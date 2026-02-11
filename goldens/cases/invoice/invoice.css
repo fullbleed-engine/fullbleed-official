@@ -1,0 +1,126 @@
+body.doc-invoice {
+  margin: 0;
+  background: #eef1f6;
+  color: #1b2f4b;
+  font-family: "Noto Sans", sans-serif;
+}
+
+.sheet {
+  width: 7.85in;
+  margin: 0.25in auto;
+  background: #f7f8fb;
+  border: 1px solid #d4dce8;
+  border-top: 6pt solid #1f3f6a;
+  border-radius: 10pt;
+  padding: 22pt 22pt 16pt 22pt;
+}
+
+.eyebrow {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 8.2pt;
+  color: #607792;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+.invoice-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 24pt;
+}
+
+.invoice-header h1 {
+  margin-top: 5pt;
+  margin-bottom: 8pt;
+  font-size: 24pt;
+  line-height: 1.05;
+}
+
+.invoice-header p {
+  margin-bottom: 5pt;
+  font-size: 11pt;
+}
+
+.invoice-meta {
+  text-align: right;
+  min-width: 2.45in;
+}
+
+.invoice-meta h2 {
+  margin-top: 6pt;
+  margin-bottom: 12pt;
+  font-size: 26pt;
+  line-height: 1;
+}
+
+.billto-card {
+  margin-top: 18pt;
+  margin-bottom: 20pt;
+  background: #edf2f9;
+  border: 1pt solid #d7e0ee;
+  border-radius: 10pt;
+  padding: 14pt;
+}
+
+.billto-card p {
+  font-size: 11pt;
+  margin-bottom: 4pt;
+}
+
+.line-items {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.line-items thead th {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #4f6380;
+  font-size: 9pt;
+  text-align: left;
+  border-bottom: 1.8pt solid #2b4162;
+  padding: 8pt 0 7pt 0;
+}
+
+.line-items td {
+  font-size: 11pt;
+  color: #263f61;
+  border-bottom: 1pt solid #d8e1ee;
+  padding: 10pt 0;
+}
+
+.num {
+  text-align: right;
+}
+
+.strong {
+  font-weight: 700;
+}
+
+.totals {
+  margin-top: 14pt;
+  margin-left: auto;
+  width: 2.75in;
+}
+
+.totals p {
+  display: flex;
+  justify-content: space-between;
+  padding: 5pt 0;
+  font-size: 11pt;
+  border-bottom: 1pt solid #d8e1ee;
+}
+
+.totals .grand {
+  font-size: 13pt;
+  font-weight: 700;
+  border-bottom: 0;
+  padding-top: 8pt;
+}
+

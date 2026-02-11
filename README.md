@@ -785,6 +785,31 @@ Known caveats:
 - Source reference images are often cropped viewports, not full page canvases.
 - `--fail-on overflow` can still be over-sensitive on some full-page wrapper layouts (use with intent and verify with JIT artifacts).
 
+## Public Golden Regression Suite
+
+Launch-grade render regression coverage is available under `goldens/` with three fixtures:
+
+- `invoice`
+- `statement`
+- `menu`
+
+Golden contract assets:
+
+- Expected hashes: `goldens/expected/golden_suite.expected.json`
+- Expected PNG baselines: `goldens/expected/png/<case>/<case>_page1.png`
+
+Run against committed expectations:
+
+```bash
+python goldens/run_golden_suite.py verify --cli "python -m fullbleed"
+```
+
+Refresh baselines intentionally:
+
+```bash
+python goldens/run_golden_suite.py generate --cli "python -m fullbleed"
+```
+
 ## Human + AI Operating Mode
 
 Recommended automation defaults:
@@ -927,6 +952,7 @@ print(payload["outputs"]["pdf"])
 - Living docs example project: `examples/living_docs_atlas/README.md`
 - Roofing invoice parity example: `examples/roofing_invoice/README.md`
 - Iconography smoke example: `examples/iconography_test/README.md`
+- Public golden regression suite: `goldens/README.md`
 
 ## License
 

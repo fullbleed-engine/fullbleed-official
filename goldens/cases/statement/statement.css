@@ -1,0 +1,119 @@
+body.doc-statement {
+  margin: 0;
+  background: #f1f3f8;
+  color: #1c2f49;
+  font-family: "Noto Sans", sans-serif;
+}
+
+.sheet {
+  width: 7.85in;
+  margin: 0.24in auto;
+  background: #ffffff;
+  border: 1pt solid #d6dcea;
+  border-radius: 9pt;
+  padding: 18pt 20pt 20pt 20pt;
+}
+
+p,
+h1 {
+  margin: 0;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-size: 8pt;
+  color: #5f7593;
+  margin-bottom: 4pt;
+}
+
+.statement-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14pt;
+  border-bottom: 1pt solid #d3dceb;
+  padding-bottom: 12pt;
+}
+
+.statement-header h1 {
+  font-size: 23pt;
+  line-height: 1.06;
+  margin-bottom: 8pt;
+}
+
+.statement-header p {
+  font-size: 10.5pt;
+  line-height: 1.35;
+  margin-bottom: 2pt;
+}
+
+.summary-boxes {
+  width: 2.65in;
+}
+
+.summary-box {
+  border: 1pt solid #d4ddec;
+  border-radius: 8pt;
+  padding: 9pt 10pt;
+  margin-bottom: 8pt;
+  background: #f8fafd;
+}
+
+.summary-box p {
+  font-size: 8.5pt;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #607693;
+  margin-bottom: 4pt;
+}
+
+.summary-box strong {
+  font-size: 16pt;
+  color: #20395d;
+}
+
+.notice {
+  margin-top: 12pt;
+  margin-bottom: 12pt;
+  background: #eef3fa;
+  border: 1pt solid #d9e2f0;
+  border-radius: 8pt;
+  padding: 10pt;
+}
+
+.notice p {
+  font-size: 10pt;
+  line-height: 1.4;
+  color: #2c4467;
+}
+
+.tx-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.tx-table th {
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 8.6pt;
+  color: #506683;
+  border-bottom: 1.7pt solid #2d466b;
+  padding: 7pt 0;
+}
+
+.tx-table td {
+  font-size: 10.5pt;
+  color: #294265;
+  border-bottom: 1pt solid #dde4f1;
+  padding: 8pt 0;
+}
+
+.tx-table td:nth-child(2) {
+  width: 3.7in;
+}
+
+.num {
+  text-align: right;
+}
+
