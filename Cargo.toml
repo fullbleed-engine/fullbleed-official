@@ -3,6 +3,11 @@ name = "fullbleed"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
+description = "Deterministic, dependency-free HTML/CSS-to-PDF engine in Rust for transactional document generation and AI agent workflows."
+repository = "https://github.com/fullbleed-engine/fullbleed-official"
+homepage = "https://fullbleed.dev"
+documentation = "https://github.com/fullbleed-engine/fullbleed-official#readme"
+readme = "README.md"
 
 [lib]
 crate-type = ["rlib", "cdylib"]
