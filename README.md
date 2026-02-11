@@ -759,7 +759,7 @@ fullbleed --json render \
 
 ## Reference-Image Parity Workflow (Practical)
 
-When targeting a design reference image (for example Figma exports), this loop has worked well:
+When targeting a design reference image (for example reference image exports), this loop has worked well:
 
 1. Start from `fullbleed init` so CSS/font/icon baselines are vendored and pinned.
 2. Register assets through the CLI (`--asset ...`) or `AssetBundle`; do not rely on HTML `<link rel="stylesheet">`.
