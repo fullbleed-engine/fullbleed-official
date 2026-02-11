@@ -1,0 +1,73 @@
+{{FONT_FACE_RULE}}
+
+:root {
+  --specimen-bg-a: #f4f8ff;
+  --specimen-bg-b: #fff9f1;
+  --specimen-ink: #111827;
+  --specimen-muted: #6b7280;
+}
+
+@page {
+  size: letter;
+  margin: 0.5in;
+}
+
+body.specimen-page {
+  color: var(--specimen-ink);
+  background:
+    radial-gradient(960px 460px at 0% 0%, #dbeafe 0%, transparent 60%),
+    radial-gradient(760px 340px at 100% 15%, #ffe8cc 0%, transparent 60%),
+    linear-gradient(180deg, var(--specimen-bg-a) 0%, var(--specimen-bg-b) 100%);
+  font-family: "{{FONT_FAMILY}}", {{FONT_FALLBACK_STACK}};
+  line-height: 1.45;
+}
+
+.hero {
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(245, 250, 255, 0.96));
+  border-radius: 20px;
+}
+
+.sample-card {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.sample-line {
+  font-size: 1rem;
+  line-height: 1.45;
+}
+
+.font-target {
+  font-family: "{{FONT_FAMILY}}", {{FONT_FALLBACK_STACK}};
+}
+
+.sample-code {
+  font-family: "JetBrains Mono", "Fira Code", Consolas, "Liberation Mono", monospace;
+  font-size: 0.9rem;
+}
+
+.machine-json {
+  max-height: 18rem;
+  overflow: auto;
+  padding: 1rem;
+  border-radius: 12px;
+  background: #0b1221;
+  color: #e2e8f0;
+  border: 1px solid #1e293b;
+  font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
+  font-size: 0.76rem;
+}
+
+.text-muted {
+  color: var(--specimen-muted) !important;
+}
+
+h1, h2, h3, h4 {
+  letter-spacing: -0.02em;
+}
+
+@media print {
+  .card,
+  .hero {
+    box-shadow: none !important;
+  }
+}

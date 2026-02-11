@@ -1,0 +1,379 @@
+{
+  "schema": 1,
+  "packages": [
+    {
+      "name": "bootstrap",
+      "version": "5.0.0",
+      "kind": "css",
+      "files": [
+        {
+          "path": "vendor/css/bootstrap.min.css",
+          "sha256": "04083fcecdd9e19b2acd1e0073437aa07c98d230f0198d7f1fd470ab220fef64"
+        }
+      ]
+    },
+    {
+      "name": "arvo",
+      "version": "regular",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/Arvo-Regular.ttf",
+          "sha256": "f41bd41471ec2db7140351bdde614da5341524503598ff7fe79f3c89c13b605e"
+        }
+      ]
+    },
+    {
+      "name": "crimson-text",
+      "version": "regular",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/CrimsonText-Regular.ttf",
+          "sha256": "48e6c5d5ad1d01599d374ecb817e15890d1feb3b8a3a88e527d44c90389e1f06"
+        }
+      ]
+    },
+    {
+      "name": "eb-garamond",
+      "version": "wght",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/EBGaramond-Variable.ttf",
+          "sha256": "b7f1dd91643e4f81f60e43fa9c4ba117663a001621913dcfd213706a4d83e6d9"
+        }
+      ]
+    },
+    {
+      "name": "fira-code",
+      "version": "wght",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/FiraCode-Variable.ttf",
+          "sha256": "9335b082b3c7850d98a64b584f3417f65355f3471278bb5eeb8c6c0e8657aeeb"
+        }
+      ]
+    },
+    {
+      "name": "inter",
+      "version": "4.0",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/Inter-Variable.ttf",
+          "sha256": "29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031"
+        }
+      ]
+    },
+    {
+      "name": "jetbrains-mono",
+      "version": "wght",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/JetBrainsMono-Variable.ttf",
+          "sha256": "48715a42ec242c21e9f02692891e147d022299a52e48d5e413e1a942193ffeda"
+        }
+      ]
+    },
+    {
+      "name": "lato",
+      "version": "regular",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/Lato-Regular.ttf",
+          "sha256": "d636e4683231f931eda222d588e944d082bfd3bdba02f928bee461c0f185b251"
+        }
+      ]
+    },
+    {
+      "name": "libre-baskerville",
+      "version": "wght",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/LibreBaskerville-Variable.ttf",
+          "sha256": "05a95421961341c5b2556285e8415df9db27dab4f4abe22b446b3c6a8b916c5d"
+        }
+      ]
+    },
+    {
+      "name": "lora",
+      "version": "wght",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/Lora-Variable.ttf",
+          "sha256": "822a6621ccbe8d97d20ac88c1c41f5615c9c2c202eaa75f272cd452aac6475a7"
+        }
+      ]
+    },
+    {
+      "name": "montserrat",
+      "version": "wght",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/Montserrat-Variable.ttf",
+          "sha256": "0f7b311b2f3279e4eef9b2f968bcdbab6e28f4daeb1f049f4f278a902bcd82f7"
+        }
+      ]
+    },
+    {
+      "name": "noto-color-emoji",
+      "version": "2.047",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/NotoColorEmoji-Regular.ttf",
+          "sha256": "be73479ba4fa277c89b85cd6c71717df30d9d0eff6da8c1e1a201e5b95459299"
+        }
+      ]
+    },
+    {
+      "name": "noto-sans-arabic",
+      "version": "2.010",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/NotoSansArabic-Variable.ttf",
+          "sha256": "63111b5b2e074dd48cc67692e0a2726d86ee94c1c37fe8598257b7b4e87e869e"
+        }
+      ]
+    },
+    {
+      "name": "noto-sans-hebrew",
+      "version": "2.003",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/NotoSansHebrew-Variable.ttf",
+          "sha256": "7ef36a2c3593758cdb622e1bdef4f84523e92fbc3ccc667438dd80ff54c2de88"
+        }
+      ]
+    },
+    {
+      "name": "noto-sans-italic",
+      "version": "2.014",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/NotoSans-Italic-Variable.ttf",
+          "sha256": "58e6e0ebd1931b29a365aa2d3e2ee9a9e831a3af7cf3ad1462d4e72154f0b291"
+        }
+      ]
+    },
+    {
+      "name": "noto-sans-jp",
+      "version": "2.004",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/NotoSansJP-Variable.ttf",
+          "sha256": "c2f3b4d463500a2ddcd3849cded1fceeb9fd6d1c32e6cbecd568453ba50fc68f"
+        }
+      ]
+    },
+    {
+      "name": "noto-sans-kr",
+      "version": "2.004",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/NotoSansKR-Variable.ttf",
+          "sha256": "194018e6b2b293a7964f037b25c0249ce1418bc9ab3c971060a03aa57861e252"
+        }
+      ]
+    },
+    {
+      "name": "noto-sans-mono",
+      "version": "2.014",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/NotoSansMono-Variable.ttf",
+          "sha256": "2cb2adb378a8f574213e23df697050b83c54c27df465a2015552740b2769a081"
+        }
+      ]
+    },
+    {
+      "name": "noto-sans-regular",
+      "version": "2.014",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/NotoSans-Variable.ttf",
+          "sha256": "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d"
+        }
+      ]
+    },
+    {
+      "name": "noto-sans-sc",
+      "version": "2.004",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/NotoSansSC-Variable.ttf",
+          "sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da"
+        }
+      ]
+    },
+    {
+      "name": "noto-sans-thai",
+      "version": "2.002",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/NotoSansThai-Variable.ttf",
+          "sha256": "5a1c559bb539583c8a1fd99d1c5b9491e5e14478c9cd2bd0970d5c3096cc9ef8"
+        }
+      ]
+    },
+    {
+      "name": "noto-serif-italic",
+      "version": "2.014",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/NotoSerif-Italic-Variable.ttf",
+          "sha256": "e87acbc6c0efd0d9a20d6a8cbbda2b266c14be3a3a6f5af8ec9d7b2460570ad1"
+        }
+      ]
+    },
+    {
+      "name": "noto-serif-regular",
+      "version": "2.014",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/NotoSerif-Variable.ttf",
+          "sha256": "4d8e6761424656867019081a1a01336f3cb086982682698714054fc33f782713"
+        }
+      ]
+    },
+    {
+      "name": "nunito",
+      "version": "wght",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/Nunito-Variable.ttf",
+          "sha256": "bb55a5ca5c2042335b3991af27c4d0705d0ef41cac6164ac737fd8f2a1e85207"
+        }
+      ]
+    },
+    {
+      "name": "open-sans",
+      "version": "wdth,wght",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/OpenSans-Variable.ttf",
+          "sha256": "36643644f318a812aab2d2ed3bb98f8cf0872527f835fe9398d95fe6b9adb878"
+        }
+      ]
+    },
+    {
+      "name": "oswald",
+      "version": "wght",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/Oswald-Variable.ttf",
+          "sha256": "5b38c246e255a12f5712d640d56bcced0472466fc68983d2d0410ec0457c2817"
+        }
+      ]
+    },
+    {
+      "name": "playfair-display",
+      "version": "wght",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/PlayfairDisplay-Variable.ttf",
+          "sha256": "c40f2293766a503bc70cce9e512ef844a4ccb7cbcde792fe2ea31d191917d8d6"
+        }
+      ]
+    },
+    {
+      "name": "poppins",
+      "version": "regular",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/Poppins-Regular.ttf",
+          "sha256": "7e65201e9b79159e2300267cc885e16c8dcef2424cdfa09a29bfb0980a94a7ba"
+        }
+      ]
+    },
+    {
+      "name": "pt-serif",
+      "version": "regular",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/PTSerif-Regular.ttf",
+          "sha256": "a4951fade06ff8f09b7673aa81ffb65a8cd409e24d3289a6dc670bc4dda2557a"
+        }
+      ]
+    },
+    {
+      "name": "raleway",
+      "version": "wght",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/Raleway-Variable.ttf",
+          "sha256": "8bbcc3eb8275c388f4bcd998832f8a4b943eadbaf6a595205312774b5951aefb"
+        }
+      ]
+    },
+    {
+      "name": "roboto-mono",
+      "version": "wght",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/RobotoMono-Variable.ttf",
+          "sha256": "66a80e79d17e4c7cabd162e2916578a4cc08fd19eef6e2a643305eae9c567b2b"
+        }
+      ]
+    },
+    {
+      "name": "rubik",
+      "version": "wght",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/Rubik-Variable.ttf",
+          "sha256": "1b3a7437ba2af80e465e773ed60c5036d1ba6ace492d89046dbcf18fb31e4e88"
+        }
+      ]
+    },
+    {
+      "name": "source-code-pro",
+      "version": "wght",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/SourceCodePro-Variable.ttf",
+          "sha256": "b400fc584e10aff25d0e775ce181b4fc1c5ea1b5dc37b81aeb2084375b945790"
+        }
+      ]
+    },
+    {
+      "name": "work-sans",
+      "version": "wght",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/WorkSans-Variable.ttf",
+          "sha256": "f50f61f2ba738e239442d40bf1069adb195c224b6a5a73a581fc2f3ed62a9f63"
+        }
+      ]
+    }
+  ]
+}

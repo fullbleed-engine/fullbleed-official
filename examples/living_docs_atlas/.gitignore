@@ -1,0 +1,39 @@
+﻿# Fullbleed outputs
+output/
+*.pdf
+
+# Generated docs inputs and manifests
+build/*.html
+build/*.css
+build/*.json
+build/*.sha256
+build/*.jsonl
+build/*.log
+!build/atlas.html
+!build/atlas.css
+!build/atlas.summary.json
+build/specimens/*.html
+build/specimens/*.css
+build/specimens/*.json
+
+# Vendored binaries (use scripts/install_assets.py)
+vendor/css/*.css
+vendor/fonts/*.ttf
+vendor/fonts/*.otf
+vendor/fonts/*.woff2
+vendor/fonts/LICENSE.*.txt
+vendor/*.css
+vendor/*.ttf
+vendor/*.otf
+vendor/*.woff2
+vendor/LICENSE*.txt
+.tmp_packaging_scratch/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# IDE
+.vscode/
+.idea/

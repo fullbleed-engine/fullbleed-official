@@ -1,0 +1,21 @@
+﻿{
+  "schema": "fullbleed.bootstrap_feature_map.v1",
+  "groups": [
+    {
+      "name": "Layout",
+      "items": ["containers", "section rhythm", "columns", "alignment"]
+    },
+    {
+      "name": "Grid",
+      "items": ["row/col", "auto layout", "offsets", "nested rows"]
+    },
+    {
+      "name": "Components",
+      "items": ["alerts", "cards", "badges", "list groups", "nav", "progress", "tables"]
+    },
+    {
+      "name": "Forms & Utilities",
+      "items": ["input groups", "validation style", "spacing", "display", "flex", "colors"]
+    }
+  ]
+}

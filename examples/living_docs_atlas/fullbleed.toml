@@ -1,0 +1,9 @@
+﻿[project]
+name = "living_docs_atlas"
+purpose = "Living docs for Fullbleed CLI + engine"
+
+[docs]
+default_html = "build/atlas.html"
+default_css = "build/atlas.css"
+default_pdf_engine = "output/living_docs_atlas.engine.pdf"
+default_pdf_cli = "output/living_docs_atlas.cli.pdf"

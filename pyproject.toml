@@ -1,0 +1,31 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "fullbleed"
+version = "0.1.0"
+description = "High-performance HTML5 to PDF renderer built in Rust"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial"}
+license-files = ["LICENSE", "COPYRIGHT", "LICENSING.md", "THIRD_PARTY_LICENSES.md"]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+
+# This is the important part: pip generates the `fullbleed` command from this
+[project.scripts]
+fullbleed = "fullbleed_cli.cli:main"
+
+[tool.maturin]
+features = ["python"]
+python-source = "python"
+python-packages = ["fullbleed", "fullbleed_assets", "fullbleed_cli"]
+module-name = "fullbleed._fullbleed"
+include = ["python/fullbleed/**", "python/fullbleed_assets/**", "python/fullbleed_cli/**"]
+
+[tool.pytest.ini_options]
+addopts = ["--ignore-glob=*.txt"]

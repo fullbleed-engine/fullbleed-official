@@ -1,0 +1,83 @@
+/* Invoice Template Styles */
+@page {
+    size: letter;
+    margin: 0.75in;
+}
+
+body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 11pt;
+    line-height: 1.4;
+    color: #333;
+}
+
+.invoice-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid #2563eb;
+}
+
+.company-info h1 {
+    margin: 0;
+    font-size: 1.5rem;
+    color: #1e40af;
+}
+
+.invoice-info {
+    text-align: right;
+}
+
+.invoice-info h2 {
+    margin: 0 0 0.5rem;
+    font-size: 1.25rem;
+    color: #1e40af;
+}
+
+.billing {
+    margin-bottom: 2rem;
+}
+
+.line-items {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 2rem;
+}
+
+.line-items th,
+.line-items td {
+    padding: 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.line-items th {
+    background: #f3f4f6;
+    font-weight: 600;
+}
+
+.line-items th:last-child,
+.line-items td:last-child {
+    text-align: right;
+}
+
+.total-label {
+    text-align: right;
+    font-weight: 600;
+}
+
+.total-amount {
+    font-weight: 600;
+    font-size: 1.1em;
+    color: #1e40af;
+}
+
+footer {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid #e5e7eb;
+    text-align: center;
+    font-size: 0.9em;
+    color: #6b7280;
+}

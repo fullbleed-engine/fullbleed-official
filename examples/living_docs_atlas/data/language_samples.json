@@ -1,0 +1,157 @@
+{
+  "schema": "fullbleed.language_samples.v1",
+  "samples": [
+    {
+      "id": "en",
+      "label": "English",
+      "script": "Latin",
+      "lang": "en",
+      "dir": "ltr",
+      "text": "This is {font}. Deterministic PDF generation on every run."
+    },
+    {
+      "id": "es",
+      "label": "Español",
+      "script": "Latin",
+      "lang": "es",
+      "dir": "ltr",
+      "text": "Esta es {font}. Generación de PDF determinista en cada ejecución."
+    },
+    {
+      "id": "fr",
+      "label": "Français",
+      "script": "Latin",
+      "lang": "fr",
+      "dir": "ltr",
+      "text": "Voici {font}. Génération PDF déterministe à chaque exécution."
+    },
+    {
+      "id": "de",
+      "label": "Deutsch",
+      "script": "Latin",
+      "lang": "de",
+      "dir": "ltr",
+      "text": "Das ist {font}. Deterministische PDF-Erzeugung bei jedem Lauf."
+    },
+    {
+      "id": "pt",
+      "label": "Português",
+      "script": "Latin",
+      "lang": "pt",
+      "dir": "ltr",
+      "text": "Isto é {font}. Geração de PDF determinística em toda execução."
+    },
+    {
+      "id": "vi",
+      "label": "Tiếng Việt",
+      "script": "Latin",
+      "lang": "vi",
+      "dir": "ltr",
+      "text": "Đây là {font}. Tạo PDF xác định ở mọi lần chạy."
+    },
+    {
+      "id": "tr",
+      "label": "Türkçe",
+      "script": "Latin",
+      "lang": "tr",
+      "dir": "ltr",
+      "text": "Bu {font}. Her çalıştırmada deterministik PDF üretimi."
+    },
+    {
+      "id": "pl",
+      "label": "Polski",
+      "script": "Latin",
+      "lang": "pl",
+      "dir": "ltr",
+      "text": "To jest {font}. Deterministyczne generowanie PDF przy każdym uruchomieniu."
+    },
+    {
+      "id": "ru",
+      "label": "Русский",
+      "script": "Cyrillic",
+      "lang": "ru",
+      "dir": "ltr",
+      "text": "Это {font}. Детерминированная генерация PDF при каждом запуске."
+    },
+    {
+      "id": "el",
+      "label": "Ελληνικά",
+      "script": "Greek",
+      "lang": "el",
+      "dir": "ltr",
+      "text": "Αυτή είναι η {font}. Ντετερμινιστική παραγωγή PDF σε κάθε εκτέλεση."
+    },
+    {
+      "id": "ar",
+      "label": "العربية",
+      "script": "Arabic",
+      "lang": "ar",
+      "dir": "rtl",
+      "text": "هذا هو {font}. إنشاء PDF حتمي في كل تشغيل."
+    },
+    {
+      "id": "he",
+      "label": "עברית",
+      "script": "Hebrew",
+      "lang": "he",
+      "dir": "rtl",
+      "text": "זהו {font}. יצירת PDF דטרמיניסטית בכל הרצה."
+    },
+    {
+      "id": "ja",
+      "label": "日本語",
+      "script": "Japanese",
+      "lang": "ja",
+      "dir": "ltr",
+      "text": "これは {font} です。毎回同じ PDF を生成します。"
+    },
+    {
+      "id": "ko",
+      "label": "한국어",
+      "script": "Korean",
+      "lang": "ko",
+      "dir": "ltr",
+      "text": "이것은 {font} 입니다. 매번 동일한 PDF를 생성합니다."
+    },
+    {
+      "id": "zh-hans",
+      "label": "简体中文",
+      "script": "Han",
+      "lang": "zh-Hans",
+      "dir": "ltr",
+      "text": "这是 {font}。每次运行都生成确定性的 PDF。"
+    },
+    {
+      "id": "th",
+      "label": "ไทย",
+      "script": "Thai",
+      "lang": "th",
+      "dir": "ltr",
+      "text": "นี่คือ {font} สร้าง PDF แบบกำหนดผลลัพธ์ได้ทุกครั้ง"
+    },
+    {
+      "id": "hi",
+      "label": "हिन्दी",
+      "script": "Devanagari",
+      "lang": "hi",
+      "dir": "ltr",
+      "text": "यह {font} है। हर बार एक जैसा PDF बनता है।"
+    },
+    {
+      "id": "code",
+      "label": "Code",
+      "script": "Monospace",
+      "lang": "en",
+      "dir": "ltr",
+      "text": "print('This is {font} -> deterministic_pdf=True')"
+    },
+    {
+      "id": "emoji",
+      "label": "Emoji",
+      "script": "Symbols",
+      "lang": "und",
+      "dir": "ltr",
+      "text": "🚀 📄 ✅ ⚙️  This is {font}."
+    }
+  ]
+}

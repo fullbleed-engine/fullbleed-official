@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fullbleed Font Registry Atlas</title>
+</head>
+<body class="atlas-page">
+  <main class="atlas-main">
+    <header class="hero">
+      <p class="eyebrow">Fullbleed Living Documentation</p>
+      <h1>Multipage Font Registry for Humans and AI Agents</h1>
+      <p class="lead">
+        Generated from source metadata and live vendor state. This document is optimized for deterministic paged output
+        and machine-readable extraction.
+      </p>
+      <div class="metrics">
+        <span class="metric">Fonts: {{FONT_TOTAL}}</span>
+        <span class="metric metric-good">Installed: {{FONT_INSTALLED}}</span>
+        <span class="metric">Missing: {{FONT_MISSING}}</span>
+        <span class="metric">Generated: {{GENERATED_AT}}</span>
+      </div>
+      <div class="feature-grid">
+        {{FEATURE_CHIPS}}
+      </div>
+    </header>
+
+    <section class="doc-section">
+      <h2>1. Engine Usage Contract</h2>
+      <p class="text-muted">
+        Each row provides implementation-ready usage snippets: asset bundle registration, CSS class binding, and family
+        naming. Use specimen links for multilingual visual checks.
+      </p>
+      <ul>
+        <li><strong>Asset path:</strong> <code>vendor/fonts/&lt;file&gt;.ttf</code></li>
+        <li><strong>Bundle call:</strong> <code>bundle.add_file ... kind=font name=&lt;package&gt;</code></li>
+        <li><strong>CSS class:</strong> <code>.font-family-&lt;package&gt;</code></li>
+        <li><strong>Family name:</strong> <code>FB &lt;Display Name&gt;</code></li>
+      </ul>
+    </section>
+
+    <section id="font-registry" class="doc-section">
+      <h2>2. Font Registry Table</h2>
+      <p class="text-muted">
+        One row per curated font package. Header rows are configured to repeat across page breaks.
+      </p>
+      <table class="font-registry-table">
+        <thead>
+          <tr>
+            <th>Font Name</th>
+            <th>Package</th>
+            <th>In-Engine Usage</th>
+            <th>License</th>
+            <th>Asset File</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{FONT_REGISTRY_ROWS}}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="doc-section">
+      <h2>3. Machine Summary</h2>
+      <p class="text-muted">Stable JSON block for parser-friendly extraction.</p>
+      <pre class="machine-json"><code>{{MACHINE_SUMMARY_JSON}}</code></pre>
+    </section>
+  </main>
+</body>
+</html>
