@@ -25,3 +25,4 @@
 *.pdf
 /image_gen_test/output/
 /dist
+/.github/workflows
