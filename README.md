@@ -47,6 +47,13 @@ From a local wheel:
 python -m pip install C:\path\to\fullbleed-0.1.0-cp311-cp311-win_amd64.whl
 ```
 
+Platform artifact policy:
+
+- Linux (`manylinux`) and Windows wheels are built as release artifacts.
+- Linux wheel builds are smoke-tested in Ubuntu/WSL during release prep.
+- macOS wheel artifacts are built in CI, but are currently maintainer-untested.
+- If macOS wheel behavior differs from your environment, open an issue and include `fullbleed doctor --json`.
+
 Verify command surface:
 
 ```bash

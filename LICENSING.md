@@ -45,10 +45,10 @@ If you can comply with AGPL and you are comfortable doing so, you do not need th
 
 Commercial licensing is priced by your organization's Annual Gross Revenue:
 
-- `$0 / year` for `$0-$100,000`
+- `$240 / year` for `$0-$100,000`
 - `$1,000 / year` for `$100,001-$1,000,000`
 - `$5,000 / year` for `$1,000,001-$10,000,000`
-- `$10,000,001+` contact us for pricing
+- `$10,000 / year` for `$10,000,000 or more`
 
 To obtain or renew a commercial license, contact:
 
