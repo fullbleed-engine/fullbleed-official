@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust-tests:
+    name: Rust Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Ensure image fixture for engine tests
+        shell: pwsh
+        run: |
+          $fixture = "examples/img/full_bleed-logo_small.png"
+          New-Item -ItemType Directory -Force "examples/img" | Out-Null
+          if (-not (Test-Path $fixture)) {
+            $base64 = "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAAdSURBVDhPY/jPwPCfEsyALkAqHjVg1IBRAwaLAQAwxP4Q7zYsrwAAAABJRU5ErkJggg=="
+            [IO.File]::WriteAllBytes($fixture, [Convert]::FromBase64String($base64))
+          }
+          Get-Item $fixture | Select-Object FullName, Length
+
+      - name: Run rust test suite
+        run: cargo test --locked -- --nocapture
+
+  python-wheel-smoke:
+    name: Python Wheel Smoke (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+        python-version:
+          - "3.11"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install maturin
+        run: python -m pip install --upgrade pip maturin
+
+      - name: Build wheel from source
+        run: python -m maturin build --release --features python
+
+      - name: Install built wheel
+        shell: bash
+        run: |
+          python -m pip install --force-reinstall target/wheels/fullbleed-*.whl
+
+      - name: CLI + runtime smoke checks
+        run: |
+          python -m fullbleed --version
+          python -m fullbleed doctor --strict --json
+          python -m fullbleed compliance --strict --json
+          python tools/check_license_integrity.py --json
+
+  goldens:
+    name: Goldens (Windows, py3.11)
+    runs-on: windows-latest
+    needs:
+      - rust-tests
+      - python-wheel-smoke
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install maturin
+        run: python -m pip install --upgrade pip maturin
+
+      - name: Build wheel from source
+        run: python -m maturin build --release --features python
+
+      - name: Install built wheel
+        shell: bash
+        run: |
+          python -m pip install --force-reinstall target/wheels/fullbleed-*.whl
+
+      - name: Verify golden suite
+        run: python goldens/run_golden_suite.py --python python verify

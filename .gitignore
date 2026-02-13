@@ -24,8 +24,6 @@
 !/examples/resume_reference_steven_smith/**
 *.pdf
 /image_gen_test/output/
-/dist
-/.github/workflows
 /.venv_engine
 *.pyc
 *.pyd
