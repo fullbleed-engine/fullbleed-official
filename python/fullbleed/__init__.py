@@ -1,4 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial
+"""Public Python bindings for the Fullbleed PDF engine.
+
+This package re-exports the Rust extension module symbols (`PdfEngine`,
+`AssetBundle`, `WatermarkSpec`, and helpers), and adds process-local helpers for
+commercial license attestation metadata used by CLI compliance tooling.
+"""
 import os
 
 from . import _fullbleed as _ext
@@ -30,7 +36,8 @@ def activate_commercial_license(
 ):
     """Set process-local environment markers for commercial license attestation.
 
-    This enables ergonomic interop with `fullbleed compliance` and related tooling.
+    This affects only the current process and children spawned from it. It does
+    not persist machine-wide state.
     """
     os.environ["FULLBLEED_LICENSE_MODE"] = "commercial"
     if licensed:
@@ -53,7 +60,7 @@ def clear_commercial_license():
 
 
 def commercial_license_status():
-    """Return current process-local commercial license markers."""
+    """Return a snapshot of process-local commercial license markers."""
     return {
         "mode": os.environ.get("FULLBLEED_LICENSE_MODE", "auto"),
         "licensed": os.environ.get("FULLBLEED_COMMERCIAL_LICENSED"),

@@ -19,6 +19,8 @@ jobs:
   rust-tests:
     name: Rust Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    env:
+      FULLBLEED_FONT_DIR: ${{ github.workspace }}/python/fullbleed_assets/fonts
     strategy:
       fail-fast: false
       matrix:
@@ -45,6 +47,12 @@ jobs:
             [IO.File]::WriteAllBytes($fixture, [Convert]::FromBase64String($base64))
           }
           Get-Item $fixture | Select-Object FullName, Length
+
+      - name: Verify test font directory
+        shell: pwsh
+        run: |
+          Write-Host "FULLBLEED_FONT_DIR=$env:FULLBLEED_FONT_DIR"
+          Get-ChildItem $env:FULLBLEED_FONT_DIR | Select-Object -First 5 Name, Length
 
       - name: Run rust test suite
         run: cargo test --locked -- --nocapture

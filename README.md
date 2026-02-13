@@ -16,6 +16,13 @@ This README is the canonical usage guide for:
 - `fullbleed` CLI (human workflows + machine/agent automation)
 - `fullbleed` Python bindings (`PdfEngine`, `AssetBundle`, batch APIs)
 
+Additional focused references are in `docs/`:
+
+- `docs/README.md`
+- `docs/engine.md`
+- `docs/python-api.md`
+- `docs/cli.md`
+
 ## What You Get
 
 - No headless browser requirement for PDF generation.

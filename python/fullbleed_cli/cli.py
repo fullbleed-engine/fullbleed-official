@@ -267,6 +267,7 @@ SCHEMA_DEFS = {
 }
 
 def _get_version():
+    """Return installed Fullbleed version, with a dev fallback."""
     for dist in ("fullbleed", "fullbleed-cli"):
         try:
             return metadata.version(dist)
@@ -289,6 +290,7 @@ def _compliance_roots():
 
 
 def _find_compliance_file(rel_name):
+    """Locate a compliance file by searching known repository roots."""
     for root in _compliance_roots():
         path = root / rel_name
         if path.exists():
@@ -297,10 +299,12 @@ def _find_compliance_file(rel_name):
 
 
 def _is_truthy(value):
+    """Return True for common truthy string/integer environment values."""
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _load_commercial_license_file(path):
+    """Parse a commercial attestation file (JSON object/string or plain text id)."""
     p = Path(path).expanduser()
     text = p.read_text(encoding="utf-8").strip()
     payload = {}
@@ -321,6 +325,7 @@ def _load_commercial_license_file(path):
 
 
 def _resolve_license_attestation(args=None):
+    """Resolve effective commercial license attestation from args/env/file."""
     mode = str(
         getattr(args, "license_mode", None)
         or os.environ.get("FULLBLEED_LICENSE_MODE")
@@ -382,6 +387,7 @@ def _resolve_license_attestation(args=None):
 
 
 def _license_warning_state_path():
+    """Return persisted marker path for one-time `run` license warning."""
     base = os.environ.get("FULLBLEED_STATE_DIR")
     if base:
         state_dir = Path(base).expanduser()
@@ -391,6 +397,7 @@ def _license_warning_state_path():
 
 
 def _maybe_emit_run_license_warning(args):
+    """Emit a one-time AGPL/commercial reminder for `fullbleed run`."""
     if getattr(args, "no_license_warn", False):
         return False
     if os.environ.get("FULLBLEED_NO_LICENSE_WARN", "").strip().lower() in {"1", "true", "yes"}:
@@ -427,6 +434,7 @@ def _maybe_emit_run_license_warning(args):
 
 
 def _apply_global_flags(args):
+    """Apply global CLI flags to process environment and parsed args."""
     if getattr(args, "json_only", False):
         args.json = True
         args.no_prompts = True
@@ -438,6 +446,7 @@ def _apply_global_flags(args):
 
 
 def _infer_schema_from_argv(argv):
+    """Infer requested schema id from argv when `--schema` is present."""
     tokens = [t for t in (argv or []) if t != "--schema"]
     command = None
     sub = None
@@ -467,6 +476,7 @@ def _infer_schema_from_argv(argv):
 
 
 def _emit_schema(schema_name):
+    """Emit JSON schema envelope for a known schema id."""
     payload = {
         "schema": "fullbleed.schema.v1",
         "target": schema_name,
@@ -477,6 +487,7 @@ def _emit_schema(schema_name):
 
 
 def _resolve_assets(args):
+    """Resolve CLI asset flags into normalized (path, kind, name) tuples."""
     assets = args.asset or []
     kinds = args.asset_kind or []
     names = args.asset_name or []
@@ -555,12 +566,14 @@ def _apply_profile(args):
 
 
 def _read_text(path_or_dash):
+    """Read UTF-8 text from path, or stdin when value is '-'."""
     if path_or_dash == "-":
         return sys.stdin.read()
     return Path(path_or_dash).read_text(encoding="utf-8")
 
 
 def _read_json_or_path(value):
+    """Parse JSON from inline string or from file path if it exists."""
     if value is None:
         return None
     path = Path(value)
@@ -570,6 +583,7 @@ def _read_json_or_path(value):
 
 
 def _detect_remote_refs(html, css):
+    """Return unique http(s) references detected in HTML/CSS payloads."""
     urls = []
     link_re = re.compile(r"<(link|script)[^>]+(?:href|src)=[\"'](https?://[^\"']+)[\"']",
                          re.IGNORECASE)
@@ -583,6 +597,7 @@ def _detect_remote_refs(html, css):
 
 
 def _resolve_page_size(args):
+    """Resolve page size pair from explicit width/height or named size."""
     if args.page_width or args.page_height:
         if not args.page_width or not args.page_height:
             raise ValueError("--page-width and --page-height must be provided together")
@@ -596,6 +611,7 @@ def _resolve_page_size(args):
 
 
 def _normalize_watermark_layer(raw_layer):
+    """Normalize watermark layer aliases and validate allowed choices."""
     layer = (raw_layer or "overlay").strip().lower()
     layer = WATERMARK_LAYER_ALIASES.get(layer, layer)
     if layer not in WATERMARK_LAYER_CHOICES:
@@ -608,6 +624,7 @@ def _normalize_watermark_layer(raw_layer):
 
 
 def _validate_pdf_options(args):
+    """Validate cross-option PDF constraints before engine construction."""
     has_output_intent_metadata = any(
         [
             getattr(args, "output_intent_identifier", None),
@@ -623,6 +640,7 @@ def _validate_pdf_options(args):
 
 
 def _collect_css(args):
+    """Collect CSS sources (`--css`, `--css-str`) into one stylesheet string."""
     css_parts = []
     for css_path in args.css or []:
         css_parts.append(_read_text(css_path))
@@ -632,6 +650,7 @@ def _collect_css(args):
 
 
 def _collect_html(args):
+    """Return HTML from `--html-str` or `--html` path/stdin."""
     if args.html_str is not None:
         return args.html_str
     if args.html is None:
@@ -640,6 +659,7 @@ def _collect_html(args):
 
 
 def _build_bundle(args):
+    """Build and populate an `AssetBundle` from resolved CLI asset flags."""
     bundle = fullbleed.AssetBundle()
     inferred = _resolve_assets(args)
 
@@ -658,6 +678,7 @@ def _build_bundle(args):
 
 
 def _build_manifest(args):
+    """Build canonical compiler-input manifest for reproducibility/debugging."""
     _apply_profile(args)
     page_width, page_height = _resolve_page_size(args)
     command_name = getattr(args, "command", None)
@@ -760,6 +781,7 @@ def _build_manifest(args):
 
 
 def _build_engine(args):
+    """Construct `PdfEngine` from normalized CLI options."""
     # Apply profile defaults before building engine
     _apply_profile(args)
     
@@ -831,6 +853,7 @@ def _build_engine(args):
 
 
 def _write_pdf_bytes(out_path, pdf_bytes):
+    """Write PDF bytes to file or stdout and return written byte count."""
     if out_path == "-":
         sys.stdout.buffer.write(pdf_bytes)
         return len(pdf_bytes)
@@ -839,6 +862,7 @@ def _write_pdf_bytes(out_path, pdf_bytes):
 
 
 def _derive_image_stem(out_path):
+    """Derive PNG artifact filename stem from output PDF path."""
     if out_path and out_path != "-":
         stem = Path(out_path).stem
         if stem:
@@ -847,6 +871,7 @@ def _derive_image_stem(out_path):
 
 
 def _emit_image_artifacts(engine, html, css, out_path, args):
+    """Render per-page PNG artifacts when `--emit-image` is set."""
     image_dir = getattr(args, "emit_image", None)
     if not image_dir:
         return None
@@ -882,6 +907,7 @@ def _emit_image_artifacts(engine, html, css, out_path, args):
 
 
 def _json_default(obj):
+    """Best-effort JSON serializer fallback for CLI payload objects."""
     if isinstance(obj, (bytes, bytearray)):
         return {"type": "bytes", "length": len(obj)}
     if isinstance(obj, memoryview):
@@ -892,14 +918,17 @@ def _json_default(obj):
 
 
 def _json_dumps(payload, indent=None):
+    """JSON serialize payload using CLI defaults."""
     return json.dumps(payload, ensure_ascii=True, indent=indent, default=_json_default)
 
 
 def _write_json(path, payload):
+    """Write payload as pretty JSON with stable CLI serializer rules."""
     Path(path).write_text(_json_dumps(payload, indent=2), encoding="utf-8")
 
 
 def _extract_pdf_bytes(payload):
+    """Recursively locate PDF byte payload in mixed return structures."""
     if isinstance(payload, (bytes, bytearray)):
         return bytes(payload)
     if isinstance(payload, memoryview):
@@ -913,6 +942,7 @@ def _extract_pdf_bytes(payload):
 
 
 def _normalize_bytes_written(raw, pdf_bytes=None):
+    """Normalize render return values to an integer byte count."""
     if isinstance(raw, bool):
         return int(raw)
     if isinstance(raw, int):
@@ -944,10 +974,12 @@ def _normalize_bytes_written(raw, pdf_bytes=None):
 
 
 def _sha256_bytes(data):
+    """Return SHA-256 digest for raw bytes."""
     return hashlib.sha256(data).hexdigest()
 
 
 def _stable_json_hash(payload):
+    """Return stable SHA-256 hash of normalized JSON payload."""
     normalized = json.dumps(
         payload,
         ensure_ascii=True,
@@ -959,6 +991,7 @@ def _stable_json_hash(payload):
 
 
 def _compute_pdf_sha256(out_path, pdf_bytes):
+    """Compute output PDF SHA-256 from file path or in-memory bytes."""
     output_hash = None
     if out_path and out_path != "-":
         pdf_path = Path(out_path)
@@ -972,6 +1005,7 @@ def _compute_pdf_sha256(out_path, pdf_bytes):
 
 
 def _compute_output_hash(deterministic_hash, out_path, pdf_bytes):
+    """Compute and optionally write deterministic output hash artifact."""
     output_hash = _compute_pdf_sha256(out_path, pdf_bytes)
     if deterministic_hash and output_hash is not None:
         Path(deterministic_hash).write_text(output_hash, encoding="utf-8")
@@ -979,6 +1013,7 @@ def _compute_output_hash(deterministic_hash, out_path, pdf_bytes):
 
 
 def _assets_lock_hash():
+    """Return digest metadata for `assets.lock.json` when present."""
     lock = Path("assets.lock.json")
     if not lock.exists():
         return None
@@ -989,6 +1024,7 @@ def _assets_lock_hash():
 
 
 def _build_repro_record(args, manifest, html, css, output_hash, bytes_written):
+    """Create a reproducibility record for the current render invocation."""
     assets = []
     for path, kind, name in _resolve_assets(args):
         item = {
@@ -1034,6 +1070,7 @@ def _build_repro_record(args, manifest, html, css, output_hash, bytes_written):
 
 
 def _render_with_artifacts(engine, html, css, out_path, args):
+    """Render PDF and optional JSON/PNG artifacts, returning tuple payload."""
     page_data_path = args.emit_page_data
     glyph_path = args.emit_glyph_report
     
@@ -1109,6 +1146,7 @@ def _as_int(value):
 
 
 def _prepare_fail_on_args(args):
+    """Inject temporary artifacts/options required by active fail-on checks."""
     fail_on = set(getattr(args, "fail_on", None) or [])
     previous = {}
     internal_jit_path = None
@@ -1135,11 +1173,13 @@ def _prepare_fail_on_args(args):
 
 
 def _restore_args(args, previous):
+    """Restore argparse fields modified during render/verify pre-processing."""
     for key, value in previous.items():
         setattr(args, key, value)
 
 
 def _collect_jit_insights(jit_log_path):
+    """Collect overflow, fallback, and timing signals from JIT diagnostics."""
     insights = {
         "overflow_signal": False,
         "overflow_count": 0,
@@ -1229,6 +1269,7 @@ def _collect_jit_insights(jit_log_path):
 
 
 def _validate_budget_configuration(args):
+    """Ensure budget fail-on has at least one configured budget threshold."""
     fail_on = set(getattr(args, "fail_on", None) or [])
     if "budget" not in fail_on:
         return
@@ -1242,6 +1283,7 @@ def _validate_budget_configuration(args):
 
 
 def _evaluate_failures(args, bytes_written, glyph_report, jit_insights):
+    """Evaluate fail-on policy and return structured violation objects."""
     fail_on = set(getattr(args, "fail_on", None) or [])
     allow_fallbacks = bool(getattr(args, "allow_fallbacks", False))
     failures = []
@@ -1350,6 +1392,7 @@ def _evaluate_failures(args, bytes_written, glyph_report, jit_insights):
 
 
 def _collect_fallback_summary(args, glyph_report, jit_insights):
+    """Summarize fallback-related signals for result payload emission."""
     summary_counts = jit_insights.get("debug_counts", {})
     winansi_fallbacks = (jit_insights.get("winansi_fallbacks", 0) or 0) + (
         _as_int(summary_counts.get("pdf.winansi.fallback")) or 0
@@ -1366,6 +1409,7 @@ def _collect_fallback_summary(args, glyph_report, jit_insights):
 
 
 def _run_repro_record_or_check(args, manifest, html, css, output_hash, bytes_written):
+    """Write/check reproducibility records and return associated failures."""
     repro_record_path = getattr(args, "repro_record", None)
     repro_check_path = getattr(args, "repro_check", None)
     if not repro_record_path and not repro_check_path:
@@ -1436,6 +1480,7 @@ def _run_repro_record_or_check(args, manifest, html, css, output_hash, bytes_wri
 
 
 def _emit_result(ok, schema, out_path, bytes_written, outputs, args, error=None):
+    """Emit command result in human-readable or schema-based JSON format."""
     if not args.json:
         if ok:
             msg = f"[ok] wrote {out_path} ({_normalize_bytes_written(bytes_written)} bytes)"
@@ -1466,6 +1511,7 @@ def _emit_result(ok, schema, out_path, bytes_written, outputs, args, error=None)
 
 
 def cmd_render(args):
+    """CLI handler for `fullbleed render`."""
     html = _collect_html(args)
     css = _collect_css(args)
     _validate_pdf_options(args)
@@ -1550,6 +1596,7 @@ def cmd_render(args):
 
 
 def cmd_verify(args):
+    """CLI handler for `fullbleed verify`."""
     html = _collect_html(args)
     css = _collect_css(args)
     _validate_pdf_options(args)
@@ -1634,6 +1681,7 @@ def cmd_verify(args):
 
 
 def cmd_plan(args):
+    """CLI handler for `fullbleed plan`."""
     html = _collect_html(args)
     css = _collect_css(args)
     remote_refs = _detect_remote_refs(html, css)
@@ -1667,6 +1715,7 @@ def cmd_plan(args):
 
 
 def _load_json_lines(path):
+    """Read newline-delimited JSON entries from a file."""
     data = []
     for line in Path(path).read_text(encoding="utf-8").splitlines():
         line = line.strip()
@@ -1680,6 +1729,7 @@ def _load_json_lines(path):
 
 
 def cmd_debug_perf(args):
+    """CLI handler for `fullbleed debug-perf`."""
     data = _load_json_lines(args.perf_log)
     hot = [d for d in data if d.get("type", "").startswith("perf.hot.")]
     if hot:
@@ -1701,6 +1751,7 @@ def cmd_debug_perf(args):
 
 
 def cmd_debug_jit(args):
+    """CLI handler for `fullbleed debug-jit`."""
     data = _load_json_lines(args.jit_log)
     if args.errors_only:
         data = [
@@ -1717,6 +1768,7 @@ def cmd_debug_jit(args):
 
 
 def cmd_doctor(args):
+    """CLI handler for `fullbleed doctor` environment diagnostics."""
     bootstrap = Path(fullbleed_assets.asset_path("bootstrap.min.css"))
     bootstrap_icons = Path(fullbleed_assets.asset_path("icons/bootstrap-icons.svg"))
     noto = Path(fullbleed_assets.asset_path("fonts/NotoSans-Regular.ttf"))
@@ -1754,6 +1806,7 @@ def cmd_doctor(args):
 
 
 def cmd_compliance(args):
+    """CLI handler for compliance and license policy reporting."""
     now = datetime.now(timezone.utc)
     max_age_days = max(int(getattr(args, "max_audit_age_days", 180) or 180), 1)
     license_state = _resolve_license_attestation(args)
@@ -2099,6 +2152,7 @@ def cmd_compliance(args):
 
 
 def cmd_capabilities(args):
+    """CLI handler for machine-readable capability inspection."""
     commands = [
         "render",
         "verify",
@@ -2250,6 +2304,7 @@ def cmd_run(args):
 
 
 def _add_bool_flag(p, name, default):
+    """Register paired boolean flags (`--x` and `--no-x`) on a parser."""
     dest = name.replace("-", "_")
     p.add_argument(f"--{name}", dest=dest, action="store_true")
     p.add_argument(f"--no-{name}", dest=dest, action="store_false")
@@ -2257,6 +2312,7 @@ def _add_bool_flag(p, name, default):
 
 
 def _add_common_flags(p):
+    """Register common render pipeline flags shared by render/verify/plan."""
     p.add_argument(
         "--html",
         help="Path to HTML input. Use a .svg file to render a standalone SVG document.",
@@ -2367,6 +2423,7 @@ def _add_common_flags(p):
 
 
 def _build_parser():
+    """Construct and return the top-level CLI parser."""
     parser = argparse.ArgumentParser(prog="fullbleed")
     parser.add_argument("--config")
     parser.add_argument("--log-level", choices=["error", "warn", "info", "debug"], default="info")
@@ -2541,6 +2598,7 @@ def _build_parser():
 
 
 def main(argv=None):
+    """Execute CLI command dispatch and standardized error handling."""
     argv = list(sys.argv[1:] if argv is None else argv)
     force_json = "--json" in argv
     if "--schema" in argv:
