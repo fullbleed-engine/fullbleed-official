@@ -1,10 +1,13 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial -->
-# Fullbleed Agent Guide
+# Fullbleed LLM Guide
 
-This document is for AI agents using `fullbleed` in real user environments.
+Version target: `fullbleed 0.1.12 (stable)`
+
+This document is for LLM-driven automation using `fullbleed` in real user environments.
 
 Scope:
 - Assumes a normal installed release (`pip install fullbleed`), not a mixed local dev tree.
+- Assumes CLI/Python behavior from `0.1.12 (stable)`.
 - Focuses on reliable automation patterns for repeatable document generation.
 - Treat Fullbleed as a document engine, not a web-to-print/browser-runtime substitute.
 - Treat HTML/CSS as the familiar document DSL; with pinned assets and flags, Fullbleed targets reproducible outputs.

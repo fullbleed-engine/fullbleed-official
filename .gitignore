@@ -27,3 +27,6 @@
 /dist
 /.github/workflows
 /.venv_engine
+*.pyc
+*.pyd
+*.pyc

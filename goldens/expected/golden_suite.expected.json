@@ -1,0 +1,96 @@
+{
+  "schema": "fullbleed.golden_suite.v1",
+  "generated_at_utc": "2026-02-13T06:49:36.648394+00:00",
+  "cases": {
+    "acme_invoice": {
+      "case_id": "acme_invoice",
+      "report": "examples/acme_invoice/report.py",
+      "pdf": {
+        "path": "examples/acme_invoice/output/acme_sample_invoice.pdf",
+        "bytes": 1793270,
+        "sha256": "6598c5d6175f20094af792f03573506999ab5a4757954c9bd5fe5429bfaf4441"
+      },
+      "png": {
+        "count": 1,
+        "files": [
+          {
+            "name": "acme_sample_invoice_page1.png",
+            "path": "examples/acme_invoice/output/acme_sample_invoice_page1.png",
+            "bytes": 288545,
+            "sha256": "a8ac9abfc5e96943833c912e603a9ffc9001fc1c33d6077d09db68a6d8e00d66"
+          }
+        ]
+      },
+      "validation": {
+        "path": "examples/acme_invoice/output/acme_sample_invoice_component_mount_validation.json",
+        "kind": "component_mount",
+        "sha256": "ac1131f909c2cc4f5259226441c4a2e7f3518c38908c43b2d83d81b34d0f25f2"
+      },
+      "css_layers": {
+        "path": "examples/acme_invoice/output/acme_sample_invoice_css_layers.json",
+        "sha256": "8f7fdae9de10034669569be3e087e9703aa1ad7213856611b9fc896d6d64bbd5"
+      }
+    },
+    "bank_statement": {
+      "case_id": "bank_statement",
+      "report": "examples/bank_statement/report.py",
+      "pdf": {
+        "path": "examples/bank_statement/output/bank_statement.pdf",
+        "bytes": 1811609,
+        "sha256": "6f8c2425fa777a54ecb5d1794d221f7725725117213f132ea9fe3c75a879f267"
+      },
+      "png": {
+        "count": 2,
+        "files": [
+          {
+            "name": "bank_statement_page1.png",
+            "path": "examples/bank_statement/output/bank_statement_page1.png",
+            "bytes": 453696,
+            "sha256": "6f673f92a291f8d33296e95ac6fff1fbbd9cc210f0495932e4b3585e64ba1b12"
+          },
+          {
+            "name": "bank_statement_page2.png",
+            "path": "examples/bank_statement/output/bank_statement_page2.png",
+            "bytes": 139387,
+            "sha256": "0f3bfbdfcc27e6675d30aa9a46fadafb3b58d7d803804795f843dc372f1911ab"
+          }
+        ]
+      },
+      "validation": {
+        "path": "examples/bank_statement/output/bank_statement_component_mount_validation.json",
+        "kind": "component_mount",
+        "sha256": "f0efda1c185dece7dec189184a372d4ab68f5e6250e9d2cee29ec81eb814873f"
+      },
+      "css_layers": {
+        "path": "examples/bank_statement/output/bank_statement_css_layers.json",
+        "sha256": "500a348e3ca1d5577b61429d98fdb3a2e21998bf6e4367b1419fcb44b2d60c8e"
+      }
+    },
+    "coastal_menu": {
+      "case_id": "coastal_menu",
+      "report": "examples/coastal_menu/report.py",
+      "pdf": {
+        "path": "examples/coastal_menu/output/coastal_menu.pdf",
+        "bytes": 8347,
+        "sha256": "fef95bea026787183eba96c9f26d30deaddde8585afea6f39df16792a23b2865"
+      },
+      "png": {
+        "count": 1,
+        "files": [
+          {
+            "name": "coastal_menu_page1.png",
+            "path": "examples/coastal_menu/output/coastal_menu_page1.png",
+            "bytes": 174091,
+            "sha256": "7e0ba2be8da3458b86d3af1861f9992149d064d34cb76473248f7d691c1f66b1"
+          }
+        ]
+      },
+      "validation": {
+        "path": "examples/coastal_menu/output/coastal_menu_validation.json",
+        "kind": "coastal_validation",
+        "sha256": "359e31d8830b7b9498cb5bc8572a48068786fc12d18dd726be3a2878e194d117"
+      },
+      "css_layers": null
+    }
+  }
+}

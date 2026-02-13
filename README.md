@@ -44,7 +44,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-0.1.0-cp311-cp311-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-0.1.12-cp311-cp311-win_amd64.whl
 ```
 
 Platform artifact policy:
@@ -868,13 +868,13 @@ Golden contract assets:
 Run against committed expectations:
 
 ```bash
-python goldens/run_golden_suite.py verify --cli "python -m fullbleed"
+python goldens/run_golden_suite.py verify
 ```
 
 Refresh baselines intentionally:
 
 ```bash
-python goldens/run_golden_suite.py generate --cli "python -m fullbleed"
+python goldens/run_golden_suite.py generate
 ```
 
 ## Human + AI Operating Mode
@@ -1011,7 +1011,7 @@ print(payload["outputs"]["pdf"])
 
 ## Related Docs
 
-- Agent workflow guide: `AI.md`
+- Agent workflow guide: `llm.txt`
 - CLI JSON contract quick reference: `cli_schema.md`
 - CLI epoch/spec: `CLI_EPOCH.md`
 - Licensing guide: `LICENSING.md`
