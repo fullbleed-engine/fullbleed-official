@@ -1,0 +1,36 @@
+{
+  "layers": [
+    {
+      "path": "styles/tokens.css",
+      "exists": true,
+      "bytes": 703
+    },
+    {
+      "path": "components/styles/primitives.css",
+      "exists": true,
+      "bytes": 1840
+    },
+    {
+      "path": "components/styles/header.css",
+      "exists": true,
+      "bytes": 2471
+    },
+    {
+      "path": "components/styles/body.css",
+      "exists": true,
+      "bytes": 1446
+    },
+    {
+      "path": "components/styles/footer.css",
+      "exists": true,
+      "bytes": 839
+    },
+    {
+      "path": "styles/report.css",
+      "exists": true,
+      "bytes": 211
+    }
+  ],
+  "unscoped_selector_count": 0,
+  "no_effect_declaration_count": 0
+}
