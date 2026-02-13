@@ -1,6 +1,6 @@
 {
   "schema": "fullbleed.golden_suite.v1",
-  "generated_at_utc": "2026-02-13T06:49:36.648394+00:00",
+  "generated_at_utc": "2026-02-13T20:00:03.147065+00:00",
   "cases": {
     "acme_invoice": {
       "case_id": "acme_invoice",
@@ -80,15 +80,15 @@
           {
             "name": "coastal_menu_page1.png",
             "path": "examples/coastal_menu/output/coastal_menu_page1.png",
-            "bytes": 174091,
-            "sha256": "7e0ba2be8da3458b86d3af1861f9992149d064d34cb76473248f7d691c1f66b1"
+            "bytes": 410557,
+            "sha256": "7d94762087b061c4882e85a2b4a17812810b3a09aefe8eed758e9f25ced8ff2c"
           }
         ]
       },
       "validation": {
         "path": "examples/coastal_menu/output/coastal_menu_validation.json",
         "kind": "coastal_validation",
-        "sha256": "359e31d8830b7b9498cb5bc8572a48068786fc12d18dd726be3a2878e194d117"
+        "sha256": "fd9d44bf8fc1bca243b642c7f7f6fe13532ee94d0ed1ad259a050401dc707706"
       },
       "css_layers": null
     }
