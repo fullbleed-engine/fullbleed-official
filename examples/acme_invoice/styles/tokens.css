@@ -1,0 +1,42 @@
+@page {
+  size: 8.5in 11in;
+  margin: 0;
+}
+
+:root {
+  --fb-font-family-sans: "Inter", "Segoe UI", Arial, sans-serif;
+  --fb-ink: #1f2d3d;
+  --fb-muted: #70767f;
+  --fb-muted-strong: #4d5664;
+  --fb-soft: #9ca2a9;
+  --fb-line: #d8dadd;
+  --fb-page-bg: #eeeeef;
+}
+
+html,
+body {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  background: var(--fb-page-bg);
+}
+
+body {
+  font-family: var(--fb-font-family-sans);
+  font-weight: 400;
+  color: var(--fb-ink);
+}
+
+[data-fb-role="document-root"] {
+  box-sizing: border-box;
+  width: 8.5in;
+  height: 11in;
+  min-height: 11in;
+  margin: 0 auto;
+  background: var(--fb-page-bg);
+  color: var(--fb-ink);
+}
+
+[data-fb-role="document-root"] * {
+  box-sizing: border-box;
+}

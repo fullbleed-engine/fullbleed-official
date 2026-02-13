@@ -1,0 +1,7 @@
+[data-fb-role="document-root"] .fb-footer {
+  margin: 0;
+  padding-top: var(--fb-space-2);
+  border-top: 1px solid var(--fb-color-border);
+  font-size: 0.8125rem;
+  color: var(--fb-color-muted);
+}

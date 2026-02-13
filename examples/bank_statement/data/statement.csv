@@ -1,0 +1,32 @@
+row_type,key,value,date,description,amount
+meta,bank_name,Acme Community Bank,,,
+meta,bank_tagline,Modern Banking Solutions,,,
+meta,contact_phone,1-800-555-0123,,,
+meta,contact_email,support@acmebank.example,,,
+meta,contact_website,www.acmebank.example,,,
+meta,account_holder,Alex Carter,,,
+meta,account_address_line1,2847 Willow Creek Drive,,,
+meta,account_address_line2,"San Francisco, CA 94102",,,
+meta,account_number,****7392,,,
+meta,routing_number,121000248,,,
+meta,statement_start,"January 1, 2026",,,
+meta,statement_end,"January 31, 2026",,,
+meta,beginning_balance,4114.69,,,
+transaction,,,2026-01-05,Rent Payment - Bayview Apartments,-2400.00
+transaction,,,2026-01-06,Federal Tax Refund,500.00
+transaction,,,2026-01-07,City Utilities,-188.55
+transaction,,,2026-01-10,Work Expense Reimbursement,750.00
+transaction,,,2026-01-11,Neighborhood Grocer,-150.00
+transaction,,,2026-01-13,City Car Share,-60.00
+transaction,,,2026-01-15,Quarterly Bonus Payment,3000.00
+transaction,,,2026-01-16,Downtown Bistro,-140.00
+transaction,,,2026-01-18,Broadband Service,-65.00
+transaction,,,2026-01-20,Fitness Membership,-45.00
+transaction,,,2026-01-21,Pharmacy Purchase,-40.00
+transaction,,,2026-01-22,Instant Transfer from John Davis,150.00
+transaction,,,2026-01-24,Mobile App Purchase,-2.99
+transaction,,,2026-01-25,Fuel Station,-62.34
+transaction,,,2026-01-27,Streaming Subscription,-15.49
+transaction,,,2026-01-28,Organic Market,-127.89
+transaction,,,2026-01-30,Online Transfer to Savings,-500.00
+transaction,,,2026-01-31,Direct Deposit - Payroll,4250.00

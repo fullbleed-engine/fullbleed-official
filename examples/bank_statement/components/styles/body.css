@@ -1,0 +1,112 @@
+[data-fb-role="document-root"] .bs-summary-block {
+  padding: 0.24in 0 0.24in;
+  border-bottom: 1px solid #d8dde5;
+}
+
+[data-fb-role="document-root"] .bs-section-kicker {
+  margin: 0 0 0.14in;
+  font-size: 0.105in;
+  letter-spacing: 0.01em;
+  font-weight: 530;
+  color: #75859a;
+}
+
+[data-fb-role="document-root"] .bs-summary-grid {
+  display: flex;
+  justify-content: space-between;
+}
+
+[data-fb-role="document-root"] .bs-summary-item {
+  width: 1.74in;
+}
+
+[data-fb-role="document-root"] .bs-summary-label {
+  margin: 0 0 0.055in;
+  font-size: 0.11in;
+  line-height: 1.2;
+  color: #4f6177;
+}
+
+[data-fb-role="document-root"] .bs-summary-value {
+  margin: 0;
+  font-size: 0.22in;
+  line-height: 1.14;
+  font-weight: 520;
+  color: #2a3c52;
+}
+
+[data-fb-role="document-root"] .bs-summary-positive {
+  color: #19a764;
+}
+
+[data-fb-role="document-root"] .bs-summary-negative {
+  color: #d04a45;
+}
+
+[data-fb-role="document-root"] .bs-history-block {
+  padding-top: 0.24in;
+}
+
+[data-fb-role="document-root"] .bs-transaction-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+[data-fb-role="document-root"] .bs-transaction-table thead th {
+  border-bottom: 1px solid #cfd5de;
+  padding: 0 0 0.08in;
+  font-size: 0.105in;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  font-weight: 530;
+  color: #62748b;
+}
+
+[data-fb-role="document-root"] .bs-transaction-table tbody td {
+  border-bottom: 1px solid #dce1e9;
+  padding: 0.12in 0;
+  font-size: 0.133in;
+  line-height: 1.2;
+  color: #25374d;
+}
+
+[data-fb-role="document-root"] .bs-head-date,
+[data-fb-role="document-root"] .bs-col-date {
+  width: 1.05in;
+  text-align: left;
+}
+
+[data-fb-role="document-root"] .bs-head-description,
+[data-fb-role="document-root"] .bs-col-description {
+  width: 4.1in;
+  text-align: left;
+}
+
+[data-fb-role="document-root"] .bs-head-amount,
+[data-fb-role="document-root"] .bs-col-amount,
+[data-fb-role="document-root"] .bs-head-balance,
+[data-fb-role="document-root"] .bs-col-balance {
+  width: 1.2in;
+  text-align: right;
+}
+
+[data-fb-role="document-root"] .bs-col-description {
+  font-weight: 500;
+}
+
+[data-fb-role="document-root"] .bs-col-date {
+  color: #61748b;
+}
+
+[data-fb-role="document-root"] .bs-col-amount,
+[data-fb-role="document-root"] .bs-col-balance {
+  font-weight: 510;
+}
+
+[data-fb-role="document-root"] .bs-tx-positive {
+  color: #18a664;
+}
+
+[data-fb-role="document-root"] .bs-tx-negative {
+  color: #d04a45;
+}

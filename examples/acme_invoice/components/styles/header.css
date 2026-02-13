@@ -1,0 +1,132 @@
+[data-fb-role="document-root"] .fb-header {
+  margin: 0;
+}
+
+[data-fb-role="document-root"] .fb-top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+[data-fb-role="document-root"] .fb-brand-block {
+  width: 61%;
+}
+
+[data-fb-role="document-root"] .fb-brand {
+  margin: 0;
+  font-size: 54px;
+  line-height: 1;
+  letter-spacing: -0.015em;
+  color: #020614;
+  font-weight: 800;
+}
+
+[data-fb-role="document-root"] .fb-tagline {
+  margin: 8px 0 0 0;
+  font-size: 14px;
+  color: #70767f;
+  font-weight: 500;
+}
+
+[data-fb-role="document-root"] .fb-meta-block {
+  width: 31%;
+  text-align: right;
+}
+
+[data-fb-role="document-root"] .fb-badge {
+  margin: 0 0 14px auto;
+  display: inline-block;
+  background: #060606;
+  color: #ffffff;
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 700;
+  padding: 10px 18px 10px;
+  letter-spacing: 0.02em;
+}
+
+[data-fb-role="document-root"] .fb-meta-line {
+  margin: 0;
+  color: #646a73;
+  font-size: 13px;
+  line-height: 1.4;
+  font-weight: 560;
+}
+
+[data-fb-role="document-root"] .fb-number-line {
+  margin-bottom: 6px;
+}
+
+[data-fb-role="document-root"] .fb-prefix {
+  margin-right: 6px;
+  color: #70767f;
+  font-weight: 700;
+}
+
+[data-fb-role="document-root"] .fb-value {
+  letter-spacing: 0.03em;
+}
+
+[data-fb-role="document-root"] .fb-date-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+[data-fb-role="document-root"] .fb-date-line .fb-icon {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+}
+
+[data-fb-role="document-root"] .fb-party-grid {
+  margin-top: 68px;
+  display: flex;
+  justify-content: space-between;
+}
+
+[data-fb-role="document-root"] .fb-party {
+  width: 46%;
+}
+
+[data-fb-role="document-root"] .fb-party-kicker {
+  margin: 0 0 13px 0;
+  color: #9ca2a9;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+[data-fb-role="document-root"] .fb-party-company {
+  margin: 0 0 8px 0;
+  font-size: 24px;
+  line-height: 1.05;
+  font-weight: 700;
+  color: #182437;
+}
+
+[data-fb-role="document-root"] .fb-icon-line,
+[data-fb-role="document-root"] .fb-plain-line {
+  margin: 0 0 4px 0;
+  color: #4d5664;
+  font-size: 14px;
+  line-height: 1.35;
+  font-weight: 500;
+}
+
+[data-fb-role="document-root"] .fb-icon-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+[data-fb-role="document-root"] .fb-icon {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  stroke: #7b8189;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}

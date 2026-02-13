@@ -1,0 +1,20 @@
+row_type,key,value,description,qty,rate
+meta,studio_name,Acme Studio,,,
+meta,studio_tagline,Sample Creative Services,,,
+meta,from_company,Acme Studio,,,
+meta,from_email,billing@example.com,,,
+meta,from_website,example.com,,,
+meta,from_address_line1,100 Example Street,,,
+meta,from_address_line2,"Demo City, CA 94102",,,
+meta,bill_company,Acme Client Corp,,,
+meta,bill_contact,Jordan Lee,,,
+meta,bill_email,accounts-payable@example.net,,,
+meta,bill_address_line1,250 Client Avenue,,,
+meta,bill_address_line2,"Sampletown, NY 10001",,,
+meta,invoice_number,SAMPLE-2024-0042,,,
+meta,invoice_date,2024-02-13,,,
+meta,tax_rate,0.08,,,
+item,,,Brand Identity Design,1,3500
+item,,,Website Development,1,8500
+item,,,Custom Illustration Set,5,450
+item,,,Consultation & Strategy,8,200

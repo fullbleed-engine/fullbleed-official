@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "packages": [
+    {
+      "name": "bootstrap",
+      "version": "5.0.0",
+      "kind": "css",
+      "files": [
+        {
+          "path": "vendor/css/bootstrap.min.css",
+          "sha256": "04083fcecdd9e19b2acd1e0073437aa07c98d230f0198d7f1fd470ab220fef64"
+        }
+      ]
+    },
+    {
+      "name": "inter",
+      "version": "4.0",
+      "kind": "font",
+      "files": [
+        {
+          "path": "vendor/fonts/Inter-Variable.ttf",
+          "sha256": "29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031"
+        }
+      ]
+    },
+    {
+      "name": "bootstrap-icons",
+      "version": "1.11.3",
+      "kind": "svg",
+      "files": [
+        {
+          "path": "vendor/icons/bootstrap-icons.svg",
+          "sha256": "b000f622cba471181e4aa9b83e4ea38a069d0e0674cdc817148b21ef3dcd704b"
+        }
+      ]
+    }
+  ]
+}

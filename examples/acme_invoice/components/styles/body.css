@@ -1,0 +1,58 @@
+[data-fb-role="document-root"] .fb-items-wrap {
+  margin-top: 28px;
+  border-top: 1px solid #d8dadd;
+  padding-top: 44px;
+}
+
+[data-fb-role="document-root"] .fb-items-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+[data-fb-role="document-root"] .fb-items-table thead th {
+  text-align: left;
+  color: #606874;
+  font-size: 11px;
+  font-weight: 730;
+  letter-spacing: 0.03em;
+  padding: 0 0 11px;
+}
+
+[data-fb-role="document-root"] .fb-items-table thead .fb-col-qty,
+[data-fb-role="document-root"] .fb-items-table thead .fb-col-rate,
+[data-fb-role="document-root"] .fb-items-table thead .fb-col-amount {
+  text-align: right;
+}
+
+[data-fb-role="document-root"] .fb-items-table tbody td {
+  padding: 17px 0;
+  border-top: 1px solid #dedfe2;
+  color: #1d2737;
+  font-size: 18px;
+  line-height: 1.2;
+  font-weight: 520;
+}
+
+[data-fb-role="document-root"] .fb-items-table tbody .fb-col-qty,
+[data-fb-role="document-root"] .fb-items-table tbody .fb-col-rate,
+[data-fb-role="document-root"] .fb-items-table tbody .fb-col-amount {
+  text-align: right;
+  font-family: "IBM Plex Mono", "Courier New", monospace;
+  white-space: nowrap;
+}
+
+[data-fb-role="document-root"] .fb-items-table .fb-col-desc {
+  width: 58%;
+}
+
+[data-fb-role="document-root"] .fb-items-table .fb-col-qty {
+  width: 8%;
+}
+
+[data-fb-role="document-root"] .fb-items-table .fb-col-rate {
+  width: 17%;
+}
+
+[data-fb-role="document-root"] .fb-items-table .fb-col-amount {
+  width: 17%;
+}

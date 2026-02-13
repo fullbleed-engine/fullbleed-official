@@ -1,0 +1,152 @@
+[data-fb-role="document-root"] .bs-header {
+  border-bottom: 1px solid #d8dde5;
+}
+
+[data-fb-role="document-root"] .bs-top-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+[data-fb-role="document-root"] .bs-top-left {
+  width: 60%;
+  vertical-align: top;
+}
+
+[data-fb-role="document-root"] .bs-top-right {
+  width: 40%;
+  vertical-align: top;
+}
+
+[data-fb-role="document-root"] .bs-bank-icon {
+  width: 0.36in;
+  height: 0.36in;
+}
+
+[data-fb-role="document-root"] .bs-brand-table {
+  border-collapse: collapse;
+}
+
+[data-fb-role="document-root"] .bs-brand-icon-cell {
+  width: 0.46in;
+  vertical-align: top;
+}
+
+[data-fb-role="document-root"] .bs-brand-text-cell {
+  vertical-align: top;
+}
+
+[data-fb-role="document-root"] .bs-brand-copy {
+  padding-top: 0.01in;
+}
+
+[data-fb-role="document-root"] .bs-bank-name {
+  margin: 0;
+  font-size: 0.33in;
+  line-height: 1.05;
+  font-weight: 520;
+  letter-spacing: -0.01em;
+  color: #1f3656;
+}
+
+[data-fb-role="document-root"] .bs-bank-tagline {
+  margin: 0.045in 0 0;
+  font-size: 0.12in;
+  line-height: 1.2;
+  color: #5f6e81;
+  font-weight: 450;
+}
+
+[data-fb-role="document-root"] .bs-contact-block {
+  padding-top: 0.03in;
+}
+
+[data-fb-role="document-root"] .bs-contact-table {
+  margin-left: auto;
+  border-collapse: collapse;
+}
+
+[data-fb-role="document-root"] .bs-contact-icon {
+  width: 0.14in;
+  height: 0.14in;
+}
+
+[data-fb-role="document-root"] .bs-contact-icon-cell {
+  width: 0.2in;
+  text-align: right;
+  vertical-align: middle;
+  padding: 0 0.05in 0.04in 0;
+}
+
+[data-fb-role="document-root"] .bs-contact-text-cell {
+  text-align: right;
+  vertical-align: middle;
+  padding: 0 0 0.04in;
+}
+
+[data-fb-role="document-root"] .bs-contact-value {
+  font-size: 0.11in;
+  line-height: 1.22;
+  color: #4f6177;
+}
+
+[data-fb-role="document-root"] .bs-accent-rule {
+  border-top: 0.04in solid #2f6ff5;
+  margin: 0.22in -0.5in 0.24in;
+}
+
+[data-fb-role="document-root"] .bs-account-grid {
+  display: flex;
+  justify-content: space-between;
+  padding-bottom: 0.26in;
+}
+
+[data-fb-role="document-root"] .bs-account-col {
+  width: 3.34in;
+}
+
+[data-fb-role="document-root"] .bs-kicker {
+  margin: 0 0 0.11in;
+  font-size: 0.105in;
+  letter-spacing: 0.01em;
+  font-weight: 530;
+  color: #75859a;
+}
+
+[data-fb-role="document-root"] .bs-holder-name {
+  margin: 0 0 0.06in;
+  font-size: 0.155in;
+  line-height: 1.25;
+  font-weight: 500;
+  color: #1f2f44;
+}
+
+[data-fb-role="document-root"] .bs-address-line {
+  margin: 0 0 0.04in;
+  font-size: 0.112in;
+  line-height: 1.2;
+  color: #4f6177;
+}
+
+[data-fb-role="document-root"] .bs-detail-row {
+  margin: 0 0 0.055in;
+}
+
+[data-fb-role="document-root"] .bs-detail-label {
+  display: inline-block;
+  width: 1.34in;
+  font-size: 0.115in;
+  line-height: 1.22;
+  color: #4f6177;
+}
+
+[data-fb-role="document-root"] .bs-detail-value {
+  display: inline-block;
+  font-size: 0.118in;
+  line-height: 1.22;
+  font-weight: 510;
+  color: #27384e;
+}
+
+[data-fb-role="document-root"] .bs-detail-emphasis {
+  font-weight: 600;
+}

@@ -1,0 +1,31 @@
+@page {
+  margin: 0in;
+}
+
+:root {
+  --fb-font-family-sans: "Inter", "Noto Sans", sans-serif;
+  --fb-color-text: #25374d;
+  --fb-color-muted: #5f6e81;
+  --fb-color-border: #d8dde5;
+  --fb-color-page: #f3f5f8;
+  --fb-space-1: 0.25rem;
+  --fb-space-2: 0.5rem;
+  --fb-space-3: 0.75rem;
+  --fb-space-4: 1rem;
+  --fb-space-6: 1.5rem;
+}
+
+body {
+  margin: 0;
+  font-family: var(--fb-font-family-sans);
+  font-weight: 450;
+  color: var(--fb-color-text);
+  background: var(--fb-color-page);
+}
+
+[data-fb-role="document-root"] {
+  width: 7.5in;
+  min-height: 11in;
+  margin: 0 auto;
+  background: var(--fb-color-page);
+}

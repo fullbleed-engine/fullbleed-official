@@ -1,0 +1,17 @@
+@page {
+  margin: 0in;
+}
+
+[data-fb-role="document-root"] {
+  font-family: "Inter", "Noto Sans", sans-serif;
+  font-weight: 450;
+  color: #25374d;
+}
+
+[data-fb-role="document-root"] .report-root {
+  min-height: 11in;
+}
+
+[data-fb-role="document-root"].report-root {
+  padding: 0.52in 0 0.42in;
+}

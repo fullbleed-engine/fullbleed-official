@@ -17,7 +17,6 @@
 /target_grad
 /target_use
 /target_codex2
-/examples/*
 !/examples/living_docs_atlas/
 !/examples/living_docs_atlas/**
 !/examples/resume_reference_steven_smith/
@@ -28,3 +27,4 @@
 *.pyc
 *.pyd
 *.pyc
+/.venv_pypi_smoke_2

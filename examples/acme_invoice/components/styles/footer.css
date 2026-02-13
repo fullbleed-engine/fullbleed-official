@@ -1,0 +1,41 @@
+[data-fb-role="document-root"] .fb-totals {
+  width: 42%;
+  margin-left: auto;
+  margin-top: 33px;
+}
+
+[data-fb-role="document-root"] .fb-total-row {
+  margin: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 14px;
+  color: #2d384a;
+  font-size: 16px;
+  line-height: 1.1;
+  font-weight: 520;
+  padding: 12px 0;
+}
+
+[data-fb-role="document-root"] .fb-total-label {
+  color: #6e7682;
+  font-weight: 540;
+}
+
+[data-fb-role="document-root"] .fb-total-value {
+  font-family: "IBM Plex Mono", "Courier New", monospace;
+  margin-left: 16px;
+}
+
+[data-fb-role="document-root"] .fb-total-grand {
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px solid #d8dadd;
+  color: #172538;
+  font-weight: 700;
+}
+
+[data-fb-role="document-root"] .fb-total-grand .fb-total-label {
+  color: #29384f;
+  font-weight: 700;
+}

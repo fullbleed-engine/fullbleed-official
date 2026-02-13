@@ -1,0 +1,198 @@
+/* __TOKENS__ */
+
+@page {
+  size: 17in 8.5in;
+  margin: 0;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Inter", "Noto Sans", sans-serif;
+  color: var(--coastal-text-primary);
+  background: #ffffff;
+}
+
+.report-root {
+  width: 100%;
+  min-height: 8.5in;
+  margin: 0;
+  padding: 0;
+}
+
+.coastal-layout {
+  width: 17in;
+  height: 8.5in;
+  min-height: 8.5in;
+  display: table;
+  table-layout: fixed;
+}
+
+.left-panel {
+  display: table-cell;
+  width: 5.45in;
+  height: 8.5in;
+  vertical-align: top;
+  box-sizing: border-box;
+  background: var(--coastal-left-bg);
+  color: var(--coastal-white-soft);
+  padding: 0.64in 0.56in 0.46in;
+}
+
+.wave-mark-left {
+  display: block;
+  width: 0.62in;
+  height: 0.62in;
+  margin: 0 0 0.36in;
+}
+
+.visit-title {
+  margin: 0 0 0.38in;
+  font-family: "Times New Roman", Georgia, serif;
+  font-size: 0.64in;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.contact-stack {
+  margin-top: 0.10in;
+}
+
+.contact-row {
+  position: relative;
+  width: 100%;
+  min-height: 0.28in;
+  padding-left: 0.40in;
+  margin-bottom: 0.30in;
+  white-space: normal;
+}
+
+.ui-row {
+  width: 100%;
+}
+
+.contact-icon-svg {
+  display: block;
+  width: 0.24in;
+  height: 0.24in;
+  margin-right: 0;
+  color: var(--coastal-white-soft);
+  vertical-align: top;
+}
+
+.contact-icon-fallback {
+  display: inline-block;
+  width: 0.18in;
+  margin-right: 0.09in;
+  font-size: 0.15in;
+  line-height: 1.2;
+}
+
+.contact-lines {
+  display: block;
+}
+
+.contact-icon-wrap {
+  position: absolute;
+  left: 0;
+  top: 0.01in;
+  width: 0.24in;
+  height: 0.24in;
+}
+
+.contact-lines-wrap {
+  display: block;
+  width: auto;
+  padding-left: 0;
+}
+
+.contact-line {
+  margin: 0 0 0.04in;
+  font-size: 0.16in;
+  line-height: 1.25;
+  font-weight: 500;
+}
+
+.contact-line:last-child {
+  margin-bottom: 0;
+}
+
+.contact-title {
+  display: none;
+}
+
+.center-panel {
+  display: table-cell;
+  width: 5.75in;
+  height: 8.5in;
+  vertical-align: top;
+  box-sizing: border-box;
+  background: var(--coastal-center-bg);
+  padding: 0.60in 0.58in 0.50in;
+}
+
+.menu-section {
+  margin: 0 0 0.30in;
+}
+
+.menu-section:last-child {
+  margin-bottom: 0;
+}
+
+.section-title {
+  margin: 0;
+  padding-bottom: 0.10in;
+  border-bottom: 0.020in solid #1775b8;
+  font-family: "Times New Roman", Georgia, serif;
+  font-size: 0.29in;
+  font-weight: 500;
+  color: var(--coastal-text-primary);
+}
+
+.menu-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.menu-item {
+  border-bottom: 0.010in solid #d3d7dd;
+  padding: 0.105in 0;
+}
+
+.item-head {
+  display: table;
+  width: 100%;
+  font-size: 0.145in;
+  font-weight: 500;
+  line-height: 1.20;
+}
+
+.item-name {
+  display: table-cell;
+  color: var(--coastal-text-primary);
+}
+
+.item-price {
+  display: table-cell;
+  width: 0.8in;
+  text-align: right;
+  color: #1798e6;
+  font-weight: 500;
+}
+
+.item-desc {
+  margin-top: 0.032in;
+  color: #4a6f99;
+  font-size: 0.094in;
+  line-height: 1.18;
+  clear: both;
+}
+
+/* Right panel styling is defined in components/right_panel.py (component-level styles). */
