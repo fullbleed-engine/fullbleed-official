@@ -1622,6 +1622,7 @@ pub(crate) fn document_to_pdf_with_metrics_and_registry_with_logs(
     Ok(bytes)
 }
 
+#[allow(dead_code)]
 pub(crate) fn document_to_pdf_with_metrics_and_registry_to_writer<W: Write>(
     document: &Document,
     metrics: Option<&mut DocumentMetrics>,
@@ -1698,6 +1699,7 @@ fn collect_used_font_names(document: &Document) -> BTreeSet<String> {
     names
 }
 
+#[allow(dead_code)]
 fn collect_font_names(document: &Document) -> Vec<String> {
     collect_used_font_names(document).into_iter().collect()
 }
@@ -1768,6 +1770,7 @@ fn validate_pdfx4_output_intent(options: &PdfOptions) -> io::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn collect_optional_content_names_in_commands(commands: &[Command], names: &mut BTreeSet<String>) {
     for cmd in commands {
         match cmd {
@@ -1783,6 +1786,7 @@ fn collect_optional_content_names_in_commands(commands: &[Command], names: &mut 
     }
 }
 
+#[allow(dead_code)]
 fn collect_optional_content_names(document: &Document) -> Vec<String> {
     let mut names = BTreeSet::new();
     for page in &document.pages {
@@ -1791,6 +1795,7 @@ fn collect_optional_content_names(document: &Document) -> Vec<String> {
     names.into_iter().collect()
 }
 
+#[allow(dead_code)]
 fn collect_tag_records(document: &Document) -> Vec<TagRecord> {
     let mut records = Vec::new();
     for (page_index, page) in document.pages.iter().enumerate() {
@@ -1830,6 +1835,7 @@ fn collect_tag_records(document: &Document) -> Vec<TagRecord> {
     records
 }
 
+#[allow(dead_code)]
 fn collect_font_usage(
     document: &Document,
     registry: Option<&FontRegistry>,
@@ -1892,6 +1898,7 @@ fn collect_font_usage(
     map
 }
 
+#[allow(dead_code)]
 fn collect_image_sources(document: &Document) -> Vec<String> {
     let mut sources = BTreeSet::new();
     for page in &document.pages {
@@ -1911,6 +1918,7 @@ enum FontEncoding {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct FontResource {
     resource: String,
     encoding: FontEncoding,
@@ -1921,6 +1929,7 @@ struct FontUsage {
     glyph_map: BTreeMap<u16, String>,
 }
 
+#[allow(dead_code)]
 fn build_font_map(fonts: &[String]) -> BTreeMap<String, FontResource> {
     let mut map = BTreeMap::new();
     for (index, name) in fonts.iter().enumerate() {
@@ -1935,6 +1944,7 @@ fn build_font_map(fonts: &[String]) -> BTreeMap<String, FontResource> {
     map
 }
 
+#[allow(dead_code)]
 fn glyph_cache_key(font_name: &str, text: &str) -> String {
     let mut key = String::with_capacity(font_name.len() + 1 + text.len());
     key.push_str(font_name);
@@ -1953,6 +1963,7 @@ fn tj_cache_key(font_name: &str, font_size: Pt, text: &str) -> String {
     key
 }
 
+#[allow(dead_code)]
 fn cached_shape_text_to_tj(
     registry: &FontRegistry,
     font_name: &str,
@@ -1973,6 +1984,7 @@ fn cached_shape_text_to_tj(
     Some(tj)
 }
 
+#[allow(dead_code)]
 fn build_font_objects(
     font_names: &[String],
     font_map: &mut BTreeMap<String, FontResource>,
@@ -2109,6 +2121,7 @@ fn build_cidfont_objects(
     (objects, type0_font_id, glyph_map, start_id + 5)
 }
 
+#[allow(dead_code)]
 fn build_image_objects(
     sources: &[String],
     start_id: usize,
@@ -2163,6 +2176,7 @@ fn build_image_objects(
     (objects, resources, name_map, next_id)
 }
 
+#[allow(dead_code)]
 fn build_extgstate_objects(
     document: &Document,
     start_id: usize,
@@ -2210,6 +2224,7 @@ fn build_extgstate_objects(
     (objects, resources, name_map, next_id)
 }
 
+#[allow(dead_code)]
 fn build_shading_objects(
     document: &Document,
     start_id: usize,
@@ -2655,6 +2670,7 @@ fn sanitize_font_name(name: &str) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn render_page(
     page: &Page,
     page_height: Pt,
@@ -3216,6 +3232,7 @@ fn info_object(title: Option<&str>, profile: PdfProfile) -> String {
     format!("<< {} >>", entries.join(" "))
 }
 
+#[allow(dead_code)]
 fn build_pdf(
     objects: Vec<String>,
     catalog_id: usize,
@@ -3519,6 +3536,7 @@ fn to_unicode_cmap(glyph_map: &BTreeMap<u16, String>) -> String {
     out
 }
 
+#[allow(dead_code)]
 fn encode_cid_hex(text: &str, glyph_map: Option<&BTreeMap<u16, String>>) -> String {
     let mut out = String::new();
     out.push('<');
@@ -3539,6 +3557,7 @@ fn encode_cid_hex(text: &str, glyph_map: Option<&BTreeMap<u16, String>>) -> Stri
     out
 }
 
+#[allow(dead_code)]
 fn shape_text_to_glyph_map(font_data: &[u8], text: &str) -> Option<BTreeMap<u16, String>> {
     let face = HbFace::from_slice(font_data, 0)?;
     let mut buffer = UnicodeBuffer::new();
@@ -3567,6 +3586,7 @@ fn shape_text_to_glyph_map(font_data: &[u8], text: &str) -> Option<BTreeMap<u16,
     Some(map)
 }
 
+#[allow(dead_code)]
 fn shape_text_to_tj(
     registry: &FontRegistry,
     font_name: &str,
@@ -3614,6 +3634,7 @@ fn shape_text_to_tj(
     Some(format!("[{}] TJ\n", parts.join(" ")))
 }
 
+#[allow(dead_code)]
 fn detect_direction(text: &str) -> rustybuzz::Direction {
     for ch in text.chars() {
         let code = ch as u32;

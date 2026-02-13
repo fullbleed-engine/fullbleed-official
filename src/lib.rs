@@ -2893,6 +2893,7 @@ mod tests {
             None,
             Some(Arc::<str>::from("TD")),
             None,
+            1,
             Pt::from_f32(12.0),
             None,
             false,
@@ -3070,6 +3071,343 @@ mod tests {
     }
 
     #[test]
+    fn display_table_cells_share_a_single_row() {
+        let html = r#"
+            <!doctype html>
+            <html>
+              <body>
+                <div class="t"><span>AA</span><span>BB</span><span>CC</span></div>
+              </body>
+            </html>
+        "#;
+        let css = r#"
+            @page { size: 4in 4in; margin: 0.25in; }
+            body { margin: 0; font-size: 12px; line-height: 1.2; }
+            .t { display: table; width: 240px; border: 1px solid #000; }
+            .t > span { display: table-cell; padding: 2px 4px; border-right: 1px solid #000; }
+            .t > span:last-child { border-right: 0; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render document");
+        let page = doc.pages.first().expect("page");
+
+        let mut aa: Option<(Pt, Pt)> = None;
+        let mut bb: Option<(Pt, Pt)> = None;
+        let mut cc: Option<(Pt, Pt)> = None;
+        for cmd in &page.commands {
+            if let Command::DrawString { text, x, y } = cmd {
+                if text.contains("AA") {
+                    aa = Some((*x, *y));
+                } else if text.contains("BB") {
+                    bb = Some((*x, *y));
+                } else if text.contains("CC") {
+                    cc = Some((*x, *y));
+                }
+            }
+        }
+        let (aa_x, aa_y) = aa.expect("missing AA draw");
+        let (bb_x, bb_y) = bb.expect("missing BB draw");
+        let (cc_x, cc_y) = cc.expect("missing CC draw");
+        assert!((aa_y.to_f32() - bb_y.to_f32()).abs() < 1.0);
+        assert!((bb_y.to_f32() - cc_y.to_f32()).abs() < 1.0);
+        assert!(aa_x < bb_x && bb_x < cc_x);
+    }
+
+    #[test]
+    fn heading_honors_display_block_on_inline_descendants() {
+        let html = r#"
+            <!doctype html>
+            <html>
+              <body>
+                <h1 class="title">
+                  <span class="line">TITLELINE_TOP</span>
+                  <span class="line">TITLELINE_BOTTOM</span>
+                </h1>
+              </body>
+            </html>
+        "#;
+        let css = r#"
+            @page { size: 4in 4in; margin: 0.25in; }
+            body { margin: 0; font-family: sans-serif; }
+            .title { margin: 0; font-size: 28px; line-height: 1.1; }
+            .title > .line { display: block; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render document");
+        let page = doc.pages.first().expect("page");
+
+        let mut top_y: Option<Pt> = None;
+        let mut bottom_y: Option<Pt> = None;
+        let mut merged_line = false;
+        for cmd in &page.commands {
+            if let Command::DrawString { text, y, .. } = cmd {
+                if text.contains("TITLELINE_TOP TITLELINE_BOTTOM")
+                    || text.contains("TITLELINE_BOTTOM TITLELINE_TOP")
+                {
+                    merged_line = true;
+                }
+                if text.contains("TITLELINE_TOP") {
+                    top_y = Some(*y);
+                }
+                if text.contains("TITLELINE_BOTTOM") {
+                    bottom_y = Some(*y);
+                }
+            }
+        }
+
+        assert!(
+            !merged_line,
+            "display:block spans inside heading must not collapse to one line"
+        );
+        let top_y = top_y.expect("expected top heading line draw command");
+        let bottom_y = bottom_y.expect("expected bottom heading line draw command");
+        assert!(
+            (top_y.to_f32() - bottom_y.to_f32()).abs() > 1.0,
+            "expected heading block lines at different y positions, got y={} and y={}",
+            top_y.to_f32(),
+            bottom_y.to_f32()
+        );
+        assert!(
+            bottom_y > top_y,
+            "expected second heading block line to render below first line"
+        );
+    }
+
+    #[test]
+    fn html_table_cell_block_children_preserve_vertical_flow() {
+        let html = r#"
+            <!doctype html>
+            <html>
+              <body>
+                <table class="t">
+                  <tr>
+                    <td>
+                      <div>TBLTOPMARK</div>
+                      <div>TBLBOTTOMMARK</div>
+                    </td>
+                  </tr>
+                </table>
+              </body>
+            </html>
+        "#;
+        let css = r#"
+            @page { size: 4in 4in; margin: 0.25in; }
+            body { margin: 0; font-size: 14px; line-height: 1.2; }
+            table.t { border-collapse: collapse; width: 220px; }
+            table.t td { border: 1px solid #000; padding: 2px; }
+            table.t td > div { display: block; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render document");
+        let page = doc.pages.first().expect("page");
+
+        let mut top_y: Option<Pt> = None;
+        let mut bottom_y: Option<Pt> = None;
+        let mut merged_line = false;
+        for cmd in &page.commands {
+            if let Command::DrawString { text, y, .. } = cmd {
+                if text.contains("TBLTOPMARK TBLBOTTOMMARK")
+                    || text.contains("TBLBOTTOMMARK TBLTOPMARK")
+                {
+                    merged_line = true;
+                }
+                if text.contains("TBLTOPMARK") {
+                    top_y = Some(*y);
+                }
+                if text.contains("TBLBOTTOMMARK") {
+                    bottom_y = Some(*y);
+                }
+            }
+        }
+
+        assert!(
+            !merged_line,
+            "table cell block descendants should not collapse into one text line"
+        );
+        let top_y = top_y.expect("expected top marker draw command");
+        let bottom_y = bottom_y.expect("expected bottom marker draw command");
+        assert!(
+            (top_y.to_f32() - bottom_y.to_f32()).abs() > 1.0,
+            "expected block descendants at different y positions, got y={} and y={}",
+            top_y.to_f32(),
+            bottom_y.to_f32()
+        );
+        assert!(
+            bottom_y > top_y,
+            "expected second block to render below first block"
+        );
+    }
+
+    #[test]
+    fn html_table_second_row_starts_after_multiline_first_row() {
+        let html = r#"
+            <!doctype html>
+            <html>
+              <body>
+                <table class="t">
+                  <tr>
+                    <td>
+                      <div>ROW1A</div>
+                      <div>ROW1B</div>
+                      <div>ROW1C</div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>ROW2ONLY</td>
+                  </tr>
+                </table>
+              </body>
+            </html>
+        "#;
+        let css = r#"
+            @page { size: 4in 4in; margin: 0.25in; }
+            body { margin: 0; font-size: 14px; line-height: 1.2; }
+            table.t { border-collapse: collapse; width: 220px; }
+            table.t td { border: 1px solid #000; padding: 2px; }
+            table.t td > div { display: block; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render document");
+        let page = doc.pages.first().expect("page");
+
+        let mut row1_last_y: Option<Pt> = None;
+        let mut row2_y: Option<Pt> = None;
+        for cmd in &page.commands {
+            if let Command::DrawString { text, y, .. } = cmd {
+                if text.contains("ROW1C") {
+                    row1_last_y = Some(*y);
+                }
+                if text.contains("ROW2ONLY") {
+                    row2_y = Some(*y);
+                }
+            }
+        }
+
+        let row1_last_y = row1_last_y.expect("expected ROW1C draw command");
+        let row2_y = row2_y.expect("expected ROW2ONLY draw command");
+        assert!(
+            row2_y > row1_last_y,
+            "expected second row to render below first row content, got row1={} row2={}",
+            row1_last_y.to_f32(),
+            row2_y.to_f32()
+        );
+    }
+
+    #[test]
+    fn html_table_colspan_preserves_following_column_alignment() {
+        let html = r#"
+            <!doctype html>
+            <html>
+              <body>
+                <table class="t">
+                  <tr>
+                    <td colspan="2">FULLSPAN HEADER</td>
+                  </tr>
+                  <tr>
+                    <td>LEFT</td>
+                    <td>RIGHT</td>
+                  </tr>
+                </table>
+              </body>
+            </html>
+        "#;
+        let css = r#"
+            @page { size: 4in 4in; margin: 0.25in; }
+            body { margin: 0; font-size: 14px; line-height: 1.2; }
+            table.t { border-collapse: collapse; width: 300px; table-layout: fixed; }
+            table.t td { border: 1px solid #000; padding: 2px; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render document");
+        let page = doc.pages.first().expect("page");
+
+        let mut left_x: Option<Pt> = None;
+        let mut right_x: Option<Pt> = None;
+        for cmd in &page.commands {
+            if let Command::DrawString { text, x, .. } = cmd {
+                if text == "LEFT" {
+                    left_x = Some(*x);
+                }
+                if text == "RIGHT" {
+                    right_x = Some(*x);
+                }
+            }
+        }
+
+        let left_x = left_x.expect("expected LEFT draw command");
+        let right_x = right_x.expect("expected RIGHT draw command");
+        let delta = right_x - left_x;
+        assert!(
+            delta > Pt::from_f32(50.0),
+            "expected RIGHT to be in a separate column, got delta={}",
+            delta.to_f32()
+        );
+        assert!(
+            delta < Pt::from_f32(220.0),
+            "colspan should not collapse following column to page edge, got delta={}",
+            delta.to_f32()
+        );
+    }
+
+    #[test]
+    fn list_item_block_children_preserve_vertical_flow() {
+        let html = r#"
+            <!doctype html>
+            <html>
+              <body>
+                <ul class="menu">
+                  <li>
+                    <div class="title">ITEMHEADONLY</div>
+                    <div class="desc">ITEMDESCONLY</div>
+                  </li>
+                </ul>
+              </body>
+            </html>
+        "#;
+        let css = r#"
+            @page { size: 4in 4in; margin: 0.25in; }
+            body { margin: 0; font-size: 14px; line-height: 1.2; }
+            ul, li { margin: 0; padding: 0; list-style: none; }
+            .title, .desc { display: block; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render document");
+        let page = doc.pages.first().expect("page");
+
+        let mut title_y: Option<Pt> = None;
+        let mut desc_y: Option<Pt> = None;
+        let mut merged_line = false;
+        for cmd in &page.commands {
+            if let Command::DrawString { text, y, .. } = cmd {
+                if text.contains("ITEMHEADONLY ITEMDESCONLY")
+                    || text.contains("ITEMDESCONLY ITEMHEADONLY")
+                {
+                    merged_line = true;
+                }
+                if text.contains("ITEMHEADONLY") {
+                    title_y = Some(*y);
+                }
+                if text.contains("ITEMDESCONLY") {
+                    desc_y = Some(*y);
+                }
+            }
+        }
+
+        assert!(
+            !merged_line,
+            "list-item block children should not collapse into one line"
+        );
+        let title_y = title_y.expect("expected title draw command");
+        let desc_y = desc_y.expect("expected description draw command");
+        assert!(
+            (title_y.to_f32() - desc_y.to_f32()).abs() > 1.0,
+            "expected list-item block children on separate lines, got y={} and y={}",
+            title_y.to_f32(),
+            desc_y.to_f32()
+        );
+    }
+
+    #[test]
     fn css_page_size_applies_when_builder_page_size_is_default() {
         let html = "<!doctype html><html><body><p>hello</p></body></html>";
         let css = "@page { size: letter; margin: 0.5in; }";
@@ -3112,6 +3450,63 @@ mod tests {
         drop(engine);
         let log = std::fs::read_to_string(&log_path).expect("read debug log");
         assert!(log.contains("\"PAGE_BREAK_TRIGGER\""));
+        let _ = std::fs::remove_file(log_path);
+    }
+
+    #[test]
+    fn html_table_row_collection_excludes_nested_tables() {
+        let log_path = temp_log_path("table_row_scope");
+        let html = r#"
+            <!doctype html>
+            <html>
+              <body>
+                <table class="outer">
+                  <tr>
+                    <td>
+                      <div>Outer left</div>
+                      <table class="inner">
+                        <tr>
+                          <td>Inner A</td>
+                          <td>Inner B</td>
+                          <td>Inner C</td>
+                        </tr>
+                      </table>
+                    </td>
+                    <td>Outer right</td>
+                  </tr>
+                </table>
+              </body>
+            </html>
+        "#;
+        let css = r#"
+            body { margin: 0; font-size: 10pt; }
+            table { border-collapse: collapse; width: 100%; }
+            td { border: 1px solid #333; padding: 2pt; }
+        "#;
+        let engine = FullBleed::builder()
+            .page_size(Size::from_inches(4.0, 4.0))
+            .margin_all(0.0)
+            .debug_log(&log_path)
+            .build()
+            .expect("engine");
+        let _doc = engine.render_to_document(html, css).expect("render document");
+        drop(engine);
+
+        let log = std::fs::read_to_string(&log_path).expect("read debug log");
+        let table_rows_events: Vec<&str> = log
+            .lines()
+            .filter(|line| line.contains("\"type\":\"table.rows\""))
+            .collect();
+        assert!(
+            table_rows_events.len() >= 2,
+            "expected outer and inner table row events, got {}",
+            table_rows_events.len()
+        );
+        assert!(
+            table_rows_events[0].contains("\"total\":1"),
+            "outer table should only collect direct rows: {}",
+            table_rows_events[0]
+        );
         let _ = std::fs::remove_file(log_path);
     }
 

@@ -1,0 +1,48 @@
+[data-fb-role="document-root"] .fb-body-card {
+  margin-bottom: var(--fb-space-4);
+}
+
+[data-fb-role="document-root"] .fb-body-title {
+  margin: 0;
+}
+
+[data-fb-role="document-root"] .fb-body-intro {
+  margin: 0;
+  color: #6b7280;
+}
+
+[data-fb-role="document-root"] .fb-summary-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+[data-fb-role="document-root"] .fb-summary-table thead th {
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #607086;
+  border-bottom: 1px solid var(--fb-color-border);
+  padding: 0 0 0.4rem 0;
+}
+
+[data-fb-role="document-root"] .fb-summary-row th,
+[data-fb-role="document-root"] .fb-summary-row td {
+  padding: 0.55rem 0;
+  border-bottom: 1px solid #e6ebf2;
+}
+
+[data-fb-role="document-root"] .fb-summary-label {
+  font-weight: 600;
+  color: #374151;
+  width: 32%;
+}
+
+[data-fb-role="document-root"] .fb-summary-value {
+  color: #111827;
+  width: 34%;
+}
+
+[data-fb-role="document-root"] .fb-summary-note {
+  color: #6b7280;
+  width: 34%;
+}

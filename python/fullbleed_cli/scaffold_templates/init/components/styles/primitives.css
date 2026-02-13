@@ -1,0 +1,85 @@
+[data-fb-role="document-root"] .ui-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fb-space-2);
+}
+
+[data-fb-role="document-root"] .ui-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fb-space-2);
+}
+
+[data-fb-role="document-root"] .ui-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+[data-fb-role="document-root"] .ui-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+[data-fb-role="document-root"] .ui-card {
+  border: 1px solid var(--fb-color-border);
+  border-radius: var(--fb-radius-card);
+  background: var(--fb-color-surface);
+  padding: var(--fb-space-4);
+}
+
+[data-fb-role="document-root"] .ui-divider {
+  border: 0;
+  border-top: 1px solid var(--fb-color-border);
+  margin: var(--fb-space-2) 0;
+}
+
+[data-fb-role="document-root"] .ui-kicker {
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fb-color-muted);
+}
+
+[data-fb-role="document-root"] .ui-title {
+  margin: 0;
+}
+
+[data-fb-role="document-root"] .ui-subtitle {
+  margin: 0;
+  color: #6b7280;
+}
+
+[data-fb-role="document-root"] .ui-list {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+[data-fb-role="document-root"] .ui-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid var(--fb-color-border);
+}
+
+[data-fb-role="document-root"] .ui-key-value .ui-kv-label,
+[data-fb-role="document-root"] .ui-price-row .ui-price-label {
+  color: #4b5563;
+}
+
+[data-fb-role="document-root"] .ui-key-value .ui-kv-value,
+[data-fb-role="document-root"] .ui-price-row .ui-price-value {
+  font-weight: 600;
+}
+
+[data-fb-role="document-root"] .ui-table {
+  width: 100%;
+  border-collapse: collapse;
+}

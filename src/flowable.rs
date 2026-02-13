@@ -14,6 +14,32 @@ fn huge_pt() -> Pt {
     Pt::from_f32(1.0e9)
 }
 
+fn table_debug_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("FULLBLEED_TABLE_DEBUG")
+            .ok()
+            .map(|v| {
+                let v = v.trim();
+                v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes")
+            })
+            .unwrap_or(false)
+    })
+}
+
+fn table_debug_verbose_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("FULLBLEED_TABLE_DEBUG_VERBOSE")
+            .ok()
+            .map(|v| {
+                let v = v.trim();
+                v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes")
+            })
+            .unwrap_or(false)
+    })
+}
+
 struct PerfContext {
     logger: Arc<PerfLogger>,
     doc_id: Option<usize>,
@@ -407,7 +433,7 @@ struct ResolvedBorder {
     colors: ResolvedEdgeColors,
 }
 
-pub trait Flowable: FlowableClone {
+pub trait Flowable: FlowableClone + Send + Sync {
     fn wrap(&self, avail_width: Pt, avail_height: Pt) -> Size;
     fn split(
         &self,
@@ -1380,13 +1406,13 @@ impl Flowable for Paragraph {
 #[derive(Clone)]
 pub struct ListItemFlowable {
     label: Paragraph,
-    body: Paragraph,
+    body: Box<dyn Flowable>,
     gap: Pt,
     pagination: Pagination,
 }
 
 impl ListItemFlowable {
-    pub fn new(label: Paragraph, body: Paragraph, gap: Pt) -> Self {
+    pub fn new(label: Paragraph, body: Box<dyn Flowable>, gap: Pt) -> Self {
         Self {
             label,
             body,
@@ -1469,6 +1495,11 @@ impl Flowable for Spacer {
             width: avail_width,
             height: self.height.max(Pt::ZERO),
         }
+    }
+
+    fn intrinsic_width(&self) -> Option<Pt> {
+        // A line break / spacer contributes vertical rhythm, not horizontal demand.
+        Some(Pt::ZERO)
     }
 
     fn split(
@@ -1712,7 +1743,7 @@ pub struct BorderSpec {
     pub color: Color,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TableCell {
     pub text: String,
     pub style: TextStyle,
@@ -1724,7 +1755,13 @@ pub struct TableCell {
     pub box_shadow: Option<BoxShadowSpec>,
     pub tag_role: Option<Arc<str>>,
     pub scope: Option<String>,
+    col_span: usize,
     pub root_font_size: Pt,
+    row_min_height: Pt,
+    preferred_width: Option<LengthSpec>,
+    preferred_width_font_size: Pt,
+    preferred_width_root_font_size: Pt,
+    content: Option<Box<dyn Flowable>>,
     font_registry: Option<Arc<FontRegistry>>,
     cached_line_height: Pt,
     preserve_whitespace: bool,
@@ -1745,11 +1782,13 @@ impl TableCell {
         box_shadow: Option<BoxShadowSpec>,
         tag_role: Option<Arc<str>>,
         scope: Option<String>,
+        col_span: usize,
         root_font_size: Pt,
         font_registry: Option<Arc<FontRegistry>>,
         preserve_whitespace: bool,
         no_wrap: bool,
     ) -> Self {
+        let style_font_size = style.font_size;
         let cached_line_height = if style.line_height_is_auto {
             if let Some(registry) = font_registry.as_deref() {
                 registry.line_height(&style.font_name, style.font_size, style.line_height)
@@ -1771,7 +1810,13 @@ impl TableCell {
             box_shadow,
             tag_role,
             scope,
+            col_span: col_span.max(1),
             root_font_size,
+            row_min_height: Pt::ZERO,
+            preferred_width: None,
+            preferred_width_font_size: style_font_size,
+            preferred_width_root_font_size: root_font_size,
+            content: None,
             font_registry,
             cached_line_height,
             preserve_whitespace,
@@ -1779,6 +1824,32 @@ impl TableCell {
             layout_cache: Arc::new(Mutex::new(TextLayoutCache::default())),
             width_cache: Arc::new(Mutex::new(TextWidthCache::default())),
         }
+    }
+
+    pub(crate) fn with_content(mut self, content: Box<dyn Flowable>) -> Self {
+        self.content = Some(content);
+        self
+    }
+
+    pub(crate) fn col_span(&self) -> usize {
+        self.col_span.max(1)
+    }
+
+    pub(crate) fn with_row_min_height(mut self, min_height: Pt) -> Self {
+        self.row_min_height = min_height.max(Pt::ZERO);
+        self
+    }
+
+    pub(crate) fn with_preferred_width(
+        mut self,
+        width: LengthSpec,
+        font_size: Pt,
+        root_font_size: Pt,
+    ) -> Self {
+        self.preferred_width = Some(width);
+        self.preferred_width_font_size = font_size;
+        self.preferred_width_root_font_size = root_font_size;
+        self
     }
 
     fn measure_text_width(&self, text: &str) -> Pt {
@@ -1851,6 +1922,9 @@ impl TableCell {
     }
 
     fn max_line_width(&self) -> Pt {
+        if let Some(content) = self.content.as_ref() {
+            return content.intrinsic_width().unwrap_or(Pt::ZERO);
+        }
         let mut max = Pt::ZERO;
         for line in self.text.split('\n') {
             max = max.max(self.measure_text_width(line));
@@ -1859,6 +1933,9 @@ impl TableCell {
     }
 
     fn min_word_width(&self) -> Pt {
+        if let Some(content) = self.content.as_ref() {
+            return content.intrinsic_width().unwrap_or(Pt::ZERO);
+        }
         if self.no_wrap {
             return self.max_line_width();
         }
@@ -2184,6 +2261,28 @@ impl TableCell {
     }
 }
 
+impl std::fmt::Debug for TableCell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TableCell")
+            .field("text", &self.text)
+            .field("style", &self.style)
+            .field("align", &self.align)
+            .field("valign", &self.valign)
+            .field("padding", &self.padding)
+            .field("background", &self.background)
+            .field("border", &self.border)
+            .field("box_shadow", &self.box_shadow)
+            .field("tag_role", &self.tag_role)
+            .field("scope", &self.scope)
+            .field("col_span", &self.col_span)
+            .field("root_font_size", &self.root_font_size)
+            .field("row_min_height", &self.row_min_height)
+            .field("preferred_width", &self.preferred_width)
+            .field("has_content_flowable", &self.content.is_some())
+            .finish()
+    }
+}
+
 fn split_long_word_by_width_paragraph(cell: &TableCell, word: &str, max_width: Pt) -> Vec<String> {
     let mut parts = Vec::new();
     let mut current = String::new();
@@ -2356,18 +2455,38 @@ impl TableFlowable {
     fn max_columns(&self) -> usize {
         let mut max_cols = 0usize;
         for row in &self.data.header_rows {
-            max_cols = max_cols.max(row.len());
+            max_cols = max_cols.max(Self::row_total_columns(row));
         }
         for row in &self.data.body_rows {
-            max_cols = max_cols.max(row.len());
+            max_cols = max_cols.max(Self::row_total_columns(row));
         }
         max_cols.max(1)
     }
 
+    fn row_total_columns(row: &[TableCell]) -> usize {
+        row.iter().map(TableCell::col_span).sum::<usize>().max(1)
+    }
+
+    fn cell_span_for_start(cell: &TableCell, col_start: usize, total_columns: usize) -> usize {
+        let remaining = total_columns.saturating_sub(col_start).max(1);
+        cell.col_span().min(remaining).max(1)
+    }
+
+    fn span_width(col_widths: &[Pt], col_start: usize, col_span: usize) -> Pt {
+        let mut width = Pt::ZERO;
+        for col in col_start..col_start.saturating_add(col_span) {
+            width = width + col_widths.get(col).copied().unwrap_or(Pt::ZERO);
+        }
+        width
+    }
+
     fn row_height(row: &[TableCell], col_widths: &[Pt]) -> Pt {
         let mut max_height = Pt::ZERO;
-        for (idx, cell) in row.iter().enumerate() {
-            let col_width = col_widths.get(idx).copied().unwrap_or(Pt::ZERO);
+        let mut cursor_col = 0usize;
+        let total_columns = col_widths.len().max(1);
+        for cell in row.iter() {
+            let col_span = Self::cell_span_for_start(cell, cursor_col, total_columns);
+            let col_width = Self::span_width(col_widths, cursor_col, col_span);
             let padding = cell.resolved_padding(col_width);
             let border = cell.resolved_border(col_width);
             let pad_left = padding.left + border.left;
@@ -2375,9 +2494,15 @@ impl TableFlowable {
             let pad_top = padding.top + border.top;
             let pad_bottom = padding.bottom + border.bottom;
             let content_width = (col_width - pad_left - pad_right).max(Pt::ZERO);
-            let lines = cell.layout_lines(content_width);
-            let height = cell.effective_line_height() * (lines.len() as i32) + pad_top + pad_bottom;
+            let content_height = if let Some(content) = cell.content.as_ref() {
+                content.wrap(content_width, huge_pt()).height
+            } else {
+                let lines = cell.layout_lines(content_width);
+                cell.effective_line_height() * (lines.len() as i32)
+            };
+            let height = (content_height + pad_top + pad_bottom).max(cell.row_min_height);
             max_height = max_height.max(height);
+            cursor_col = cursor_col.saturating_add(col_span);
         }
         max_height.max(Pt::ZERO)
     }
@@ -2392,20 +2517,35 @@ impl TableFlowable {
             return Self::row_height(row, col_widths);
         }
         let mut max_height = Pt::ZERO;
-        for (idx, cell) in row.iter().enumerate() {
-            let col_width = col_widths.get(idx).copied().unwrap_or(Pt::ZERO);
+        let mut cursor_col = 0usize;
+        let total_columns = col_widths.len().max(1);
+        for cell in row.iter() {
+            let col_span = Self::cell_span_for_start(cell, cursor_col, total_columns);
+            let col_width = Self::span_width(col_widths, cursor_col, col_span);
             let padding = cell.resolved_padding(col_width);
             let border = self
-                .collapsed_border_for_cell(draw_row_index, idx, col_widths, cell)
+                .collapsed_border_for_cell(
+                    draw_row_index,
+                    cursor_col,
+                    col_span,
+                    col_widths,
+                    cell,
+                )
                 .widths;
             let pad_left = padding.left + border.left;
             let pad_right = padding.right + border.right;
             let pad_top = padding.top + border.top;
             let pad_bottom = padding.bottom + border.bottom;
             let content_width = (col_width - pad_left - pad_right).max(Pt::ZERO);
-            let lines = cell.layout_lines(content_width);
-            let height = cell.effective_line_height() * (lines.len() as i32) + pad_top + pad_bottom;
+            let content_height = if let Some(content) = cell.content.as_ref() {
+                content.wrap(content_width, huge_pt()).height
+            } else {
+                let lines = cell.layout_lines(content_width);
+                cell.effective_line_height() * (lines.len() as i32)
+            };
+            let height = (content_height + pad_top + pad_bottom).max(cell.row_min_height);
             max_height = max_height.max(height);
+            cursor_col = cursor_col.saturating_add(col_span);
         }
         max_height.max(Pt::ZERO)
     }
@@ -2421,21 +2561,43 @@ impl TableFlowable {
         }
         let mut max_height = Pt::ZERO;
         let mut lines_out: Vec<Arc<Vec<LineLayout>>> = Vec::with_capacity(row.len());
-        for (idx, cell) in row.iter().enumerate() {
-            let col_width = col_widths.get(idx).copied().unwrap_or(Pt::ZERO);
+        let mut cursor_col = 0usize;
+        let total_columns = col_widths.len().max(1);
+        for cell in row.iter() {
+            let col_span = Self::cell_span_for_start(cell, cursor_col, total_columns);
+            let col_width = Self::span_width(col_widths, cursor_col, col_span);
             let padding = cell.resolved_padding(col_width);
             let border = self
-                .collapsed_border_for_cell(draw_row_index, idx, col_widths, cell)
+                .collapsed_border_for_cell(
+                    draw_row_index,
+                    cursor_col,
+                    col_span,
+                    col_widths,
+                    cell,
+                )
                 .widths;
             let pad_left = padding.left + border.left;
             let pad_right = padding.right + border.right;
             let pad_top = padding.top + border.top;
             let pad_bottom = padding.bottom + border.bottom;
             let content_width = (col_width - pad_left - pad_right).max(Pt::ZERO);
-            let lines = cell.layout_lines(content_width);
-            let height = cell.effective_line_height() * (lines.len() as i32) + pad_top + pad_bottom;
+            let (height, lines) = if let Some(content) = cell.content.as_ref() {
+                let content_height = content.wrap(content_width, huge_pt()).height;
+                (
+                    (content_height + pad_top + pad_bottom).max(cell.row_min_height),
+                    Arc::new(Vec::<LineLayout>::new()),
+                )
+            } else {
+                let lines = cell.layout_lines(content_width);
+                (
+                    (cell.effective_line_height() * (lines.len() as i32) + pad_top + pad_bottom)
+                        .max(cell.row_min_height),
+                    lines,
+                )
+            };
             max_height = max_height.max(height);
             lines_out.push(lines);
+            cursor_col = cursor_col.saturating_add(col_span);
         }
         (max_height.max(Pt::ZERO), lines_out)
     }
@@ -2464,9 +2626,23 @@ impl TableFlowable {
             .map(|row| row.as_slice())
     }
 
-    fn cell_by_draw_index(&self, draw_row_index: usize, col_index: usize) -> Option<&TableCell> {
-        self.row_by_draw_index(draw_row_index)
-            .and_then(|row| row.get(col_index))
+    fn cell_layout_by_draw_index(
+        &self,
+        draw_row_index: usize,
+        col_index: usize,
+        total_columns: usize,
+    ) -> Option<(&TableCell, usize, usize)> {
+        let row = self.row_by_draw_index(draw_row_index)?;
+        let mut cursor_col = 0usize;
+        for cell in row.iter() {
+            let col_span = Self::cell_span_for_start(cell, cursor_col, total_columns);
+            let end_col = cursor_col.saturating_add(col_span);
+            if col_index >= cursor_col && col_index < end_col {
+                return Some((cell, cursor_col, col_span));
+            }
+            cursor_col = end_col;
+        }
+        None
     }
 
     fn stronger_edge(
@@ -2485,17 +2661,23 @@ impl TableFlowable {
     fn collapsed_border_for_cell(
         &self,
         row_index: usize,
-        col_index: usize,
+        col_start: usize,
+        col_span: usize,
         col_widths: &[Pt],
         cell: &TableCell,
     ) -> ResolvedBorder {
-        let col_width = col_widths.get(col_index).copied().unwrap_or(Pt::ZERO);
+        let total_columns = col_widths.len().max(1);
+        let col_span = col_span.max(1).min(total_columns.saturating_sub(col_start).max(1));
+        let col_end = col_start.saturating_add(col_span);
+        let col_width = Self::span_width(col_widths, col_start, col_span);
         let mut widths = cell.resolved_border(col_width);
         let mut colors = ResolvedEdgeColors::uniform(cell.border.color);
 
-        if col_index + 1 < col_widths.len() {
-            if let Some(right_cell) = self.cell_by_draw_index(row_index, col_index + 1) {
-                let right_col_width = col_widths.get(col_index + 1).copied().unwrap_or(Pt::ZERO);
+        if col_end < total_columns {
+            if let Some((right_cell, right_start, right_span)) =
+                self.cell_layout_by_draw_index(row_index, col_end, total_columns)
+            {
+                let right_col_width = Self::span_width(col_widths, right_start, right_span);
                 let right_border = right_cell.resolved_border(right_col_width);
                 let (width, color) = Self::stronger_edge(
                     widths.right,
@@ -2508,22 +2690,27 @@ impl TableFlowable {
             }
         }
 
-        if let Some(below_cell) = self.cell_by_draw_index(row_index + 1, col_index) {
-            let below_border = below_cell.resolved_border(col_width);
-            let (width, color) = Self::stronger_edge(
-                widths.bottom,
-                colors.bottom,
-                below_border.top,
-                below_cell.border.color,
-            );
-            widths.bottom = width;
-            colors.bottom = color;
+        for below_col in col_start..col_end {
+            if let Some((below_cell, below_start, below_span)) =
+                self.cell_layout_by_draw_index(row_index + 1, below_col, total_columns)
+            {
+                let below_col_width = Self::span_width(col_widths, below_start, below_span);
+                let below_border = below_cell.resolved_border(below_col_width);
+                let (width, color) = Self::stronger_edge(
+                    widths.bottom,
+                    colors.bottom,
+                    below_border.top,
+                    below_cell.border.color,
+                );
+                widths.bottom = width;
+                colors.bottom = color;
+            }
         }
 
         if row_index > 0 {
             widths.top = Pt::ZERO;
         }
-        if col_index > 0 {
+        if col_start > 0 {
             widths.left = Pt::ZERO;
         }
 
@@ -2546,15 +2733,28 @@ impl TableFlowable {
             canvas.begin_tag("TR", None, None, Some(self.table_id), None, true);
         });
         let mut cursor_x = x;
-        for (col_index, cell) in row.iter().enumerate() {
-            let col_width = col_widths.get(col_index).copied().unwrap_or(Pt::ZERO);
+        let total_columns = col_widths.len().max(1);
+        let mut cursor_col = 0usize;
+        for (cell_index, cell) in row.iter().enumerate() {
+            let col_span = Self::cell_span_for_start(cell, cursor_col, total_columns);
+            let internal_gaps = if col_span > 1 {
+                col_gap * ((col_span - 1) as i32)
+            } else {
+                Pt::ZERO
+            };
+            let col_width = Self::span_width(col_widths, cursor_col, col_span) + internal_gaps;
             let cell_x = cursor_x;
             let cell_y = y;
             let padding = cell.resolved_padding(col_width);
             let (border, border_colors) =
                 if matches!(self.border_collapse, BorderCollapseMode::Collapse) {
-                    let resolved =
-                        self.collapsed_border_for_cell(row_index, col_index, col_widths, cell);
+                    let resolved = self.collapsed_border_for_cell(
+                        row_index,
+                        cursor_col,
+                        col_span,
+                        col_widths,
+                        cell,
+                    );
                     (resolved.widths, resolved.colors)
                 } else {
                     (
@@ -2568,7 +2768,7 @@ impl TableFlowable {
             let pad_bottom = padding.bottom + border.bottom;
 
             let tagged = cell.tag_role.as_ref().map(|role| {
-                let col = u16::try_from(col_index).ok();
+                let col = u16::try_from(cursor_col).ok();
                 canvas.begin_tag(
                     role.as_ref(),
                     None,
@@ -2602,54 +2802,68 @@ impl TableFlowable {
             }
 
             let content_width = (col_width - pad_left - pad_right).max(Pt::ZERO);
-            let lines = if let Some(lines_for_row) = row_lines {
-                lines_for_row
-                    .get(col_index)
-                    .cloned()
-                    .unwrap_or_else(|| cell.layout_lines(content_width))
-            } else {
-                cell.layout_lines(content_width)
-            };
-            let line_height = cell.effective_line_height();
-            let text_block_height = line_height * (lines.len() as i32);
             let content_height = (row_height - pad_top - pad_bottom).max(Pt::ZERO);
-            let text_y = match cell.valign {
-                VerticalAlign::Top => cell_y + pad_top,
-                VerticalAlign::Middle => {
-                    cell_y + pad_top + (content_height - text_block_height).mul_ratio(1, 2)
-                }
-                VerticalAlign::Bottom => cell_y + row_height - pad_bottom - text_block_height,
-            };
-
-            canvas.set_fill_color(cell.style.color);
-            canvas.set_font_size(cell.style.font_size);
-            let mut cursor_y = text_y.max(cell_y + pad_top);
-            for line in lines.iter() {
-                let line_width = line.width.min(content_width);
-                let text_x = match cell.align {
-                    TextAlign::Left => cell_x + pad_left,
-                    TextAlign::Center => {
-                        cell_x + pad_left + (content_width - line_width).mul_ratio(1, 2)
+            if let Some(content) = cell.content.as_ref() {
+                let wrapped = content.wrap(content_width, content_height);
+                let draw_h = wrapped.height.min(content_height).max(Pt::ZERO);
+                let draw_y = match cell.valign {
+                    VerticalAlign::Top => cell_y + pad_top,
+                    VerticalAlign::Middle => {
+                        cell_y + pad_top + (content_height - draw_h).mul_ratio(1, 2)
                     }
-                    TextAlign::Right => cell_x + col_width - pad_right - line_width,
+                    VerticalAlign::Bottom => cell_y + row_height - pad_bottom - draw_h,
                 };
-                cell.draw_text_line(canvas, text_x, cursor_y, &line.text);
-                draw_text_decorations(
-                    canvas,
-                    &cell.style,
-                    cell.font_registry.as_deref(),
-                    text_x,
-                    cursor_y,
-                    line_width,
-                );
-                cursor_y = cursor_y + line_height;
+                content.draw(canvas, cell_x + pad_left, draw_y, content_width, draw_h);
+            } else {
+                let lines = if let Some(lines_for_row) = row_lines {
+                    lines_for_row
+                        .get(cell_index)
+                        .cloned()
+                        .unwrap_or_else(|| cell.layout_lines(content_width))
+                } else {
+                    cell.layout_lines(content_width)
+                };
+                let line_height = cell.effective_line_height();
+                let text_block_height = line_height * (lines.len() as i32);
+                let text_y = match cell.valign {
+                    VerticalAlign::Top => cell_y + pad_top,
+                    VerticalAlign::Middle => {
+                        cell_y + pad_top + (content_height - text_block_height).mul_ratio(1, 2)
+                    }
+                    VerticalAlign::Bottom => cell_y + row_height - pad_bottom - text_block_height,
+                };
+
+                canvas.set_fill_color(cell.style.color);
+                canvas.set_font_size(cell.style.font_size);
+                let mut cursor_y = text_y.max(cell_y + pad_top);
+                for line in lines.iter() {
+                    let line_width = line.width.min(content_width);
+                    let text_x = match cell.align {
+                        TextAlign::Left => cell_x + pad_left,
+                        TextAlign::Center => {
+                            cell_x + pad_left + (content_width - line_width).mul_ratio(1, 2)
+                        }
+                        TextAlign::Right => cell_x + col_width - pad_right - line_width,
+                    };
+                    cell.draw_text_line(canvas, text_x, cursor_y, &line.text);
+                    draw_text_decorations(
+                        canvas,
+                        &cell.style,
+                        cell.font_registry.as_deref(),
+                        text_x,
+                        cursor_y,
+                        line_width,
+                    );
+                    cursor_y = cursor_y + line_height;
+                }
             }
 
             if tagged.is_some() {
                 canvas.end_tag();
             }
             cursor_x = cursor_x + col_width;
-            if col_index + 1 < col_widths.len() {
+            cursor_col = cursor_col.saturating_add(col_span);
+            if cursor_col < total_columns {
                 cursor_x = cursor_x + col_gap;
             }
         }
@@ -2760,6 +2974,18 @@ impl Flowable for TableFlowable {
                     ("header_rows", header_rows),
                     ("body_rows", body_rows),
                 ],
+            );
+        }
+        if table_debug_enabled() {
+            eprintln!(
+                "[table.debug.wrap] id={} data_ptr={:p} cols={} avail_width_pt={:.3} body_rows={} include_header={} height_pt={:.3}",
+                self.table_id,
+                Arc::as_ptr(&self.data),
+                columns,
+                avail_width.to_f32(),
+                self.body_range.end.saturating_sub(self.body_range.start),
+                self.include_header,
+                height.to_f32()
             );
         }
         perf_end("layout.table.wrap", perf);
@@ -2935,6 +3161,24 @@ impl Flowable for TableFlowable {
         } else {
             std::borrow::Cow::Owned(self.data.compute_column_widths(avail_cols_width, columns))
         };
+        if table_debug_enabled() {
+            let widths: Vec<String> = col_widths
+                .iter()
+                .map(|w| format!("{:.3}", w.to_f32()))
+                .collect();
+            eprintln!(
+                "[table.debug.draw] id={} data_ptr={:p} cols={} avail_width_pt={:.3} col_widths_pt=[{}] body_rows={} include_header={} x_pt={:.3} y_pt={:.3}",
+                self.table_id,
+                Arc::as_ptr(&self.data),
+                columns,
+                avail_width.to_f32(),
+                widths.join(","),
+                self.body_range.end.saturating_sub(self.body_range.start),
+                self.include_header,
+                x.to_f32(),
+                y.to_f32()
+            );
+        }
         let mut cursor_y = y;
         let mut row_index = 0usize;
         if self.include_header && !self.data.header_rows.is_empty() {
@@ -3011,6 +3255,13 @@ impl Flowable for TableFlowable {
                 owned_row_lines = Some(lines);
                 height
             };
+            if row_height <= Pt::ZERO {
+                row_index += 1;
+                if i + 1 < self.data.body_rows[self.body_range.clone()].len() {
+                    cursor_y = cursor_y + row_gap;
+                }
+                continue;
+            }
             let row_lines = if let Some(lines) = cached_row_lines {
                 Some(lines.as_slice())
             } else {
@@ -3085,34 +3336,143 @@ impl TableFlowableData {
     fn compute_column_widths(&self, avail_width: Pt, columns: usize) -> Vec<Pt> {
         let columns = columns.max(1);
         let approx_col = avail_width / (columns as i32);
+        let debug_verbose = table_debug_enabled() && table_debug_verbose_enabled();
+        let data_ptr = self as *const TableFlowableData as usize;
+        if debug_verbose {
+            eprintln!(
+                "[table.debug.widths.begin] data_ptr=0x{:x} columns={} avail_width_pt={:.3} approx_col_pt={:.3} header_rows={} body_rows={}",
+                data_ptr,
+                columns,
+                avail_width.to_f32(),
+                approx_col.to_f32(),
+                self.header_rows.len(),
+                self.body_rows.len()
+            );
+        }
 
         let row_count = self.header_rows.len() + self.body_rows.len();
         let mut min_widths = vec![0i64; columns];
         let mut max_widths = vec![0i64; columns];
+        let mut preferred_widths = vec![0i64; columns];
 
-        let update_row = |row: &Vec<TableCell>, min_out: &mut [i64], max_out: &mut [i64]| {
-            for (idx, cell) in row.iter().enumerate() {
-                if idx >= columns {
+        let ensure_span_requirement =
+            |out: &mut [i64], start: usize, span: usize, required: i64| {
+                if required <= 0 || start >= out.len() {
+                    return;
+                }
+                let end = start.saturating_add(span).min(out.len());
+                if start >= end {
+                    return;
+                }
+                if end - start == 1 {
+                    if required > out[start] {
+                        out[start] = required;
+                    }
+                    return;
+                }
+
+                let current: i64 = out[start..end].iter().sum();
+                if current >= required {
+                    return;
+                }
+                let mut deficit = required - current;
+                let slots = (end - start) as i64;
+                let base = deficit / slots;
+                if base > 0 {
+                    for value in out[start..end].iter_mut() {
+                        *value += base;
+                    }
+                    deficit -= base * slots;
+                }
+                let mut idx = start;
+                while deficit > 0 {
+                    out[idx] += 1;
+                    deficit -= 1;
+                    idx += 1;
+                    if idx >= end {
+                        idx = start;
+                    }
+                }
+            };
+
+        let update_row = |row_kind: &str,
+                          row_index: usize,
+                          row: &Vec<TableCell>,
+                          min_out: &mut [i64],
+                          max_out: &mut [i64],
+                          pref_out: &mut [i64]| {
+            let mut cursor_col = 0usize;
+            for (cell_index, cell) in row.iter().enumerate() {
+                if cursor_col >= columns {
                     break;
                 }
-                let padding = cell.resolved_padding(approx_col);
-                let border = cell.resolved_border(approx_col);
+                let col_span = cell.col_span().min(columns.saturating_sub(cursor_col)).max(1);
+                let span_width = approx_col * (col_span as i32);
+                let resolved_preferred = cell.preferred_width.map(|width_spec| {
+                    width_spec
+                        .resolve_width(
+                            avail_width,
+                            cell.preferred_width_font_size,
+                            cell.preferred_width_root_font_size,
+                        )
+                        .max(Pt::ZERO)
+                        .to_milli_i64()
+                });
+                if let Some(resolved) = resolved_preferred {
+                    ensure_span_requirement(pref_out, cursor_col, col_span, resolved);
+                }
+                let padding = cell.resolved_padding(span_width);
+                let border = cell.resolved_border(span_width);
                 let extra = padding.left + padding.right + border.left + border.right;
-                let min_text = cell.min_word_width();
-                let max_text = cell.max_line_width();
+                let (min_text, max_text) = if let Some(content) = cell.content.as_ref() {
+                    let intrinsic = content.intrinsic_width().unwrap_or(Pt::ZERO);
+                    let wrapped =
+                        content.wrap(span_width.max(Pt::from_f32(1.0)), huge_pt()).width;
+                    (intrinsic, wrapped.max(intrinsic))
+                } else {
+                    (cell.min_word_width(), cell.max_line_width())
+                };
                 let min_w = (min_text + extra).to_milli_i64();
                 let max_w = (max_text + extra).to_milli_i64();
-                if min_w > min_out[idx] {
-                    min_out[idx] = min_w;
+                ensure_span_requirement(min_out, cursor_col, col_span, min_w);
+                ensure_span_requirement(max_out, cursor_col, col_span, max_w);
+                if debug_verbose {
+                    let text_preview = cell
+                        .text
+                        .chars()
+                        .take(24)
+                        .collect::<String>()
+                        .replace('\n', "\\n");
+                    eprintln!(
+                        "[table.debug.widths.cell] data_ptr=0x{:x} row={}#{} cell={} col_start={} span={} pref_milli={} has_content={} text_len={} text_preview=\"{}\" min_milli={} max_milli={} span_width_pt={:.3}",
+                        data_ptr,
+                        row_kind,
+                        row_index,
+                        cell_index,
+                        cursor_col,
+                        col_span,
+                        resolved_preferred.unwrap_or(0),
+                        cell.content.is_some(),
+                        cell.text.chars().count(),
+                        text_preview,
+                        min_w,
+                        max_w,
+                        span_width.to_f32()
+                    );
                 }
-                if max_w > max_out[idx] {
-                    max_out[idx] = max_w;
-                }
+                cursor_col = cursor_col.saturating_add(col_span);
+            }
+            if debug_verbose {
+                eprintln!(
+                    "[table.debug.widths.row] data_ptr=0x{:x} row={}#{} min={:?} max={:?} pref={:?}",
+                    data_ptr, row_kind, row_index, min_out, max_out, pref_out
+                );
             }
         };
 
-        if row_count >= 64 {
-            let merge = |mut a: (Vec<i64>, Vec<i64>), b: (Vec<i64>, Vec<i64>)| {
+        if row_count >= 64 && !debug_verbose {
+            let merge =
+                |mut a: (Vec<i64>, Vec<i64>, Vec<i64>), b: (Vec<i64>, Vec<i64>, Vec<i64>)| {
                 for i in 0..columns {
                     if b.0[i] > a.0[i] {
                         a.0[i] = b.0[i];
@@ -3120,41 +3480,72 @@ impl TableFlowableData {
                     if b.1[i] > a.1[i] {
                         a.1[i] = b.1[i];
                     }
+                    if b.2[i] > a.2[i] {
+                        a.2[i] = b.2[i];
+                    }
                 }
                 a
             };
-            let (min_h, max_h) = self
+            let (min_h, max_h, pref_h) = self
                 .header_rows
                 .par_iter()
                 .fold(
-                    || (vec![0i64; columns], vec![0i64; columns]),
+                    || (vec![0i64; columns], vec![0i64; columns], vec![0i64; columns]),
                     |mut acc, row| {
-                        update_row(row, &mut acc.0, &mut acc.1);
+                        update_row("header", 0, row, &mut acc.0, &mut acc.1, &mut acc.2);
                         acc
                     },
                 )
-                .reduce(|| (vec![0i64; columns], vec![0i64; columns]), merge);
-            let (min_b, max_b) = self
+                .reduce(
+                    || (vec![0i64; columns], vec![0i64; columns], vec![0i64; columns]),
+                    merge,
+                );
+            let (min_b, max_b, pref_b) = self
                 .body_rows
                 .par_iter()
                 .fold(
-                    || (vec![0i64; columns], vec![0i64; columns]),
+                    || (vec![0i64; columns], vec![0i64; columns], vec![0i64; columns]),
                     |mut acc, row| {
-                        update_row(row, &mut acc.0, &mut acc.1);
+                        update_row("body", 0, row, &mut acc.0, &mut acc.1, &mut acc.2);
                         acc
                     },
                 )
-                .reduce(|| (vec![0i64; columns], vec![0i64; columns]), merge);
+                .reduce(
+                    || (vec![0i64; columns], vec![0i64; columns], vec![0i64; columns]),
+                    merge,
+                );
             for i in 0..columns {
                 min_widths[i] = min_h[i].max(min_b[i]);
                 max_widths[i] = max_h[i].max(max_b[i]);
+                preferred_widths[i] = pref_h[i].max(pref_b[i]);
             }
         } else {
-            for row in &self.header_rows {
-                update_row(row, &mut min_widths, &mut max_widths);
+            for (row_index, row) in self.header_rows.iter().enumerate() {
+                update_row(
+                    "header",
+                    row_index,
+                    row,
+                    &mut min_widths,
+                    &mut max_widths,
+                    &mut preferred_widths,
+                );
             }
-            for row in &self.body_rows {
-                update_row(row, &mut min_widths, &mut max_widths);
+            for (row_index, row) in self.body_rows.iter().enumerate() {
+                update_row(
+                    "body",
+                    row_index,
+                    row,
+                    &mut min_widths,
+                    &mut max_widths,
+                    &mut preferred_widths,
+                );
+            }
+        }
+
+        for i in 0..columns {
+            if preferred_widths[i] > 0 {
+                min_widths[i] = min_widths[i].max(preferred_widths[i]);
+                max_widths[i] = max_widths[i].max(preferred_widths[i]);
             }
         }
 
@@ -3238,6 +3629,20 @@ impl TableFlowableData {
                 rem -= 1;
                 i += 1;
             }
+        }
+
+        if debug_verbose {
+            eprintln!(
+                "[table.debug.widths.end] data_ptr=0x{:x} avail_milli={} total_min={} total_max={} min={:?} max={:?} pref={:?} out={:?}",
+                data_ptr,
+                avail,
+                total_min,
+                total_max,
+                min_widths,
+                max_widths,
+                preferred_widths,
+                widths
+            );
         }
 
         widths.into_iter().map(Pt::from_milli_i64).collect()
@@ -3332,8 +3737,11 @@ impl TableLayoutCache {
     ) -> (Pt, Vec<Arc<Vec<LineLayout>>>) {
         let mut max_height = Pt::ZERO;
         let mut lines_out: Vec<Arc<Vec<LineLayout>>> = Vec::with_capacity(row.len());
-        for (idx, cell) in row.iter().enumerate() {
-            let col_width = col_widths.get(idx).copied().unwrap_or(Pt::ZERO);
+        let mut cursor_col = 0usize;
+        let total_columns = col_widths.len().max(1);
+        for cell in row.iter() {
+            let col_span = TableFlowable::cell_span_for_start(cell, cursor_col, total_columns);
+            let col_width = TableFlowable::span_width(col_widths, cursor_col, col_span);
             let padding = cell.resolved_padding(col_width);
             let border = cell.resolved_border(col_width);
             let pad_left = padding.left + border.left;
@@ -3341,10 +3749,23 @@ impl TableLayoutCache {
             let pad_top = padding.top + border.top;
             let pad_bottom = padding.bottom + border.bottom;
             let content_width = (col_width - pad_left - pad_right).max(Pt::ZERO);
-            let lines = cell.layout_lines(content_width);
-            let height = cell.effective_line_height() * (lines.len() as i32) + pad_top + pad_bottom;
+            let (height, lines) = if let Some(content) = cell.content.as_ref() {
+                let content_height = content.wrap(content_width, huge_pt()).height;
+                (
+                    (content_height + pad_top + pad_bottom).max(cell.row_min_height),
+                    Arc::new(Vec::<LineLayout>::new()),
+                )
+            } else {
+                let lines = cell.layout_lines(content_width);
+                (
+                    (cell.effective_line_height() * (lines.len() as i32) + pad_top + pad_bottom)
+                        .max(cell.row_min_height),
+                    lines,
+                )
+            };
             max_height = max_height.max(height);
             lines_out.push(lines);
+            cursor_col = cursor_col.saturating_add(col_span);
         }
         (max_height.max(Pt::ZERO), lines_out)
     }
@@ -3504,6 +3925,23 @@ impl Flowable for InlineBlockLayoutFlowable {
             width: layout.max_width.min(avail_width),
             height: layout.total_height,
         }
+    }
+
+    fn intrinsic_width(&self) -> Option<Pt> {
+        let mut total = Pt::ZERO;
+        let mut seen = false;
+        for (child, _) in &self.children {
+            if child.out_of_flow() {
+                continue;
+            }
+            let child_width = child.intrinsic_width()?;
+            if seen {
+                total = total + self.gap.max(Pt::ZERO);
+            }
+            total = total + child_width.max(Pt::ZERO);
+            seen = true;
+        }
+        Some(total.max(Pt::ZERO))
     }
 
     fn split(
@@ -4892,9 +5330,7 @@ impl Flowable for ContainerFlowable {
             if child.out_of_flow() {
                 continue;
             }
-            let child_width = child
-                .intrinsic_width()
-                .unwrap_or_else(|| child.wrap(huge_pt(), huge_pt()).width);
+            let child_width = child.intrinsic_width()?;
             max_child = max_child.max(child_width);
         }
 

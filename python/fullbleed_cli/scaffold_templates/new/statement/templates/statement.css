@@ -1,0 +1,87 @@
+/* Statement Template Styles */
+@page {
+    size: letter;
+    margin: 0.5in;
+}
+
+body {
+    font-family: "Segoe UI", Roboto, sans-serif;
+    font-size: 10pt;
+    line-height: 1.3;
+}
+
+header {
+    text-align: center;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid #1f2937;
+}
+
+header h1 {
+    margin: 0;
+    font-size: 1.5rem;
+}
+
+.account-info {
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background: #f9fafb;
+    border-radius: 4px;
+}
+
+.account-info p {
+    margin: 0.25rem 0;
+}
+
+.summary {
+    display: flex;
+    gap: 2rem;
+    margin-bottom: 1.5rem;
+}
+
+.balance-box {
+    flex: 1;
+    padding: 1rem;
+    background: #eff6ff;
+    border-radius: 4px;
+    text-align: center;
+}
+
+.balance-box .label {
+    display: block;
+    font-size: 0.85em;
+    color: #6b7280;
+}
+
+.balance-box .amount {
+    display: block;
+    font-size: 1.25em;
+    font-weight: 600;
+    color: #1e40af;
+}
+
+.transactions {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9em;
+}
+
+.transactions th,
+.transactions td {
+    padding: 0.5rem;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.transactions th {
+    background: #1f2937;
+    color: white;
+    text-align: left;
+    font-weight: 500;
+}
+
+.transactions td:nth-child(3),
+.transactions td:nth-child(4),
+.transactions td:nth-child(5) {
+    text-align: right;
+    font-family: "Consolas", monospace;
+}

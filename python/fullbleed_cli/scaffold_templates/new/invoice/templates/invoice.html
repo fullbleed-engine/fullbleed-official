@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Invoice</title>
+</head>
+<body>
+    <header class="invoice-header">
+        <div class="company-info">
+            <h1>{{ company_name }}</h1>
+            <p>{{ company_address }}</p>
+        </div>
+        <div class="invoice-info">
+            <h2>INVOICE</h2>
+            <p>Invoice #: {{ invoice_number }}</p>
+            <p>Date: {{ invoice_date }}</p>
+            <p>Due: {{ due_date }}</p>
+        </div>
+    </header>
+    
+    <section class="billing">
+        <div class="bill-to">
+            <strong>Bill To:</strong>
+            <p>{{ customer_name }}</p>
+            <p>{{ customer_address }}</p>
+        </div>
+    </section>
+    
+    <table class="line-items">
+        <thead>
+            <tr>
+                <th>Description</th>
+                <th>Qty</th>
+                <th>Unit Price</th>
+                <th>Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td>{{ item.description }}</td>
+                <td>{{ item.quantity }}</td>
+                <td>${{ item.unit_price }}</td>
+                <td>${{ item.amount }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr>
+                <td colspan="3" class="total-label">Total:</td>
+                <td class="total-amount">${{ total }}</td>
+            </tr>
+        </tfoot>
+    </table>
+    
+    <footer>
+        <p>Thank you for your business!</p>
+    </footer>
+</body>
+</html>

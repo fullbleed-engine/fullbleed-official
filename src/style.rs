@@ -570,8 +570,18 @@ pub enum DisplayMode {
     Block,
     Inline,
     InlineBlock,
+    Table,
+    InlineTable,
+    TableRowGroup,
+    TableHeaderGroup,
+    TableFooterGroup,
+    TableRow,
+    TableCell,
+    TableCaption,
     Flex,
     InlineFlex,
+    Grid,
+    InlineGrid,
     None,
     Contents,
 }
@@ -730,6 +740,7 @@ struct StyleDelta {
     order: Option<i32>,
     justify_content: Option<JustifyContentMode>,
     align_items: Option<AlignItemsMode>,
+    grid_columns: Option<usize>,
     gap: Option<LengthSpec>,
     flex_grow: Option<f32>,
     flex_shrink: Option<f32>,
@@ -801,6 +812,7 @@ pub struct ComputedStyle {
     pub order: i32,
     pub justify_content: JustifyContentMode,
     pub align_items: AlignItemsMode,
+    pub grid_columns: Option<usize>,
     pub gap: LengthSpec,
     pub flex_grow: f32,
     pub flex_shrink: f32,
@@ -1330,6 +1342,7 @@ impl StyleResolver {
             order: 0,
             justify_content: JustifyContentMode::FlexStart,
             align_items: AlignItemsMode::Stretch,
+            grid_columns: None,
             gap: LengthSpec::Absolute(Pt::ZERO),
             flex_grow: 0.0,
             flex_shrink: 1.0,
@@ -1410,6 +1423,7 @@ impl StyleResolver {
             order: parent.order,
             justify_content: parent.justify_content,
             align_items: parent.align_items,
+            grid_columns: None,
             gap: parent.gap,
             flex_grow: parent.flex_grow,
             flex_shrink: parent.flex_shrink,
@@ -1483,6 +1497,13 @@ impl StyleResolver {
         let mut inline_important = StyleDelta::default();
         if let Some(inline) = inline_style {
             if let Ok(style) = StyleAttribute::parse(inline, ParserOptions::default()) {
+                if let Some(logger) = debug {
+                    let selector = debug_node
+                        .as_deref()
+                        .map(|node| format!("@inline {node}"))
+                        .unwrap_or_else(|| "@inline".to_string());
+                    log_declaration_no_effects(&style.declarations, &selector, logger);
+                }
                 let (normal_delta, important_delta) = style_from_declarations(&style.declarations);
                 inline_normal = normal_delta;
                 inline_important = important_delta;
@@ -1674,6 +1695,7 @@ impl StyleResolver {
             order: parent.order,
             justify_content: parent.justify_content,
             align_items: parent.align_items,
+            grid_columns: None,
             gap: parent.gap,
             flex_grow: parent.flex_grow,
             flex_shrink: parent.flex_shrink,
@@ -2263,7 +2285,22 @@ fn log_declaration_no_effects(
         .iter()
         .chain(declarations.important_declarations.iter())
     {
-        let Some(name) = declaration_no_effect_property_name(property) else {
+        if let Some((requested, applied, reason)) = declaration_layout_mode_normalization(property)
+        {
+            let json = format!(
+                "{{\"type\":\"jit.known_loss\",\"code\":\"LAYOUT_MODE_NORMALIZED\",\"property\":\"display\",\"requested\":{},\"applied\":{},\"reason\":{},\"selector\":{}}}",
+                json_string(&requested),
+                json_string(applied),
+                json_string(reason),
+                json_string(selector)
+            );
+            logger.log_json(&json);
+            logger.increment("jit.known_loss.layout_mode_normalized", 1);
+        }
+
+        let name = declaration_no_effect_property_name(property)
+            .or_else(|| declaration_parsed_no_effect_property_name(property).map(|v| v.to_string()));
+        let Some(name) = name else {
             continue;
         };
         let json = format!(
@@ -2287,6 +2324,100 @@ fn declaration_no_effect_property_name(property: &Property) -> Option<String> {
                     Some(name)
                 }
             }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn declaration_layout_mode_normalization(
+    property: &Property,
+) -> Option<(String, &'static str, &'static str)> {
+    let Property::Display(display) = property else {
+        return None;
+    };
+    let reason = match display {
+        Display::Pair(pair) => match pair.inside {
+            DisplayInside::Table => return None,
+            DisplayInside::Ruby => "display_ruby_not_supported",
+            DisplayInside::Box(_) => "display_legacy_box_not_supported",
+            _ => return None,
+        },
+        Display::Keyword(keyword) => match keyword {
+            DisplayKeyword::TableRowGroup
+            | DisplayKeyword::TableHeaderGroup
+            | DisplayKeyword::TableFooterGroup
+            | DisplayKeyword::TableRow
+            | DisplayKeyword::TableCell
+            | DisplayKeyword::TableCaption => return None,
+            DisplayKeyword::TableColumnGroup | DisplayKeyword::TableColumn => {
+                "display_table_column_not_supported"
+            }
+            DisplayKeyword::RubyBase
+            | DisplayKeyword::RubyText
+            | DisplayKeyword::RubyBaseContainer
+            | DisplayKeyword::RubyTextContainer => "display_ruby_internal_not_supported",
+            _ => return None,
+        },
+    };
+    let requested = display
+        .to_css_string(PrinterOptions::default())
+        .unwrap_or_else(|_| "display".to_string());
+    let applied = display_mode_name(display_mode_from_display(display));
+    Some((requested, applied, reason))
+}
+
+fn declaration_parsed_no_effect_property_name(property: &Property) -> Option<&'static str> {
+    match property {
+        Property::AlignContent(_, _) => Some("align-content"),
+        Property::AlignSelf(_, _) => Some("align-self"),
+        Property::JustifyItems(_) => Some("justify-items"),
+        Property::JustifySelf(_) => Some("justify-self"),
+        Property::PlaceContent(_) => Some("place-content"),
+        Property::PlaceItems(_) => Some("place-items"),
+        Property::PlaceSelf(_) => Some("place-self"),
+        Property::RowGap(_) => Some("row-gap"),
+        Property::ColumnGap(_) => Some("column-gap"),
+        Property::FlexFlow(_, _) => Some("flex-flow"),
+        Property::GridTemplateRows(_) => Some("grid-template-rows"),
+        Property::GridAutoColumns(_) => Some("grid-auto-columns"),
+        Property::GridAutoRows(_) => Some("grid-auto-rows"),
+        Property::GridAutoFlow(_) => Some("grid-auto-flow"),
+        Property::GridTemplateAreas(_) => Some("grid-template-areas"),
+        Property::GridTemplate(_) => Some("grid-template"),
+        Property::Grid(_) => Some("grid"),
+        Property::GridRowStart(_) => Some("grid-row-start"),
+        Property::GridRowEnd(_) => Some("grid-row-end"),
+        Property::GridColumnStart(_) => Some("grid-column-start"),
+        Property::GridColumnEnd(_) => Some("grid-column-end"),
+        Property::GridRow(_) => Some("grid-row"),
+        Property::GridColumn(_) => Some("grid-column"),
+        Property::GridArea(_) => Some("grid-area"),
+        Property::Unparsed(unparsed) => match &unparsed.property_id {
+            PropertyId::AlignContent(_) => Some("align-content"),
+            PropertyId::AlignSelf(_) => Some("align-self"),
+            PropertyId::JustifyItems => Some("justify-items"),
+            PropertyId::JustifySelf => Some("justify-self"),
+            PropertyId::PlaceContent => Some("place-content"),
+            PropertyId::PlaceItems => Some("place-items"),
+            PropertyId::PlaceSelf => Some("place-self"),
+            PropertyId::RowGap => Some("row-gap"),
+            PropertyId::ColumnGap => Some("column-gap"),
+            PropertyId::FlexFlow(_) => Some("flex-flow"),
+            PropertyId::GridTemplateRows => Some("grid-template-rows"),
+            PropertyId::GridAutoColumns => Some("grid-auto-columns"),
+            PropertyId::GridAutoRows => Some("grid-auto-rows"),
+            PropertyId::GridAutoFlow => Some("grid-auto-flow"),
+            PropertyId::GridTemplateAreas => Some("grid-template-areas"),
+            PropertyId::GridTemplate => Some("grid-template"),
+            PropertyId::Grid => Some("grid"),
+            PropertyId::GridRowStart => Some("grid-row-start"),
+            PropertyId::GridRowEnd => Some("grid-row-end"),
+            PropertyId::GridColumnStart => Some("grid-column-start"),
+            PropertyId::GridColumnEnd => Some("grid-column-end"),
+            PropertyId::GridRow => Some("grid-row"),
+            PropertyId::GridColumn => Some("grid-column"),
+            PropertyId::GridArea => Some("grid-area"),
             _ => None,
         },
         _ => None,
@@ -2903,6 +3034,11 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                     } => AlignItemsMode::FlexEnd,
                     _ => AlignItemsMode::FlexStart,
                 });
+            }
+            Property::GridTemplateColumns(value) => {
+                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
+                    delta.grid_columns = parse_grid_track_count(&raw);
+                }
             }
             Property::Gap(value) => {
                 // Use row gap (single-value `gap:` sets both row/column the same).
@@ -3715,6 +3851,10 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                             _ => AlignItemsMode::FlexStart,
                         });
                     }
+                }
+                PropertyId::GridTemplateColumns => {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    delta.grid_columns = parse_grid_track_count(&raw);
                 }
                 PropertyId::BoxSizing(_) => {
                     if let Some(value) = first_ident(&unparsed.value.0) {
@@ -5002,6 +5142,13 @@ fn debug_style_json(style: &ComputedStyle) -> String {
         json_string(&length_spec_debug(style.gap))
     ));
     fields.push(format!(
+        "\"grid_columns\":{}",
+        style
+            .grid_columns
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "null".to_string())
+    ));
+    fields.push(format!(
         "\"flex_wrap\":{}",
         json_string(&format!("{:?}", style.flex_wrap))
     ));
@@ -5324,6 +5471,9 @@ fn apply_delta(
     }
     if let Some(align) = delta.align_items {
         computed.align_items = align;
+    }
+    if let Some(columns) = delta.grid_columns {
+        computed.grid_columns = if columns == 0 { None } else { Some(columns) };
     }
     if let Some(gap) = delta.gap {
         computed.gap = normalize_length_spec(gap, parent.gap);
@@ -5935,6 +6085,96 @@ fn parse_length_list(raw: &str) -> Vec<LengthSpec> {
         .collect()
 }
 
+fn parse_grid_track_count(raw: &str) -> Option<usize> {
+    let mut normalized = raw.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+
+    if let Some(columns_only) = parse_repeat_track_count(&normalized) {
+        return Some(columns_only.max(1));
+    }
+
+    if let Some((before_slash, _)) = normalized.split_once('/') {
+        normalized = before_slash.trim().to_string();
+    }
+
+    if normalized.is_empty() || normalized == "none" {
+        return None;
+    }
+
+    let tracks = split_top_level_whitespace_tokens(&normalized);
+    let mut count = 0usize;
+    for track in tracks {
+        let track = track.trim();
+        if track.is_empty() {
+            continue;
+        }
+        if track.starts_with('[') && track.ends_with(']') {
+            continue;
+        }
+        count += 1;
+    }
+    if count > 0 {
+        Some(count)
+    } else {
+        None
+    }
+}
+
+fn parse_repeat_track_count(raw: &str) -> Option<usize> {
+    let text = raw.trim();
+    if !(text.starts_with("repeat(") && text.ends_with(')')) {
+        return None;
+    }
+    let inner = &text[7..text.len().saturating_sub(1)];
+    let (count_raw, tracks_raw) = inner.split_once(',')?;
+    if tracks_raw.trim().is_empty() {
+        return None;
+    }
+    let count = count_raw.trim().parse::<usize>().ok()?;
+    (count > 0).then_some(count)
+}
+
+fn split_top_level_whitespace_tokens(raw: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut buf = String::new();
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+
+    for ch in raw.chars() {
+        match ch {
+            '(' => {
+                paren_depth += 1;
+                buf.push(ch);
+            }
+            ')' => {
+                paren_depth = paren_depth.saturating_sub(1);
+                buf.push(ch);
+            }
+            '[' => {
+                bracket_depth += 1;
+                buf.push(ch);
+            }
+            ']' => {
+                bracket_depth = bracket_depth.saturating_sub(1);
+                buf.push(ch);
+            }
+            _ if ch.is_whitespace() && paren_depth == 0 && bracket_depth == 0 => {
+                if !buf.trim().is_empty() {
+                    out.push(buf.trim().to_string());
+                }
+                buf.clear();
+            }
+            _ => buf.push(ch),
+        }
+    }
+    if !buf.trim().is_empty() {
+        out.push(buf.trim().to_string());
+    }
+    out
+}
+
 fn parse_border_spacing_str(raw: &str) -> Option<BorderSpacingSpec> {
     let values = parse_length_list(raw);
     if values.is_empty() {
@@ -6504,14 +6744,34 @@ fn display_mode_from_display(display: &Display) -> DisplayMode {
         Display::Keyword(keyword) => match keyword {
             DisplayKeyword::None => DisplayMode::None,
             DisplayKeyword::Contents => DisplayMode::Contents,
+            DisplayKeyword::TableRowGroup => DisplayMode::TableRowGroup,
+            DisplayKeyword::TableHeaderGroup => DisplayMode::TableHeaderGroup,
+            DisplayKeyword::TableFooterGroup => DisplayMode::TableFooterGroup,
+            DisplayKeyword::TableRow => DisplayMode::TableRow,
+            DisplayKeyword::TableCell => DisplayMode::TableCell,
+            DisplayKeyword::TableCaption => DisplayMode::TableCaption,
             _ => DisplayMode::Block,
         },
         Display::Pair(pair) => {
+            if matches!(pair.inside, DisplayInside::Table) {
+                return if pair.outside == DisplayOutside::Inline {
+                    DisplayMode::InlineTable
+                } else {
+                    DisplayMode::Table
+                };
+            }
             if matches!(pair.inside, DisplayInside::Flex(_)) {
                 return if pair.outside == DisplayOutside::Inline {
                     DisplayMode::InlineFlex
                 } else {
                     DisplayMode::Flex
+                };
+            }
+            if matches!(pair.inside, DisplayInside::Grid) {
+                return if pair.outside == DisplayOutside::Inline {
+                    DisplayMode::InlineGrid
+                } else {
+                    DisplayMode::Grid
                 };
             }
             if pair.outside == DisplayOutside::Inline {
@@ -6524,6 +6784,28 @@ fn display_mode_from_display(display: &Display) -> DisplayMode {
                 DisplayMode::Block
             }
         }
+    }
+}
+
+fn display_mode_name(mode: DisplayMode) -> &'static str {
+    match mode {
+        DisplayMode::Inline => "inline",
+        DisplayMode::Block => "block",
+        DisplayMode::Table => "table",
+        DisplayMode::InlineTable => "inline-table",
+        DisplayMode::TableRowGroup => "table-row-group",
+        DisplayMode::TableHeaderGroup => "table-header-group",
+        DisplayMode::TableFooterGroup => "table-footer-group",
+        DisplayMode::TableRow => "table-row",
+        DisplayMode::TableCell => "table-cell",
+        DisplayMode::TableCaption => "table-caption",
+        DisplayMode::None => "none",
+        DisplayMode::Contents => "contents",
+        DisplayMode::Flex => "flex",
+        DisplayMode::InlineBlock => "inline-block",
+        DisplayMode::InlineFlex => "inline-flex",
+        DisplayMode::Grid => "grid",
+        DisplayMode::InlineGrid => "inline-grid",
     }
 }
 
@@ -7040,6 +7322,7 @@ impl StyleDelta {
             && self.order.is_none()
             && self.justify_content.is_none()
             && self.align_items.is_none()
+            && self.grid_columns.is_none()
             && self.gap.is_none()
             && self.flex_grow.is_none()
             && self.flex_shrink.is_none()
@@ -7195,6 +7478,59 @@ mod tests {
         let log = std::fs::read_to_string(&path).expect("read debug log");
         assert!(log.contains("\"DECLARATION_PARSED_NO_EFFECT\""));
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn display_table_is_not_normalized() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "fullbleed_style_layout_known_loss_{}_{}.jsonl",
+            std::process::id(),
+            nanos
+        ));
+        let logger = Arc::new(DebugLogger::new(&path).expect("debug logger"));
+        let resolver =
+            StyleResolver::new_with_debug(".menu { display: table; }", Some(logger.clone()));
+        drop(resolver);
+        drop(logger);
+        let log = std::fs::read_to_string(&path).expect("read debug log");
+        assert!(
+            !log.contains("\"LAYOUT_MODE_NORMALIZED\""),
+            "display:table should be preserved, log={log}"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn grid_template_columns_sets_column_count() {
+        let resolver =
+            StyleResolver::new(".menu { display: grid; grid-template-columns: 1fr 1fr 1fr; }");
+        let root = resolver.default_style();
+        let info = element("div", None, &["menu"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.display, DisplayMode::Grid);
+        assert_eq!(style.grid_columns, Some(3));
+    }
+
+    #[test]
+    fn display_table_keywords_map_to_table_modes() {
+        let resolver = StyleResolver::new(
+            ".t{display:table}.it{display:inline-table}.tr{display:table-row}.tc{display:table-cell}.th{display:table-header-group}",
+        );
+        let root = resolver.default_style();
+        let t = resolver.compute_style(&element("div", None, &["t"]), &root, None, &[]);
+        let it = resolver.compute_style(&element("div", None, &["it"]), &root, None, &[]);
+        let tr = resolver.compute_style(&element("div", None, &["tr"]), &root, None, &[]);
+        let tc = resolver.compute_style(&element("div", None, &["tc"]), &root, None, &[]);
+        let th = resolver.compute_style(&element("div", None, &["th"]), &root, None, &[]);
+        assert_eq!(t.display, DisplayMode::Table);
+        assert_eq!(it.display, DisplayMode::InlineTable);
+        assert_eq!(tr.display, DisplayMode::TableRow);
+        assert_eq!(tc.display, DisplayMode::TableCell);
+        assert_eq!(th.display, DisplayMode::TableHeaderGroup);
     }
 
     #[test]

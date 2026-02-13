@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Account Statement</title>
+</head>
+<body>
+    <header>
+        <h1>{{ institution_name }}</h1>
+        <p>Account Statement</p>
+    </header>
+    
+    <section class="account-info">
+        <p><strong>Account Holder:</strong> {{ account_holder }}</p>
+        <p><strong>Account Number:</strong> {{ account_number }}</p>
+        <p><strong>Statement Period:</strong> {{ start_date }} - {{ end_date }}</p>
+    </section>
+    
+    <section class="summary">
+        <div class="balance-box">
+            <span class="label">Opening Balance</span>
+            <span class="amount">${{ opening_balance }}</span>
+        </div>
+        <div class="balance-box">
+            <span class="label">Closing Balance</span>
+            <span class="amount">${{ closing_balance }}</span>
+        </div>
+    </section>
+    
+    <table class="transactions">
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Description</th>
+                <th>Debit</th>
+                <th>Credit</th>
+                <th>Balance</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for tx in transactions %}
+            <tr>
+                <td>{{ tx.date }}</td>
+                <td>{{ tx.description }}</td>
+                <td>{% if tx.debit %}${{ tx.debit }}{% endif %}</td>
+                <td>{% if tx.credit %}${{ tx.credit }}{% endif %}</td>
+                <td>${{ tx.balance }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>

@@ -1,5 +1,6 @@
 use crate::flowable::{
-    AbsolutePositionedFlowable, AlignItems, BorderRadiusSpec, BorderSpec, ContainerFlowable,
+    AbsolutePositionedFlowable, AlignItems, BorderRadiusSpec, BorderSpec, CalcLength,
+    ContainerFlowable,
     EdgeSizes, FlexDirection, FlexFlowable, ImageFlowable, InlineBlockLayoutFlowable,
     JustifyContent, LengthSpec, ListItemFlowable, Paragraph, Spacer, SvgFlowable, TableCell,
     TableFlowable, TextAlign, TextStyle, VerticalAlign,
@@ -70,8 +71,18 @@ pub fn scan_html_asset_warnings(html: &str) -> Vec<HtmlAssetWarning> {
         let mut count = 0usize;
         let mut has_import = false;
         for style in styles {
-            count += 1;
             let node = style.as_node();
+            let nested_in_svg = node.ancestors().any(|ancestor| {
+                if let NodeData::Element(el) = ancestor.data() {
+                    el.name.local.as_ref().eq_ignore_ascii_case("svg")
+                } else {
+                    false
+                }
+            });
+            if nested_in_svg {
+                continue;
+            }
+            count += 1;
             let text = node.text_contents();
             if text.contains("@import") {
                 has_import = true;
@@ -562,7 +573,10 @@ fn node_to_flowables(
             }
             let parent_is_flex = matches!(
                 parent_style.display,
-                DisplayMode::Flex | DisplayMode::InlineFlex
+                DisplayMode::Flex
+                    | DisplayMode::InlineFlex
+                    | DisplayMode::Grid
+                    | DisplayMode::InlineGrid
             );
             let has_renderable_content = node_has_renderable_content(node);
             let mut flex_item_width_spec = None;
@@ -638,81 +652,99 @@ fn node_to_flowables(
 
             let mut flowables = match info.tag.as_str() {
                 "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
-                    let t_extract = std::time::Instant::now();
-                    let mut text = extract_text(node, style.white_space);
-                    if let Some(perf_logger) = perf {
-                        let ms = t_extract.elapsed().as_secs_f64() * 1000.0;
-                        perf_logger.log_span_ms("story.text.extract", doc_id, ms);
-                    }
-                    let before = pseudo_text_for(
-                        resolver,
-                        &info,
-                        &style,
-                        ancestors,
-                        font_registry.clone(),
-                        report.as_deref_mut(),
-                        crate::style::PseudoTarget::Before,
-                    );
-                    let after = pseudo_text_for(
-                        resolver,
-                        &info,
-                        &style,
-                        ancestors,
-                        font_registry.clone(),
-                        report.as_deref_mut(),
-                        crate::style::PseudoTarget::After,
-                    );
-                    if !before.is_empty() || !after.is_empty() {
-                        text = format!("{before}{text}{after}");
-                    }
-                    if text.is_empty() {
-                        Vec::new()
-                    } else {
-                        let t_transform = std::time::Instant::now();
-                        let text = apply_text_transform(&text, style.text_transform);
+                    let role = match info.tag.as_str() {
+                        "h1" => "H1",
+                        "h2" => "H2",
+                        "h3" => "H3",
+                        "h4" => "H4",
+                        "h5" => "H5",
+                        "h6" => "H6",
+                        _ => "P",
+                    };
+
+                    if inline_children_only(node, resolver, &style, ancestors) {
+                        let t_extract = std::time::Instant::now();
+                        let mut text = extract_text(node, style.white_space);
                         if let Some(perf_logger) = perf {
-                            let ms = t_transform.elapsed().as_secs_f64() * 1000.0;
-                            perf_logger.log_span_ms("story.text.transform", doc_id, ms);
+                            let ms = t_extract.elapsed().as_secs_f64() * 1000.0;
+                            perf_logger.log_span_ms("story.text.extract", doc_id, ms);
                         }
-                        let role = match info.tag.as_str() {
-                            "h1" => "H1",
-                            "h2" => "H2",
-                            "h3" => "H3",
-                            "h4" => "H4",
-                            "h5" => "H5",
-                            "h6" => "H6",
-                            _ => "P",
-                        };
-                        let text_style = style.to_text_style();
-                        let t_glyph = std::time::Instant::now();
-                        report_missing_glyphs(
+                        let before = pseudo_text_for(
+                            resolver,
+                            &info,
+                            &style,
+                            ancestors,
+                            font_registry.clone(),
                             report.as_deref_mut(),
-                            font_registry.as_deref(),
-                            &text_style,
-                            &text,
+                            crate::style::PseudoTarget::Before,
                         );
-                        if let Some(perf_logger) = perf {
-                            let ms = t_glyph.elapsed().as_secs_f64() * 1000.0;
-                            perf_logger.log_span_ms("story.glyph.report", doc_id, ms);
+                        let after = pseudo_text_for(
+                            resolver,
+                            &info,
+                            &style,
+                            ancestors,
+                            font_registry.clone(),
+                            report.as_deref_mut(),
+                            crate::style::PseudoTarget::After,
+                        );
+                        if !before.is_empty() || !after.is_empty() {
+                            text = format!("{before}{text}{after}");
                         }
-                        let paragraph = Paragraph::new(text)
-                            .with_style(text_style)
-                            .with_align(text_align_from_style(&style))
-                            .with_whitespace(
-                                preserve_whitespace(style.white_space),
-                                no_wrap(style.white_space),
-                            )
-                            .with_pagination(style.pagination)
-                            .with_font_registry(font_registry.clone())
-                            .with_tag_role(role);
-                        let items = vec![LayoutItem::Block {
-                            flowable: Box::new(paragraph) as Box<dyn Flowable>,
-                            flex_grow: 0.0,
-                            flex_shrink: 1.0,
-                            width_spec: None,
-                            order: 0,
-                        }];
-                        container_flowables(items, &style)
+                        if text.is_empty() {
+                            Vec::new()
+                        } else {
+                            let t_transform = std::time::Instant::now();
+                            let text = apply_text_transform(&text, style.text_transform);
+                            if let Some(perf_logger) = perf {
+                                let ms = t_transform.elapsed().as_secs_f64() * 1000.0;
+                                perf_logger.log_span_ms("story.text.transform", doc_id, ms);
+                            }
+                            let text_style = style.to_text_style();
+                            let t_glyph = std::time::Instant::now();
+                            report_missing_glyphs(
+                                report.as_deref_mut(),
+                                font_registry.as_deref(),
+                                &text_style,
+                                &text,
+                            );
+                            if let Some(perf_logger) = perf {
+                                let ms = t_glyph.elapsed().as_secs_f64() * 1000.0;
+                                perf_logger.log_span_ms("story.glyph.report", doc_id, ms);
+                            }
+                            let paragraph = Paragraph::new(text)
+                                .with_style(text_style)
+                                .with_align(text_align_from_style(&style))
+                                .with_whitespace(
+                                    preserve_whitespace(style.white_space),
+                                    no_wrap(style.white_space),
+                                )
+                                .with_pagination(style.pagination)
+                                .with_font_registry(font_registry.clone())
+                                .with_tag_role(role);
+                            let items = vec![LayoutItem::Block {
+                                flowable: Box::new(paragraph) as Box<dyn Flowable>,
+                                flex_grow: 0.0,
+                                flex_shrink: 1.0,
+                                width_spec: None,
+                                order: 0,
+                            }];
+                            container_flowables(items, &style)
+                        }
+                    } else {
+                        let children = collect_children(
+                            node,
+                            resolver,
+                            &style,
+                            ancestors,
+                            font_registry.clone(),
+                            report.as_deref_mut(),
+                            svg_form,
+                            svg_raster_fallback,
+                            perf,
+                            doc_id,
+                        );
+                        let children = inject_pseudo_items(children, &before_items, &after_items);
+                        container_flowables_with_role(children, &style, Some(role))
                     }
                 }
                 "pre" => {
@@ -1067,6 +1099,8 @@ fn node_to_flowables(
                         ancestors,
                         font_registry.clone(),
                         report.as_deref_mut(),
+                        svg_form,
+                        svg_raster_fallback,
                         perf,
                         doc_id,
                     )
@@ -1122,6 +1156,10 @@ fn node_to_flowables(
                         ancestors,
                         font_registry.clone(),
                         report.as_deref_mut(),
+                        svg_form,
+                        svg_raster_fallback,
+                        perf,
+                        doc_id,
                     );
                     let items = inject_pseudo_items(items, &before_items, &after_items);
                     container_flowables_with_role(items, &style, Some("L"))
@@ -1161,7 +1199,26 @@ fn node_to_flowables(
                 }
                 "div" | "span" | "section" | "article" | "header" | "footer" | "aside" | "nav"
                 | "main" | "blockquote" | "dl" | "dt" | "dd" => {
-                    if matches!(style.display, DisplayMode::Flex | DisplayMode::InlineFlex) {
+                    if is_table_container_display(style.display) {
+                        table_container_flowables(
+                            node,
+                            resolver,
+                            &style,
+                            ancestors,
+                            font_registry.clone(),
+                            report.as_deref_mut(),
+                            svg_form,
+                            svg_raster_fallback,
+                            perf,
+                            doc_id,
+                        )
+                    } else if matches!(
+                        style.display,
+                        DisplayMode::Flex
+                            | DisplayMode::InlineFlex
+                            | DisplayMode::Grid
+                            | DisplayMode::InlineGrid
+                    ) {
                         flex_container_flowables(
                             node,
                             resolver,
@@ -1247,19 +1304,34 @@ fn node_to_flowables(
                     }
                 }
                 _ => {
-                    let children = collect_children(
-                        node,
-                        resolver,
-                        &style,
-                        ancestors,
-                        font_registry.clone(),
-                        report.as_deref_mut(),
-                        svg_form,
-                        svg_raster_fallback,
-                        perf,
-                        doc_id,
-                    );
-                    inject_pseudo_items(children, &before_items, &after_items)
+                    if is_table_container_display(style.display) {
+                        table_container_flowables(
+                            node,
+                            resolver,
+                            &style,
+                            ancestors,
+                            font_registry.clone(),
+                            report.as_deref_mut(),
+                            svg_form,
+                            svg_raster_fallback,
+                            perf,
+                            doc_id,
+                        )
+                    } else {
+                        let children = collect_children(
+                            node,
+                            resolver,
+                            &style,
+                            ancestors,
+                            font_registry.clone(),
+                            report.as_deref_mut(),
+                            svg_form,
+                            svg_raster_fallback,
+                            perf,
+                            doc_id,
+                        );
+                        inject_pseudo_items(children, &before_items, &after_items)
+                    }
                 }
             };
 
@@ -1316,7 +1388,10 @@ fn node_to_flowables(
                 .collect();
             if matches!(
                 style.display,
-                DisplayMode::InlineBlock | DisplayMode::InlineFlex
+                DisplayMode::InlineBlock
+                    | DisplayMode::InlineTable
+                    | DisplayMode::InlineFlex
+                    | DisplayMode::InlineGrid
             ) {
                 let valign = match style.vertical_align {
                     crate::style::VerticalAlignMode::Middle => VerticalAlign::Middle,
@@ -1488,7 +1563,11 @@ fn pseudo_content_items(
         .with_font_registry(font_registry);
     let is_inline = matches!(
         style.display,
-        DisplayMode::Inline | DisplayMode::InlineBlock | DisplayMode::InlineFlex
+        DisplayMode::Inline
+            | DisplayMode::InlineBlock
+            | DisplayMode::InlineTable
+            | DisplayMode::InlineFlex
+            | DisplayMode::InlineGrid
     );
     if is_inline {
         let valign = match style.vertical_align {
@@ -1592,6 +1671,7 @@ fn inline_children_only(
             DisplayMode::Inline
             | DisplayMode::InlineBlock
             | DisplayMode::InlineFlex
+            | DisplayMode::InlineGrid
             | DisplayMode::Contents => {}
             _ => return false,
         }
@@ -1665,6 +1745,44 @@ mod tests {
         assert!(
             !inline_children_only(svg_div.as_node(), &resolver, &parent, &ancestors),
             "svg-only wrappers must not be flattened to text"
+        );
+    }
+
+    #[test]
+    fn inline_children_only_respects_display_block_on_span_children() {
+        let doc = kuchiki::parse_html().one(
+            r##"
+            <html>
+              <body>
+                <h1 class="title"><span class="line">A</span><span class="line">B</span></h1>
+              </body>
+            </html>
+            "##,
+        );
+        let resolver = StyleResolver::new(".title > .line { display: block; }");
+        let root = resolver.default_style();
+
+        let h1 = doc.select_first("h1.title").expect("title");
+        let h1_info = element_info(h1.as_node(), resolver.has_sibling_selectors());
+        let h1_style = resolver.compute_style(&h1_info, &root, None, &[]);
+
+        let span = h1
+            .as_node()
+            .children()
+            .find(|child| child.as_element().is_some())
+            .expect("span child");
+        let span_info = element_info(&span, resolver.has_sibling_selectors());
+        let span_style = resolver.compute_style(&span_info, &h1_style, None, &[h1_info.clone()]);
+        assert_eq!(
+            span_style.display,
+            DisplayMode::Block,
+            "expected .title > .line selector to force span display:block"
+        );
+
+        let ancestors = vec![h1_info];
+        assert!(
+            !inline_children_only(h1.as_node(), &resolver, &h1_style, &ancestors),
+            "h1 with span display:block children must not take inline flatten path"
         );
     }
 
@@ -1745,6 +1863,10 @@ fn list_flowables(
     ancestors: &[ElementInfo],
     font_registry: Option<Arc<FontRegistry>>,
     report: Option<&mut GlyphCoverageReport>,
+    svg_form: bool,
+    svg_raster_fallback: bool,
+    perf: Option<&crate::perf::PerfLogger>,
+    doc_id: Option<usize>,
 ) -> Vec<LayoutItem> {
     let mut out = Vec::new();
     let mut report = report;
@@ -1767,63 +1889,90 @@ fn list_flowables(
                 .map(|s| s.to_string());
             let style =
                 resolver.compute_style(&info, parent_style, inline_style.as_deref(), ancestors);
-            let text = extract_text(&child, style.white_space);
-            if text.is_empty() {
-                continue;
-            }
-            let text = apply_text_transform(&text, style.text_transform);
             let is_inline = matches!(
                 style.display,
-                DisplayMode::Inline | DisplayMode::InlineBlock | DisplayMode::InlineFlex
+                DisplayMode::Inline
+                    | DisplayMode::InlineBlock
+                    | DisplayMode::InlineTable
+                    | DisplayMode::InlineFlex
+                    | DisplayMode::InlineGrid
             );
             let show_marker =
                 matches!(style.list_style_type, crate::style::ListStyleTypeMode::Auto)
                     && !is_inline;
-            let prefix = if show_marker {
-                if ordered {
+
+            let mut li_ancestors = ancestors.to_vec();
+            li_ancestors.push(info.clone());
+            let mut li_body_items: Vec<LayoutItem> = Vec::new();
+            for li_child in child.children() {
+                li_body_items.extend(node_to_flowables(
+                    &li_child,
+                    resolver,
+                    &style,
+                    &mut li_ancestors,
+                    font_registry.clone(),
+                    report.as_deref_mut(),
+                    svg_form,
+                    svg_raster_fallback,
+                    perf,
+                    doc_id,
+                ));
+            }
+            if li_body_items.is_empty() {
+                continue;
+            }
+
+            let li_body_flowables = layout_children_to_flowables(li_body_items, None);
+            if li_body_flowables.is_empty() {
+                continue;
+            }
+            let li_body: Box<dyn Flowable> = Box::new(
+                ContainerFlowable::new_pt(li_body_flowables, style.font_size, style.root_font_size)
+                    .with_pagination(style.pagination)
+                    .with_tag_role("LBody"),
+            );
+
+            let li_flowable: Box<dyn Flowable> = if show_marker {
+                let prefix = if ordered {
                     let label = format!("{}. ", index);
                     index += 1;
                     label
                 } else {
                     "\u{2022} ".to_string()
-                }
-            } else {
-                String::new()
-            };
-            let text_style = style.to_text_style();
-            report_missing_glyphs(
-                report.as_deref_mut(),
-                font_registry.as_deref(),
-                &text_style,
-                &text,
-            );
-            if !prefix.is_empty() {
+                };
+                let text_style = style.to_text_style();
                 report_missing_glyphs(
                     report.as_deref_mut(),
                     font_registry.as_deref(),
                     &text_style,
                     &prefix,
                 );
-            }
-            let body_para = Paragraph::new(text)
-                .with_style(text_style.clone())
-                .with_align(text_align_from_style(&style))
-                .with_whitespace(
-                    preserve_whitespace(style.white_space),
-                    no_wrap(style.white_space),
-                )
-                .with_pagination(style.pagination)
-                .with_font_registry(font_registry.clone())
-                .with_tag_role("LBody");
+                let label_para = Paragraph::new(prefix)
+                    .with_style(text_style)
+                    .with_align(text_align_from_style(&style))
+                    .with_whitespace(
+                        preserve_whitespace(style.white_space),
+                        no_wrap(style.white_space),
+                    )
+                    .with_pagination(style.pagination)
+                    .with_font_registry(font_registry.clone())
+                    .with_tag_role("Lbl");
+                Box::new(
+                    ListItemFlowable::new(label_para, li_body, Pt::from_f32(4.0))
+                        .with_pagination(style.pagination),
+                ) as Box<dyn Flowable>
+            } else {
+                li_body
+            };
 
+            let items = vec![LayoutItem::Block {
+                flowable: li_flowable,
+                flex_grow: 0.0,
+                flex_shrink: 1.0,
+                width_spec: flex_item_basis(&style),
+                order: 0,
+            }];
             if is_inline {
-                let items = vec![LayoutItem::Block {
-                    flowable: Box::new(body_para) as Box<dyn Flowable>,
-                    flex_grow: 0.0,
-                    flex_shrink: 1.0,
-                    width_spec: flex_item_basis(&style),
-                    order: 0,
-                }];
                 if let Some(container) = container_flowable_with_role(items, &style, Some("LI")) {
                     let valign = match style.vertical_align {
                         crate::style::VerticalAlignMode::Middle => VerticalAlign::Middle,
@@ -1839,35 +1988,9 @@ fn list_flowables(
                         order: 0,
                     });
                 }
-                continue;
-            }
-
-            let label_para = Paragraph::new(prefix)
-                .with_style(text_style.clone())
-                .with_align(text_align_from_style(&style))
-                .with_whitespace(
-                    preserve_whitespace(style.white_space),
-                    no_wrap(style.white_space),
-                )
-                .with_pagination(style.pagination)
-                .with_font_registry(font_registry.clone())
-                .with_tag_role("Lbl");
-
-            let gap = if show_marker {
-                Pt::from_f32(4.0)
             } else {
-                Pt::ZERO
-            };
-            let list_item =
-                ListItemFlowable::new(label_para, body_para, gap).with_pagination(style.pagination);
-            let items = vec![LayoutItem::Block {
-                flowable: Box::new(list_item) as Box<dyn Flowable>,
-                flex_grow: 0.0,
-                flex_shrink: 1.0,
-                width_spec: flex_item_basis(&style),
-                order: 0,
-            }];
-            out.extend(container_flowables_with_role(items, &style, Some("LI")));
+                out.extend(container_flowables_with_role(items, &style, Some("LI")));
+            }
         }
     }
     out
@@ -2038,6 +2161,14 @@ fn flex_container_flowables(
     perf: Option<&crate::perf::PerfLogger>,
     doc_id: Option<usize>,
 ) -> Vec<LayoutItem> {
+    let is_grid_like = matches!(style.display, DisplayMode::Grid | DisplayMode::InlineGrid);
+    let grid_track_count = style.grid_columns.unwrap_or(0);
+    let grid_basis = if is_grid_like && grid_track_count > 0 {
+        Some(grid_track_basis(grid_track_count, style.gap))
+    } else {
+        None
+    };
+
     let mut items_with_order: Vec<(i32, usize, Box<dyn Flowable>, f32, f32, Option<LengthSpec>)> =
         Vec::new();
     let mut report = report;
@@ -2087,7 +2218,17 @@ fn flex_container_flowables(
                 style.root_font_size,
             ))
         };
-        items_with_order.push((order, child_idx, boxed, grow, shrink, width_spec));
+        let effective_width_spec = width_spec.or(grid_basis);
+        let effective_grow = if is_grid_like { 0.0 } else { grow };
+        let effective_shrink = if is_grid_like { 1.0 } else { shrink };
+        items_with_order.push((
+            order,
+            child_idx,
+            boxed,
+            effective_grow,
+            effective_shrink,
+            effective_width_spec,
+        ));
     }
 
     items_with_order.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
@@ -2095,10 +2236,15 @@ fn flex_container_flowables(
         .into_iter()
         .map(|(_, _, boxed, grow, shrink, width_spec)| (boxed, grow, shrink, width_spec))
         .collect();
+    let grid_wrap = is_grid_like && grid_track_count > 0 && items.len() > grid_track_count;
 
-    let dir = match style.flex_direction {
-        FlexDirectionMode::Column => FlexDirection::Column,
-        _ => FlexDirection::Row,
+    let dir = if is_grid_like {
+        FlexDirection::Row
+    } else {
+        match style.flex_direction {
+            FlexDirectionMode::Column => FlexDirection::Column,
+            _ => FlexDirection::Row,
+        }
     };
     let justify = match style.justify_content {
         JustifyContentMode::FlexEnd => JustifyContent::FlexEnd,
@@ -2119,7 +2265,11 @@ fn flex_container_flowables(
         justify,
         align,
         style.gap,
-        matches!(style.flex_wrap, FlexWrapMode::Wrap),
+        if is_grid_like {
+            grid_wrap
+        } else {
+            matches!(style.flex_wrap, FlexWrapMode::Wrap)
+        },
         style.font_size,
         style.root_font_size,
     );
@@ -2152,6 +2302,400 @@ fn flex_container_flowables(
     }]
 }
 
+fn is_table_container_display(display: DisplayMode) -> bool {
+    matches!(display, DisplayMode::Table | DisplayMode::InlineTable)
+}
+
+fn is_table_row_group_display(display: DisplayMode) -> bool {
+    matches!(
+        display,
+        DisplayMode::TableRowGroup | DisplayMode::TableHeaderGroup | DisplayMode::TableFooterGroup
+    )
+}
+
+fn table_group_role(display: DisplayMode) -> &'static str {
+    match display {
+        DisplayMode::TableHeaderGroup => "THead",
+        DisplayMode::TableFooterGroup => "TFoot",
+        _ => "TBody",
+    }
+}
+
+fn table_container_flowables(
+    node: &NodeRef,
+    resolver: &StyleResolver,
+    style: &ComputedStyle,
+    ancestors: &[ElementInfo],
+    font_registry: Option<Arc<FontRegistry>>,
+    report: Option<&mut GlyphCoverageReport>,
+    svg_form: bool,
+    svg_raster_fallback: bool,
+    perf: Option<&crate::perf::PerfLogger>,
+    doc_id: Option<usize>,
+) -> Vec<LayoutItem> {
+    let mut report = report;
+    let include_prev_siblings = resolver.has_sibling_selectors();
+    let mut table_children: Vec<Box<dyn Flowable>> = Vec::new();
+    let mut anon_cells: Vec<(NodeRef, ComputedStyle)> = Vec::new();
+
+    for child in node.children() {
+        let Some(child_element) = child.as_element() else {
+            continue;
+        };
+        let child_info = element_info(&child, include_prev_siblings);
+        let child_inline_style = child_element
+            .attributes
+            .borrow()
+            .get("style")
+            .map(|s| s.to_string());
+        let child_style =
+            resolver.compute_style(&child_info, style, child_inline_style.as_deref(), ancestors);
+        if matches!(child_style.display, DisplayMode::None) {
+            continue;
+        }
+
+        if matches!(child_style.display, DisplayMode::TableCell) {
+            anon_cells.push((child.clone(), child_style));
+            continue;
+        }
+
+        if let Some(row_flowable) = table_row_flowable_from_cells(
+            std::mem::take(&mut anon_cells),
+            style,
+            resolver,
+            ancestors,
+            font_registry.clone(),
+            report.as_deref_mut(),
+            svg_form,
+            svg_raster_fallback,
+            perf,
+            doc_id,
+        ) {
+            table_children.push(row_flowable);
+        }
+
+        if matches!(child_style.display, DisplayMode::TableRow) {
+            if let Some(row_flowable) = table_row_flowable_from_node(
+                &child,
+                &child_style,
+                resolver,
+                ancestors,
+                font_registry.clone(),
+                report.as_deref_mut(),
+                svg_form,
+                svg_raster_fallback,
+                perf,
+                doc_id,
+            ) {
+                table_children.push(row_flowable);
+            }
+            continue;
+        }
+
+        if is_table_row_group_display(child_style.display) {
+            let mut group_rows: Vec<Box<dyn Flowable>> = Vec::new();
+            for row_node in child.children() {
+                let Some(row_element) = row_node.as_element() else {
+                    continue;
+                };
+                let row_info = element_info(&row_node, include_prev_siblings);
+                let row_inline_style = row_element
+                    .attributes
+                    .borrow()
+                    .get("style")
+                    .map(|s| s.to_string());
+                let row_style = resolver.compute_style(
+                    &row_info,
+                    &child_style,
+                    row_inline_style.as_deref(),
+                    ancestors,
+                );
+                if !matches!(row_style.display, DisplayMode::TableRow) {
+                    continue;
+                }
+                if let Some(row_flowable) = table_row_flowable_from_node(
+                    &row_node,
+                    &row_style,
+                    resolver,
+                    ancestors,
+                    font_registry.clone(),
+                    report.as_deref_mut(),
+                    svg_form,
+                    svg_raster_fallback,
+                    perf,
+                    doc_id,
+                ) {
+                    group_rows.push(row_flowable);
+                }
+            }
+            if !group_rows.is_empty() {
+                let group_items: Vec<LayoutItem> = group_rows
+                    .into_iter()
+                    .map(|flowable| LayoutItem::Block {
+                        flowable,
+                        flex_grow: 0.0,
+                        flex_shrink: 1.0,
+                        width_spec: None,
+                        order: 0,
+                    })
+                    .collect();
+                if let Some(group_flowable) = container_flowable_with_role(
+                    group_items,
+                    &child_style,
+                    Some(table_group_role(child_style.display)),
+                ) {
+                    table_children.push(group_flowable);
+                }
+            }
+            continue;
+        }
+
+        let mut child_ancestors = ancestors.to_vec();
+        let child_items = node_to_flowables(
+            &child,
+            resolver,
+            style,
+            &mut child_ancestors,
+            font_registry.clone(),
+            report.as_deref_mut(),
+            svg_form,
+            svg_raster_fallback,
+            perf,
+            doc_id,
+        );
+        table_children.extend(layout_children_to_flowables(child_items, None));
+    }
+
+    if let Some(row_flowable) = table_row_flowable_from_cells(
+        std::mem::take(&mut anon_cells),
+        style,
+        resolver,
+        ancestors,
+        font_registry.clone(),
+        report.as_deref_mut(),
+        svg_form,
+        svg_raster_fallback,
+        perf,
+        doc_id,
+    ) {
+        table_children.push(row_flowable);
+    }
+
+    let table_items: Vec<LayoutItem> = table_children
+        .into_iter()
+        .map(|flowable| LayoutItem::Block {
+            flowable,
+            flex_grow: 0.0,
+            flex_shrink: 1.0,
+            width_spec: None,
+            order: 0,
+        })
+        .collect();
+
+    let Some(table_flowable) = container_flowable_with_role(table_items, style, Some("Table")) else {
+        return Vec::new();
+    };
+
+    if matches!(style.display, DisplayMode::InlineTable) {
+        let valign = match style.vertical_align {
+            crate::style::VerticalAlignMode::Middle => VerticalAlign::Middle,
+            crate::style::VerticalAlignMode::Bottom => VerticalAlign::Bottom,
+            _ => VerticalAlign::Top,
+        };
+        vec![LayoutItem::Inline {
+            flowable: table_flowable,
+            valign,
+            flex_grow: style.flex_grow,
+            flex_shrink: style.flex_shrink,
+            width_spec: flex_item_basis(style),
+            order: 0,
+        }]
+    } else {
+        vec![LayoutItem::Block {
+            flowable: table_flowable,
+            flex_grow: style.flex_grow,
+            flex_shrink: style.flex_shrink,
+            width_spec: flex_item_basis(style),
+            order: 0,
+        }]
+    }
+}
+
+fn table_row_flowable_from_node(
+    row_node: &NodeRef,
+    row_style: &ComputedStyle,
+    resolver: &StyleResolver,
+    ancestors: &[ElementInfo],
+    font_registry: Option<Arc<FontRegistry>>,
+    report: Option<&mut GlyphCoverageReport>,
+    svg_form: bool,
+    svg_raster_fallback: bool,
+    perf: Option<&crate::perf::PerfLogger>,
+    doc_id: Option<usize>,
+) -> Option<Box<dyn Flowable>> {
+    let include_prev_siblings = resolver.has_sibling_selectors();
+    let mut cells: Vec<(NodeRef, ComputedStyle)> = Vec::new();
+    for cell_node in row_node.children() {
+        let Some(cell_element) = cell_node.as_element() else {
+            continue;
+        };
+        let cell_info = element_info(&cell_node, include_prev_siblings);
+        let cell_inline_style = cell_element
+            .attributes
+            .borrow()
+            .get("style")
+            .map(|s| s.to_string());
+        let cell_style = resolver.compute_style(
+            &cell_info,
+            row_style,
+            cell_inline_style.as_deref(),
+            ancestors,
+        );
+        if matches!(cell_style.display, DisplayMode::None) {
+            continue;
+        }
+        cells.push((cell_node.clone(), cell_style));
+    }
+    table_row_flowable_from_cells(
+        cells,
+        row_style,
+        resolver,
+        ancestors,
+        font_registry,
+        report,
+        svg_form,
+        svg_raster_fallback,
+        perf,
+        doc_id,
+    )
+}
+
+fn table_row_flowable_from_cells(
+    cells: Vec<(NodeRef, ComputedStyle)>,
+    row_style: &ComputedStyle,
+    resolver: &StyleResolver,
+    ancestors: &[ElementInfo],
+    font_registry: Option<Arc<FontRegistry>>,
+    report: Option<&mut GlyphCoverageReport>,
+    svg_form: bool,
+    svg_raster_fallback: bool,
+    perf: Option<&crate::perf::PerfLogger>,
+    doc_id: Option<usize>,
+) -> Option<Box<dyn Flowable>> {
+    if cells.is_empty() {
+        return None;
+    }
+    let mut report = report;
+    let cell_count = cells.len().max(1) as f32;
+    let mut row_items: Vec<(Box<dyn Flowable>, f32, f32, Option<LengthSpec>)> = Vec::new();
+
+    for (cell_node, cell_style) in cells {
+        let mut cell_ancestors = ancestors.to_vec();
+        let cell_items = node_to_flowables(
+            &cell_node,
+            resolver,
+            row_style,
+            &mut cell_ancestors,
+            font_registry.clone(),
+            report.as_deref_mut(),
+            svg_form,
+            svg_raster_fallback,
+            perf,
+            doc_id,
+        );
+        let mut cell_flowables = layout_children_to_flowables(cell_items, None);
+        let cell_flowable: Box<dyn Flowable> = if cell_flowables.is_empty() {
+            Box::new(ContainerFlowable::new_pt(
+                Vec::new(),
+                cell_style.font_size,
+                cell_style.root_font_size,
+            ))
+        } else if cell_flowables.len() == 1 {
+            cell_flowables.remove(0)
+        } else {
+            Box::new(ContainerFlowable::new_pt(
+                cell_flowables,
+                cell_style.font_size,
+                cell_style.root_font_size,
+            ))
+        };
+        let explicit_width = !matches!(cell_style.width, LengthSpec::Auto);
+        let width_spec = if explicit_width {
+            Some(cell_style.width)
+        } else {
+            Some(LengthSpec::Percent(1.0 / cell_count))
+        };
+        row_items.push((
+            cell_flowable,
+            if explicit_width { 0.0 } else { 1.0 },
+            1.0,
+            width_spec,
+        ));
+    }
+
+    let row_core: Box<dyn Flowable> = Box::new(
+        FlexFlowable::new_pt(
+            row_items,
+            FlexDirection::Row,
+            JustifyContent::FlexStart,
+            AlignItems::Stretch,
+            row_style.gap,
+            false,
+            row_style.font_size,
+            row_style.root_font_size,
+        ),
+    );
+    let row_wrapped = container_flowable_with_role(
+        vec![LayoutItem::Block {
+            flowable: row_core.clone(),
+            flex_grow: 0.0,
+            flex_shrink: 1.0,
+            width_spec: None,
+            order: 0,
+        }],
+        row_style,
+        Some("TR"),
+    )
+    .unwrap_or(row_core);
+    Some(row_wrapped)
+}
+
+fn grid_track_basis(track_count: usize, gap: LengthSpec) -> LengthSpec {
+    let columns = track_count.max(1) as f32;
+    let base_percent = 1.0 / columns;
+    if track_count <= 1 {
+        return LengthSpec::Percent(base_percent);
+    }
+
+    let gap_share = (track_count.saturating_sub(1) as f32) / columns;
+    let mut calc = CalcLength::zero();
+    calc.percent = base_percent;
+
+    match gap {
+        LengthSpec::Absolute(value) => {
+            calc.abs = -(value * gap_share);
+        }
+        LengthSpec::Percent(value) => {
+            calc.percent -= value * gap_share;
+        }
+        LengthSpec::Em(value) => {
+            calc.em = -(value * gap_share);
+        }
+        LengthSpec::Rem(value) => {
+            calc.rem = -(value * gap_share);
+        }
+        LengthSpec::Calc(value) => {
+            calc.abs = -(value.abs * gap_share);
+            calc.percent -= value.percent * gap_share;
+            calc.em = -(value.em * gap_share);
+            calc.rem = -(value.rem * gap_share);
+        }
+        LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => {}
+    }
+
+    LengthSpec::Calc(calc)
+}
+
 fn table_flowable(
     node: &NodeRef,
     style: &ComputedStyle,
@@ -2159,6 +2703,8 @@ fn table_flowable(
     ancestors: &mut Vec<ElementInfo>,
     font_registry: Option<Arc<FontRegistry>>,
     report: Option<&mut GlyphCoverageReport>,
+    svg_form: bool,
+    svg_raster_fallback: bool,
     perf: Option<&crate::perf::PerfLogger>,
     doc_id: Option<usize>,
 ) -> TableFlowable {
@@ -2216,21 +2762,42 @@ fn table_flowable(
         }
     }
 
-    fn collect_rows(node: &NodeRef, in_thead: bool, out: &mut Vec<(NodeRef, bool)>) {
-        for child in node.children() {
-            if let Some(el) = child.as_element() {
-                match el.name.local.as_ref() {
-                    "thead" => collect_rows(&child, true, out),
-                    "tbody" | "tfoot" => collect_rows(&child, false, out),
-                    "tr" => out.push((child, in_thead)),
-                    _ => collect_rows(&child, in_thead, out),
-                }
+    fn resolve_non_auto_height(spec: LengthSpec, font_size: Pt, root_font_size: Pt) -> Pt {
+        match spec {
+            LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => Pt::ZERO,
+            _ => spec
+                .resolve_height(Pt::ZERO, font_size, root_font_size)
+                .max(Pt::ZERO),
+        }
+    }
+
+    fn collect_rows_from_group(group: &NodeRef, in_thead: bool, out: &mut Vec<(NodeRef, bool)>) {
+        for child in group.children() {
+            let Some(el) = child.as_element() else {
+                continue;
+            };
+            if el.name.local.as_ref() == "tr" {
+                out.push((child, in_thead));
+            }
+        }
+    }
+
+    fn collect_rows(table: &NodeRef, out: &mut Vec<(NodeRef, bool)>) {
+        for child in table.children() {
+            let Some(el) = child.as_element() else {
+                continue;
+            };
+            match el.name.local.as_ref() {
+                "thead" => collect_rows_from_group(&child, true, out),
+                "tbody" | "tfoot" => collect_rows_from_group(&child, false, out),
+                "tr" => out.push((child, false)),
+                _ => {}
             }
         }
     }
 
     let mut rows: Vec<(NodeRef, bool)> = Vec::new();
-    collect_rows(node, false, &mut rows);
+    collect_rows(node, &mut rows);
     if let Some(logger) = resolver.debug_logger() {
         let header_count = rows.iter().filter(|(_, is_header)| *is_header).count();
         let body_count = rows.len().saturating_sub(header_count);
@@ -2313,22 +2880,21 @@ fn table_flowable(
             }
         });
         let mut pushed_section = false;
-        let mut section_style_owned: Option<ComputedStyle> = None;
-        let mut row_parent_style: &ComputedStyle = style;
         let mut can_cache_section = true;
-        if let Some((section, inline_style)) = section_context {
+        let section_style_owned: Option<ComputedStyle> = if let Some((section, inline_style)) = section_context {
             can_cache_section =
                 section.id.is_none() && section.classes.is_empty() && inline_style.is_none();
             let t_section_style = std::time::Instant::now();
-            section_style_owned =
-                Some(resolver.compute_style(&section, style, inline_style.as_deref(), ancestors));
+            let computed =
+                resolver.compute_style(&section, style, inline_style.as_deref(), ancestors);
             row_style_ms += t_section_style.elapsed().as_secs_f64() * 1000.0;
             ancestors.push(section);
             pushed_section = true;
-            if let Some(section_style) = section_style_owned.as_ref() {
-                row_parent_style = section_style;
-            }
-        }
+            Some(computed)
+        } else {
+            None
+        };
+        let row_parent_style: &ComputedStyle = section_style_owned.as_ref().unwrap_or(style);
         if is_header {
             header_index += 1;
         } else {
@@ -2423,6 +2989,8 @@ fn table_flowable(
         } else {
             row_style_tmp.as_ref().unwrap()
         };
+        let row_min_height =
+            resolve_non_auto_height(row_style.height, row_style.font_size, row_style.root_font_size);
 
         ancestors.push(row_info);
 
@@ -2443,6 +3011,14 @@ fn table_flowable(
         for (cell_idx, cell_child) in cell_nodes.iter().enumerate() {
             let cell_el = cell_child.as_element().expect("cell element");
             let tag = cell_el.name.local.as_ref();
+            cell_count = cell_count.saturating_add(1);
+            let col_span = cell_el
+                .attributes
+                .borrow()
+                .get("colspan")
+                .and_then(|raw| raw.trim().parse::<usize>().ok())
+                .filter(|value| *value > 0)
+                .unwrap_or(1);
 
             let cell_info = {
                 let t_info = std::time::Instant::now();
@@ -2515,18 +3091,71 @@ fn table_flowable(
             };
             let cell_style = cell_style_ref.as_ref();
 
-            let t_cell_text = std::time::Instant::now();
-            let text = cell_child.text_contents();
-            cell_text_ms += t_cell_text.elapsed().as_secs_f64() * 1000.0;
-            let trimmed = text.trim();
-            let cell_text = if trimmed.is_empty() {
-                String::new()
-            } else {
-                let transformed = apply_text_transform(trimmed, cell_style.text_transform);
-                cell_count = cell_count.saturating_add(1);
-                text_chars = text_chars.saturating_add(transformed.chars().count() as u64);
-                transformed
-            };
+            let has_element_children = cell_child.children().any(|child| child.as_element().is_some());
+            let mut cell_content: Option<Box<dyn Flowable>> = None;
+            let mut cell_text = String::new();
+            if has_element_children {
+                let before_items = pseudo_items_for(
+                    resolver,
+                    &cell_info,
+                    cell_style,
+                    ancestors,
+                    font_registry.clone(),
+                    report.as_deref_mut(),
+                    crate::style::PseudoTarget::Before,
+                );
+                let after_items = pseudo_items_for(
+                    resolver,
+                    &cell_info,
+                    cell_style,
+                    ancestors,
+                    font_registry.clone(),
+                    report.as_deref_mut(),
+                    crate::style::PseudoTarget::After,
+                );
+
+                ancestors.push(cell_info.clone());
+                let mut cell_items = before_items;
+                cell_items.extend(collect_children(
+                    cell_child,
+                    resolver,
+                    cell_style,
+                    ancestors,
+                    font_registry.clone(),
+                    report.as_deref_mut(),
+                    svg_form,
+                    svg_raster_fallback,
+                    perf,
+                    doc_id,
+                ));
+                ancestors.pop();
+                cell_items.extend(after_items);
+
+                let mut cell_flowables = layout_children_to_flowables(cell_items, None);
+                cell_content = if cell_flowables.is_empty() {
+                    None
+                } else if cell_flowables.len() == 1 {
+                    Some(cell_flowables.remove(0))
+                } else {
+                    Some(Box::new(ContainerFlowable::new_pt(
+                        cell_flowables,
+                        cell_style.font_size,
+                        cell_style.root_font_size,
+                    )) as Box<dyn Flowable>)
+                };
+            }
+
+            if cell_content.is_none() {
+                let t_cell_text = std::time::Instant::now();
+                let text = cell_child.text_contents();
+                cell_text_ms += t_cell_text.elapsed().as_secs_f64() * 1000.0;
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    let transformed = apply_text_transform(trimmed, cell_style.text_transform);
+                    text_chars = text_chars.saturating_add(transformed.chars().count() as u64);
+                    cell_text = transformed;
+                }
+            }
 
             let align = match cell_style.text_align {
                 crate::style::TextAlignMode::Center => TextAlign::Center,
@@ -2585,11 +3214,28 @@ fn table_flowable(
                 } else {
                     None
                 },
+                col_span,
                 cell_style.root_font_size,
                 font_registry.clone(),
                 preserve_whitespace(cell_style.white_space),
                 no_wrap(cell_style.white_space),
             );
+            let mut cell = cell.with_row_min_height(row_min_height);
+            if !matches!(
+                cell_style.width,
+                LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
+            ) {
+                cell = cell.with_preferred_width(
+                    cell_style.width,
+                    cell_style.font_size,
+                    cell_style.root_font_size,
+                );
+            }
+            let cell = if let Some(content) = cell_content {
+                cell.with_content(content)
+            } else {
+                cell
+            };
             cells.push(cell);
         }
 

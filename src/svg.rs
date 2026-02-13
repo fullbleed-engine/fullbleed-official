@@ -5,7 +5,8 @@ use lightningcss::properties::Property;
 use lightningcss::properties::svg::{
     SVGPaint, SVGPaintFallback, StrokeDasharray, StrokeLinecap, StrokeLinejoin,
 };
-use lightningcss::stylesheet::{ParserOptions, StyleAttribute};
+use lightningcss::rules::CssRule;
+use lightningcss::stylesheet::{ParserOptions, StyleAttribute, StyleSheet};
 use lightningcss::traits::ToCss;
 use lightningcss::values::alpha::AlphaValue;
 use lightningcss::values::color::{CssColor, SRGB};
@@ -22,7 +23,7 @@ pub(crate) fn svg_needs_raster_fallback(svg_xml: &str) -> bool {
         let name = node.tag_name().name();
         match name {
             // Text and HTML-in-SVG are not supported in our vector subset.
-            "text" | "foreignObject" | "style" => return true,
+            "text" | "foreignObject" => return true,
             // Filter/mask pipelines are raster-only for us.
             "filter" | "mask" => return true,
             // Pattern/marker/symbol are not implemented in our subset.
@@ -32,15 +33,6 @@ pub(crate) fn svg_needs_raster_fallback(svg_xml: &str) -> bool {
 
         if node.attribute("mask").is_some() || node.attribute("filter").is_some() {
             return true;
-        }
-
-        if name == "path" {
-            if let Some(d) = node.attribute("d") {
-                // Arc commands (A/a) are not supported in the current path parser.
-                if d.contains('A') || d.contains('a') {
-                    return true;
-                }
-            }
         }
 
         if name == "image" {
@@ -249,6 +241,34 @@ impl SvgStyle {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct SvgSpecificity(u16, u16, u16);
+
+#[derive(Debug, Clone)]
+struct SvgSimpleSelector {
+    tag: Option<String>,
+    id: Option<String>,
+    classes: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct SvgSelector {
+    parts: Vec<SvgSimpleSelector>,
+    specificity: SvgSpecificity,
+}
+
+#[derive(Debug, Clone)]
+struct SvgCssRule {
+    selector: SvgSelector,
+    declarations: String,
+    order: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SvgStylesheet {
+    rules: Vec<SvgCssRule>,
+}
+
 #[derive(Debug, Clone)]
 enum PathSeg {
     MoveTo(f32, f32),
@@ -290,7 +310,8 @@ pub(crate) fn compile_svg(svg_xml: &str, width: Pt, height: Pt) -> Vec<CompiledI
         return Vec::new();
     };
 
-    let gradients = extract_gradients(&doc);
+    let stylesheet = extract_svg_stylesheet(&doc);
+    let gradients = extract_gradients(&doc, &stylesheet);
     let id_map = build_id_map(&doc);
     let view_box = parse_viewbox(root.attribute("viewBox"));
     let viewport = viewbox_to_viewport_matrix(view_box, width.to_f32(), height.to_f32());
@@ -298,7 +319,15 @@ pub(crate) fn compile_svg(svg_xml: &str, width: Pt, height: Pt) -> Vec<CompiledI
 
     let style = SvgStyle::default();
     let mut out = Vec::new();
-    compile_element(&mut out, root, base, &style, &gradients, &id_map);
+    compile_element(
+        &mut out,
+        root,
+        base,
+        &style,
+        &gradients,
+        &id_map,
+        &stylesheet,
+    );
     out
 }
 
@@ -339,13 +368,14 @@ fn compile_element(
     style: &SvgStyle,
     gradients: &std::collections::HashMap<String, GradientDef>,
     id_map: &std::collections::HashMap<String, roxmltree::Node<'_, '_>>,
+    stylesheet: &SvgStylesheet,
 ) {
     if !node.is_element() {
         return;
     }
 
     let mut local_style = style.clone();
-    apply_presentation_and_style(node, &mut local_style);
+    apply_presentation_and_style(node, stylesheet, &mut local_style);
 
     let mut local_ctm = ctm;
     if let Some(transform) = node.attribute("transform") {
@@ -359,7 +389,15 @@ fn compile_element(
         }
         "g" | "svg" => {
             for child in node.children().filter(|n| n.is_element()) {
-                compile_element(out, child, local_ctm, &local_style, gradients, id_map);
+                compile_element(
+                    out,
+                    child,
+                    local_ctm,
+                    &local_style,
+                    gradients,
+                    id_map,
+                    stylesheet,
+                );
             }
         }
         "use" => {
@@ -369,7 +407,15 @@ fn compile_element(
                     let x = parse_number(node.attribute("x").unwrap_or("0")).unwrap_or(0.0);
                     let y = parse_number(node.attribute("y").unwrap_or("0")).unwrap_or(0.0);
                     let use_ctm = local_ctm.mul(Matrix::translate(x, y));
-                    compile_element(out, target, use_ctm, &local_style, gradients, id_map);
+                    compile_element(
+                        out,
+                        target,
+                        use_ctm,
+                        &local_style,
+                        gradients,
+                        id_map,
+                        stylesheet,
+                    );
                 }
             }
         }
@@ -1031,7 +1077,302 @@ fn viewbox_to_viewport_matrix(view_box: Option<(f32, f32, f32, f32)>, w: f32, h:
     Matrix::translate(tx, ty).mul(Matrix::scale(s, s))
 }
 
-fn apply_presentation_and_style(node: roxmltree::Node<'_, '_>, style: &mut SvgStyle) {
+fn extract_svg_stylesheet(doc: &roxmltree::Document<'_>) -> SvgStylesheet {
+    let mut out = SvgStylesheet::default();
+    let mut order = 0usize;
+
+    for node in doc
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("style"))
+    {
+        let css = node.text().unwrap_or_default().trim();
+        if css.is_empty() {
+            continue;
+        }
+        let Ok(sheet) = StyleSheet::parse(css, ParserOptions::default()) else {
+            continue;
+        };
+        collect_svg_style_rules(sheet.rules, &mut out.rules, &mut order);
+    }
+
+    out
+}
+
+fn collect_svg_style_rules(
+    rules: lightningcss::rules::CssRuleList,
+    out: &mut Vec<SvgCssRule>,
+    order: &mut usize,
+) {
+    for rule in rules.0 {
+        match rule {
+            CssRule::Style(style_rule) => {
+                let selectors = style_rule
+                    .selectors
+                    .to_css_string(PrinterOptions::default())
+                    .unwrap_or_default();
+                let declarations = style_rule
+                    .declarations
+                    .to_css_string(PrinterOptions::default())
+                    .unwrap_or_default();
+                if declarations.trim().is_empty() {
+                    *order += 1;
+                    continue;
+                }
+                for selector_raw in selectors.split(',') {
+                    if let Some(selector) = parse_svg_selector(selector_raw) {
+                        out.push(SvgCssRule {
+                            selector,
+                            declarations: declarations.clone(),
+                            order: *order,
+                        });
+                    }
+                }
+                *order += 1;
+            }
+            CssRule::Media(media) => {
+                collect_svg_style_rules(media.rules, out, order);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn parse_svg_selector(raw: &str) -> Option<SvgSelector> {
+    let selector = raw.trim();
+    if selector.is_empty() {
+        return None;
+    }
+
+    let mut parts = Vec::new();
+    let mut id_count = 0u16;
+    let mut class_count = 0u16;
+    let mut tag_count = 0u16;
+
+    for token in selector.split_whitespace() {
+        let part = parse_svg_simple_selector(token)?;
+        if part.id.is_some() {
+            id_count += 1;
+        }
+        class_count += part.classes.len() as u16;
+        if part.tag.is_some() {
+            tag_count += 1;
+        }
+        parts.push(part);
+    }
+
+    if parts.is_empty() {
+        return None;
+    }
+
+    Some(SvgSelector {
+        parts,
+        specificity: SvgSpecificity(id_count, class_count, tag_count),
+    })
+}
+
+fn parse_svg_simple_selector(token: &str) -> Option<SvgSimpleSelector> {
+    let token = token.trim();
+    if token.is_empty() {
+        return None;
+    }
+    if token.contains(':')
+        || token.contains('[')
+        || token.contains(']')
+        || token.contains('>')
+        || token.contains('+')
+        || token.contains('~')
+    {
+        return None;
+    }
+
+    let bytes = token.as_bytes();
+    let mut i = 0usize;
+    let len = bytes.len();
+    let mut tag = None;
+    let mut id = None;
+    let mut classes = Vec::new();
+
+    if bytes[0] == b'*' {
+        i = 1;
+    } else if is_svg_selector_ident_start(bytes[0]) {
+        let start = i;
+        i += 1;
+        while i < len && is_svg_selector_ident_char(bytes[i]) {
+            i += 1;
+        }
+        if i > start {
+            tag = Some(token[start..i].to_ascii_lowercase());
+        }
+    }
+
+    while i < len {
+        match bytes[i] {
+            b'.' => {
+                i += 1;
+                let start = i;
+                while i < len && is_svg_selector_ident_char(bytes[i]) {
+                    i += 1;
+                }
+                if start == i {
+                    return None;
+                }
+                classes.push(token[start..i].to_string());
+            }
+            b'#' => {
+                i += 1;
+                let start = i;
+                while i < len && is_svg_selector_ident_char(bytes[i]) {
+                    i += 1;
+                }
+                if start == i {
+                    return None;
+                }
+                if id.is_some() {
+                    return None;
+                }
+                id = Some(token[start..i].to_string());
+            }
+            _ => return None,
+        }
+    }
+
+    if tag.is_none() && id.is_none() && classes.is_empty() {
+        return None;
+    }
+
+    Some(SvgSimpleSelector { tag, id, classes })
+}
+
+fn is_svg_selector_ident_start(ch: u8) -> bool {
+    ch.is_ascii_alphabetic() || ch == b'_'
+}
+
+fn is_svg_selector_ident_char(ch: u8) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, b'_' | b'-' | b':')
+}
+
+fn parent_element<'a, 'input>(
+    node: roxmltree::Node<'a, 'input>,
+) -> Option<roxmltree::Node<'a, 'input>> {
+    let mut cursor = node.parent();
+    while let Some(parent) = cursor {
+        if parent.is_element() {
+            return Some(parent);
+        }
+        cursor = parent.parent();
+    }
+    None
+}
+
+fn svg_simple_selector_matches(node: roxmltree::Node<'_, '_>, selector: &SvgSimpleSelector) -> bool {
+    if let Some(tag) = &selector.tag {
+        if !node.tag_name().name().eq_ignore_ascii_case(tag) {
+            return false;
+        }
+    }
+    if let Some(id) = &selector.id {
+        if node.attribute("id") != Some(id.as_str()) {
+            return false;
+        }
+    }
+    for class_name in &selector.classes {
+        let Some(node_classes) = node.attribute("class") else {
+            return false;
+        };
+        if !node_classes
+            .split_whitespace()
+            .any(|candidate| candidate == class_name)
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn svg_selector_matches(node: roxmltree::Node<'_, '_>, selector: &SvgSelector) -> bool {
+    let Some(last) = selector.parts.last() else {
+        return false;
+    };
+    if !svg_simple_selector_matches(node, last) {
+        return false;
+    }
+
+    let mut anchor = parent_element(node);
+    for part in selector.parts.iter().rev().skip(1) {
+        let mut probe = anchor;
+        let mut matched = None;
+        while let Some(candidate) = probe {
+            if svg_simple_selector_matches(candidate, part) {
+                matched = Some(candidate);
+                break;
+            }
+            probe = parent_element(candidate);
+        }
+        let Some(candidate) = matched else {
+            return false;
+        };
+        anchor = parent_element(candidate);
+    }
+
+    true
+}
+
+fn apply_style_string_normal_only(input: &str, style: &mut SvgStyle) -> bool {
+    if let Ok(style_attr) = StyleAttribute::parse(input, ParserOptions::default()) {
+        apply_svg_property_list(&style_attr.declarations.declarations, style);
+        return true;
+    }
+    false
+}
+
+fn apply_style_string_important_only(input: &str, style: &mut SvgStyle) -> bool {
+    if let Ok(style_attr) = StyleAttribute::parse(input, ParserOptions::default()) {
+        apply_svg_property_list(&style_attr.declarations.important_declarations, style);
+        return true;
+    }
+    false
+}
+
+fn apply_svg_stylesheet(
+    node: roxmltree::Node<'_, '_>,
+    stylesheet: &SvgStylesheet,
+    style: &mut SvgStyle,
+) {
+    if stylesheet.rules.is_empty() {
+        return;
+    }
+
+    let mut matched: Vec<&SvgCssRule> = stylesheet
+        .rules
+        .iter()
+        .filter(|rule| svg_selector_matches(node, &rule.selector))
+        .collect();
+    if matched.is_empty() {
+        return;
+    }
+
+    matched.sort_by(|a, b| {
+        a.selector
+            .specificity
+            .cmp(&b.selector.specificity)
+            .then(a.order.cmp(&b.order))
+    });
+
+    for rule in &matched {
+        if !apply_style_string_normal_only(&rule.declarations, style) {
+            apply_style_string_legacy(&rule.declarations, style);
+        }
+    }
+    for rule in &matched {
+        let _ = apply_style_string_important_only(&rule.declarations, style);
+    }
+}
+
+fn apply_presentation_and_style(
+    node: roxmltree::Node<'_, '_>,
+    stylesheet: &SvgStylesheet,
+    style: &mut SvgStyle,
+) {
     // Presentation attributes are the baseline.
     if let Some(fill) = node.attribute("fill") {
         parse_paint_into(fill, &mut style.fill);
@@ -1095,6 +1436,9 @@ fn apply_presentation_and_style(node: roxmltree::Node<'_, '_>, style: &mut SvgSt
     if let Some(v) = node.attribute("stroke-opacity").and_then(parse_number) {
         style.stroke_opacity *= v.clamp(0.0, 1.0);
     }
+
+    // Inline/embedded stylesheet rules override presentation attributes.
+    apply_svg_stylesheet(node, stylesheet, style);
 
     // Inline style="" wins over presentation attributes.
     if let Some(s) = node.attribute("style") {
@@ -1458,10 +1802,34 @@ fn parse_stop_offset(input: Option<&str>) -> Option<f32> {
     Some(v.clamp(0.0, 1.0))
 }
 
-fn parse_stop_color(node: roxmltree::Node<'_, '_>) -> Option<Color> {
-    if let Some(c) = node.attribute("stop-color").and_then(parse_color) {
-        return Some(c);
+fn parse_stop_color(node: roxmltree::Node<'_, '_>, stylesheet: &SvgStylesheet) -> Option<Color> {
+    let mut stop_color = node.attribute("stop-color").and_then(parse_color);
+
+    // Support class/id based declarations in embedded <style> blocks.
+    if !stylesheet.rules.is_empty() {
+        let mut matched: Vec<&SvgCssRule> = stylesheet
+            .rules
+            .iter()
+            .filter(|rule| svg_selector_matches(node, &rule.selector))
+            .collect();
+        matched.sort_by(|a, b| {
+            a.selector
+                .specificity
+                .cmp(&b.selector.specificity)
+                .then(a.order.cmp(&b.order))
+        });
+        for rule in &matched {
+            if let Some(color) = parse_named_stop_color_decl(&rule.declarations, false) {
+                stop_color = Some(color);
+            }
+        }
+        for rule in &matched {
+            if let Some(color) = parse_named_stop_color_decl(&rule.declarations, true) {
+                stop_color = Some(color);
+            }
+        }
     }
+
     if let Some(style_attr) = node.attribute("style") {
         for decl in style_attr.split(';') {
             let decl = decl.trim();
@@ -1469,15 +1837,47 @@ fn parse_stop_color(node: roxmltree::Node<'_, '_>) -> Option<Color> {
                 continue;
             };
             if k.trim().eq_ignore_ascii_case("stop-color") {
-                return parse_color(v.trim());
+                stop_color = parse_color(v.trim());
             }
         }
     }
-    None
+    stop_color
+}
+
+fn parse_named_stop_color_decl(input: &str, important_only: bool) -> Option<Color> {
+    let mut out = None;
+    for decl in input.split(';') {
+        let decl = decl.trim();
+        if decl.is_empty() {
+            continue;
+        }
+        let Some((raw_key, raw_value)) = decl.split_once(':') else {
+            continue;
+        };
+        if !raw_key.trim().eq_ignore_ascii_case("stop-color") {
+            continue;
+        }
+        let mut value = raw_value.trim();
+        let has_important = value.to_ascii_lowercase().contains("!important");
+        if important_only != has_important {
+            continue;
+        }
+        if has_important {
+            value = value
+                .rsplit_once("!important")
+                .map(|(v, _)| v.trim())
+                .unwrap_or(value);
+        }
+        if let Some(color) = parse_color(value) {
+            out = Some(color);
+        }
+    }
+    out
 }
 
 fn extract_gradients(
     doc: &roxmltree::Document<'_>,
+    stylesheet: &SvgStylesheet,
 ) -> std::collections::HashMap<String, GradientDef> {
     // Opinionated SVG 1.1 subset: linearGradient + radialGradient with stop colors.
     // (We ignore per-stop opacity for now; we support element opacity via ExtGState.)
@@ -1520,7 +1920,7 @@ fn extract_gradients(
             let Some(offset) = parse_stop_offset(stop.attribute("offset")) else {
                 continue;
             };
-            let Some(color) = parse_stop_color(stop) else {
+            let Some(color) = parse_stop_color(stop, stylesheet) else {
                 continue;
             };
             stops.push(crate::types::ShadingStop { offset, color });
@@ -2005,8 +2405,8 @@ fn parse_path_data(d: &str) -> Vec<PathSeg> {
                     p.next_number(),
                     p.next_number(),
                     p.next_number(),
-                    p.next_number(),
-                    p.next_number(),
+                    p.next_arc_flag(),
+                    p.next_arc_flag(),
                     p.next_number(),
                     p.next_number(),
                 ) {
@@ -2291,6 +2691,24 @@ impl<'a> PathParser<'a> {
         s.parse::<f32>().ok()
     }
 
+    fn next_arc_flag(&mut self) -> Option<f32> {
+        self.skip_ws();
+        if self.i >= self.bytes.len() {
+            return None;
+        }
+        match self.bytes[self.i] {
+            b'0' => {
+                self.i += 1;
+                Some(0.0)
+            }
+            b'1' => {
+                self.i += 1;
+                Some(1.0)
+            }
+            _ => self.next_number().map(|v| if v.abs() > 0.5 { 1.0 } else { 0.0 }),
+        }
+    }
+
     fn next_pair(&mut self) -> Option<(f32, f32)> {
         let x = self.next_number()?;
         let y = self.next_number()?;
@@ -2316,6 +2734,126 @@ mod tests {
         assert!(!segs.is_empty());
         // Quadratic and arc both normalize to cubic CurveTo segments.
         assert!(segs.iter().any(|s| matches!(s, PathSeg::CurveTo(..))));
+    }
+
+    #[test]
+    fn parses_compact_arc_flags_without_separator() {
+        let segs = parse_path_data("M10 10 A5 5 0 01 20 20");
+        assert!(
+            segs.iter().any(|s| matches!(s, PathSeg::CurveTo(..))),
+            "compact arc flag syntax should produce cubic segments"
+        );
+    }
+
+    #[test]
+    fn svg_stylesheet_class_rules_apply_to_shapes() {
+        let svg = r##"
+        <svg width="220" height="120" viewBox="0 0 220 120">
+          <style>
+            .bg { fill: #6f85ff; }
+            .dot { fill: #9ce2c8; }
+            .tri { fill: #202f5f; stroke: #ffffff; stroke-width: 2; }
+          </style>
+          <rect class="bg" x="8" y="8" width="204" height="104" rx="10" />
+          <circle class="dot" cx="56" cy="60" r="24" />
+          <path class="tri" d="M96 82 L118 34 L140 82 Z" />
+        </svg>
+        "##;
+        let compiled = compile_svg(svg, Pt::from_f32(220.0), Pt::from_f32(120.0));
+        assert!(
+            !compiled.is_empty(),
+            "expected compiled output from class-based stylesheet"
+        );
+        let mut had_bg = false;
+        let mut had_tri_stroke = false;
+        for item in &compiled {
+            let CompiledItem::Path(path) = item else {
+                continue;
+            };
+            if let Some(fill) = path.style.fill.color {
+                if (fill.r - (111.0 / 255.0)).abs() < 0.01
+                    && (fill.g - (133.0 / 255.0)).abs() < 0.01
+                    && (fill.b - 1.0).abs() < 0.01
+                {
+                    had_bg = true;
+                }
+            }
+            if let Some(stroke) = path.style.stroke.color {
+                if (stroke.r - 1.0).abs() < 0.01
+                    && (stroke.g - 1.0).abs() < 0.01
+                    && (stroke.b - 1.0).abs() < 0.01
+                    && (path.style.stroke_width - 2.0).abs() < 0.01
+                {
+                    had_tri_stroke = true;
+                }
+            }
+        }
+        assert!(had_bg, "expected stylesheet fill to apply to .bg shape");
+        assert!(
+            had_tri_stroke,
+            "expected stylesheet stroke to apply to .tri shape"
+        );
+    }
+
+    #[test]
+    fn svg_stylesheet_descendant_rules_apply_to_nested_nodes() {
+        let svg = r##"
+        <svg width="40" height="20" viewBox="0 0 40 20">
+          <style>.group .dot { fill: #00ff00; }</style>
+          <g class="group"><circle class="dot" cx="10" cy="10" r="8" /></g>
+        </svg>
+        "##;
+        let compiled = compile_svg(svg, Pt::from_f32(40.0), Pt::from_f32(20.0));
+        let path = compiled
+            .iter()
+            .find_map(|item| match item {
+                CompiledItem::Path(path) => Some(path),
+                _ => None,
+            })
+            .expect("expected compiled path");
+        let fill = path.style.fill.color.expect("expected fill color");
+        assert!((fill.r - 0.0).abs() < 0.01);
+        assert!((fill.g - 1.0).abs() < 0.01);
+        assert!((fill.b - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn svg_stylesheet_important_beats_later_non_important() {
+        let svg = r##"
+        <svg width="20" height="10" viewBox="0 0 20 10">
+          <style>
+            .strong { fill: #ff0000 !important; }
+            .weak { fill: #0000ff; }
+          </style>
+          <rect class="strong weak" x="0" y="0" width="20" height="10" />
+        </svg>
+        "##;
+        let compiled = compile_svg(svg, Pt::from_f32(20.0), Pt::from_f32(10.0));
+        let path = compiled
+            .iter()
+            .find_map(|item| match item {
+                CompiledItem::Path(path) => Some(path),
+                _ => None,
+            })
+            .expect("expected compiled path");
+        let fill = path.style.fill.color.expect("expected fill color");
+        assert!((fill.r - 1.0).abs() < 0.01);
+        assert!((fill.g - 0.0).abs() < 0.01);
+        assert!((fill.b - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn svg_supported_features_do_not_force_raster_fallback() {
+        let svg = r##"
+        <svg width="20" height="10" viewBox="0 0 20 10">
+          <style>.x { fill: #ff0000; }</style>
+          <path class="x" d="M1 1 A4 4 0 01 9 9" />
+        </svg>
+        "##;
+        assert!(
+            !svg_needs_raster_fallback(svg),
+            "style/arc-only SVG should stay on vector path"
+        );
     }
 
     #[test]

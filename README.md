@@ -61,11 +61,6 @@ fullbleed --help
 fullbleed capabilities --json
 fullbleed doctor --json
 ```
-```
-
-
-
-
 
 ## 60-Second Quick Start (Project Happy Path)
 
@@ -80,6 +75,13 @@ vendors Bootstrap Icons (`1.11.3`) into `vendor/icons/bootstrap-icons.svg`,
 vendors `inter` into `vendor/fonts/Inter-Variable.ttf`, writes license notices
 (`vendor/css/LICENSE.bootstrap.txt`, `vendor/icons/LICENSE.bootstrap-icons.txt`, `vendor/fonts/LICENSE.inter.txt`),
 and seeds `assets.lock.json` with pinned hashes.
+The scaffolded `report.py` also runs a component mount smoke validation before
+main render and writes `output/component_mount_validation.json` (fails fast on
+missing glyphs, placement overflow, or CSS miss signals parsed from debug logs).
+Scaffolded components now include `components/primitives.py` with reusable
+layout/content helpers (`Stack`, `Row`, `Text`, table/list helpers, key/value rows, etc.).
+Each scaffolded project also includes `SCAFFOLDING.md`, which should be your
+first read before restructuring components.
 
 Install additional project assets (defaults to `./vendor/...` in project context):
 
@@ -91,16 +93,79 @@ Bootstrap baseline note:
 - We target Bootstrap (`5.0.0`) as the default styling baseline for project workflows.
 - Re-run `fullbleed assets install bootstrap --json` only if you want to explicitly refresh/bootstrap-manage outside `init`.
 
-Render from files:
+Render using the scaffolded component pipeline:
 
 ```bash
-fullbleed --json render \
-  --html templates/report.html \
-  --css templates/report.css \
-  --emit-image output/report_pages \
-  --image-dpi 150 \
-  --out output/report.pdf
+python report.py
 ```
+
+Expected artifacts from scaffolded `report.py`:
+- `output/report.pdf`
+- `output/report_page1.png` (or equivalent page preview from engine image APIs)
+- `output/component_mount_validation.json`
+- `output/css_layers.json`
+
+## Scaffold-First Workflow (Recommended)
+
+`fullbleed init` is designed for component-first authoring rather than a single large HTML template.
+
+Typical scaffold layout:
+
+```text
+.
+|-- SCAFFOLDING.md
+|-- COMPLIANCE.md
+|-- report.py
+|-- components/
+|   |-- fb_ui.py
+|   |-- primitives.py
+|   |-- header.py
+|   |-- body.py
+|   |-- footer.py
+|   `-- styles/
+|       |-- primitives.css
+|       |-- header.css
+|       |-- body.css
+|       `-- footer.css
+|-- styles/
+|   |-- tokens.css
+|   `-- report.css
+|-- vendor/
+|   |-- css/
+|   |-- fonts/
+|   `-- icons/
+`-- output/
+```
+
+Best-practice authoring model:
+1. Read `SCAFFOLDING.md` first for project conventions.
+2. Keep composition and data loading in `report.py`.
+3. Keep reusable component building blocks in `components/primitives.py`.
+4. Keep section markup in `components/header.py`, `components/body.py`, `components/footer.py`.
+5. Keep component-local styles in `components/styles/*.css`.
+6. Keep page tokens/composition styles in `styles/tokens.css` and `styles/report.css`.
+
+Recommended CSS layer order:
+1. `styles/tokens.css`
+2. `components/styles/primitives.css`
+3. `components/styles/header.css`
+4. `components/styles/body.css`
+5. `components/styles/footer.css`
+6. `styles/report.css`
+
+Recommended iteration loop:
+1. Edit data loading + component props in `report.py`.
+2. Edit component markup in `components/*.py`.
+3. Edit styles in `components/styles/*.css` and `styles/*.css`.
+4. Run `python report.py`.
+5. Review `output/report_page1.png`, `output/component_mount_validation.json`, and `output/css_layers.json`.
+
+Optional scaffold diagnostics:
+- `FULLBLEED_DEBUG=1` to emit JIT traces.
+- `FULLBLEED_PERF=1` to emit perf traces.
+- `FULLBLEED_EMIT_PAGE_DATA=1` to persist page data JSON.
+- `FULLBLEED_IMAGE_DPI=144` (or higher) for preview resolution.
+- `FULLBLEED_VALIDATE_STRICT=1` for stricter validation gates in CI.
 
 ## One-off Quick Render (No Project Scaffold)
 
@@ -762,8 +827,9 @@ fullbleed --json render \
 When targeting a design reference image (for example reference image exports), this loop has worked well:
 
 1. Start from `fullbleed init` so CSS/font/icon baselines are vendored and pinned.
-2. Register assets through the CLI (`--asset ...`) or `AssetBundle`; do not rely on HTML `<link rel="stylesheet">`.
-3. Iterate with image artifacts enabled:
+2. For scaffolded projects, run `python report.py` and set `FULLBLEED_IMAGE_DPI` as needed for sharper previews.
+3. For direct CLI template rendering, register assets through the CLI (`--asset ...`) or `AssetBundle`.
+4. Iterate with image artifacts enabled:
 
 ```bash
 fullbleed --json render \
@@ -779,11 +845,12 @@ fullbleed --json render \
   --out output/render.pdf
 ```
 
-4. Use `--repro-record` / `--repro-check` once your layout stabilizes.
+5. Use `--repro-record` / `--repro-check` once your layout stabilizes.
 
-Known caveats:
-- Source reference images are often cropped viewports, not full page canvases.
-- `--fail-on overflow` can still be over-sensitive on some full-page wrapper layouts (use with intent and verify with JIT artifacts).
+Practical tips:
+- Compare against full-page exports when available.
+- Keep a fixed preview DPI (for example `144` or `200`) across iterations.
+- Commit PNG baselines for repeatable visual checks.
 
 ## Public Golden Regression Suite
 
@@ -1003,3 +1070,4 @@ fullbleed.activate_commercial_license(
     tier="$1,000,001-$10,000,000",
 )
 ```
+
