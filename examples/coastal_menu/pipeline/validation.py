@@ -32,6 +32,22 @@ class RenderValidation:
         }
 
 
+def _extract_page_count(page_data: Any) -> int | None:
+    """Best-effort page-count extraction from engine-native page data."""
+    if page_data is None:
+        return None
+    if isinstance(page_data, list):
+        return len(page_data)
+    if isinstance(page_data, dict):
+        pages = page_data.get("pages")
+        if isinstance(pages, list):
+            return len(pages)
+        count = page_data.get("page_count")
+        if isinstance(count, int):
+            return count
+    return None
+
+
 def validate_render(
     *,
     engine: Any,
@@ -75,23 +91,15 @@ def validate_render(
         )
 
     page_count: int | None = None
-    try:
-        import fitz  # type: ignore
-
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    if hasattr(engine, "render_pdf_with_page_data"):
         try:
-            page_count = doc.page_count
-        finally:
-            doc.close()
-    except Exception as exc:
-        diagnostics.append(
-            Diagnostic(
-                code="FB_PAGECOUNT_UNAVAILABLE",
-                level="warn",
-                message="Could not compute page_count in validation.",
-                data={"exception": repr(exc)},
-            )
-        )
+            _, page_data = engine.render_pdf_with_page_data(html, css)
+            page_count = _extract_page_count(page_data)
+            checks["page_data_available"] = page_data is not None
+        except Exception:
+            checks["page_data_available"] = False
+    else:
+        checks["page_data_available"] = False
 
     checks["page_count"] = page_count
     if expected_page_count is not None and page_count is not None:

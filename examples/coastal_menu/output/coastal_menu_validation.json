@@ -1,14 +1,14 @@
 {
   "ok": true,
   "bytes_written": 8347,
-  "page_count": 1,
+  "page_count": null,
   "checks": {
     "component": "App",
     "page_target": "17x8.5-landscape",
     "bootstrap_hint": true,
     "byte_length_positive": true,
-    "page_count": 1,
-    "expected_page_count": 1,
+    "page_data_available": false,
+    "page_count": null,
     "missing_glyph_count": 0
   },
   "diagnostics": []
