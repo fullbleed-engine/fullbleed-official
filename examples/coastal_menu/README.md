@@ -11,7 +11,7 @@ python report.py
 
 Outputs:
 - `output/coastal_menu.pdf`
-- `output/coastal_menu_page1.png` (if PyMuPDF is available)
+- `output/coastal_menu_page1.png`
 
 ## Structure
 
