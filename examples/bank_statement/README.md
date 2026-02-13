@@ -17,8 +17,29 @@ It is a reference for:
 - Engine-native per-page templating:
   - different margins for page 1 vs continuation pages
   - continuation header text (`header_each`)
-  - page-level and total-level footer metrics (`footer_each`, `footer_last`)
+- page-level and total-level footer metrics (`footer_each`, `footer_last`)
 - Validation and diagnostics pipeline equivalent to scaffolded production flow.
+
+## Image-to-PDF Workflow (First-Class)
+
+This example is explicitly designed for image-led reconstruction and refinement.
+
+Reference image:
+- `source.png`
+
+Recommended loop:
+- Start from `source.png` as the visual contract.
+- Build major blocks as components first (header/account details, summary, transaction table).
+- Use per-page templates early so continuation pages do not drift from the intended design.
+- Run `python report.py` after each change.
+- Compare `output/bank_statement_page1.png` and `output/bank_statement_page2.png` against the target style.
+- Increase preview precision when polishing:
+  - `FULLBLEED_IMAGE_DPI=180` or higher.
+- Keep JSON diagnostics green while matching visuals:
+  - `output/bank_statement_component_mount_validation.json`
+  - `output/bank_statement_css_layers.json`
+
+For AI and human workflows alike, the fastest path is: image target -> component decomposition -> iterative render -> visual compare -> lock layout.
 
 ## Directory Layout
 
@@ -177,4 +198,4 @@ Common edits:
 2. Run `python report.py`.
 3. Confirm `output/bank_statement_component_mount_validation.json` has `"ok": true`.
 4. Confirm `output/bank_statement.pdf` exists and page count is expected.
-5. Use `output/bank_statement_page*.png` for visual regression checks.
+5. Use `output/bank_statement_page*.png` as the primary visual regression artifacts against `source.png`.

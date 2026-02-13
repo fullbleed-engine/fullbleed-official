@@ -23,6 +23,28 @@ It is intended as a visual composition showcase for:
   - `pipeline/validation.py`
   - output written to `output/coastal_menu_validation.json`
 
+## Image-to-PDF Workflow (First-Class)
+
+This example is a direct image-to-PDF composition workflow.
+
+Source reference:
+- `costal_menu.png`
+
+Recommended loop:
+- Treat `costal_menu.png` as the design contract.
+- Map visual regions into the three panel components:
+  - left contact panel
+  - center menu panel
+  - right hero/beverage panel
+- Iterate in short cycles:
+  - edit component markup or CSS
+  - run `python report.py`
+  - compare `output/coastal_menu_page1.png` to `costal_menu.png`
+- Adjust typography, spacing, and panel proportions until visual parity is reached.
+- Keep render validation passing (`output/coastal_menu_validation.json`) while visual tuning.
+
+This workflow is intentionally optimized for both human designers and AI agents that translate reference images into componentized PDF layouts.
+
 ## Directory Layout
 
 ```text
@@ -115,8 +137,11 @@ Checks include:
 
 ## Preview Image Notes
 
-`report.py` writes `output/coastal_menu_page1.png` using a PDF-to-image step.
-If the preview dependency is unavailable, PDF output and validation still run.
+`report.py` writes `output/coastal_menu_page1.png` using Fullbleed image rendering APIs:
+- `render_image_pages_to_dir(...)` when available
+- `render_image_pages(...)` as fallback
+
+No external converter is required for normal preview generation.
 
 ## Customization Guide
 
@@ -136,4 +161,4 @@ Common edits:
 1. Run `python report.py`.
 2. Confirm `output/coastal_menu_validation.json` reports `"ok": true`.
 3. Confirm `output/coastal_menu.pdf` exists and is non-empty.
-4. Use `output/coastal_menu_page1.png` for visual parity checks against `costal_menu.png`.
+4. Use `output/coastal_menu_page1.png` as the primary visual regression artifact against `costal_menu.png`.

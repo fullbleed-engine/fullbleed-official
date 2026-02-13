@@ -17,6 +17,23 @@ It is designed to be useful for:
 - Component mount smoke validation before final render (`validate_component_mount`).
 - Optional diagnostics and metadata outputs (JIT, perf, page data).
 
+## Image-to-PDF Workflow (First-Class)
+
+This example is intended to be built the same way many real documents are built: start from a target visual and iteratively match it.
+
+Recommended loop:
+- Choose a target mock/screenshot for the invoice look.
+- Map visual regions directly to `Header`, `Body`, and `Footer` components.
+- Run `python report.py` after each style or structure edit.
+- Compare the target image against `output/acme_sample_invoice_page1.png`.
+- Raise preview DPI during final polish:
+  - `FULLBLEED_IMAGE_DPI=180` or higher.
+- Keep validation in lockstep with visuals:
+  - `output/acme_sample_invoice_component_mount_validation.json`
+  - `output/acme_sample_invoice_css_layers.json`
+
+For AI-driven iteration, treat the target image as the spec and the component tree as the editable structure that converges to that spec.
+
 ## Directory Layout
 
 ```text
@@ -153,4 +170,4 @@ Typical edits:
 2. Run `python report.py`.
 3. Confirm `output/acme_sample_invoice_component_mount_validation.json` has `"ok": true`.
 4. Confirm `output/acme_sample_invoice.pdf` is non-empty.
-5. Use `output/acme_sample_invoice_page1.png` for visual diff loops.
+5. Use `output/acme_sample_invoice_page1.png` as the primary visual regression artifact against your target image.

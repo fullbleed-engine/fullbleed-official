@@ -16,7 +16,6 @@ ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = ROOT / "output"
 CSS_PATH = ROOT / "styles" / "coastal_menu.css"
 PDF_PATH = OUTPUT_DIR / "coastal_menu.pdf"
-PNG_PATH = OUTPUT_DIR / "coastal_menu_page1.png"
 SOURCE_IMAGE = ROOT / "costal_menu.png"
 VALIDATION_PATH = OUTPUT_DIR / "coastal_menu_validation.json"
 
@@ -108,20 +107,30 @@ def load_css() -> str:
     return css_template.replace("/* __TOKENS__ */", token_block, 1)
 
 
-def _emit_preview_png(pdf_path: Path, png_path: Path) -> str:
-    try:
-        import fitz  # type: ignore
-    except Exception:
-        return "skipped (PyMuPDF missing)"
-    doc = fitz.open(pdf_path)
-    try:
-        if doc.page_count == 0:
-            return "skipped (empty PDF)"
-        pix = doc[0].get_pixmap(dpi=144, alpha=False)
-        pix.save(png_path)
-    finally:
-        doc.close()
-    return "ok"
+def _emit_preview_png(
+    engine: fullbleed.PdfEngine,
+    html: str,
+    css: str,
+    out_dir: Path,
+    *,
+    stem: str,
+    dpi: int,
+) -> tuple[str, str | None]:
+    if hasattr(engine, "render_image_pages_to_dir"):
+        paths = engine.render_image_pages_to_dir(html, css, str(out_dir), dpi, stem)
+        if paths:
+            return "ok", str(paths[0])
+        return "skipped (no pages)", None
+
+    if hasattr(engine, "render_image_pages"):
+        page_images = engine.render_image_pages(html, css, dpi)
+        if page_images:
+            first_path = out_dir / f"{stem}_page1.png"
+            first_path.write_bytes(page_images[0])
+            return "ok", str(first_path)
+        return "skipped (no pages)", None
+
+    return "skipped (engine image API unavailable)", None
 
 
 def main() -> None:
@@ -133,10 +142,20 @@ def main() -> None:
     VALIDATION_PATH.write_text(json.dumps(validation.to_dict(), indent=2), encoding="utf-8")
 
     bytes_written = engine.render_pdf_to_file(html, css, str(PDF_PATH))
-    png_status = _emit_preview_png(PDF_PATH, PNG_PATH)
+    png_status, preview_png = _emit_preview_png(
+        engine,
+        html,
+        css,
+        OUTPUT_DIR,
+        stem="coastal_menu",
+        dpi=144,
+    )
 
     print(f"[ok] Wrote {PDF_PATH} ({bytes_written} bytes)")
-    print(f"[ok] Preview PNG: {PNG_PATH} ({png_status})")
+    if preview_png is not None:
+        print(f"[ok] Preview PNG: {preview_png} ({png_status})")
+    else:
+        print(f"[ok] Preview PNG: {OUTPUT_DIR} ({png_status})")
     print(f"[ok] Validation: {VALIDATION_PATH} (ok={validation.ok})")
     print(f"[info] Source reference: {SOURCE_IMAGE}")
 
