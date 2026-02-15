@@ -2,6 +2,7 @@
 # Fullbleed
 
 Deterministic, dependency-free HTML/CSS-to-PDF generation in Rust, with a Python-first CLI and Python engine bindings.
+License: AGPLv3 for OSS use; commercial license available for proprietary/closed-source production.
 
 ## Positioning
 
