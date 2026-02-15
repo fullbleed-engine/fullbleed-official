@@ -16,9 +16,9 @@ License: AGPLv3 for OSS use; commercial license available for proprietary/closed
 
 ## Positioning
 
-Fullbleed is not a web-to-print runtime, and does not aim to be one.
+Fullbleed is a deterministic, offline-first document rendering engine for transactional/VDP pipelines (not a browser, not a hosted web-to-print SaaS).
 
-Fullbleed is a document creation engine: HTML and CSS are used as a familiar DSL for layout, styling, and data placement in transactional documents.
+HTML and CSS are used as a familiar DSL for layout, styling, and data placement in transactional documents.
 
 HTML/CSS are the familiar document DSL; with pinned assets and flags, Fullbleed targets reproducible outputs.
 See our [publicly available targets](https://github.com/fullbleed-engine/fullbleed-targets).
