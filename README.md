@@ -6,6 +6,14 @@ Deterministic, dependency-free HTML/CSS-to-PDF generation in Rust, with a Python
 
 License: AGPLv3 for OSS use; commercial license available for proprietary/closed-source production.
 
+
+
+- **Install:** `pip install fullbleed`
+- **Try:** `fullbleed init . && python report.py`
+- **Outputs:** `output/report.pdf` 
+- Deterministic + reproducible (`--repro-record` / `--repro-check`)
+- Agent-safe JSON schemas (`--json-only`, `--schema`)
+
 ## Positioning
 
 Fullbleed is not a web-to-print runtime, and does not aim to be one.
