@@ -8,6 +8,15 @@ repository = "https://github.com/fullbleed-engine/fullbleed-official"
 homepage = "https://fullbleed.dev"
 documentation = "https://github.com/fullbleed-engine/fullbleed-official#readme"
 readme = "README.md"
+include = [
+    "Cargo.toml",
+    "Cargo.lock",
+    "README.md",
+    "LICENSE",
+    "COPYRIGHT",
+    "THIRD_PARTY_LICENSES.md",
+    "src/**",
+]
 
 [lib]
 crate-type = ["rlib", "cdylib"]
