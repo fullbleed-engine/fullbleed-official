@@ -42,8 +42,11 @@ Additional focused references are in `docs/`:
 - Deterministic render pipeline with optional SHA256 output hashing.
 - Reproducibility workflow via `--repro-record` and `--repro-check`.
 - PDF `1.7` as the production-stable default target.
+- Rust-native PDF template composition for VDP/transactional overlays.
+- Feature-driven page-to-template binding with per-page deterministic compose plans.
 - Structured JSON result schemas for CI and AI agents.
 - Offline-first asset model with explicit remote opt-in.
+- Remote project template registry workflows (`new list`, `new search`, `new remote`).
 - Python-first extension surface for hackability and custom workflows.
 - Python render calls release the GIL while Rust rendering executes.
 - Rayon-backed parallelism for batch rendering and selected internal engine workloads.
@@ -124,6 +127,36 @@ Expected artifacts from scaffolded `report.py`:
 - `output/report_page1.png` (or equivalent page preview from engine image APIs)
 - `output/component_mount_validation.json`
 - `output/css_layers.json`
+
+## Project Bootstrap Templates (`fullbleed new`)
+
+Use local starters:
+
+```bash
+fullbleed new local invoice ./my-invoice
+fullbleed new local statement ./my-statement
+```
+
+Discover remote starters from registry:
+
+```bash
+fullbleed new list --json
+fullbleed new search i9 --tag vdp --json
+fullbleed new remote i9-stamped-vdp ./i9-job --json
+```
+
+Optional registry override (for private/canary registries):
+
+```bash
+fullbleed new list --registry https://example.com/manifest.json --json
+```
+
+or:
+
+```bash
+set FULLBLEED_TEMPLATE_REGISTRY=https://example.com/manifest.json
+fullbleed new search statement --json
+```
 
 ## Scaffold-First Workflow (Recommended)
 
@@ -231,6 +264,53 @@ fullbleed --json plan \
   --html templates/report.html \
   --css templates/report.css
 ```
+
+## PDF Template Composition (VDP / Transactional)
+
+When overlaying variable data onto a source PDF, use the built-in Rust template compose path.
+
+Minimal CLI auto-compose flow:
+
+```bash
+fullbleed --json render \
+  --html templates/overlay.html \
+  --css templates/overlay.css \
+  --asset templates/source.pdf --asset-kind pdf --asset-name source-template \
+  --template-binding config/template_binding.json \
+  --templates config/template_catalog.json \
+  --out output/composed.pdf
+```
+
+Minimal `template_binding` example:
+
+```json
+{
+  "default_template_id": "source-template",
+  "feature_prefix": "fb.feature.",
+  "by_feature": {
+    "front": "source-template",
+    "back_blank": "source-template"
+  }
+}
+```
+
+Python API compose flow:
+
+```python
+import fullbleed
+
+engine = fullbleed.PdfEngine(template_binding=binding_spec)
+overlay_bytes, _page_data, bindings = engine.render_pdf_with_page_data_and_template_bindings(html, css)
+open("output/overlay.pdf", "wb").write(overlay_bytes)
+fullbleed.finalize_compose_pdf(
+    [("source-template", "templates/source.pdf")],
+    plan,  # [(template_id, template_page_index, overlay_page_index, dx, dy), ...]
+    "output/overlay.pdf",
+    "output/composed.pdf",
+)
+```
+
+See `docs/pdf-templates.md` and `examples/template-flagging-smoke/` for full production examples.
 
 ## CLI Command Map
 
@@ -984,6 +1064,9 @@ print(payload["outputs"]["pdf"])
     "fullbleed.cache_prune.v1",
     "fullbleed.init.v1",
     "fullbleed.new_template.v1",
+    "fullbleed.new_list.v1",
+    "fullbleed.new_search.v1",
+    "fullbleed.new_remote.v1",
     "fullbleed.debug_perf.v1",
     "fullbleed.debug_jit.v1",
     "fullbleed.repro_record.v1",
