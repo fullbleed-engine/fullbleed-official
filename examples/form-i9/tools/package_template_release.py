@@ -117,7 +117,7 @@ def build_release(
     release_block = {
         "version": version,
         "published_at": timestamp,
-        "fullbleed_version_range": ">=0.1.12",
+        "fullbleed_version_range": ">=0.1.6",
         "python_version_range": ">=3.10",
         "archive": {
             "url": f"https://github.com/fullbleed-engine/fullbleed-manifest/releases/download/{template_id}-v{version}/{zip_name}",
