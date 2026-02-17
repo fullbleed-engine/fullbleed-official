@@ -41,6 +41,10 @@ This emits:
 - `output/permutation_vdp/manifest.json`
 - `output/permutation_vdp/records.json`
 
+Note:
+- The permutation runner now uses a Fullbleed-only contract (no third-party PDF parser).
+- Default chunk size is large so the canonical run emits single merged artifacts directly.
+
 Current matrix categories:
 - baseline: 1 record
 - checkbox permutations: 256 records (`2^8`)
@@ -54,10 +58,10 @@ Current matrix categories:
 - `output/template_bindings.json`: per-page template binding decisions
 - `output/compose_report.json`: finalize compose summary
 - `output/template_asset_validation.json`: PDF asset metadata/validation report
-- `output/field_fit_validation.json`: geometry-fit validation against composed PDF text extraction
+- `output/field_fit_validation.json`: Fullbleed-only heuristic field-fit validation
 - `output/component_mount_validation.json`: component mount smoke report
 - `output/report_page_data.json`: page data payload from render step
-- `output/report_page*.png`: preview PNGs of composed output
+- `output/report_page*.png`: overlay preview PNGs from engine image rendering
 
 ## Field Data Contract
 
@@ -71,8 +75,11 @@ Keys map to exact widget geometry in `data/i9_field_layout.json`.
 
 ## Regenerate Layout/Data From PDF
 
-If the source form changes, regenerate layout + seed values:
+Refresh seeded values from canonical layout:
 
 ```bash
 python tools/build_i9_fields.py
 ```
+
+Note:
+- This tool intentionally avoids third-party PDF parsers. Keep `data/i9_field_layout.json` as the canonical checked-in layout input.

@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
 from pathlib import Path
-
-import fitz
+from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,20 +12,6 @@ LAYOUT_PATH = ROOT / "data" / "i9_field_layout.json"
 DATA_PATH = ROOT / "data" / "data.json"
 LEGACY_DATA_PATH = ROOT / "data" / "i9_data.json"
 
-FIELD_FLAG_MULTILINE = 1 << 12
-FIELD_FLAG_COMB = 1 << 24
-
-
-MANUAL_KEYS: dict[tuple[int, str], str] = {
-    (1, "CB_1"): "p01_section1_status_us_citizen",
-    (1, "CB_2"): "p01_section1_status_noncitizen_national",
-    (1, "CB_3"): "p01_section1_status_lawful_permanent_resident",
-    (1, "CB_4"): "p01_section1_status_authorized_to_work_until",
-    (1, "CB_Alt"): "p01_section2_alternative_procedure_used",
-    (4, "CB_Alt_0"): "p04_reverification_row_1_alt_procedure_used",
-    (4, "CB_Alt_1"): "p04_reverification_row_2_alt_procedure_used",
-    (4, "CB_Alt_2"): "p04_reverification_row_3_alt_procedure_used",
-}
 
 MANUAL_VALUES: dict[tuple[int, str], object] = {
     (1, "Last Name (Family Name)"): "DOE",
@@ -72,25 +56,6 @@ MANUAL_VALUES: dict[tuple[int, str], object] = {
 }
 
 
-@dataclass
-class FieldEntry:
-    key: str
-    pdf_field_name: str
-    page: int
-    widget_index: int
-    field_type: str
-    x_pt: float
-    y_pt: float
-    width_pt: float
-    height_pt: float
-    field_flags: int
-    text_maxlen: int
-    text_font: str
-    text_fontsize: float
-    comb: bool
-    multiline: bool
-
-
 def _slugify(raw: str) -> str:
     text = raw.strip().lower().replace("&", " and ")
     text = re.sub(r"[^a-z0-9]+", "_", text)
@@ -102,27 +67,16 @@ def _slugify(raw: str) -> str:
     return text
 
 
-def _build_key(*, page: int, field_name: str, used: set[str]) -> str:
-    key = MANUAL_KEYS.get((page, field_name))
-    if not key:
-        key = f"p{page:02d}_{_slugify(field_name)}"
-    base = key
-    suffix = 2
-    while key in used:
-        key = f"{base}_{suffix}"
-        suffix += 1
-    used.add(key)
-    return key
+def _auto_value(field: dict[str, Any], fallback_key: str) -> object:
+    name = str(field.get("pdf_field_name", "")).lower()
+    field_type = str(field.get("field_type", "Text"))
+    page = int(field.get("page", 0) or 0)
+    widget_index = int(field.get("widget_index", 0) or 0)
 
-
-def _auto_value(entry: FieldEntry) -> object:
-    key = entry.key
-    name = entry.pdf_field_name.lower()
-
-    if entry.field_type == "CheckBox":
+    if field_type == "CheckBox":
         return False
 
-    if entry.field_type == "ComboBox":
+    if field_type == "ComboBox":
         if "state" in name:
             return "TX"
         return "N/A"
@@ -148,97 +102,47 @@ def _auto_value(entry: FieldEntry) -> object:
     if "address" in name:
         return "100 MAIN ST"
 
-    # Keep fallback short so it fits tiny fields.
-    return f"V{entry.page}{entry.widget_index:02d}"
+    return f"V{page}{widget_index:02d}-{_slugify(fallback_key)[:10]}"
 
 
 def build() -> None:
-    if not PDF_PATH.exists():
-        raise FileNotFoundError(f"source PDF not found: {PDF_PATH}")
+    if not LAYOUT_PATH.exists():
+        raise FileNotFoundError(
+            f"layout file not found: {LAYOUT_PATH}\n"
+            "This project now avoids third-party PDF parsers in tooling.\n"
+            "Keep the checked-in layout JSON as canonical input for data seeding."
+        )
 
-    doc = fitz.open(PDF_PATH)
-    try:
-        page_meta: list[dict[str, object]] = []
-        fields: list[FieldEntry] = []
-        used_keys: set[str] = set()
+    layout_payload = json.loads(LAYOUT_PATH.read_text(encoding="utf-8"))
+    if not isinstance(layout_payload, dict):
+        raise ValueError(f"invalid layout payload: {LAYOUT_PATH}")
+    fields = layout_payload.get("fields")
+    if not isinstance(fields, list) or not fields:
+        raise ValueError(f"layout has no fields: {LAYOUT_PATH}")
 
-        for page_index in range(doc.page_count):
-            page_no = page_index + 1
-            page = doc[page_index]
-            page_meta.append(
-                {
-                    "page": page_no,
-                    "width_pt": round(float(page.rect.width), 3),
-                    "height_pt": round(float(page.rect.height), 3),
-                }
-            )
+    data_values: dict[str, object] = {}
+    for idx, raw in enumerate(fields):
+        if not isinstance(raw, dict):
+            continue
+        key = str(raw.get("key", "")).strip()
+        if not key:
+            key = f"field_{idx+1:04d}"
+        page = int(raw.get("page", 0) or 0)
+        pdf_field_name = str(raw.get("pdf_field_name", key))
+        manual = MANUAL_VALUES.get((page, pdf_field_name))
+        data_values[key] = manual if manual is not None else _auto_value(raw, key)
 
-            widget = page.first_widget
-            widget_index = 0
-            while widget:
-                rect = widget.rect
-                field_name = widget.field_name or f"unnamed_{page_no}_{widget_index}"
-                key = _build_key(page=page_no, field_name=field_name, used=used_keys)
-                field_flags = int(getattr(widget, "field_flags", 0) or 0)
-                text_maxlen = int(getattr(widget, "text_maxlen", 0) or 0)
-                text_font = str(getattr(widget, "text_font", "") or "")
-                text_fontsize = float(getattr(widget, "text_fontsize", 0.0) or 0.0)
-                fields.append(
-                    FieldEntry(
-                        key=key,
-                        pdf_field_name=field_name,
-                        page=page_no,
-                        widget_index=widget_index,
-                        field_type=str(widget.field_type_string or "Text"),
-                        x_pt=round(float(rect.x0), 3),
-                        y_pt=round(float(rect.y0), 3),
-                        width_pt=round(float(rect.width), 3),
-                        height_pt=round(float(rect.height), 3),
-                        field_flags=field_flags,
-                        text_maxlen=text_maxlen,
-                        text_font=text_font,
-                        text_fontsize=round(text_fontsize, 3),
-                        comb=bool(field_flags & FIELD_FLAG_COMB),
-                        multiline=bool(field_flags & FIELD_FLAG_MULTILINE),
-                    )
-                )
-                widget_index += 1
-                widget = widget.next
-
-        fields.sort(key=lambda item: (item.page, item.widget_index, item.key))
-
-        data_values: dict[str, object] = {}
-        for item in fields:
-            manual = MANUAL_VALUES.get((item.page, item.pdf_field_name))
-            if manual is not None:
-                data_values[item.key] = manual
-            else:
-                data_values[item.key] = _auto_value(item)
-
-        LAYOUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
-
-        layout_payload = {
-            "schema": "fullbleed.i9_field_layout.v1",
-            "source_pdf": PDF_PATH.name,
-            "page_count": doc.page_count,
-            "pages": page_meta,
-            "fields": [item.__dict__ for item in fields],
-        }
-        LAYOUT_PATH.write_text(json.dumps(layout_payload, indent=2), encoding="utf-8")
-
-        data_payload = {
-            "schema": "fullbleed.i9_data.v1",
-            "source_pdf": PDF_PATH.name,
-            "values": data_values,
-        }
-        DATA_PATH.write_text(json.dumps(data_payload, indent=2), encoding="utf-8")
-        LEGACY_DATA_PATH.write_text(json.dumps(data_payload, indent=2), encoding="utf-8")
-    finally:
-        doc.close()
+    DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema": "fullbleed.i9_data.v1",
+        "source_pdf": PDF_PATH.name,
+        "values": data_values,
+    }
+    DATA_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    LEGACY_DATA_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":
     build()
-    print(f"[ok] wrote {LAYOUT_PATH}")
-    print(f"[ok] wrote {DATA_PATH}")
+    print(f"[ok] refreshed {DATA_PATH}")
+    print(f"[ok] refreshed {LEGACY_DATA_PATH}")

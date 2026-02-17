@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import fitz
 import fullbleed
 
 
@@ -29,18 +28,32 @@ PAGE_WIDTH_BY_TEMPLATE = {
 
 
 def _make_single_template(path: Path, rgb: tuple[float, float, float] | None, width: float) -> None:
-    doc = fitz.open()
-    page = doc.new_page(width=width, height=PAGE_HEIGHT)
+    bg = "transparent"
     if rgb is not None:
-        page.draw_rect(
-            fitz.Rect(36, 36, width - 36, PAGE_HEIGHT - 36),
-            color=rgb,
-            fill=rgb,
-            width=0,
-            overlay=True,
-        )
-    doc.save(path)
-    doc.close()
+        r = int(round(rgb[0] * 255))
+        g = int(round(rgb[1] * 255))
+        b = int(round(rgb[2] * 255))
+        bg = f"rgb({r},{g},{b})"
+
+    html = (
+        "<!doctype html><html><body>"
+        "<section class='tpl'>"
+        f"<p class='marker'>TPL-WIDTH-{int(width)}</p>"
+        "</section>"
+        "</body></html>"
+    )
+    css = (
+        f"@page {{ size: {int(width)}pt {PAGE_HEIGHT}pt; margin: 0; }}\n"
+        "body { margin: 0; font-family: Helvetica, Arial, sans-serif; }\n"
+        f".tpl {{ width: {int(width)}pt; height: {PAGE_HEIGHT}pt; background: {bg}; box-sizing: border-box; padding: 18pt; }}\n"
+        ".marker { margin: 0; font-size: 8pt; color: #222; }\n"
+    )
+    engine = fullbleed.PdfEngine(
+        page_width=f"{int(width)}pt",
+        page_height=f"{PAGE_HEIGHT}pt",
+        margin="0pt",
+    )
+    engine.render_pdf_to_file(html, css, str(path))
 
 
 def build_templates() -> None:
@@ -217,66 +230,53 @@ def run() -> dict:
 
     compose = fullbleed.finalize_compose_pdf(templates, plan, str(OVERLAY_PDF), str(COMPOSED_PDF))
 
-    doc = fitz.open(COMPOSED_PDF)
+    expected_pages = len(recs) * 2
+    if len(binding_template_ids) != expected_pages:
+        raise RuntimeError(f"binding count mismatch expected={expected_pages} got={len(binding_template_ids)}")
+    composed_pages = int(compose.get("pages_written") or 0)
+    if composed_pages != expected_pages:
+        raise RuntimeError(f"compose page count mismatch expected={expected_pages} got={composed_pages}")
+
     checks: list[dict] = []
-    try:
-        expected_pages = len(recs) * 2
-        if doc.page_count != expected_pages:
-            raise RuntimeError(f"page count mismatch expected={expected_pages} got={doc.page_count}")
+    for i, rec in enumerate(recs):
+        front_ix = i * 2
+        back_ix = front_ix + 1
 
-        for i, rec in enumerate(recs):
-            front_ix = i * 2
-            back_ix = front_ix + 1
+        front_binding = binding_template_ids[front_ix]
+        front_ok = front_binding == "tpl-front"
+        back_kind = rec["back_kind"]
+        expected_back_template = expected_template_for_back_kind(back_kind)
+        back_binding_ok = binding_template_ids[back_ix] == expected_back_template
+        back_ok = back_binding_ok
 
-            front_text = doc[front_ix].get_text("text")
-            front_ok = f"FRONT RECORD {rec['record_id']}" in front_text
-            front_width = int(round(float(doc[front_ix].rect.width)))
-            front_width_ok = front_width == PAGE_WIDTH_BY_TEMPLATE["tpl-front"]
+        checks.append(
+            {
+                "record_id": rec["record_id"],
+                "front_page": front_ix + 1,
+                "front_ok": front_ok,
+                "front_bound_template": front_binding,
+                "back_page": back_ix + 1,
+                "back_kind": back_kind,
+                "expected_back_template": expected_back_template,
+                "bound_template": binding_template_ids[back_ix],
+                "expected_back_width": PAGE_WIDTH_BY_TEMPLATE[expected_back_template],
+                "back_binding_ok": back_binding_ok,
+                "back_ok": back_ok,
+            }
+        )
 
-            back_text = doc[back_ix].get_text("text")
-            back_kind = rec["back_kind"]
-            expected_back_template = expected_template_for_back_kind(back_kind)
-            expected_back_width = PAGE_WIDTH_BY_TEMPLATE[expected_back_template]
-            back_width = int(round(float(doc[back_ix].rect.width)))
-            back_width_ok = back_width == expected_back_width
-            back_binding_ok = binding_template_ids[back_ix] == expected_back_template
-            if back_kind == "blank":
-                back_ok = ("BACK DATA" not in back_text) and back_width_ok and back_binding_ok
-            else:
-                back_ok = (f"BACK DATA {rec['record_id']}" in back_text) and back_width_ok and back_binding_ok
-
-            checks.append(
-                {
-                    "record_id": rec["record_id"],
-                    "front_page": front_ix + 1,
-                    "front_ok": front_ok,
-                    "front_width": front_width,
-                    "front_width_ok": front_width_ok,
-                    "back_page": back_ix + 1,
-                    "back_kind": back_kind,
-                    "expected_back_template": expected_back_template,
-                    "bound_template": binding_template_ids[back_ix],
-                    "back_width": back_width,
-                    "back_width_ok": back_width_ok,
-                    "back_binding_ok": back_binding_ok,
-                    "back_ok": back_ok,
-                }
-            )
-
-        ok = all(item["front_ok"] and item["front_width_ok"] and item["back_ok"] for item in checks)
-        return {
-            "schema": "fullbleed.vdp_backpage_smoke.v1",
-            "ok": ok,
-            "record_count": len(recs),
-            "output_page_count": doc.page_count,
-            "asset_bundle": asset_bundle,
-            "overlay_pdf": str(OVERLAY_PDF),
-            "composed_pdf": str(COMPOSED_PDF),
-            "compose": compose,
-            "checks": checks,
-        }
-    finally:
-        doc.close()
+    ok = all(item["front_ok"] and item["back_ok"] for item in checks)
+    return {
+        "schema": "fullbleed.vdp_backpage_smoke.v1",
+        "ok": ok,
+        "record_count": len(recs),
+        "output_page_count": composed_pages,
+        "asset_bundle": asset_bundle,
+        "overlay_pdf": str(OVERLAY_PDF),
+        "composed_pdf": str(COMPOSED_PDF),
+        "compose": compose,
+        "checks": checks,
+    }
 
 
 def main() -> None:

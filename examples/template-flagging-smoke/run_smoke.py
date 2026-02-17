@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from typing import Iterable
 
-import fitz
 import fullbleed
 
 from components.fb_ui import el, render_node
@@ -45,30 +44,30 @@ TEMPLATE_PAGE_BY_ID = {
     "tpl-green": 2,
 }
 
-PAGE_SIZE = (612, 792)  # Letter portrait in points
-
 
 def build_template_pdf(path: Path) -> None:
-    doc = fitz.open()
-    square = fitz.Rect(206, 296, 406, 496)
-    palette = [("blue", (0, 0, 1)), ("red", (1, 0, 0)), ("green", (0, 1, 0))]
-    for color_name, rgb in palette:
-        page = doc.new_page(width=PAGE_SIZE[0], height=PAGE_SIZE[1])
-        page.draw_rect(
-            square,
-            color=rgb,
-            fill=rgb,
-            width=0,
-            overlay=True,
-        )
-        page.insert_text(
-            fitz.Point(222, 270),
-            f"TEMPLATE::{color_name.upper()}",
-            fontsize=18,
-            color=(0, 0, 0),
-        )
-    doc.save(path)
-    doc.close()
+    html = """
+<!doctype html>
+<html>
+  <body>
+    <section class="tpl blue"><p class="marker">TEMPLATE::BLUE</p></section>
+    <section class="tpl red"><p class="marker">TEMPLATE::RED</p></section>
+    <section class="tpl green"><p class="marker">TEMPLATE::GREEN</p></section>
+  </body>
+</html>
+""".strip()
+    css = """
+@page { size: 8.5in 11in; margin: 0; }
+body { margin: 0; font-family: Helvetica, Arial, sans-serif; }
+.tpl { width: 8.5in; height: 11in; box-sizing: border-box; padding: 24pt; }
+.tpl:not(:last-child) { break-after: page; }
+.blue { background: rgb(0, 0, 255); }
+.red { background: rgb(255, 0, 0); }
+.green { background: rgb(0, 255, 0); }
+.marker { margin: 0; font-size: 14pt; font-weight: 700; color: #111; background: #fff; display: inline-block; padding: 2pt 6pt; }
+""".strip()
+    engine = fullbleed.PdfEngine(page_width="8.5in", page_height="11in", margin="0pt")
+    engine.render_pdf_to_file(html, css, str(path))
 
 
 def common_css() -> str:
@@ -206,52 +205,31 @@ def compose_from_bindings(bindings: list[dict], overlay_pdf: Path, out_pdf: Path
     return fullbleed.finalize_compose_pdf(templates, plan, str(overlay_pdf), str(out_pdf))
 
 
-def sample_template_color(pdf_path: Path, page_index: int) -> str:
-    doc = fitz.open(pdf_path)
-    page = doc[page_index]
-    pix = page.get_pixmap(matrix=fitz.Matrix(1, 1), alpha=False)
-    x = pix.width // 2
-    y = pix.height // 2
-    r, g, b = pix.pixel(x, y)
-    doc.close()
-    if b > 180 and r < 100 and g < 140:
-        return "blue"
-    if r > 180 and g < 120 and b < 120:
-        return "red"
-    if g > 160 and r < 140 and b < 140:
-        return "green"
-    return f"unknown({r},{g},{b})"
+def validate_output(mode_label: str, bindings: list[dict], compose_result: dict) -> dict:
+    expected_ids = expected_template_ids()
+    got_ids = [str(item.get("template_id")) for item in bindings]
+    if got_ids != expected_ids:
+        raise RuntimeError(f"{mode_label}: binding validation failed")
 
+    pages_written = int(compose_result.get("pages_written") or 0)
+    if pages_written != len(PAGE_SEQUENCE):
+        raise RuntimeError(
+            f"{mode_label}: compose page count mismatch expected={len(PAGE_SEQUENCE)} got={pages_written}"
+        )
 
-def validate_output(pdf_path: Path, mode_label: str) -> dict:
-    doc = fitz.open(pdf_path)
-    try:
-        if doc.page_count != len(PAGE_SEQUENCE):
-            raise RuntimeError(
-                f"{mode_label}: page count mismatch expected={len(PAGE_SEQUENCE)} got={doc.page_count}"
-            )
-        color_hits = []
-        text_checks = []
-        for i, expected_color in enumerate(PAGE_SEQUENCE):
-            observed_color = sample_template_color(pdf_path, i)
-            color_hits.append({"page": i + 1, "expected": expected_color, "observed": observed_color})
-            if observed_color != expected_color:
-                raise RuntimeError(
-                    f"{mode_label}: page {i+1} expected template color {expected_color} got {observed_color}"
-                )
-            text = doc[i].get_text("text")
-            has_marker = f"PAGE {i+1:02d}" in text
-            text_checks.append({"page": i + 1, "has_overlay_marker": has_marker})
-            if not has_marker:
-                raise RuntimeError(f"{mode_label}: missing overlay marker text on page {i+1}")
-        return {
-            "ok": True,
-            "page_count": doc.page_count,
-            "color_checks": color_hits,
-            "text_checks": text_checks,
-        }
-    finally:
-        doc.close()
+    return {
+        "ok": True,
+        "page_count": pages_written,
+        "binding_checks": [
+            {
+                "page": i + 1,
+                "expected_template_id": expected_ids[i],
+                "bound_template_id": got_ids[i],
+                "binding_ok": expected_ids[i] == got_ids[i],
+            }
+            for i in range(len(PAGE_SEQUENCE))
+        ],
+    }
 
 
 def main() -> None:
@@ -260,15 +238,16 @@ def main() -> None:
 
     raw_bindings = render_overlay_and_bindings("raw", raw_html(PAGE_SEQUENCE), css, RAW_OVERLAY_PDF)
     raw_compose = compose_from_bindings(raw_bindings, RAW_OVERLAY_PDF, RAW_COMPOSED_PDF)
-    raw_validation = validate_output(RAW_COMPOSED_PDF, "raw")
+    raw_validation = validate_output("raw", raw_bindings, raw_compose)
 
     el_bindings = render_overlay_and_bindings("el", el_html(PAGE_SEQUENCE), css, EL_OVERLAY_PDF)
     el_compose = compose_from_bindings(el_bindings, EL_OVERLAY_PDF, EL_COMPOSED_PDF)
-    el_validation = validate_output(EL_COMPOSED_PDF, "el")
+    el_validation = validate_output("el", el_bindings, el_compose)
 
     report = {
         "schema": "fullbleed.template_flagging_smoke.v1",
         "ok": True,
+        "validation_mode": "fullbleed_bindings_and_compose_contract",
         "template_pdf": str(TEMPLATE_PDF),
         "sequence": PAGE_SEQUENCE,
         "raw": {

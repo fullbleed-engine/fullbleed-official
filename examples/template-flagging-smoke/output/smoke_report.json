@@ -1,6 +1,7 @@
 {
   "schema": "fullbleed.template_flagging_smoke.v1",
   "ok": true,
+  "validation_mode": "fullbleed_bindings_and_compose_contract",
   "template_pdf": "C:\\dev\\workbench\\fullbleed-official\\examples\\template-flagging-smoke\\output\\rgb_template_3pages.pdf",
   "sequence": [
     "blue",
@@ -24,98 +25,66 @@
     "validation": {
       "ok": true,
       "page_count": 10,
-      "color_checks": [
+      "binding_checks": [
         {
           "page": 1,
-          "expected": "blue",
-          "observed": "blue"
+          "expected_template_id": "tpl-blue",
+          "bound_template_id": "tpl-blue",
+          "binding_ok": true
         },
         {
           "page": 2,
-          "expected": "red",
-          "observed": "red"
+          "expected_template_id": "tpl-red",
+          "bound_template_id": "tpl-red",
+          "binding_ok": true
         },
         {
           "page": 3,
-          "expected": "green",
-          "observed": "green"
+          "expected_template_id": "tpl-green",
+          "bound_template_id": "tpl-green",
+          "binding_ok": true
         },
         {
           "page": 4,
-          "expected": "blue",
-          "observed": "blue"
+          "expected_template_id": "tpl-blue",
+          "bound_template_id": "tpl-blue",
+          "binding_ok": true
         },
         {
           "page": 5,
-          "expected": "green",
-          "observed": "green"
+          "expected_template_id": "tpl-green",
+          "bound_template_id": "tpl-green",
+          "binding_ok": true
         },
         {
           "page": 6,
-          "expected": "red",
-          "observed": "red"
+          "expected_template_id": "tpl-red",
+          "bound_template_id": "tpl-red",
+          "binding_ok": true
         },
         {
           "page": 7,
-          "expected": "blue",
-          "observed": "blue"
+          "expected_template_id": "tpl-blue",
+          "bound_template_id": "tpl-blue",
+          "binding_ok": true
         },
         {
           "page": 8,
-          "expected": "red",
-          "observed": "red"
+          "expected_template_id": "tpl-red",
+          "bound_template_id": "tpl-red",
+          "binding_ok": true
         },
         {
           "page": 9,
-          "expected": "green",
-          "observed": "green"
+          "expected_template_id": "tpl-green",
+          "bound_template_id": "tpl-green",
+          "binding_ok": true
         },
         {
           "page": 10,
-          "expected": "blue",
-          "observed": "blue"
-        }
-      ],
-      "text_checks": [
-        {
-          "page": 1,
-          "has_overlay_marker": true
-        },
-        {
-          "page": 2,
-          "has_overlay_marker": true
-        },
-        {
-          "page": 3,
-          "has_overlay_marker": true
-        },
-        {
-          "page": 4,
-          "has_overlay_marker": true
-        },
-        {
-          "page": 5,
-          "has_overlay_marker": true
-        },
-        {
-          "page": 6,
-          "has_overlay_marker": true
-        },
-        {
-          "page": 7,
-          "has_overlay_marker": true
-        },
-        {
-          "page": 8,
-          "has_overlay_marker": true
-        },
-        {
-          "page": 9,
-          "has_overlay_marker": true
-        },
-        {
-          "page": 10,
-          "has_overlay_marker": true
+          "expected_template_id": "tpl-blue",
+          "bound_template_id": "tpl-blue",
+          "binding_ok": true
         }
       ]
     }
@@ -130,98 +99,66 @@
     "validation": {
       "ok": true,
       "page_count": 10,
-      "color_checks": [
+      "binding_checks": [
         {
           "page": 1,
-          "expected": "blue",
-          "observed": "blue"
+          "expected_template_id": "tpl-blue",
+          "bound_template_id": "tpl-blue",
+          "binding_ok": true
         },
         {
           "page": 2,
-          "expected": "red",
-          "observed": "red"
+          "expected_template_id": "tpl-red",
+          "bound_template_id": "tpl-red",
+          "binding_ok": true
         },
         {
           "page": 3,
-          "expected": "green",
-          "observed": "green"
+          "expected_template_id": "tpl-green",
+          "bound_template_id": "tpl-green",
+          "binding_ok": true
         },
         {
           "page": 4,
-          "expected": "blue",
-          "observed": "blue"
+          "expected_template_id": "tpl-blue",
+          "bound_template_id": "tpl-blue",
+          "binding_ok": true
         },
         {
           "page": 5,
-          "expected": "green",
-          "observed": "green"
+          "expected_template_id": "tpl-green",
+          "bound_template_id": "tpl-green",
+          "binding_ok": true
         },
         {
           "page": 6,
-          "expected": "red",
-          "observed": "red"
+          "expected_template_id": "tpl-red",
+          "bound_template_id": "tpl-red",
+          "binding_ok": true
         },
         {
           "page": 7,
-          "expected": "blue",
-          "observed": "blue"
+          "expected_template_id": "tpl-blue",
+          "bound_template_id": "tpl-blue",
+          "binding_ok": true
         },
         {
           "page": 8,
-          "expected": "red",
-          "observed": "red"
+          "expected_template_id": "tpl-red",
+          "bound_template_id": "tpl-red",
+          "binding_ok": true
         },
         {
           "page": 9,
-          "expected": "green",
-          "observed": "green"
+          "expected_template_id": "tpl-green",
+          "bound_template_id": "tpl-green",
+          "binding_ok": true
         },
         {
           "page": 10,
-          "expected": "blue",
-          "observed": "blue"
-        }
-      ],
-      "text_checks": [
-        {
-          "page": 1,
-          "has_overlay_marker": true
-        },
-        {
-          "page": 2,
-          "has_overlay_marker": true
-        },
-        {
-          "page": 3,
-          "has_overlay_marker": true
-        },
-        {
-          "page": 4,
-          "has_overlay_marker": true
-        },
-        {
-          "page": 5,
-          "has_overlay_marker": true
-        },
-        {
-          "page": 6,
-          "has_overlay_marker": true
-        },
-        {
-          "page": 7,
-          "has_overlay_marker": true
-        },
-        {
-          "page": 8,
-          "has_overlay_marker": true
-        },
-        {
-          "page": 9,
-          "has_overlay_marker": true
-        },
-        {
-          "page": 10,
-          "has_overlay_marker": true
+          "expected_template_id": "tpl-blue",
+          "bound_template_id": "tpl-blue",
+          "binding_ok": true
         }
       ]
     }

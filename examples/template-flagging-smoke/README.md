@@ -23,6 +23,6 @@ python examples/template-flagging-smoke/run_smoke.py
 
 Validation checks:
 1. template binding decisions match expected page sequence
-2. composed output page count is 10
-3. each composed page center pixel matches expected template color
-4. overlay marker text remains present on each page (format/path sanity)
+2. compose result reports `pages_written=10`
+3. binding contracts match expected template ids for each page
+4. both authoring paths (`raw` and `el()`) produce identical binding outcomes

@@ -24,7 +24,7 @@ It exercises a hard workload:
 4. Builds overlay HTML/CSS with per-page feature flags.
 5. Runs canonical CLI auto-compose:
    - `render --templates ... --template-binding ...`
-6. Validates composed output (template marker + overlay marker).
+6. Validates compose contract outputs (`pages_written`, template routing inputs, artifact existence).
 7. Verifies duplex start parity and deterministic signatures.
 8. Enforces production-style CLI gates:
    - `--fail-on font-subst`
