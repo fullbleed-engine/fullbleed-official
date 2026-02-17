@@ -5,6 +5,7 @@ mod doc_context;
 mod doc_template;
 mod error;
 mod flowable;
+mod finalize;
 mod font;
 mod frame;
 mod glyph_report;
@@ -35,6 +36,14 @@ pub use flowable::{
     AbsolutePositionedFlowable, BreakAfter, BreakBefore, BreakInside, ContainerFlowable, EdgeSizes,
     Flowable, ImageFlowable, LengthSpec, Pagination, Paragraph, Spacer, SvgFlowable, TableFlowable,
     TextStyle,
+};
+pub use finalize::{
+    BindingSource, ComposePagePlan, FinalizeComposeSummary, FinalizeStampSummary,
+    META_PAGE_TEMPLATE_KEY, PageBindingDecision, TemplateAsset, TemplateBindingSpec,
+    TemplateCatalog, collect_page_feature_flags, collect_page_template_names,
+    compose_overlay_with_template_catalog, default_page_map, resolve_template_bindings,
+    resolve_template_bindings_for_document, stamp_overlay_on_template_pdf,
+    validate_bindings_against_catalog, validate_page_map,
 };
 use font::FontRegistry;
 pub use frame::{AddResult, Frame};
@@ -68,6 +77,7 @@ pub struct FullBleed {
     page_header_html: Option<PageHeaderHtmlSpec>,
     page_footer: Option<PageFooterSpec>,
     paginated_context: Option<PaginatedContextSpec>,
+    template_binding_spec: Option<TemplateBindingSpec>,
     watermark: Option<WatermarkSpec>,
     asset_css: String,
 }
@@ -92,6 +102,7 @@ pub struct FullBleedBuilder {
     page_header_html: Option<PageHeaderHtmlSpec>,
     page_footer: Option<PageFooterSpec>,
     paginated_context: Option<PaginatedContextSpec>,
+    template_binding_spec: Option<TemplateBindingSpec>,
     page_margins: std::collections::BTreeMap<usize, Margins>,
     watermark: Option<WatermarkSpec>,
     asset_bundle: AssetBundle,
@@ -1392,6 +1403,7 @@ impl FullBleed {
             doc_id,
             &built,
             self.paginated_context.as_ref(),
+            self.template_binding_spec.as_ref(),
             page_data_override.clone(),
             self.debug.clone(),
             self.jit_mode,
@@ -1399,8 +1411,13 @@ impl FullBleed {
             |page_data| {
                 self.build_overlay_documents(&built, resolver, page_data, report.as_deref_mut())
             },
-        );
+        )?;
         let plan_ms = t_plan.elapsed().as_secs_f64() * 1000.0;
+        let template_binding_count = planned
+            .template_bindings
+            .as_ref()
+            .map(|v| v.len())
+            .unwrap_or(0);
 
         if let Some(logger) = self.debug.as_deref() {
             let t_finalize = std::time::Instant::now();
@@ -1439,6 +1456,7 @@ impl FullBleed {
                     &[
                         ("pages", built.pages.len() as u64),
                         ("commands", command_count as u64),
+                        ("template_bindings", template_binding_count as u64),
                     ],
                 );
             }
@@ -1464,6 +1482,7 @@ impl FullBleed {
                 &[
                     ("pages", built.pages.len() as u64),
                     ("commands", command_count as u64),
+                    ("template_bindings", template_binding_count as u64),
                 ],
             );
         }
@@ -1514,6 +1533,7 @@ impl FullBleed {
             doc_id,
             &built,
             self.paginated_context.as_ref(),
+            self.template_binding_spec.as_ref(),
             page_data_override.clone(),
             self.debug.clone(),
             self.jit_mode,
@@ -1521,8 +1541,13 @@ impl FullBleed {
             |page_data| {
                 self.build_overlay_documents(&built, resolver, page_data, report.as_deref_mut())
             },
-        );
+        )?;
         let plan_ms = t_plan.elapsed().as_secs_f64() * 1000.0;
+        let template_binding_count = planned
+            .template_bindings
+            .as_ref()
+            .map(|v| v.len())
+            .unwrap_or(0);
         if let Some(logger) = self.debug.as_deref() {
             log_jit_metrics(
                 logger,
@@ -1550,6 +1575,7 @@ impl FullBleed {
                 &[
                     ("pages", built.pages.len() as u64),
                     ("commands", command_count as u64),
+                    ("template_bindings", template_binding_count as u64),
                 ],
             );
         }
@@ -1652,12 +1678,18 @@ impl FullBleed {
             0,
             &document,
             self.paginated_context.as_ref(),
+            self.template_binding_spec.as_ref(),
             page_data_override.clone(),
             self.debug.clone(),
             self.jit_mode,
             Some(self.font_registry.as_ref()),
             |page_data| self.build_overlay_documents(&document, &context.resolver, page_data, None),
-        );
+        )?;
+        let _template_binding_count = planned
+            .template_bindings
+            .as_ref()
+            .map(|v| v.len())
+            .unwrap_or(0);
         let document = self.finalize_with_jit(
             0,
             document,
@@ -1699,6 +1731,37 @@ impl FullBleed {
         )?;
         self.emit_debug_summary("render_with_page_data");
         Ok((bytes, page_data))
+    }
+
+    pub fn render_with_page_data_and_template_bindings(
+        &self,
+        html: &str,
+        css: &str,
+    ) -> Result<
+        (
+            Vec<u8>,
+            Option<PageDataContext>,
+            Option<Vec<PageBindingDecision>>,
+        ),
+        FullBleedError,
+    > {
+        let context = self.build_render_context(css, Some(0));
+        let (document, page_data) =
+            self.render_to_document_and_page_data_with_resolver(html, &context.page_templates, &context.resolver)?;
+        let template_bindings = match self.template_binding_spec.as_ref() {
+            Some(spec) => Some(resolve_template_bindings_for_document(&document, spec)?),
+            None => None,
+        };
+        let bytes = pdf::document_to_pdf_with_metrics_and_registry_with_logs(
+            &document,
+            None,
+            Some(self.font_registry.as_ref()),
+            &self.pdf_options,
+            self.debug.clone(),
+            self.perf.clone(),
+        )?;
+        self.emit_debug_summary("render_with_page_data_and_template_bindings");
+        Ok((bytes, page_data, template_bindings))
     }
 
     pub fn render_with_glyph_report(
@@ -2481,6 +2544,7 @@ impl FullBleedBuilder {
             page_header_html: None,
             page_footer: None,
             paginated_context: None,
+            template_binding_spec: None,
             page_margins: std::collections::BTreeMap::new(),
             watermark: None,
             asset_bundle: AssetBundle::default(),
@@ -2747,6 +2811,11 @@ impl FullBleedBuilder {
         self
     }
 
+    pub fn template_binding_spec(mut self, spec: TemplateBindingSpec) -> Self {
+        self.template_binding_spec = Some(spec);
+        self
+    }
+
     pub fn register_bundle(mut self, bundle: AssetBundle) -> Self {
         self.asset_bundle = bundle;
         self
@@ -2796,6 +2865,7 @@ impl FullBleedBuilder {
             page_header_html: self.page_header_html,
             page_footer: self.page_footer,
             paginated_context: self.paginated_context,
+            template_binding_spec: self.template_binding_spec,
             watermark: self.watermark,
             asset_css,
         })
@@ -2931,6 +3001,24 @@ mod tests {
         std::env::temp_dir().join(format!("fullbleed_{tag}_{}_{}.jsonl", std::process::id(), nanos))
     }
 
+    fn repo_font_path(file_name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("python")
+            .join("fullbleed_assets")
+            .join("fonts")
+            .join(file_name)
+    }
+
+    fn count_token(haystack: &[u8], token: &[u8]) -> usize {
+        if token.is_empty() || haystack.len() < token.len() {
+            return 0;
+        }
+        haystack
+            .windows(token.len())
+            .filter(|window| *window == token)
+            .count()
+    }
+
     #[test]
     fn pdfx4_builder_requires_output_intent() {
         let err = match FullBleed::builder().pdf_profile(PdfProfile::PdfX4).build() {
@@ -2939,6 +3027,80 @@ mod tests {
         };
         assert!(matches!(err, FullBleedError::InvalidConfiguration(_)));
         assert!(err.to_string().contains("output_intent"));
+    }
+
+    #[test]
+    fn batch_writer_file_and_parallel_paths_dedupe_embedded_fonts() {
+        let inter_path = repo_font_path("Inter-Variable.ttf");
+        let inter_bytes = std::fs::read(&inter_path).expect("read inter");
+
+        let mut engine = FullBleed::builder().build().expect("engine");
+        let font_name = {
+            let registry = Arc::get_mut(&mut engine.font_registry).expect("unique registry");
+            registry
+                .register_bytes(inter_bytes, Some(inter_path.to_string_lossy().as_ref()))
+                .expect("register inter")
+        };
+
+        let css = format!(
+            "@page {{ size: 8.5in 11in; margin: 0.5in; }} body {{ margin: 0; font-family: '{}'; font-size: 12pt; }}",
+            font_name
+        );
+        let html_list = vec![
+            "<html><body><p>Record 1</p></body></html>".to_string(),
+            "<html><body><p>Record 2</p></body></html>".to_string(),
+            "<html><body><p>Record 3</p></body></html>".to_string(),
+        ];
+        let jobs: Vec<(String, String)> = html_list
+            .iter()
+            .map(|html| (html.clone(), css.clone()))
+            .collect();
+
+        let mut seq_writer = Vec::new();
+        engine
+            .render_many_to_writer(&html_list, &css, &mut seq_writer)
+            .expect("render_many_to_writer");
+        assert_eq!(count_token(&seq_writer, b"/FontFile2"), 1);
+
+        let mut seq_css_writer = Vec::new();
+        engine
+            .render_many_to_writer_with_css(&jobs, &mut seq_css_writer)
+            .expect("render_many_to_writer_with_css");
+        assert_eq!(count_token(&seq_css_writer, b"/FontFile2"), 1);
+
+        let mut parallel_writer = Vec::new();
+        engine
+            .render_many_to_writer_parallel(&html_list, &css, &mut parallel_writer)
+            .expect("render_many_to_writer_parallel");
+        assert_eq!(count_token(&parallel_writer, b"/FontFile2"), 1);
+
+        let tmp_dir = std::env::temp_dir();
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let seq_path =
+            tmp_dir.join(format!("fullbleed_batch_font_dedup_seq_{}_{}.pdf", std::process::id(), stamp));
+        let parallel_path = tmp_dir.join(format!(
+            "fullbleed_batch_font_dedup_parallel_{}_{}.pdf",
+            std::process::id(),
+            stamp
+        ));
+
+        engine
+            .render_many_to_file(&html_list, &css, &seq_path)
+            .expect("render_many_to_file");
+        engine
+            .render_many_to_file_parallel(&html_list, &css, &parallel_path)
+            .expect("render_many_to_file_parallel");
+
+        let seq_file_bytes = std::fs::read(&seq_path).expect("read seq file");
+        let parallel_file_bytes = std::fs::read(&parallel_path).expect("read parallel file");
+        assert_eq!(count_token(&seq_file_bytes, b"/FontFile2"), 1);
+        assert_eq!(count_token(&parallel_file_bytes, b"/FontFile2"), 1);
+
+        let _ = std::fs::remove_file(seq_path);
+        let _ = std::fs::remove_file(parallel_path);
     }
 
     #[test]
@@ -3698,5 +3860,110 @@ mod tests {
             found_winner_edge,
             "expected 4pt shared border drawn in blue"
         );
+    }
+
+    #[test]
+    fn rendered_pages_emit_page_template_meta_for_finalize_binding() {
+        let html = "<!doctype html><html><body><p>hello</p></body></html>";
+        let css = "@page { size: letter; margin: 0.5in; }";
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render document");
+        assert!(!doc.pages.is_empty(), "expected at least one page");
+        for page in &doc.pages {
+            let has_template_meta = page.commands.iter().any(|cmd| {
+                matches!(
+                    cmd,
+                    Command::Meta { key, value }
+                    if key == META_PAGE_TEMPLATE_KEY && !value.trim().is_empty()
+                )
+            });
+            assert!(
+                has_template_meta,
+                "expected page to include {} metadata",
+                META_PAGE_TEMPLATE_KEY
+            );
+        }
+    }
+
+    #[test]
+    fn template_binding_accepts_feature_meta_from_plain_div_data_fb() {
+        let html = r#"
+<!doctype html>
+<html>
+  <body>
+    <section>
+      <div data-fb="fb.feature.red=1"></div>
+      <p>Page one marker</p>
+    </section>
+    <section style="page-break-before: always;">
+      <div data-fb="fb.feature.green=1"></div>
+      <p>Page two marker</p>
+    </section>
+  </body>
+</html>
+"#;
+        let css = "@page { size: letter; margin: 0.5in; }";
+
+        let mut spec = TemplateBindingSpec::default();
+        spec.default_template_id = Some("tpl-default".to_string());
+        spec.by_feature = std::collections::BTreeMap::from([
+            ("red".to_string(), "tpl-red".to_string()),
+            ("green".to_string(), "tpl-green".to_string()),
+        ]);
+
+        let engine = FullBleed::builder()
+            .template_binding_spec(spec)
+            .build()
+            .expect("engine");
+
+        let (_pdf, _page_data, bindings) = engine
+            .render_with_page_data_and_template_bindings(html, css)
+            .expect("render");
+        let bindings = bindings.expect("expected bindings");
+        assert_eq!(bindings.len(), 2, "expected two pages");
+        assert_eq!(bindings[0].template_id, "tpl-red");
+        assert_eq!(bindings[0].source, BindingSource::Feature);
+        assert_eq!(bindings[1].template_id, "tpl-green");
+        assert_eq!(bindings[1].source, BindingSource::Feature);
+    }
+
+    #[test]
+    fn template_binding_accepts_feature_meta_from_metadata_only_div_pages() {
+        let html = r#"
+<!doctype html>
+<html>
+  <body>
+    <section>
+      <div data-fb="fb.feature.red=1"></div>
+    </section>
+    <section style="page-break-before: always;">
+      <div data-fb="fb.feature.green=1"></div>
+    </section>
+  </body>
+</html>
+"#;
+        let css = "@page { size: letter; margin: 0.5in; }";
+
+        let mut spec = TemplateBindingSpec::default();
+        spec.default_template_id = Some("tpl-default".to_string());
+        spec.by_feature = std::collections::BTreeMap::from([
+            ("red".to_string(), "tpl-red".to_string()),
+            ("green".to_string(), "tpl-green".to_string()),
+        ]);
+
+        let engine = FullBleed::builder()
+            .template_binding_spec(spec)
+            .build()
+            .expect("engine");
+
+        let (_pdf, _page_data, bindings) = engine
+            .render_with_page_data_and_template_bindings(html, css)
+            .expect("render");
+        let bindings = bindings.expect("expected bindings");
+        assert_eq!(bindings.len(), 2, "expected two pages");
+        assert_eq!(bindings[0].template_id, "tpl-red");
+        assert_eq!(bindings[0].source, BindingSource::Feature);
+        assert_eq!(bindings[1].template_id, "tpl-green");
+        assert_eq!(bindings[1].source, BindingSource::Feature);
     }
 }

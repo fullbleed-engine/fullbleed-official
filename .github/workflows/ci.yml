@@ -129,3 +129,14 @@ jobs:
 
       - name: Verify golden suite
         run: python goldens/run_golden_suite.py --python python verify
+
+      - name: Verify minimal per-page template flagging smoke
+        run: python examples/template-flagging-smoke/run_smoke.py
+
+      - name: Verify templated back-page VDP smoke
+        run: python examples/template-flagging-smoke/run_vdp_backpage_smoke.py
+
+      - name: Verify I-9 batch font dedup smoke
+        env:
+          FULLBLEED_I9_CI_RECORDS: "12"
+        run: python examples/form-i9/tools/check_batch_font_dedup_ci.py

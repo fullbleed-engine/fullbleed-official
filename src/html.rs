@@ -2,8 +2,8 @@ use crate::flowable::{
     AbsolutePositionedFlowable, AlignItems, BorderRadiusSpec, BorderSpec, CalcLength,
     ContainerFlowable,
     EdgeSizes, FlexDirection, FlexFlowable, ImageFlowable, InlineBlockLayoutFlowable,
-    JustifyContent, LengthSpec, ListItemFlowable, Paragraph, Spacer, SvgFlowable, TableCell,
-    TableFlowable, TextAlign, TextStyle, VerticalAlign,
+    JustifyContent, LengthSpec, ListItemFlowable, MetaFlowable, Paragraph, Spacer, SvgFlowable,
+    TableCell, TableFlowable, TextAlign, TextStyle, VerticalAlign,
 };
 use base64::Engine;
 use crate::font::FontRegistry;
@@ -438,6 +438,25 @@ fn contains_placeholder(value: &str) -> bool {
         || value.contains("{total:")
 }
 
+fn parse_data_fb(raw: &str) -> Vec<(String, String)> {
+    // data-fb="key=value; other.key=other_value"
+    raw.split(';')
+        .filter_map(|pair| {
+            let pair = pair.trim();
+            if pair.is_empty() {
+                return None;
+            }
+            let (k, v) = pair.split_once('=')?;
+            let k = k.trim();
+            let v = v.trim();
+            if k.is_empty() {
+                return None;
+            }
+            Some((k.to_string(), v.to_string()))
+        })
+        .collect()
+}
+
 fn collect_children(
     node: &NodeRef,
     resolver: &StyleResolver,
@@ -559,6 +578,12 @@ fn node_to_flowables(
                 .borrow()
                 .get("style")
                 .map(|s| s.to_string());
+            let node_meta = element
+                .attributes
+                .borrow()
+                .get("data-fb")
+                .map(parse_data_fb)
+                .unwrap_or_default();
             if inline_style.is_some() {
                 if let Some(perf_logger) = perf {
                     perf_logger.log_counts("story.inline_style", doc_id, &[("count", 1)]);
@@ -1335,6 +1360,22 @@ fn node_to_flowables(
                 }
             };
 
+            // Preserve metadata-only nodes (for example <div data-fb="..."></div>) so
+            // feature flags can be emitted even when the element has no visual content.
+            // Use a tiny spacer to ensure the flowable is drawable; zero-height carriers can
+            // be skipped in layout paths and lose metadata emission.
+            if flowables.is_empty() && !node_meta.is_empty() {
+                let carrier =
+                    Spacer::new_pt(Pt::from_f32(0.01)).with_pagination(style.pagination);
+                flowables.push(LayoutItem::Block {
+                    flowable: Box::new(carrier) as Box<dyn Flowable>,
+                    flex_grow: style.flex_grow,
+                    flex_shrink: style.flex_shrink,
+                    width_spec: flex_item_basis(&style),
+                    order: style.order,
+                });
+            }
+
             if matches!(style.position, PositionMode::Absolute) {
                 flowables = wrap_absolute(flowables, &style);
             }
@@ -1386,6 +1427,43 @@ fn node_to_flowables(
                     }
                 })
                 .collect();
+            if !node_meta.is_empty() {
+                items = items
+                    .into_iter()
+                    .map(|item| match item {
+                        LayoutItem::Block {
+                            flowable,
+                            flex_grow,
+                            flex_shrink,
+                            width_spec,
+                            order,
+                        } => LayoutItem::Block {
+                            flowable: Box::new(MetaFlowable::new(flowable, node_meta.clone()))
+                                as Box<dyn Flowable>,
+                            flex_grow,
+                            flex_shrink,
+                            width_spec,
+                            order,
+                        },
+                        LayoutItem::Inline {
+                            flowable,
+                            valign,
+                            flex_grow,
+                            flex_shrink,
+                            width_spec,
+                            order,
+                        } => LayoutItem::Inline {
+                            flowable: Box::new(MetaFlowable::new(flowable, node_meta.clone()))
+                                as Box<dyn Flowable>,
+                            valign,
+                            flex_grow,
+                            flex_shrink,
+                            width_spec,
+                            order,
+                        },
+                    })
+                    .collect();
+            }
             if matches!(
                 style.display,
                 DisplayMode::InlineBlock
@@ -2729,25 +2807,6 @@ fn table_flowable(
     let mut cell_count = 0u64;
     let mut text_chars = 0u64;
     let t_table = std::time::Instant::now();
-
-    fn parse_data_fb(raw: &str) -> Vec<(String, String)> {
-        // data-fb="key=value; other.key=other_value"
-        raw.split(';')
-            .filter_map(|pair| {
-                let pair = pair.trim();
-                if pair.is_empty() {
-                    return None;
-                }
-                let (k, v) = pair.split_once('=')?;
-                let k = k.trim();
-                let v = v.trim();
-                if k.is_empty() {
-                    return None;
-                }
-                Some((k.to_string(), v.to_string()))
-            })
-            .collect()
-    }
 
     fn length_spec_is_zero(spec: LengthSpec) -> bool {
         match spec {

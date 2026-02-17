@@ -1,0 +1,253 @@
+{
+  "schema": "fullbleed.vdp_backpage_smoke.v1",
+  "ok": true,
+  "record_count": 10,
+  "output_page_count": 20,
+  "asset_bundle": {
+    "ok": true,
+    "vendored_assets": [
+      {
+        "name": "tpl-1",
+        "kind": "pdf",
+        "bytes": 586,
+        "trusted": false,
+        "source": "C:\\dev\\workbench\\fullbleed-official\\examples\\template-flagging-smoke\\output\\vdp_front_template.pdf",
+        "pdf_version": "1.7",
+        "page_count": 1,
+        "encrypted": false
+      },
+      {
+        "name": "tpl-2",
+        "kind": "pdf",
+        "bytes": 584,
+        "trusted": false,
+        "source": "C:\\dev\\workbench\\fullbleed-official\\examples\\template-flagging-smoke\\output\\vdp_back_blue_template.pdf",
+        "pdf_version": "1.7",
+        "page_count": 1,
+        "encrypted": false
+      },
+      {
+        "name": "tpl-3",
+        "kind": "pdf",
+        "bytes": 586,
+        "trusted": false,
+        "source": "C:\\dev\\workbench\\fullbleed-official\\examples\\template-flagging-smoke\\output\\vdp_back_green_template.pdf",
+        "pdf_version": "1.7",
+        "page_count": 1,
+        "encrypted": false
+      },
+      {
+        "name": "tpl-4",
+        "kind": "pdf",
+        "bytes": 460,
+        "trusted": false,
+        "source": "C:\\dev\\workbench\\fullbleed-official\\examples\\template-flagging-smoke\\output\\vdp_back_blank_template.pdf",
+        "pdf_version": "1.7",
+        "page_count": 1,
+        "encrypted": false
+      }
+    ],
+    "bundle_assets": [
+      {
+        "name": "tpl-1",
+        "kind": "pdf",
+        "bytes": 586,
+        "trusted": false,
+        "source": "C:\\dev\\workbench\\fullbleed-official\\examples\\template-flagging-smoke\\output\\vdp_front_template.pdf",
+        "pdf_version": "1.7",
+        "page_count": 1,
+        "encrypted": false
+      },
+      {
+        "name": "tpl-2",
+        "kind": "pdf",
+        "bytes": 584,
+        "trusted": false,
+        "source": "C:\\dev\\workbench\\fullbleed-official\\examples\\template-flagging-smoke\\output\\vdp_back_blue_template.pdf",
+        "pdf_version": "1.7",
+        "page_count": 1,
+        "encrypted": false
+      },
+      {
+        "name": "tpl-3",
+        "kind": "pdf",
+        "bytes": 586,
+        "trusted": false,
+        "source": "C:\\dev\\workbench\\fullbleed-official\\examples\\template-flagging-smoke\\output\\vdp_back_green_template.pdf",
+        "pdf_version": "1.7",
+        "page_count": 1,
+        "encrypted": false
+      },
+      {
+        "name": "tpl-4",
+        "kind": "pdf",
+        "bytes": 460,
+        "trusted": false,
+        "source": "C:\\dev\\workbench\\fullbleed-official\\examples\\template-flagging-smoke\\output\\vdp_back_blank_template.pdf",
+        "pdf_version": "1.7",
+        "page_count": 1,
+        "encrypted": false
+      }
+    ],
+    "invalid_pdf_rejected": true,
+    "invalid_pdf_error": "invalid pdf data: couldn't parse input: invalid file header"
+  },
+  "overlay_pdf": "C:\\dev\\workbench\\fullbleed-official\\examples\\template-flagging-smoke\\output\\vdp_overlay_10x2.pdf",
+  "composed_pdf": "C:\\dev\\workbench\\fullbleed-official\\examples\\template-flagging-smoke\\output\\vdp_composed_10x2.pdf",
+  "compose": {
+    "ok": true,
+    "pages_written": 20
+  },
+  "checks": [
+    {
+      "record_id": "R01",
+      "front_page": 1,
+      "front_ok": true,
+      "front_width": 612,
+      "front_width_ok": true,
+      "back_page": 2,
+      "back_kind": "blue",
+      "expected_back_template": "tpl-back-blue",
+      "bound_template": "tpl-back-blue",
+      "back_width": 620,
+      "back_width_ok": true,
+      "back_binding_ok": true,
+      "back_ok": true
+    },
+    {
+      "record_id": "R02",
+      "front_page": 3,
+      "front_ok": true,
+      "front_width": 612,
+      "front_width_ok": true,
+      "back_page": 4,
+      "back_kind": "blank",
+      "expected_back_template": "tpl-back-blank",
+      "bound_template": "tpl-back-blank",
+      "back_width": 636,
+      "back_width_ok": true,
+      "back_binding_ok": true,
+      "back_ok": true
+    },
+    {
+      "record_id": "R03",
+      "front_page": 5,
+      "front_ok": true,
+      "front_width": 612,
+      "front_width_ok": true,
+      "back_page": 6,
+      "back_kind": "green",
+      "expected_back_template": "tpl-back-green",
+      "bound_template": "tpl-back-green",
+      "back_width": 628,
+      "back_width_ok": true,
+      "back_binding_ok": true,
+      "back_ok": true
+    },
+    {
+      "record_id": "R04",
+      "front_page": 7,
+      "front_ok": true,
+      "front_width": 612,
+      "front_width_ok": true,
+      "back_page": 8,
+      "back_kind": "blank",
+      "expected_back_template": "tpl-back-blank",
+      "bound_template": "tpl-back-blank",
+      "back_width": 636,
+      "back_width_ok": true,
+      "back_binding_ok": true,
+      "back_ok": true
+    },
+    {
+      "record_id": "R05",
+      "front_page": 9,
+      "front_ok": true,
+      "front_width": 612,
+      "front_width_ok": true,
+      "back_page": 10,
+      "back_kind": "blue",
+      "expected_back_template": "tpl-back-blue",
+      "bound_template": "tpl-back-blue",
+      "back_width": 620,
+      "back_width_ok": true,
+      "back_binding_ok": true,
+      "back_ok": true
+    },
+    {
+      "record_id": "R06",
+      "front_page": 11,
+      "front_ok": true,
+      "front_width": 612,
+      "front_width_ok": true,
+      "back_page": 12,
+      "back_kind": "green",
+      "expected_back_template": "tpl-back-green",
+      "bound_template": "tpl-back-green",
+      "back_width": 628,
+      "back_width_ok": true,
+      "back_binding_ok": true,
+      "back_ok": true
+    },
+    {
+      "record_id": "R07",
+      "front_page": 13,
+      "front_ok": true,
+      "front_width": 612,
+      "front_width_ok": true,
+      "back_page": 14,
+      "back_kind": "blank",
+      "expected_back_template": "tpl-back-blank",
+      "bound_template": "tpl-back-blank",
+      "back_width": 636,
+      "back_width_ok": true,
+      "back_binding_ok": true,
+      "back_ok": true
+    },
+    {
+      "record_id": "R08",
+      "front_page": 15,
+      "front_ok": true,
+      "front_width": 612,
+      "front_width_ok": true,
+      "back_page": 16,
+      "back_kind": "blue",
+      "expected_back_template": "tpl-back-blue",
+      "bound_template": "tpl-back-blue",
+      "back_width": 620,
+      "back_width_ok": true,
+      "back_binding_ok": true,
+      "back_ok": true
+    },
+    {
+      "record_id": "R09",
+      "front_page": 17,
+      "front_ok": true,
+      "front_width": 612,
+      "front_width_ok": true,
+      "back_page": 18,
+      "back_kind": "green",
+      "expected_back_template": "tpl-back-green",
+      "bound_template": "tpl-back-green",
+      "back_width": 628,
+      "back_width_ok": true,
+      "back_binding_ok": true,
+      "back_ok": true
+    },
+    {
+      "record_id": "R10",
+      "front_page": 19,
+      "front_ok": true,
+      "front_width": 612,
+      "front_width_ok": true,
+      "back_page": 20,
+      "back_kind": "blank",
+      "expected_back_template": "tpl-back-blank",
+      "bound_template": "tpl-back-blank",
+      "back_width": 636,
+      "back_width_ok": true,
+      "back_binding_ok": true,
+      "back_ok": true
+    }
+  ]
+}

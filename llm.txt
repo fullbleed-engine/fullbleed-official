@@ -24,6 +24,24 @@ Why:
 
 Use direct one-off CLI rendering only for quick ad hoc jobs.
 
+For project bootstrap templates:
+- Use `fullbleed new list` / `fullbleed new search` to discover registry templates.
+- Use `fullbleed new remote <template_id>` to install a remote template project.
+- Use `fullbleed new local <template>` (or compatibility `fullbleed new <template>`) for builtin starters.
+
+## Source PDF Template Policy
+
+When a workflow includes a source PDF template, use the Rust template composition path.
+
+Required behavior:
+- Register template PDFs as first-class assets (`vendored_asset(..., "pdf")` or `AssetBundle.add_file(..., "pdf")`) so validation/metadata checks run.
+- Use template composition via CLI render/finalize template options, not ad-hoc byte-stream hacks.
+- Treat templates as vendored vector assets and overlay variable data on top.
+- Do not use private/prototype pypdf backend paths for production automation.
+
+Reference:
+- `docs/pdf-templates.md`
+
 ## Happy Path (Project)
 
 1. Install:
@@ -85,8 +103,8 @@ Exit-code handling contract:
 4. Use stable builtin package names.
 - Builtins accept both forms:
   - `bootstrap` and `@bootstrap`
-  - `noto-sans` and `@noto-sans`
 - In PowerShell, quote `@...` aliases (for example `"@bootstrap"`).
+- Prefer `inter` for default/production scaffolds. Use `noto-sans` only when broader glyph coverage is required.
 
 5. For repeatable/production workflows, prefer project vendoring.
 - Use `fullbleed init` first.
@@ -129,6 +147,13 @@ Exit-code handling contract:
 - HTML + external SVG asset:
   - `fullbleed --json render --html templates/report.html --css templates/report.css --asset assets/logo.svg --asset-kind svg --out output/report.pdf`
 - Use `fullbleed capabilities --json` and check the `svg` object for machine-readable SVG support metadata.
+
+11. For source-PDF template jobs, enforce the canonical template path.
+- Use Rust finalize template composition only.
+- Register PDF templates as bundled assets first, then bind templates by page/feature.
+- Use canonical smoke fixtures when validating template behavior:
+  - `python examples/template-flagging-smoke/run_smoke.py`
+  - `python examples/template-flagging-smoke/run_vdp_backpage_smoke.py`
 
 ## Recommended Defaults for Automation
 

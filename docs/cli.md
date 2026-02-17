@@ -27,6 +27,7 @@ Core render pipeline:
 - `verify`
 - `plan`
 - `run`
+- `finalize` (template composition workflow)
 
 Diagnostics and introspection:
 
@@ -57,11 +58,16 @@ High-value options:
 - input: `--html` / `--html-str`, `--css`, `--css-str`
 - output: `--out`
 - assets: `--asset`, `--asset-kind`, `--asset-name`, `--asset-trusted`
+- template compose (auto-finalize): `--template-binding`, `--templates`, `--template-dx`, `--template-dy`
 - page/pdf: `--page-size`, `--page-width`, `--page-height`, `--margin`, `--pdf-version`, `--pdf-profile`
 - diagnostics: `--emit-jit`, `--emit-perf`, `--emit-glyph-report`, `--emit-page-data`
 - image artifacts: `--emit-image`, `--image-dpi`
 - policy: `--profile`, `--fail-on`, `--allow-fallbacks`, budget flags
 - reproducibility: `--deterministic-hash`, `--repro-record`, `--repro-check`
+
+Template auto-compose notes:
+- When `--templates` is set on `render`, CLI renders overlay, resolves template bindings, and finalizes via Rust compose in one command.
+- Requires `--template-binding` and file output (`--out` cannot be `-`).
 
 ## `verify`
 
@@ -82,6 +88,38 @@ fullbleed run report:engine --html input.html --css styles.css --out out.pdf
 ```
 
 Entrypoint can be `module:name` or `path/to/file.py:name`.
+
+## `finalize`
+
+Template composition command group:
+
+- `fullbleed finalize stamp --template <template.pdf> --overlay <overlay.pdf> --out <final.pdf>`
+- `fullbleed finalize compose --templates <dir> --plan <plan.json> --overlay <overlay.pdf> --out <final.pdf>`
+- Stamp placement controls: `--dx <pt> --dy <pt>` for explicit overlay translation when needed.
+
+Current state:
+- `stamp` is implemented through the Rust core finalize path with strict checks and JSON result envelope
+- `compose` is implemented as a Rust-backed baseline with strict plan/catalog validation
+
+## `new`
+
+Template/project bootstrap command group:
+
+- Local templates:
+  - `fullbleed new local invoice <path>`
+  - `fullbleed new local statement <path>`
+  - Compatibility aliases are still supported:
+    - `fullbleed new invoice <path>`
+    - `fullbleed new statement <path>`
+- Remote registry:
+  - `fullbleed new list [--registry <manifest-url>]`
+  - `fullbleed new search <query> [--tag <tag>] [--registry <manifest-url>]`
+  - `fullbleed new remote <template_id> [path] [--version latest|<x.y.z>] [--registry <manifest-url>]`
+
+Practical notes:
+- Default registry URL can be overridden with `--registry` or `FULLBLEED_TEMPLATE_REGISTRY`.
+- `new remote --dry-run` resolves template/release metadata without downloading archives.
+- Remote install verifies archive SHA256 before extraction and blocks path traversal in zip contents.
 
 ## Machine-mode schemas
 
@@ -120,10 +158,13 @@ Set `--allow-fallbacks` to permit fallback-related signals without failing.
 Use:
 
 - `fullbleed assets install @bootstrap`
-- `fullbleed assets install @noto-sans`
+- `fullbleed assets install inter`
 - `fullbleed assets lock`
 - `fullbleed cache dir`
 - `fullbleed cache prune --dry-run`
+
+Note:
+- `@noto-sans` remains available for broader glyph coverage, but it has a larger font payload and should be installed intentionally.
 
 Project-aware installs default to `./vendor/`; use `--global` for cache install behavior.
 
@@ -144,4 +185,3 @@ Use `--strict` for non-zero exit on flags.
 2. Enable `--fail-on` checks for your quality gates
 3. Emit deterministic and repro artifacts
 4. Parse command schema ids and output contracts in CI tooling
-

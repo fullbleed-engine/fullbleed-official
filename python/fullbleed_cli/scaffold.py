@@ -4,8 +4,14 @@
 Provides commands for initializing new projects and creating templates.
 """
 import json
+import hashlib
+import os
 import shutil
 import sys
+import tempfile
+import urllib.error
+import urllib.request
+import zipfile
 from importlib import resources
 from pathlib import Path
 
@@ -212,6 +218,12 @@ TEMPLATES = {
         "source_dir": "new/statement",
     },
 }
+
+
+DEFAULT_TEMPLATE_REGISTRY_URL = (
+    "https://raw.githubusercontent.com/fullbleed-engine/fullbleed-manifest/master/manifest.json"
+)
+TEMPLATE_REGISTRY_SCHEMA = "fullbleed.template_registry.v1"
 
 
 def cmd_init(args):
@@ -436,4 +448,487 @@ def cmd_new_template(args):
         sys.stdout.write(f"[ok] Created {template_name} template\n")
         for f in created_files:
             sys.stdout.write(f"  - {f}\n")
+
+
+def cmd_new_template_alias(args):
+    """Compatibility shim for `fullbleed new <template>` legacy usage."""
+    cmd_new_template(args)
+
+
+def _emit_new_registry_error(code: str, message: str, *, is_json: bool) -> None:
+    if is_json:
+        result = {
+            "schema": "fullbleed.error.v1",
+            "ok": False,
+            "code": code,
+            "message": message,
+        }
+        sys.stdout.write(json.dumps(result, ensure_ascii=True) + "\n")
+    else:
+        sys.stderr.write(f"[error] {code}: {message}\n")
+    raise SystemExit(1)
+
+
+def _resolve_registry_url(args) -> str:
+    return (
+        getattr(args, "registry", None)
+        or os.environ.get("FULLBLEED_TEMPLATE_REGISTRY")
+        or DEFAULT_TEMPLATE_REGISTRY_URL
+    )
+
+
+def _fetch_template_registry(url: str) -> dict:
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "fullbleed-cli-template-registry/1"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            if getattr(resp, "status", 200) >= 400:
+                raise ValueError(f"registry request failed with status {resp.status}")
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise ValueError(f"registry HTTP error ({exc.code}): {url}") from exc
+    except urllib.error.URLError as exc:
+        raise ValueError(f"registry network error: {exc.reason}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"registry JSON parse failed: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError("registry payload must be a JSON object")
+    schema = payload.get("schema")
+    if schema != TEMPLATE_REGISTRY_SCHEMA:
+        raise ValueError(
+            f"unsupported registry schema: {schema!r} (expected {TEMPLATE_REGISTRY_SCHEMA!r})"
+        )
+    templates = payload.get("templates")
+    if not isinstance(templates, list):
+        raise ValueError("registry payload missing templates[] list")
+    return payload
+
+
+def _template_summaries(payload: dict) -> list[dict]:
+    out: list[dict] = []
+    for raw in payload.get("templates", []):
+        if not isinstance(raw, dict):
+            continue
+        template_id = str(raw.get("id", "")).strip()
+        if not template_id:
+            continue
+        tags = raw.get("tags")
+        if not isinstance(tags, list):
+            tags = []
+        tags = [str(tag).strip() for tag in tags if str(tag).strip()]
+        releases = raw.get("releases")
+        release_count = len(releases) if isinstance(releases, list) else 0
+        out.append(
+            {
+                "id": template_id,
+                "name": str(raw.get("name", "")).strip() or template_id,
+                "summary": str(raw.get("summary", "")).strip(),
+                "description": str(raw.get("description", "")).strip(),
+                "tags": tags,
+                "maintainer": str(raw.get("maintainer", "")).strip(),
+                "license": str(raw.get("license", "")).strip(),
+                "homepage": str(raw.get("homepage", "")).strip(),
+                "latest": str(raw.get("latest", "")).strip() or None,
+                "release_count": release_count,
+            }
+        )
+    out.sort(key=lambda item: (item["name"].lower(), item["id"].lower()))
+    return out
+
+
+def cmd_new_list(args):
+    """List remote templates from registry manifest."""
+    is_json = getattr(args, "json", False)
+    registry_url = _resolve_registry_url(args)
+    try:
+        payload = _fetch_template_registry(registry_url)
+        templates = _template_summaries(payload)
+    except Exception as exc:
+        _emit_new_registry_error(
+            "TEMPLATE_REGISTRY_UNAVAILABLE",
+            str(exc),
+            is_json=is_json,
+        )
+        raise
+
+    registry = payload.get("registry")
+    if not isinstance(registry, dict):
+        registry = {}
+    result = {
+        "schema": "fullbleed.new_list.v1",
+        "ok": True,
+        "registry_url": registry_url,
+        "registry": {
+            "name": registry.get("name"),
+            "homepage": registry.get("homepage"),
+            "generated_at": registry.get("generated_at"),
+        },
+        "count": len(templates),
+        "templates": templates,
+    }
+    if is_json:
+        sys.stdout.write(json.dumps(result, ensure_ascii=True) + "\n")
+        return
+
+    sys.stdout.write(f"[ok] {len(templates)} template(s) available\n")
+    for tmpl in templates:
+        tags = ", ".join(tmpl["tags"]) if tmpl["tags"] else "-"
+        latest = tmpl["latest"] or "n/a"
+        sys.stdout.write(
+            f"  - {tmpl['id']} ({tmpl['name']}) latest={latest} tags={tags}\n"
+        )
+
+
+def _template_matches_query(template: dict, query: str, tags: list[str]) -> bool:
+    q = query.strip().lower()
+    if q:
+        haystacks = [
+            template.get("id", ""),
+            template.get("name", ""),
+            template.get("summary", ""),
+            template.get("description", ""),
+            " ".join(template.get("tags", [])),
+        ]
+        text = "\n".join(str(v).lower() for v in haystacks)
+        if q not in text:
+            return False
+    if tags:
+        template_tags = {str(t).lower() for t in template.get("tags", [])}
+        for tag in tags:
+            if tag not in template_tags:
+                return False
+    return True
+
+
+def cmd_new_search(args):
+    """Search remote templates from registry manifest."""
+    is_json = getattr(args, "json", False)
+    registry_url = _resolve_registry_url(args)
+    try:
+        payload = _fetch_template_registry(registry_url)
+        templates = _template_summaries(payload)
+    except Exception as exc:
+        _emit_new_registry_error(
+            "TEMPLATE_REGISTRY_UNAVAILABLE",
+            str(exc),
+            is_json=is_json,
+        )
+        raise
+
+    query = str(getattr(args, "query", "") or "")
+    tags = getattr(args, "tag", None) or []
+    tags = [str(tag).strip().lower() for tag in tags if str(tag).strip()]
+    matches = [t for t in templates if _template_matches_query(t, query, tags)]
+
+    result = {
+        "schema": "fullbleed.new_search.v1",
+        "ok": True,
+        "registry_url": registry_url,
+        "query": query,
+        "tags": tags,
+        "count": len(matches),
+        "templates": matches,
+    }
+    if is_json:
+        sys.stdout.write(json.dumps(result, ensure_ascii=True) + "\n")
+        return
+
+    sys.stdout.write(f"[ok] {len(matches)} match(es)\n")
+    for tmpl in matches:
+        sys.stdout.write(f"  - {tmpl['id']} ({tmpl['name']})\n")
+
+
+def _select_template(payload: dict, template_id: str) -> dict | None:
+    for raw in payload.get("templates", []):
+        if not isinstance(raw, dict):
+            continue
+        if str(raw.get("id", "")).strip() == template_id:
+            return raw
+    return None
+
+
+def _select_release(template: dict, requested_version: str | None) -> dict | None:
+    releases = template.get("releases")
+    if not isinstance(releases, list) or not releases:
+        return None
+    if not requested_version or requested_version == "latest":
+        latest = str(template.get("latest", "")).strip()
+        if latest:
+            for rel in releases:
+                if isinstance(rel, dict) and str(rel.get("version", "")).strip() == latest:
+                    return rel
+        for rel in releases:
+            if isinstance(rel, dict):
+                return rel
+        return None
+    for rel in releases:
+        if not isinstance(rel, dict):
+            continue
+        if str(rel.get("version", "")).strip() == requested_version:
+            return rel
+    return None
+
+
+def _hash_file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _download_to_file(url: str, dst: Path) -> None:
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "fullbleed-cli-template-registry/1"},
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        with dst.open("wb") as out:
+            while True:
+                chunk = resp.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
+
+
+def _clean_target_dir(path: Path, *, force: bool) -> None:
+    if path.exists():
+        if not path.is_dir():
+            if not force:
+                raise ValueError(
+                    f"target path exists and is not a directory: {path}. Use --force to overwrite."
+                )
+            path.unlink(missing_ok=True)
+            path.mkdir(parents=True, exist_ok=True)
+            return
+        if any(path.iterdir()):
+            if not force:
+                raise ValueError(
+                    f"target directory is not empty: {path}. Use --force to overwrite."
+                )
+            for child in list(path.iterdir()):
+                if child.is_dir():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink(missing_ok=True)
+    else:
+        path.mkdir(parents=True, exist_ok=True)
+
+
+def _safe_extract_zip(
+    archive_path: Path,
+    target_dir: Path,
+    *,
+    root_dir: str | None,
+) -> list[str]:
+    extracted: list[str] = []
+    root_prefix = None
+    if root_dir:
+        root_prefix = root_dir.strip().strip("/").replace("\\", "/")
+        if root_prefix:
+            root_prefix += "/"
+        else:
+            root_prefix = None
+
+    with zipfile.ZipFile(archive_path, "r") as zf:
+        names = zf.namelist()
+        if root_prefix and not any(name.startswith(root_prefix) for name in names):
+            raise ValueError(f"archive missing expected root_dir prefix: {root_dir}")
+
+        for member in zf.infolist():
+            raw_name = member.filename.replace("\\", "/")
+            if not raw_name or raw_name.endswith("/"):
+                continue
+            if raw_name.startswith("/") or raw_name.startswith("../"):
+                raise ValueError(f"unsafe archive entry: {raw_name}")
+
+            rel_name = raw_name
+            if root_prefix:
+                if not rel_name.startswith(root_prefix):
+                    continue
+                rel_name = rel_name[len(root_prefix) :]
+                if not rel_name:
+                    continue
+            rel_path = Path(rel_name)
+            if any(part == ".." for part in rel_path.parts):
+                raise ValueError(f"unsafe archive entry: {raw_name}")
+
+            dest_path = target_dir / rel_path
+            dest_parent = dest_path.parent.resolve()
+            target_resolved = target_dir.resolve()
+            if not dest_parent.is_relative_to(target_resolved):
+                raise ValueError(f"unsafe archive destination: {raw_name}")
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(member, "r") as src, dest_path.open("wb") as dst:
+                shutil.copyfileobj(src, dst)
+            extracted.append(str(rel_path).replace("\\", "/"))
+    return extracted
+
+
+def cmd_new_remote(args):
+    """Install a remote template project from registry manifest."""
+    is_json = getattr(args, "json", False)
+    registry_url = _resolve_registry_url(args)
+    template_id = str(getattr(args, "template_id", "") or "").strip()
+    requested_version = str(getattr(args, "version", "latest") or "latest").strip()
+    dry_run = bool(getattr(args, "dry_run", False))
+    target_dir = Path(getattr(args, "path", ".") or ".").resolve()
+    force = bool(getattr(args, "force", False))
+
+    try:
+        payload = _fetch_template_registry(registry_url)
+    except Exception as exc:
+        _emit_new_registry_error(
+            "TEMPLATE_REGISTRY_UNAVAILABLE",
+            str(exc),
+            is_json=is_json,
+        )
+        raise
+
+    template = _select_template(payload, template_id)
+    if not template:
+        available = [
+            str(item.get("id", "")).strip()
+            for item in payload.get("templates", [])
+            if isinstance(item, dict) and str(item.get("id", "")).strip()
+        ]
+        _emit_new_registry_error(
+            "UNKNOWN_REMOTE_TEMPLATE",
+            f"unknown template id: {template_id}. available: {', '.join(sorted(available))}",
+            is_json=is_json,
+        )
+        raise RuntimeError("unreachable")
+
+    release = _select_release(template, requested_version)
+    if not release:
+        _emit_new_registry_error(
+            "UNKNOWN_TEMPLATE_VERSION",
+            f"no matching release for template={template_id} version={requested_version}",
+            is_json=is_json,
+        )
+        raise RuntimeError("unreachable")
+
+    archive = release.get("archive")
+    if not isinstance(archive, dict):
+        _emit_new_registry_error(
+            "TEMPLATE_RELEASE_INVALID",
+            f"release archive block is missing for template={template_id}",
+            is_json=is_json,
+        )
+        raise RuntimeError("unreachable")
+
+    archive_url = str(archive.get("url", "")).strip()
+    archive_sha256 = str(archive.get("sha256", "")).strip()
+    archive_format = str(archive.get("format", "zip")).strip().lower()
+    archive_root = archive.get("root_dir")
+
+    if archive_format != "zip":
+        _emit_new_registry_error(
+            "UNSUPPORTED_TEMPLATE_ARCHIVE",
+            f"unsupported archive format: {archive_format!r} (expected 'zip')",
+            is_json=is_json,
+        )
+        raise RuntimeError("unreachable")
+
+    placeholder_url = ("<" in archive_url) or (">" in archive_url) or not archive_url
+    placeholder_hash = (
+        ("<" in archive_sha256)
+        or (">" in archive_sha256)
+        or len(archive_sha256) != 64
+    )
+
+    if dry_run:
+        result = {
+            "schema": "fullbleed.new_remote.v1",
+            "ok": True,
+            "dry_run": True,
+            "registry_url": registry_url,
+            "template_id": template_id,
+            "version": str(release.get("version", "")).strip() or requested_version,
+            "target_path": str(target_dir),
+            "archive": {
+                "url": archive_url,
+                "sha256": archive_sha256,
+                "format": archive_format,
+                "root_dir": archive_root,
+                "placeholder_url": placeholder_url,
+                "placeholder_sha256": placeholder_hash,
+            },
+        }
+        if is_json:
+            sys.stdout.write(json.dumps(result, ensure_ascii=True) + "\n")
+        else:
+            sys.stdout.write(
+                f"[ok] dry-run template={template_id} version={result['version']} target={target_dir}\n"
+            )
+        return
+
+    if placeholder_url or placeholder_hash:
+        _emit_new_registry_error(
+            "TEMPLATE_RELEASE_UNAVAILABLE",
+            (
+                "release archive is not yet publishable; update manifest archive.url and "
+                "archive.sha256 with real values"
+            ),
+            is_json=is_json,
+        )
+        raise RuntimeError("unreachable")
+
+    temp_file = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix=f"fullbleed_new_{template_id}_",
+            suffix=".zip",
+            delete=False,
+        ) as tmp:
+            temp_file = Path(tmp.name)
+
+        _download_to_file(archive_url, temp_file)
+        actual_sha = _hash_file_sha256(temp_file)
+        if actual_sha.lower() != archive_sha256.lower():
+            raise ValueError(
+                f"archive sha256 mismatch expected={archive_sha256} got={actual_sha}"
+            )
+
+        _clean_target_dir(target_dir, force=force)
+        extracted = _safe_extract_zip(
+            temp_file,
+            target_dir,
+            root_dir=str(archive_root) if archive_root else None,
+        )
+
+        result = {
+            "schema": "fullbleed.new_remote.v1",
+            "ok": True,
+            "dry_run": False,
+            "registry_url": registry_url,
+            "template_id": template_id,
+            "version": str(release.get("version", "")).strip() or requested_version,
+            "target_path": str(target_dir),
+            "files_written": len(extracted),
+            "sample_files": extracted[:50],
+            "entrypoints": release.get("entrypoints") if isinstance(release.get("entrypoints"), dict) else None,
+        }
+        if is_json:
+            sys.stdout.write(json.dumps(result, ensure_ascii=True) + "\n")
+        else:
+            sys.stdout.write(
+                f"[ok] installed remote template {template_id}@{result['version']} to {target_dir}\n"
+            )
+            sys.stdout.write(f"  files written: {len(extracted)}\n")
+    except Exception as exc:
+        _emit_new_registry_error(
+            "NEW_REMOTE_FAILED",
+            str(exc),
+            is_json=is_json,
+        )
+    finally:
+        if temp_file and temp_file.exists():
+            temp_file.unlink(missing_ok=True)
 

@@ -1,0 +1,57 @@
+{
+  "schema": "fullbleed.template_registry.v1",
+  "registry": {
+    "name": "fullbleed-community-templates",
+    "homepage": "https://github.com/fullbleed-engine/fullbleed-manifest",
+    "generated_at": "2026-02-17T00:00:00Z"
+  },
+  "templates": [
+    {
+      "id": "i9-stamped-vdp",
+      "name": "I-9 Stamped VDP",
+      "summary": "Per-record overlay + PDF template composition with conditional back pages.",
+      "description": "Production-ready Fullbleed project template for high-volume VDP jobs.",
+      "tags": [
+        "vdp",
+        "transactional",
+        "templating",
+        "duplex",
+        "pdf"
+      ],
+      "license": "MIT",
+      "maintainer": "fullbleed-engine",
+      "homepage": "https://github.com/fullbleed-engine/fullbleed-manifest/tree/main/templates/i9-stamped-vdp",
+      "latest": "1.0.0",
+      "releases": [
+        {
+          "version": "1.0.0",
+          "published_at": "2026-02-17T00:00:00Z",
+          "fullbleed_version_range": ">=0.1.12",
+          "python_version_range": ">=3.10",
+          "archive": {
+            "url": "https://raw.githubusercontent.com/fullbleed-engine/fullbleed-manifest/master/i9-stamped-vdp-v1.0.0.zip",
+            "format": "zip",
+            "sha256": "03fde3536185cd833176fc87e45c97b9c438188461cebdb37a2fd17040a1886e",
+            "size_bytes": 1221140,
+            "root_dir": "i9-stamped-vdp"
+          },
+          "entrypoints": {
+            "readme": "README.md",
+            "run": "report.py"
+          },
+          "assets": {
+            "lock_file": "assets.lock.json",
+            "vendor_included": true
+          },
+          "checks": {
+            "smoke_command": "python report.py",
+            "expected_outputs": [
+              "output/report.pdf"
+            ]
+          },
+          "deprecated": false
+        }
+      ]
+    }
+  ]
+}

@@ -5719,6 +5719,67 @@ pub struct AbsolutePositionedFlowable {
     pagination: Pagination,
 }
 
+#[derive(Clone)]
+pub struct MetaFlowable {
+    child: Box<dyn Flowable>,
+    metadata: Arc<Vec<(String, String)>>,
+}
+
+impl MetaFlowable {
+    pub fn new(child: Box<dyn Flowable>, metadata: Vec<(String, String)>) -> Self {
+        Self {
+            child,
+            metadata: Arc::new(metadata),
+        }
+    }
+}
+
+impl Flowable for MetaFlowable {
+    fn wrap(&self, avail_width: Pt, avail_height: Pt) -> Size {
+        let mut size = self.child.wrap(avail_width, avail_height);
+        if !self.metadata.is_empty() && size.height <= Pt::ZERO {
+            size.height = Pt::from_f32(0.01);
+        }
+        size
+    }
+
+    fn split(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        let (first, second) = self.child.split(avail_width, avail_height)?;
+        let meta = self.metadata.as_ref().clone();
+        Some((
+            Box::new(Self::new(first, meta.clone())) as Box<dyn Flowable>,
+            Box::new(Self::new(second, meta)) as Box<dyn Flowable>,
+        ))
+    }
+
+    fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt) {
+        for (k, v) in self.metadata.iter() {
+            canvas.meta(k.clone(), v.clone());
+        }
+        self.child.draw(canvas, x, y, avail_width, avail_height);
+    }
+
+    fn intrinsic_width(&self) -> Option<Pt> {
+        self.child.intrinsic_width()
+    }
+
+    fn out_of_flow(&self) -> bool {
+        self.child.out_of_flow()
+    }
+
+    fn z_index(&self) -> i32 {
+        self.child.z_index()
+    }
+
+    fn pagination(&self) -> Pagination {
+        self.child.pagination()
+    }
+}
+
 impl AbsolutePositionedFlowable {
     pub fn new(
         child: Box<dyn Flowable>,

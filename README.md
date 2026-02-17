@@ -34,6 +34,7 @@ Additional focused references are in `docs/`:
 - `docs/engine.md`
 - `docs/python-api.md`
 - `docs/cli.md`
+- `docs/pdf-templates.md`
 
 ## What You Get
 
@@ -252,7 +253,7 @@ fullbleed --json plan \
 | `cache dir` | Cache location | `fullbleed.cache_dir.v1` |
 | `cache prune` | Remove old cached packages | `fullbleed.cache_prune.v1` |
 | `init` | Initialize project scaffold | `fullbleed.init.v1` |
-| `new` | Create starter template files | `fullbleed.new_template.v1` |
+| `new` | Create starter template files or query/install remote templates | `fullbleed.new_template.v1`, `fullbleed.new_list.v1`, `fullbleed.new_search.v1`, `fullbleed.new_remote.v1` |
 
 Schema discovery for any command/subcommand:
 
@@ -413,8 +414,7 @@ Install builtin assets:
 ```bash
 fullbleed assets install bootstrap
 fullbleed assets install bootstrap-icons
-fullbleed assets install noto-sans
-# `@bootstrap` / `@bootstrap-icons` / `@noto-sans` are also supported aliases
+# `@bootstrap` / `@bootstrap-icons` are also supported aliases
 ```
 
 PowerShell note:
@@ -426,6 +426,12 @@ Install remote asset package:
 fullbleed assets install inter
 ```
 
+Install broad Unicode fallback package (larger font payload):
+
+```bash
+fullbleed assets install noto-sans
+```
+
 Install to a custom vendor directory:
 
 ```bash
@@ -435,7 +441,7 @@ fullbleed assets install bootstrap --vendor ./vendor
 Install to global cache:
 
 ```bash
-fullbleed assets install noto-sans --global
+fullbleed assets install inter --global
 ```
 
 Install common barcode fonts (license-safe defaults):
@@ -461,6 +467,7 @@ fullbleed cache prune --max-age-days 30 --dry-run --json
 Notes:
 
 - Builtin packages accept both plain and `@` references (`bootstrap` == `@bootstrap`, `bootstrap-icons` == `@bootstrap-icons`, `noto-sans` == `@noto-sans`).
+- `noto-sans` is available as a builtin fallback package, but it is intentionally larger than `inter`; use it when your document requires broader glyph coverage.
 - Project installs default to `./vendor/` when project markers are present (`assets.lock.json`, `report.py`, or `fullbleed.toml` in CWD).
 - If no project markers are found, `assets install` defaults to global cache unless `--vendor` is explicitly set.
 - Do not hardcode cache paths like `%LOCALAPPDATA%/fullbleed/cache/...`; use `assets install --json` and consume `installed_to`.
@@ -1033,6 +1040,7 @@ print(payload["outputs"]["pdf"])
 - Agent workflow guide: `llm.txt`
 - CLI JSON contract quick reference: `cli_schema.md`
 - CLI epoch/spec: `CLI_EPOCH.md`
+- PDF template/XObject composition guide: `docs/pdf-templates.md`
 - Licensing guide: `LICENSING.md`
 - Third-party notices: `THIRD_PARTY_LICENSES.md`
 - Living docs example project: `examples/living_docs_atlas/README.md`
@@ -1089,4 +1097,3 @@ fullbleed.activate_commercial_license(
     tier="$1,000,001-$10,000,000",
 )
 ```
-

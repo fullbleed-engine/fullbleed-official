@@ -46,7 +46,7 @@ Key methods:
 
 ## `AssetBundle`
 
-Container for CSS/font/image/SVG assets.
+Container for CSS/font/image/PDF/SVG assets.
 
 - `add(asset)`
 - `add_file(path, kind, name=None, trusted=False, remote=False)`
@@ -60,8 +60,13 @@ Class attributes:
 - `AssetKind.Css`
 - `AssetKind.Font`
 - `AssetKind.Image`
+- `AssetKind.Pdf`
 - `AssetKind.Svg`
 - `AssetKind.Other`
+
+`Asset.info()` includes kind-specific metadata:
+- `font`: primary font name (font assets)
+- `pdf_version`, `page_count`, `encrypted` (PDF assets)
 
 ## `WatermarkSpec`
 
@@ -88,6 +93,8 @@ fullbleed.WatermarkSpec(
 - `vendored_asset(source, kind, name=None, trusted=False, remote=False)`
 - `fetch_asset(url) -> bytes`
 - `concat_css(parts: list[str]) -> str`
+- `finalize_stamp_pdf(template, overlay, out, page_map=None, dx=0.0, dy=0.0) -> dict`
+- `finalize_compose_pdf(templates, plan, overlay, out) -> dict`
 
 ## License helper utilities
 
@@ -109,4 +116,3 @@ For component-style reporting:
 4. Render through `PdfEngine` from that entrypoint
 
 See scaffold template docs in `python/fullbleed_cli/scaffold_templates/init/SCAFFOLDING.md`.
-

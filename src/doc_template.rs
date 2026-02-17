@@ -119,6 +119,10 @@ impl DocTemplate {
         if let Some(callback) = template.on_page() {
             callback(&mut canvas, &DocContext::new(page_number, &template.name));
         }
+        canvas.meta(
+            crate::META_PAGE_TEMPLATE_KEY.to_string(),
+            template.name.clone(),
+        );
 
         let mut story = VecDeque::from(self.story);
 
@@ -154,6 +158,10 @@ impl DocTemplate {
                     if let Some(callback) = template.on_page() {
                         callback(&mut canvas, &DocContext::new(page_number, &template.name));
                     }
+                    canvas.meta(
+                        crate::META_PAGE_TEMPLATE_KEY.to_string(),
+                        template.name.clone(),
+                    );
                 }
 
                 if frame_index >= frames.len() {
@@ -179,6 +187,10 @@ impl DocTemplate {
                     if let Some(callback) = template.on_page() {
                         callback(&mut canvas, &DocContext::new(page_number, &template.name));
                     }
+                    canvas.meta(
+                        crate::META_PAGE_TEMPLATE_KEY.to_string(),
+                        template.name.clone(),
+                    );
                 }
 
                 if frames.is_empty() {
@@ -236,6 +248,10 @@ impl DocTemplate {
                                     &DocContext::new(page_number, &template.name),
                                 );
                             }
+                            canvas.meta(
+                                crate::META_PAGE_TEMPLATE_KEY.to_string(),
+                                template.name.clone(),
+                            );
                         }
                         break;
                     }

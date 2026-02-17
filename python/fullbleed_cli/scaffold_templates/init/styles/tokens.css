@@ -3,7 +3,7 @@
 }
 
 :root {
-  --fb-font-family-sans: "Inter", "Noto Sans", sans-serif;
+  --fb-font-family-sans: "Inter", "Helvetica Neue", Arial, sans-serif;
   --fb-color-text: #1f2a37;
   --fb-color-muted: #607086;
   --fb-color-border: #d5dde8;

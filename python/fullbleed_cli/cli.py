@@ -109,8 +109,16 @@ SCHEMA_REGISTRY = {
     "assets:lock": "fullbleed.assets_lock.v1",
     "cache:dir": "fullbleed.cache_dir.v1",
     "cache:prune": "fullbleed.cache_prune.v1",
+    "finalize:stamp": "fullbleed.finalize_stamp_result.v1",
+    "finalize:compose": "fullbleed.finalize_compose_result.v1",
     "init": "fullbleed.init.v1",
     "new": "fullbleed.new_template.v1",
+    "new:local": "fullbleed.new_template.v1",
+    "new:list": "fullbleed.new_list.v1",
+    "new:search": "fullbleed.new_search.v1",
+    "new:remote": "fullbleed.new_remote.v1",
+    "new:invoice": "fullbleed.new_template.v1",
+    "new:statement": "fullbleed.new_template.v1",
 }
 
 SCHEMA_DEFS = {
@@ -218,6 +226,35 @@ SCHEMA_DEFS = {
         "required": ["schema", "dry_run", "removed_count"],
         "properties": {"schema": {"type": "string"}, "removed": {"type": "array"}},
     },
+    "fullbleed.finalize_stamp_result.v1": {
+        "type": "object",
+        "required": ["schema", "ok", "mode", "outputs"],
+        "properties": {
+            "schema": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "mode": {"type": "string"},
+            "bytes_written": {"type": "integer"},
+            "pages_written": {"type": "integer"},
+            "outputs": {"type": "object"},
+            "code": {"type": "string"},
+            "message": {"type": "string"},
+        },
+    },
+    "fullbleed.finalize_compose_result.v1": {
+        "type": "object",
+        "required": ["schema", "ok", "mode", "outputs"],
+        "properties": {
+            "schema": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "mode": {"type": "string"},
+            "bytes_written": {"type": "integer"},
+            "pages_written": {"type": "integer"},
+            "outputs": {"type": "object"},
+            "metrics": {"type": "object"},
+            "code": {"type": "string"},
+            "message": {"type": "string"},
+        },
+    },
     "fullbleed.init.v1": {
         "type": "object",
         "required": ["schema", "ok", "path"],
@@ -227,6 +264,43 @@ SCHEMA_DEFS = {
         "type": "object",
         "required": ["schema", "ok", "template"],
         "properties": {"schema": {"type": "string"}, "ok": {"type": "boolean"}, "template": {"type": "string"}},
+    },
+    "fullbleed.new_list.v1": {
+        "type": "object",
+        "required": ["schema", "ok", "registry_url", "templates"],
+        "properties": {
+            "schema": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "registry_url": {"type": "string"},
+            "count": {"type": "integer"},
+            "templates": {"type": "array"},
+        },
+    },
+    "fullbleed.new_search.v1": {
+        "type": "object",
+        "required": ["schema", "ok", "registry_url", "query", "templates"],
+        "properties": {
+            "schema": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "registry_url": {"type": "string"},
+            "query": {"type": "string"},
+            "count": {"type": "integer"},
+            "templates": {"type": "array"},
+        },
+    },
+    "fullbleed.new_remote.v1": {
+        "type": "object",
+        "required": ["schema", "ok", "registry_url", "template_id", "version"],
+        "properties": {
+            "schema": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "registry_url": {"type": "string"},
+            "template_id": {"type": "string"},
+            "version": {"type": "string"},
+            "target_path": {"type": "string"},
+            "dry_run": {"type": "boolean"},
+            "files_written": {"type": "integer"},
+        },
     },
     "fullbleed.doctor.v1": {
         "type": "object",
@@ -457,7 +531,7 @@ def _infer_schema_from_argv(argv):
         break
     if not command:
         return None
-    if command in {"assets", "cache"}:
+    if command in {"assets", "cache", "finalize", "new"}:
         found_command = False
         for t in tokens:
             if t == command:
@@ -471,7 +545,13 @@ def _infer_schema_from_argv(argv):
             break
         if not sub:
             return None
-        return SCHEMA_REGISTRY.get(f"{command}:{sub}")
+        schema = SCHEMA_REGISTRY.get(f"{command}:{sub}")
+        if schema:
+            return schema
+        if command == "new":
+            # Compatibility: `new <template>` should map to the local template schema.
+            return SCHEMA_REGISTRY.get("new:local")
+        return None
     return SCHEMA_REGISTRY.get(command)
 
 
@@ -541,6 +621,8 @@ def _resolve_assets(args):
                 kind = "font"
             elif ext in {".svg"}:
                 kind = "svg"
+            elif ext in {".pdf"}:
+                kind = "pdf"
             elif ext in {".png", ".jpg", ".jpeg"}:
                 kind = "image"
             else:
@@ -749,6 +831,13 @@ def _build_manifest(args):
             "document_lang": getattr(args, "document_lang", None),
             "document_title": getattr(args, "document_title", None),
         },
+        "template": {
+            "binding": getattr(args, "template_binding", None),
+            "catalog": getattr(args, "templates", None),
+            "dx": getattr(args, "template_dx", 0.0),
+            "dy": getattr(args, "template_dy", 0.0),
+            "auto_compose": bool(getattr(args, "templates", None)),
+        },
         "profile": getattr(args, "profile", None),
         "fail_on": getattr(args, "fail_on", None) or [],
         "allow_fallbacks": bool(getattr(args, "allow_fallbacks", False)),
@@ -801,6 +890,7 @@ def _build_engine(args):
             emit_perf = "fullbleed_preflight.perf"
     
     watermark_layer = _normalize_watermark_layer(getattr(args, "watermark_layer", "overlay"))
+    template_binding = _read_json_or_path(getattr(args, "template_binding", None))
     try:
         engine = fullbleed.PdfEngine(
             page_width=page_width,
@@ -831,6 +921,7 @@ def _build_engine(args):
             watermark_semantics=getattr(args, "watermark_semantics", "artifact"),
             watermark_opacity=args.watermark_opacity,
             watermark_rotation=args.watermark_rotation,
+            template_binding=template_binding,
             jit_mode=args.jit_mode,
             debug=bool(emit_jit),
             debug_out=emit_jit,
@@ -842,7 +933,7 @@ def _build_engine(args):
         if "pdfx4 requires embedded fonts" in message.lower():
             raise ValueError(
                 message
-                + " Hint: add an embeddable font asset (for example '--asset @noto-sans') "
+                + " Hint: add an embeddable font asset (for example '--asset vendor/fonts/Inter-Variable.ttf' from 'fullbleed init') "
                 "and set CSS 'font-family' to that font."
             )
         raise
@@ -1129,6 +1220,127 @@ def _render_with_artifacts(engine, html, css, out_path, args):
     bytes_written = engine.render_pdf_to_file(html, css, out_path)
     image_paths = _emit_image_artifacts(engine, html, css, out_path, args)
     return _normalize_bytes_written(bytes_written), None, None, image_paths
+
+
+def _load_template_catalog_entries(value):
+    from . import finalize as finalize_module
+
+    return finalize_module._load_template_catalog(value)
+
+
+def _template_page_counts(templates):
+    page_counts = {}
+    for template_id, pdf_path in templates:
+        asset = fullbleed.vendored_asset(str(pdf_path), "pdf")
+        info = asset.info()
+        page_count = int(info.get("page_count", 0) or 0)
+        if page_count <= 0:
+            raise ValueError(
+                f"template catalog item has invalid page_count for template_id={template_id}: {pdf_path}"
+            )
+        page_counts[template_id] = page_count
+    return page_counts
+
+
+def _render_with_template_compose(engine, html, css, out_path, args):
+    templates_arg = getattr(args, "templates", None)
+    if not templates_arg:
+        raise ValueError("--templates is required when template compose mode is enabled")
+    if out_path == "-":
+        raise ValueError("template compose mode requires file output (use --out <path>, not '-')")
+    if not getattr(args, "template_binding", None):
+        raise ValueError("template compose mode requires --template-binding")
+    if not hasattr(engine, "render_pdf_with_page_data_and_template_bindings"):
+        raise ValueError(
+            "installed engine does not support template binding observability "
+            "(missing render_pdf_with_page_data_and_template_bindings API)"
+        )
+    if not hasattr(fullbleed, "finalize_compose_pdf"):
+        raise ValueError("installed fullbleed runtime is missing finalize_compose_pdf")
+
+    templates = _load_template_catalog_entries(templates_arg)
+    template_ids = {template_id for template_id, _ in templates}
+    page_counts = _template_page_counts(templates)
+
+    overlay_pdf_bytes, page_data, bindings = engine.render_pdf_with_page_data_and_template_bindings(
+        html, css
+    )
+    if page_data is not None and getattr(args, "emit_page_data", None):
+        _write_json(args.emit_page_data, page_data)
+
+    if not isinstance(bindings, list) or len(bindings) == 0:
+        raise ValueError(
+            "template compose mode requires non-empty template bindings from render pipeline"
+        )
+
+    dx = float(getattr(args, "template_dx", 0.0) or 0.0)
+    dy = float(getattr(args, "template_dy", 0.0) or 0.0)
+    sorted_bindings = sorted(bindings, key=lambda item: int(item.get("page_index", 0)))
+    plan = []
+    for i, binding in enumerate(sorted_bindings):
+        template_id = binding.get("template_id")
+        if template_id not in template_ids:
+            raise ValueError(
+                f"binding resolved unknown template_id at page {i + 1}: {template_id!r}"
+            )
+        overlay_page_index = int(binding.get("page_index", i))
+        template_page_count = page_counts[template_id]
+        template_page_index = overlay_page_index % template_page_count
+        plan.append(
+            (
+                template_id,
+                template_page_index,
+                overlay_page_index,
+                dx,
+                dy,
+            )
+        )
+
+    out_path_obj = Path(out_path)
+    out_path_obj.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        prefix="fullbleed_overlay_",
+        suffix=".pdf",
+        delete=False,
+    ) as tmp_overlay:
+        tmp_overlay.write(overlay_pdf_bytes)
+        tmp_overlay_path = Path(tmp_overlay.name)
+
+    compose_result = None
+    try:
+        compose_result = fullbleed.finalize_compose_pdf(
+            templates,
+            plan,
+            str(tmp_overlay_path),
+            str(out_path_obj),
+        )
+    finally:
+        try:
+            tmp_overlay_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    fail_on = getattr(args, "fail_on", None) or []
+    need_glyph_check = "missing-glyphs" in fail_on or "font-subst" in fail_on
+    glyph_path = getattr(args, "emit_glyph_report", None)
+    glyph_report = None
+    if glyph_path or need_glyph_check:
+        _glyph_pdf, glyph_report = engine.render_pdf_with_glyph_report(html, css)
+        if glyph_path:
+            _write_json(glyph_path, glyph_report)
+
+    image_paths = _emit_image_artifacts(engine, html, css, out_path, args)
+    bytes_written = out_path_obj.stat().st_size if out_path_obj.exists() else 0
+    compose_pages = int((compose_result or {}).get("pages_written", len(plan)))
+    compose_info = {
+        "enabled": True,
+        "templates": len(templates),
+        "pages_written": compose_pages,
+        "plan_pages": len(plan),
+        "dx": dx,
+        "dy": dy,
+    }
+    return int(bytes_written), glyph_report, None, image_paths, compose_info
 
 
 def _as_float(value):
@@ -1528,14 +1740,20 @@ def cmd_render(args):
     previous, internal_jit_path = _prepare_fail_on_args(args)
     try:
         engine = _build_engine(args)
-        rendered = _render_with_artifacts(engine, html, css, args.out, args)
+        if getattr(args, "templates", None):
+            rendered = _render_with_template_compose(engine, html, css, args.out, args)
+        else:
+            rendered = _render_with_artifacts(engine, html, css, args.out, args)
     finally:
         _restore_args(args, previous)
+    compose_info = None
     if len(rendered) == 3:
         bytes_written, glyph_report, pdf_bytes = rendered
         image_paths = None
-    else:
+    elif len(rendered) == 4:
         bytes_written, glyph_report, pdf_bytes, image_paths = rendered
+    else:
+        bytes_written, glyph_report, pdf_bytes, image_paths, compose_info = rendered
     # Flush/close debug logger buffers before reading emitted jit logs.
     try:
         del engine
@@ -1581,6 +1799,7 @@ def cmd_render(args):
         "repro_record": getattr(args, "repro_record", None),
         "repro_check": getattr(args, "repro_check", None),
         "repro_status": "fail" if failures else ("pass" if repro_record else None),
+        "template_compose": compose_info,
     }
     
     if failures:
@@ -2158,6 +2377,7 @@ def cmd_capabilities(args):
         "verify",
         "plan",
         "run",
+        "finalize",
         "compliance",
         "debug-perf",
         "debug-jit",
@@ -2385,14 +2605,35 @@ def _add_common_flags(p):
     p.add_argument("--emit-manifest",
                    help="Write compiler input manifest derived from CLI flags")
     p.add_argument(
+        "--template-binding",
+        help="Template binding spec JSON (path or inline). Enables per-page template-id resolution.",
+    )
+    p.add_argument(
+        "--templates",
+        help="Template catalog for auto-compose (directory, JSON path, or inline JSON). "
+             "When set on render, output is finalized through Rust compose.",
+    )
+    p.add_argument(
+        "--template-dx",
+        type=float,
+        default=0.0,
+        help="Optional overlay X translation (points) applied during auto-compose render mode.",
+    )
+    p.add_argument(
+        "--template-dy",
+        type=float,
+        default=0.0,
+        help="Optional overlay Y translation (points) applied during auto-compose render mode.",
+    )
+    p.add_argument(
         "--asset",
         action="append",
-        help="Repeatable asset path. .svg is inferred as asset kind 'svg'.",
+        help="Repeatable asset path. .svg and .pdf are inferred as asset kinds.",
     )
     p.add_argument(
         "--asset-kind",
         action="append",
-        help="Asset kind override: css, font, svg, image.",
+        help="Asset kind override: css, font, svg, image, pdf.",
     )
     p.add_argument("--asset-name", action="append")
     p.add_argument("--asset-trusted", action="store_true")
@@ -2565,6 +2806,38 @@ def _build_parser():
     p_cache_prune.add_argument("--json", action="store_true")
     p_cache_prune.set_defaults(func=cache_module.cmd_cache_prune)
 
+    # ===== Finalize commands (template composition) =====
+    from . import finalize as finalize_module
+
+    p_finalize = sub.add_parser("finalize", help="Finalize template composition workflows")
+    finalize_sub = p_finalize.add_subparsers(dest="finalize_command", required=True)
+
+    p_finalize_stamp = finalize_sub.add_parser("stamp", help="Page-for-page template stamping")
+    p_finalize_stamp.add_argument("--template", required=True, help="Template PDF path")
+    p_finalize_stamp.add_argument("--overlay", required=True, help="Overlay PDF path")
+    p_finalize_stamp.add_argument("--out", required=True, help="Output PDF path")
+    p_finalize_stamp.add_argument("--dx", type=float, default=0.0, help="X translation in points for overlay placement")
+    p_finalize_stamp.add_argument("--dy", type=float, default=0.0, help="Y translation in points for overlay placement")
+    p_finalize_stamp.add_argument(
+        "--page-map",
+        help="Optional JSON path/string mapping template/overlay page indices",
+    )
+    p_finalize_stamp.add_argument("--json", action="store_true")
+    p_finalize_stamp.set_defaults(func=finalize_module.cmd_finalize_stamp)
+
+    p_finalize_compose = finalize_sub.add_parser("compose", help="Plan-driven template composition")
+    p_finalize_compose.add_argument("--templates", required=True, help="Template root directory or manifest location")
+    p_finalize_compose.add_argument("--plan", required=True, help="PagePlan JSON path")
+    p_finalize_compose.add_argument("--overlay", required=True, help="Overlay PDF path")
+    p_finalize_compose.add_argument("--out", required=True, help="Output PDF path")
+    p_finalize_compose.add_argument(
+        "--experimental-xobject-reuse",
+        action="store_true",
+        help="Enable experimental XObject reuse implementation",
+    )
+    p_finalize_compose.add_argument("--json", action="store_true")
+    p_finalize_compose.set_defaults(func=finalize_module.cmd_finalize_compose)
+
     # ===== Project scaffolding commands =====
     from . import scaffold as scaffold_module
     
@@ -2574,12 +2847,65 @@ def _build_parser():
     p_init.add_argument("--json", action="store_true")
     p_init.set_defaults(func=scaffold_module.cmd_init)
     
-    p_new = sub.add_parser("new", help="Create from a starter template")
-    p_new.add_argument("template", help="Template name (invoice, statement)")
-    p_new.add_argument("path", nargs="?", default=".", help="Target directory")
-    p_new.add_argument("--force", action="store_true", help="Overwrite existing files")
-    p_new.add_argument("--json", action="store_true")
-    p_new.set_defaults(func=scaffold_module.cmd_new_template)
+    p_new = sub.add_parser("new", help="Create local starter templates or fetch remote templates")
+    new_sub = p_new.add_subparsers(dest="new_command", required=True)
+
+    p_new_local = new_sub.add_parser("local", help="Create from a local starter template")
+    p_new_local.add_argument("template", help="Template name (invoice, statement)")
+    p_new_local.add_argument("path", nargs="?", default=".", help="Target directory")
+    p_new_local.add_argument("--force", action="store_true", help="Overwrite existing files")
+    p_new_local.add_argument("--json", action="store_true")
+    p_new_local.set_defaults(func=scaffold_module.cmd_new_template)
+
+    # Compatibility aliases for existing usage: `fullbleed new invoice [path]`.
+    for tmpl_name in sorted(scaffold_module.TEMPLATES.keys()):
+        p_alias = new_sub.add_parser(
+            tmpl_name,
+            help=f"(compat) same as `fullbleed new local {tmpl_name}`",
+        )
+        p_alias.add_argument("path", nargs="?", default=".", help="Target directory")
+        p_alias.add_argument("--force", action="store_true", help="Overwrite existing files")
+        p_alias.add_argument("--json", action="store_true")
+        p_alias.set_defaults(func=scaffold_module.cmd_new_template_alias, template=tmpl_name)
+
+    p_new_list = new_sub.add_parser("list", help="List remote templates from registry")
+    p_new_list.add_argument(
+        "--registry",
+        help="Registry manifest URL (defaults to FULLBLEED_TEMPLATE_REGISTRY or builtin URL)",
+    )
+    p_new_list.add_argument("--json", action="store_true")
+    p_new_list.set_defaults(func=scaffold_module.cmd_new_list)
+
+    p_new_search = new_sub.add_parser("search", help="Search remote templates by text and tags")
+    p_new_search.add_argument("query", help="Search query text")
+    p_new_search.add_argument(
+        "--tag",
+        action="append",
+        help="Repeatable tag filter (all supplied tags must match)",
+    )
+    p_new_search.add_argument(
+        "--registry",
+        help="Registry manifest URL (defaults to FULLBLEED_TEMPLATE_REGISTRY or builtin URL)",
+    )
+    p_new_search.add_argument("--json", action="store_true")
+    p_new_search.set_defaults(func=scaffold_module.cmd_new_search)
+
+    p_new_remote = new_sub.add_parser("remote", help="Install a remote template project")
+    p_new_remote.add_argument("template_id", help="Remote template id (for example: i9-stamped-vdp)")
+    p_new_remote.add_argument("path", nargs="?", default=".", help="Target directory")
+    p_new_remote.add_argument(
+        "--version",
+        default="latest",
+        help="Release version (default: latest)",
+    )
+    p_new_remote.add_argument(
+        "--registry",
+        help="Registry manifest URL (defaults to FULLBLEED_TEMPLATE_REGISTRY or builtin URL)",
+    )
+    p_new_remote.add_argument("--dry-run", action="store_true", help="Resolve remote release without downloading")
+    p_new_remote.add_argument("--force", action="store_true", help="Overwrite target directory contents")
+    p_new_remote.add_argument("--json", action="store_true")
+    p_new_remote.set_defaults(func=scaffold_module.cmd_new_remote)
 
     # ===== Run command =====
     p_run = sub.add_parser("run", help="Run a Python module's engine factory")

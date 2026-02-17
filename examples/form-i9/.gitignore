@@ -1,0 +1,11 @@
+# Fullbleed output
+output/
+/dist
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# IDE
+.vscode/
+.idea/

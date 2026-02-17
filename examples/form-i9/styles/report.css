@@ -1,0 +1,15 @@
+@page {
+  size: 612pt 792pt;
+  margin: 0;
+}
+
+[data-fb-role="document-root"] {
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+  font-weight: 400;
+  color: #111111;
+}
+
+[data-fb-role="document-root"] .report-root,
+[data-fb-role="document-root"] .i9-overlay-document {
+  width: 612pt;
+}

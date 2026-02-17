@@ -165,6 +165,7 @@ pub(crate) struct PdfStreamWriter<'a, W: Write> {
     fonts: BTreeMap<String, StreamFont<'a>>,
     next_font_resource: usize,
     current_doc_id: usize,
+    doc_font_usage: BTreeMap<usize, BTreeSet<String>>,
 
     image_resources: Vec<(String, usize)>,
     image_name_map: HashMap<String, String>,
@@ -228,6 +229,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             fonts: BTreeMap::new(),
             next_font_resource: 1,
             current_doc_id: 0,
+            doc_font_usage: BTreeMap::new(),
             image_resources: Vec::new(),
             image_name_map: HashMap::new(),
             image_content_map: HashMap::new(),
@@ -321,19 +323,24 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
 
         // 1) Fonts (some objects were allocated early but not written yet).
         let fonts = std::mem::take(&mut self.fonts);
+        let doc_font_usage = std::mem::take(&mut self.doc_font_usage);
 
         if let Some(logger) = self.debug.as_deref() {
-            let mut doc_map: BTreeMap<usize, Vec<(String, usize)>> = BTreeMap::new();
+            let mut glyph_counts: BTreeMap<String, usize> = BTreeMap::new();
             for (key, font_state) in &fonts {
-                let doc_id = key
-                    .splitn(2, "::")
-                    .next()
-                    .and_then(|v| v.parse::<usize>().ok())
-                    .unwrap_or(0);
-                doc_map
-                    .entry(doc_id)
-                    .or_default()
-                    .push((font_state.logical_name.clone(), font_state.glyph_map.len()));
+                glyph_counts.insert(key.clone(), font_state.glyph_map.len());
+            }
+
+            let mut doc_map: BTreeMap<usize, Vec<(String, usize)>> = BTreeMap::new();
+            for (doc_id, names) in doc_font_usage {
+                let mut rows: Vec<(String, usize)> = Vec::new();
+                for name in names {
+                    let key = normalize_font_key(&name);
+                    let glyphs = glyph_counts.get(&key).copied().unwrap_or(0);
+                    rows.push((name, glyphs));
+                }
+                rows.sort_by(|a, b| a.0.cmp(&b.0));
+                doc_map.insert(doc_id, rows);
             }
 
             let mut out = String::from("{\"type\":\"jit.fonts\",\"docs\":[");
@@ -1141,13 +1148,32 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             .unwrap_or(PDF_PAGES_ID)
     }
 
+    fn canonical_font_name(&self, name: &str) -> String {
+        let trimmed = name.trim().trim_matches('"').trim_matches('\'');
+        if let Some(registry) = self.registry {
+            if let Some(font) = registry.resolve(trimmed) {
+                return font.name.clone();
+            }
+        }
+        trimmed.to_string()
+    }
+
+    fn record_doc_font_usage(&mut self, logical_name: &str) {
+        self.doc_font_usage
+            .entry(self.current_doc_id)
+            .or_default()
+            .insert(logical_name.to_string());
+    }
+
     fn font_key(&self, name: &str) -> String {
-        format!("{}::{}", self.current_doc_id, name)
+        normalize_font_key(&self.canonical_font_name(name))
     }
 
     fn ensure_font(&mut self, name: &str) -> io::Result<()> {
-        let key = self.font_key(name);
+        let logical_name = self.canonical_font_name(name);
+        let key = self.font_key(&logical_name);
         if self.fonts.contains_key(&key) {
+            self.record_doc_font_usage(&logical_name);
             return Ok(());
         }
 
@@ -1165,12 +1191,12 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     "pdfx4 requires a font registry for embedded font resolution",
                 ));
             };
-            let Some(font) = registry.resolve(name) else {
+            let Some(font) = registry.resolve(&logical_name) else {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     format!(
                         "pdfx4 requires embedded fonts; unresolved font '{}'. register an embeddable font asset.",
-                        name
+                        logical_name
                     ),
                 ));
             };
@@ -1186,10 +1212,10 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             }
         } else {
             // Default to base14 fonts when possible for speed and portability.
-            let base14 = is_base14_font(name);
+            let base14 = is_base14_font(&logical_name);
             if !base14 && self.options.unicode_support {
                 if let Some(registry) = self.registry {
-                    if let Some(font) = registry.resolve(name) {
+                    if let Some(font) = registry.resolve(&logical_name) {
                         if matches!(font.program_kind, FontProgramKind::TrueType) {
                             kind = StreamFontKind::TrueTypeIdentityH;
                             encoding = FontEncoding::IdentityH;
@@ -1213,7 +1239,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         self.fonts.insert(
             key,
             StreamFont {
-                logical_name: name.to_string(),
+                logical_name: logical_name.clone(),
                 resource,
                 encoding,
                 start_id,
@@ -1223,6 +1249,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 plans: HashMap::new(),
             },
         );
+        self.record_doc_font_usage(&logical_name);
         Ok(())
     }
 
@@ -1443,6 +1470,13 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         out.push('>');
         out
     }
+}
+
+fn normalize_font_key(name: &str) -> String {
+    name.trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .to_ascii_lowercase()
 }
 
 fn is_base14_font(name: &str) -> bool {
@@ -3784,6 +3818,26 @@ mod tests {
         std::env::temp_dir().join(format!("fullbleed_{tag}_{}_{}.jsonl", std::process::id(), nanos))
     }
 
+    fn repo_font_path(file_name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("python")
+            .join("fullbleed_assets")
+            .join("fonts")
+            .join(file_name)
+    }
+
+    fn text_page(font_name: &str, text: &str) -> Document {
+        one_page_document(vec![
+            Command::SetFontName(font_name.to_string()),
+            Command::SetFontSize(Pt::from_f32(11.0)),
+            Command::DrawString {
+                x: Pt::from_f32(72.0),
+                y: Pt::from_f32(88.0),
+                text: text.to_string(),
+            },
+        ])
+    }
+
     #[test]
     fn pdfx4_requires_output_intent() {
         let doc = one_page_document(vec![]);
@@ -3979,6 +4033,85 @@ mod tests {
         let pdf = String::from_utf8_lossy(&bytes);
         assert!(pdf.contains("/Subtype /Form"));
         assert!(pdf.contains("/Fm1 Do"));
+    }
+
+    #[test]
+    fn streaming_writer_dedupes_same_embedded_font_across_documents() {
+        let inter_path = repo_font_path("Inter-Variable.ttf");
+        let inter_bytes = std::fs::read(&inter_path).expect("read inter");
+
+        let mut registry = FontRegistry::new();
+        let inter_name = registry
+            .register_bytes(
+                inter_bytes,
+                Some(inter_path.to_string_lossy().as_ref()),
+            )
+            .expect("register inter");
+
+        let doc_a = text_page(&inter_name, "Record A");
+        let doc_b = text_page(&inter_name, "Record B");
+
+        let mut out = Vec::new();
+        let mut stream = PdfStreamWriter::new(
+            &mut out,
+            Size::a4(),
+            Some(&registry),
+            PdfOptions::default(),
+            None,
+            None,
+        )
+        .expect("stream writer");
+        stream.add_document(0, &doc_a).expect("add doc a");
+        stream.add_document(1, &doc_b).expect("add doc b");
+        let written = stream.finish().expect("finish stream");
+        assert_eq!(written, out.len());
+
+        // One embedded TrueType program and one Type0 wrapper for the shared font.
+        assert_eq!(count_token(&out, b"/FontFile2"), 1);
+        assert_eq!(count_token(&out, b"/Subtype /Type0"), 1);
+    }
+
+    #[test]
+    fn streaming_writer_keeps_distinct_embedded_fonts_distinct() {
+        let inter_path = repo_font_path("Inter-Variable.ttf");
+        let noto_path = repo_font_path("NotoSans-Regular.ttf");
+        let inter_bytes = std::fs::read(&inter_path).expect("read inter");
+        let noto_bytes = std::fs::read(&noto_path).expect("read noto");
+
+        let mut registry = FontRegistry::new();
+        let inter_name = registry
+            .register_bytes(
+                inter_bytes,
+                Some(inter_path.to_string_lossy().as_ref()),
+            )
+            .expect("register inter");
+        let noto_name = registry
+            .register_bytes(
+                noto_bytes,
+                Some(noto_path.to_string_lossy().as_ref()),
+            )
+            .expect("register noto");
+
+        let doc_a = text_page(&inter_name, "Inter sample");
+        let doc_b = text_page(&noto_name, "Noto sample");
+
+        let mut out = Vec::new();
+        let mut stream = PdfStreamWriter::new(
+            &mut out,
+            Size::a4(),
+            Some(&registry),
+            PdfOptions::default(),
+            None,
+            None,
+        )
+        .expect("stream writer");
+        stream.add_document(0, &doc_a).expect("add doc a");
+        stream.add_document(1, &doc_b).expect("add doc b");
+        let written = stream.finish().expect("finish stream");
+        assert_eq!(written, out.len());
+
+        // Two distinct embedded font programs for two distinct logical fonts.
+        assert_eq!(count_token(&out, b"/FontFile2"), 2);
     }
 
     #[test]

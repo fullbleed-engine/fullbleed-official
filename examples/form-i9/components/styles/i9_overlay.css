@@ -1,0 +1,77 @@
+[data-fb-role="document-root"] {
+  margin: 0;
+  padding: 0;
+  width: 612pt;
+  max-width: none;
+}
+
+[data-fb-role="document-root"] .i9-overlay-document {
+  width: 612pt;
+}
+
+[data-fb-role="document-root"] .i9-page {
+  width: 612pt;
+  height: 792pt;
+  position: relative;
+  box-sizing: border-box;
+}
+
+[data-fb-role="document-root"] .i9-page:not(:last-child) {
+  break-after: page;
+}
+
+[data-fb-role="document-root"] .i9-page-marker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+[data-fb-role="document-root"] .i9-record-marker {
+  position: absolute;
+  left: 540pt;
+  top: 786pt;
+  color: #ffffff;
+  font-size: 1.2pt;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+[data-fb-role="document-root"] .i9-field {
+  position: absolute;
+  box-sizing: border-box;
+  overflow: hidden;
+  white-space: nowrap;
+  color: #111;
+}
+
+[data-fb-role="document-root"] .i9-field-text {
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+  font-size: 8.25pt;
+  line-height: 1.05;
+  padding: 0.4pt 0.8pt 0 0.8pt;
+}
+
+[data-fb-role="document-root"] .i9-field-comb-cell {
+  padding: 0;
+  text-align: center;
+  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-size: 9.15pt;
+  line-height: 1.05;
+  padding-top: 1.05pt;
+}
+
+[data-fb-role="document-root"] .i9-field-checkbox {
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+  font-size: 8pt;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1;
+  padding-top: 1pt;
+}
+
+[data-fb-role="document-root"] .i9-field-checkbox.checked {
+  color: #000;
+}

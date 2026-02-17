@@ -1,0 +1,169 @@
+{
+  "schema": "fullbleed.auto_compose_parity.v1",
+  "ok": true,
+  "i9": {
+    "render": {
+      "schema": "fullbleed.render_result.v1",
+      "ok": true,
+      "outputs": {
+        "pdf": "C:\\dev\\workbench\\fullbleed-official\\examples\\i9-stamped\\output\\i9_auto_composed.pdf",
+        "jit": null,
+        "perf": null,
+        "glyph_report": null,
+        "page_data": null,
+        "image": null,
+        "image_paths": null,
+        "deterministic_hash": null,
+        "sha256": "278b07d4a426148833cac81d1d28bc53d967a509626e4c0eb3dd52406c2b6118",
+        "fallbacks": {
+          "allowed": false,
+          "missing_glyphs": 0,
+          "encoding_fallbacks": 0,
+          "detected": false
+        },
+        "repro_record": null,
+        "repro_check": null,
+        "repro_status": null,
+        "template_compose": {
+          "enabled": true,
+          "templates": 1,
+          "pages_written": 4,
+          "plan_pages": 4,
+          "dx": 0.0,
+          "dy": 0.0
+        }
+      },
+      "bytes_written": 556657
+    },
+    "render_repeat": {
+      "schema": "fullbleed.render_result.v1",
+      "ok": true,
+      "outputs": {
+        "pdf": "C:\\dev\\workbench\\fullbleed-official\\examples\\i9-stamped\\output\\i9_auto_composed_repeat.pdf",
+        "jit": null,
+        "perf": null,
+        "glyph_report": null,
+        "page_data": null,
+        "image": null,
+        "image_paths": null,
+        "deterministic_hash": null,
+        "sha256": "278b07d4a426148833cac81d1d28bc53d967a509626e4c0eb3dd52406c2b6118",
+        "fallbacks": {
+          "allowed": false,
+          "missing_glyphs": 0,
+          "encoding_fallbacks": 0,
+          "detected": false
+        },
+        "repro_record": null,
+        "repro_check": null,
+        "repro_status": null,
+        "template_compose": {
+          "enabled": true,
+          "templates": 1,
+          "pages_written": 4,
+          "plan_pages": 4,
+          "dx": 0.0,
+          "dy": 0.0
+        }
+      },
+      "bytes_written": 556657
+    },
+    "pdf": "C:\\dev\\workbench\\fullbleed-official\\examples\\i9-stamped\\output\\i9_auto_composed.pdf",
+    "summary": {
+      "page_count": 4,
+      "text_lengths": [
+        4207,
+        4171,
+        2409,
+        4134
+      ]
+    },
+    "signature": "pages=4|p1:612.000x792.000:txt=4207:blocks=48|p2:612.000x792.000:txt=4171:blocks=67|p3:612.000x792.000:txt=2409:blocks=30|p4:612.000x792.000:txt=4134:blocks=43",
+    "signature_repeat": "pages=4|p1:612.000x792.000:txt=4207:blocks=48|p2:612.000x792.000:txt=4171:blocks=67|p3:612.000x792.000:txt=2409:blocks=30|p4:612.000x792.000:txt=4134:blocks=43",
+    "deterministic_structural": true
+  },
+  "form_1099_int": {
+    "render": {
+      "schema": "fullbleed.render_result.v1",
+      "ok": true,
+      "outputs": {
+        "pdf": "C:\\dev\\workbench\\fullbleed-official\\examples\\1099-int\\output\\report_auto_composed.pdf",
+        "jit": null,
+        "perf": null,
+        "glyph_report": null,
+        "page_data": null,
+        "image": null,
+        "image_paths": null,
+        "deterministic_hash": null,
+        "sha256": "74a67aae7db188781aa1ee8ea5962c2dd290b5bcc0868812873e440ac72fc2f8",
+        "fallbacks": {
+          "allowed": false,
+          "missing_glyphs": 0,
+          "encoding_fallbacks": 0,
+          "detected": false
+        },
+        "repro_record": null,
+        "repro_check": null,
+        "repro_status": null,
+        "template_compose": {
+          "enabled": true,
+          "templates": 1,
+          "pages_written": 7,
+          "plan_pages": 7,
+          "dx": 0.0,
+          "dy": 0.0
+        }
+      },
+      "bytes_written": 314634
+    },
+    "render_repeat": {
+      "schema": "fullbleed.render_result.v1",
+      "ok": true,
+      "outputs": {
+        "pdf": "C:\\dev\\workbench\\fullbleed-official\\examples\\1099-int\\output\\report_auto_composed_repeat.pdf",
+        "jit": null,
+        "perf": null,
+        "glyph_report": null,
+        "page_data": null,
+        "image": null,
+        "image_paths": null,
+        "deterministic_hash": null,
+        "sha256": "74a67aae7db188781aa1ee8ea5962c2dd290b5bcc0868812873e440ac72fc2f8",
+        "fallbacks": {
+          "allowed": false,
+          "missing_glyphs": 0,
+          "encoding_fallbacks": 0,
+          "detected": false
+        },
+        "repro_record": null,
+        "repro_check": null,
+        "repro_status": null,
+        "template_compose": {
+          "enabled": true,
+          "templates": 1,
+          "pages_written": 7,
+          "plan_pages": 7,
+          "dx": 0.0,
+          "dy": 0.0
+        }
+      },
+      "bytes_written": 314634
+    },
+    "pdf": "C:\\dev\\workbench\\fullbleed-official\\examples\\1099-int\\output\\report_auto_composed.pdf",
+    "summary": {
+      "page_count": 7,
+      "text_lengths": [
+        2843,
+        2660,
+        2103,
+        2652,
+        10756,
+        2200,
+        7397
+      ]
+    },
+    "signature": "pages=7|p1:612.000x792.000:txt=2843:blocks=12|p2:612.000x792.000:txt=2660:blocks=89|p3:612.000x792.000:txt=2103:blocks=83|p4:612.000x792.000:txt=2652:blocks=89|p5:612.000x792.000:txt=10756:blocks=7|p6:612.000x792.000:txt=2200:blocks=84|p7:612.000x792.000:txt=7397:blocks=4",
+    "signature_repeat": "pages=7|p1:612.000x792.000:txt=2843:blocks=12|p2:612.000x792.000:txt=2660:blocks=89|p3:612.000x792.000:txt=2103:blocks=83|p4:612.000x792.000:txt=2652:blocks=89|p5:612.000x792.000:txt=10756:blocks=7|p6:612.000x792.000:txt=2200:blocks=84|p7:612.000x792.000:txt=7397:blocks=4",
+    "deterministic_structural": true
+  }
+}

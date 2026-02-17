@@ -1,0 +1,22 @@
+@page {
+  size: 612pt 792pt;
+  margin: 0;
+}
+
+:root {
+  --fb-font-family-sans: "Inter", "Helvetica Neue", Arial, sans-serif;
+  --fb-color-text: #111111;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--fb-font-family-sans);
+  font-weight: 400;
+  color: var(--fb-color-text);
+}
+
+[data-fb-role="document-root"] {
+  margin: 0;
+  padding: 0;
+}

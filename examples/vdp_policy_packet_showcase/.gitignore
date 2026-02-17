@@ -1,0 +1,5 @@
+assets/templates/
+output/
+vendor/
+__pycache__/
+*.pyc

@@ -6,6 +6,7 @@ pub enum AssetKind {
     Css,
     Font,
     Image,
+    Pdf,
     Svg,
     Other,
 }
@@ -16,6 +17,7 @@ impl AssetKind {
             AssetKind::Css => "css",
             AssetKind::Font => "font",
             AssetKind::Image => "image",
+            AssetKind::Pdf => "pdf",
             AssetKind::Svg => "svg",
             AssetKind::Other => "other",
         }
@@ -26,6 +28,7 @@ impl AssetKind {
             "css" => Some(AssetKind::Css),
             "font" => Some(AssetKind::Font),
             "image" => Some(AssetKind::Image),
+            "pdf" => Some(AssetKind::Pdf),
             "svg" => Some(AssetKind::Svg),
             "other" => Some(AssetKind::Other),
             _ => None,
@@ -102,4 +105,15 @@ pub fn is_supported_font_path(path: &Path) -> bool {
         return false;
     };
     matches!(ext.to_ascii_lowercase().as_str(), "ttf" | "otf")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AssetKind;
+
+    #[test]
+    fn asset_kind_pdf_roundtrip() {
+        assert_eq!(AssetKind::from_str("pdf"), Some(AssetKind::Pdf));
+        assert_eq!(AssetKind::Pdf.as_str(), "pdf");
+    }
 }

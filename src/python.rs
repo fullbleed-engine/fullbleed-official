@@ -10,8 +10,8 @@ use base64::Engine;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyModule};
-use std::collections::HashMap;
-use std::path::Path;
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
 
 #[pyclass(name = "AssetKind")]
 struct PyAssetKind;
@@ -27,6 +27,9 @@ impl PyAssetKind {
     #[allow(non_upper_case_globals)]
     #[classattr]
     const Image: &'static str = "image";
+    #[allow(non_upper_case_globals)]
+    #[classattr]
+    const Pdf: &'static str = "pdf";
     #[allow(non_upper_case_globals)]
     #[classattr]
     const Svg: &'static str = "svg";
@@ -58,6 +61,12 @@ impl PyAsset {
             {
                 info.set_item("font", font_name)?;
             }
+        } else if self.asset.kind == AssetKind::Pdf {
+            let pdf = lopdf::Document::load_mem(&self.asset.data)
+                .map_err(|err| PyValueError::new_err(format!("invalid pdf data: {err}")))?;
+            info.set_item("pdf_version", pdf.version.as_str())?;
+            info.set_item("page_count", pdf.get_pages().len())?;
+            info.set_item("encrypted", pdf.is_encrypted())?;
         }
         Ok(info.to_object(py))
     }
@@ -121,7 +130,7 @@ impl PyAssetBundle {
 fn parse_asset_kind(raw: &str) -> PyResult<AssetKind> {
     AssetKind::from_str(raw).ok_or_else(|| {
         PyValueError::new_err(format!(
-            "unknown asset kind: {raw:?} (expected css|font|image|svg|other)"
+            "unknown asset kind: {raw:?} (expected css|font|image|pdf|svg|other)"
         ))
     })
 }
@@ -183,6 +192,14 @@ fn build_asset(
         if crate::font::font_primary_name_from_bytes(&data, Some(&asset_name)).is_none() {
             return Err(PyValueError::new_err("invalid font data (unable to parse)"));
         }
+    } else if kind == AssetKind::Pdf {
+        let pdf = lopdf::Document::load_mem(&data)
+            .map_err(|err| PyValueError::new_err(format!("invalid pdf data: {err}")))?;
+        if pdf.is_encrypted() {
+            return Err(PyValueError::new_err(
+                "encrypted pdf assets are not supported",
+            ));
+        }
     }
     Ok(Asset::new(
         asset_name,
@@ -220,6 +237,78 @@ fn fetch_asset(py: Python<'_>, url: &str) -> PyResult<Py<PyBytes>> {
 #[pyfunction]
 fn concat_css(parts: Vec<String>) -> PyResult<String> {
     Ok(parts.join("\n"))
+}
+
+#[pyfunction]
+#[pyo3(signature = (template, overlay, out, page_map=None, dx=0.0, dy=0.0))]
+fn finalize_stamp_pdf(
+    template: &str,
+    overlay: &str,
+    out: &str,
+    page_map: Option<Vec<(usize, usize)>>,
+    dx: f32,
+    dy: f32,
+) -> PyResult<PyObject> {
+    let summary = crate::stamp_overlay_on_template_pdf(
+        std::path::Path::new(template),
+        std::path::Path::new(overlay),
+        std::path::Path::new(out),
+        page_map.as_deref(),
+        dx,
+        dy,
+    )
+    .map_err(to_py_err)?;
+    Python::with_gil(|py| {
+        let d = PyDict::new_bound(py);
+        d.set_item("ok", true)?;
+        d.set_item("pages_written", summary.pages_written)?;
+        Ok(d.to_object(py))
+    })
+}
+
+#[pyfunction]
+#[pyo3(signature = (templates, plan, overlay, out))]
+fn finalize_compose_pdf(
+    templates: Vec<(String, String)>,
+    plan: Vec<(String, usize, usize, f32, f32)>,
+    overlay: &str,
+    out: &str,
+) -> PyResult<PyObject> {
+    let mut catalog = crate::TemplateCatalog::default();
+    for (template_id, pdf_path) in templates {
+        catalog
+            .insert(crate::TemplateAsset {
+                template_id,
+                pdf_path: PathBuf::from(pdf_path),
+                sha256: None,
+                page_count: None,
+            })
+            .map_err(to_py_err)?;
+    }
+    let mut page_plan = Vec::with_capacity(plan.len());
+    for (template_id, template_page_index, overlay_page_index, dx, dy) in plan {
+        page_plan.push(crate::ComposePagePlan {
+            template_id,
+            template_page_index,
+            overlay_page_index,
+            dx,
+            dy,
+        });
+    }
+    let summary = crate::compose_overlay_with_template_catalog(
+        &catalog,
+        std::path::Path::new(overlay),
+        std::path::Path::new(out),
+        &page_plan,
+    )
+    .map_err(to_py_err)?;
+
+    Python::with_gil(|py| {
+        let d = PyDict::new_bound(py);
+        d.set_item("ok", true)?;
+        d.set_item("pages_written", summary.pages_written)?;
+        Ok(d.to_object(py))
+    })
 }
 
 fn div_round_i128(num: i128, den: i128) -> Option<i64> {
@@ -383,6 +472,87 @@ fn parse_py_margins(arg: Option<&Bound<'_, PyAny>>) -> PyResult<Option<Margins>>
     Err(PyValueError::new_err(
         "page_margins values must be a number (points) or a dict like {'top':'20mm','right':'10mm','bottom':'10mm','left':'10mm'}",
     ))
+}
+
+fn parse_template_binding_spec(
+    value: &Bound<'_, PyAny>,
+) -> PyResult<crate::TemplateBindingSpec> {
+    let dict = value.downcast::<PyDict>().map_err(|_| {
+        PyValueError::new_err(
+            "template_binding must be a dict like {'default_template_id':'tpl-default','by_page_template':{'Page1':'tpl-a'},'by_feature':{'i9':'tpl-b'},'feature_prefix':'fb.feature.'}",
+        )
+    })?;
+    let mut spec = crate::TemplateBindingSpec::default();
+
+    if let Some(v) = dict.get_item("default_template_id")? {
+        let id = v.extract::<String>().map_err(|_| {
+            PyValueError::new_err("template_binding.default_template_id must be a string")
+        })?;
+        if id.trim().is_empty() {
+            return Err(PyValueError::new_err(
+                "template_binding.default_template_id cannot be empty",
+            ));
+        }
+        spec.default_template_id = Some(id);
+    }
+
+    if let Some(v) = dict.get_item("feature_prefix")? {
+        let prefix = v.extract::<String>().map_err(|_| {
+            PyValueError::new_err("template_binding.feature_prefix must be a string")
+        })?;
+        if prefix.trim().is_empty() {
+            return Err(PyValueError::new_err(
+                "template_binding.feature_prefix cannot be empty",
+            ));
+        }
+        spec.feature_prefix = prefix;
+    }
+
+    if let Some(v) = dict.get_item("by_page_template")? {
+        let by = v.downcast::<PyDict>().map_err(|_| {
+            PyValueError::new_err("template_binding.by_page_template must be a dict[str, str]")
+        })?;
+        let mut out: BTreeMap<String, String> = BTreeMap::new();
+        for (k, val) in by.iter() {
+            let key = k.extract::<String>().map_err(|_| {
+                PyValueError::new_err("template_binding.by_page_template keys must be strings")
+            })?;
+            let mapped = val.extract::<String>().map_err(|_| {
+                PyValueError::new_err("template_binding.by_page_template values must be strings")
+            })?;
+            if key.trim().is_empty() || mapped.trim().is_empty() {
+                return Err(PyValueError::new_err(
+                    "template_binding.by_page_template entries cannot be empty",
+                ));
+            }
+            out.insert(key, mapped);
+        }
+        spec.by_page_template = out;
+    }
+
+    if let Some(v) = dict.get_item("by_feature")? {
+        let by = v.downcast::<PyDict>().map_err(|_| {
+            PyValueError::new_err("template_binding.by_feature must be a dict[str, str]")
+        })?;
+        let mut out: BTreeMap<String, String> = BTreeMap::new();
+        for (k, val) in by.iter() {
+            let key = k.extract::<String>().map_err(|_| {
+                PyValueError::new_err("template_binding.by_feature keys must be strings")
+            })?;
+            let mapped = val.extract::<String>().map_err(|_| {
+                PyValueError::new_err("template_binding.by_feature values must be strings")
+            })?;
+            if key.trim().is_empty() || mapped.trim().is_empty() {
+                return Err(PyValueError::new_err(
+                    "template_binding.by_feature entries cannot be empty",
+                ));
+            }
+            out.insert(key, mapped);
+        }
+        spec.by_feature = out;
+    }
+
+    Ok(spec)
 }
 
 fn parse_color_hex(s: &str) -> Option<Color> {
@@ -698,6 +868,29 @@ fn page_data_context_to_py(py: Python<'_>, ctx: &PageDataContext) -> PyResult<Py
     Ok(root.to_object(py))
 }
 
+fn template_binding_decisions_to_py(
+    py: Python<'_>,
+    decisions: &[crate::PageBindingDecision],
+) -> PyResult<PyObject> {
+    let list = PyList::empty_bound(py);
+    for decision in decisions {
+        let d = PyDict::new_bound(py);
+        d.set_item("page_index", decision.page_index)?;
+        d.set_item("page", decision.page_index + 1)?;
+        d.set_item("page_template_name", decision.page_template_name.clone())?;
+        d.set_item("feature_hits", PyList::new_bound(py, &decision.feature_hits))?;
+        d.set_item("template_id", decision.template_id.clone())?;
+        let source = match decision.source {
+            crate::BindingSource::Feature => "feature",
+            crate::BindingSource::PageTemplate => "page_template",
+            crate::BindingSource::Default => "default",
+        };
+        d.set_item("source", source)?;
+        list.append(d)?;
+    }
+    Ok(list.to_object(py))
+}
+
 fn glyph_report_to_py(py: Python<'_>, report: &GlyphCoverageReport) -> PyResult<PyObject> {
     let list = PyList::empty_bound(py);
     for missing in report.missing() {
@@ -778,6 +971,7 @@ impl PdfEngine {
             watermark_font_size=None,
             watermark_color=None,
             paginated_context=None,
+            template_binding=None,
             jit_mode=None,
             debug=false,
             debug_out=None,
@@ -842,6 +1036,7 @@ impl PdfEngine {
         watermark_font_size: Option<f32>,
         watermark_color: Option<String>,
         paginated_context: Option<HashMap<String, String>>,
+        template_binding: Option<&Bound<'_, PyAny>>,
         jit_mode: Option<String>,
         debug: bool,
         debug_out: Option<String>,
@@ -1070,6 +1265,10 @@ impl PdfEngine {
             }
             builder = builder.paginated_context(crate::PaginatedContextSpec::new(ops));
         }
+        if let Some(raw) = template_binding {
+            let spec = parse_template_binding_spec(raw)?;
+            builder = builder.template_binding_spec(spec);
+        }
         if let Some(mode) = jit_mode {
             let mode = mode.trim().to_ascii_lowercase();
             let jit_mode = match mode.as_str() {
@@ -1177,6 +1376,31 @@ impl PdfEngine {
         };
 
         Ok((PyBytes::new_bound(py, &bytes).unbind(), data_obj))
+    }
+
+    fn render_pdf_with_page_data_and_template_bindings(
+        &self,
+        py: Python<'_>,
+        html: &str,
+        css: &str,
+    ) -> PyResult<(Py<PyBytes>, PyObject, PyObject)> {
+        let (bytes, page_data, template_bindings) = py
+            .allow_threads(|| {
+                self.engine
+                    .render_with_page_data_and_template_bindings(html, css)
+            })
+            .map_err(to_py_err)?;
+
+        let data_obj = match page_data {
+            Some(ctx) => page_data_context_to_py(py, &ctx)?,
+            None => py.None(),
+        };
+        let bindings_obj = match template_bindings {
+            Some(bindings) => template_binding_decisions_to_py(py, &bindings)?,
+            None => py.None(),
+        };
+
+        Ok((PyBytes::new_bound(py, &bytes).unbind(), data_obj, bindings_obj))
     }
 
     #[pyo3(signature = (html, css))]
@@ -1321,6 +1545,8 @@ fn _fullbleed(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(vendored_asset, module)?)?;
     module.add_function(wrap_pyfunction!(fetch_asset, module)?)?;
     module.add_function(wrap_pyfunction!(concat_css, module)?)?;
+    module.add_function(wrap_pyfunction!(finalize_stamp_pdf, module)?)?;
+    module.add_function(wrap_pyfunction!(finalize_compose_pdf, module)?)?;
     Ok(())
 }
 
