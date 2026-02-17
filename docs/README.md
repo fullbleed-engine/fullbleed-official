@@ -8,7 +8,7 @@ This folder documents the Fullbleed stack at three layers:
 
 ## Version scope
 
-These docs target the `0.2.0` stable line and the current repository source layout.
+These docs target the `0.2.5` stable line and the current repository source layout.
 
 ## Documents
 

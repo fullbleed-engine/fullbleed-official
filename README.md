@@ -43,6 +43,7 @@ Additional focused references are in `docs/`:
 - Reproducibility workflow via `--repro-record` and `--repro-check`.
 - PDF `1.7` as the production-stable default target.
 - Rust-native PDF template composition for VDP/transactional overlays.
+- Native Rust image emission for overlay and finalized compose outputs (`--emit-image`) without external PDF raster runtime dependencies.
 - Feature-driven page-to-template binding with per-page deterministic compose plans.
 - Structured JSON result schemas for CI and AI agents.
 - Offline-first asset model with explicit remote opt-in.
@@ -67,7 +68,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-0.2.0-cp311-cp311-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-0.2.5-cp311-cp311-win_amd64.whl
 ```
 
 Platform artifact policy:
@@ -236,7 +237,7 @@ fullbleed --json render \
   --out output/hello.pdf
 ```
 
-`--deterministic-hash` writes the output PDF SHA-256 by default; when `--emit-image` is enabled, it writes an artifact-set digest over PDF SHA-256 plus ordered page-image SHA-256 hashes.
+`--deterministic-hash` writes the output PDF SHA-256 by default; when `--emit-image` is enabled, it writes an artifact-set digest (`fullbleed.artifact_digest.v1`) over PDF SHA-256 plus ordered page-image SHA-256 hashes. JSON outputs expose `outputs.deterministic_hash_mode` (`pdf_only` or `artifact_set_v1`), with `outputs.artifact_sha256` and `outputs.image_sha256` when images are emitted.
 
 Re-run and enforce reproducibility against a stored record:
 
@@ -293,6 +294,10 @@ fullbleed --json render \
   --templates config/template_catalog.json \
   --out output/composed.pdf
 ```
+
+Compose image semantics:
+- In template auto-compose mode, `--emit-image` PNGs are rasterized from finalized composed pages and report `outputs.image_mode=composed_pdf`.
+- In non-compose `render`/`verify` runs, `--emit-image` reports `outputs.image_mode=overlay_document`.
 
 Minimal `template_binding` example:
 
@@ -794,8 +799,15 @@ Module exports:
 | `register_bundle(bundle)` | `None` |
 | `render_pdf(html, css, deterministic_hash=None)` | `bytes` |
 | `render_pdf_to_file(html, css, path, deterministic_hash=None)` | `int` (bytes written) |
+| `render_image_pages(html, css, dpi=150)` | `list[bytes]` |
+| `render_image_pages_to_dir(html, css, out_dir, dpi=150, stem=None)` | `list[str]` |
+| `render_finalized_pdf_image_pages(pdf_path, dpi=150)` | `list[bytes]` |
+| `render_finalized_pdf_image_pages_to_dir(pdf_path, out_dir, dpi=150, stem=None)` | `list[str]` |
 | `render_pdf_with_glyph_report(html, css)` | `(bytes, list)` |
 | `render_pdf_with_page_data(html, css)` | `(bytes, page_data_or_none)` |
+| `render_pdf_with_page_data_and_glyph_report(html, css)` | `(bytes, page_data_or_none, glyph_report_list)` |
+| `render_pdf_with_page_data_and_template_bindings(html, css)` | `(bytes, page_data_or_none, template_bindings_or_none)` |
+| `render_pdf_with_page_data_and_template_bindings_and_glyph_report(html, css)` | `(bytes, page_data_or_none, template_bindings_or_none, glyph_report_list)` |
 | `plan_template_compose(html, css, templates, dx=0.0, dy=0.0)` | `dict` |
 | `render_pdf_batch(html_list, css, deterministic_hash=None)` | `bytes` |
 | `render_pdf_batch_parallel(html_list, css, deterministic_hash=None)` | `bytes` |
@@ -1151,7 +1163,9 @@ print(payload["outputs"]["pdf"])
 - `render --json` cannot be combined with `--out -` (stdout PDF bytes).
 - `verify` defaults to stdout PDF unless `--emit-pdf` is provided; for machine mode, use `--emit-pdf <path>`.
 - `--emit-image <dir>` writes per-page PNGs as `<stem>_pageN.png` (stem comes from `--out`/`--emit-pdf`, or `render` when streaming PDF to stdout).
-- If both `--emit-page-data` and `--emit-glyph-report` are set, render is performed twice.
+- In template auto-compose runs, `--emit-image` artifacts are rasterized from finalized composed pages and report `outputs.image_mode=composed_pdf`; otherwise `image_mode=overlay_document`.
+- `outputs.deterministic_hash_mode` is `pdf_only` by default and `artifact_set_v1` when image artifacts are emitted.
+- If both `--emit-page-data` and `--emit-glyph-report` are set, current engines use a combined API and render once; older engines without that API fall back to a double render.
 - Production target is PDF `1.7`.
 - `run` accepts `--html-str` without requiring `--html`.
 - `run` emits a one-time AGPL/commercial licensing reminder; suppress with `--no-license-warn` or by activating commercial attestation (`FULLBLEED_LICENSE_MODE=commercial` + `FULLBLEED_COMMERCIAL_LICENSED=1`).

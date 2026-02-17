@@ -1,14 +1,14 @@
 {
   "schema": "fullbleed.golden_suite.v1",
-  "generated_at_utc": "2026-02-13T20:00:03.147065+00:00",
+  "generated_at_utc": "2026-02-17T22:57:07.107807+00:00",
   "cases": {
     "acme_invoice": {
       "case_id": "acme_invoice",
       "report": "examples/acme_invoice/report.py",
       "pdf": {
         "path": "examples/acme_invoice/output/acme_sample_invoice.pdf",
-        "bytes": 1793270,
-        "sha256": "6598c5d6175f20094af792f03573506999ab5a4757954c9bd5fe5429bfaf4441"
+        "bytes": 882692,
+        "sha256": "78fc748dae775de6e319486823c8dd47b39c145eb1a146f848315904c3600086"
       },
       "png": {
         "count": 1,
@@ -16,15 +16,15 @@
           {
             "name": "acme_sample_invoice_page1.png",
             "path": "examples/acme_invoice/output/acme_sample_invoice_page1.png",
-            "bytes": 288545,
-            "sha256": "a8ac9abfc5e96943833c912e603a9ffc9001fc1c33d6077d09db68a6d8e00d66"
+            "bytes": 277440,
+            "sha256": "ca6ae2031f391e4a035e45d9b8d83c0833f22c38b3e7d31e634615df78117c01"
           }
         ]
       },
       "validation": {
         "path": "examples/acme_invoice/output/acme_sample_invoice_component_mount_validation.json",
         "kind": "component_mount",
-        "sha256": "ac1131f909c2cc4f5259226441c4a2e7f3518c38908c43b2d83d81b34d0f25f2"
+        "sha256": "3ad1ac9899ba96f48bc5424f59f177769d021aea03021a54043c1023bc944772"
       },
       "css_layers": {
         "path": "examples/acme_invoice/output/acme_sample_invoice_css_layers.json",
@@ -36,8 +36,8 @@
       "report": "examples/bank_statement/report.py",
       "pdf": {
         "path": "examples/bank_statement/output/bank_statement.pdf",
-        "bytes": 1811609,
-        "sha256": "6f8c2425fa777a54ecb5d1794d221f7725725117213f132ea9fe3c75a879f267"
+        "bytes": 886630,
+        "sha256": "03c6a42dc26f0763d1fd60adb064504249126af38d48d07ece3a50f5d9d68b97"
       },
       "png": {
         "count": 2,
@@ -59,7 +59,7 @@
       "validation": {
         "path": "examples/bank_statement/output/bank_statement_component_mount_validation.json",
         "kind": "component_mount",
-        "sha256": "f0efda1c185dece7dec189184a372d4ab68f5e6250e9d2cee29ec81eb814873f"
+        "sha256": "5f3edb9bc8687d1c5cb4a0605d79b1dc2c5d7d6f4fb0619fdcb64ca3e99d0e4e"
       },
       "css_layers": {
         "path": "examples/bank_statement/output/bank_statement_css_layers.json",
@@ -71,8 +71,8 @@
       "report": "examples/coastal_menu/report.py",
       "pdf": {
         "path": "examples/coastal_menu/output/coastal_menu.pdf",
-        "bytes": 8347,
-        "sha256": "fef95bea026787183eba96c9f26d30deaddde8585afea6f39df16792a23b2865"
+        "bytes": 3930,
+        "sha256": "8d8ad329d5019a8699a8321a0e76d5b947fb5d988a13f2b4f416cf28df2163ce"
       },
       "png": {
         "count": 1,
@@ -80,15 +80,15 @@
           {
             "name": "coastal_menu_page1.png",
             "path": "examples/coastal_menu/output/coastal_menu_page1.png",
-            "bytes": 410557,
-            "sha256": "7d94762087b061c4882e85a2b4a17812810b3a09aefe8eed758e9f25ced8ff2c"
+            "bytes": 414419,
+            "sha256": "b193e38c4c69faf4ad64ac4bcf0765643fe2ce2f026d4019029ad4b6280d893a"
           }
         ]
       },
       "validation": {
         "path": "examples/coastal_menu/output/coastal_menu_validation.json",
         "kind": "coastal_validation",
-        "sha256": "fd9d44bf8fc1bca243b642c7f7f6fe13532ee94d0ed1ad259a050401dc707706"
+        "sha256": "717abb3db4a5a5aa504f15a47d77fc81ec5bd39c70b101a9e9fba5e9b85a977a"
       },
       "css_layers": null
     }

@@ -1,13 +1,13 @@
 {
   "ok": true,
-  "bytes_written": 1793270,
+  "bytes_written": 882692,
   "missing_glyph_count": 0,
   "overflow_count": 0,
   "css_warning_count": 0,
   "css_miss_count": 0,
   "known_loss_count": 0,
   "html_asset_warning_count": 0,
-  "debug_log": "C:\\Users\\keena\\AppData\\Local\\Temp\\invoice_mount_c38_a8uj.jit.jsonl",
+  "debug_log": "C:\\Users\\keena\\AppData\\Local\\Temp\\invoice_mount_p97sdgec.jit.jsonl",
   "failures": [],
   "warnings": []
 }
