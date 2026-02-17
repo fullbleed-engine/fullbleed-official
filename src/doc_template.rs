@@ -6,8 +6,8 @@ use crate::flowable::{BreakAfter, BreakBefore, Flowable};
 use crate::frame::AddResult;
 use crate::metrics::{DocumentMetrics, PageMetrics};
 use crate::page_template::PageTemplate;
-use std::sync::Arc;
 use std::collections::VecDeque;
+use std::sync::Arc;
 use std::time::Instant;
 
 pub struct DocTemplate {

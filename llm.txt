@@ -35,8 +35,12 @@ When a workflow includes a source PDF template, use the Rust template compositio
 
 Required behavior:
 - Register template PDFs as first-class assets (`vendored_asset(..., "pdf")` or `AssetBundle.add_file(..., "pdf")`) so validation/metadata checks run.
+- Run `fullbleed inspect pdf <path> --json` when validating unknown source PDFs in automation.
+- Run `fullbleed inspect templates --templates <dir|json> --json` for catalog-level compatibility checks.
+- Use `fullbleed plan --templates ... --template-binding ... --emit-compose-plan <path>` for machine-readable compose planning without finalizing.
 - Use template composition via CLI render/finalize template options, not ad-hoc byte-stream hacks.
 - Treat templates as vendored vector assets and overlay variable data on top.
+- Python API equivalents: `fullbleed.inspect_template_catalog(...)` and `PdfEngine.plan_template_compose(...)`.
 - Do not use private/prototype pypdf backend paths for production automation.
 
 Reference:

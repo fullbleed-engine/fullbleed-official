@@ -29,6 +29,10 @@ pub(crate) struct PdfOptions {
     pub document_lang: Option<String>,
     pub document_title: Option<String>,
     pub color_space: ColorSpace,
+    // When true, page/form command streams are Flate-compressed.
+    pub compress_content_streams: bool,
+    // Keep tiny streams uncompressed to avoid compression overhead.
+    pub compress_content_stream_min_bytes: usize,
 }
 
 impl Default for PdfOptions {
@@ -43,6 +47,8 @@ impl Default for PdfOptions {
             document_lang: None,
             document_title: None,
             color_space: ColorSpace::Rgb,
+            compress_content_streams: true,
+            compress_content_stream_min_bytes: 128,
         }
     }
 }
@@ -200,6 +206,9 @@ pub(crate) struct PdfStreamWriter<'a, W: Write> {
     tag_records: Vec<TagRecord>,
     page_ids: Vec<usize>,
     page_content_bytes: Vec<usize>,
+    content_stream_raw_bytes: usize,
+    content_stream_encoded_bytes: usize,
+    content_stream_compressed_count: usize,
 }
 
 impl<'a, W: Write> PdfStreamWriter<'a, W> {
@@ -253,6 +262,9 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             tag_records: Vec::new(),
             page_ids: Vec::new(),
             page_content_bytes: Vec::new(),
+            content_stream_raw_bytes: 0,
+            content_stream_encoded_bytes: 0,
+            content_stream_compressed_count: 0,
         };
 
         Ok(s)
@@ -291,7 +303,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         let content_stream = self.render_page(page, page_index)?;
         self.page_content_bytes
             .push(content_stream.as_bytes().len());
-        self.write_object(content_id, &stream_object(&content_stream))?;
+        self.write_content_stream_object(content_id, "", content_stream.as_bytes())?;
         self.page_ids.push(page_id);
 
         let (struct_parents, tabs) = if self.options.pdf_profile == PdfProfile::Tagged {
@@ -385,11 +397,19 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                                 format!("font not found in registry: {}", font_state.logical_name),
                             ));
                         };
-                        let (objs, _font_id, _next) =
-                            build_truetype_font_objects(font, font_state.start_id);
-                        for (i, obj) in objs.iter().enumerate() {
-                            self.write_object(font_state.start_id + i, obj)?;
-                        }
+                        let font_file_id = font_state.start_id;
+                        let descriptor_id = font_state.start_id + 1;
+                        let font_id = font_state.start_id + 2;
+                        self.write_font_file_stream_object(
+                            font_file_id,
+                            &font.data,
+                            font.program_kind,
+                        )?;
+                        self.write_object(
+                            descriptor_id,
+                            &font_descriptor_object(font, font_file_id),
+                        )?;
+                        self.write_object(font_id, &truetype_font_object(font, descriptor_id))?;
                     }
                     StreamFontKind::TrueTypeIdentityH => {
                         let Some(font) = registry.resolve(&font_state.logical_name) else {
@@ -398,18 +418,66 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                                 format!("font not found in registry: {}", font_state.logical_name),
                             ));
                         };
-                        let usage = FontUsage {
-                            glyph_map: font_state.glyph_map.clone(),
-                        };
-                        let (objs, _type0_id, _glyph_map, _next) = build_cidfont_objects(
-                            font,
-                            registry,
-                            Some(&usage),
-                            font_state.start_id,
-                        );
-                        for (i, obj) in objs.iter().enumerate() {
-                            self.write_object(font_state.start_id + i, obj)?;
+                        let font_file_id = font_state.start_id;
+                        let descriptor_id = font_state.start_id + 1;
+                        let cid_font_id = font_state.start_id + 2;
+                        let to_unicode_id = font_state.start_id + 3;
+                        let type0_font_id = font_state.start_id + 4;
+
+                        self.write_font_file_stream_object(
+                            font_file_id,
+                            &font.data,
+                            font.program_kind,
+                        )?;
+                        self.write_object(
+                            descriptor_id,
+                            &font_descriptor_object(font, font_file_id),
+                        )?;
+
+                        let mut glyph_map = font_state.glyph_map.clone();
+                        if glyph_map.is_empty() {
+                            let gid = registry.map_glyph_id_for_char(&font.name, ' ');
+                            if gid != 0 {
+                                glyph_map.insert(gid, " ".to_string());
+                            }
                         }
+                        let used_gids: BTreeSet<u16> = glyph_map.keys().copied().collect();
+                        let mut w_entries: Vec<String> = Vec::new();
+                        for gid in &used_gids {
+                            let adv = registry.glyph_advance(&font.name, *gid);
+                            let width = if adv > 0 {
+                                adv
+                            } else {
+                                font.metrics.missing_width
+                            };
+                            w_entries.push(format!("{} [{}]", gid, width));
+                        }
+                        let w_array = if w_entries.is_empty() {
+                            String::new()
+                        } else {
+                            format!("/W [{}]", w_entries.join(" "))
+                        };
+                        self.write_object(
+                            cid_font_id,
+                            &format!(
+                                "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /{} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor {} 0 R {} /CIDToGIDMap /Identity >>",
+                                sanitize_font_name(&font.name),
+                                descriptor_id,
+                                w_array
+                            ),
+                        )?;
+
+                        let to_unicode = to_unicode_cmap(&glyph_map);
+                        self.write_stream_object_bytes(to_unicode_id, "", to_unicode.as_bytes())?;
+                        self.write_object(
+                            type0_font_id,
+                            &format!(
+                                "<< /Type /Font /Subtype /Type0 /BaseFont /{} /Encoding /Identity-H /DescendantFonts [{} 0 R] /ToUnicode {} 0 R >>",
+                                sanitize_font_name(&font.name),
+                                cid_font_id,
+                                to_unicode_id
+                            ),
+                        )?;
                     }
                 }
             }
@@ -620,10 +688,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             }
             if let Some(oi) = output_intent.as_ref() {
                 let icc_id = self.alloc_ids(1);
-                self.write_object(
-                    icc_id,
-                    &icc_profile_object(&oi.icc_profile, oi.n_components),
-                )?;
+                self.write_icc_profile_stream_object(icc_id, &oi.icc_profile, oi.n_components)?;
                 let oi_id = self.alloc_ids(1);
                 self.write_object(oi_id, &output_intent_object(oi, icc_id, pdf_profile))?;
                 output_intent_id = Some(oi_id);
@@ -693,10 +758,17 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         write_str(self.writer, &trailer, &mut self.offset)?;
 
         let bytes_written = self.offset;
+        let content_ratio_ppm = if self.content_stream_raw_bytes == 0 {
+            1_000_000u64
+        } else {
+            ((self.content_stream_encoded_bytes as u128)
+                .saturating_mul(1_000_000)
+                .saturating_div(self.content_stream_raw_bytes as u128)) as u64
+        };
         let finish_ms = t_finish.elapsed().as_secs_f64() * 1000.0;
         if let Some(logger) = self.debug.as_deref() {
             let json = format!(
-                "{{\"type\":\"jit.link\",\"ms\":{:.3},\"bytes\":{},\"pages\":{},\"fonts\":{},\"images\":{},\"forms\":{},\"shadings\":{},\"extgstates\":{},\"image_bytes\":{}}}",
+                "{{\"type\":\"jit.link\",\"ms\":{:.3},\"bytes\":{},\"pages\":{},\"fonts\":{},\"images\":{},\"forms\":{},\"shadings\":{},\"extgstates\":{},\"image_bytes\":{},\"content_stream_raw_bytes\":{},\"content_stream_encoded_bytes\":{},\"content_stream_compressed\":{},\"content_stream_ratio_ppm\":{}}}",
                 finish_ms,
                 bytes_written,
                 self.page_ids.len(),
@@ -705,7 +777,11 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 self.form_resources.len(),
                 self.shading_resources.len(),
                 self.gs_resources.len(),
-                self.image_bytes_total
+                self.image_bytes_total,
+                self.content_stream_raw_bytes,
+                self.content_stream_encoded_bytes,
+                self.content_stream_compressed_count,
+                content_ratio_ppm
             );
             logger.log_json(&json);
         }
@@ -723,6 +799,19 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     ("shadings", self.shading_resources.len() as u64),
                     ("extgstates", self.gs_resources.len() as u64),
                     ("image_bytes", self.image_bytes_total as u64),
+                    (
+                        "content_stream_raw_bytes",
+                        self.content_stream_raw_bytes as u64,
+                    ),
+                    (
+                        "content_stream_encoded_bytes",
+                        self.content_stream_encoded_bytes as u64,
+                    ),
+                    (
+                        "content_stream_compressed",
+                        self.content_stream_compressed_count as u64,
+                    ),
+                    ("content_stream_ratio_ppm", content_ratio_ppm),
                 ],
             );
         }
@@ -1126,6 +1215,108 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         )
     }
 
+    fn write_stream_object_bytes(
+        &mut self,
+        obj_id: usize,
+        dict_entries: &str,
+        data: &[u8],
+    ) -> io::Result<()> {
+        write_pdf_stream_object(
+            self.writer,
+            &mut self.offset,
+            &mut self.offsets,
+            obj_id,
+            dict_entries,
+            data,
+        )
+    }
+
+    fn write_content_stream_object(
+        &mut self,
+        obj_id: usize,
+        dict_entries: &str,
+        content: &[u8],
+    ) -> io::Result<()> {
+        self.content_stream_raw_bytes = self.content_stream_raw_bytes.saturating_add(content.len());
+        let should_compress = self.options.compress_content_streams
+            && content.len() >= self.options.compress_content_stream_min_bytes;
+        if should_compress {
+            let compressed = flate_compress(content);
+            self.content_stream_encoded_bytes = self
+                .content_stream_encoded_bytes
+                .saturating_add(compressed.len());
+            self.content_stream_compressed_count =
+                self.content_stream_compressed_count.saturating_add(1);
+            let mut dict = String::new();
+            if !dict_entries.trim().is_empty() {
+                dict.push_str(dict_entries.trim());
+                dict.push(' ');
+            }
+            dict.push_str("/Filter /FlateDecode");
+            self.write_stream_object_bytes(obj_id, &dict, &compressed)
+        } else {
+            self.content_stream_encoded_bytes = self
+                .content_stream_encoded_bytes
+                .saturating_add(content.len());
+            self.write_stream_object_bytes(obj_id, dict_entries, content)
+        }
+    }
+
+    fn write_image_smask_stream_object(
+        &mut self,
+        obj_id: usize,
+        alpha: &AlphaData,
+    ) -> io::Result<()> {
+        let dict = format!(
+            "/Type /XObject /Subtype /Image /Width {} /Height {} /ColorSpace /DeviceGray /BitsPerComponent {} /Filter {}",
+            alpha.width, alpha.height, alpha.bits_per_component, alpha.filter
+        );
+        self.write_stream_object_bytes(obj_id, &dict, &alpha.data)
+    }
+
+    fn write_image_stream_object(
+        &mut self,
+        obj_id: usize,
+        image: &ImageData,
+        smask_id: Option<usize>,
+    ) -> io::Result<()> {
+        let smask = smask_id
+            .map(|id| format!(" /SMask {} 0 R", id))
+            .unwrap_or_default();
+        let dict = format!(
+            "/Type /XObject /Subtype /Image /Width {} /Height {} /ColorSpace {} /BitsPerComponent {} /Filter {}{}",
+            image.width,
+            image.height,
+            image.color_space,
+            image.bits_per_component,
+            image.filter,
+            smask
+        );
+        self.write_stream_object_bytes(obj_id, &dict, &image.data)
+    }
+
+    fn write_font_file_stream_object(
+        &mut self,
+        obj_id: usize,
+        data: &[u8],
+        kind: FontProgramKind,
+    ) -> io::Result<()> {
+        let mut dict = format!("/Length1 {}", data.len());
+        if matches!(kind, FontProgramKind::OpenTypeCff) {
+            dict.push_str(" /Subtype /OpenType");
+        }
+        self.write_stream_object_bytes(obj_id, &dict, data)
+    }
+
+    fn write_icc_profile_stream_object(
+        &mut self,
+        obj_id: usize,
+        data: &[u8],
+        n_components: u8,
+    ) -> io::Result<()> {
+        self.write_stream_object_bytes(obj_id, &format!("/N {}", n_components), data)
+    }
+
     fn ensure_page_node(&mut self) -> usize {
         let needs_new = self
             .current_node
@@ -1307,9 +1498,9 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             self.image_bytes_total += alpha.data.len();
         }
         if let (Some(alpha), Some(mask_id)) = (image.alpha.as_ref(), smask_id) {
-            self.write_object(mask_id, &image_smask_object(alpha))?;
+            self.write_image_smask_stream_object(mask_id, alpha)?;
         }
-        self.write_object(obj_id, &image_object(&image, smask_id))?;
+        self.write_image_stream_object(obj_id, &image, smask_id)?;
         self.image_resources.push((name.clone(), obj_id));
         self.image_name_map.insert(source.to_string(), name.clone());
         if self.options.reuse_xobjects {
@@ -1345,16 +1536,14 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         let name = format!("Fm{}", self.next_form_index);
         self.next_form_index += 1;
 
-        let obj = format!(
-            "<< /Type /XObject /Subtype /Form /FormType 1 /BBox [0 0 {} {}] /Resources {} 0 R /Length {} >>\nstream\n{}\nendstream",
+        let dict = format!(
+            "/Type /XObject /Subtype /Form /FormType 1 /BBox [0 0 {} {}] /Resources {} 0 R",
             fmt_pt(width),
             fmt_pt(height),
             PDF_RESOURCES_ID,
-            content.len(),
-            content
         );
 
-        self.write_object(obj_id, &obj)?;
+        self.write_content_stream_object(obj_id, &dict, content.as_bytes())?;
         self.form_resources.push((name.clone(), obj_id));
         self.form_name_map
             .insert(resource_id.to_string(), name.clone());
@@ -2019,198 +2208,6 @@ fn cached_shape_text_to_tj(
 }
 
 #[allow(dead_code)]
-fn build_font_objects(
-    font_names: &[String],
-    font_map: &mut BTreeMap<String, FontResource>,
-    registry: Option<&FontRegistry>,
-    start_id: usize,
-    font_usage: &HashMap<String, FontUsage>,
-    options: &PdfOptions,
-) -> (
-    Vec<String>,
-    Vec<(String, usize)>,
-    HashMap<String, BTreeMap<u16, String>>,
-    usize,
-) {
-    let mut objects = Vec::new();
-    let mut resources = Vec::new();
-    let mut next_id = start_id;
-    let mut glyph_maps: HashMap<String, BTreeMap<u16, String>> = HashMap::new();
-
-    for name in font_names {
-        let resource = font_map
-            .get(name)
-            .map(|v| v.resource.clone())
-            .unwrap_or_else(|| "F1".to_string());
-        if let Some(font) = registry.and_then(|registry| registry.resolve(name)) {
-            if options.unicode_support && matches!(font.program_kind, FontProgramKind::TrueType) {
-                let usage = font_usage.get(name);
-                let reg = registry.expect("registry is Some when font is resolved");
-                let (font_objects, font_id, glyph_map, new_next) =
-                    build_cidfont_objects(font, reg, usage, next_id);
-                objects.extend(font_objects);
-                resources.push((resource.clone(), font_id));
-                if let Some(entry) = font_map.get_mut(name) {
-                    entry.encoding = FontEncoding::IdentityH;
-                }
-                glyph_maps.insert(name.clone(), glyph_map);
-                next_id = new_next;
-            } else {
-                // Fallback to WinAnsi Type1/TrueType path for OpenType CFF for now.
-                let (font_objects, font_id, new_next) = build_truetype_font_objects(font, next_id);
-                objects.extend(font_objects);
-                resources.push((resource.clone(), font_id));
-                next_id = new_next;
-            }
-        } else {
-            let font_id = next_id;
-            objects.push(font_object(name));
-            resources.push((resource.clone(), font_id));
-            next_id += 1;
-        }
-    }
-
-    (objects, resources, glyph_maps, next_id)
-}
-
-fn build_truetype_font_objects(
-    font: &RegisteredFont,
-    start_id: usize,
-) -> (Vec<String>, usize, usize) {
-    let font_file_id = start_id;
-    let descriptor_id = start_id + 1;
-    let font_id = start_id + 2;
-    let font_file = font_file_object(&font.data, font.program_kind);
-    let descriptor = font_descriptor_object(font, font_file_id);
-    let font_object = truetype_font_object(font, descriptor_id);
-    (
-        vec![font_file, descriptor, font_object],
-        font_id,
-        start_id + 3,
-    )
-}
-
-fn build_cidfont_objects(
-    font: &RegisteredFont,
-    registry: &FontRegistry,
-    usage: Option<&FontUsage>,
-    start_id: usize,
-) -> (Vec<String>, usize, BTreeMap<u16, String>, usize) {
-    let font_file_id = start_id;
-    let descriptor_id = start_id + 1;
-    let cid_font_id = start_id + 2;
-    let to_unicode_id = start_id + 3;
-    let type0_font_id = start_id + 4;
-
-    let mut objects = Vec::new();
-    objects.push(font_file_object(&font.data, font.program_kind));
-    objects.push(font_descriptor_object(font, font_file_id));
-
-    let mut glyph_map: BTreeMap<u16, String> =
-        usage.map(|u| u.glyph_map.clone()).unwrap_or_default();
-    if glyph_map.is_empty() {
-        // Fallback: at least include space.
-        let gid = registry.map_glyph_id_for_char(&font.name, ' ');
-        if gid != 0 {
-            glyph_map.insert(gid, " ".to_string());
-        }
-    }
-    let used_gids: BTreeSet<u16> = glyph_map.keys().copied().collect();
-
-    let mut w_entries: Vec<String> = Vec::new();
-    for gid in &used_gids {
-        let adv = registry.glyph_advance(&font.name, *gid);
-        let width = if adv > 0 {
-            adv
-        } else {
-            font.metrics.missing_width
-        };
-        w_entries.push(format!("{} [{}]", gid, width));
-    }
-    let w_array = if w_entries.is_empty() {
-        String::new()
-    } else {
-        format!("/W [{}]", w_entries.join(" "))
-    };
-
-    let cid_font = format!(
-        "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /{} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor {} 0 R {} /CIDToGIDMap /Identity >>",
-        sanitize_font_name(&font.name),
-        descriptor_id,
-        w_array
-    );
-    objects.push(cid_font);
-
-    let to_unicode = to_unicode_cmap(&glyph_map);
-    objects.push(stream_object(&to_unicode));
-
-    let type0 = format!(
-        "<< /Type /Font /Subtype /Type0 /BaseFont /{} /Encoding /Identity-H /DescendantFonts [{} 0 R] /ToUnicode {} 0 R >>",
-        sanitize_font_name(&font.name),
-        cid_font_id,
-        to_unicode_id
-    );
-    objects.push(type0);
-
-    (objects, type0_font_id, glyph_map, start_id + 5)
-}
-
-#[allow(dead_code)]
-fn build_image_objects(
-    sources: &[String],
-    start_id: usize,
-    reuse_xobjects: bool,
-) -> (
-    Vec<String>,
-    Vec<(String, usize)>,
-    HashMap<String, String>,
-    usize,
-) {
-    let mut objects = Vec::new();
-    let mut resources = Vec::new();
-    let mut name_map = HashMap::new();
-    let mut content_map: HashMap<u64, (String, usize)> = HashMap::new();
-    let mut next_id = start_id;
-    let mut image_index = 1usize;
-
-    for source in sources {
-        if let Some(image) = load_image(source) {
-            let hash = hash_image(&image);
-            if reuse_xobjects {
-                if let Some((name, _obj_id)) = content_map.get(&hash) {
-                    name_map.insert(source.clone(), name.clone());
-                    continue;
-                }
-            }
-
-            let smask_id = image.alpha.as_ref().map(|_| {
-                let id = next_id;
-                next_id += 1;
-                id
-            });
-            let obj_id = next_id;
-            next_id += 1;
-            let name = format!("Im{}", image_index);
-            image_index += 1;
-
-            if let (Some(alpha), Some(mask_id)) = (image.alpha.as_ref(), smask_id) {
-                objects.push(image_smask_object(alpha));
-                objects.push(image_object(&image, Some(mask_id)));
-            } else {
-                objects.push(image_object(&image, None));
-            }
-            resources.push((name.clone(), obj_id));
-            name_map.insert(source.clone(), name.clone());
-            if reuse_xobjects {
-                content_map.insert(hash, (name, obj_id));
-            }
-        }
-    }
-
-    (objects, resources, name_map, next_id)
-}
-
-#[allow(dead_code)]
 fn build_extgstate_objects(
     document: &Document,
     start_id: usize,
@@ -2425,12 +2422,7 @@ fn parse_data_uri(uri: &str) -> Option<(String, Vec<u8>)> {
 }
 
 fn flate_compress(data: &[u8]) -> Vec<u8> {
-    use flate2::Compression;
-    use flate2::write::ZlibEncoder;
-
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-    let _ = encoder.write_all(data);
-    encoder.finish().unwrap_or_default()
+    crate::flate_native::zlib_deflate_parallel(data)
 }
 
 fn hash_bytes(data: &[u8]) -> u64 {
@@ -2448,57 +2440,6 @@ fn hash_image(image: &ImageData) -> u64 {
         alpha.data.hash(&mut hasher);
     }
     hasher.finish()
-}
-
-fn image_object(image: &ImageData, smask_id: Option<usize>) -> String {
-    let stream_data = encode_stream_data(&image.data);
-    let filters = match image.filter {
-        "/DCTDecode" => "[/ASCIIHexDecode /DCTDecode]",
-        _ => "[/ASCIIHexDecode /FlateDecode]",
-    };
-    let smask = smask_id
-        .map(|id| format!(" /SMask {} 0 R", id))
-        .unwrap_or_default();
-    format!(
-        "<< /Type /XObject /Subtype /Image /Width {} /Height {} /ColorSpace {} /BitsPerComponent {} /Length {} /Filter {}{} >>
-stream
-{}
-endstream",
-        image.width,
-        image.height,
-        image.color_space,
-        image.bits_per_component,
-        stream_data.as_bytes().len(),
-        filters,
-        smask,
-        stream_data
-    )
-}
-
-fn image_smask_object(alpha: &AlphaData) -> String {
-    let stream_data = encode_stream_data(&alpha.data);
-    let filters = match alpha.filter {
-        "/DCTDecode" => "[/ASCIIHexDecode /DCTDecode]",
-        _ => "[/ASCIIHexDecode /FlateDecode]",
-    };
-    format!(
-        "<< /Type /XObject /Subtype /Image /Width {} /Height {} /ColorSpace /DeviceGray /BitsPerComponent {} /Length {} /Filter {} >>
-stream
-{}
-endstream",
-        alpha.width,
-        alpha.height,
-        alpha.bits_per_component,
-        stream_data.as_bytes().len(),
-        filters,
-        stream_data
-    )
-}
-
-fn encode_stream_data(data: &[u8]) -> String {
-    let mut hex = ascii_hex_encode(data);
-    hex.push('>');
-    hex
 }
 
 fn truetype_font_object(font: &RegisteredFont, descriptor_id: usize) -> String {
@@ -2555,38 +2496,6 @@ fn font_descriptor_object(font: &RegisteredFont, font_file_id: usize) -> String 
     )
 }
 
-fn font_file_object(data: &[u8], kind: FontProgramKind) -> String {
-    let hex = ascii_hex_encode(data);
-    let mut stream_data = String::new();
-    stream_data.push_str(&hex);
-    stream_data.push('>');
-    stream_data.push('\n');
-    let length = stream_data.as_bytes().len();
-    let mut dict = format!(
-        "<< /Length {} /Length1 {} /Filter /ASCIIHexDecode",
-        length,
-        data.len()
-    );
-    if matches!(kind, FontProgramKind::OpenTypeCff) {
-        dict.push_str(" /Subtype /OpenType");
-    }
-    dict.push_str(" >>\nstream\n");
-    format!("{}{}endstream", dict, stream_data)
-}
-
-fn icc_profile_object(data: &[u8], n_components: u8) -> String {
-    let hex = ascii_hex_encode(data);
-    let mut stream_data = String::new();
-    stream_data.push_str(&hex);
-    stream_data.push('>');
-    stream_data.push('\n');
-    let length = stream_data.as_bytes().len();
-    format!(
-        "<< /N {} /Length {} /Filter /ASCIIHexDecode >>\nstream\n{}endstream",
-        n_components, length, stream_data
-    )
-}
-
 fn output_intent_object(oi: &OutputIntent, icc_id: usize, profile: PdfProfile) -> String {
     let subtype = match profile {
         PdfProfile::PdfX4 => "GTS_PDFX",
@@ -2604,18 +2513,6 @@ fn output_intent_object(oi: &OutputIntent, icc_id: usize, profile: PdfProfile) -
     dict.push_str(&format!(" /Info ({})", escape_pdf_string(info)));
     dict.push_str(" >>");
     dict
-}
-
-fn ascii_hex_encode(data: &[u8]) -> String {
-    let mut out = String::with_capacity(data.len() * 2);
-    for (index, byte) in data.iter().enumerate() {
-        use std::fmt::Write;
-        let _ = write!(&mut out, "{:02X}", byte);
-        if index % 32 == 31 {
-            out.push('\n');
-        }
-    }
-    out
 }
 
 fn font_object(name: &str) -> String {
@@ -3323,6 +3220,40 @@ fn write_pdf_object<W: Write>(
     Ok(())
 }
 
+fn write_pdf_stream_object<W: Write>(
+    writer: &mut W,
+    offset: &mut usize,
+    offsets: &mut [usize],
+    obj_id: usize,
+    dict_entries: &str,
+    stream_data: &[u8],
+) -> io::Result<()> {
+    if let Some(slot) = offsets.get_mut(obj_id) {
+        *slot = *offset;
+    }
+    write_str(writer, &format!("{} 0 obj\n", obj_id), offset)?;
+    if dict_entries.trim().is_empty() {
+        write_str(
+            writer,
+            &format!("<< /Length {} >>\nstream\n", stream_data.len()),
+            offset,
+        )?;
+    } else {
+        write_str(
+            writer,
+            &format!(
+                "<< {} /Length {} >>\nstream\n",
+                dict_entries.trim(),
+                stream_data.len()
+            ),
+            offset,
+        )?;
+    }
+    write_bytes(writer, stream_data, offset)?;
+    write_bytes(writer, b"\nendstream\nendobj\n", offset)?;
+    Ok(())
+}
+
 fn write_bytes<W: Write>(writer: &mut W, data: &[u8], offset: &mut usize) -> io::Result<()> {
     writer.write_all(data)?;
     *offset += data.len();
@@ -3810,12 +3741,66 @@ mod tests {
         bytes.windows(token.len()).filter(|w| *w == token).count()
     }
 
+    fn page_content_bytes(bytes: &[u8]) -> Vec<u8> {
+        let doc = lopdf::Document::load_mem(bytes).expect("load pdf");
+        let mut out = Vec::new();
+        for (_, page_id) in doc.get_pages() {
+            let content = doc.get_page_content(page_id).expect("page content");
+            out.extend_from_slice(&content);
+            out.push(b'\n');
+        }
+        out
+    }
+
+    fn count_page_content_token(bytes: &[u8], token: &[u8]) -> usize {
+        let content = page_content_bytes(bytes);
+        count_token(&content, token)
+    }
+
+    fn first_page_content_filter(bytes: &[u8]) -> Option<Vec<u8>> {
+        let doc = lopdf::Document::load_mem(bytes).expect("load pdf");
+        let page_id = *doc
+            .get_pages()
+            .values()
+            .next()
+            .expect("at least one page expected");
+        let page = doc
+            .get_object(page_id)
+            .and_then(lopdf::Object::as_dict)
+            .expect("page dict");
+        let contents = page.get(b"Contents").expect("page contents");
+        let content_id = match contents {
+            lopdf::Object::Reference(id) => *id,
+            lopdf::Object::Array(arr) => arr
+                .first()
+                .and_then(|o| o.as_reference().ok())
+                .expect("content array has reference"),
+            _ => panic!("unsupported page contents object"),
+        };
+        let stream = doc
+            .get_object(content_id)
+            .and_then(lopdf::Object::as_stream)
+            .expect("content stream");
+        match stream.dict.get(b"Filter") {
+            Ok(lopdf::Object::Name(name)) => Some(name.clone()),
+            Ok(lopdf::Object::Array(arr)) => arr
+                .first()
+                .and_then(|o| o.as_name().ok())
+                .map(|n| n.to_vec()),
+            _ => None,
+        }
+    }
+
     fn temp_log_path(tag: &str) -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        std::env::temp_dir().join(format!("fullbleed_{tag}_{}_{}.jsonl", std::process::id(), nanos))
+        std::env::temp_dir().join(format!(
+            "fullbleed_{tag}_{}_{}.jsonl",
+            std::process::id(),
+            nanos
+        ))
     }
 
     fn repo_font_path(file_name: &str) -> PathBuf {
@@ -3896,11 +3881,11 @@ mod tests {
             document_to_pdf_with_metrics_and_registry(&doc, None, None, &PdfOptions::default())
                 .unwrap();
         let pdf = String::from_utf8_lossy(&bytes);
-        assert!(pdf.contains("/Artifact <</Subtype /Watermark>> BDC"));
-        assert!(pdf.contains("/OC /WM BDC"));
         assert!(pdf.contains("/OCProperties"));
         assert!(pdf.contains("/Type /OCG"));
         assert!(pdf.contains("/Properties << /WM"));
+        assert!(count_page_content_token(&bytes, b"/Artifact <</Subtype /Watermark>> BDC") > 0);
+        assert!(count_page_content_token(&bytes, b"/OC /WM BDC") > 0);
     }
 
     #[test]
@@ -3946,8 +3931,8 @@ mod tests {
         // The same image source should embed once and be drawn on every page.
         let image_objs_one = count_token(&pdf_one, b"/Subtype /Image");
         let image_objs_multi = count_token(&pdf_multi, b"/Subtype /Image");
-        let draws_one = count_token(&pdf_one, b"/Im1 Do");
-        let draws_multi = count_token(&pdf_multi, b"/Im1 Do");
+        let draws_one = count_page_content_token(&pdf_one, b"/Im1 Do");
+        let draws_multi = count_page_content_token(&pdf_multi, b"/Im1 Do");
 
         assert!(image_objs_one > 0);
         assert_eq!(image_objs_one, image_objs_multi);
@@ -4000,7 +3985,7 @@ mod tests {
         let pdf = String::from_utf8_lossy(&bytes);
         assert!(pdf.contains("/Subtype /Form"));
         assert!(pdf.contains("/XObject"));
-        assert!(pdf.contains("/Fm1 Do"));
+        assert!(count_page_content_token(&bytes, b"/Fm1 Do") > 0);
     }
 
     #[test]
@@ -4032,7 +4017,143 @@ mod tests {
                 .unwrap();
         let pdf = String::from_utf8_lossy(&bytes);
         assert!(pdf.contains("/Subtype /Form"));
-        assert!(pdf.contains("/Fm1 Do"));
+        assert!(count_page_content_token(&bytes, b"/Fm1 Do") > 0);
+    }
+
+    #[test]
+    fn large_page_content_stream_is_flate_compressed_by_default() {
+        let mut commands = Vec::new();
+        commands.push(Command::SetFontName("Helvetica".to_string()));
+        commands.push(Command::SetFontSize(Pt::from_f32(10.0)));
+        for i in 0..240 {
+            commands.push(Command::DrawString {
+                x: Pt::from_f32(36.0),
+                y: Pt::from_f32(36.0 + (i as f32)),
+                text: format!("compression_probe_line_{}", i),
+            });
+        }
+        let doc = one_page_document(commands);
+
+        let bytes =
+            document_to_pdf_with_metrics_and_registry(&doc, None, None, &PdfOptions::default())
+                .expect("pdf bytes");
+        let filter = first_page_content_filter(&bytes).expect("filter present");
+        assert_eq!(filter.as_slice(), b"FlateDecode");
+    }
+
+    #[test]
+    fn content_stream_compression_can_be_threshold_disabled() {
+        let doc = one_page_document(vec![Command::DrawRect {
+            x: Pt::from_f32(1.0),
+            y: Pt::from_f32(2.0),
+            width: Pt::from_f32(3.0),
+            height: Pt::from_f32(4.0),
+        }]);
+        let mut options = PdfOptions::default();
+        options.compress_content_stream_min_bytes = usize::MAX;
+
+        let bytes = document_to_pdf_with_metrics_and_registry(&doc, None, None, &options)
+            .expect("pdf bytes");
+        assert!(first_page_content_filter(&bytes).is_none());
+    }
+
+    #[test]
+    fn image_streams_emit_binary_filters_without_asciihex() {
+        let image_source = "examples/img/full_bleed-logo_small.png".to_string();
+        let doc = one_page_document(vec![Command::DrawImage {
+            x: Pt::from_f32(12.0),
+            y: Pt::from_f32(16.0),
+            width: Pt::from_f32(60.0),
+            height: Pt::from_f32(30.0),
+            resource_id: image_source,
+        }]);
+
+        let bytes =
+            document_to_pdf_with_metrics_and_registry(&doc, None, None, &PdfOptions::default())
+                .expect("pdf bytes");
+        assert!(count_token(&bytes, b"/Subtype /Image") > 0);
+        assert!(count_token(&bytes, b"/Filter /FlateDecode") > 0);
+        assert_eq!(count_token(&bytes, b"/ASCIIHexDecode"), 0);
+    }
+
+    #[test]
+    fn embedded_font_streams_emit_without_asciihex() {
+        let inter_path = repo_font_path("Inter-Variable.ttf");
+        let inter_bytes = std::fs::read(&inter_path).expect("read inter");
+
+        let mut registry = FontRegistry::new();
+        let inter_name = registry
+            .register_bytes(inter_bytes, Some(inter_path.to_string_lossy().as_ref()))
+            .expect("register inter");
+        let doc = text_page(&inter_name, "Font binary stream check");
+
+        let bytes = document_to_pdf_with_metrics_and_registry(
+            &doc,
+            None,
+            Some(&registry),
+            &PdfOptions::default(),
+        )
+        .expect("pdf bytes");
+        assert_eq!(count_token(&bytes, b"/FontFile2"), 1);
+        assert_eq!(count_token(&bytes, b"/ASCIIHexDecode"), 0);
+    }
+
+    #[test]
+    fn icc_stream_emits_without_asciihex() {
+        let doc = one_page_document(vec![]);
+        let mut options = PdfOptions::default();
+        options.pdf_profile = PdfProfile::PdfX4;
+        options.output_intent = Some(OutputIntent::new(
+            vec![0x00, 0x01, 0x02, 0x03],
+            3,
+            "sRGB IEC61966-2.1",
+            Some("sRGB".to_string()),
+        ));
+
+        let bytes = document_to_pdf_with_metrics_and_registry(&doc, None, None, &options)
+            .expect("pdf bytes");
+        assert!(count_token(&bytes, b"/OutputIntents") > 0);
+        assert!(count_token(&bytes, b"/DestOutputProfile") > 0);
+        assert_eq!(count_token(&bytes, b"/ASCIIHexDecode"), 0);
+    }
+
+    #[test]
+    fn pdf_link_perf_reports_content_stream_compression_counters() {
+        let mut commands = Vec::new();
+        commands.push(Command::SetFontName("Helvetica".to_string()));
+        commands.push(Command::SetFontSize(Pt::from_f32(10.0)));
+        for i in 0..220 {
+            commands.push(Command::DrawString {
+                x: Pt::from_f32(40.0),
+                y: Pt::from_f32(40.0 + i as f32),
+                text: format!("perf_counter_probe_line_{}", i),
+            });
+        }
+        let doc = one_page_document(commands);
+        let path = temp_log_path("pdf_link_content_stream_perf");
+        let perf = Arc::new(crate::perf::PerfLogger::new(&path).expect("perf logger"));
+
+        let mut writer = Vec::new();
+        let _ = document_to_pdf_with_metrics_and_registry_to_writer_with_logs(
+            &doc,
+            None,
+            None,
+            &PdfOptions::default(),
+            &mut writer,
+            None,
+            Some(perf.clone()),
+        )
+        .expect("pdf write");
+        perf.flush();
+        drop(perf);
+
+        let log = std::fs::read_to_string(&path).expect("read perf log");
+        assert!(log.contains("\"name\":\"pdf.link\""));
+        assert!(log.contains("\"content_stream_raw_bytes\""));
+        assert!(log.contains("\"content_stream_encoded_bytes\""));
+        assert!(log.contains("\"content_stream_compressed\""));
+        assert!(log.contains("\"content_stream_ratio_ppm\""));
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
@@ -4042,10 +4163,7 @@ mod tests {
 
         let mut registry = FontRegistry::new();
         let inter_name = registry
-            .register_bytes(
-                inter_bytes,
-                Some(inter_path.to_string_lossy().as_ref()),
-            )
+            .register_bytes(inter_bytes, Some(inter_path.to_string_lossy().as_ref()))
             .expect("register inter");
 
         let doc_a = text_page(&inter_name, "Record A");
@@ -4080,16 +4198,10 @@ mod tests {
 
         let mut registry = FontRegistry::new();
         let inter_name = registry
-            .register_bytes(
-                inter_bytes,
-                Some(inter_path.to_string_lossy().as_ref()),
-            )
+            .register_bytes(inter_bytes, Some(inter_path.to_string_lossy().as_ref()))
             .expect("register inter");
         let noto_name = registry
-            .register_bytes(
-                noto_bytes,
-                Some(noto_path.to_string_lossy().as_ref()),
-            )
+            .register_bytes(noto_bytes, Some(noto_path.to_string_lossy().as_ref()))
             .expect("register noto");
 
         let doc_a = text_page(&inter_name, "Inter sample");

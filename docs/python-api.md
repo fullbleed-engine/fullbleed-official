@@ -29,20 +29,27 @@ Common constructor options:
 Key methods:
 
 - `register_bundle(bundle)`
-- `render_pdf(html, css) -> bytes`
-- `render_pdf_to_file(html, css, path) -> int`
+- `render_pdf(html, css, deterministic_hash=None) -> bytes`
+- `render_pdf_to_file(html, css, path, deterministic_hash=None) -> int`
 - `render_pdf_with_page_data(html, css) -> (bytes, dict|None)`
+- `render_pdf_with_page_data_and_glyph_report(html, css) -> (bytes, dict|None, list[dict])`
+- `plan_template_compose(html, css, templates, dx=0.0, dy=0.0) -> dict`
 - `render_pdf_with_glyph_report(html, css) -> (bytes, list[dict])`
+- `render_pdf_with_page_data_and_template_bindings_and_glyph_report(html, css) -> (bytes, dict|None, list[dict]|None, list[dict])`
 - `render_image_pages(html, css, dpi=150) -> list[bytes]`
 - `render_image_pages_to_dir(html, css, out_dir, dpi=150, stem=None) -> list[str]`
+- `render_finalized_pdf_image_pages(pdf_path, dpi=150) -> list[bytes]`
+- `render_finalized_pdf_image_pages_to_dir(pdf_path, out_dir, dpi=150, stem=None) -> list[str]`
 - batch APIs:
-  - `render_pdf_batch`
-  - `render_pdf_batch_to_file`
-  - `render_pdf_batch_with_css`
-  - `render_pdf_batch_with_css_to_file`
-  - `render_pdf_batch_parallel`
-  - `render_pdf_batch_to_file_parallel`
-  - `render_pdf_batch_to_file_parallel_with_page_data`
+  - `render_pdf_batch(..., deterministic_hash=None)`
+  - `render_pdf_batch_to_file(..., deterministic_hash=None)`
+  - `render_pdf_batch_with_css(..., deterministic_hash=None)`
+  - `render_pdf_batch_with_css_to_file(..., deterministic_hash=None)`
+  - `render_pdf_batch_parallel(..., deterministic_hash=None)`
+  - `render_pdf_batch_to_file_parallel(..., deterministic_hash=None)`
+  - `render_pdf_batch_to_file_parallel_with_page_data(..., deterministic_hash=None)`
+
+`deterministic_hash` writes SHA-256 of the produced PDF bytes to the given file path.
 
 ## `AssetBundle`
 
@@ -67,6 +74,7 @@ Class attributes:
 `Asset.info()` includes kind-specific metadata:
 - `font`: primary font name (font assets)
 - `pdf_version`, `page_count`, `encrypted` (PDF assets)
+- `composition_supported`, `composition_issues` (PDF assets)
 
 ## `WatermarkSpec`
 
@@ -91,6 +99,8 @@ fullbleed.WatermarkSpec(
 ## Helper functions
 
 - `vendored_asset(source, kind, name=None, trusted=False, remote=False)`
+- `inspect_pdf(path) -> dict`
+- `inspect_template_catalog(templates) -> dict`
 - `fetch_asset(url) -> bytes`
 - `concat_css(parts: list[str]) -> str`
 - `finalize_stamp_pdf(template, overlay, out, page_map=None, dx=0.0, dy=0.0) -> dict`

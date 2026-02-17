@@ -5,12 +5,16 @@ use crate::{
     Asset, AssetBundle, AssetKind, Color, ColorSpace, FullBleed, FullBleedBuilder, FullBleedError,
     GlyphCoverageReport, JitMode, Margins, OutputIntent, PageDataContext, PageDataValue,
     PdfProfile, PdfVersion, Pt, Size, WatermarkLayer, WatermarkSemantics, WatermarkSpec,
+    composition_compatibility_issues, inspect_pdf_bytes, inspect_pdf_path,
+    require_pdf_composition_compatibility,
 };
 use base64::Engine;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyModule};
-use std::collections::{BTreeMap, HashMap};
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 #[pyclass(name = "AssetKind")]
@@ -62,11 +66,18 @@ impl PyAsset {
                 info.set_item("font", font_name)?;
             }
         } else if self.asset.kind == AssetKind::Pdf {
-            let pdf = lopdf::Document::load_mem(&self.asset.data)
-                .map_err(|err| PyValueError::new_err(format!("invalid pdf data: {err}")))?;
-            info.set_item("pdf_version", pdf.version.as_str())?;
-            info.set_item("page_count", pdf.get_pages().len())?;
-            info.set_item("encrypted", pdf.is_encrypted())?;
+            let report =
+                inspect_pdf_bytes(&self.asset.data).map_err(pdf_asset_inspect_err_to_py)?;
+            info.set_item("pdf_version", report.pdf_version.as_str())?;
+            info.set_item("page_count", report.page_count)?;
+            info.set_item("encrypted", report.encrypted)?;
+            let issues = composition_compatibility_issues(&report);
+            let issue_list = PyList::empty_bound(py);
+            for issue in &issues {
+                issue_list.append(issue.as_str())?;
+            }
+            info.set_item("composition_supported", issues.is_empty())?;
+            info.set_item("composition_issues", issue_list)?;
         }
         Ok(info.to_object(py))
     }
@@ -193,13 +204,8 @@ fn build_asset(
             return Err(PyValueError::new_err("invalid font data (unable to parse)"));
         }
     } else if kind == AssetKind::Pdf {
-        let pdf = lopdf::Document::load_mem(&data)
-            .map_err(|err| PyValueError::new_err(format!("invalid pdf data: {err}")))?;
-        if pdf.is_encrypted() {
-            return Err(PyValueError::new_err(
-                "encrypted pdf assets are not supported",
-            ));
-        }
+        let report = inspect_pdf_bytes(&data).map_err(pdf_asset_inspect_err_to_py)?;
+        require_pdf_composition_compatibility(&report).map_err(pdf_asset_inspect_err_to_py)?;
     }
     Ok(Asset::new(
         asset_name,
@@ -208,6 +214,169 @@ fn build_asset(
         Some(source.to_string()),
         trusted,
     ))
+}
+
+#[derive(Debug, Clone)]
+struct TemplateCatalogReportItem {
+    template_id: String,
+    pdf_path: String,
+    report: crate::PdfInspectReport,
+    issues: Vec<crate::PdfInspectErrorCode>,
+}
+
+fn inspect_report_to_py(
+    py: Python<'_>,
+    path: &str,
+    report: &crate::PdfInspectReport,
+) -> PyResult<PyObject> {
+    let out = PyDict::new_bound(py);
+    out.set_item("path", path)?;
+    out.set_item("pdf_version", report.pdf_version.as_str())?;
+    out.set_item("page_count", report.page_count)?;
+    out.set_item("encrypted", report.encrypted)?;
+    out.set_item("file_size_bytes", report.file_size_bytes)?;
+
+    let warnings = PyList::empty_bound(py);
+    for warning in &report.warnings {
+        let d = PyDict::new_bound(py);
+        d.set_item("code", warning.code.clone())?;
+        d.set_item("message", warning.message.clone())?;
+        warnings.append(d)?;
+    }
+    out.set_item("warnings", warnings)?;
+
+    let issues = composition_compatibility_issues(report);
+    let issue_codes = PyList::empty_bound(py);
+    for issue in &issues {
+        issue_codes.append(issue.as_str())?;
+    }
+    let compat = PyDict::new_bound(py);
+    compat.set_item("supported", issues.is_empty())?;
+    compat.set_item("issues", issue_codes)?;
+    out.set_item("composition", compat)?;
+
+    Ok(out.to_object(py))
+}
+
+fn inspect_template_catalog_entries(
+    templates: &[(String, String)],
+) -> PyResult<Vec<TemplateCatalogReportItem>> {
+    if templates.is_empty() {
+        return Err(PyValueError::new_err("template catalog cannot be empty"));
+    }
+
+    let mut seen_ids: BTreeSet<&str> = BTreeSet::new();
+    let mut out = Vec::with_capacity(templates.len());
+    for (idx, (template_id_raw, pdf_path_raw)) in templates.iter().enumerate() {
+        let template_id = template_id_raw.trim();
+        if template_id.is_empty() {
+            return Err(PyValueError::new_err(format!(
+                "template catalog item {} has empty template_id",
+                idx
+            )));
+        }
+        if !seen_ids.insert(template_id) {
+            return Err(PyValueError::new_err(format!(
+                "duplicate template_id in template catalog: {}",
+                template_id
+            )));
+        }
+
+        let pdf_path = pdf_path_raw.trim();
+        if pdf_path.is_empty() {
+            return Err(PyValueError::new_err(format!(
+                "template catalog item {} has empty pdf_path",
+                idx
+            )));
+        }
+
+        let report = inspect_pdf_path(Path::new(pdf_path)).map_err(pdf_inspect_err_to_py)?;
+        let issues = composition_compatibility_issues(&report);
+        out.push(TemplateCatalogReportItem {
+            template_id: template_id.to_string(),
+            pdf_path: pdf_path.to_string(),
+            report,
+            issues,
+        });
+    }
+
+    Ok(out)
+}
+
+fn template_catalog_entries_to_py(
+    py: Python<'_>,
+    entries: &[TemplateCatalogReportItem],
+) -> PyResult<PyObject> {
+    let templates = PyList::empty_bound(py);
+    let mut compatible = 0usize;
+    let mut total_pages = 0usize;
+    for entry in entries {
+        if entry.issues.is_empty() {
+            compatible += 1;
+        }
+        total_pages += entry.report.page_count;
+
+        let d = PyDict::new_bound(py);
+        d.set_item("template_id", entry.template_id.clone())?;
+        d.set_item("path", entry.pdf_path.clone())?;
+        d.set_item("pdf_version", entry.report.pdf_version.as_str())?;
+        d.set_item("page_count", entry.report.page_count)?;
+        d.set_item("encrypted", entry.report.encrypted)?;
+        d.set_item("file_size_bytes", entry.report.file_size_bytes)?;
+
+        let warnings = PyList::empty_bound(py);
+        for warning in &entry.report.warnings {
+            let w = PyDict::new_bound(py);
+            w.set_item("code", warning.code.clone())?;
+            w.set_item("message", warning.message.clone())?;
+            warnings.append(w)?;
+        }
+        d.set_item("warnings", warnings)?;
+
+        let issues = PyList::empty_bound(py);
+        for issue in &entry.issues {
+            issues.append(issue.as_str())?;
+        }
+        let composition = PyDict::new_bound(py);
+        composition.set_item("supported", entry.issues.is_empty())?;
+        composition.set_item("issues", issues)?;
+        d.set_item("composition", composition)?;
+
+        templates.append(d)?;
+    }
+
+    let metrics = PyDict::new_bound(py);
+    metrics.set_item("templates", entries.len())?;
+    metrics.set_item("compatible_templates", compatible)?;
+    metrics.set_item(
+        "incompatible_templates",
+        entries.len().saturating_sub(compatible),
+    )?;
+    metrics.set_item("total_template_pages", total_pages)?;
+
+    let out = PyDict::new_bound(py);
+    out.set_item("ok", true)?;
+    out.set_item("templates", templates)?;
+    out.set_item("metrics", metrics)?;
+    Ok(out.to_object(py))
+}
+
+#[pyfunction]
+fn inspect_pdf(py: Python<'_>, path: &str) -> PyResult<PyObject> {
+    let report = inspect_pdf_path(Path::new(path)).map_err(pdf_inspect_err_to_py)?;
+    let out = inspect_report_to_py(py, path, &report)?;
+    let dict = out.bind(py).downcast::<PyDict>()?;
+    dict.set_item("ok", true)?;
+    Ok(out)
+}
+
+#[pyfunction]
+fn inspect_template_catalog(
+    py: Python<'_>,
+    templates: Vec<(String, String)>,
+) -> PyResult<PyObject> {
+    let entries = inspect_template_catalog_entries(&templates)?;
+    template_catalog_entries_to_py(py, &entries)
 }
 
 #[pyfunction]
@@ -474,9 +643,7 @@ fn parse_py_margins(arg: Option<&Bound<'_, PyAny>>) -> PyResult<Option<Margins>>
     ))
 }
 
-fn parse_template_binding_spec(
-    value: &Bound<'_, PyAny>,
-) -> PyResult<crate::TemplateBindingSpec> {
+fn parse_template_binding_spec(value: &Bound<'_, PyAny>) -> PyResult<crate::TemplateBindingSpec> {
     let dict = value.downcast::<PyDict>().map_err(|_| {
         PyValueError::new_err(
             "template_binding must be a dict like {'default_template_id':'tpl-default','by_page_template':{'Page1':'tpl-a'},'by_feature':{'i9':'tpl-b'},'feature_prefix':'fb.feature.'}",
@@ -878,7 +1045,10 @@ fn template_binding_decisions_to_py(
         d.set_item("page_index", decision.page_index)?;
         d.set_item("page", decision.page_index + 1)?;
         d.set_item("page_template_name", decision.page_template_name.clone())?;
-        d.set_item("feature_hits", PyList::new_bound(py, &decision.feature_hits))?;
+        d.set_item(
+            "feature_hits",
+            PyList::new_bound(py, &decision.feature_hits),
+        )?;
         d.set_item("template_id", decision.template_id.clone())?;
         let source = match decision.source {
             crate::BindingSource::Feature => "feature",
@@ -889,6 +1059,61 @@ fn template_binding_decisions_to_py(
         list.append(d)?;
     }
     Ok(list.to_object(py))
+}
+
+fn compose_plan_to_py(
+    py: Python<'_>,
+    decisions: &[crate::PageBindingDecision],
+    template_page_counts: &BTreeMap<String, usize>,
+    dx: f32,
+    dy: f32,
+) -> PyResult<PyObject> {
+    if decisions.is_empty() {
+        return Err(PyValueError::new_err(
+            "compose planning requires non-empty template bindings",
+        ));
+    }
+
+    let mut sorted = decisions.to_vec();
+    sorted.sort_by_key(|d| d.page_index);
+
+    let mut seen_pages: BTreeSet<usize> = BTreeSet::new();
+    let plan = PyList::empty_bound(py);
+    for decision in &sorted {
+        if !seen_pages.insert(decision.page_index) {
+            return Err(PyValueError::new_err(format!(
+                "duplicate template binding for overlay page {}",
+                decision.page_index
+            )));
+        }
+        let template_page_count =
+            *template_page_counts
+                .get(&decision.template_id)
+                .ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "binding references unknown template_id at page {}: {}",
+                        decision.page_index + 1,
+                        decision.template_id
+                    ))
+                })?;
+        if template_page_count == 0 {
+            return Err(PyValueError::new_err(format!(
+                "template has zero pages for template_id: {}",
+                decision.template_id
+            )));
+        }
+        let template_page = decision.page_index % template_page_count;
+        let row = PyDict::new_bound(py);
+        row.set_item("page_index", decision.page_index)?;
+        row.set_item("page", decision.page_index + 1)?;
+        row.set_item("template_id", decision.template_id.clone())?;
+        row.set_item("template_page", template_page)?;
+        row.set_item("overlay_page", decision.page_index)?;
+        row.set_item("dx", dx)?;
+        row.set_item("dy", dy)?;
+        plan.append(row)?;
+    }
+    Ok(plan.to_object(py))
 }
 
 fn glyph_report_to_py(py: Python<'_>, report: &GlyphCoverageReport) -> PyResult<PyObject> {
@@ -908,6 +1133,47 @@ fn glyph_report_to_py(py: Python<'_>, report: &GlyphCoverageReport) -> PyResult<
 struct PdfEngine {
     engine: FullBleed,
     builder: FullBleedBuilder,
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    let mut out = String::with_capacity(digest.len() * 2);
+    for b in digest {
+        use std::fmt::Write;
+        let _ = write!(&mut out, "{:02x}", b);
+    }
+    out
+}
+
+fn sha256_file_hex(path: &str) -> PyResult<String> {
+    let mut file = std::fs::File::open(path).map_err(|e| {
+        PyValueError::new_err(format!("failed to open output file for hashing: {e}"))
+    })?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let read = file.read(&mut buf).map_err(|e| {
+            PyValueError::new_err(format!("failed to read output file for hashing: {e}"))
+        })?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buf[..read]);
+    }
+    let digest = hasher.finalize();
+    let mut out = String::with_capacity(digest.len() * 2);
+    for b in digest {
+        use std::fmt::Write;
+        let _ = write!(&mut out, "{:02x}", b);
+    }
+    Ok(out)
+}
+
+fn write_hash_file(path: &str, hash: &str) -> PyResult<()> {
+    std::fs::write(path, hash)
+        .map_err(|e| PyValueError::new_err(format!("failed to write deterministic hash file: {e}")))
 }
 
 #[pymethods]
@@ -1311,10 +1577,20 @@ impl PdfEngine {
         Ok(())
     }
 
-    fn render_pdf(&self, py: Python<'_>, html: &str, css: &str) -> PyResult<Py<PyBytes>> {
+    #[pyo3(signature = (html, css, deterministic_hash=None))]
+    fn render_pdf(
+        &self,
+        py: Python<'_>,
+        html: &str,
+        css: &str,
+        deterministic_hash: Option<String>,
+    ) -> PyResult<Py<PyBytes>> {
         let bytes = py
             .allow_threads(|| self.engine.render_to_buffer(html, css))
             .map_err(to_py_err)?;
+        if let Some(path) = deterministic_hash.as_deref() {
+            write_hash_file(path, &sha256_hex(&bytes))?;
+        }
         Ok(PyBytes::new_bound(py, &bytes).unbind())
     }
 
@@ -1360,6 +1636,46 @@ impl PdfEngine {
         Ok(out.to_object(py))
     }
 
+    #[pyo3(signature = (pdf_path, dpi=150))]
+    fn render_finalized_pdf_image_pages(
+        &self,
+        py: Python<'_>,
+        pdf_path: &str,
+        dpi: u32,
+    ) -> PyResult<PyObject> {
+        let pages = py
+            .allow_threads(|| self.engine.render_finalized_pdf_image_pages(pdf_path, dpi))
+            .map_err(to_py_err)?;
+        let out = PyList::empty_bound(py);
+        for page in pages {
+            out.append(PyBytes::new_bound(py, &page))?;
+        }
+        Ok(out.to_object(py))
+    }
+
+    #[pyo3(signature = (pdf_path, out_dir, dpi=150, stem=None))]
+    fn render_finalized_pdf_image_pages_to_dir(
+        &self,
+        py: Python<'_>,
+        pdf_path: &str,
+        out_dir: &str,
+        dpi: u32,
+        stem: Option<String>,
+    ) -> PyResult<PyObject> {
+        let stem = stem.unwrap_or_else(|| "render".to_string());
+        let paths = py
+            .allow_threads(|| {
+                self.engine
+                    .render_finalized_pdf_image_pages_to_dir(pdf_path, out_dir, &stem, dpi)
+            })
+            .map_err(to_py_err)?;
+        let out = PyList::empty_bound(py);
+        for path in paths {
+            out.append(path.to_string_lossy().to_string())?;
+        }
+        Ok(out.to_object(py))
+    }
+
     fn render_pdf_with_page_data(
         &self,
         py: Python<'_>,
@@ -1376,6 +1692,32 @@ impl PdfEngine {
         };
 
         Ok((PyBytes::new_bound(py, &bytes).unbind(), data_obj))
+    }
+
+    fn render_pdf_with_page_data_and_glyph_report(
+        &self,
+        py: Python<'_>,
+        html: &str,
+        css: &str,
+    ) -> PyResult<(Py<PyBytes>, PyObject, PyObject)> {
+        let (bytes, page_data, report) = py
+            .allow_threads(|| {
+                self.engine
+                    .render_with_page_data_and_glyph_report(html, css)
+            })
+            .map_err(to_py_err)?;
+
+        let data_obj = match page_data {
+            Some(ctx) => page_data_context_to_py(py, &ctx)?,
+            None => py.None(),
+        };
+        let report_obj = glyph_report_to_py(py, &report)?;
+
+        Ok((
+            PyBytes::new_bound(py, &bytes).unbind(),
+            data_obj,
+            report_obj,
+        ))
     }
 
     fn render_pdf_with_page_data_and_template_bindings(
@@ -1400,7 +1742,116 @@ impl PdfEngine {
             None => py.None(),
         };
 
-        Ok((PyBytes::new_bound(py, &bytes).unbind(), data_obj, bindings_obj))
+        Ok((
+            PyBytes::new_bound(py, &bytes).unbind(),
+            data_obj,
+            bindings_obj,
+        ))
+    }
+
+    fn render_pdf_with_page_data_and_template_bindings_and_glyph_report(
+        &self,
+        py: Python<'_>,
+        html: &str,
+        css: &str,
+    ) -> PyResult<(Py<PyBytes>, PyObject, PyObject, PyObject)> {
+        let (bytes, page_data, template_bindings, report) = py
+            .allow_threads(|| {
+                self.engine
+                    .render_with_page_data_and_template_bindings_and_glyph_report(html, css)
+            })
+            .map_err(to_py_err)?;
+
+        let data_obj = match page_data {
+            Some(ctx) => page_data_context_to_py(py, &ctx)?,
+            None => py.None(),
+        };
+        let bindings_obj = match template_bindings {
+            Some(bindings) => template_binding_decisions_to_py(py, &bindings)?,
+            None => py.None(),
+        };
+        let report_obj = glyph_report_to_py(py, &report)?;
+
+        Ok((
+            PyBytes::new_bound(py, &bytes).unbind(),
+            data_obj,
+            bindings_obj,
+            report_obj,
+        ))
+    }
+
+    #[pyo3(signature = (html, css, templates, dx=0.0, dy=0.0))]
+    fn plan_template_compose(
+        &self,
+        py: Python<'_>,
+        html: &str,
+        css: &str,
+        templates: Vec<(String, String)>,
+        dx: f32,
+        dy: f32,
+    ) -> PyResult<PyObject> {
+        let entries = inspect_template_catalog_entries(&templates)?;
+        let mut template_page_counts: BTreeMap<String, usize> = BTreeMap::new();
+        for entry in &entries {
+            if !entry.issues.is_empty() {
+                let issue_codes: Vec<&str> = entry.issues.iter().map(|i| i.as_str()).collect();
+                return Err(PyValueError::new_err(format!(
+                    "template catalog item is not composition-compatible for template_id={}: {} (issues={:?})",
+                    entry.template_id, entry.pdf_path, issue_codes
+                )));
+            }
+            template_page_counts.insert(entry.template_id.clone(), entry.report.page_count);
+        }
+
+        let (_bytes, page_data, template_bindings) = py
+            .allow_threads(|| {
+                self.engine
+                    .render_with_page_data_and_template_bindings(html, css)
+            })
+            .map_err(to_py_err)?;
+
+        let bindings = template_bindings.ok_or_else(|| {
+            PyValueError::new_err(
+                "template compose planning requires template_binding on PdfEngine and non-empty bindings",
+            )
+        })?;
+        if bindings.is_empty() {
+            return Err(PyValueError::new_err(
+                "template compose planning requires non-empty template bindings",
+            ));
+        }
+
+        let mut sorted_bindings = bindings.clone();
+        sorted_bindings.sort_by_key(|item| item.page_index);
+        let plan_obj = compose_plan_to_py(py, &sorted_bindings, &template_page_counts, dx, dy)?;
+
+        let out = PyDict::new_bound(py);
+        out.set_item("ok", true)?;
+        out.set_item("dx", dx)?;
+        out.set_item("dy", dy)?;
+        let page_data_obj = match page_data {
+            Some(ctx) => page_data_context_to_py(py, &ctx)?,
+            None => py.None(),
+        };
+        out.set_item("page_data", page_data_obj)?;
+        out.set_item(
+            "bindings",
+            template_binding_decisions_to_py(py, &sorted_bindings)?,
+        )?;
+        out.set_item("plan", plan_obj)?;
+        out.set_item(
+            "template_catalog",
+            template_catalog_entries_to_py(py, &entries)?,
+        )?;
+
+        let metrics = PyDict::new_bound(py);
+        metrics.set_item("pages", sorted_bindings.len())?;
+        metrics.set_item("templates", template_page_counts.len())?;
+        metrics.set_item("dx", dx)?;
+        metrics.set_item("dy", dy)?;
+        out.set_item("metrics", metrics)?;
+
+        Ok(out.to_object(py))
     }
 
     #[pyo3(signature = (html, css))]
@@ -1417,121 +1868,165 @@ impl PdfEngine {
         Ok((PyBytes::new_bound(py, &bytes).unbind(), report_obj))
     }
 
-    #[pyo3(signature = (html, css, path))]
-    fn render_pdf_to_file(&self, html: &str, css: &str, path: &str) -> PyResult<usize> {
-        Python::with_gil(|py| {
+    #[pyo3(signature = (html, css, path, deterministic_hash=None))]
+    fn render_pdf_to_file(
+        &self,
+        html: &str,
+        css: &str,
+        path: &str,
+        deterministic_hash: Option<String>,
+    ) -> PyResult<usize> {
+        let written = Python::with_gil(|py| {
             py.allow_threads(|| self.engine.render_to_file(html, css, path))
                 .map_err(to_py_err)
-        })
+        })?;
+        if let Some(hash_path) = deterministic_hash.as_deref() {
+            let hash = sha256_file_hex(path)?;
+            write_hash_file(hash_path, &hash)?;
+        }
+        Ok(written)
     }
 
-    #[pyo3(signature = (html_list, css))]
+    #[pyo3(signature = (html_list, css, deterministic_hash=None))]
     fn render_pdf_batch(
         &self,
         py: Python<'_>,
         html_list: Vec<String>,
         css: &str,
+        deterministic_hash: Option<String>,
     ) -> PyResult<Py<PyBytes>> {
         let bytes = py
             .allow_threads(|| self.engine.render_many_to_buffer(&html_list, css))
             .map_err(to_py_err)?;
+        if let Some(path) = deterministic_hash.as_deref() {
+            write_hash_file(path, &sha256_hex(&bytes))?;
+        }
         Ok(PyBytes::new_bound(py, &bytes).unbind())
     }
 
-    #[pyo3(signature = (html_list, css, path))]
+    #[pyo3(signature = (html_list, css, path, deterministic_hash=None))]
     fn render_pdf_batch_to_file(
         &self,
         html_list: Vec<String>,
         css: &str,
         path: &str,
+        deterministic_hash: Option<String>,
     ) -> PyResult<usize> {
-        Python::with_gil(|py| {
+        let written = Python::with_gil(|py| {
             py.allow_threads(|| self.engine.render_many_to_file(&html_list, css, path))
                 .map_err(to_py_err)
-        })
+        })?;
+        if let Some(hash_path) = deterministic_hash.as_deref() {
+            let hash = sha256_file_hex(path)?;
+            write_hash_file(hash_path, &hash)?;
+        }
+        Ok(written)
     }
 
-    #[pyo3(signature = (jobs))]
+    #[pyo3(signature = (jobs, deterministic_hash=None))]
     fn render_pdf_batch_with_css(
         &self,
         py: Python<'_>,
         jobs: Vec<(String, String)>,
+        deterministic_hash: Option<String>,
     ) -> PyResult<Py<PyBytes>> {
         let bytes = py
             .allow_threads(|| self.engine.render_many_to_buffer_with_css(&jobs))
             .map_err(to_py_err)?;
+        if let Some(path) = deterministic_hash.as_deref() {
+            write_hash_file(path, &sha256_hex(&bytes))?;
+        }
         Ok(PyBytes::new_bound(py, &bytes).unbind())
     }
 
-    #[pyo3(signature = (jobs, path))]
+    #[pyo3(signature = (jobs, path, deterministic_hash=None))]
     fn render_pdf_batch_with_css_to_file(
         &self,
         jobs: Vec<(String, String)>,
         path: &str,
+        deterministic_hash: Option<String>,
     ) -> PyResult<usize> {
-        Python::with_gil(|py| {
+        let written = Python::with_gil(|py| {
             py.allow_threads(|| self.engine.render_many_to_file_with_css(&jobs, path))
                 .map_err(to_py_err)
-        })
+        })?;
+        if let Some(hash_path) = deterministic_hash.as_deref() {
+            let hash = sha256_file_hex(path)?;
+            write_hash_file(hash_path, &hash)?;
+        }
+        Ok(written)
     }
 
     // Parallel batch (common CSS). Uses Rust threads; releases the GIL for the duration.
-    #[pyo3(signature = (html_list, css))]
+    #[pyo3(signature = (html_list, css, deterministic_hash=None))]
     fn render_pdf_batch_parallel(
         &self,
         py: Python<'_>,
         html_list: Vec<String>,
         css: &str,
+        deterministic_hash: Option<String>,
     ) -> PyResult<Py<PyBytes>> {
         let bytes = py
             .allow_threads(|| self.engine.render_many_to_buffer_parallel(&html_list, css))
             .map_err(to_py_err)?;
+        if let Some(path) = deterministic_hash.as_deref() {
+            write_hash_file(path, &sha256_hex(&bytes))?;
+        }
         Ok(PyBytes::new_bound(py, &bytes).unbind())
     }
 
-    #[pyo3(signature = (html_list, css, path))]
+    #[pyo3(signature = (html_list, css, path, deterministic_hash=None))]
     fn render_pdf_batch_to_file_parallel_with_page_data(
         &self,
         html_list: Vec<String>,
         css: &str,
         path: &str,
+        deterministic_hash: Option<String>,
     ) -> PyResult<(usize, PyObject)> {
-        Python::with_gil(|py| {
+        let (bytes_written, page_data) = Python::with_gil(|py| {
             py.allow_threads(|| {
                 self.engine
                     .render_many_to_file_parallel_with_page_data(&html_list, css, path)
             })
             .map_err(to_py_err)
-        })
-        .and_then(|(bytes_written, page_data)| {
-            Python::with_gil(|py| {
-                let list = PyList::empty_bound(py);
-                for ctx in page_data {
-                    let obj = match ctx {
-                        Some(c) => page_data_context_to_py(py, &c)?,
-                        None => py.None(),
-                    };
-                    list.append(obj)?;
-                }
-                Ok((bytes_written, list.to_object(py)))
-            })
+        })?;
+        if let Some(hash_path) = deterministic_hash.as_deref() {
+            let hash = sha256_file_hex(path)?;
+            write_hash_file(hash_path, &hash)?;
+        }
+        Python::with_gil(|py| {
+            let list = PyList::empty_bound(py);
+            for ctx in page_data {
+                let obj = match ctx {
+                    Some(c) => page_data_context_to_py(py, &c)?,
+                    None => py.None(),
+                };
+                list.append(obj)?;
+            }
+            Ok((bytes_written, list.to_object(py)))
         })
     }
 
-    #[pyo3(signature = (html_list, css, path))]
+    #[pyo3(signature = (html_list, css, path, deterministic_hash=None))]
     fn render_pdf_batch_to_file_parallel(
         &self,
         html_list: Vec<String>,
         css: &str,
         path: &str,
+        deterministic_hash: Option<String>,
     ) -> PyResult<usize> {
-        Python::with_gil(|py| {
+        let written = Python::with_gil(|py| {
             py.allow_threads(|| {
                 self.engine
                     .render_many_to_file_parallel(&html_list, css, path)
             })
             .map_err(to_py_err)
-        })
+        })?;
+        if let Some(hash_path) = deterministic_hash.as_deref() {
+            let hash = sha256_file_hex(path)?;
+            write_hash_file(hash_path, &hash)?;
+        }
+        Ok(written)
     }
 }
 
@@ -1542,6 +2037,8 @@ fn _fullbleed(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyAsset>()?;
     module.add_class::<PyAssetBundle>()?;
     module.add_class::<PyWatermarkSpec>()?;
+    module.add_function(wrap_pyfunction!(inspect_pdf, module)?)?;
+    module.add_function(wrap_pyfunction!(inspect_template_catalog, module)?)?;
     module.add_function(wrap_pyfunction!(vendored_asset, module)?)?;
     module.add_function(wrap_pyfunction!(fetch_asset, module)?)?;
     module.add_function(wrap_pyfunction!(concat_css, module)?)?;
@@ -1552,4 +2049,23 @@ fn _fullbleed(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
 
 fn to_py_err(err: FullBleedError) -> PyErr {
     PyValueError::new_err(err.to_string())
+}
+
+fn pdf_asset_inspect_err_to_py(err: crate::PdfInspectError) -> PyErr {
+    match err.code {
+        crate::PdfInspectErrorCode::PdfParseFailed => {
+            PyValueError::new_err(format!("invalid pdf data: {}", err.message))
+        }
+        crate::PdfInspectErrorCode::PdfEncryptedUnsupported => {
+            PyValueError::new_err("encrypted pdf assets are not supported")
+        }
+        crate::PdfInspectErrorCode::PdfEmptyOrNoPages => {
+            PyValueError::new_err("invalid pdf data: pdf has no pages")
+        }
+        crate::PdfInspectErrorCode::PdfIoError => PyValueError::new_err(err.message),
+    }
+}
+
+fn pdf_inspect_err_to_py(err: crate::PdfInspectError) -> PyErr {
+    PyValueError::new_err(format!("{}: {}", err.code.as_str(), err.message))
 }

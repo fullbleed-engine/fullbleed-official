@@ -1,5 +1,11 @@
-use crate::{Command, Document, FullBleedError};
-use lopdf::{Document as LoDocument, Object as LoObject, ObjectId as LoObjectId, Stream as LoStream, dictionary};
+use crate::{
+    Command, Document, FullBleedError, PdfInspectError, PdfInspectErrorCode,
+    composition_compatibility_issues, inspect_pdf_path,
+};
+use lopdf::{
+    Document as LoDocument, Object as LoObject, ObjectId as LoObjectId, Stream as LoStream,
+    dictionary,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
@@ -76,6 +82,44 @@ fn lopdf_err(err: lopdf::Error) -> FullBleedError {
     FullBleedError::InvalidConfiguration(format!("pdf compose error: {err}"))
 }
 
+fn inspect_err_to_finalize_err(err: PdfInspectError) -> FullBleedError {
+    match err.code {
+        PdfInspectErrorCode::PdfParseFailed | PdfInspectErrorCode::PdfIoError => {
+            FullBleedError::InvalidConfiguration(format!("pdf compose error: {}", err.message))
+        }
+        PdfInspectErrorCode::PdfEncryptedUnsupported => {
+            FullBleedError::InvalidConfiguration("pdf compose error: encrypted pdf".to_string())
+        }
+        PdfInspectErrorCode::PdfEmptyOrNoPages => {
+            FullBleedError::InvalidConfiguration("pdf compose error: pdf has no pages".to_string())
+        }
+    }
+}
+
+fn preflight_finalize_pdf(
+    path: &std::path::Path,
+    role: &str,
+) -> Result<crate::PdfInspectReport, FullBleedError> {
+    let report = inspect_pdf_path(path).map_err(inspect_err_to_finalize_err)?;
+    let issues = composition_compatibility_issues(&report);
+    for issue in issues {
+        match issue {
+            PdfInspectErrorCode::PdfEncryptedUnsupported => {
+                return Err(FullBleedError::InvalidConfiguration(format!(
+                    "{role} PDF is encrypted"
+                )));
+            }
+            PdfInspectErrorCode::PdfEmptyOrNoPages => {
+                return Err(FullBleedError::InvalidConfiguration(format!(
+                    "pdf compose error: {role} PDF has no pages"
+                )));
+            }
+            PdfInspectErrorCode::PdfParseFailed | PdfInspectErrorCode::PdfIoError => {}
+        }
+    }
+    Ok(report)
+}
+
 fn page_box(page: &lopdf::Dictionary) -> Vec<LoObject> {
     if let Ok(arr) = page.get(b"CropBox").and_then(LoObject::as_array) {
         return arr.clone();
@@ -130,11 +174,6 @@ fn import_document_objects(
     dst: &mut LoDocument,
     mut src: LoDocument,
 ) -> Result<Vec<LoObjectId>, FullBleedError> {
-    if src.is_encrypted() {
-        return Err(FullBleedError::InvalidConfiguration(
-            "template PDF is encrypted".to_string(),
-        ));
-    }
     let start_id = dst.max_id + 1;
     src.renumber_objects_with(start_id);
     let page_ids: Vec<LoObjectId> = src.get_pages().values().copied().collect();
@@ -153,24 +192,15 @@ pub fn stamp_overlay_on_template_pdf(
     dx: f32,
     dy: f32,
 ) -> Result<FinalizeStampSummary, FullBleedError> {
+    let template_meta = preflight_finalize_pdf(template_pdf, "template")?;
+    let overlay_meta = preflight_finalize_pdf(overlay_pdf, "overlay")?;
+
     let mut template = LoDocument::load(template_pdf).map_err(lopdf_err)?;
     let mut overlay = LoDocument::load(overlay_pdf).map_err(lopdf_err)?;
 
-    if template.is_encrypted() {
-        return Err(FullBleedError::InvalidConfiguration(
-            "template PDF is encrypted".to_string(),
-        ));
-    }
-    if overlay.is_encrypted() {
-        return Err(FullBleedError::InvalidConfiguration(
-            "overlay PDF is encrypted".to_string(),
-        ));
-    }
-
     let template_pages = template.get_pages();
-    let overlay_pages = overlay.get_pages();
-    let template_count = template_pages.len();
-    let overlay_count = overlay_pages.len();
+    let template_count = template_meta.page_count;
+    let overlay_count = overlay_meta.page_count;
     let mapping = match page_map {
         Some(v) => v.to_vec(),
         None => default_page_map(template_count, overlay_count)?,
@@ -197,7 +227,9 @@ pub fn stamp_overlay_on_template_pdf(
             .and_then(LoObject::as_dict)
             .map_err(lopdf_err)?
             .clone();
-        let overlay_content = template.get_page_content(overlay_page_id).map_err(lopdf_err)?;
+        let overlay_content = template
+            .get_page_content(overlay_page_id)
+            .map_err(lopdf_err)?;
         let bbox = page_box(&overlay_page);
         let overlay_resources = page_resources_object(&template, &overlay_page);
 
@@ -232,8 +264,7 @@ pub fn stamp_overlay_on_template_pdf(
             page_mut.set("Resources", LoObject::Dictionary(resources));
         }
 
-        let do_content =
-            format!("q 1 0 0 1 {} {} cm /{} Do Q\n", dx, dy, form_name).into_bytes();
+        let do_content = format!("q 1 0 0 1 {} {} cm /{} Do Q\n", dx, dy, form_name).into_bytes();
         template
             .add_page_contents(template_page_id, do_content)
             .map_err(lopdf_err)?;
@@ -270,13 +301,17 @@ pub fn compose_overlay_with_template_catalog(
     let mut template_pages_by_id: BTreeMap<String, Vec<LoObjectId>> = BTreeMap::new();
 
     for (template_id, asset) in &catalog.by_id {
-        let src = LoDocument::load(&asset.pdf_path).map_err(lopdf_err)?;
-        if src.is_encrypted() {
-            return Err(FullBleedError::InvalidConfiguration(format!(
-                "template PDF is encrypted: {}",
-                asset.pdf_path.display()
-            )));
+        let report = preflight_finalize_pdf(&asset.pdf_path, "template")?;
+        if let Some(expected) = asset.page_count {
+            if expected != report.page_count {
+                return Err(FullBleedError::InvalidConfiguration(format!(
+                    "template page count mismatch for template_id={}: expected {} found {}",
+                    template_id, expected, report.page_count
+                )));
+            }
         }
+
+        let src = LoDocument::load(&asset.pdf_path).map_err(lopdf_err)?;
         let page_ids = import_document_objects(&mut composed, src)?;
         if let Some(expected) = asset.page_count {
             if expected != page_ids.len() {
@@ -291,20 +326,15 @@ pub fn compose_overlay_with_template_catalog(
         template_pages_by_id.insert(template_id.clone(), page_ids);
     }
 
+    preflight_finalize_pdf(overlay_pdf, "overlay")?;
     let overlay_src = LoDocument::load(overlay_pdf).map_err(lopdf_err)?;
-    if overlay_src.is_encrypted() {
-        return Err(FullBleedError::InvalidConfiguration(
-            "overlay PDF is encrypted".to_string(),
-        ));
-    }
     let overlay_pages = import_document_objects(&mut composed, overlay_src)?;
 
     for (idx, item) in plan.iter().enumerate() {
         let Some(template_pages) = template_pages_by_id.get(&item.template_id) else {
             return Err(FullBleedError::InvalidConfiguration(format!(
                 "plan item {} references unknown template_id: {}",
-                idx,
-                item.template_id
+                idx, item.template_id
             )));
         };
         if item.template_page_index >= template_pages.len() {
@@ -343,8 +373,12 @@ pub fn compose_overlay_with_template_catalog(
             .map_err(lopdf_err)?
             .clone();
 
-        let template_content = composed.get_page_content(template_page_id).map_err(lopdf_err)?;
-        let overlay_content = composed.get_page_content(overlay_page_id).map_err(lopdf_err)?;
+        let template_content = composed
+            .get_page_content(template_page_id)
+            .map_err(lopdf_err)?;
+        let overlay_content = composed
+            .get_page_content(overlay_page_id)
+            .map_err(lopdf_err)?;
         let template_bbox = page_box(&template_page);
         let overlay_bbox = page_box(&overlay_page);
         let template_resources = page_resources_object(&composed, &template_page);
@@ -772,17 +806,16 @@ mod tests {
     #[test]
     fn resolve_template_bindings_fails_on_ambiguous_feature_mappings() {
         let mut spec = TemplateBindingSpec::default();
-        spec.by_feature
-            .insert("a".to_string(), "tpl-a".to_string());
-        spec.by_feature
-            .insert("b".to_string(), "tpl-b".to_string());
+        spec.by_feature.insert("a".to_string(), "tpl-a".to_string());
+        spec.by_feature.insert("b".to_string(), "tpl-b".to_string());
         let mut features = BTreeSet::new();
         features.insert("a".to_string());
         features.insert("b".to_string());
         let err = resolve_template_bindings(&spec, &[None], &[features]).expect_err("ambiguous");
-        assert!(err
-            .to_string()
-            .contains("ambiguous feature bindings on page 1"));
+        assert!(
+            err.to_string()
+                .contains("ambiguous feature bindings on page 1")
+        );
     }
 
     #[test]
@@ -899,9 +932,10 @@ mod tests {
             source: BindingSource::Default,
         }];
         let err = validate_bindings_against_catalog(&bindings, &cat).expect_err("missing");
-        assert!(err
-            .to_string()
-            .contains("missing template_id in catalog for page 1"));
+        assert!(
+            err.to_string()
+                .contains("missing template_id in catalog for page 1")
+        );
     }
 
     #[test]
@@ -1080,8 +1114,10 @@ mod tests {
             },
         ];
 
-        compose_overlay_with_template_catalog(&catalog, &overlay, &out_a, &plan).expect("compose a");
-        compose_overlay_with_template_catalog(&catalog, &overlay, &out_b, &plan).expect("compose b");
+        compose_overlay_with_template_catalog(&catalog, &overlay, &out_a, &plan)
+            .expect("compose a");
+        compose_overlay_with_template_catalog(&catalog, &overlay, &out_b, &plan)
+            .expect("compose b");
 
         let sig_a = pdf_structural_signature(&out_a);
         let sig_b = pdf_structural_signature(&out_b);

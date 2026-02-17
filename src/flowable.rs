@@ -2524,13 +2524,7 @@ impl TableFlowable {
             let col_width = Self::span_width(col_widths, cursor_col, col_span);
             let padding = cell.resolved_padding(col_width);
             let border = self
-                .collapsed_border_for_cell(
-                    draw_row_index,
-                    cursor_col,
-                    col_span,
-                    col_widths,
-                    cell,
-                )
+                .collapsed_border_for_cell(draw_row_index, cursor_col, col_span, col_widths, cell)
                 .widths;
             let pad_left = padding.left + border.left;
             let pad_right = padding.right + border.right;
@@ -2568,13 +2562,7 @@ impl TableFlowable {
             let col_width = Self::span_width(col_widths, cursor_col, col_span);
             let padding = cell.resolved_padding(col_width);
             let border = self
-                .collapsed_border_for_cell(
-                    draw_row_index,
-                    cursor_col,
-                    col_span,
-                    col_widths,
-                    cell,
-                )
+                .collapsed_border_for_cell(draw_row_index, cursor_col, col_span, col_widths, cell)
                 .widths;
             let pad_left = padding.left + border.left;
             let pad_right = padding.right + border.right;
@@ -2667,7 +2655,9 @@ impl TableFlowable {
         cell: &TableCell,
     ) -> ResolvedBorder {
         let total_columns = col_widths.len().max(1);
-        let col_span = col_span.max(1).min(total_columns.saturating_sub(col_start).max(1));
+        let col_span = col_span
+            .max(1)
+            .min(total_columns.saturating_sub(col_start).max(1));
         let col_end = col_start.saturating_add(col_span);
         let col_width = Self::span_width(col_widths, col_start, col_span);
         let mut widths = cell.resolved_border(col_width);
@@ -2749,11 +2739,7 @@ impl TableFlowable {
             let (border, border_colors) =
                 if matches!(self.border_collapse, BorderCollapseMode::Collapse) {
                     let resolved = self.collapsed_border_for_cell(
-                        row_index,
-                        cursor_col,
-                        col_span,
-                        col_widths,
-                        cell,
+                        row_index, cursor_col, col_span, col_widths, cell,
                     );
                     (resolved.widths, resolved.colors)
                 } else {
@@ -3406,7 +3392,10 @@ impl TableFlowableData {
                 if cursor_col >= columns {
                     break;
                 }
-                let col_span = cell.col_span().min(columns.saturating_sub(cursor_col)).max(1);
+                let col_span = cell
+                    .col_span()
+                    .min(columns.saturating_sub(cursor_col))
+                    .max(1);
                 let span_width = approx_col * (col_span as i32);
                 let resolved_preferred = cell.preferred_width.map(|width_spec| {
                     width_spec
@@ -3426,8 +3415,9 @@ impl TableFlowableData {
                 let extra = padding.left + padding.right + border.left + border.right;
                 let (min_text, max_text) = if let Some(content) = cell.content.as_ref() {
                     let intrinsic = content.intrinsic_width().unwrap_or(Pt::ZERO);
-                    let wrapped =
-                        content.wrap(span_width.max(Pt::from_f32(1.0)), huge_pt()).width;
+                    let wrapped = content
+                        .wrap(span_width.max(Pt::from_f32(1.0)), huge_pt())
+                        .width;
                     (intrinsic, wrapped.max(intrinsic))
                 } else {
                     (cell.min_word_width(), cell.max_line_width())
@@ -3471,8 +3461,8 @@ impl TableFlowableData {
         };
 
         if row_count >= 64 && !debug_verbose {
-            let merge =
-                |mut a: (Vec<i64>, Vec<i64>, Vec<i64>), b: (Vec<i64>, Vec<i64>, Vec<i64>)| {
+            let merge = |mut a: (Vec<i64>, Vec<i64>, Vec<i64>),
+                         b: (Vec<i64>, Vec<i64>, Vec<i64>)| {
                 for i in 0..columns {
                     if b.0[i] > a.0[i] {
                         a.0[i] = b.0[i];
@@ -3490,28 +3480,52 @@ impl TableFlowableData {
                 .header_rows
                 .par_iter()
                 .fold(
-                    || (vec![0i64; columns], vec![0i64; columns], vec![0i64; columns]),
+                    || {
+                        (
+                            vec![0i64; columns],
+                            vec![0i64; columns],
+                            vec![0i64; columns],
+                        )
+                    },
                     |mut acc, row| {
                         update_row("header", 0, row, &mut acc.0, &mut acc.1, &mut acc.2);
                         acc
                     },
                 )
                 .reduce(
-                    || (vec![0i64; columns], vec![0i64; columns], vec![0i64; columns]),
+                    || {
+                        (
+                            vec![0i64; columns],
+                            vec![0i64; columns],
+                            vec![0i64; columns],
+                        )
+                    },
                     merge,
                 );
             let (min_b, max_b, pref_b) = self
                 .body_rows
                 .par_iter()
                 .fold(
-                    || (vec![0i64; columns], vec![0i64; columns], vec![0i64; columns]),
+                    || {
+                        (
+                            vec![0i64; columns],
+                            vec![0i64; columns],
+                            vec![0i64; columns],
+                        )
+                    },
                     |mut acc, row| {
                         update_row("body", 0, row, &mut acc.0, &mut acc.1, &mut acc.2);
                         acc
                     },
                 )
                 .reduce(
-                    || (vec![0i64; columns], vec![0i64; columns], vec![0i64; columns]),
+                    || {
+                        (
+                            vec![0i64; columns],
+                            vec![0i64; columns],
+                            vec![0i64; columns],
+                        )
+                    },
                     merge,
                 );
             for i in 0..columns {

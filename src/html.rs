@@ -1,11 +1,9 @@
 use crate::flowable::{
     AbsolutePositionedFlowable, AlignItems, BorderRadiusSpec, BorderSpec, CalcLength,
-    ContainerFlowable,
-    EdgeSizes, FlexDirection, FlexFlowable, ImageFlowable, InlineBlockLayoutFlowable,
-    JustifyContent, LengthSpec, ListItemFlowable, MetaFlowable, Paragraph, Spacer, SvgFlowable,
-    TableCell, TableFlowable, TextAlign, TextStyle, VerticalAlign,
+    ContainerFlowable, EdgeSizes, FlexDirection, FlexFlowable, ImageFlowable,
+    InlineBlockLayoutFlowable, JustifyContent, LengthSpec, ListItemFlowable, MetaFlowable,
+    Paragraph, Spacer, SvgFlowable, TableCell, TableFlowable, TextAlign, TextStyle, VerticalAlign,
 };
-use base64::Engine;
 use crate::font::FontRegistry;
 use crate::glyph_report::GlyphCoverageReport;
 use crate::style::{
@@ -14,6 +12,7 @@ use crate::style::{
 };
 use crate::types::Pt;
 use crate::{BreakAfter, BreakBefore, BreakInside, Flowable};
+use base64::Engine;
 use kuchiki::traits::TendrilSink;
 use kuchiki::{NodeData, NodeRef};
 use std::path::Path;
@@ -655,8 +654,9 @@ fn node_to_flowables(
 
             // Contents/inline are usually transparent containers in our layout model, except
             // replaced/special inline elements that render atomic content.
-            let transparent_inline = matches!(style.display, DisplayMode::Contents | DisplayMode::Inline)
-                && !matches!(info.tag.as_str(), "img" | "svg" | "br");
+            let transparent_inline =
+                matches!(style.display, DisplayMode::Contents | DisplayMode::Inline)
+                    && !matches!(info.tag.as_str(), "img" | "svg" | "br");
             if transparent_inline {
                 let out = collect_children(
                     node,
@@ -858,10 +858,11 @@ fn node_to_flowables(
                     ) {
                         None
                     } else {
-                        let resolved =
-                            style
-                                .width
-                                .resolve_width(Pt::from_f32(300.0), style.font_size, style.root_font_size);
+                        let resolved = style.width.resolve_width(
+                            Pt::from_f32(300.0),
+                            style.font_size,
+                            style.root_font_size,
+                        );
                         (resolved > Pt::ZERO).then_some(resolved)
                     };
                     let css_height = if matches!(
@@ -946,8 +947,7 @@ fn node_to_flowables(
                             if let Some(perf_logger) = perf {
                                 let ms = t_svg.elapsed().as_secs_f64() * 1000.0;
                                 perf_logger.log_span_ms("svg.compile", None, ms);
-                                perf_logger
-                                    .log_counts("svg.compile", None, &[("bytes", xml_len)]);
+                                perf_logger.log_counts("svg.compile", None, &[("bytes", xml_len)]);
                             }
                             vec![LayoutItem::Block {
                                 flowable: Box::new(svg) as Box<dyn Flowable>,
@@ -1365,8 +1365,7 @@ fn node_to_flowables(
             // Use a tiny spacer to ensure the flowable is drawable; zero-height carriers can
             // be skipped in layout paths and lose metadata emission.
             if flowables.is_empty() && !node_meta.is_empty() {
-                let carrier =
-                    Spacer::new_pt(Pt::from_f32(0.01)).with_pagination(style.pagination);
+                let carrier = Spacer::new_pt(Pt::from_f32(0.01)).with_pagination(style.pagination);
                 flowables.push(LayoutItem::Block {
                     flowable: Box::new(carrier) as Box<dyn Flowable>,
                     flex_grow: style.flex_grow,
@@ -1868,8 +1867,7 @@ mod tests {
     fn svg_auto_dimensions_use_viewbox_when_present() {
         let resolver = StyleResolver::new("");
         let style = resolver.default_style();
-        let (w, h) =
-            resolve_svg_dimensions(None, None, None, None, Some("0 0 220 120"), &style);
+        let (w, h) = resolve_svg_dimensions(None, None, None, None, Some("0 0 220 120"), &style);
         assert!(
             approx_eq_pt(w, 165.0) && approx_eq_pt(h, 90.0),
             "expected viewBox fallback to 220x120px -> 165x90pt, got {}x{}",
@@ -2570,7 +2568,8 @@ fn table_container_flowables(
         })
         .collect();
 
-    let Some(table_flowable) = container_flowable_with_role(table_items, style, Some("Table")) else {
+    let Some(table_flowable) = container_flowable_with_role(table_items, style, Some("Table"))
+    else {
         return Vec::new();
     };
 
@@ -2711,18 +2710,16 @@ fn table_row_flowable_from_cells(
         ));
     }
 
-    let row_core: Box<dyn Flowable> = Box::new(
-        FlexFlowable::new_pt(
-            row_items,
-            FlexDirection::Row,
-            JustifyContent::FlexStart,
-            AlignItems::Stretch,
-            row_style.gap,
-            false,
-            row_style.font_size,
-            row_style.root_font_size,
-        ),
-    );
+    let row_core: Box<dyn Flowable> = Box::new(FlexFlowable::new_pt(
+        row_items,
+        FlexDirection::Row,
+        JustifyContent::FlexStart,
+        AlignItems::Stretch,
+        row_style.gap,
+        false,
+        row_style.font_size,
+        row_style.root_font_size,
+    ));
     let row_wrapped = container_flowable_with_role(
         vec![LayoutItem::Block {
             flowable: row_core.clone(),
@@ -2940,19 +2937,20 @@ fn table_flowable(
         });
         let mut pushed_section = false;
         let mut can_cache_section = true;
-        let section_style_owned: Option<ComputedStyle> = if let Some((section, inline_style)) = section_context {
-            can_cache_section =
-                section.id.is_none() && section.classes.is_empty() && inline_style.is_none();
-            let t_section_style = std::time::Instant::now();
-            let computed =
-                resolver.compute_style(&section, style, inline_style.as_deref(), ancestors);
-            row_style_ms += t_section_style.elapsed().as_secs_f64() * 1000.0;
-            ancestors.push(section);
-            pushed_section = true;
-            Some(computed)
-        } else {
-            None
-        };
+        let section_style_owned: Option<ComputedStyle> =
+            if let Some((section, inline_style)) = section_context {
+                can_cache_section =
+                    section.id.is_none() && section.classes.is_empty() && inline_style.is_none();
+                let t_section_style = std::time::Instant::now();
+                let computed =
+                    resolver.compute_style(&section, style, inline_style.as_deref(), ancestors);
+                row_style_ms += t_section_style.elapsed().as_secs_f64() * 1000.0;
+                ancestors.push(section);
+                pushed_section = true;
+                Some(computed)
+            } else {
+                None
+            };
         let row_parent_style: &ComputedStyle = section_style_owned.as_ref().unwrap_or(style);
         if is_header {
             header_index += 1;
@@ -3048,8 +3046,11 @@ fn table_flowable(
         } else {
             row_style_tmp.as_ref().unwrap()
         };
-        let row_min_height =
-            resolve_non_auto_height(row_style.height, row_style.font_size, row_style.root_font_size);
+        let row_min_height = resolve_non_auto_height(
+            row_style.height,
+            row_style.font_size,
+            row_style.root_font_size,
+        );
 
         ancestors.push(row_info);
 
@@ -3150,7 +3151,9 @@ fn table_flowable(
             };
             let cell_style = cell_style_ref.as_ref();
 
-            let has_element_children = cell_child.children().any(|child| child.as_element().is_some());
+            let has_element_children = cell_child
+                .children()
+                .any(|child| child.as_element().is_some());
             let mut cell_content: Option<Box<dyn Flowable>> = None;
             let mut cell_text = String::new();
             if has_element_children {
@@ -3594,7 +3597,10 @@ fn resolve_non_auto_css_dimension(
     root_font_size: Pt,
     is_height: bool,
 ) -> Option<Pt> {
-    if matches!(spec, LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial) {
+    if matches!(
+        spec,
+        LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
+    ) {
         return None;
     }
     let resolved = if is_height {
@@ -3665,12 +3671,16 @@ fn resolve_svg_dimensions(
         .or_else(|| parse_dimension(attr_height))
         .or(css_height);
 
-    if width.is_none() && let (Some(h), Some(ratio)) = (height, viewbox_ratio) {
+    if width.is_none()
+        && let (Some(h), Some(ratio)) = (height, viewbox_ratio)
+    {
         if ratio.is_finite() && ratio > 0.0 {
             width = Some(Pt::from_f32(h.to_f32() * ratio));
         }
     }
-    if height.is_none() && let (Some(w), Some(ratio)) = (width, viewbox_ratio) {
+    if height.is_none()
+        && let (Some(w), Some(ratio)) = (width, viewbox_ratio)
+    {
         if ratio.is_finite() && ratio > 0.0 {
             height = Some(Pt::from_f32(w.to_f32() / ratio));
         }

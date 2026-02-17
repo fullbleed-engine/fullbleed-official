@@ -133,6 +133,12 @@ jobs:
       - name: Verify minimal per-page template flagging smoke
         run: python examples/template-flagging-smoke/run_smoke.py
 
+      - name: Verify CLI compose-image template smoke
+        run: python examples/template-flagging-smoke/run_cli_compose_image_smoke.py
+
+      - name: Verify CLI cross-process determinism smoke
+        run: python examples/template-flagging-smoke/run_cli_determinism_smoke.py
+
       - name: Verify templated back-page VDP smoke
         run: python examples/template-flagging-smoke/run_vdp_backpage_smoke.py
 

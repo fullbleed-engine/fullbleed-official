@@ -1078,11 +1078,7 @@ impl StyleResolver {
                             .to_css_string(PrinterOptions::default())
                             .unwrap_or_default();
                         if let Some(logger) = debug {
-                            log_declaration_no_effects(
-                                &style.declarations,
-                                &selectors,
-                                logger,
-                            );
+                            log_declaration_no_effects(&style.declarations, &selectors, logger);
                             for selector in selectors.split(',') {
                                 let selector_trimmed = selector.trim().to_string();
                                 let parsed = parse_selector_pattern(&selector_trimmed).is_some();
@@ -2191,10 +2187,7 @@ fn apply_margin_shorthand_str(setup: &mut CssPageSetup, raw: &str) {
 }
 
 fn parse_page_size_from_str(raw: &str) -> Option<Size> {
-    let normalized = raw
-        .replace(',', " ")
-        .replace('\n', " ")
-        .replace('\r', " ");
+    let normalized = raw.replace(',', " ").replace('\n', " ").replace('\r', " ");
     let mut orientation: Option<&str> = None;
     let mut parts: Vec<&str> = Vec::new();
     for token in normalized.split_whitespace() {
@@ -2298,8 +2291,9 @@ fn log_declaration_no_effects(
             logger.increment("jit.known_loss.layout_mode_normalized", 1);
         }
 
-        let name = declaration_no_effect_property_name(property)
-            .or_else(|| declaration_parsed_no_effect_property_name(property).map(|v| v.to_string()));
+        let name = declaration_no_effect_property_name(property).or_else(|| {
+            declaration_parsed_no_effect_property_name(property).map(|v| v.to_string())
+        });
         let Some(name) = name else {
             continue;
         };
@@ -6115,11 +6109,7 @@ fn parse_grid_track_count(raw: &str) -> Option<usize> {
         }
         count += 1;
     }
-    if count > 0 {
-        Some(count)
-    } else {
-        None
-    }
+    if count > 0 { Some(count) } else { None }
 }
 
 fn parse_repeat_track_count(raw: &str) -> Option<usize> {
@@ -7830,7 +7820,8 @@ mod tests {
 
     #[test]
     fn bootstrap_border_start_with_border_width_keeps_only_start_edge() {
-        let css = ".border-start { border-left: 1px solid #198754; } .border-3 { border-width: 3px; }";
+        let css =
+            ".border-start { border-left: 1px solid #198754; } .border-3 { border-width: 3px; }";
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let info = element("div", None, &["border-start", "border-3"]);

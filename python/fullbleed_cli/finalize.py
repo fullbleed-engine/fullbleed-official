@@ -53,7 +53,7 @@ def _read_json_or_path(value):
         raise ValueError("value is required")
     candidate = Path(value)
     if candidate.exists():
-        return json.loads(candidate.read_text(encoding="utf-8"))
+        return json.loads(candidate.read_text(encoding="utf-8-sig"))
     return json.loads(value)
 
 

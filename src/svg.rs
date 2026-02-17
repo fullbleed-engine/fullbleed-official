@@ -1264,7 +1264,10 @@ fn parent_element<'a, 'input>(
     None
 }
 
-fn svg_simple_selector_matches(node: roxmltree::Node<'_, '_>, selector: &SvgSimpleSelector) -> bool {
+fn svg_simple_selector_matches(
+    node: roxmltree::Node<'_, '_>,
+    selector: &SvgSimpleSelector,
+) -> bool {
     if let Some(tag) = &selector.tag {
         if !node.tag_name().name().eq_ignore_ascii_case(tag) {
             return false;
@@ -2705,7 +2708,9 @@ impl<'a> PathParser<'a> {
                 self.i += 1;
                 Some(1.0)
             }
-            _ => self.next_number().map(|v| if v.abs() > 0.5 { 1.0 } else { 0.0 }),
+            _ => self
+                .next_number()
+                .map(|v| if v.abs() > 0.5 { 1.0 } else { 0.0 }),
         }
     }
 

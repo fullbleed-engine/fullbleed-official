@@ -572,7 +572,6 @@ version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "fixed",
- "flate2",
  "image",
  "kuchiki",
  "libm",
@@ -583,6 +582,7 @@ dependencies = [
  "resvg",
  "roxmltree 0.20.0",
  "rustybuzz 0.14.1",
+ "sha2",
  "tiny-skia",
  "ttf-parser 0.20.0",
 ]
@@ -1791,6 +1791,17 @@ checksum = "d98238b800e0d1576d8b6e3de32827c2d74bee68bb97748dcf5071fb53965432"
 dependencies = [
  "nodrop",
  "stable_deref_trait",
+]
+
+[[package]]
+name = "sha2"
+version = "0.10.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest",
 ]
 
 [[package]]

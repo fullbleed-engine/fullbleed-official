@@ -18,6 +18,22 @@ This example uses a vendored source PDF (`i-9.pdf`) and overlays variable data u
 python report.py
 ```
 
+Default example watermark:
+- Output is watermarked with `EXAMPLE` by default.
+- To disable it:
+
+```bash
+$env:FULLBLEED_I9_WATERMARK=0
+python report.py
+```
+
+Optional custom watermark text:
+
+```bash
+$env:FULLBLEED_I9_WATERMARK="INTERNAL USE ONLY"
+python report.py
+```
+
 Size optimization default:
 - This example does **not** embed Inter by default, so large VDP jobs avoid per-record font duplication.
 - To force embedded Inter for metric-compat testing, set:

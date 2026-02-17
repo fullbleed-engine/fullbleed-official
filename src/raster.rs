@@ -595,7 +595,14 @@ fn build_shading_shader(
             let end = Point::from_xy(*x1, page_height_pt - *y1);
             let radius = (*r1 - *r0).abs().max(0.0001);
             let stops = shading_stops(stops, opacity);
-            RadialGradient::new(start, end, radius, stops, SpreadMode::Pad, Transform::identity())
+            RadialGradient::new(
+                start,
+                end,
+                radius,
+                stops,
+                SpreadMode::Pad,
+                Transform::identity(),
+            )
         }
     }
 }
@@ -688,12 +695,7 @@ fn draw_string(
     let baseline_x = x;
     let baseline_y = page_height_pt - y - font_size;
     let placements = layout_text_glyphs(
-        font_data,
-        text,
-        font_size,
-        baseline_x,
-        baseline_y,
-        shape_text,
+        font_data, text, font_size, baseline_x, baseline_y, shape_text,
     );
     if placements.is_empty() {
         if debug_text {
@@ -859,6 +861,14 @@ fn layout_text_glyphs_unshaped(
 
 static SYSTEM_FONT_CACHE: OnceLock<Mutex<HashMap<String, Option<Arc<Vec<u8>>>>>> = OnceLock::new();
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FontStyleVariant {
+    Regular,
+    Bold,
+    Italic,
+    BoldItalic,
+}
+
 fn resolve_system_font_bytes(font_name: &str) -> Option<Arc<Vec<u8>>> {
     let families = font_family_candidates(font_name);
     let cache = SYSTEM_FONT_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
@@ -893,10 +903,32 @@ fn resolve_system_font_bytes(font_name: &str) -> Option<Arc<Vec<u8>>> {
 fn load_system_font_from_candidates(font_name: &str) -> Option<Arc<Vec<u8>>> {
     let mut candidates = system_font_file_candidates(font_name);
     if candidates.is_empty() {
-        // Heuristic fallback: convert family name to a probable file name.
-        let normalized = normalize_font_family(font_name).replace(' ', "");
+        // Heuristic fallback: synthesize likely file names from normalized family + style.
+        let (family, style) = parse_system_font_request(font_name);
+        let normalized = family.replace(' ', "");
         if !normalized.is_empty() {
-            candidates.push(format!("{normalized}.ttf"));
+            match style {
+                FontStyleVariant::Regular => {
+                    candidates.push(format!("{normalized}.ttf"));
+                }
+                FontStyleVariant::Bold => {
+                    candidates.push(format!("{normalized}Bold.ttf"));
+                    candidates.push(format!("{normalized}-Bold.ttf"));
+                    candidates.push(format!("{normalized}.ttf"));
+                }
+                FontStyleVariant::Italic => {
+                    candidates.push(format!("{normalized}Italic.ttf"));
+                    candidates.push(format!("{normalized}-Italic.ttf"));
+                    candidates.push(format!("{normalized}.ttf"));
+                }
+                FontStyleVariant::BoldItalic => {
+                    candidates.push(format!("{normalized}BoldItalic.ttf"));
+                    candidates.push(format!("{normalized}-BoldItalic.ttf"));
+                    candidates.push(format!("{normalized}BoldOblique.ttf"));
+                    candidates.push(format!("{normalized}-BoldOblique.ttf"));
+                    candidates.push(format!("{normalized}.ttf"));
+                }
+            }
         }
     }
 
@@ -956,32 +988,160 @@ fn system_font_dirs() -> Vec<std::path::PathBuf> {
 }
 
 fn system_font_file_candidates(font_name: &str) -> Vec<String> {
-    let n = normalize_font_family(font_name);
-    match n.as_str() {
-        "system-ui" | "ui-sans-serif" | "sans-serif" => vec![
-            "segoeui.ttf".to_string(),
-            "arial.ttf".to_string(),
-            "NotoSans-Regular.ttf".to_string(),
-            "LiberationSans-Regular.ttf".to_string(),
-        ],
-        "ui-monospace" | "monospace" => vec![
-            "consola.ttf".to_string(),
-            "cour.ttf".to_string(),
-            "LiberationMono-Regular.ttf".to_string(),
-        ],
-        "serif" => vec![
-            "times.ttf".to_string(),
-            "timesnewroman.ttf".to_string(),
-            "LiberationSerif-Regular.ttf".to_string(),
-        ],
-        "segoe ui" => vec!["segoeui.ttf".to_string()],
-        "roboto" => vec!["Roboto-Regular.ttf".to_string(), "arial.ttf".to_string()],
-        "helvetica" | "helvetica neue" => vec!["arial.ttf".to_string()],
-        "arial" => vec!["arial.ttf".to_string()],
-        "noto sans" => vec!["NotoSans-Regular.ttf".to_string(), "arial.ttf".to_string()],
-        "liberation sans" => vec!["LiberationSans-Regular.ttf".to_string(), "arial.ttf".to_string()],
-        _ => Vec::new(),
+    let (family, style) = parse_system_font_request(font_name);
+    let mut out = Vec::new();
+    match family.as_str() {
+        "system-ui" | "ui-sans-serif" | "sans-serif" => {
+            extend_style_candidates(
+                &mut out,
+                style,
+                &[
+                    "segoeui.ttf",
+                    "arial.ttf",
+                    "NotoSans-Regular.ttf",
+                    "LiberationSans-Regular.ttf",
+                ],
+                &[
+                    "segoeuib.ttf",
+                    "arialbd.ttf",
+                    "NotoSans-Bold.ttf",
+                    "LiberationSans-Bold.ttf",
+                ],
+                &[
+                    "segoeuii.ttf",
+                    "ariali.ttf",
+                    "NotoSans-Italic.ttf",
+                    "LiberationSans-Italic.ttf",
+                ],
+                &[
+                    "segoeuiz.ttf",
+                    "arialbi.ttf",
+                    "NotoSans-BoldItalic.ttf",
+                    "LiberationSans-BoldItalic.ttf",
+                ],
+            );
+        }
+        "ui-monospace" | "monospace" => {
+            extend_style_candidates(
+                &mut out,
+                style,
+                &["consola.ttf", "cour.ttf", "LiberationMono-Regular.ttf"],
+                &["consolab.ttf", "courbd.ttf", "LiberationMono-Bold.ttf"],
+                &["consolai.ttf", "couri.ttf", "LiberationMono-Italic.ttf"],
+                &["consolaz.ttf", "courbi.ttf", "LiberationMono-BoldItalic.ttf"],
+            );
+        }
+        "serif" => {
+            extend_style_candidates(
+                &mut out,
+                style,
+                &["times.ttf", "timesnewroman.ttf", "LiberationSerif-Regular.ttf"],
+                &["timesbd.ttf", "timesnewromanbold.ttf", "LiberationSerif-Bold.ttf"],
+                &["timesi.ttf", "timesnewromanitalic.ttf", "LiberationSerif-Italic.ttf"],
+                &[
+                    "timesbi.ttf",
+                    "timesnewromanbolditalic.ttf",
+                    "LiberationSerif-BoldItalic.ttf",
+                ],
+            );
+        }
+        "segoe ui" => {
+            extend_style_candidates(
+                &mut out,
+                style,
+                &["segoeui.ttf"],
+                &["segoeuib.ttf"],
+                &["segoeuii.ttf"],
+                &["segoeuiz.ttf"],
+            );
+        }
+        "roboto" => {
+            extend_style_candidates(
+                &mut out,
+                style,
+                &["Roboto-Regular.ttf", "arial.ttf"],
+                &["Roboto-Bold.ttf", "arialbd.ttf", "arial.ttf"],
+                &["Roboto-Italic.ttf", "ariali.ttf", "arial.ttf"],
+                &["Roboto-BoldItalic.ttf", "arialbi.ttf", "arial.ttf"],
+            );
+        }
+        "helvetica" | "helvetica neue" | "arial" => {
+            extend_style_candidates(
+                &mut out,
+                style,
+                &["arial.ttf", "LiberationSans-Regular.ttf"],
+                &["arialbd.ttf", "LiberationSans-Bold.ttf", "arial.ttf"],
+                &["ariali.ttf", "LiberationSans-Italic.ttf", "arial.ttf"],
+                &["arialbi.ttf", "LiberationSans-BoldItalic.ttf", "arial.ttf"],
+            );
+        }
+        "times" | "times roman" | "times new roman" => {
+            extend_style_candidates(
+                &mut out,
+                style,
+                &["times.ttf", "timesnewroman.ttf", "LiberationSerif-Regular.ttf"],
+                &["timesbd.ttf", "timesnewromanbold.ttf", "LiberationSerif-Bold.ttf"],
+                &["timesi.ttf", "timesnewromanitalic.ttf", "LiberationSerif-Italic.ttf"],
+                &[
+                    "timesbi.ttf",
+                    "timesnewromanbolditalic.ttf",
+                    "LiberationSerif-BoldItalic.ttf",
+                ],
+            );
+        }
+        "courier" | "courier new" => {
+            extend_style_candidates(
+                &mut out,
+                style,
+                &["cour.ttf", "consola.ttf", "LiberationMono-Regular.ttf"],
+                &["courbd.ttf", "consolab.ttf", "LiberationMono-Bold.ttf"],
+                &["couri.ttf", "consolai.ttf", "LiberationMono-Italic.ttf"],
+                &["courbi.ttf", "consolaz.ttf", "LiberationMono-BoldItalic.ttf"],
+            );
+        }
+        "noto sans" => {
+            extend_style_candidates(
+                &mut out,
+                style,
+                &["NotoSans-Regular.ttf", "arial.ttf"],
+                &["NotoSans-Bold.ttf", "arialbd.ttf", "arial.ttf"],
+                &["NotoSans-Italic.ttf", "ariali.ttf", "arial.ttf"],
+                &["NotoSans-BoldItalic.ttf", "arialbi.ttf", "arial.ttf"],
+            );
+        }
+        "liberation sans" => {
+            extend_style_candidates(
+                &mut out,
+                style,
+                &["LiberationSans-Regular.ttf", "arial.ttf"],
+                &["LiberationSans-Bold.ttf", "arialbd.ttf", "arial.ttf"],
+                &["LiberationSans-Italic.ttf", "ariali.ttf", "arial.ttf"],
+                &["LiberationSans-BoldItalic.ttf", "arialbi.ttf", "arial.ttf"],
+            );
+        }
+        "liberation serif" => {
+            extend_style_candidates(
+                &mut out,
+                style,
+                &["LiberationSerif-Regular.ttf", "times.ttf"],
+                &["LiberationSerif-Bold.ttf", "timesbd.ttf", "times.ttf"],
+                &["LiberationSerif-Italic.ttf", "timesi.ttf", "times.ttf"],
+                &["LiberationSerif-BoldItalic.ttf", "timesbi.ttf", "times.ttf"],
+            );
+        }
+        "liberation mono" => {
+            extend_style_candidates(
+                &mut out,
+                style,
+                &["LiberationMono-Regular.ttf", "consola.ttf"],
+                &["LiberationMono-Bold.ttf", "consolab.ttf", "consola.ttf"],
+                &["LiberationMono-Italic.ttf", "consolai.ttf", "consola.ttf"],
+                &["LiberationMono-BoldItalic.ttf", "consolaz.ttf", "consola.ttf"],
+            );
+        }
+        _ => {}
     }
+    out
 }
 
 fn font_family_candidates(font_name: &str) -> Vec<String> {
@@ -1007,6 +1167,121 @@ fn normalize_font_family(name: &str) -> String {
         .trim_matches('"')
         .trim_matches('\'')
         .to_ascii_lowercase()
+}
+
+fn parse_system_font_request(font_name: &str) -> (String, FontStyleVariant) {
+    let normalized = normalize_font_family(font_name).replace('_', " ");
+    let without_subset = strip_pdf_subset_prefix(&normalized);
+    let style_probe = without_subset
+        .replace("boldoblique", "bold oblique")
+        .replace("bolditalic", "bold italic")
+        .replace("semi-bold", "semibold")
+        .replace("demi-bold", "demibold");
+
+    let bold =
+        style_probe.contains("bold") || style_probe.contains("semibold") || style_probe.contains("demibold");
+    let italic = style_probe.contains("italic") || style_probe.contains("oblique");
+    let style = match (bold, italic) {
+        (true, true) => FontStyleVariant::BoldItalic,
+        (true, false) => FontStyleVariant::Bold,
+        (false, true) => FontStyleVariant::Italic,
+        (false, false) => FontStyleVariant::Regular,
+    };
+
+    let mut kept: Vec<&str> = Vec::new();
+    for token in style_probe.split(|c: char| c == '-' || c == '_' || c.is_whitespace()) {
+        let token = token.trim();
+        if token.is_empty() {
+            continue;
+        }
+        if matches!(
+            token,
+            "bold"
+                | "italic"
+                | "oblique"
+                | "semibold"
+                | "demibold"
+                | "regular"
+                | "normal"
+                | "book"
+                | "medium"
+                | "mt"
+                | "psmt"
+                | "it"
+                | "bd"
+                | "bi"
+        ) {
+            continue;
+        }
+        kept.push(token);
+    }
+
+    let mut family = if kept.is_empty() {
+        style_probe
+    } else {
+        kept.join(" ")
+    };
+    family = canonical_font_family_alias(&family);
+    (family, style)
+}
+
+fn strip_pdf_subset_prefix(name: &str) -> &str {
+    if let Some((prefix, rest)) = name.split_once('+') {
+        if prefix.len() == 6 && prefix.chars().all(|c| c.is_ascii_alphabetic()) {
+            return rest;
+        }
+    }
+    name
+}
+
+fn canonical_font_family_alias(name: &str) -> String {
+    let normalized = normalize_font_family(name);
+    let compact: String = normalized
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '-' && *c != '_')
+        .collect();
+    match compact.as_str() {
+        "helvetica" | "helveticaneue" => "helvetica".to_string(),
+        "arial" | "arialmt" => "arial".to_string(),
+        "times" | "timesroman" | "timesnewroman" | "timesnewromanpsmt" => "times".to_string(),
+        "courier" | "couriernew" | "couriernewpsmt" => "courier".to_string(),
+        "segoeui" => "segoe ui".to_string(),
+        "notosans" => "noto sans".to_string(),
+        "liberationsans" => "liberation sans".to_string(),
+        "liberationserif" => "liberation serif".to_string(),
+        "liberationmono" => "liberation mono".to_string(),
+        "systemui" => "system-ui".to_string(),
+        "uisansserif" => "ui-sans-serif".to_string(),
+        "uimonospace" => "ui-monospace".to_string(),
+        "sansserif" => "sans-serif".to_string(),
+        _ => normalized,
+    }
+}
+
+fn extend_style_candidates(
+    out: &mut Vec<String>,
+    style: FontStyleVariant,
+    regular: &[&str],
+    bold: &[&str],
+    italic: &[&str],
+    bold_italic: &[&str],
+) {
+    let groups: [&[&str]; 4] = match style {
+        FontStyleVariant::Regular => [regular, bold, italic, bold_italic],
+        FontStyleVariant::Bold => [bold, regular, bold_italic, italic],
+        FontStyleVariant::Italic => [italic, regular, bold_italic, bold],
+        FontStyleVariant::BoldItalic => [bold_italic, bold, italic, regular],
+    };
+    for group in groups {
+        for candidate in group {
+            if candidate.is_empty() {
+                continue;
+            }
+            if !out.iter().any(|existing| existing.eq_ignore_ascii_case(candidate)) {
+                out.push((*candidate).to_string());
+            }
+        }
+    }
 }
 
 fn detect_direction(text: &str) -> HbDirection {
@@ -1322,6 +1597,21 @@ mod tests {
             has_non_white_pixel(&img),
             "expected text to produce non-white pixels"
         );
+    }
+
+    #[test]
+    fn system_font_candidates_prefer_bold_variant_for_helvetica() {
+        let candidates = system_font_file_candidates("Helvetica-Bold");
+        assert!(!candidates.is_empty());
+        assert_eq!(candidates[0], "arialbd.ttf");
+        assert!(candidates.iter().any(|v| v.eq_ignore_ascii_case("arial.ttf")));
+    }
+
+    #[test]
+    fn system_font_candidates_normalize_subset_prefix_and_style() {
+        let candidates = system_font_file_candidates("ABCDEF+Helvetica-BoldOblique");
+        assert!(!candidates.is_empty());
+        assert_eq!(candidates[0], "arialbi.ttf");
     }
 
     #[test]

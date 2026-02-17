@@ -28,6 +28,7 @@ Core render pipeline:
 - `plan`
 - `run`
 - `finalize` (template composition workflow)
+- `inspect` (PDF metadata + compatibility inspection)
 
 Diagnostics and introspection:
 
@@ -60,7 +61,7 @@ High-value options:
 - assets: `--asset`, `--asset-kind`, `--asset-name`, `--asset-trusted`
 - template compose (auto-finalize): `--template-binding`, `--templates`, `--template-dx`, `--template-dy`
 - page/pdf: `--page-size`, `--page-width`, `--page-height`, `--margin`, `--pdf-version`, `--pdf-profile`
-- diagnostics: `--emit-jit`, `--emit-perf`, `--emit-glyph-report`, `--emit-page-data`
+- diagnostics: `--emit-jit`, `--emit-perf`, `--emit-glyph-report`, `--emit-page-data`, `--emit-compose-plan`
 - image artifacts: `--emit-image`, `--image-dpi`
 - policy: `--profile`, `--fail-on`, `--allow-fallbacks`, budget flags
 - reproducibility: `--deterministic-hash`, `--repro-record`, `--repro-check`
@@ -68,6 +69,8 @@ High-value options:
 Template auto-compose notes:
 - When `--templates` is set on `render`, CLI renders overlay, resolves template bindings, and finalizes via Rust compose in one command.
 - Requires `--template-binding` and file output (`--out` cannot be `-`).
+- When `--emit-image` is used with template auto-compose, image artifacts are emitted from the finalized composed PDF (not overlay-only preview) via native Rust rasterization in the engine.
+- `--deterministic-hash` writes PDF SHA-256 by default; when `--emit-image` is set, it writes an artifact-set digest (`fullbleed.artifact_digest.v1`) computed from PDF SHA-256 plus ordered page-image SHA-256 values.
 
 ## `verify`
 
@@ -78,6 +81,10 @@ Same pipeline as render but tuned for validation/preflight usage. Can emit PDF o
 Generates normalized compile manifest (`fullbleed.compiler_input.v1`) and warnings (for example remote refs without allow flag).
 
 Use `--emit-manifest <path>` to persist manifest JSON.
+
+Template composition planning:
+- with `--templates` + `--template-binding`, `plan` resolves template bindings and compose plan rows.
+- use `--emit-compose-plan <path>` to write `fullbleed.compose_plan.v1`.
 
 ## `run`
 
@@ -100,6 +107,28 @@ Template composition command group:
 Current state:
 - `stamp` is implemented through the Rust core finalize path with strict checks and JSON result envelope
 - `compose` is implemented as a Rust-backed baseline with strict plan/catalog validation
+
+## `inspect`
+
+Inspection command group:
+
+- `fullbleed inspect pdf <path> [--json]`
+- `fullbleed inspect pdf-batch <path...> [--list paths.txt] [--json]`
+- `fullbleed inspect templates --templates <dir|json> [--json]`
+
+Use this to read canonical PDF metadata from the Rust inspector without rendering:
+
+- `pdf_version`
+- `page_count`
+- `encrypted`
+- `file_size_bytes`
+- composition compatibility (`supported`, `issues`)
+
+Schema target:
+
+- `fullbleed.inspect_pdf.v1`
+- `fullbleed.inspect_pdf_batch.v1`
+- `fullbleed.inspect_templates.v1`
 
 ## `new`
 
@@ -134,6 +163,7 @@ Examples:
 ```bash
 fullbleed --schema render
 fullbleed --schema assets list
+fullbleed --schema inspect templates
 ```
 
 ## Fail-on policy

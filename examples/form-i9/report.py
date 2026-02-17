@@ -82,6 +82,13 @@ def _env_truthy(name: str) -> bool:
     return value in {"1", "true", "yes", "on"}
 
 
+def _resolve_watermark_text() -> str | None:
+    raw = os.getenv("FULLBLEED_I9_WATERMARK", "EXAMPLE").strip()
+    if raw.lower() in {"", "0", "false", "off", "none", "no"}:
+        return None
+    return raw
+
+
 def _env_int(name: str, default: int) -> int:
     raw = os.getenv(name, "").strip()
     if not raw:
@@ -242,6 +249,7 @@ def create_engine(
     debug_enabled = _env_truthy("FULLBLEED_DEBUG") if debug is None else bool(debug)
     perf_enabled = _env_truthy("FULLBLEED_PERF")
     debug_target = debug_out if debug_out is not None else (str(JIT_PATH) if debug_enabled else None)
+    watermark_text = _resolve_watermark_text()
 
     engine = fullbleed.PdfEngine(
         page_width="612pt",
@@ -253,6 +261,14 @@ def create_engine(
         unicode_support=True,
         shape_text=True,
         unicode_metrics=True,
+        watermark_text=watermark_text,
+        watermark_layer="overlay",
+        watermark_semantics="artifact",
+        watermark_opacity=0.40,
+        watermark_rotation=0.0,
+        watermark_font_name="Helvetica-Bold",
+        watermark_font_size=88.0,
+        watermark_color="#7a0000",
         debug=debug_enabled,
         debug_out=debug_target,
         perf=perf_enabled,

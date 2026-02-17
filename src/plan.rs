@@ -1,11 +1,11 @@
 use crate::Document;
 use crate::debug::DebugLogger;
+use crate::error::FullBleedError;
 use crate::finalize::{
     PageBindingDecision, TemplateBindingSpec, resolve_template_bindings_for_document,
 };
 use crate::font::FontRegistry;
 use crate::jit::{self, DocPlan, JitMode};
-use crate::error::FullBleedError;
 use crate::page_data::{PageDataContext, PaginatedContextSpec, compute_page_data_context};
 use std::sync::Arc;
 

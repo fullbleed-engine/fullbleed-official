@@ -236,6 +236,8 @@ fullbleed --json render \
   --out output/hello.pdf
 ```
 
+`--deterministic-hash` writes the output PDF SHA-256 by default; when `--emit-image` is enabled, it writes an artifact-set digest over PDF SHA-256 plus ordered page-image SHA-256 hashes.
+
 Re-run and enforce reproducibility against a stored record:
 
 ```bash
@@ -263,6 +265,17 @@ Compile-only plan (no render):
 fullbleed --json plan \
   --html templates/report.html \
   --css templates/report.css
+```
+
+Template compose planning (no finalize write):
+
+```bash
+fullbleed --json plan \
+  --html templates/overlay.html \
+  --css templates/overlay.css \
+  --template-binding config/template_binding.json \
+  --templates config/template_catalog.json \
+  --emit-compose-plan output/compose_plan.json
 ```
 
 ## PDF Template Composition (VDP / Transactional)
@@ -300,11 +313,28 @@ Python API compose flow:
 import fullbleed
 
 engine = fullbleed.PdfEngine(template_binding=binding_spec)
-overlay_bytes, _page_data, bindings = engine.render_pdf_with_page_data_and_template_bindings(html, css)
+overlay_bytes, _page_data, _bindings = engine.render_pdf_with_page_data_and_template_bindings(html, css)
 open("output/overlay.pdf", "wb").write(overlay_bytes)
+plan_result = engine.plan_template_compose(
+    html,
+    css,
+    [("source-template", "templates/source.pdf")],
+    0.0,
+    0.0,
+)
+plan = [
+    (
+        row["template_id"],
+        row["template_page"],
+        row["overlay_page"],
+        row["dx"],
+        row["dy"],
+    )
+    for row in plan_result["plan"]
+]
 fullbleed.finalize_compose_pdf(
     [("source-template", "templates/source.pdf")],
-    plan,  # [(template_id, template_page_index, overlay_page_index, dx, dy), ...]
+    plan,
     "output/overlay.pdf",
     "output/composed.pdf",
 )
@@ -320,6 +350,9 @@ See `docs/pdf-templates.md` and `examples/template-flagging-smoke/` for full pro
 | `verify` | Validation render path with optional PDF and PNG emits | `fullbleed.verify_result.v1` |
 | `plan` | Compile/normalize inputs into manifest + warnings | `fullbleed.plan_result.v1` |
 | `run` | Render using Python module/file engine factory | `fullbleed.run_result.v1` |
+| `inspect pdf` | Inspect PDF metadata and composition compatibility | `fullbleed.inspect_pdf.v1` |
+| `inspect pdf-batch` | Inspect multiple PDFs with per-file status | `fullbleed.inspect_pdf_batch.v1` |
+| `inspect templates` | Inspect template catalog metadata/compatibility | `fullbleed.inspect_templates.v1` |
 | `compliance` | License/compliance report for legal/procurement | `fullbleed.compliance.v1` |
 | `debug-perf` | Summarize perf JSONL logs | `fullbleed.debug_perf.v1` |
 | `debug-jit` | Filter/inspect JIT JSONL logs | `fullbleed.debug_jit.v1` |
@@ -340,6 +373,8 @@ Schema discovery for any command/subcommand:
 ```bash
 fullbleed --schema render
 fullbleed --schema assets verify
+fullbleed --schema inspect pdf
+fullbleed --schema inspect templates
 ```
 
 ## CLI Flags That Matter Most
@@ -365,7 +400,7 @@ Render/verify/plan key flags:
   Stable default is `--pdf-version 1.7` for shipping workflows.
   Output intent metadata (`--output-intent-identifier|--output-intent-info|--output-intent-components`) requires `--output-intent-icc`.
 - Watermarking: `--watermark-text`, `--watermark-html`, `--watermark-image`, `--watermark-layer`, `--watermark-semantics`, `--watermark-opacity`, `--watermark-rotation`
-- Artifacts: `--emit-jit`, `--emit-perf`, `--emit-glyph-report`, `--emit-page-data`, `--emit-image`, `--image-dpi`, `--deterministic-hash`
+- Artifacts: `--emit-jit`, `--emit-perf`, `--emit-glyph-report`, `--emit-page-data`, `--emit-compose-plan`, `--emit-image`, `--image-dpi`, `--deterministic-hash`
 - Assets: `--asset`, `--asset-kind`, `--asset-name`, `--asset-trusted`, `--allow-remote-assets`
 - Profiles: `--profile dev|preflight|prod`
 - Fail policy: `--fail-on overflow|missing-glyphs|font-subst|budget`
@@ -746,6 +781,10 @@ Module exports:
 - `WatermarkSpec(kind, value, layer='overlay', semantics=None, opacity=0.15, rotation_deg=0.0, font_name=None, font_size=None, color=None)`
 - `concat_css(parts)`
 - `vendored_asset(source, kind, name=None, trusted=False, remote=False)`
+- `inspect_pdf(path)`
+- `inspect_template_catalog(templates)`
+- `finalize_stamp_pdf(template, overlay, out, page_map=None, dx=0.0, dy=0.0)`
+- `finalize_compose_pdf(templates, plan, overlay, out)`
 - `fetch_asset(url)`
 
 `PdfEngine` methods:
@@ -753,17 +792,20 @@ Module exports:
 | Method | Return shape |
 | --- | --- |
 | `register_bundle(bundle)` | `None` |
-| `render_pdf(html, css)` | `bytes` |
-| `render_pdf_to_file(html, css, path)` | `int` (bytes written) |
+| `render_pdf(html, css, deterministic_hash=None)` | `bytes` |
+| `render_pdf_to_file(html, css, path, deterministic_hash=None)` | `int` (bytes written) |
 | `render_pdf_with_glyph_report(html, css)` | `(bytes, list)` |
 | `render_pdf_with_page_data(html, css)` | `(bytes, page_data_or_none)` |
-| `render_pdf_batch(html_list, css)` | `bytes` |
-| `render_pdf_batch_parallel(html_list, css)` | `bytes` |
-| `render_pdf_batch_to_file(html_list, css, path)` | `int` |
-| `render_pdf_batch_to_file_parallel(html_list, css, path)` | `int` |
-| `render_pdf_batch_to_file_parallel_with_page_data(html_list, css, path)` | `(bytes_written, page_data_list)` |
-| `render_pdf_batch_with_css(jobs)` | `bytes` |
-| `render_pdf_batch_with_css_to_file(jobs, path)` | `int` |
+| `plan_template_compose(html, css, templates, dx=0.0, dy=0.0)` | `dict` |
+| `render_pdf_batch(html_list, css, deterministic_hash=None)` | `bytes` |
+| `render_pdf_batch_parallel(html_list, css, deterministic_hash=None)` | `bytes` |
+| `render_pdf_batch_to_file(html_list, css, path, deterministic_hash=None)` | `int` |
+| `render_pdf_batch_to_file_parallel(html_list, css, path, deterministic_hash=None)` | `int` |
+| `render_pdf_batch_to_file_parallel_with_page_data(html_list, css, path, deterministic_hash=None)` | `(bytes_written, page_data_list)` |
+| `render_pdf_batch_with_css(jobs, deterministic_hash=None)` | `bytes` |
+| `render_pdf_batch_with_css_to_file(jobs, path, deterministic_hash=None)` | `int` |
+
+When `deterministic_hash` is set, engine writes PDF SHA-256 to the provided file path.
 
 `AssetBundle` methods:
 
@@ -1039,6 +1081,8 @@ print(payload["outputs"]["pdf"])
     "debug-perf",
     "debug-jit",
     "run",
+    "finalize",
+    "inspect",
     "compliance",
     "doctor",
     "capabilities",
@@ -1052,6 +1096,10 @@ print(payload["outputs"]["pdf"])
     "fullbleed.verify_result.v1",
     "fullbleed.plan_result.v1",
     "fullbleed.run_result.v1",
+    "fullbleed.inspect_pdf.v1",
+    "fullbleed.inspect_pdf_batch.v1",
+    "fullbleed.inspect_templates.v1",
+    "fullbleed.compose_plan.v1",
     "fullbleed.compliance.v1",
     "fullbleed.capabilities.v1",
     "fullbleed.doctor.v1",
@@ -1078,6 +1126,7 @@ print(payload["outputs"]["pdf"])
     "--emit-perf",
     "--emit-glyph-report",
     "--emit-page-data",
+    "--emit-compose-plan",
     "--emit-image",
     "--image-dpi",
     "--deterministic-hash",

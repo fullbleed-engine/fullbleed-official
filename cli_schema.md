@@ -43,7 +43,17 @@ Machine contract for `fullbleed` automation.
     "jit": "out/jit.jsonl",
     "perf": "out/perf.jsonl",
     "glyph_report": null,
-    "page_data": null
+    "page_data": null,
+    "compose_plan": null,
+    "sha256": "3c8f27e6...",
+    "artifact_sha256": "8b1f6d8c...",
+    "image_sha256": [
+      "b9b19826...",
+      "6f1e5f09..."
+    ],
+    "deterministic_hash": "out/report.sha256",
+    "deterministic_hash_sha256": "8b1f6d8c...",
+    "deterministic_hash_mode": "artifact_set_v1"
   }
 }
 ```
@@ -60,7 +70,8 @@ Machine contract for `fullbleed` automation.
     "jit": "out/jit.jsonl",
     "perf": "out/perf.jsonl",
     "glyph_report": null,
-    "page_data": null
+    "page_data": null,
+    "compose_plan": null
   }
 }
 ```
@@ -120,13 +131,16 @@ Commercial attestation options for `compliance`:
 ```json
 {
   "schema": "fullbleed.capabilities.v1",
-  "commands": ["render", "verify", "plan", "run", "compliance", "capabilities"],
-  "agent_flags": ["--json", "--json-only", "--schema", "--emit-manifest"],
+  "commands": ["render", "verify", "plan", "run", "finalize", "inspect", "compliance", "capabilities"],
+  "agent_flags": ["--json", "--json-only", "--schema", "--emit-manifest", "--emit-compose-plan"],
   "engine": {
     "batch_render": true,
     "batch_render_parallel": true,
     "glyph_report": true,
-    "page_data": true
+    "page_data": true,
+    "pdf_inspect": true,
+    "template_catalog_inspect": true,
+    "template_compose_planner": true
   },
   "svg": {
     "document_input": {
@@ -143,6 +157,61 @@ Commercial attestation options for `compliance`:
       "svg_raster_fallback": true
     }
   }
+}
+```
+
+### InspectPdfResult
+
+```json
+{
+  "schema": "fullbleed.inspect_pdf.v1",
+  "ok": true,
+  "path": "examples/form-i9/i-9.pdf",
+  "pdf_version": "1.7",
+  "page_count": 4,
+  "encrypted": false,
+  "file_size_bytes": 524095,
+  "warnings": [],
+  "composition": {
+    "supported": true,
+    "issues": []
+  }
+}
+```
+
+### InspectTemplatesResult
+
+```json
+{
+  "schema": "fullbleed.inspect_templates.v1",
+  "ok": true,
+  "templates": [
+    {
+      "template_id": "i-9",
+      "path": "examples/form-i9/i-9.pdf",
+      "page_count": 4,
+      "composition": {"supported": true, "issues": []}
+    }
+  ],
+  "metrics": {
+    "templates": 1,
+    "compatible_templates": 1,
+    "incompatible_templates": 0
+  }
+}
+```
+
+### InspectPdfBatchResult
+
+```json
+{
+  "schema": "fullbleed.inspect_pdf_batch.v1",
+  "ok": false,
+  "items": [
+    {"path": "input/a.pdf", "ok": true, "page_count": 2},
+    {"path": "input/missing.pdf", "ok": false, "code": "PDF_NOT_FOUND"}
+  ],
+  "metrics": {"total": 2, "ok": 1, "failed": 1}
 }
 ```
 
@@ -173,6 +242,9 @@ fullbleed --schema verify
 fullbleed --schema assets install
 fullbleed --schema assets verify
 fullbleed --schema capabilities
+fullbleed --schema inspect pdf
+fullbleed --schema inspect templates
+fullbleed --schema inspect pdf-batch
 ```
 
 ## Known Schema IDs (Primary)
@@ -193,5 +265,12 @@ fullbleed --schema capabilities
 - `fullbleed.cache_prune.v1`
 - `fullbleed.init.v1`
 - `fullbleed.new_template.v1`
+- `fullbleed.new_list.v1`
+- `fullbleed.new_search.v1`
+- `fullbleed.new_remote.v1`
+- `fullbleed.inspect_pdf.v1`
+- `fullbleed.inspect_templates.v1`
+- `fullbleed.inspect_pdf_batch.v1`
+- `fullbleed.compose_plan.v1`
 - `fullbleed.error.v1`
 

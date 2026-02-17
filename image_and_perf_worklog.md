@@ -1,0 +1,267 @@
+# Image + Perf Worklog
+
+## Session: 2026-02-17
+
+### Scope
+- Execute sprint items from `image_and_perf.md`.
+- Prioritize correctness gap: compose/stamp image artifacts must reflect finalized PDF pages.
+- Land early performance wins by removing redundant render passes in artifact-heavy CLI paths.
+
+### Findings (Initial)
+- `render --templates ... --emit-image ...` currently emits overlay-render images, not finalized composed output.
+- Root path:
+  - Compose occurs in `python/fullbleed_cli/cli.py::_render_with_template_compose` via `fullbleed.finalize_compose_pdf(...)`.
+  - Image emission is then called through `_emit_image_artifacts(...)`, which rerenders HTML/CSS from engine APIs.
+- This means template PDF backgrounds added during finalize are absent in emitted PNGs.
+- Perf overhead exists from duplicated renders when `page_data`, `glyph_report`, and `emit-image` are combined.
+
+### Decisions (In Progress)
+- Add compose-aware image emission from finalized output PDF path in CLI.
+- Tighten correctness semantics for compose image output so it is not silently overlay-only.
+- Add consolidated Rust/Python render method(s) to reduce redundant passes when multiple artifacts are requested.
+- Keep finalized-PDF raster fully engine-native (no third-party renderer dependency path).
+
+### Implementation Progress
+- Added compose image emission path:
+  - `python/fullbleed_cli/cli.py::_emit_image_artifacts_from_pdf`
+  - Uses finalized output PDF path and emits per-page PNGs via new native engine APIs when `--emit-image` is set in compose mode.
+  - Compose render now uses this path in `_render_with_template_compose`.
+- Added native finalized-PDF raster module in Rust:
+  - `src/pdf_raster.rs`
+  - Parses finalized PDF content/XObjects with `lopdf`, maps into engine commands, and rasterizes via existing `src/raster.rs`.
+  - Handles per-page media box sizes by rasterizing each parsed page with its own page dimensions.
+- Added native finalized-PDF raster APIs in engine:
+  - `src/lib.rs::render_finalized_pdf_image_pages`
+  - `src/lib.rs::render_finalized_pdf_image_pages_to_dir`
+- Added Python bindings for native finalized-PDF raster APIs:
+  - `src/python.rs::render_finalized_pdf_image_pages`
+  - `src/python.rs::render_finalized_pdf_image_pages_to_dir`
+- Added render metadata:
+  - `outputs.image_mode` now emitted in `render`/`verify` payloads.
+  - Compose mode marks `template_compose.image_mode = composed_pdf` when image emission is requested.
+- Added BOM-tolerant JSON file loading (`utf-8-sig`) in CLI JSON loaders:
+  - `python/fullbleed_cli/cli.py::_read_json_or_path`
+  - `python/fullbleed_cli/finalize.py::_read_json_or_path`
+- Added dedicated CLI compose-image smoke:
+  - `examples/template-flagging-smoke/run_cli_compose_image_smoke.py`
+  - Validates:
+    - `outputs.image_mode == composed_pdf`
+    - emitted image count equals composed `pages_written`
+    - template background color is present in emitted image pixel sample.
+- Wired smoke into CI goldens workflow without third-party raster dependency:
+  - `.github/workflows/ci.yml` runs compose-image smoke without `pymupdf` install.
+- Locked compression backend to pure Rust:
+  - `Cargo.toml` now pins `flate2` to `rust_backend` with default features disabled.
+- Replaced direct `flate2` usage in engine PDF writer:
+  - Added `src/flate_native.rs` with in-house zlib/deflate encoder using native LZ77 tokenization + fixed Huffman block coding.
+  - Includes parallel chunk planning (`rayon`) and parallel Adler-32 combination across chunks.
+  - `src/pdf.rs::flate_compress` now routes to `crate::flate_native::zlib_deflate_parallel`.
+  - Removed direct `flate2` dependency from `Cargo.toml`.
+- Replaced smoke pixel-read dependency:
+  - `examples/template-flagging-smoke/run_cli_compose_image_smoke.py` now validates PNG pixels with an internal PNG decoder (no `fitz` dependency).
+- Added first compose-image timing signal:
+  - `template_compose.image_emit_ms` in render outputs for compose mode when `--emit-image` is used.
+- Added consolidated Rust render methods to reduce extra passes:
+  - `src/lib.rs::render_with_page_data_and_glyph_report`
+  - `src/lib.rs::render_with_page_data_and_template_bindings_and_glyph_report`
+- Added Python bindings for consolidated methods:
+  - `src/python.rs::render_pdf_with_page_data_and_glyph_report`
+  - `src/python.rs::render_pdf_with_page_data_and_template_bindings_and_glyph_report`
+- Updated CLI artifact orchestration to use consolidated APIs when available:
+  - `python/fullbleed_cli/cli.py::_render_with_artifacts`
+  - `python/fullbleed_cli/cli.py::_render_with_template_compose`
+- Added determinism regression gates in Rust tests:
+  - `src/lib.rs::tests::render_to_buffer_pdf_bytes_are_deterministic`
+  - `src/lib.rs::tests::render_many_parallel_pdf_bytes_are_deterministic_across_thread_counts`
+  - `src/lib.rs::tests::render_image_pages_png_bytes_are_deterministic`
+  - `src/lib.rs::tests::render_finalized_pdf_image_pages_png_bytes_are_deterministic`
+  - `src/flate_native.rs::tests::zlib_lz77_is_deterministic_across_thread_counts`
+- Added CLI cross-process determinism smoke harness:
+  - `examples/template-flagging-smoke/run_cli_determinism_smoke.py`
+  - Runs `render` in separate subprocesses with `RAYON_NUM_THREADS=1` and `RAYON_NUM_THREADS=4`.
+  - Verifies byte-level SHA-256 stability for:
+    - non-compose output PDF + emitted PNG set (`image_mode=overlay_document`)
+    - compose output PDF + emitted PNG set (`image_mode=composed_pdf`)
+  - Also validates CLI `--deterministic-hash` file matches computed PDF hash per run.
+- Wired deterministic artifact smoke into CI:
+  - `.github/workflows/ci.yml` now runs `python examples/template-flagging-smoke/run_cli_determinism_smoke.py` in goldens job.
+- Added linker content-stream compression in core PDF writer:
+  - `src/pdf.rs` now routes page content streams and Form XObject command streams through a new binary stream writer path.
+  - New writer helpers emit stream objects from raw bytes (`write_pdf_stream_object`) and apply native deterministic Flate (`/Filter /FlateDecode`) when stream size exceeds threshold.
+  - Compression is governed by `PdfOptions` defaults:
+    - `compress_content_streams=true`
+    - `compress_content_stream_min_bytes=128`
+  - This lands `P0-2` from `core_research.md` without introducing non-Rust/system dependencies.
+- Extended linker binary stream emission beyond page/form content:
+  - Runtime writer path now emits image XObject streams, embedded font program streams, and ICC profile streams directly as binary stream payloads (no ASCIIHex wrapper).
+  - Applied in:
+    - image path (`ensure_image` -> binary stream writers)
+    - font emit path in `PdfStreamWriter::finish` for WinAnsi and Identity-H flows
+    - output intent ICC stream emission in `PdfStreamWriter::finish`
+- Added linker compression telemetry in perf/debug outputs:
+  - `pdf.link` counts now include:
+    - `content_stream_raw_bytes`
+    - `content_stream_encoded_bytes`
+    - `content_stream_compressed`
+    - `content_stream_ratio_ppm`
+  - Debug `jit.link` JSON now includes the same counters.
+- Updated PDF tests to remain robust with compressed content streams:
+  - Replaced raw-PDF substring assertions for page-stream tokens with decoded page-content assertions via `lopdf::Document::get_page_content`.
+  - Added focused tests for:
+    - default compression on large content streams
+    - threshold-based bypass behavior for small streams.
+  - Added stream-encoding regression tests:
+    - image streams emit with native filter tokens and no `ASCIIHexDecode`
+    - embedded font streams emit with no `ASCIIHexDecode`
+    - ICC output intent stream emits with no `ASCIIHexDecode`
+    - `pdf.link` perf log includes new content-stream compression counters.
+- Removed legacy/dead PDF object-builder stream functions from `src/pdf.rs`:
+  - deleted unreachable ASCIIHex-based stream builders used by old object-list path (`build_font_objects`, `build_image_objects`, `font_file_object`, `image_object`, etc.).
+  - runtime `PdfStreamWriter` binary stream emission is now the only stream construction path, eliminating representation drift risk.
+- Extended CLI deterministic-hash contract for image-enabled runs:
+  - `python/fullbleed_cli/cli.py` now computes:
+    - `sha256` (PDF hash, unchanged semantics)
+    - `artifact_sha256` (stable digest over PDF hash + ordered image hashes; schema `fullbleed.artifact_digest.v1`)
+    - `image_sha256` (ordered per-page image hashes)
+    - `deterministic_hash_sha256` and `deterministic_hash_mode` (`pdf_only` or `artifact_set_v1`)
+  - `--deterministic-hash <path>` now writes artifact-set digest when `--emit-image` is present; otherwise writes PDF hash (backward-compatible for non-image runs).
+- Updated determinism smoke contract for CLI:
+  - `examples/template-flagging-smoke/run_cli_determinism_smoke.py` now validates artifact-set hashing semantics and checks reported output digest fields against computed values.
+- Updated user-facing contract docs:
+  - `docs/cli.md`, `README.md`, and `cli_schema.md` now describe/illustrate artifact-set digest behavior.
+- Added engine API-level optional hash-file parameter:
+  - `src/python.rs` now accepts `deterministic_hash=None` on:
+    - `render_pdf`, `render_pdf_to_file`
+    - `render_pdf_batch`, `render_pdf_batch_to_file`
+    - `render_pdf_batch_with_css`, `render_pdf_batch_with_css_to_file`
+    - `render_pdf_batch_parallel`
+    - `render_pdf_batch_to_file_parallel`
+    - `render_pdf_batch_to_file_parallel_with_page_data`
+  - Engine writes PDF SHA-256 to the provided path when set.
+  - Hashing is native in Rust binding via `sha2` (`Cargo.toml`) and avoids CLI-only dependency for API users.
+- Updated Python API docs for new method parameter contract:
+  - `docs/python-api.md` and README API table now include `deterministic_hash` option.
+
+### Validation Notes
+- Rust tests: `cargo test -q` passed (`117` tests, including new combined-render smoke coverage).
+- Python syntax: `python -m py_compile python/fullbleed_cli/cli.py` passed.
+- Template compose smoke (`examples/template-flagging-smoke/run_smoke.py`) passed.
+- CLI compose-image smoke (`examples/template-flagging-smoke/run_cli_compose_image_smoke.py`) passed.
+- End-to-end compose image check (local CLI path) passed:
+  - `python -m fullbleed_cli.cli --json render ... --templates ... --emit-image ...`
+  - Result emitted `outputs.image_mode = composed_pdf` and two PNG paths.
+  - Sample pixel probe on page PNG (`(10,10) -> (0,0,255)`) confirms template background appears in emitted image.
+- Native raster unit/smoke coverage added and passing:
+  - `src/pdf_raster.rs` tests cover text/fill smoke and compose-template background presence.
+- BOM regression check passed after patch:
+  - JSON files written with UTF-8 BOM now load correctly through render/compose CLI paths.
+- Determinism regression slice passed:
+  - Command: `cargo test deterministic -- --nocapture`
+  - Result: `7 passed; 0 failed`
+  - Includes existing compose structural determinism (`src/finalize.rs`) plus newly added PDF/PNG/deflate determinism gates.
+- Cross-process deterministic artifact smoke passed:
+  - Command: `python examples/template-flagging-smoke/run_cli_determinism_smoke.py`
+  - Result: `ok=true`
+  - Verified identical hashes across thread profiles:
+    - non-compose PDF: `5cb052315df1b5f348f976521b63dab22bbabeef3e2254696358c4d1409799b3`
+    - compose PDF: `f6d13bcaa76f5c95b97d853d987cbe546a8e3a0abdbd3e435a9ec3995ab1f8d8`
+- Linker compression slice validation passed:
+  - Command: `cargo test -q`
+  - Result: `136 passed; 0 failed`
+  - Includes new tests:
+    - `large_page_content_stream_is_flate_compressed_by_default`
+    - `content_stream_compression_can_be_threshold_disabled`
+    - `image_streams_emit_binary_filters_without_asciihex`
+    - `embedded_font_streams_emit_without_asciihex`
+    - `icc_stream_emits_without_asciihex`
+    - `pdf_link_perf_reports_content_stream_compression_counters`
+- Source build passed:
+  - Command: `cargo build --release`
+  - Result: finished successfully.
+- Compose/image + cross-process determinism smokes revalidated after linker changes:
+  - `python examples/template-flagging-smoke/run_cli_compose_image_smoke.py` => `ok=true`
+  - `python examples/template-flagging-smoke/run_cli_determinism_smoke.py` => `ok=true`
+  - Determinism signature values remained stable for smoke fixture PDFs/PNGs.
+- Legacy-path removal regression validation passed:
+  - Command: `cargo test -q` (post-removal run)
+  - Result: `136 passed; 0 failed`
+  - `python examples/template-flagging-smoke/run_cli_compose_image_smoke.py` => `ok=true`
+  - `python examples/template-flagging-smoke/run_cli_determinism_smoke.py` => `ok=true`
+- Deterministic hash contract extension validation passed:
+  - `python -m py_compile python/fullbleed_cli/cli.py` => pass
+  - `python -m py_compile examples/template-flagging-smoke/run_cli_determinism_smoke.py` => pass
+  - `python examples/template-flagging-smoke/run_cli_compose_image_smoke.py` => `ok=true`
+  - `python examples/template-flagging-smoke/run_cli_determinism_smoke.py` => `ok=true`
+  - Non-compose deterministic hash file now resolves to artifact digest:
+    - `58aa0f2a5835349c1ced0fc80fe1e341f637cf0676d7f2c9faa626356ce56aa9`
+  - Compose deterministic hash file now resolves to artifact digest:
+    - `f77ce6bcb759a26fd69feee0e1ee56d07a410153f1d80b8072892d9d1df534e0`
+- Engine hash parameter validation passed:
+  - `cargo test -q` => `136 passed; 0 failed`
+  - `python -m pip install --user -e .` => success
+  - Direct API smoke:
+    - `PdfEngine.render_pdf(..., deterministic_hash=...)` hash file matched returned PDF bytes SHA.
+    - `PdfEngine.render_pdf_to_file(..., deterministic_hash=...)` hash file matched written PDF SHA.
+- I-9 1000-record benchmark run passed (deterministic wrapper over permutation harness):
+  - Command context: `examples/form-i9` one-off Python runner invoking `run_vdp_permutation_job.run()` with record builder padded to exactly `1000`.
+  - Runtime:
+    - in-process measured: `19.669s`
+    - wall clock measured: `20.013s`
+  - Output contract:
+    - `record_count=1000`
+    - `expected_total_pages=4000`
+    - `overlay_merged_pages=4000`
+    - `composed_merged_pages=4000`
+    - `ok=true`
+    - `batch_mode=parallel`
+    - `chunk_count=1`
+  - Category distribution:
+    - `baseline=1`, `checkbox=256`, `combo=265`, `text=351`, `extended=127`
+  - Artifact sizes:
+    - `examples/form-i9/output/permutation_vdp/overlay_merged.pdf` => `5,424,669` bytes
+    - `examples/form-i9/output/permutation_vdp/composed_merged.pdf` => `24,376,203` bytes
+    - `examples/form-i9/output/permutation_vdp/records.json` => `7,701,827` bytes
+    - `examples/form-i9/output/permutation_vdp/manifest.json` => `2,010` bytes
+- Native raster font-style fidelity investigation confirmed a current gap:
+  - Probe script rendered two lines with identical text but different `font-weight` (`400` vs `700`) through both image paths (`render_image_pages` and `render_finalized_pdf_image_pages`).
+  - With `FULLBLEED_RASTER_DEBUG_TEXT=1`, raster logs reported fallback system-font resolution for both names:
+    - `font='Helvetica' fallback=true`
+    - `font='Helvetica-Bold' fallback=true`
+  - PDF generation still preserves weight intent (`Helvetica-Bold` token present in emitted PDF bytes), so gap is in image raster font fallback resolution, not PDF linker/font emit.
+  - Breadcrumbed root cause:
+    - `src/raster.rs::draw_string` resolves font bytes via `resolve_system_font_bytes` when registry misses.
+    - `src/raster.rs::system_font_file_candidates` lacks style-aware variant mapping for common bold/italic names (for example `Helvetica-Bold`, `Times-BoldItalic`).
+    - `src/pdf_raster.rs::resolve_font_name` currently returns `BaseFont` values as-is, including subset/style encoded names, reducing fallback hit quality.
+- Native raster font-style fidelity fix landed:
+  - `src/raster.rs`:
+    - added style-aware font request parsing (`regular`/`bold`/`italic`/`bold-italic`) with subset-prefix normalization support.
+    - upgraded fallback candidate mapping for Base14/common family aliases and generic families to prioritize style-correct file names first.
+    - improved no-map heuristic fallback filename synthesis to include style suffix patterns.
+    - added tests:
+      - `system_font_candidates_prefer_bold_variant_for_helvetica`
+      - `system_font_candidates_normalize_subset_prefix_and_style`
+  - `src/pdf_raster.rs`:
+    - normalized `BaseFont` names by stripping subset prefixes (`ABCDEF+...`) before emitting `SetFontName` in replay commands.
+    - added test: `normalize_pdf_font_name_strips_subset_prefix`
+- Post-fix validation:
+  - `cargo test -q` => `139 passed; 0 failed`
+  - targeted style tests and compose raster smoke all pass.
+
+### Backlog Candidates (Discovered)
+- Explicit artifact mode contract (`overlay` vs `composed`) in render outputs/schemas.
+- Separate perf metrics for compose-image path to avoid hiding regressions in generic `raster` span.
+- Parse JSON config files with UTF-8 BOM tolerance (`utf-8-sig`) in CLI JSON loaders.
+- Extend native finalized-PDF raster parser support:
+  - rotated/sheared image placement matrices, additional image filters/color spaces, richer text operators.
+- Add decode/parse cache strategy for repeated Form XObject processing on large composed jobs.
+- Add dynamic Huffman mode + entropy-based block selection on top of fixed-Huffman path.
+- Evaluate optional deterministic cross-chunk dictionary handoff to recover compression ratio at chunk boundaries.
+- Add cross-process determinism harness (spawn separate processes, compare output signatures) in addition to current in-process tests.
+- Add CI job artifact signature gate for representative deterministic fixtures (PDF + image outputs).
+- Add lint/CI guard to prevent reintroduction of alternate PDF stream-encoding implementations outside runtime binary writer path.
+- Consider engine-level artifact-set digest helper for image-emitting APIs to mirror CLI `artifact_set_v1` deterministic hash contract.
+- Add first-class `examples/form-i9` knob for deterministic exact record counts (for example `FULLBLEED_I9_RECORD_COUNT`) so benchmark runs do not require wrapper monkeypatching.
+- Add a checked-in `examples/form-i9` perf harness that records elapsed time, pages/sec, and artifact byte sizes for standard loads (`100`, `1000`, `5000`) and appends JSON baselines for trend tracking.
+- Expand native raster font-style mapping coverage beyond current aliases:
+  - widen style-aware fallback mapping table to additional families and OS-specific naming variants.
+  - add fixture coverage for style fidelity across mixed template catalogs and non-Latin fallback stacks.

@@ -23,6 +23,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 import re
@@ -111,6 +112,9 @@ SCHEMA_REGISTRY = {
     "cache:prune": "fullbleed.cache_prune.v1",
     "finalize:stamp": "fullbleed.finalize_stamp_result.v1",
     "finalize:compose": "fullbleed.finalize_compose_result.v1",
+    "inspect:pdf": "fullbleed.inspect_pdf.v1",
+    "inspect:templates": "fullbleed.inspect_templates.v1",
+    "inspect:pdf-batch": "fullbleed.inspect_pdf_batch.v1",
     "init": "fullbleed.init.v1",
     "new": "fullbleed.new_template.v1",
     "new:local": "fullbleed.new_template.v1",
@@ -153,6 +157,7 @@ SCHEMA_DEFS = {
             "ok": {"type": "boolean"},
             "manifest": {"type": "object"},
             "warnings": {"type": "array"},
+            "template_compose": {"type": "object"},
         },
     },
     "fullbleed.run_result.v1": {
@@ -253,6 +258,57 @@ SCHEMA_DEFS = {
             "metrics": {"type": "object"},
             "code": {"type": "string"},
             "message": {"type": "string"},
+        },
+    },
+    "fullbleed.inspect_pdf.v1": {
+        "type": "object",
+        "required": ["schema", "ok", "path"],
+        "properties": {
+            "schema": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "path": {"type": "string"},
+            "pdf_version": {"type": "string"},
+            "page_count": {"type": "integer"},
+            "encrypted": {"type": "boolean"},
+            "file_size_bytes": {"type": "integer"},
+            "warnings": {"type": "array"},
+            "composition": {"type": "object"},
+            "code": {"type": "string"},
+            "message": {"type": "string"},
+        },
+    },
+    "fullbleed.inspect_templates.v1": {
+        "type": "object",
+        "required": ["schema", "ok", "templates"],
+        "properties": {
+            "schema": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "templates": {"type": "array"},
+            "metrics": {"type": "object"},
+            "code": {"type": "string"},
+            "message": {"type": "string"},
+        },
+    },
+    "fullbleed.inspect_pdf_batch.v1": {
+        "type": "object",
+        "required": ["schema", "ok", "items"],
+        "properties": {
+            "schema": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "items": {"type": "array"},
+            "metrics": {"type": "object"},
+            "code": {"type": "string"},
+            "message": {"type": "string"},
+        },
+    },
+    "fullbleed.compose_plan.v1": {
+        "type": "object",
+        "required": ["schema", "ok", "pages"],
+        "properties": {
+            "schema": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "pages": {"type": "array"},
+            "metrics": {"type": "object"},
         },
     },
     "fullbleed.init.v1": {
@@ -531,7 +587,7 @@ def _infer_schema_from_argv(argv):
         break
     if not command:
         return None
-    if command in {"assets", "cache", "finalize", "new"}:
+    if command in {"assets", "cache", "finalize", "new", "inspect"}:
         found_command = False
         for t in tokens:
             if t == command:
@@ -660,7 +716,7 @@ def _read_json_or_path(value):
         return None
     path = Path(value)
     if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     return json.loads(value)
 
 
@@ -855,6 +911,7 @@ def _build_manifest(args):
             "perf": getattr(args, "emit_perf", None),
             "glyph_report": getattr(args, "emit_glyph_report", None),
             "page_data": getattr(args, "emit_page_data", None),
+            "compose_plan": getattr(args, "emit_compose_plan", None),
             "image": getattr(args, "emit_image", None),
             "image_dpi": getattr(args, "image_dpi", 150),
         },
@@ -961,8 +1018,8 @@ def _derive_image_stem(out_path):
     return "render"
 
 
-def _emit_image_artifacts(engine, html, css, out_path, args):
-    """Render per-page PNG artifacts when `--emit-image` is set."""
+def _resolve_image_emit_config(out_path, args):
+    """Resolve emit-image directory/stem/dpi and create output directory."""
     image_dir = getattr(args, "emit_image", None)
     if not image_dir:
         return None
@@ -978,6 +1035,15 @@ def _emit_image_artifacts(engine, html, css, out_path, args):
     out_dir = Path(image_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = _derive_image_stem(out_path)
+    return out_dir, stem, dpi
+
+
+def _emit_image_artifacts(engine, html, css, out_path, args):
+    """Render per-page PNG artifacts when `--emit-image` is set."""
+    image_cfg = _resolve_image_emit_config(out_path, args)
+    if image_cfg is None:
+        return None
+    out_dir, stem, dpi = image_cfg
 
     if hasattr(engine, "render_image_pages_to_dir"):
         paths = engine.render_image_pages_to_dir(html, css, str(out_dir), dpi, stem)
@@ -989,6 +1055,38 @@ def _emit_image_artifacts(engine, html, css, out_path, args):
         )
 
     page_images = engine.render_image_pages(html, css, dpi)
+    paths = []
+    for idx0, png_bytes in enumerate(page_images, start=1):
+        path = out_dir / f"{stem}_page{idx0}.png"
+        path.write_bytes(png_bytes)
+        paths.append(str(path))
+    return paths
+
+
+def _emit_image_artifacts_from_pdf(engine, pdf_path, out_path, args):
+    """Rasterize page PNGs from an already finalized output PDF."""
+    image_cfg = _resolve_image_emit_config(out_path, args)
+    if image_cfg is None:
+        return None
+    out_dir, stem, dpi = image_cfg
+
+    source = Path(pdf_path)
+    if not source.exists():
+        raise ValueError(f"cannot emit images: finalized PDF not found: {source}")
+
+    if hasattr(engine, "render_finalized_pdf_image_pages_to_dir"):
+        paths = engine.render_finalized_pdf_image_pages_to_dir(
+            str(source), str(out_dir), dpi, stem
+        )
+        return [str(p) for p in (paths or [])]
+
+    if not hasattr(engine, "render_finalized_pdf_image_pages"):
+        raise ValueError(
+            "installed engine does not support finalized PDF image artifacts "
+            "(missing render_finalized_pdf_image_pages API)"
+        )
+
+    page_images = engine.render_finalized_pdf_image_pages(str(source), dpi)
     paths = []
     for idx0, png_bytes in enumerate(page_images, start=1):
         path = out_dir / f"{stem}_page{idx0}.png"
@@ -1095,12 +1193,47 @@ def _compute_pdf_sha256(out_path, pdf_bytes):
     return output_hash
 
 
-def _compute_output_hash(deterministic_hash, out_path, pdf_bytes):
-    """Compute and optionally write deterministic output hash artifact."""
-    output_hash = _compute_pdf_sha256(out_path, pdf_bytes)
-    if deterministic_hash and output_hash is not None:
-        Path(deterministic_hash).write_text(output_hash, encoding="utf-8")
-    return output_hash
+def _compute_image_sha256_list(image_paths):
+    """Compute SHA-256 digests for emitted image artifacts in output order."""
+    digests = []
+    for raw in image_paths or []:
+        try:
+            path = Path(raw)
+        except TypeError:
+            continue
+        if path.exists() and path.is_file():
+            digests.append(_sha256_bytes(path.read_bytes()))
+    return digests
+
+
+def _compute_artifact_set_sha256(pdf_sha256, image_sha256):
+    """Compute stable artifact-set digest (PDF + ordered image hashes)."""
+    if not image_sha256:
+        return None
+    payload = {
+        "schema": "fullbleed.artifact_digest.v1",
+        "pdf_sha256": pdf_sha256,
+        "image_sha256": image_sha256,
+    }
+    return _stable_json_hash(payload)
+
+
+def _compute_output_hash(deterministic_hash, out_path, pdf_bytes, image_paths=None):
+    """Compute PDF/output digests and optionally write deterministic hash artifact."""
+    pdf_hash = _compute_pdf_sha256(out_path, pdf_bytes)
+    image_sha256 = _compute_image_sha256_list(image_paths)
+    artifact_hash = _compute_artifact_set_sha256(pdf_hash, image_sha256)
+    deterministic_value = artifact_hash or pdf_hash
+    deterministic_mode = "artifact_set_v1" if artifact_hash is not None else "pdf_only"
+    if deterministic_hash and deterministic_value is not None:
+        Path(deterministic_hash).write_text(deterministic_value, encoding="utf-8")
+    return {
+        "pdf_sha256": pdf_hash,
+        "artifact_sha256": artifact_hash,
+        "image_sha256": image_sha256,
+        "deterministic_sha256": deterministic_value,
+        "deterministic_mode": deterministic_mode,
+    }
 
 
 def _assets_lock_hash():
@@ -1164,15 +1297,28 @@ def _render_with_artifacts(engine, html, css, out_path, args):
     """Render PDF and optional JSON/PNG artifacts, returning tuple payload."""
     page_data_path = args.emit_page_data
     glyph_path = args.emit_glyph_report
-    
-    # For fail-on checks, we need glyph report even if not explicitly requested
+
+    # For fail-on checks, we need glyph report even if not explicitly requested.
     fail_on = getattr(args, "fail_on", None) or []
     need_glyph_check = "missing-glyphs" in fail_on or "font-subst" in fail_on
-    
+
+    need_page_data = bool(page_data_path)
+    need_glyph = bool(glyph_path or need_glyph_check)
+
+    if need_page_data and need_glyph and hasattr(engine, "render_pdf_with_page_data_and_glyph_report"):
+        pdf_bytes, page_data, glyph = engine.render_pdf_with_page_data_and_glyph_report(html, css)
+        if page_data_path:
+            _write_json(page_data_path, page_data)
+        if glyph_path:
+            _write_json(glyph_path, glyph)
+        bytes_written = _write_pdf_bytes(out_path, pdf_bytes)
+        image_paths = _emit_image_artifacts(engine, html, css, out_path, args)
+        return bytes_written, glyph, pdf_bytes, image_paths
+
     if page_data_path and glyph_path:
         if not getattr(args, "json_only", False):
             sys.stderr.write(
-                "[warn] both --emit-page-data and --emit-glyph-report set; rendering twice\n"
+                "[warn] both --emit-page-data and --emit-glyph-report set; engine lacks combined API, rendering twice\n"
             )
         primary_pdf_bytes, page_data = engine.render_pdf_with_page_data(html, css)
         _write_json(page_data_path, page_data)
@@ -1193,7 +1339,7 @@ def _render_with_artifacts(engine, html, css, out_path, args):
             return bytes_written, glyph, pdf_bytes, image_paths
         image_paths = _emit_image_artifacts(engine, html, css, out_path, args)
         return bytes_written, None, pdf_bytes, image_paths
-    
+
     if glyph_path:
         pdf_bytes, glyph = engine.render_pdf_with_glyph_report(html, css)
         _write_json(glyph_path, glyph)
@@ -1206,17 +1352,13 @@ def _render_with_artifacts(engine, html, css, out_path, args):
         bytes_written = _write_pdf_bytes(out_path, pdf_bytes)
         image_paths = _emit_image_artifacts(engine, html, css, out_path, args)
         return bytes_written, None, pdf_bytes, image_paths
-    
-    # For fail-on checks, we need glyph report even if not explicitly requested
-    fail_on = getattr(args, "fail_on", None) or []
-    need_glyph_check = "missing-glyphs" in fail_on or "font-subst" in fail_on
-    
+
     if need_glyph_check:
         pdf_bytes, glyph_report = engine.render_pdf_with_glyph_report(html, css)
         bytes_written = _write_pdf_bytes(out_path, pdf_bytes)
         image_paths = _emit_image_artifacts(engine, html, css, out_path, args)
         return bytes_written, glyph_report, pdf_bytes, image_paths
-    
+
     bytes_written = engine.render_pdf_to_file(html, css, out_path)
     image_paths = _emit_image_artifacts(engine, html, css, out_path, args)
     return _normalize_bytes_written(bytes_written), None, None, image_paths
@@ -1228,18 +1370,170 @@ def _load_template_catalog_entries(value):
     return finalize_module._load_template_catalog(value)
 
 
-def _template_page_counts(templates):
-    page_counts = {}
+def _inspect_template_catalog(templates):
+    if hasattr(fullbleed, "inspect_template_catalog"):
+        report = fullbleed.inspect_template_catalog(templates)
+        if isinstance(report, dict) and isinstance(report.get("templates"), list):
+            return report
+        raise ValueError("inspect_template_catalog returned unexpected payload")
+
+    # Backward-compatible fallback for older wheels.
+    has_inspect_pdf = hasattr(fullbleed, "inspect_pdf")
+    items = []
     for template_id, pdf_path in templates:
-        asset = fullbleed.vendored_asset(str(pdf_path), "pdf")
-        info = asset.info()
-        page_count = int(info.get("page_count", 0) or 0)
+        item = {
+            "template_id": template_id,
+            "path": str(pdf_path),
+        }
+        if has_inspect_pdf:
+            report = fullbleed.inspect_pdf(str(pdf_path))
+            item.update(
+                {
+                    "pdf_version": report.get("pdf_version"),
+                    "page_count": report.get("page_count"),
+                    "encrypted": report.get("encrypted"),
+                    "file_size_bytes": report.get("file_size_bytes"),
+                    "warnings": report.get("warnings", []),
+                    "composition": report.get("composition", {"supported": None, "issues": []}),
+                }
+            )
+        else:
+            # Old runtime fallback: recover PDF metadata from asset info only.
+            asset = fullbleed.vendored_asset(str(pdf_path), "pdf")
+            info = asset.info()
+            page_count = int(info.get("page_count", 0) or 0)
+            encrypted = bool(info.get("encrypted"))
+            composition_issues = []
+            if encrypted:
+                composition_issues.append("PDF_ENCRYPTED_UNSUPPORTED")
+            if page_count <= 0:
+                composition_issues.append("PDF_EMPTY_OR_NO_PAGES")
+            item.update(
+                {
+                    "pdf_version": info.get("pdf_version"),
+                    "page_count": page_count,
+                    "encrypted": encrypted,
+                    "file_size_bytes": info.get("size_bytes"),
+                    "warnings": [],
+                    "composition": {
+                        "supported": len(composition_issues) == 0,
+                        "issues": composition_issues,
+                    },
+                }
+            )
+        items.append(item)
+    return {
+        "ok": True,
+        "templates": items,
+        "metrics": {
+            "templates": len(items),
+            "compatible_templates": sum(
+                1 for item in items if bool((item.get("composition") or {}).get("supported", False))
+            ),
+            "incompatible_templates": sum(
+                1 for item in items if not bool((item.get("composition") or {}).get("supported", False))
+            ),
+            "total_template_pages": sum(int(item.get("page_count", 0) or 0) for item in items),
+        },
+    }
+
+
+def _template_page_counts(templates):
+    catalog = _inspect_template_catalog(templates)
+    page_counts = {}
+    for item in catalog.get("templates", []):
+        template_id = item.get("template_id")
+        pdf_path = item.get("path")
+        page_count = int(item.get("page_count", 0) or 0)
+        if not isinstance(template_id, str) or not template_id:
+            raise ValueError("template catalog item missing template_id")
         if page_count <= 0:
             raise ValueError(
                 f"template catalog item has invalid page_count for template_id={template_id}: {pdf_path}"
             )
+        composition = item.get("composition") or {}
+        if not bool(composition.get("supported", False)):
+            issues = composition.get("issues") or []
+            raise ValueError(
+                f"template catalog item is not composition-compatible for template_id={template_id}: "
+                f"{pdf_path} (issues={issues})"
+            )
         page_counts[template_id] = page_count
     return page_counts
+
+
+def _plan_template_compose(engine, html, css, templates, dx, dy):
+    if hasattr(engine, "plan_template_compose"):
+        result = engine.plan_template_compose(html, css, templates, dx, dy)
+        if not isinstance(result, dict):
+            raise ValueError("plan_template_compose returned unexpected payload")
+        plan_rows = result.get("plan")
+        if not isinstance(plan_rows, list) or not plan_rows:
+            raise ValueError("template compose planner returned empty plan")
+        plan = []
+        for i, row in enumerate(plan_rows):
+            if not isinstance(row, dict):
+                raise ValueError(f"template compose plan row {i} must be an object")
+            template_id = row.get("template_id")
+            if not isinstance(template_id, str) or not template_id:
+                raise ValueError(f"template compose plan row {i} missing template_id")
+            try:
+                template_page = int(row.get("template_page"))
+                overlay_page = int(row.get("overlay_page"))
+                row_dx = float(row.get("dx", dx))
+                row_dy = float(row.get("dy", dy))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"template compose plan row {i} has invalid numeric fields"
+                ) from exc
+            plan.append((template_id, template_page, overlay_page, row_dx, row_dy))
+        return {
+            "plan": plan,
+            "bindings": result.get("bindings"),
+            "page_data": result.get("page_data"),
+            "template_catalog": result.get("template_catalog"),
+            "metrics": result.get("metrics", {}),
+        }
+
+    if not hasattr(engine, "render_pdf_with_page_data_and_template_bindings"):
+        raise ValueError(
+            "installed engine does not support template binding observability "
+            "(missing render_pdf_with_page_data_and_template_bindings API)"
+        )
+
+    template_ids = {template_id for template_id, _ in templates}
+    page_counts = _template_page_counts(templates)
+    _overlay_pdf_bytes, page_data, bindings = engine.render_pdf_with_page_data_and_template_bindings(
+        html, css
+    )
+    if not isinstance(bindings, list) or len(bindings) == 0:
+        raise ValueError(
+            "template compose mode requires non-empty template bindings from render pipeline"
+        )
+    sorted_bindings = sorted(bindings, key=lambda item: int(item.get("page_index", 0)))
+    plan = []
+    for i, binding in enumerate(sorted_bindings):
+        template_id = binding.get("template_id")
+        if template_id not in template_ids:
+            raise ValueError(
+                f"binding resolved unknown template_id at page {i + 1}: {template_id!r}"
+            )
+        overlay_page_index = int(binding.get("page_index", i))
+        template_page_count = page_counts[template_id]
+        template_page_index = overlay_page_index % template_page_count
+        plan.append((template_id, template_page_index, overlay_page_index, dx, dy))
+    return {
+        "plan": plan,
+        "bindings": sorted_bindings,
+        "page_data": page_data,
+        "template_catalog": _inspect_template_catalog(templates),
+        "metrics": {
+            "pages": len(plan),
+            "templates": len(templates),
+            "dx": dx,
+            "dy": dy,
+        },
+    }
 
 
 def _render_with_template_compose(engine, html, css, out_path, args):
@@ -1262,9 +1556,33 @@ def _render_with_template_compose(engine, html, css, out_path, args):
     template_ids = {template_id for template_id, _ in templates}
     page_counts = _template_page_counts(templates)
 
-    overlay_pdf_bytes, page_data, bindings = engine.render_pdf_with_page_data_and_template_bindings(
-        html, css
-    )
+    fail_on = getattr(args, "fail_on", None) or []
+    need_glyph_check = "missing-glyphs" in fail_on or "font-subst" in fail_on
+    glyph_path = getattr(args, "emit_glyph_report", None)
+    glyph_report = None
+
+    if glyph_path or need_glyph_check:
+        if hasattr(engine, "render_pdf_with_page_data_and_template_bindings_and_glyph_report"):
+            (
+                overlay_pdf_bytes,
+                page_data,
+                bindings,
+                glyph_report,
+            ) = engine.render_pdf_with_page_data_and_template_bindings_and_glyph_report(
+                html, css
+            )
+        else:
+            overlay_pdf_bytes, page_data, bindings = engine.render_pdf_with_page_data_and_template_bindings(
+                html, css
+            )
+            _glyph_pdf, glyph_report = engine.render_pdf_with_glyph_report(html, css)
+        if glyph_path:
+            _write_json(glyph_path, glyph_report)
+    else:
+        overlay_pdf_bytes, page_data, bindings = engine.render_pdf_with_page_data_and_template_bindings(
+            html, css
+        )
+
     if page_data is not None and getattr(args, "emit_page_data", None):
         _write_json(args.emit_page_data, page_data)
 
@@ -1296,6 +1614,30 @@ def _render_with_template_compose(engine, html, css, out_path, args):
             )
         )
 
+    emit_compose_plan = getattr(args, "emit_compose_plan", None)
+    if emit_compose_plan:
+        compose_payload = {
+            "schema": "fullbleed.compose_plan.v1",
+            "ok": True,
+            "pages": [
+                {
+                    "template_id": item[0],
+                    "template_page": int(item[1]),
+                    "overlay_page": int(item[2]),
+                    "dx": float(item[3]),
+                    "dy": float(item[4]),
+                }
+                for item in plan
+            ],
+            "metrics": {
+                "templates": len(templates),
+                "pages": len(plan),
+                "dx": dx,
+                "dy": dy,
+            },
+        }
+        _write_json(emit_compose_plan, compose_payload)
+
     out_path_obj = Path(out_path)
     out_path_obj.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
@@ -1320,16 +1662,9 @@ def _render_with_template_compose(engine, html, css, out_path, args):
         except Exception:
             pass
 
-    fail_on = getattr(args, "fail_on", None) or []
-    need_glyph_check = "missing-glyphs" in fail_on or "font-subst" in fail_on
-    glyph_path = getattr(args, "emit_glyph_report", None)
-    glyph_report = None
-    if glyph_path or need_glyph_check:
-        _glyph_pdf, glyph_report = engine.render_pdf_with_glyph_report(html, css)
-        if glyph_path:
-            _write_json(glyph_path, glyph_report)
-
-    image_paths = _emit_image_artifacts(engine, html, css, out_path, args)
+    t_image = time.perf_counter()
+    image_paths = _emit_image_artifacts_from_pdf(engine, out_path_obj, out_path, args)
+    image_emit_ms = (time.perf_counter() - t_image) * 1000.0 if image_paths is not None else None
     bytes_written = out_path_obj.stat().st_size if out_path_obj.exists() else 0
     compose_pages = int((compose_result or {}).get("pages_written", len(plan)))
     compose_info = {
@@ -1339,6 +1674,8 @@ def _render_with_template_compose(engine, html, css, out_path, args):
         "plan_pages": len(plan),
         "dx": dx,
         "dy": dy,
+        "image_mode": "composed_pdf" if getattr(args, "emit_image", None) else None,
+        "image_emit_ms": image_emit_ms,
     }
     return int(bytes_written), glyph_report, None, image_paths, compose_info
 
@@ -1761,7 +2098,10 @@ def cmd_render(args):
         pass
 
     deterministic_hash = getattr(args, "deterministic_hash", None)
-    output_hash = _compute_output_hash(deterministic_hash, args.out, pdf_bytes)
+    hash_info = _compute_output_hash(
+        deterministic_hash, args.out, pdf_bytes, image_paths=image_paths
+    )
+    output_hash = hash_info["pdf_sha256"]
 
     effective_jit_path = user_emit_jit or internal_jit_path
     jit_insights = _collect_jit_insights(effective_jit_path)
@@ -1785,16 +2125,29 @@ def cmd_render(args):
         except Exception:
             pass
 
+    image_mode = None
+    if getattr(args, "emit_image", None):
+        if compose_info and compose_info.get("image_mode"):
+            image_mode = compose_info.get("image_mode")
+        else:
+            image_mode = "overlay_document"
+
     outputs = {
         "pdf": None if args.out == "-" else args.out,
         "jit": user_emit_jit,
         "perf": args.emit_perf,
         "glyph_report": args.emit_glyph_report,
         "page_data": args.emit_page_data,
+        "compose_plan": getattr(args, "emit_compose_plan", None),
         "image": getattr(args, "emit_image", None),
+        "image_mode": image_mode,
         "image_paths": image_paths,
         "deterministic_hash": deterministic_hash,
+        "deterministic_hash_sha256": hash_info["deterministic_sha256"],
+        "deterministic_hash_mode": hash_info["deterministic_mode"],
         "sha256": output_hash,
+        "artifact_sha256": hash_info["artifact_sha256"],
+        "image_sha256": hash_info["image_sha256"] if image_paths else None,
         "fallbacks": fallback_summary,
         "repro_record": getattr(args, "repro_record", None),
         "repro_check": getattr(args, "repro_check", None),
@@ -1849,7 +2202,10 @@ def cmd_verify(args):
     except UnboundLocalError:
         pass
     deterministic_hash = getattr(args, "deterministic_hash", None)
-    output_hash = _compute_output_hash(deterministic_hash, out_path, pdf_bytes)
+    hash_info = _compute_output_hash(
+        deterministic_hash, out_path, pdf_bytes, image_paths=image_paths
+    )
+    output_hash = hash_info["pdf_sha256"]
 
     effective_jit_path = user_emit_jit or internal_jit_path
     jit_insights = _collect_jit_insights(effective_jit_path)
@@ -1873,16 +2229,24 @@ def cmd_verify(args):
         except Exception:
             pass
 
+    image_mode = "overlay_document" if getattr(args, "emit_image", None) else None
+
     outputs = {
         "pdf": None if out_path == "-" else out_path,
         "jit": user_emit_jit,
         "perf": args.emit_perf,
         "glyph_report": args.emit_glyph_report,
         "page_data": args.emit_page_data,
+        "compose_plan": getattr(args, "emit_compose_plan", None),
         "image": getattr(args, "emit_image", None),
+        "image_mode": image_mode,
         "image_paths": image_paths,
         "deterministic_hash": deterministic_hash,
+        "deterministic_hash_sha256": hash_info["deterministic_sha256"],
+        "deterministic_hash_mode": hash_info["deterministic_mode"],
         "sha256": output_hash,
+        "artifact_sha256": hash_info["artifact_sha256"],
+        "image_sha256": hash_info["image_sha256"] if image_paths else None,
         "fallbacks": fallback_summary,
         "repro_record": getattr(args, "repro_record", None),
         "repro_check": getattr(args, "repro_check", None),
@@ -1918,6 +2282,61 @@ def cmd_plan(args):
             sys.stderr.write(
                 "[warn] remote asset refs detected; use --asset and --allow-remote-assets if needed\n"
             )
+
+    template_compose = None
+    emit_compose_plan = getattr(args, "emit_compose_plan", None)
+    if emit_compose_plan and not getattr(args, "templates", None):
+        raise ValueError("--emit-compose-plan requires --templates and --template-binding")
+
+    if getattr(args, "templates", None):
+        if not getattr(args, "template_binding", None):
+            raise ValueError("--template-binding is required when --templates is set on plan")
+        templates = _load_template_catalog_entries(args.templates)
+        dx = float(getattr(args, "template_dx", 0.0) or 0.0)
+        dy = float(getattr(args, "template_dy", 0.0) or 0.0)
+        engine = _build_engine(args)
+        planned = _plan_template_compose(engine, html, css, templates, dx, dy)
+        plan_rows = []
+        for template_id, template_page, overlay_page, row_dx, row_dy in planned.get("plan", []):
+            plan_rows.append(
+                {
+                    "template_id": template_id,
+                    "template_page": int(template_page),
+                    "overlay_page": int(overlay_page),
+                    "dx": float(row_dx),
+                    "dy": float(row_dy),
+                }
+            )
+
+        page_data = planned.get("page_data")
+        if page_data is not None and getattr(args, "emit_page_data", None):
+            _write_json(args.emit_page_data, page_data)
+
+        template_compose = {
+            "enabled": True,
+            "templates": len(templates),
+            "plan_pages": len(plan_rows),
+            "dx": dx,
+            "dy": dy,
+            "plan": plan_rows,
+            "bindings": planned.get("bindings"),
+            "template_catalog": planned.get("template_catalog"),
+            "metrics": planned.get("metrics", {}),
+        }
+        if emit_compose_plan:
+            compose_payload = {
+                "schema": "fullbleed.compose_plan.v1",
+                "ok": True,
+                "pages": plan_rows,
+                "metrics": {
+                    "templates": len(templates),
+                    "pages": len(plan_rows),
+                    "dx": dx,
+                    "dy": dy,
+                },
+            }
+            _write_json(emit_compose_plan, compose_payload)
+
     manifest = _build_manifest(args)
     payload = {
         "schema": "fullbleed.plan_result.v1",
@@ -1925,12 +2344,19 @@ def cmd_plan(args):
         "manifest": manifest,
         "warnings": warnings,
     }
+    if template_compose is not None:
+        payload["template_compose"] = template_compose
     if args.json:
         sys.stdout.write(json.dumps(payload, ensure_ascii=True) + "\n")
     else:
         sys.stdout.write("[ok] plan compiled\n")
         if warnings:
             sys.stdout.write(f"[warn] {len(warnings)} warning(s)\n")
+        if template_compose is not None:
+            sys.stdout.write(
+                "[ok] template compose planned "
+                f"(templates={template_compose['templates']}, pages={template_compose['plan_pages']})\n"
+            )
 
 
 def _load_json_lines(path):
@@ -2378,6 +2804,7 @@ def cmd_capabilities(args):
         "plan",
         "run",
         "finalize",
+        "inspect",
         "compliance",
         "debug-perf",
         "debug-jit",
@@ -2396,6 +2823,7 @@ def cmd_capabilities(args):
             "--json-only",
             "--schema",
             "--emit-manifest",
+            "--emit-compose-plan",
             "--emit-image",
             "--image-dpi",
             "--no-prompts",
@@ -2409,6 +2837,9 @@ def cmd_capabilities(args):
             "glyph_report": hasattr(fullbleed.PdfEngine, "render_pdf_with_glyph_report"),
             "page_data": hasattr(fullbleed.PdfEngine, "render_pdf_with_page_data"),
             "image_pages": hasattr(fullbleed.PdfEngine, "render_image_pages"),
+            "pdf_inspect": hasattr(fullbleed, "inspect_pdf"),
+            "template_catalog_inspect": hasattr(fullbleed, "inspect_template_catalog"),
+            "template_compose_planner": hasattr(fullbleed.PdfEngine, "plan_template_compose"),
         },
         "svg": {
             "document_input": {
@@ -2433,9 +2864,207 @@ def cmd_capabilities(args):
     }
     if args.json:
         sys.stdout.write(json.dumps(payload, ensure_ascii=True) + "\n")
+
+
+def cmd_inspect_pdf(args):
+    """Inspect PDF metadata and composition compatibility via Rust inspector."""
+    path = Path(args.path)
+    if not path.exists():
+        payload = {
+            "schema": "fullbleed.error.v1",
+            "ok": False,
+            "code": "PDF_NOT_FOUND",
+            "message": f"PDF not found: {path}",
+        }
+        if getattr(args, "json", False):
+            sys.stdout.write(json.dumps(payload, ensure_ascii=True) + "\n")
+        else:
+            sys.stderr.write(f"[error] {payload['code']}: {payload['message']}\n")
+        raise SystemExit(2)
+
+    try:
+        report = fullbleed.inspect_pdf(str(path))
+    except Exception as exc:
+        code = "PDF_INSPECT_FAILED"
+        message = str(exc)
+        if ": " in message:
+            candidate_code, rest = message.split(": ", 1)
+            if candidate_code.startswith("PDF_") and candidate_code.upper() == candidate_code:
+                code = candidate_code
+                message = rest
+        payload = {
+            "schema": "fullbleed.error.v1",
+            "ok": False,
+            "code": code,
+            "message": message,
+        }
+        if getattr(args, "json", False):
+            sys.stdout.write(json.dumps(payload, ensure_ascii=True) + "\n")
+        else:
+            sys.stderr.write(f"[error] {payload['code']}: {payload['message']}\n")
+        raise SystemExit(2)
+
+    payload = {
+        "schema": "fullbleed.inspect_pdf.v1",
+        "ok": True,
+        "path": str(path),
+        "pdf_version": report.get("pdf_version"),
+        "page_count": report.get("page_count"),
+        "encrypted": report.get("encrypted"),
+        "file_size_bytes": report.get("file_size_bytes"),
+        "warnings": report.get("warnings", []),
+        "composition": report.get("composition", {"supported": None, "issues": []}),
+    }
+    if getattr(args, "json", False):
+        sys.stdout.write(json.dumps(payload, ensure_ascii=True) + "\n")
     else:
-        for key, value in payload.items():
-            sys.stdout.write(f"{key}: {value}\n")
+        sys.stdout.write(
+            "[ok] "
+            f"{path} "
+            f"(version={payload['pdf_version']}, pages={payload['page_count']}, "
+            f"encrypted={payload['encrypted']}, composition_supported={payload['composition'].get('supported')})\n"
+        )
+
+
+def cmd_inspect_templates(args):
+    """Inspect template catalog PDFs and composition compatibility."""
+    try:
+        templates = _load_template_catalog_entries(args.templates)
+    except Exception as exc:
+        payload = {
+            "schema": "fullbleed.error.v1",
+            "ok": False,
+            "code": "TEMPLATE_CATALOG_INVALID",
+            "message": str(exc),
+        }
+        if getattr(args, "json", False):
+            sys.stdout.write(json.dumps(payload, ensure_ascii=True) + "\n")
+        else:
+            sys.stderr.write(f"[error] {payload['code']}: {payload['message']}\n")
+        raise SystemExit(2)
+
+    try:
+        report = _inspect_template_catalog(templates)
+    except Exception as exc:
+        payload = {
+            "schema": "fullbleed.error.v1",
+            "ok": False,
+            "code": "TEMPLATE_INSPECT_FAILED",
+            "message": str(exc),
+        }
+        if getattr(args, "json", False):
+            sys.stdout.write(json.dumps(payload, ensure_ascii=True) + "\n")
+        else:
+            sys.stderr.write(f"[error] {payload['code']}: {payload['message']}\n")
+        raise SystemExit(2)
+
+    payload = {
+        "schema": "fullbleed.inspect_templates.v1",
+        "ok": True,
+        "templates": report.get("templates", []),
+        "metrics": report.get("metrics", {}),
+    }
+    if getattr(args, "json", False):
+        sys.stdout.write(json.dumps(payload, ensure_ascii=True) + "\n")
+    else:
+        metrics = payload["metrics"] or {}
+        sys.stdout.write(
+            "[ok] template catalog inspected "
+            f"(templates={metrics.get('templates', len(payload['templates']))}, "
+            f"compatible={metrics.get('compatible_templates')})\n"
+        )
+        for item in payload["templates"]:
+            composition = item.get("composition") or {}
+            sys.stdout.write(
+                f"- {item.get('template_id')}: pages={item.get('page_count')} "
+                f"composition_supported={composition.get('supported')}\n"
+            )
+
+
+def cmd_inspect_pdf_batch(args):
+    """Inspect a batch of PDF files with per-item success/failure."""
+    paths = list(args.paths or [])
+    list_path = getattr(args, "list", None)
+    if list_path:
+        for line in Path(list_path).read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            paths.append(line)
+    if not paths:
+        raise ValueError("inspect pdf-batch requires at least one path or --list file")
+
+    items = []
+    failures = 0
+    for raw in paths:
+        path = Path(raw)
+        item = {"path": str(path)}
+        if not path.exists():
+            failures += 1
+            item.update(
+                {
+                    "ok": False,
+                    "code": "PDF_NOT_FOUND",
+                    "message": f"PDF not found: {path}",
+                }
+            )
+            items.append(item)
+            continue
+        try:
+            report = fullbleed.inspect_pdf(str(path))
+            item.update(
+                {
+                    "ok": True,
+                    "pdf_version": report.get("pdf_version"),
+                    "page_count": report.get("page_count"),
+                    "encrypted": report.get("encrypted"),
+                    "file_size_bytes": report.get("file_size_bytes"),
+                    "warnings": report.get("warnings", []),
+                    "composition": report.get("composition", {"supported": None, "issues": []}),
+                }
+            )
+        except Exception as exc:
+            failures += 1
+            code = "PDF_INSPECT_FAILED"
+            message = str(exc)
+            if ": " in message:
+                candidate_code, rest = message.split(": ", 1)
+                if candidate_code.startswith("PDF_") and candidate_code.upper() == candidate_code:
+                    code = candidate_code
+                    message = rest
+            item.update({"ok": False, "code": code, "message": message})
+        items.append(item)
+
+    payload = {
+        "schema": "fullbleed.inspect_pdf_batch.v1",
+        "ok": failures == 0,
+        "items": items,
+        "metrics": {
+            "total": len(items),
+            "ok": len(items) - failures,
+            "failed": failures,
+        },
+    }
+    if getattr(args, "json", False):
+        sys.stdout.write(json.dumps(payload, ensure_ascii=True) + "\n")
+    else:
+        sys.stdout.write(
+            "[ok] pdf batch inspected "
+            f"(total={payload['metrics']['total']}, failed={payload['metrics']['failed']})\n"
+        )
+        for item in items:
+            if item.get("ok"):
+                composition = item.get("composition") or {}
+                sys.stdout.write(
+                    f"- {item['path']}: pages={item.get('page_count')} "
+                    f"composition_supported={composition.get('supported')}\n"
+                )
+            else:
+                sys.stdout.write(
+                    f"- {item['path']}: error={item.get('code')} {item.get('message')}\n"
+                )
+    if failures:
+        raise SystemExit(2)
 
 
 def cmd_run(args):
@@ -2589,6 +3218,10 @@ def _add_common_flags(p):
     p.add_argument("--emit-glyph-report")
     p.add_argument("--emit-page-data")
     p.add_argument(
+        "--emit-compose-plan",
+        help="Write resolved template compose plan JSON (requires --templates and --template-binding)",
+    )
+    p.add_argument(
         "--emit-image",
         "--emit-images-dir",
         dest="emit_image",
@@ -2650,7 +3283,7 @@ def _add_common_flags(p):
     p.add_argument("--fail-on", action="append", choices=FAIL_ON_CHOICES,
                    help="Exit non-zero on condition (repeatable): overflow, missing-glyphs, font-subst, budget")
     p.add_argument("--deterministic-hash",
-                   help="Write SHA256 hash of output to this path for reproducibility checks")
+                   help="Write deterministic SHA256 to this path (PDF-only, or PDF+ordered image hashes when --emit-image is used)")
     p.add_argument("--budget-max-pages", type=int,
                    help="Maximum allowed page count when used with --fail-on budget")
     p.add_argument("--budget-max-bytes", type=int,
@@ -2837,6 +3470,39 @@ def _build_parser():
     )
     p_finalize_compose.add_argument("--json", action="store_true")
     p_finalize_compose.set_defaults(func=finalize_module.cmd_finalize_compose)
+
+    # ===== Inspect commands =====
+    p_inspect = sub.add_parser("inspect", help="Inspect document metadata and compatibility")
+    inspect_sub = p_inspect.add_subparsers(dest="inspect_command", required=True)
+
+    p_inspect_pdf = inspect_sub.add_parser("pdf", help="Inspect a PDF file")
+    p_inspect_pdf.add_argument("path", help="Path to PDF file")
+    p_inspect_pdf.add_argument("--json", action="store_true")
+    p_inspect_pdf.set_defaults(func=cmd_inspect_pdf)
+
+    p_inspect_pdf_batch = inspect_sub.add_parser(
+        "pdf-batch",
+        help="Inspect multiple PDFs",
+    )
+    p_inspect_pdf_batch.add_argument("paths", nargs="*", help="PDF paths")
+    p_inspect_pdf_batch.add_argument(
+        "--list",
+        help="Newline-delimited file with PDF paths (ignores blank lines and # comments)",
+    )
+    p_inspect_pdf_batch.add_argument("--json", action="store_true")
+    p_inspect_pdf_batch.set_defaults(func=cmd_inspect_pdf_batch)
+
+    p_inspect_templates = inspect_sub.add_parser(
+        "templates",
+        help="Inspect template catalog PDFs",
+    )
+    p_inspect_templates.add_argument(
+        "--templates",
+        required=True,
+        help="Template catalog (directory, JSON path, or inline JSON)",
+    )
+    p_inspect_templates.add_argument("--json", action="store_true")
+    p_inspect_templates.set_defaults(func=cmd_inspect_templates)
 
     # ===== Project scaffolding commands =====
     from . import scaffold as scaffold_module

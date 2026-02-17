@@ -33,6 +33,9 @@ Validation and metadata requirements:
 - PDF bytes must parse
 - encrypted PDFs are rejected
 - metadata must be available (`pdf_version`, `page_count`, `encrypted`)
+- inspector surface: `fullbleed inspect pdf <path> --json`
+- catalog inspector: `fullbleed inspect templates --templates <dir|json> --json`
+- compose planning artifact: `fullbleed plan --templates ... --template-binding ... --emit-compose-plan <path>`
 
 ## Binding model
 

@@ -4,8 +4,9 @@ mod debug;
 mod doc_context;
 mod doc_template;
 mod error;
-mod flowable;
 mod finalize;
+mod flate_native;
+mod flowable;
 mod font;
 mod frame;
 mod glyph_report;
@@ -15,11 +16,13 @@ mod metrics;
 mod page_data;
 mod page_template;
 mod pdf;
+mod pdf_raster;
+mod pdfinspect;
 mod perf;
 mod plan;
-mod raster;
 #[cfg(feature = "python")]
 mod python;
+mod raster;
 mod spill;
 mod style;
 mod svg;
@@ -32,11 +35,6 @@ use debug::DebugLogger;
 pub use doc_context::DocContext;
 pub use doc_template::DocTemplate;
 pub use error::FullBleedError;
-pub use flowable::{
-    AbsolutePositionedFlowable, BreakAfter, BreakBefore, BreakInside, ContainerFlowable, EdgeSizes,
-    Flowable, ImageFlowable, LengthSpec, Pagination, Paragraph, Spacer, SvgFlowable, TableFlowable,
-    TextStyle,
-};
 pub use finalize::{
     BindingSource, ComposePagePlan, FinalizeComposeSummary, FinalizeStampSummary,
     META_PAGE_TEMPLATE_KEY, PageBindingDecision, TemplateAsset, TemplateBindingSpec,
@@ -44,6 +42,11 @@ pub use finalize::{
     compose_overlay_with_template_catalog, default_page_map, resolve_template_bindings,
     resolve_template_bindings_for_document, stamp_overlay_on_template_pdf,
     validate_bindings_against_catalog, validate_page_map,
+};
+pub use flowable::{
+    AbsolutePositionedFlowable, BreakAfter, BreakBefore, BreakInside, ContainerFlowable, EdgeSizes,
+    Flowable, ImageFlowable, LengthSpec, Pagination, Paragraph, Spacer, SvgFlowable, TableFlowable,
+    TextStyle,
 };
 use font::FontRegistry;
 pub use frame::{AddResult, Frame};
@@ -55,6 +58,11 @@ pub use page_data::{PageDataContext, PageDataOp, PageDataValue, PaginatedContext
 pub use page_template::{FrameSpec, PageTemplate};
 use pdf::PdfOptions;
 pub use pdf::{OutputIntent, PdfProfile, PdfVersion};
+pub use pdfinspect::{
+    PdfInspectError, PdfInspectErrorCode, PdfInspectReport, PdfInspectWarning,
+    composition_compatibility_issues, inspect_pdf_bytes, inspect_pdf_path,
+    require_pdf_composition_compatibility,
+};
 use perf::PerfLogger;
 use std::f32::consts::PI;
 use std::sync::Arc;
@@ -1135,8 +1143,16 @@ impl FullBleed {
                 base_margins.right.to_f32(),
                 base_margins.bottom.to_f32(),
                 base_margins.left.to_f32(),
-                if page_setup.size.is_some() { "true" } else { "false" },
-                if page_setup.has_margin_override() { "true" } else { "false" }
+                if page_setup.size.is_some() {
+                    "true"
+                } else {
+                    "false"
+                },
+                if page_setup.has_margin_override() {
+                    "true"
+                } else {
+                    "false"
+                }
             );
             logger.log_json(&json);
         }
@@ -1148,13 +1164,10 @@ impl FullBleed {
         let t_css = std::time::Instant::now();
         let merged_css = self.merge_css(css);
         let page_templates = self.resolve_page_templates_for_css(&merged_css, doc_id);
-        let page_size = page_templates
-            .get(0)
-            .map(|t| t.page_size)
-            .unwrap_or(Size {
-                width: Pt::ZERO,
-                height: Pt::ZERO,
-            });
+        let page_size = page_templates.get(0).map(|t| t.page_size).unwrap_or(Size {
+            width: Pt::ZERO,
+            height: Pt::ZERO,
+        });
         let resolver = style::StyleResolver::new_with_debug_and_viewport(
             &merged_css,
             self.debug.clone(),
@@ -1733,6 +1746,32 @@ impl FullBleed {
         Ok((bytes, page_data))
     }
 
+    pub fn render_with_page_data_and_glyph_report(
+        &self,
+        html: &str,
+        css: &str,
+    ) -> Result<(Vec<u8>, Option<PageDataContext>, GlyphCoverageReport), FullBleedError> {
+        let context = self.build_render_context(css, Some(0));
+        let mut report = GlyphCoverageReport::default();
+        let (document, page_data) = self
+            .render_to_document_and_page_data_with_resolver_and_report(
+                html,
+                &context.page_templates,
+                &context.resolver,
+                Some(&mut report),
+            )?;
+        let bytes = pdf::document_to_pdf_with_metrics_and_registry_with_logs(
+            &document,
+            None,
+            Some(self.font_registry.as_ref()),
+            &self.pdf_options,
+            self.debug.clone(),
+            self.perf.clone(),
+        )?;
+        self.emit_debug_summary("render_with_page_data_and_glyph_report");
+        Ok((bytes, page_data, report))
+    }
+
     pub fn render_with_page_data_and_template_bindings(
         &self,
         html: &str,
@@ -1746,8 +1785,11 @@ impl FullBleed {
         FullBleedError,
     > {
         let context = self.build_render_context(css, Some(0));
-        let (document, page_data) =
-            self.render_to_document_and_page_data_with_resolver(html, &context.page_templates, &context.resolver)?;
+        let (document, page_data) = self.render_to_document_and_page_data_with_resolver(
+            html,
+            &context.page_templates,
+            &context.resolver,
+        )?;
         let template_bindings = match self.template_binding_spec.as_ref() {
             Some(spec) => Some(resolve_template_bindings_for_document(&document, spec)?),
             None => None,
@@ -1764,20 +1806,32 @@ impl FullBleed {
         Ok((bytes, page_data, template_bindings))
     }
 
-    pub fn render_with_glyph_report(
+    pub fn render_with_page_data_and_template_bindings_and_glyph_report(
         &self,
         html: &str,
         css: &str,
-    ) -> Result<(Vec<u8>, GlyphCoverageReport), FullBleedError> {
+    ) -> Result<
+        (
+            Vec<u8>,
+            Option<PageDataContext>,
+            Option<Vec<PageBindingDecision>>,
+            GlyphCoverageReport,
+        ),
+        FullBleedError,
+    > {
         let context = self.build_render_context(css, Some(0));
         let mut report = GlyphCoverageReport::default();
-        let (document, _page_data) = self
+        let (document, page_data) = self
             .render_to_document_and_page_data_with_resolver_and_report(
                 html,
                 &context.page_templates,
                 &context.resolver,
                 Some(&mut report),
             )?;
+        let template_bindings = match self.template_binding_spec.as_ref() {
+            Some(spec) => Some(resolve_template_bindings_for_document(&document, spec)?),
+            None => None,
+        };
         let bytes = pdf::document_to_pdf_with_metrics_and_registry_with_logs(
             &document,
             None,
@@ -1786,7 +1840,16 @@ impl FullBleed {
             self.debug.clone(),
             self.perf.clone(),
         )?;
-        self.emit_debug_summary("render_with_glyph_report");
+        self.emit_debug_summary("render_with_page_data_and_template_bindings_and_glyph_report");
+        Ok((bytes, page_data, template_bindings, report))
+    }
+
+    pub fn render_with_glyph_report(
+        &self,
+        html: &str,
+        css: &str,
+    ) -> Result<(Vec<u8>, GlyphCoverageReport), FullBleedError> {
+        let (bytes, _page_data, report) = self.render_with_page_data_and_glyph_report(html, css)?;
         Ok((bytes, report))
     }
 
@@ -1797,8 +1860,11 @@ impl FullBleed {
         writer: &mut W,
     ) -> Result<usize, FullBleedError> {
         let context = self.build_render_context(css, Some(0));
-        let document =
-            self.render_to_document_with_resolver(html, &context.page_templates, &context.resolver)?;
+        let document = self.render_to_document_with_resolver(
+            html,
+            &context.page_templates,
+            &context.resolver,
+        )?;
         let bytes_written = pdf::document_to_pdf_with_metrics_and_registry_to_writer_with_logs(
             &document,
             None,
@@ -1829,8 +1895,11 @@ impl FullBleed {
         dpi: u32,
     ) -> Result<Vec<Vec<u8>>, FullBleedError> {
         let context = self.build_render_context(css, Some(0));
-        let document =
-            self.render_to_document_with_resolver(html, &context.page_templates, &context.resolver)?;
+        let document = self.render_to_document_with_resolver(
+            html,
+            &context.page_templates,
+            &context.resolver,
+        )?;
         let start = std::time::Instant::now();
         let pages = raster::document_to_png_pages(
             &document,
@@ -1858,7 +1927,61 @@ impl FullBleed {
         let pages = self.render_image_pages(html, css, dpi)?;
         let out_dir = out_dir.as_ref();
         std::fs::create_dir_all(out_dir)?;
-        let stem = if stem.trim().is_empty() { "render" } else { stem };
+        let stem = if stem.trim().is_empty() {
+            "render"
+        } else {
+            stem
+        };
+
+        let mut paths = Vec::with_capacity(pages.len());
+        for (idx0, page_bytes) in pages.into_iter().enumerate() {
+            let path = out_dir.join(format!("{stem}_page{}.png", idx0 + 1));
+            std::fs::write(&path, page_bytes)?;
+            paths.push(path);
+        }
+        Ok(paths)
+    }
+
+    pub fn render_finalized_pdf_image_pages(
+        &self,
+        pdf_path: impl AsRef<std::path::Path>,
+        dpi: u32,
+    ) -> Result<Vec<Vec<u8>>, FullBleedError> {
+        let start = std::time::Instant::now();
+        let pages = pdf_raster::pdf_path_to_png_pages(
+            pdf_path.as_ref(),
+            dpi,
+            Some(self.font_registry.as_ref()),
+            self.pdf_options.shape_text,
+        )?;
+        if let Some(perf_logger) = self.perf.as_deref() {
+            let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+            perf_logger.log_span_ms("raster.finalized_pdf", Some(0), elapsed_ms);
+            perf_logger.log_counts(
+                "raster.finalized_pdf",
+                Some(0),
+                &[("pages", pages.len() as u64)],
+            );
+        }
+        self.emit_debug_summary("render_finalized_pdf_image_pages");
+        Ok(pages)
+    }
+
+    pub fn render_finalized_pdf_image_pages_to_dir(
+        &self,
+        pdf_path: impl AsRef<std::path::Path>,
+        out_dir: impl AsRef<std::path::Path>,
+        stem: &str,
+        dpi: u32,
+    ) -> Result<Vec<std::path::PathBuf>, FullBleedError> {
+        let pages = self.render_finalized_pdf_image_pages(pdf_path, dpi)?;
+        let out_dir = out_dir.as_ref();
+        std::fs::create_dir_all(out_dir)?;
+        let stem = if stem.trim().is_empty() {
+            "render"
+        } else {
+            stem
+        };
 
         let mut paths = Vec::with_capacity(pages.len());
         for (idx0, page_bytes) in pages.into_iter().enumerate() {
@@ -2998,7 +3121,11 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        std::env::temp_dir().join(format!("fullbleed_{tag}_{}_{}.jsonl", std::process::id(), nanos))
+        std::env::temp_dir().join(format!(
+            "fullbleed_{tag}_{}_{}.jsonl",
+            std::process::id(),
+            nanos
+        ))
     }
 
     fn repo_font_path(file_name: &str) -> PathBuf {
@@ -3079,8 +3206,11 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let seq_path =
-            tmp_dir.join(format!("fullbleed_batch_font_dedup_seq_{}_{}.pdf", std::process::id(), stamp));
+        let seq_path = tmp_dir.join(format!(
+            "fullbleed_batch_font_dedup_seq_{}_{}.pdf",
+            std::process::id(),
+            stamp
+        ));
         let parallel_path = tmp_dir.join(format!(
             "fullbleed_batch_font_dedup_parallel_{}_{}.pdf",
             std::process::id(),
@@ -3219,7 +3349,9 @@ mod tests {
             .logo { width: 210px; height: 86px; }
         "#;
         let engine = FullBleed::builder().build().expect("engine");
-        let doc = engine.render_to_document(html, css).expect("render document");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
         let mut found = false;
         for page in &doc.pages {
             if page.commands.iter().any(|cmd| {
@@ -3250,7 +3382,9 @@ mod tests {
             .t > span:last-child { border-right: 0; }
         "#;
         let engine = FullBleed::builder().build().expect("engine");
-        let doc = engine.render_to_document(html, css).expect("render document");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
         let page = doc.pages.first().expect("page");
 
         let mut aa: Option<(Pt, Pt)> = None;
@@ -3295,7 +3429,9 @@ mod tests {
             .title > .line { display: block; }
         "#;
         let engine = FullBleed::builder().build().expect("engine");
-        let doc = engine.render_to_document(html, css).expect("render document");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
         let page = doc.pages.first().expect("page");
 
         let mut top_y: Option<Pt> = None;
@@ -3360,7 +3496,9 @@ mod tests {
             table.t td > div { display: block; }
         "#;
         let engine = FullBleed::builder().build().expect("engine");
-        let doc = engine.render_to_document(html, css).expect("render document");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
         let page = doc.pages.first().expect("page");
 
         let mut top_y: Option<Pt> = None;
@@ -3429,7 +3567,9 @@ mod tests {
             table.t td > div { display: block; }
         "#;
         let engine = FullBleed::builder().build().expect("engine");
-        let doc = engine.render_to_document(html, css).expect("render document");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
         let page = doc.pages.first().expect("page");
 
         let mut row1_last_y: Option<Pt> = None;
@@ -3480,7 +3620,9 @@ mod tests {
             table.t td { border: 1px solid #000; padding: 2px; }
         "#;
         let engine = FullBleed::builder().build().expect("engine");
-        let doc = engine.render_to_document(html, css).expect("render document");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
         let page = doc.pages.first().expect("page");
 
         let mut left_x: Option<Pt> = None;
@@ -3533,7 +3675,9 @@ mod tests {
             .title, .desc { display: block; }
         "#;
         let engine = FullBleed::builder().build().expect("engine");
-        let doc = engine.render_to_document(html, css).expect("render document");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
         let page = doc.pages.first().expect("page");
 
         let mut title_y: Option<Pt> = None;
@@ -3574,7 +3718,9 @@ mod tests {
         let html = "<!doctype html><html><body><p>hello</p></body></html>";
         let css = "@page { size: letter; margin: 0.5in; }";
         let engine = FullBleed::builder().build().expect("engine");
-        let doc = engine.render_to_document(html, css).expect("render document");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
         assert!((doc.page_size.width.to_f32() - 612.0).abs() < 0.01);
         assert!((doc.page_size.height.to_f32() - 792.0).abs() < 0.01);
     }
@@ -3589,7 +3735,9 @@ mod tests {
             .debug_log(&log_path)
             .build()
             .expect("engine");
-        let _ = engine.render_to_document(html, css).expect("render document");
+        let _ = engine
+            .render_to_document(html, css)
+            .expect("render document");
         drop(engine);
         let log = std::fs::read_to_string(&log_path).expect("read debug log");
         assert!(log.contains("\"PAGE_SIZE_OVERRIDDEN\""));
@@ -3607,7 +3755,9 @@ mod tests {
             .debug_log(&log_path)
             .build()
             .expect("engine");
-        let doc = engine.render_to_document(html, css).expect("render document");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
         assert!(doc.pages.len() > 1);
         drop(engine);
         let log = std::fs::read_to_string(&log_path).expect("read debug log");
@@ -3651,7 +3801,9 @@ mod tests {
             .debug_log(&log_path)
             .build()
             .expect("engine");
-        let _doc = engine.render_to_document(html, css).expect("render document");
+        let _doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
         drop(engine);
 
         let log = std::fs::read_to_string(&log_path).expect("read debug log");
@@ -3867,7 +4019,9 @@ mod tests {
         let html = "<!doctype html><html><body><p>hello</p></body></html>";
         let css = "@page { size: letter; margin: 0.5in; }";
         let engine = FullBleed::builder().build().expect("engine");
-        let doc = engine.render_to_document(html, css).expect("render document");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
         assert!(!doc.pages.is_empty(), "expected at least one page");
         for page in &doc.pages {
             let has_template_meta = page.commands.iter().any(|cmd| {
@@ -3965,5 +4119,179 @@ mod tests {
         assert_eq!(bindings[0].source, BindingSource::Feature);
         assert_eq!(bindings[1].template_id, "tpl-green");
         assert_eq!(bindings[1].source, BindingSource::Feature);
+    }
+
+    #[test]
+    fn render_with_page_data_and_glyph_report_smoke() {
+        let html = "<!doctype html><html><body><p>hello</p></body></html>";
+        let css = "@page { size: letter; margin: 0.5in; }";
+        let engine = FullBleed::builder().build().expect("engine");
+
+        let (pdf, page_data, report) = engine
+            .render_with_page_data_and_glyph_report(html, css)
+            .expect("render");
+        assert!(
+            !pdf.is_empty(),
+            "expected pdf bytes from combined page_data+glyph report render"
+        );
+        assert!(page_data.is_none(), "no page_data expected without context");
+        assert!(
+            report.is_empty(),
+            "expected no missing glyphs for simple ascii sample"
+        );
+    }
+
+    #[test]
+    fn render_with_page_data_template_bindings_and_glyph_report_smoke() {
+        let html = r#"
+<!doctype html>
+<html>
+  <body>
+    <section>
+      <div data-fb="fb.feature.red=1"></div>
+      <p>Page one marker</p>
+    </section>
+    <section style="page-break-before: always;">
+      <div data-fb="fb.feature.green=1"></div>
+      <p>Page two marker</p>
+    </section>
+  </body>
+</html>
+"#;
+        let css = "@page { size: letter; margin: 0.5in; }";
+
+        let mut spec = TemplateBindingSpec::default();
+        spec.default_template_id = Some("tpl-default".to_string());
+        spec.by_feature = std::collections::BTreeMap::from([
+            ("red".to_string(), "tpl-red".to_string()),
+            ("green".to_string(), "tpl-green".to_string()),
+        ]);
+
+        let engine = FullBleed::builder()
+            .template_binding_spec(spec)
+            .build()
+            .expect("engine");
+
+        let (pdf, _page_data, bindings, report) = engine
+            .render_with_page_data_and_template_bindings_and_glyph_report(html, css)
+            .expect("render");
+        assert!(
+            !pdf.is_empty(),
+            "expected pdf bytes from combined bindings+glyph report render"
+        );
+        assert!(
+            report.is_empty(),
+            "expected no missing glyphs for simple ascii sample"
+        );
+
+        let bindings = bindings.expect("expected bindings");
+        assert_eq!(bindings.len(), 2, "expected two pages");
+        assert_eq!(bindings[0].template_id, "tpl-red");
+        assert_eq!(bindings[1].template_id, "tpl-green");
+    }
+
+    #[test]
+    fn render_to_buffer_pdf_bytes_are_deterministic() {
+        let html =
+            "<!doctype html><html><body><h1>Determinism</h1><p>alpha beta gamma</p></body></html>";
+        let css = "@page { size: letter; margin: 0.5in; } body { margin: 0; font-size: 12pt; }";
+
+        let bytes_a = FullBleed::builder()
+            .build()
+            .expect("engine a")
+            .render_to_buffer(html, css)
+            .expect("render a");
+        let bytes_b = FullBleed::builder()
+            .build()
+            .expect("engine b")
+            .render_to_buffer(html, css)
+            .expect("render b");
+
+        assert_eq!(
+            bytes_a, bytes_b,
+            "render_to_buffer should be byte deterministic for identical input"
+        );
+    }
+
+    #[test]
+    fn render_many_parallel_pdf_bytes_are_deterministic_across_thread_counts() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let css = "@page { size: letter; margin: 0.5in; } body { margin: 0; font-size: 12pt; }";
+        let html_list = vec![
+            "<!doctype html><html><body><p>Row 1</p></body></html>".to_string(),
+            "<!doctype html><html><body><p>Row 2</p></body></html>".to_string(),
+            "<!doctype html><html><body><p>Row 3</p></body></html>".to_string(),
+        ];
+
+        let render_with_threads = |threads: usize| -> Vec<u8> {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .expect("thread pool");
+            pool.install(|| {
+                let mut out = Vec::new();
+                engine
+                    .render_many_to_writer_parallel(&html_list, css, &mut out)
+                    .expect("parallel render");
+                out
+            })
+        };
+
+        let bytes_1 = render_with_threads(1);
+        let bytes_4 = render_with_threads(4);
+        assert_eq!(
+            bytes_1, bytes_4,
+            "parallel PDF output should be byte deterministic across thread counts"
+        );
+    }
+
+    #[test]
+    fn render_image_pages_png_bytes_are_deterministic() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let html = "<!doctype html><html><body><h1>PNG Determinism</h1><p>same input same output</p></body></html>";
+        let css = "@page { size: 6in 4in; margin: 0.25in; } body { margin: 0; font-size: 12pt; }";
+
+        let pages_a = engine
+            .render_image_pages(html, css, 120)
+            .expect("image render a");
+        let pages_b = engine
+            .render_image_pages(html, css, 120)
+            .expect("image render b");
+        assert_eq!(
+            pages_a, pages_b,
+            "render_image_pages should be byte deterministic for identical input"
+        );
+    }
+
+    #[test]
+    fn render_finalized_pdf_image_pages_png_bytes_are_deterministic() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let html = "<!doctype html><html><body><h1>Finalize PNG Determinism</h1><p>stable</p></body></html>";
+        let css = "@page { size: 6in 4in; margin: 0.25in; } body { margin: 0; font-size: 12pt; }";
+        let pdf = engine.render_to_buffer(html, css).expect("render pdf");
+
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let pdf_path = std::env::temp_dir().join(format!(
+            "fullbleed_finalize_png_determinism_{}_{}.pdf",
+            std::process::id(),
+            stamp
+        ));
+        std::fs::write(&pdf_path, &pdf).expect("write temp pdf");
+
+        let pages_a = engine
+            .render_finalized_pdf_image_pages(&pdf_path, 120)
+            .expect("finalized raster a");
+        let pages_b = engine
+            .render_finalized_pdf_image_pages(&pdf_path, 120)
+            .expect("finalized raster b");
+        let _ = std::fs::remove_file(&pdf_path);
+
+        assert_eq!(
+            pages_a, pages_b,
+            "render_finalized_pdf_image_pages should be byte deterministic for identical input"
+        );
     }
 }
