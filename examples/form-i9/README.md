@@ -77,7 +77,7 @@ Current matrix categories:
 - `output/field_fit_validation.json`: Fullbleed-only heuristic field-fit validation
 - `output/component_mount_validation.json`: component mount smoke report
 - `output/report_page_data.json`: page data payload from render step
-- `output/report_page*.png`: overlay preview PNGs from engine image rendering
+- `output/report_page*.png`: composed-page preview PNGs emitted from finalized `output/report.pdf`
 
 ## Field Data Contract
 

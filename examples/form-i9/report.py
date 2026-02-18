@@ -293,10 +293,9 @@ def build_html(*, layout: dict[str, Any], values: dict[str, Any]) -> str:
     return compile_document(artifact)
 
 
-def _render_overlay_previews(
+def _render_composed_previews(
     engine: fullbleed.PdfEngine,
-    html: str,
-    css: str,
+    composed_pdf: Path,
     out_dir: Path,
     *,
     stem: str,
@@ -304,17 +303,33 @@ def _render_overlay_previews(
 ) -> list[str]:
     if dpi <= 0:
         return []
-    try:
-        paths = engine.render_image_pages_to_dir(
-            html,
-            css,
+    if not composed_pdf.exists():
+        raise FileNotFoundError(f"composed PDF not found for preview emission: {composed_pdf}")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if hasattr(engine, "render_finalized_pdf_image_pages_to_dir"):
+        paths = engine.render_finalized_pdf_image_pages_to_dir(
+            str(composed_pdf),
             str(out_dir),
             dpi=dpi,
             stem=stem,
         )
         return [str(p) for p in paths]
-    except Exception:
-        return []
+
+    if hasattr(engine, "render_finalized_pdf_image_pages"):
+        page_images = engine.render_finalized_pdf_image_pages(str(composed_pdf), dpi=dpi)
+        paths: list[str] = []
+        for idx0, png_bytes in enumerate(page_images, start=1):
+            path = out_dir / f"{stem}_page{idx0}.png"
+            path.write_bytes(png_bytes)
+            paths.append(str(path))
+        return paths
+
+    raise RuntimeError(
+        "installed engine does not support finalized PDF image artifacts "
+        "(missing render_finalized_pdf_image_pages API)"
+    )
 
 
 def _validate_css_layers(
@@ -587,14 +602,19 @@ def main() -> None:
             f"(text_match_ratio={fit_report.get('text_match_ratio')})"
         )
 
-    composed_preview_paths = _render_overlay_previews(
+    composed_preview_paths = _render_composed_previews(
         engine,
-        html,
-        css,
+        PDF_PATH,
         OUTPUT_DIR,
         stem=PREVIEW_PNG_STEM,
         dpi=image_dpi,
     )
+    expected_preview_count = int(compose_result.get("pages_written") or overlay_page_count)
+    if image_dpi > 0 and len(composed_preview_paths) != expected_preview_count:
+        raise RuntimeError(
+            "composed preview page count mismatch: "
+            f"expected={expected_preview_count} got={len(composed_preview_paths)}"
+        )
 
     report = {
         "schema": "fullbleed.form_i9_example_report.v1",
