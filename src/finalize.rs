@@ -78,6 +78,14 @@ pub struct FinalizeComposeSummary {
     pub pages_written: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ComposeAnnotationMode {
+    None,
+    #[default]
+    LinkOnly,
+    CarryWidgets,
+}
+
 fn lopdf_err(err: lopdf::Error) -> FullBleedError {
     FullBleedError::InvalidConfiguration(format!("pdf compose error: {err}"))
 }
@@ -167,6 +175,94 @@ fn page_xobject_dict(resources: &lopdf::Dictionary, doc: &LoDocument) -> lopdf::
             .cloned()
             .unwrap_or_default(),
         _ => lopdf::Dictionary::new(),
+    }
+}
+
+fn resolve_finalize_object<'a>(
+    doc: &'a LoDocument,
+    mut obj: &'a LoObject,
+) -> Result<&'a LoObject, FullBleedError> {
+    loop {
+        match obj {
+            LoObject::Reference(id) => {
+                obj = doc.get_object(*id).map_err(lopdf_err)?;
+            }
+            _ => return Ok(obj),
+        }
+    }
+}
+
+fn object_is_name(doc: &LoDocument, obj: &LoObject, expected: &[u8]) -> bool {
+    let Ok(resolved) = resolve_finalize_object(doc, obj) else {
+        return false;
+    };
+    let Ok(name) = resolved.as_name() else {
+        return false;
+    };
+    name == expected || name == format!("/{}", String::from_utf8_lossy(expected)).as_bytes()
+}
+
+fn annotation_allowed_for_mode(
+    mode: ComposeAnnotationMode,
+    doc: &LoDocument,
+    annot_dict: &lopdf::Dictionary,
+) -> bool {
+    let subtype_obj = match annot_dict.get(b"Subtype") {
+        Ok(obj) => obj,
+        Err(_) => return false,
+    };
+    match mode {
+        ComposeAnnotationMode::None => false,
+        ComposeAnnotationMode::LinkOnly => object_is_name(doc, subtype_obj, b"Link"),
+        ComposeAnnotationMode::CarryWidgets => {
+            object_is_name(doc, subtype_obj, b"Link")
+                || object_is_name(doc, subtype_obj, b"Widget")
+        }
+    }
+}
+
+fn clone_template_annotations_for_output_page(
+    doc: &mut LoDocument,
+    template_page: &lopdf::Dictionary,
+    output_page_id: LoObjectId,
+    mode: ComposeAnnotationMode,
+) -> Result<Option<LoObject>, FullBleedError> {
+    if mode == ComposeAnnotationMode::None {
+        return Ok(None);
+    }
+
+    let annots_obj = match template_page.get(b"Annots") {
+        Ok(obj) => obj,
+        Err(_) => return Ok(None),
+    };
+
+    let annots_arr = match resolve_finalize_object(doc, annots_obj)? {
+        LoObject::Array(arr) => arr.clone(),
+        _ => return Ok(None),
+    };
+
+    let mut out_annots: Vec<LoObject> = Vec::new();
+    for annot in annots_arr {
+        let annot_dict = match resolve_finalize_object(doc, &annot)? {
+            LoObject::Dictionary(d) => d.clone(),
+            LoObject::Stream(s) => s.dict.clone(),
+            _ => continue,
+        };
+
+        if !annotation_allowed_for_mode(mode, doc, &annot_dict) {
+            continue;
+        }
+
+        let mut cloned = annot_dict;
+        cloned.set("P", LoObject::Reference(output_page_id));
+        let new_annot_id = doc.add_object(LoObject::Dictionary(cloned));
+        out_annots.push(LoObject::Reference(new_annot_id));
+    }
+
+    if out_annots.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(LoObject::Array(out_annots)))
     }
 }
 
@@ -285,6 +381,22 @@ pub fn compose_overlay_with_template_catalog(
     overlay_pdf: &std::path::Path,
     out_pdf: &std::path::Path,
     plan: &[ComposePagePlan],
+) -> Result<FinalizeComposeSummary, FullBleedError> {
+    compose_overlay_with_template_catalog_with_annotation_mode(
+        catalog,
+        overlay_pdf,
+        out_pdf,
+        plan,
+        ComposeAnnotationMode::default(),
+    )
+}
+
+pub fn compose_overlay_with_template_catalog_with_annotation_mode(
+    catalog: &TemplateCatalog,
+    overlay_pdf: &std::path::Path,
+    out_pdf: &std::path::Path,
+    plan: &[ComposePagePlan],
+    annotation_mode: ComposeAnnotationMode,
 ) -> Result<FinalizeComposeSummary, FullBleedError> {
     if plan.is_empty() {
         return Err(FullBleedError::InvalidConfiguration(
@@ -415,7 +527,8 @@ pub fn compose_overlay_with_template_catalog(
         .into_bytes();
         let page_content_id = composed.add_object(LoStream::new(dictionary! {}, page_content));
 
-        let page_id = composed.add_object(dictionary! {
+        let page_id = composed.new_object_id();
+        let mut out_page = dictionary! {
             "Type" => "Page",
             "Parent" => pages_id,
             "Contents" => page_content_id,
@@ -426,7 +539,17 @@ pub fn compose_overlay_with_template_catalog(
                 },
             },
             "MediaBox" => LoObject::Array(template_bbox),
-        });
+        };
+        if let Some(annots) = clone_template_annotations_for_output_page(
+            &mut composed,
+            &template_page,
+            page_id,
+            annotation_mode,
+        )?
+        {
+            out_page.set("Annots", annots);
+        }
+        composed.objects.insert(page_id, LoObject::Dictionary(out_page));
         kids.push(LoObject::Reference(page_id));
     }
 
@@ -724,6 +847,150 @@ mod tests {
         doc.trailer.set("Root", catalog_id);
         doc.compress();
         doc.save(path).expect("save");
+    }
+
+    fn make_single_page_pdf_with_link(path: &std::path::Path, text: &str) {
+        let mut doc = LoDocument::with_version("1.5");
+        let pages_id = doc.new_object_id();
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+        });
+        let resources_id = doc.add_object(dictionary! {
+            "Font" => dictionary! { "F1" => font_id },
+        });
+        let content = format!("BT /F1 18 Tf 72 720 Td ({}) Tj ET", text).into_bytes();
+        let content_id = doc.add_object(LoStream::new(dictionary! {}, content));
+        let action_id = doc.add_object(dictionary! {
+            "S" => "URI",
+            "URI" => "https://www.example.com",
+        });
+        let link_annot_id = doc.add_object(dictionary! {
+            "Type" => "Annot",
+            "Subtype" => "Link",
+            "Rect" => vec![72.into(), 700.into(), 240.into(), 720.into()],
+            "Border" => vec![0.into(), 0.into(), 0.into()],
+            "A" => action_id,
+        });
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "Resources" => resources_id,
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+            "Annots" => vec![LoObject::Reference(link_annot_id)],
+        });
+        let pages = dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![page_id.into()],
+            "Count" => 1,
+        };
+        doc.objects.insert(pages_id, LoObject::Dictionary(pages));
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        doc.compress();
+        doc.save(path).expect("save");
+    }
+
+    fn make_single_page_pdf_with_link_and_widget(path: &std::path::Path, text: &str) {
+        let mut doc = LoDocument::with_version("1.5");
+        let pages_id = doc.new_object_id();
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+        });
+        let resources_id = doc.add_object(dictionary! {
+            "Font" => dictionary! { "F1" => font_id },
+        });
+        let content = format!("BT /F1 18 Tf 72 720 Td ({}) Tj ET", text).into_bytes();
+        let content_id = doc.add_object(LoStream::new(dictionary! {}, content));
+        let action_id = doc.add_object(dictionary! {
+            "S" => "URI",
+            "URI" => "https://www.example.com",
+        });
+        let link_annot_id = doc.add_object(dictionary! {
+            "Type" => "Annot",
+            "Subtype" => "Link",
+            "Rect" => vec![72.into(), 700.into(), 240.into(), 720.into()],
+            "Border" => vec![0.into(), 0.into(), 0.into()],
+            "A" => action_id,
+        });
+        let widget_annot_id = doc.add_object(dictionary! {
+            "Type" => "Annot",
+            "Subtype" => "Widget",
+            "FT" => "Tx",
+            "T" => "Field1",
+            "Rect" => vec![72.into(), 660.into(), 240.into(), 684.into()],
+            "F" => 4,
+        });
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "Resources" => resources_id,
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+            "Annots" => vec![LoObject::Reference(link_annot_id), LoObject::Reference(widget_annot_id)],
+        });
+        let pages = dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![page_id.into()],
+            "Count" => 1,
+        };
+        doc.objects.insert(pages_id, LoObject::Dictionary(pages));
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        doc.compress();
+        doc.save(path).expect("save");
+    }
+
+    fn page_annotation_count_by_subtype(
+        doc: &LoDocument,
+        page_id: LoObjectId,
+        subtype: &[u8],
+    ) -> usize {
+        let page = doc
+            .get_object(page_id)
+            .and_then(LoObject::as_dict)
+            .expect("page dict");
+        let annots_obj = match page.get(b"Annots") {
+            Ok(obj) => obj,
+            Err(_) => return 0,
+        };
+        let annots = match annots_obj {
+            LoObject::Array(arr) => arr.clone(),
+            LoObject::Reference(id) => doc
+                .get_object(*id)
+                .and_then(LoObject::as_array)
+                .expect("annots by ref")
+                .clone(),
+            _ => return 0,
+        };
+        let mut out = 0usize;
+        for annot in annots {
+            let annot_dict = match annot {
+                LoObject::Reference(id) => doc
+                    .get_object(id)
+                    .and_then(LoObject::as_dict)
+                    .expect("annot dict by ref")
+                    .clone(),
+                LoObject::Dictionary(d) => d,
+                _ => continue,
+            };
+            if let Ok(subtype_obj) = annot_dict.get(b"Subtype") {
+                if super::object_is_name(doc, subtype_obj, subtype) {
+                    out += 1;
+                }
+            }
+        }
+        out
     }
 
     fn pdf_structural_signature(path: &std::path::Path) -> u64 {
@@ -1025,6 +1292,189 @@ mod tests {
         assert_eq!(summary.pages_written, 2);
         let out = LoDocument::load(&out_path).expect("load out");
         assert_eq!(out.get_pages().len(), 2);
+    }
+
+    #[test]
+    fn compose_overlay_preserves_template_link_annotations() {
+        use std::fs;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "fullbleed_finalize_compose_link_annots_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).expect("mkdir");
+        let tpl = temp_dir.join("tpl_link.pdf");
+        let overlay = temp_dir.join("overlay.pdf");
+        let out_path = temp_dir.join("out_compose.pdf");
+
+        make_single_page_pdf_with_link(&tpl, "TEMPLATE_WITH_LINK");
+        make_single_page_pdf(&overlay, "OVERLAY");
+
+        let mut catalog = TemplateCatalog::default();
+        catalog
+            .insert(TemplateAsset {
+                template_id: "tpl".to_string(),
+                pdf_path: tpl.clone(),
+                sha256: None,
+                page_count: Some(1),
+            })
+            .expect("catalog");
+        let plan = vec![ComposePagePlan {
+            template_id: "tpl".to_string(),
+            template_page_index: 0,
+            overlay_page_index: 0,
+            dx: 0.0,
+            dy: 0.0,
+        }];
+
+        let summary = compose_overlay_with_template_catalog(&catalog, &overlay, &out_path, &plan)
+            .expect("compose");
+        assert_eq!(summary.pages_written, 1);
+
+        let out = LoDocument::load(&out_path).expect("load out");
+        let out_page_id = *out
+            .get_pages()
+            .values()
+            .next()
+            .expect("output page id");
+        let out_page = out
+            .get_object(out_page_id)
+            .and_then(LoObject::as_dict)
+            .expect("output page dict");
+        let annots_obj = out_page.get(b"Annots").expect("annots present");
+        let annots = match annots_obj {
+            LoObject::Array(arr) => arr.clone(),
+            LoObject::Reference(id) => out
+                .get_object(*id)
+                .and_then(LoObject::as_array)
+                .expect("annots array by ref")
+                .clone(),
+            _ => panic!("unexpected Annots object"),
+        };
+        assert!(!annots.is_empty(), "expected at least one link annotation");
+        let first = annots.first().expect("first annot");
+        let first_dict = match first {
+            LoObject::Reference(id) => out
+                .get_object(*id)
+                .and_then(LoObject::as_dict)
+                .expect("annot dict"),
+            LoObject::Dictionary(d) => d,
+            _ => panic!("unexpected annot entry"),
+        };
+        let subtype = first_dict
+            .get(b"Subtype")
+            .and_then(LoObject::as_name)
+            .expect("Subtype");
+        assert_eq!(subtype, b"Link");
+    }
+
+    #[test]
+    fn compose_overlay_annotation_mode_none_omits_template_annotations() {
+        use std::fs;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "fullbleed_finalize_compose_ann_mode_none_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).expect("mkdir");
+        let tpl = temp_dir.join("tpl_link.pdf");
+        let overlay = temp_dir.join("overlay.pdf");
+        let out_path = temp_dir.join("out_compose.pdf");
+        make_single_page_pdf_with_link(&tpl, "TEMPLATE_WITH_LINK");
+        make_single_page_pdf(&overlay, "OVERLAY");
+
+        let mut catalog = TemplateCatalog::default();
+        catalog
+            .insert(TemplateAsset {
+                template_id: "tpl".to_string(),
+                pdf_path: tpl.clone(),
+                sha256: None,
+                page_count: Some(1),
+            })
+            .expect("catalog");
+        let plan = vec![ComposePagePlan {
+            template_id: "tpl".to_string(),
+            template_page_index: 0,
+            overlay_page_index: 0,
+            dx: 0.0,
+            dy: 0.0,
+        }];
+        compose_overlay_with_template_catalog_with_annotation_mode(
+            &catalog,
+            &overlay,
+            &out_path,
+            &plan,
+            ComposeAnnotationMode::None,
+        )
+        .expect("compose");
+
+        let out = LoDocument::load(&out_path).expect("load out");
+        let out_page_id = *out
+            .get_pages()
+            .values()
+            .next()
+            .expect("output page id");
+        assert_eq!(page_annotation_count_by_subtype(&out, out_page_id, b"Link"), 0);
+        assert_eq!(page_annotation_count_by_subtype(&out, out_page_id, b"Widget"), 0);
+    }
+
+    #[test]
+    fn compose_overlay_annotation_mode_carry_widgets_preserves_widget_annotations() {
+        use std::fs;
+        let temp_dir = std::env::temp_dir().join(format!(
+            "fullbleed_finalize_compose_ann_mode_widgets_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_dir).expect("mkdir");
+        let tpl = temp_dir.join("tpl_link_widget.pdf");
+        let overlay = temp_dir.join("overlay.pdf");
+        let out_path = temp_dir.join("out_compose.pdf");
+        make_single_page_pdf_with_link_and_widget(&tpl, "TEMPLATE_WITH_LINK_WIDGET");
+        make_single_page_pdf(&overlay, "OVERLAY");
+
+        let mut catalog = TemplateCatalog::default();
+        catalog
+            .insert(TemplateAsset {
+                template_id: "tpl".to_string(),
+                pdf_path: tpl.clone(),
+                sha256: None,
+                page_count: Some(1),
+            })
+            .expect("catalog");
+        let plan = vec![ComposePagePlan {
+            template_id: "tpl".to_string(),
+            template_page_index: 0,
+            overlay_page_index: 0,
+            dx: 0.0,
+            dy: 0.0,
+        }];
+        compose_overlay_with_template_catalog_with_annotation_mode(
+            &catalog,
+            &overlay,
+            &out_path,
+            &plan,
+            ComposeAnnotationMode::CarryWidgets,
+        )
+        .expect("compose");
+
+        let out = LoDocument::load(&out_path).expect("load out");
+        let out_page_id = *out
+            .get_pages()
+            .values()
+            .next()
+            .expect("output page id");
+        assert_eq!(page_annotation_count_by_subtype(&out, out_page_id, b"Link"), 1);
+        assert_eq!(page_annotation_count_by_subtype(&out, out_page_id, b"Widget"), 1);
     }
 
     #[test]

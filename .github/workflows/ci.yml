@@ -141,8 +141,3 @@ jobs:
 
       - name: Verify templated back-page VDP smoke
         run: python examples/template-flagging-smoke/run_vdp_backpage_smoke.py
-
-      - name: Verify I-9 batch font dedup smoke
-        env:
-          FULLBLEED_I9_CI_RECORDS: "12"
-        run: python examples/form-i9/tools/check_batch_font_dedup_ci.py

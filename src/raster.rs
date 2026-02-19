@@ -316,6 +316,56 @@ fn render_commands(
                     shape_text,
                 );
             }
+            Command::DrawStringTransformed {
+                x,
+                y,
+                text,
+                m00,
+                m01,
+                m10,
+                m11,
+            } => {
+                draw_string_transformed(
+                    pixmap,
+                    state,
+                    x.to_f32(),
+                    y.to_f32(),
+                    text,
+                    *m00,
+                    *m01,
+                    *m10,
+                    *m11,
+                    base_transform,
+                    registry,
+                    shape_text,
+                );
+            }
+            Command::DrawGlyphRun {
+                x,
+                y,
+                glyph_ids,
+                advances,
+                m00,
+                m01,
+                m10,
+                m11,
+            } => {
+                draw_glyph_run(
+                    pixmap,
+                    state,
+                    x.to_f32(),
+                    y.to_f32(),
+                    glyph_ids,
+                    advances,
+                    *m00,
+                    *m01,
+                    *m10,
+                    *m11,
+                    page_height_pt,
+                    base_transform,
+                    registry,
+                );
+            }
             Command::DrawRect {
                 x,
                 y,
@@ -639,110 +689,331 @@ fn draw_string(
         .map(|v| !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"))
         .unwrap_or(false);
 
-    let mut used_system_fallback = false;
-    let mut _owned_font: Option<Arc<Vec<u8>>> = None;
-    let font_data: &[u8];
-    if let Some(registry) = registry {
-        if let Some(font) = registry.resolve(&state.font_name) {
-            font_data = font.data.as_slice();
-        } else {
-            let Some(bytes) = resolve_system_font_bytes(&state.font_name) else {
-                if debug_text {
-                    eprintln!(
-                        "[raster-text] skip: unresolved font='{}' text='{}'",
-                        state.font_name,
-                        truncate_debug_text(text)
-                    );
-                }
-                return;
-            };
-            used_system_fallback = true;
-            _owned_font = Some(bytes);
-            font_data = _owned_font.as_deref().map(|v| v.as_slice()).unwrap_or(&[]);
-        }
-    } else {
-        let Some(bytes) = resolve_system_font_bytes(&state.font_name) else {
-            if debug_text {
-                eprintln!(
-                    "[raster-text] skip: no registry + unresolved font='{}' text='{}'",
-                    state.font_name,
-                    truncate_debug_text(text)
-                );
-            }
-            return;
-        };
-        used_system_fallback = true;
-        _owned_font = Some(bytes);
-        font_data = _owned_font.as_deref().map(|v| v.as_slice()).unwrap_or(&[]);
+    let font_size = state.font_size.to_f32().max(0.0);
+    if font_size <= 0.0 {
+        return;
     }
 
-    let Ok(face) = ttf_parser::Face::parse(font_data, 0) else {
+    let baseline_x = x;
+    let baseline_y = page_height_pt - y - font_size;
+    let paint = fill_paint(state.fill_color, state.fill_opacity);
+    let device_transform = base_transform.pre_concat(state.transform);
+    let mut try_draw = |font_data: &[u8], used_system_fallback: bool| -> Result<(), &'static str> {
+        let Ok(face) = ttf_parser::Face::parse(font_data, 0) else {
+            return Err("parse_failed");
+        };
+
+        let placements = layout_text_glyphs(
+            font_data, text, font_size, baseline_x, baseline_y, shape_text,
+        );
+        if placements.is_empty() {
+            return Err("no_placements");
+        }
+        let first_origin = placements
+            .first()
+            .map(|p| (p.origin_x, p.origin_y))
+            .unwrap_or((baseline_x, baseline_y));
+
+        let mut drawn = 0usize;
+        for placement in placements {
+            let mut builder =
+                GlyphPathBuilder::new(placement.origin_x, placement.origin_y, placement.scale);
+            if face
+                .outline_glyph(GlyphId(placement.glyph_id), &mut builder)
+                .is_none()
+            {
+                continue;
+            }
+            let Some(path) = builder.finish() else {
+                continue;
+            };
+            pixmap.fill_path(
+                &path,
+                &paint,
+                FillRule::Winding,
+                device_transform,
+                state.clip_mask.as_ref(),
+            );
+            drawn += 1;
+        }
+
+        if drawn == 0 {
+            return Err("no_outlines");
+        }
+
         if debug_text {
             eprintln!(
-                "[raster-text] skip: parse failed font='{}' text='{}'",
+                "[raster-text] draw font='{}' fallback={} size={:.2} fill_opacity={:.2} clip={} glyphs={} at=({:.2},{:.2}) first=({:.2},{:.2}) text='{}'",
+                state.font_name,
+                used_system_fallback,
+                font_size,
+                state.fill_opacity,
+                state.clip_mask.is_some(),
+                drawn,
+                baseline_x,
+                baseline_y,
+                first_origin.0,
+                first_origin.1,
+                truncate_debug_text(text)
+            );
+        }
+        Ok(())
+    };
+
+    if let Some(registry) = registry {
+        if let Some(font) = registry.resolve(&state.font_name) {
+            match try_draw(font.data.as_slice(), false) {
+                Ok(()) => return,
+                Err(reason) => {
+                    if let Some(system_bytes) = resolve_system_font_bytes(&state.font_name) {
+                        if try_draw(system_bytes.as_slice(), true).is_ok() {
+                            return;
+                        }
+                    }
+                    if debug_text {
+                        eprintln!(
+                            "[raster-text] skip: {} font='{}' text='{}'",
+                            reason,
+                            state.font_name,
+                            truncate_debug_text(text)
+                        );
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    let Some(system_bytes) = resolve_system_font_bytes(&state.font_name) else {
+        if debug_text {
+            eprintln!(
+                "[raster-text] skip: unresolved font='{}' text='{}'",
                 state.font_name,
                 truncate_debug_text(text)
             );
         }
         return;
     };
+
+    if let Err(reason) = try_draw(system_bytes.as_slice(), true) {
+        if debug_text {
+            eprintln!(
+                "[raster-text] skip: {} font='{}' text='{}'",
+                reason,
+                state.font_name,
+                truncate_debug_text(text)
+            );
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_string_transformed(
+    pixmap: &mut Pixmap,
+    state: &RasterState,
+    x: f32,
+    y: f32,
+    text: &str,
+    m00: f32,
+    m01: f32,
+    m10: f32,
+    m11: f32,
+    base_transform: Transform,
+    registry: Option<&FontRegistry>,
+    shape_text: bool,
+) {
+    if text.is_empty() {
+        return;
+    }
+
     let font_size = state.font_size.to_f32().max(0.0);
     if font_size <= 0.0 {
         return;
     }
 
-    // Match PDF writer semantics: y is top-left oriented and converted during emit.
-    let baseline_x = x;
-    let baseline_y = page_height_pt - y - font_size;
-    let placements = layout_text_glyphs(
-        font_data, text, font_size, baseline_x, baseline_y, shape_text,
-    );
-    if placements.is_empty() {
-        if debug_text {
-            eprintln!(
-                "[raster-text] skip: no placements font='{}' text='{}'",
-                state.font_name,
-                truncate_debug_text(text)
-            );
+    let paint = fill_paint(state.fill_color, state.fill_opacity);
+    let device_transform = base_transform.pre_concat(state.transform);
+    let run_transform = Transform::from_row(m00, m01, m10, m11, x, y);
+
+    let mut try_draw = |font_data: &[u8]| -> Result<(), &'static str> {
+        let Ok(face) = ttf_parser::Face::parse(font_data, 0) else {
+            return Err("parse_failed");
+        };
+        let placements = layout_text_glyphs(font_data, text, font_size, 0.0, 0.0, shape_text);
+        if placements.is_empty() {
+            return Err("no_placements");
         }
+        let mut drawn = 0usize;
+        for placement in placements {
+            let mut builder =
+                GlyphPathBuilder::new(placement.origin_x, placement.origin_y, placement.scale);
+            if face
+                .outline_glyph(GlyphId(placement.glyph_id), &mut builder)
+                .is_none()
+            {
+                continue;
+            }
+            let Some(path) = builder.finish() else {
+                continue;
+            };
+            pixmap.fill_path(
+                &path,
+                &paint,
+                FillRule::Winding,
+                device_transform.pre_concat(run_transform),
+                state.clip_mask.as_ref(),
+            );
+            drawn += 1;
+        }
+        if drawn == 0 {
+            return Err("no_outlines");
+        }
+        Ok(())
+    };
+
+    if let Some(registry) = registry {
+        if let Some(font) = registry.resolve(&state.font_name) {
+            if try_draw(font.data.as_slice()).is_ok() {
+                return;
+            }
+        }
+    }
+    if let Some(system_bytes) = resolve_system_font_bytes(&state.font_name) {
+        let _ = try_draw(system_bytes.as_slice());
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_glyph_run(
+    pixmap: &mut Pixmap,
+    state: &RasterState,
+    x: f32,
+    y: f32,
+    glyph_ids: &[u16],
+    advances: &[(Pt, Pt)],
+    m00: f32,
+    m01: f32,
+    m10: f32,
+    m11: f32,
+    page_height_pt: f32,
+    base_transform: Transform,
+    registry: Option<&FontRegistry>,
+) {
+    if glyph_ids.is_empty() {
         return;
     }
 
-    if debug_text {
-        eprintln!(
-            "[raster-text] draw font='{}' fallback={} size={:.2} fill_opacity={:.2} clip={} glyphs={} text='{}'",
-            state.font_name,
-            used_system_fallback,
-            font_size,
-            state.fill_opacity,
-            state.clip_mask.is_some(),
-            placements.len(),
-            truncate_debug_text(text)
-        );
+    let debug_text = std::env::var("FULLBLEED_RASTER_DEBUG_TEXT")
+        .map(|v| !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"))
+        .unwrap_or(false);
+
+    let font_size = state.font_size.to_f32().max(0.0);
+    if font_size <= 0.0 {
+        return;
     }
 
+    let baseline_x = x;
+    let baseline_y = page_height_pt - y;
     let paint = fill_paint(state.fill_color, state.fill_opacity);
     let device_transform = base_transform.pre_concat(state.transform);
-    for placement in placements {
-        let mut builder =
-            GlyphPathBuilder::new(placement.origin_x, placement.origin_y, placement.scale);
-        if face
-            .outline_glyph(GlyphId(placement.glyph_id), &mut builder)
-            .is_none()
-        {
-            continue;
-        }
-        let Some(path) = builder.finish() else {
-            continue;
+
+    let mut try_draw = |font_data: &[u8], used_system_fallback: bool| -> Result<(), &'static str> {
+        let Ok(face) = ttf_parser::Face::parse(font_data, 0) else {
+            return Err("parse_failed");
         };
-        pixmap.fill_path(
-            &path,
-            &paint,
-            FillRule::Winding,
-            device_transform,
-            state.clip_mask.as_ref(),
-        );
+        let upem = face.units_per_em().max(1) as f32;
+        let scale = font_size / upem;
+
+        let mut pen_x = baseline_x;
+        let mut pen_y = baseline_y;
+        let mut drawn = 0usize;
+        let mut blank_glyphs = 0usize;
+        let mut invalid_glyphs = 0usize;
+        for (idx, gid) in glyph_ids.iter().enumerate() {
+            if *gid != 0 {
+                let mut builder = GlyphPathBuilder::new(0.0, 0.0, scale);
+                if face.outline_glyph(GlyphId(*gid), &mut builder).is_some() {
+                    if let Some(path) = builder.finish() {
+                        let local = Transform::from_row(m00, m01, m10, m11, pen_x, pen_y);
+                        pixmap.fill_path(
+                            &path,
+                            &paint,
+                            FillRule::Winding,
+                            device_transform.pre_concat(local),
+                            state.clip_mask.as_ref(),
+                        );
+                        drawn += 1;
+                    }
+                } else if face.glyph_hor_advance(GlyphId(*gid)).is_some() {
+                    // Some valid glyphs (e.g. spaces) intentionally have no outline.
+                    blank_glyphs += 1;
+                } else {
+                    invalid_glyphs += 1;
+                }
+            }
+
+            let (adv_x, adv_y) = advances
+                .get(idx)
+                .map(|(dx, dy)| (dx.to_f32(), dy.to_f32()))
+                .or_else(|| {
+                    face.glyph_hor_advance(GlyphId(*gid)).map(|w| {
+                        let adv = (w as f32) * scale;
+                        (m00 * adv, m01 * adv)
+                    })
+                })
+                .unwrap_or((font_size * 0.5, 0.0));
+            if adv_x.is_finite() {
+                pen_x += adv_x;
+            }
+            if adv_y.is_finite() {
+                pen_y += adv_y;
+            }
+        }
+
+        if drawn == 0 {
+            // Avoid incorrect system-font fallback for whitespace-only runs where glyph IDs
+            // are valid but intentionally outline-less.
+            if invalid_glyphs == 0 && blank_glyphs > 0 {
+                return Ok(());
+            }
+            return Err("no_outlines");
+        }
+
+        if debug_text {
+            eprintln!(
+                "[raster-glyph] draw font='{}' fallback={} size={:.2} clip={} glyphs={} at=({:.2},{:.2})",
+                state.font_name,
+                used_system_fallback,
+                font_size,
+                state.clip_mask.is_some(),
+                drawn,
+                baseline_x,
+                baseline_y
+            );
+        }
+        Ok(())
+    };
+
+    if let Some(registry) = registry {
+        if let Some(font) = registry.resolve(&state.font_name) {
+            match try_draw(font.data.as_slice(), false) {
+                Ok(()) => return,
+                Err(_reason) => {
+                    if let Some(system_bytes) = resolve_system_font_bytes(&state.font_name) {
+                        if try_draw(system_bytes.as_slice(), true).is_ok() {
+                            return;
+                        }
+                    }
+                    return;
+                }
+            }
+        }
     }
+
+    let Some(system_bytes) = resolve_system_font_bytes(&state.font_name) else {
+        return;
+    };
+    let _ = try_draw(system_bytes.as_slice(), true);
 }
 
 fn truncate_debug_text(text: &str) -> String {
@@ -1075,6 +1346,31 @@ fn system_font_file_candidates(font_name: &str) -> Vec<String> {
                 &["arialbi.ttf", "LiberationSans-BoldItalic.ttf", "arial.ttf"],
             );
         }
+        "arial narrow" | "helvetica narrow" => {
+            extend_style_candidates(
+                &mut out,
+                style,
+                &["arialn.ttf", "arial.ttf", "LiberationSans-Regular.ttf"],
+                &[
+                    "arialnb.ttf",
+                    "arialbd.ttf",
+                    "arialn.ttf",
+                    "LiberationSans-Bold.ttf",
+                ],
+                &[
+                    "arialni.ttf",
+                    "ariali.ttf",
+                    "arialn.ttf",
+                    "LiberationSans-Italic.ttf",
+                ],
+                &[
+                    "arialnbi.ttf",
+                    "arialbi.ttf",
+                    "arialnb.ttf",
+                    "LiberationSans-BoldItalic.ttf",
+                ],
+            );
+        }
         "times" | "times roman" | "times new roman" => {
             extend_style_candidates(
                 &mut out,
@@ -1087,6 +1383,16 @@ fn system_font_file_candidates(font_name: &str) -> Vec<String> {
                     "timesnewromanbolditalic.ttf",
                     "LiberationSerif-BoldItalic.ttf",
                 ],
+            );
+        }
+        "century schoolbook" | "new century schoolbook" => {
+            extend_style_candidates(
+                &mut out,
+                style,
+                &["SCHLBK.TTF", "times.ttf", "LiberationSerif-Regular.ttf"],
+                &["SCHLBKB.TTF", "timesbd.ttf", "LiberationSerif-Bold.ttf"],
+                &["SCHLBKI.TTF", "timesi.ttf", "LiberationSerif-Italic.ttf"],
+                &["SCHLBKBI.TTF", "timesbi.ttf", "LiberationSerif-BoldItalic.ttf"],
             );
         }
         "courier" | "courier new" => {
@@ -1178,9 +1484,51 @@ fn parse_system_font_request(font_name: &str) -> (String, FontStyleVariant) {
         .replace("semi-bold", "semibold")
         .replace("demi-bold", "demibold");
 
-    let bold =
-        style_probe.contains("bold") || style_probe.contains("semibold") || style_probe.contains("demibold");
-    let italic = style_probe.contains("italic") || style_probe.contains("oblique");
+    let mut bold = false;
+    let mut italic = false;
+    let mut condensed = false;
+    let mut kept: Vec<&str> = Vec::new();
+    for token in style_probe.split(|c: char| c == '-' || c == '_' || c.is_whitespace()) {
+        let token = token.trim();
+        if token.is_empty() {
+            continue;
+        }
+        let mut consumed = false;
+        if matches!(token, "bold" | "semibold" | "demibold" | "black" | "blk" | "bd")
+            || token.contains("blk")
+            || token.contains("black")
+        {
+            bold = true;
+            consumed = true;
+        }
+        if matches!(token, "italic" | "oblique" | "it") {
+            italic = true;
+            consumed = true;
+        }
+        if token == "bi" {
+            bold = true;
+            italic = true;
+            consumed = true;
+        }
+        if matches!(token, "cn" | "condensed" | "narrow")
+            || token.ends_with("cn")
+            || token.contains("condensed")
+        {
+            condensed = true;
+            consumed = true;
+        }
+        if matches!(
+            token,
+            "regular" | "normal" | "book" | "medium" | "roman" | "mt" | "psmt"
+        ) {
+            consumed = true;
+        }
+        if consumed {
+            continue;
+        }
+        kept.push(token);
+    }
+
     let style = match (bold, italic) {
         (true, true) => FontStyleVariant::BoldItalic,
         (true, false) => FontStyleVariant::Bold,
@@ -1188,40 +1536,15 @@ fn parse_system_font_request(font_name: &str) -> (String, FontStyleVariant) {
         (false, false) => FontStyleVariant::Regular,
     };
 
-    let mut kept: Vec<&str> = Vec::new();
-    for token in style_probe.split(|c: char| c == '-' || c == '_' || c.is_whitespace()) {
-        let token = token.trim();
-        if token.is_empty() {
-            continue;
-        }
-        if matches!(
-            token,
-            "bold"
-                | "italic"
-                | "oblique"
-                | "semibold"
-                | "demibold"
-                | "regular"
-                | "normal"
-                | "book"
-                | "medium"
-                | "mt"
-                | "psmt"
-                | "it"
-                | "bd"
-                | "bi"
-        ) {
-            continue;
-        }
-        kept.push(token);
-    }
-
     let mut family = if kept.is_empty() {
         style_probe
     } else {
         kept.join(" ")
     };
     family = canonical_font_family_alias(&family);
+    if condensed && matches!(family.as_str(), "helvetica" | "helvetica neue" | "arial") {
+        family = "arial narrow".to_string();
+    }
     (family, style)
 }
 
@@ -1240,6 +1563,24 @@ fn canonical_font_family_alias(name: &str) -> String {
         .chars()
         .filter(|c| !c.is_whitespace() && *c != '-' && *c != '_')
         .collect();
+    if compact.starts_with("helveticaworld")
+        || compact.starts_with("helveticaltstd")
+        || compact.starts_with("helveticaneueltstd")
+    {
+        return "helvetica".to_string();
+    }
+    if compact.starts_with("newcenturyschlbk") {
+        return "century schoolbook".to_string();
+    }
+    if compact.starts_with("mercurytext") {
+        return "times".to_string();
+    }
+    if compact.starts_with("decimal") {
+        return "arial".to_string();
+    }
+    if compact.starts_with("notosanscjk") {
+        return "noto sans".to_string();
+    }
     match compact.as_str() {
         "helvetica" | "helveticaneue" => "helvetica".to_string(),
         "arial" | "arialmt" => "arial".to_string(),
@@ -1610,6 +1951,55 @@ mod tests {
     #[test]
     fn system_font_candidates_normalize_subset_prefix_and_style() {
         let candidates = system_font_file_candidates("ABCDEF+Helvetica-BoldOblique");
+        assert!(!candidates.is_empty());
+        assert_eq!(candidates[0], "arialbi.ttf");
+    }
+
+    #[test]
+    fn system_font_candidates_alias_helvetica_world_family() {
+        let candidates = system_font_file_candidates("ABCDEF+HelveticaWorld-Bold");
+        assert!(!candidates.is_empty());
+        assert_eq!(candidates[0], "arialbd.ttf");
+    }
+
+    #[test]
+    fn system_font_candidates_treat_helvetica_lt_std_blk_as_bold() {
+        let candidates = system_font_file_candidates("ABCDEF+HelveticaLTStd-Blk");
+        assert!(!candidates.is_empty());
+        assert_eq!(candidates[0], "arialbd.ttf");
+    }
+
+    #[test]
+    fn system_font_candidates_treat_bd_shorthand_as_bold() {
+        let candidates = system_font_file_candidates("ABCDEF+HelveticaNeueLTStd-Bd");
+        assert!(!candidates.is_empty());
+        assert_eq!(candidates[0], "arialbd.ttf");
+    }
+
+    #[test]
+    fn system_font_candidates_treat_cn_shorthand_as_narrow() {
+        let candidates = system_font_file_candidates("ABCDEF+HelveticaNeueLTStd-Cn");
+        assert!(!candidates.is_empty());
+        assert_eq!(candidates[0], "arialn.ttf");
+    }
+
+    #[test]
+    fn system_font_candidates_treat_blkcn_as_bold_narrow() {
+        let candidates = system_font_file_candidates("ABCDEF+HelveticaNeueLTStd-BlkCn");
+        assert!(!candidates.is_empty());
+        assert_eq!(candidates[0], "arialnb.ttf");
+    }
+
+    #[test]
+    fn system_font_candidates_treat_it_shorthand_as_italic() {
+        let candidates = system_font_file_candidates("ABCDEF+HelveticaNeueLTStd-It");
+        assert!(!candidates.is_empty());
+        assert_eq!(candidates[0], "ariali.ttf");
+    }
+
+    #[test]
+    fn system_font_candidates_treat_bi_shorthand_as_bold_italic() {
+        let candidates = system_font_file_candidates("ABCDEF+HelveticaNeueLTStd-Bi");
         assert!(!candidates.is_empty());
         assert_eq!(candidates[0], "arialbi.ttf");
     }

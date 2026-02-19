@@ -676,6 +676,70 @@ fn commands_bbox(commands: &[Command], font_registry: Option<&FontRegistry>) -> 
                 }
                 union_bounds(&mut bounds, (min_x, min_y, max_x, max_y));
             }
+            Command::DrawStringTransformed { x, y, text, .. } => {
+                let width = if let Some(registry) = font_registry {
+                    registry.measure_text_width(&font_name, font_size, text)
+                } else {
+                    let approx = text.chars().count() as f32 * 0.6;
+                    Pt::from_f32(font_size.to_f32() * approx)
+                };
+                let height = font_size;
+                let x0 = x.to_f32();
+                let y0 = y.to_f32();
+                let x1 = x0 + width.to_f32();
+                let y1 = y0 + height.to_f32();
+                let corners = [
+                    transform.apply(x0, y0),
+                    transform.apply(x1, y0),
+                    transform.apply(x1, y1),
+                    transform.apply(x0, y1),
+                ];
+                let mut min_x = corners[0].0;
+                let mut min_y = corners[0].1;
+                let mut max_x = corners[0].0;
+                let mut max_y = corners[0].1;
+                for (cx, cy) in &corners[1..] {
+                    min_x = min_x.min(*cx);
+                    min_y = min_y.min(*cy);
+                    max_x = max_x.max(*cx);
+                    max_y = max_y.max(*cy);
+                }
+                union_bounds(&mut bounds, (min_x, min_y, max_x, max_y));
+            }
+            Command::DrawGlyphRun { x, y, advances, .. } => {
+                let mut pen_x = x.to_f32();
+                let mut pen_y = y.to_f32();
+                let mut min_x = pen_x;
+                let mut min_y = pen_y;
+                let mut max_x = pen_x;
+                let mut max_y = pen_y;
+                for (dx, dy) in advances {
+                    pen_x += dx.to_f32();
+                    pen_y += dy.to_f32();
+                    min_x = min_x.min(pen_x);
+                    min_y = min_y.min(pen_y);
+                    max_x = max_x.max(pen_x);
+                    max_y = max_y.max(pen_y);
+                }
+                let pad = font_size.to_f32().max(1.0);
+                let corners = [
+                    transform.apply(min_x - pad, min_y - pad),
+                    transform.apply(max_x + pad, min_y - pad),
+                    transform.apply(max_x + pad, max_y + pad),
+                    transform.apply(min_x - pad, max_y + pad),
+                ];
+                let mut bx0 = corners[0].0;
+                let mut by0 = corners[0].1;
+                let mut bx1 = corners[0].0;
+                let mut by1 = corners[0].1;
+                for (cx, cy) in &corners[1..] {
+                    bx0 = bx0.min(*cx);
+                    by0 = by0.min(*cy);
+                    bx1 = bx1.max(*cx);
+                    by1 = by1.max(*cy);
+                }
+                union_bounds(&mut bounds, (bx0, by0, bx1, by1));
+            }
             Command::Meta { key, value } => {
                 if key == "__fb_bbox" {
                     if let Some(rect) = parse_bbox_meta(value) {

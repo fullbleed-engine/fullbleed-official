@@ -166,11 +166,11 @@ Commercial attestation options for `compliance`:
 {
   "schema": "fullbleed.inspect_pdf.v1",
   "ok": true,
-  "path": "examples/form-i9/i-9.pdf",
+  "path": "input/sample.pdf",
   "pdf_version": "1.7",
-  "page_count": 4,
+  "page_count": 1,
   "encrypted": false,
-  "file_size_bytes": 524095,
+  "file_size_bytes": 218734,
   "warnings": [],
   "composition": {
     "supported": true,
@@ -187,9 +187,9 @@ Commercial attestation options for `compliance`:
   "ok": true,
   "templates": [
     {
-      "template_id": "i-9",
-      "path": "examples/form-i9/i-9.pdf",
-      "page_count": 4,
+      "template_id": "sample-template-a",
+      "path": "templates/template_a.pdf",
+      "page_count": 2,
       "composition": {"supported": true, "issues": []}
     }
   ],

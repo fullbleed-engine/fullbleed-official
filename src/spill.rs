@@ -212,6 +212,52 @@ fn write_command<W: Write>(out: &mut W, command: &Command) -> io::Result<()> {
             write_pt(out, *y)?;
             write_string(out, text)
         }
+        Command::DrawStringTransformed {
+            x,
+            y,
+            text,
+            m00,
+            m01,
+            m10,
+            m11,
+        } => {
+            write_u8(out, 40)?;
+            write_pt(out, *x)?;
+            write_pt(out, *y)?;
+            write_string(out, text)?;
+            write_f32(out, *m00)?;
+            write_f32(out, *m01)?;
+            write_f32(out, *m10)?;
+            write_f32(out, *m11)
+        }
+        Command::DrawGlyphRun {
+            x,
+            y,
+            glyph_ids,
+            advances,
+            m00,
+            m01,
+            m10,
+            m11,
+        } => {
+            write_u8(out, 39)?;
+            write_pt(out, *x)?;
+            write_pt(out, *y)?;
+            write_u32(out, glyph_ids.len() as u32)?;
+            for gid in glyph_ids {
+                write_u16(out, *gid)?;
+            }
+            write_u32(out, advances.len() as u32)?;
+            for (dx, dy) in advances {
+                write_pt(out, *dx)?;
+                write_pt(out, *dy)?;
+            }
+            write_f32(out, *m00)?;
+            write_f32(out, *m01)?;
+            write_f32(out, *m10)?;
+            write_f32(out, *m11)?;
+            Ok(())
+        }
         Command::DrawRect {
             x,
             y,
@@ -369,6 +415,43 @@ fn read_command<R: Read>(input: &mut R) -> io::Result<Command> {
             y: read_pt(input)?,
             text: read_string(input)?,
         },
+        40 => Command::DrawStringTransformed {
+            x: read_pt(input)?,
+            y: read_pt(input)?,
+            text: read_string(input)?,
+            m00: read_f32(input)?,
+            m01: read_f32(input)?,
+            m10: read_f32(input)?,
+            m11: read_f32(input)?,
+        },
+        39 => {
+            let x = read_pt(input)?;
+            let y = read_pt(input)?;
+            let glyph_len = read_u32(input)? as usize;
+            let mut glyph_ids = Vec::with_capacity(glyph_len);
+            for _ in 0..glyph_len {
+                glyph_ids.push(read_u16(input)?);
+            }
+            let adv_len = read_u32(input)? as usize;
+            let mut advances = Vec::with_capacity(adv_len);
+            for _ in 0..adv_len {
+                advances.push((read_pt(input)?, read_pt(input)?));
+            }
+            let m00 = read_f32(input)?;
+            let m01 = read_f32(input)?;
+            let m10 = read_f32(input)?;
+            let m11 = read_f32(input)?;
+            Command::DrawGlyphRun {
+                x,
+                y,
+                glyph_ids,
+                advances,
+                m00,
+                m01,
+                m10,
+                m11,
+            }
+        }
         30 => Command::DrawRect {
             x: read_pt(input)?,
             y: read_pt(input)?,

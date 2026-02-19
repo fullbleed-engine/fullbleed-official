@@ -43,6 +43,17 @@ $env:FULLBLEED_I9_EMBED_INTER=1
 python report.py
 ```
 
+Compose annotation carryover mode (finalized PDF output):
+- Default is `link_only` (preserves template link annotations in composed output).
+- Optional modes:
+  - `none` (drop all template annotations)
+  - `carry_widgets` (preserve template link + widget annotations)
+
+```bash
+$env:FULLBLEED_COMPOSE_ANNOTATION_MODE=carry_widgets
+python report.py
+```
+
 ## Permutation VDP Proof Job
 
 Generate a large record matrix and compose a single merged VDP output:

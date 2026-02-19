@@ -68,7 +68,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-0.2.6-cp311-cp311-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-0.2.7-cp311-cp311-win_amd64.whl
 ```
 
 Platform artifact policy:
@@ -342,6 +342,7 @@ fullbleed.finalize_compose_pdf(
     plan,
     "output/overlay.pdf",
     "output/composed.pdf",
+    annotation_mode="link_only",  # optional: link_only | none | carry_widgets
 )
 ```
 
@@ -789,7 +790,7 @@ Module exports:
 - `inspect_pdf(path)`
 - `inspect_template_catalog(templates)`
 - `finalize_stamp_pdf(template, overlay, out, page_map=None, dx=0.0, dy=0.0)`
-- `finalize_compose_pdf(templates, plan, overlay, out)`
+- `finalize_compose_pdf(templates, plan, overlay, out, annotation_mode='link_only')`
 - `fetch_asset(url)`
 
 `PdfEngine` methods:

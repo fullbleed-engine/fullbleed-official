@@ -1,13 +1,13 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial -->
 # Fullbleed LLM Guide
 
-Version target: `fullbleed 0.2.6 (stable)`
+Version target: `fullbleed 0.2.7 (stable)`
 
 This document is for LLM-driven automation using `fullbleed` in real user environments.
 
 Scope:
 - Assumes a normal installed release (`pip install fullbleed`), not a mixed local dev tree.
-- Assumes CLI/Python behavior from `0.2.6 (stable)`.
+- Assumes CLI/Python behavior from `0.2.7 (stable)`.
 - Focuses on reliable automation patterns for repeatable document generation.
 - Treat Fullbleed as a document engine, not a web-to-print/browser-runtime substitute.
 - Treat HTML/CSS as the familiar document DSL; with pinned assets and flags, Fullbleed targets reproducible outputs.

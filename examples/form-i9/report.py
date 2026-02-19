@@ -99,6 +99,19 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _resolve_compose_annotation_mode() -> str:
+    raw = os.getenv("FULLBLEED_COMPOSE_ANNOTATION_MODE", "link_only").strip().lower()
+    if raw in {"", "default", "link_only", "link-only"}:
+        return "link_only"
+    if raw in {"none", "off"}:
+        return "none"
+    if raw in {"carry_widgets", "carry-widgets", "widgets", "link_and_widgets"}:
+        return "carry_widgets"
+    raise ValueError(
+        "FULLBLEED_COMPOSE_ANNOTATION_MODE must be one of: link_only, none, carry_widgets"
+    )
+
+
 def load_layout_and_values() -> tuple[dict[str, Any], dict[str, Any]]:
     if not LAYOUT_PATH.exists() or not DATA_PATH.exists():
         raise FileNotFoundError(
@@ -586,11 +599,13 @@ def main() -> None:
         )
 
     plan = _build_compose_plan(bindings=bindings, template_page_count=template_page_count)
+    compose_annotation_mode = _resolve_compose_annotation_mode()
     compose_result = fullbleed.finalize_compose_pdf(
         [("i9-template", str(TEMPLATE_PDF_PATH))],
         plan,
         str(OVERLAY_PDF_PATH),
         str(PDF_PATH),
+        annotation_mode=compose_annotation_mode,
     )
     COMPOSE_REPORT_PATH.write_text(json.dumps(compose_result, indent=2), encoding="utf-8")
 
@@ -626,6 +641,7 @@ def main() -> None:
         "composed_pdf": str(PDF_PATH),
         "page_count": overlay_page_count,
         "field_count": len(layout.get("fields") or []),
+        "compose_annotation_mode": compose_annotation_mode,
         "template_asset_report": str(TEMPLATE_ASSET_REPORT_PATH),
         "bindings_path": str(BINDINGS_PATH),
         "compose_report": compose_result,

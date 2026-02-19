@@ -1593,6 +1593,7 @@ def _render_with_template_compose(engine, html, css, out_path, args):
 
     dx = float(getattr(args, "template_dx", 0.0) or 0.0)
     dy = float(getattr(args, "template_dy", 0.0) or 0.0)
+    annotation_mode = str(getattr(args, "compose_annotation_mode", "link_only") or "link_only")
     sorted_bindings = sorted(bindings, key=lambda item: int(item.get("page_index", 0)))
     plan = []
     for i, binding in enumerate(sorted_bindings):
@@ -1655,6 +1656,7 @@ def _render_with_template_compose(engine, html, css, out_path, args):
             plan,
             str(tmp_overlay_path),
             str(out_path_obj),
+            annotation_mode=annotation_mode,
         )
     finally:
         try:
@@ -1674,6 +1676,7 @@ def _render_with_template_compose(engine, html, css, out_path, args):
         "plan_pages": len(plan),
         "dx": dx,
         "dy": dy,
+        "annotation_mode": annotation_mode,
         "image_mode": "composed_pdf" if getattr(args, "emit_image", None) else None,
         "image_emit_ms": image_emit_ms,
     }
@@ -3259,6 +3262,13 @@ def _add_common_flags(p):
         help="Optional overlay Y translation (points) applied during auto-compose render mode.",
     )
     p.add_argument(
+        "--compose-annotation-mode",
+        choices=["link_only", "none", "carry_widgets"],
+        default="link_only",
+        help="Template annotation carryover mode for compose output: "
+             "link_only (default), none, or carry_widgets.",
+    )
+    p.add_argument(
         "--asset",
         action="append",
         help="Repeatable asset path. .svg and .pdf are inferred as asset kinds.",
@@ -3463,6 +3473,12 @@ def _build_parser():
     p_finalize_compose.add_argument("--plan", required=True, help="PagePlan JSON path")
     p_finalize_compose.add_argument("--overlay", required=True, help="Overlay PDF path")
     p_finalize_compose.add_argument("--out", required=True, help="Output PDF path")
+    p_finalize_compose.add_argument(
+        "--compose-annotation-mode",
+        choices=["link_only", "none", "carry_widgets"],
+        default="link_only",
+        help="Template annotation carryover mode: link_only (default), none, or carry_widgets.",
+    )
     p_finalize_compose.add_argument(
         "--experimental-xobject-reuse",
         action="store_true",

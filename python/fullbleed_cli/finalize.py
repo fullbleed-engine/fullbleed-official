@@ -225,11 +225,13 @@ def cmd_finalize_compose(args) -> None:
         import fullbleed
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
+        annotation_mode = str(getattr(args, "compose_annotation_mode", "link_only") or "link_only")
         result = fullbleed.finalize_compose_pdf(
             templates,
             plan,
             str(overlay_path),
             str(out_path),
+            annotation_mode=annotation_mode,
         )
     except Exception as exc:
         msg = str(exc)
@@ -260,6 +262,7 @@ def cmd_finalize_compose(args) -> None:
         "metrics": {
             "templates": len(templates),
             "plan_pages": len(plan),
+            "annotation_mode": annotation_mode,
             "experimental_xobject_reuse": bool(
                 getattr(args, "experimental_xobject_reuse", False)
             ),

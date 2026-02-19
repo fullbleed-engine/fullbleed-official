@@ -104,6 +104,19 @@ def _deepcopy_values(values: dict[str, Any]) -> dict[str, Any]:
     return dict(values)
 
 
+def _resolve_compose_annotation_mode() -> str:
+    raw = os.getenv("FULLBLEED_COMPOSE_ANNOTATION_MODE", "link_only").strip().lower()
+    if raw in {"", "default", "link_only", "link-only"}:
+        return "link_only"
+    if raw in {"none", "off"}:
+        return "none"
+    if raw in {"carry_widgets", "carry-widgets", "widgets", "link_and_widgets"}:
+        return "carry_widgets"
+    raise ValueError(
+        "FULLBLEED_COMPOSE_ANNOTATION_MODE must be one of: link_only, none, carry_widgets"
+    )
+
+
 def _text_variant_value(field: dict[str, Any], variant: str, seq: int) -> str:
     name = str(field.get("pdf_field_name", "")).lower()
     width = float(field.get("width_pt", 0.0))
@@ -260,7 +273,12 @@ def _render_batch_overlay(
     return int(engine.render_pdf_batch_to_file(html_docs, css, str(out_pdf))), "sequential"
 
 
-def _compose_batch(overlay_pdf: Path, out_pdf: Path, overlay_page_count: int) -> dict[str, Any]:
+def _compose_batch(
+    overlay_pdf: Path,
+    out_pdf: Path,
+    overlay_page_count: int,
+    compose_annotation_mode: str,
+) -> dict[str, Any]:
     plan: list[tuple[str, int, int, float, float]] = []
     for overlay_page in range(overlay_page_count):
         template_page = overlay_page % TEMPLATE_PAGE_COUNT
@@ -271,6 +289,7 @@ def _compose_batch(overlay_pdf: Path, out_pdf: Path, overlay_page_count: int) ->
         plan,
         str(overlay_pdf),
         str(out_pdf),
+        annotation_mode=compose_annotation_mode,
     )
 
 
@@ -292,6 +311,7 @@ def _count_categories(records: list[ScenarioRecord]) -> dict[str, int]:
 
 def run() -> dict[str, Any]:
     _ensure_out()
+    compose_annotation_mode = _resolve_compose_annotation_mode()
 
     records = build_permutation_records(LAYOUT, BASE_VALUES)
     RECORDS_PATH.write_text(
@@ -337,7 +357,7 @@ def run() -> dict[str, Any]:
 
         overlay_bytes, batch_mode = _render_batch_overlay(engine, css, batch, overlay_pdf)
         overlay_pages = len(batch) * PAGES_PER_RECORD
-        compose = _compose_batch(overlay_pdf, composed_pdf, overlay_pages)
+        compose = _compose_batch(overlay_pdf, composed_pdf, overlay_pages, compose_annotation_mode)
         composed_pages = int(compose.get("pages_written") or 0)
 
         chunk_rows.append(
@@ -389,6 +409,7 @@ def run() -> dict[str, Any]:
         "pages_per_record": PAGES_PER_RECORD,
         "expected_total_pages": expected_pages,
         "embed_inter": os.getenv("FULLBLEED_I9_EMBED_INTER", "").strip().lower() in {"1", "true", "yes", "on"},
+        "compose_annotation_mode": compose_annotation_mode,
         "chunk_size_records": CHUNK_SIZE_RECORDS,
         "single_chunk_required": single_chunk_required,
         "overlay_merged_pdf": overlay_merged_pdf,

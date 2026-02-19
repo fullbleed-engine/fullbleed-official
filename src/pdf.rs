@@ -1101,6 +1101,10 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     }
                     out.push_str("ET\n");
                 }
+                Command::DrawStringTransformed { .. } => {}
+                Command::DrawGlyphRun { .. } => {
+                    // Raster-only command; PDF writer does not emit glyph runs directly.
+                }
                 Command::DrawRect {
                     x,
                     y,
@@ -2845,6 +2849,10 @@ fn render_page(
                     }
                 }
                 out.push_str("ET\n");
+            }
+            Command::DrawStringTransformed { .. } => {}
+            Command::DrawGlyphRun { .. } => {
+                // Raster-only command; PDF writer does not emit glyph runs directly.
             }
             Command::DrawRect {
                 x,

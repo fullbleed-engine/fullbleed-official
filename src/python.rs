@@ -436,13 +436,15 @@ fn finalize_stamp_pdf(
 }
 
 #[pyfunction]
-#[pyo3(signature = (templates, plan, overlay, out))]
+#[pyo3(signature = (templates, plan, overlay, out, annotation_mode=None))]
 fn finalize_compose_pdf(
     templates: Vec<(String, String)>,
     plan: Vec<(String, usize, usize, f32, f32)>,
     overlay: &str,
     out: &str,
+    annotation_mode: Option<&str>,
 ) -> PyResult<PyObject> {
+    let mode = parse_compose_annotation_mode(annotation_mode)?;
     let mut catalog = crate::TemplateCatalog::default();
     for (template_id, pdf_path) in templates {
         catalog
@@ -464,11 +466,12 @@ fn finalize_compose_pdf(
             dy,
         });
     }
-    let summary = crate::compose_overlay_with_template_catalog(
+    let summary = crate::compose_overlay_with_template_catalog_with_annotation_mode(
         &catalog,
         std::path::Path::new(overlay),
         std::path::Path::new(out),
         &page_plan,
+        mode,
     )
     .map_err(to_py_err)?;
 
@@ -476,8 +479,40 @@ fn finalize_compose_pdf(
         let d = PyDict::new_bound(py);
         d.set_item("ok", true)?;
         d.set_item("pages_written", summary.pages_written)?;
+        d.set_item("annotation_mode", compose_annotation_mode_name(mode))?;
         Ok(d.to_object(py))
     })
+}
+
+fn parse_compose_annotation_mode(raw: Option<&str>) -> PyResult<crate::ComposeAnnotationMode> {
+    let Some(raw) = raw else {
+        return Ok(crate::ComposeAnnotationMode::default());
+    };
+    let mode = raw.trim().to_ascii_lowercase();
+    if mode.is_empty() || mode == "default" || mode == "link_only" || mode == "link-only" {
+        return Ok(crate::ComposeAnnotationMode::LinkOnly);
+    }
+    if mode == "none" || mode == "off" {
+        return Ok(crate::ComposeAnnotationMode::None);
+    }
+    if mode == "carry_widgets"
+        || mode == "carry-widgets"
+        || mode == "widgets"
+        || mode == "link_and_widgets"
+    {
+        return Ok(crate::ComposeAnnotationMode::CarryWidgets);
+    }
+    Err(PyValueError::new_err(
+        "annotation_mode must be one of: link_only, none, carry_widgets",
+    ))
+}
+
+fn compose_annotation_mode_name(mode: crate::ComposeAnnotationMode) -> &'static str {
+    match mode {
+        crate::ComposeAnnotationMode::None => "none",
+        crate::ComposeAnnotationMode::LinkOnly => "link_only",
+        crate::ComposeAnnotationMode::CarryWidgets => "carry_widgets",
+    }
 }
 
 fn div_round_i128(num: i128, den: i128) -> Option<i64> {

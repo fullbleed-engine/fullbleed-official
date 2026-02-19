@@ -68,6 +68,27 @@ pub enum Command {
         y: Pt,
         text: String,
     },
+    // Raster-focused command: draw text with an explicit PDF-space linear transform.
+    DrawStringTransformed {
+        x: Pt,
+        y: Pt,
+        text: String,
+        m00: f32,
+        m01: f32,
+        m10: f32,
+        m11: f32,
+    },
+    // Raster-only command emitted by PDF parser for precise Type0/CID text rendering.
+    DrawGlyphRun {
+        x: Pt,
+        y: Pt,
+        glyph_ids: Vec<u16>,
+        advances: Vec<(Pt, Pt)>,
+        m00: f32,
+        m01: f32,
+        m10: f32,
+        m11: f32,
+    },
     DrawRect {
         x: Pt,
         y: Pt,

@@ -36,10 +36,11 @@ pub use doc_context::DocContext;
 pub use doc_template::DocTemplate;
 pub use error::FullBleedError;
 pub use finalize::{
-    BindingSource, ComposePagePlan, FinalizeComposeSummary, FinalizeStampSummary,
+    BindingSource, ComposeAnnotationMode, ComposePagePlan, FinalizeComposeSummary, FinalizeStampSummary,
     META_PAGE_TEMPLATE_KEY, PageBindingDecision, TemplateAsset, TemplateBindingSpec,
     TemplateCatalog, collect_page_feature_flags, collect_page_template_names,
-    compose_overlay_with_template_catalog, default_page_map, resolve_template_bindings,
+    compose_overlay_with_template_catalog, compose_overlay_with_template_catalog_with_annotation_mode,
+    default_page_map, resolve_template_bindings,
     resolve_template_bindings_for_document, stamp_overlay_on_template_pdf,
     validate_bindings_against_catalog, validate_page_map,
 };
