@@ -1,0 +1,101 @@
+{
+  "schema": "fullbleed.css_fixture_render_result.v1",
+  "id": "diagnostics_multicol_single_column_fallback",
+  "ok": true,
+  "warnings_ok": true,
+  "expected_warnings": [],
+  "actual_warnings": [],
+  "stages": {
+    "parser": {
+      "ok": true,
+      "error": null
+    },
+    "compute": {
+      "ok": true,
+      "glyph_report_count": 0,
+      "page_data_present": false,
+      "assertions_enabled": true,
+      "assertions_ok": true,
+      "assertions": {
+        "assertion_count": 1,
+        "computed_event_count": 21,
+        "checks": [
+          {
+            "index": 0,
+            "ok": true,
+            "node": "html:nth-child(1) > body:nth-child(2) > section.x:nth-child(1)",
+            "style_mismatches": [],
+            "vars_mismatch": null,
+            "vars_count_mismatch": null
+          }
+        ]
+      }
+    },
+    "layout": {
+      "ok": true,
+      "expected_page_count": 1,
+      "actual_page_count": 1,
+      "dpi": 120,
+      "assertions_enabled": false,
+      "assertions_ok": true,
+      "assertions": {
+        "assertion_count": 0,
+        "checks": []
+      }
+    },
+    "paint": {
+      "ok": true,
+      "checks": [
+        {
+          "page": 1,
+          "x": 200,
+          "y": 200,
+          "expected_rgba": [
+            255,
+            0,
+            0,
+            255
+          ],
+          "actual_rgba": [
+            255,
+            0,
+            0,
+            255
+          ],
+          "tolerance": 8,
+          "ok": true
+        }
+      ]
+    },
+    "diagnostics": {
+      "ok": true,
+      "enabled": true,
+      "details": {
+        "checks": [
+          {
+            "kind": "event_contains",
+            "condition": {
+              "type": "jit.known_loss",
+              "code": "MULTICOL_SINGLE_COLUMN_FALLBACK",
+              "property": "column-count"
+            },
+            "ok": true
+          },
+          {
+            "kind": "summary_count_at_least",
+            "key": "jit.known_loss.multicol_single_column_fallback",
+            "expected": 1,
+            "actual": 18,
+            "ok": true
+          }
+        ],
+        "summary_counts_total": {
+          "jit.known_loss.multicol_single_column_fallback": 18,
+          "jit.layout.strategy": 3
+        },
+        "summary_context_count": 3,
+        "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_multicol_single_column_fallback_51304_1771604559794492100.jsonl"
+      }
+    }
+  }
+}

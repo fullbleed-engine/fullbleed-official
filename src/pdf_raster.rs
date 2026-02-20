@@ -394,9 +394,9 @@ fn parse_operations(
                         state.active_stroke_opacity = stroke.clamp(0.0, 1.0);
                         let effective_fill =
                             (state.active_fill_opacity * state.opacity_scale_fill).clamp(0.0, 1.0);
-                        let effective_stroke =
-                            (state.active_stroke_opacity * state.opacity_scale_stroke)
-                                .clamp(0.0, 1.0);
+                        let effective_stroke = (state.active_stroke_opacity
+                            * state.opacity_scale_stroke)
+                            .clamp(0.0, 1.0);
                         commands.push(Command::SetOpacity {
                             fill: effective_fill,
                             stroke: effective_stroke,
@@ -419,7 +419,8 @@ fn parse_operations(
             }
             "g" => {
                 if let Some(gray) = op_f32(op, 0) {
-                    state.fill_color_space = Some(RasterColorSpace::Direct(RasterDirectColor::Gray));
+                    state.fill_color_space =
+                        Some(RasterColorSpace::Direct(RasterDirectColor::Gray));
                     commands.push(Command::SetFillColor(Color::rgb(gray, gray, gray)));
                 }
             }
@@ -432,7 +433,8 @@ fn parse_operations(
             }
             "k" => {
                 if let Some([c, m, y, k]) = op_f32_4(op) {
-                    state.fill_color_space = Some(RasterColorSpace::Direct(RasterDirectColor::Cmyk));
+                    state.fill_color_space =
+                        Some(RasterColorSpace::Direct(RasterDirectColor::Cmyk));
                     let (r, g, b) = cmyk_to_rgb(c, m, y, k);
                     commands.push(Command::SetFillColor(Color::rgb(r, g, b)));
                 }
@@ -457,7 +459,9 @@ fn parse_operations(
             }
             "sc" | "scn" => {
                 let comps = op_numeric_operands(op);
-                if let Some(color) = color_from_components_in_space(&comps, state.fill_color_space.as_ref()) {
+                if let Some(color) =
+                    color_from_components_in_space(&comps, state.fill_color_space.as_ref())
+                {
                     commands.push(Command::SetFillColor(color));
                 }
             }
@@ -682,7 +686,9 @@ fn parse_operations(
                         let codes = decode_operand_codes(Some(item), current_font);
                         let emitted_glyph_run = codes
                             .as_deref()
-                            .map(|run| emit_glyph_run(commands, state, page_height, run, current_font))
+                            .map(|run| {
+                                emit_glyph_run(commands, state, page_height, run, current_font)
+                            })
                             .unwrap_or(false);
                         let decoded_text =
                             decode_text_operand(Some(item), current_font).unwrap_or_default();
@@ -1199,7 +1205,10 @@ fn decode_text_operand(obj: Option<&LoObject>, font: Option<&PdfFontResource>) -
     None
 }
 
-fn decode_operand_codes(obj: Option<&LoObject>, font: Option<&PdfFontResource>) -> Option<Vec<u16>> {
+fn decode_operand_codes(
+    obj: Option<&LoObject>,
+    font: Option<&PdfFontResource>,
+) -> Option<Vec<u16>> {
     let obj = obj?;
     let bytes = obj.as_str().ok()?;
     let encoding = font
@@ -2249,10 +2258,12 @@ fn parse_separation_sampled_lookup(
     let encode_hi = encode_min.max(encode_max);
     for tint_idx in 0..=255u16 {
         let tint = (tint_idx as f32) / 255.0;
-        let mut encoded =
-            encode_min + ((tint - domain_min) / domain_span).clamp(0.0, 1.0) * (encode_max - encode_min);
+        let mut encoded = encode_min
+            + ((tint - domain_min) / domain_span).clamp(0.0, 1.0) * (encode_max - encode_min);
         encoded = encoded.clamp(encode_lo, encode_hi);
-        let i0 = encoded.floor().clamp(0.0, (sample_count.saturating_sub(1)) as f32) as usize;
+        let i0 = encoded
+            .floor()
+            .clamp(0.0, (sample_count.saturating_sub(1)) as f32) as usize;
         let i1 = (i0 + 1).min(sample_count.saturating_sub(1));
         let frac = (encoded - (i0 as f32)).clamp(0.0, 1.0);
 
@@ -2320,9 +2331,7 @@ fn parse_icc_based_direct_color(doc: &LoDocument, arr: &[LoObject]) -> Option<Ra
                 let alt = parse_raster_color_space(doc, alt_obj)?;
                 match alt {
                     RasterColorSpace::Direct(mode) => Some(mode),
-                    RasterColorSpace::Indexed { .. } | RasterColorSpace::Separation { .. } => {
-                        None
-                    }
+                    RasterColorSpace::Indexed { .. } | RasterColorSpace::Separation { .. } => None,
                 }
             } else {
                 None
@@ -2729,7 +2738,10 @@ fn is_pdf_whitespace(b: u8) -> bool {
 }
 
 fn is_pdf_delimiter(b: u8) -> bool {
-    matches!(b, b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%')
+    matches!(
+        b,
+        b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%'
+    )
 }
 
 fn is_pdf_separator(b: u8) -> bool {
@@ -2896,7 +2908,10 @@ fn color_from_indexed_components(
     Some(color_from_rgb8(r, g, b))
 }
 
-fn color_from_separation_components(lookup_rgb: &[(u8, u8, u8)], components: &[f32]) -> Option<Color> {
+fn color_from_separation_components(
+    lookup_rgb: &[(u8, u8, u8)],
+    components: &[f32],
+) -> Option<Color> {
     let sample = components.first().copied()?;
     let max_index = lookup_rgb.len().saturating_sub(1);
     let idx = index_component_to_table_index(sample, max_index);
@@ -2918,11 +2933,7 @@ fn index_component_to_table_index(component: f32, max_index: usize) -> usize {
 }
 
 fn color_from_rgb8(r: u8, g: u8, b: u8) -> Color {
-    Color::rgb(
-        (r as f32) / 255.0,
-        (g as f32) / 255.0,
-        (b as f32) / 255.0,
-    )
+    Color::rgb((r as f32) / 255.0, (g as f32) / 255.0, (b as f32) / 255.0)
 }
 
 fn color_from_components(components: &[f32]) -> Option<Color> {
@@ -3154,9 +3165,9 @@ fn lopdf_err(err: lopdf::Error) -> FullBleedError {
 mod tests {
     use super::*;
     use crate::{
-        compose_overlay_with_template_catalog, ComposePagePlan, TemplateAsset, TemplateCatalog,
+        ComposePagePlan, TemplateAsset, TemplateCatalog, compose_overlay_with_template_catalog,
     };
-    use lopdf::{dictionary, Dictionary as LoDictionary, Stream as LoStream};
+    use lopdf::{Dictionary as LoDictionary, Stream as LoStream, dictionary};
     use std::collections::HashMap;
 
     fn write_text_pdf(path: &Path, fill_rgb: (f32, f32, f32), text: &str, width: i64, height: i64) {
@@ -3441,7 +3452,9 @@ mod tests {
         let png = base64::engine::general_purpose::STANDARD
             .decode(b64)
             .expect("base64 decode");
-        let img = image::load_from_memory(&png).expect("decode png").to_rgba8();
+        let img = image::load_from_memory(&png)
+            .expect("decode png")
+            .to_rgba8();
 
         assert_eq!(img.width(), 8);
         assert_eq!(img.height(), 1);
@@ -3489,7 +3502,9 @@ mod tests {
         let png = base64::engine::general_purpose::STANDARD
             .decode(b64)
             .expect("base64 decode");
-        let img = image::load_from_memory(&png).expect("decode png").to_rgba8();
+        let img = image::load_from_memory(&png)
+            .expect("decode png")
+            .to_rgba8();
 
         assert_eq!(img.width(), 2);
         let left = img.get_pixel(0, 0).0;
@@ -3545,7 +3560,9 @@ mod tests {
         let png = base64::engine::general_purpose::STANDARD
             .decode(b64)
             .expect("base64 decode");
-        let img = image::load_from_memory(&png).expect("decode png").to_rgba8();
+        let img = image::load_from_memory(&png)
+            .expect("decode png")
+            .to_rgba8();
 
         let left = img.get_pixel(0, 0).0;
         let right = img.get_pixel(1, 0).0;
@@ -3583,10 +3600,7 @@ mod tests {
                 "ColorSpace" => LoObject::Name(b"DeviceRGB".to_vec()),
                 "SMask" => LoObject::Reference(smask_id),
             },
-            vec![
-                255, 0, 0,
-                255, 0, 0,
-            ],
+            vec![255, 0, 0, 255, 0, 0],
         );
 
         let uri = image_stream_to_data_uri(&doc, &image_stream).expect("image to uri");
@@ -3594,7 +3608,9 @@ mod tests {
         let png = base64::engine::general_purpose::STANDARD
             .decode(b64)
             .expect("base64 decode");
-        let img = image::load_from_memory(&png).expect("decode png").to_rgba8();
+        let img = image::load_from_memory(&png)
+            .expect("decode png")
+            .to_rgba8();
 
         let p0 = img.get_pixel(0, 0).0;
         let p1 = img.get_pixel(1, 0).0;
@@ -3712,15 +3728,9 @@ mod tests {
 
     #[test]
     fn glyph_name_to_unicode_handles_small_caps_and_ligatures() {
-        assert_eq!(
-            glyph_name_to_unicode(b"m.sc").as_deref(),
-            Some("M")
-        );
+        assert_eq!(glyph_name_to_unicode(b"m.sc").as_deref(), Some("M"));
         assert_eq!(glyph_name_to_unicode(b"fi").as_deref(), Some("fi"));
-        assert_eq!(
-            glyph_name_to_unicode(b"uni00A0").as_deref(),
-            Some(" ")
-        );
+        assert_eq!(glyph_name_to_unicode(b"uni00A0").as_deref(), Some(" "));
         assert_eq!(glyph_name_to_unicode(b"period").as_deref(), Some("."));
     }
 
@@ -3853,7 +3863,9 @@ end
         let emitted = emit_glyph_run(&mut commands, &state, 792.0, &[65, 65], Some(&font));
         assert!(emitted);
         match &commands[0] {
-            Command::DrawGlyphRun { advances, m00, m01, .. } => {
+            Command::DrawGlyphRun {
+                advances, m00, m01, ..
+            } => {
                 assert_eq!(advances.len(), 2);
                 assert!(advances[0].1.to_f32().abs() > 1.0);
                 assert!(advances[0].0.to_f32().abs() < 0.1);

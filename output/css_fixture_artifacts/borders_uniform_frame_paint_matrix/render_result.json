@@ -1,0 +1,273 @@
+{
+  "schema": "fullbleed.css_fixture_render_result.v1",
+  "id": "borders_uniform_frame_paint_matrix",
+  "ok": true,
+  "warnings_ok": true,
+  "expected_warnings": [],
+  "actual_warnings": [],
+  "stages": {
+    "parser": {
+      "ok": true,
+      "error": null
+    },
+    "compute": {
+      "ok": true,
+      "glyph_report_count": 0,
+      "page_data_present": false,
+      "assertions_enabled": true,
+      "assertions_ok": true,
+      "assertions": {
+        "assertion_count": 1,
+        "computed_event_count": 9,
+        "checks": [
+          {
+            "index": 0,
+            "ok": true,
+            "node": "html:nth-child(1) > body:nth-child(2) > div.frame:nth-child(1)",
+            "style_mismatches": [],
+            "vars_mismatch": null,
+            "vars_count_mismatch": null
+          }
+        ]
+      }
+    },
+    "layout": {
+      "ok": true,
+      "expected_page_count": 1,
+      "actual_page_count": 1,
+      "dpi": 120,
+      "assertions_enabled": true,
+      "assertions_ok": true,
+      "assertions": {
+        "assertion_count": 8,
+        "checks": [
+          {
+            "index": 0,
+            "ok": true,
+            "kind": "color_run_length",
+            "page": 1,
+            "axis": "x",
+            "fixed": 135,
+            "start": 0,
+            "expected_rgba": [
+              255,
+              255,
+              255,
+              255
+            ],
+            "tolerance": 8,
+            "actual_run_length": 120,
+            "expected_length": 120,
+            "length_tolerance": 1
+          },
+          {
+            "index": 1,
+            "ok": true,
+            "kind": "color_run_length",
+            "page": 1,
+            "axis": "x",
+            "fixed": 135,
+            "start": 120,
+            "expected_rgba": [
+              0,
+              0,
+              255,
+              255
+            ],
+            "tolerance": 8,
+            "actual_run_length": 180,
+            "expected_length": 180,
+            "length_tolerance": 1
+          },
+          {
+            "index": 2,
+            "ok": true,
+            "kind": "color_run_length",
+            "page": 1,
+            "axis": "x",
+            "fixed": 135,
+            "start": 300,
+            "expected_rgba": [
+              255,
+              255,
+              255,
+              255
+            ],
+            "tolerance": 8,
+            "actual_run_length": 180,
+            "expected_length": 180,
+            "length_tolerance": 1
+          },
+          {
+            "index": 3,
+            "ok": true,
+            "kind": "color_run_length",
+            "page": 1,
+            "axis": "x",
+            "fixed": 210,
+            "start": 0,
+            "expected_rgba": [
+              255,
+              255,
+              255,
+              255
+            ],
+            "tolerance": 8,
+            "actual_run_length": 120,
+            "expected_length": 120,
+            "length_tolerance": 1
+          },
+          {
+            "index": 4,
+            "ok": true,
+            "kind": "color_run_length",
+            "page": 1,
+            "axis": "x",
+            "fixed": 210,
+            "start": 120,
+            "expected_rgba": [
+              0,
+              0,
+              255,
+              255
+            ],
+            "tolerance": 8,
+            "actual_run_length": 30,
+            "expected_length": 30,
+            "length_tolerance": 1
+          },
+          {
+            "index": 5,
+            "ok": true,
+            "kind": "color_run_length",
+            "page": 1,
+            "axis": "x",
+            "fixed": 210,
+            "start": 150,
+            "expected_rgba": [
+              255,
+              0,
+              0,
+              255
+            ],
+            "tolerance": 8,
+            "actual_run_length": 120,
+            "expected_length": 120,
+            "length_tolerance": 1
+          },
+          {
+            "index": 6,
+            "ok": true,
+            "kind": "color_run_length",
+            "page": 1,
+            "axis": "x",
+            "fixed": 210,
+            "start": 270,
+            "expected_rgba": [
+              0,
+              0,
+              255,
+              255
+            ],
+            "tolerance": 8,
+            "actual_run_length": 30,
+            "expected_length": 30,
+            "length_tolerance": 1
+          },
+          {
+            "index": 7,
+            "ok": true,
+            "kind": "color_run_length",
+            "page": 1,
+            "axis": "x",
+            "fixed": 210,
+            "start": 300,
+            "expected_rgba": [
+              255,
+              255,
+              255,
+              255
+            ],
+            "tolerance": 8,
+            "actual_run_length": 180,
+            "expected_length": 180,
+            "length_tolerance": 1
+          }
+        ]
+      }
+    },
+    "paint": {
+      "ok": true,
+      "checks": [
+        {
+          "page": 1,
+          "x": 135,
+          "y": 210,
+          "expected_rgba": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "actual_rgba": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "tolerance": 8,
+          "ok": true
+        },
+        {
+          "page": 1,
+          "x": 210,
+          "y": 210,
+          "expected_rgba": [
+            255,
+            0,
+            0,
+            255
+          ],
+          "actual_rgba": [
+            255,
+            0,
+            0,
+            255
+          ],
+          "tolerance": 8,
+          "ok": true
+        },
+        {
+          "page": 1,
+          "x": 285,
+          "y": 210,
+          "expected_rgba": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "actual_rgba": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "tolerance": 8,
+          "ok": true
+        }
+      ]
+    },
+    "diagnostics": {
+      "ok": true,
+      "enabled": true,
+      "details": {
+        "summary_counts_total": {
+          "jit.layout.strategy": 3
+        },
+        "summary_context_count": 3,
+        "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_uniform_frame_paint_matrix_99220_1771612051346740500.jsonl"
+      }
+    }
+  }
+}

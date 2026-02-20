@@ -1309,16 +1309,32 @@ fn system_font_file_candidates(font_name: &str) -> Vec<String> {
                 &["consola.ttf", "cour.ttf", "LiberationMono-Regular.ttf"],
                 &["consolab.ttf", "courbd.ttf", "LiberationMono-Bold.ttf"],
                 &["consolai.ttf", "couri.ttf", "LiberationMono-Italic.ttf"],
-                &["consolaz.ttf", "courbi.ttf", "LiberationMono-BoldItalic.ttf"],
+                &[
+                    "consolaz.ttf",
+                    "courbi.ttf",
+                    "LiberationMono-BoldItalic.ttf",
+                ],
             );
         }
         "serif" => {
             extend_style_candidates(
                 &mut out,
                 style,
-                &["times.ttf", "timesnewroman.ttf", "LiberationSerif-Regular.ttf"],
-                &["timesbd.ttf", "timesnewromanbold.ttf", "LiberationSerif-Bold.ttf"],
-                &["timesi.ttf", "timesnewromanitalic.ttf", "LiberationSerif-Italic.ttf"],
+                &[
+                    "times.ttf",
+                    "timesnewroman.ttf",
+                    "LiberationSerif-Regular.ttf",
+                ],
+                &[
+                    "timesbd.ttf",
+                    "timesnewromanbold.ttf",
+                    "LiberationSerif-Bold.ttf",
+                ],
+                &[
+                    "timesi.ttf",
+                    "timesnewromanitalic.ttf",
+                    "LiberationSerif-Italic.ttf",
+                ],
                 &[
                     "timesbi.ttf",
                     "timesnewromanbolditalic.ttf",
@@ -1385,9 +1401,21 @@ fn system_font_file_candidates(font_name: &str) -> Vec<String> {
             extend_style_candidates(
                 &mut out,
                 style,
-                &["times.ttf", "timesnewroman.ttf", "LiberationSerif-Regular.ttf"],
-                &["timesbd.ttf", "timesnewromanbold.ttf", "LiberationSerif-Bold.ttf"],
-                &["timesi.ttf", "timesnewromanitalic.ttf", "LiberationSerif-Italic.ttf"],
+                &[
+                    "times.ttf",
+                    "timesnewroman.ttf",
+                    "LiberationSerif-Regular.ttf",
+                ],
+                &[
+                    "timesbd.ttf",
+                    "timesnewromanbold.ttf",
+                    "LiberationSerif-Bold.ttf",
+                ],
+                &[
+                    "timesi.ttf",
+                    "timesnewromanitalic.ttf",
+                    "LiberationSerif-Italic.ttf",
+                ],
                 &[
                     "timesbi.ttf",
                     "timesnewromanbolditalic.ttf",
@@ -1402,7 +1430,11 @@ fn system_font_file_candidates(font_name: &str) -> Vec<String> {
                 &["SCHLBK.TTF", "times.ttf", "LiberationSerif-Regular.ttf"],
                 &["SCHLBKB.TTF", "timesbd.ttf", "LiberationSerif-Bold.ttf"],
                 &["SCHLBKI.TTF", "timesi.ttf", "LiberationSerif-Italic.ttf"],
-                &["SCHLBKBI.TTF", "timesbi.ttf", "LiberationSerif-BoldItalic.ttf"],
+                &[
+                    "SCHLBKBI.TTF",
+                    "timesbi.ttf",
+                    "LiberationSerif-BoldItalic.ttf",
+                ],
             );
         }
         "courier" | "courier new" => {
@@ -1412,7 +1444,11 @@ fn system_font_file_candidates(font_name: &str) -> Vec<String> {
                 &["cour.ttf", "consola.ttf", "LiberationMono-Regular.ttf"],
                 &["courbd.ttf", "consolab.ttf", "LiberationMono-Bold.ttf"],
                 &["couri.ttf", "consolai.ttf", "LiberationMono-Italic.ttf"],
-                &["courbi.ttf", "consolaz.ttf", "LiberationMono-BoldItalic.ttf"],
+                &[
+                    "courbi.ttf",
+                    "consolaz.ttf",
+                    "LiberationMono-BoldItalic.ttf",
+                ],
             );
         }
         "noto sans" => {
@@ -1452,7 +1488,11 @@ fn system_font_file_candidates(font_name: &str) -> Vec<String> {
                 &["LiberationMono-Regular.ttf", "consola.ttf"],
                 &["LiberationMono-Bold.ttf", "consolab.ttf", "consola.ttf"],
                 &["LiberationMono-Italic.ttf", "consolai.ttf", "consola.ttf"],
-                &["LiberationMono-BoldItalic.ttf", "consolaz.ttf", "consola.ttf"],
+                &[
+                    "LiberationMono-BoldItalic.ttf",
+                    "consolaz.ttf",
+                    "consola.ttf",
+                ],
             );
         }
         _ => {}
@@ -1504,8 +1544,10 @@ fn parse_system_font_request(font_name: &str) -> (String, FontStyleVariant) {
             continue;
         }
         let mut consumed = false;
-        if matches!(token, "bold" | "semibold" | "demibold" | "black" | "blk" | "bd")
-            || token.contains("blk")
+        if matches!(
+            token,
+            "bold" | "semibold" | "demibold" | "black" | "blk" | "bd"
+        ) || token.contains("blk")
             || token.contains("black")
         {
             bold = true;
@@ -1628,7 +1670,10 @@ fn extend_style_candidates(
             if candidate.is_empty() {
                 continue;
             }
-            if !out.iter().any(|existing| existing.eq_ignore_ascii_case(candidate)) {
+            if !out
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(candidate))
+            {
                 out.push((*candidate).to_string());
             }
         }
@@ -1955,7 +2000,11 @@ mod tests {
         let candidates = system_font_file_candidates("Helvetica-Bold");
         assert!(!candidates.is_empty());
         assert_eq!(candidates[0], "arialbd.ttf");
-        assert!(candidates.iter().any(|v| v.eq_ignore_ascii_case("arial.ttf")));
+        assert!(
+            candidates
+                .iter()
+                .any(|v| v.eq_ignore_ascii_case("arial.ttf"))
+        );
     }
 
     #[test]

@@ -215,8 +215,7 @@ fn annotation_allowed_for_mode(
         ComposeAnnotationMode::None => false,
         ComposeAnnotationMode::LinkOnly => object_is_name(doc, subtype_obj, b"Link"),
         ComposeAnnotationMode::CarryWidgets => {
-            object_is_name(doc, subtype_obj, b"Link")
-                || object_is_name(doc, subtype_obj, b"Widget")
+            object_is_name(doc, subtype_obj, b"Link") || object_is_name(doc, subtype_obj, b"Widget")
         }
     }
 }
@@ -545,11 +544,12 @@ pub fn compose_overlay_with_template_catalog_with_annotation_mode(
             &template_page,
             page_id,
             annotation_mode,
-        )?
-        {
+        )? {
             out_page.set("Annots", annots);
         }
-        composed.objects.insert(page_id, LoObject::Dictionary(out_page));
+        composed
+            .objects
+            .insert(page_id, LoObject::Dictionary(out_page));
         kids.push(LoObject::Reference(page_id));
     }
 
@@ -1335,11 +1335,7 @@ mod tests {
         assert_eq!(summary.pages_written, 1);
 
         let out = LoDocument::load(&out_path).expect("load out");
-        let out_page_id = *out
-            .get_pages()
-            .values()
-            .next()
-            .expect("output page id");
+        let out_page_id = *out.get_pages().values().next().expect("output page id");
         let out_page = out
             .get_object(out_page_id)
             .and_then(LoObject::as_dict)
@@ -1415,13 +1411,15 @@ mod tests {
         .expect("compose");
 
         let out = LoDocument::load(&out_path).expect("load out");
-        let out_page_id = *out
-            .get_pages()
-            .values()
-            .next()
-            .expect("output page id");
-        assert_eq!(page_annotation_count_by_subtype(&out, out_page_id, b"Link"), 0);
-        assert_eq!(page_annotation_count_by_subtype(&out, out_page_id, b"Widget"), 0);
+        let out_page_id = *out.get_pages().values().next().expect("output page id");
+        assert_eq!(
+            page_annotation_count_by_subtype(&out, out_page_id, b"Link"),
+            0
+        );
+        assert_eq!(
+            page_annotation_count_by_subtype(&out, out_page_id, b"Widget"),
+            0
+        );
     }
 
     #[test]
@@ -1468,13 +1466,15 @@ mod tests {
         .expect("compose");
 
         let out = LoDocument::load(&out_path).expect("load out");
-        let out_page_id = *out
-            .get_pages()
-            .values()
-            .next()
-            .expect("output page id");
-        assert_eq!(page_annotation_count_by_subtype(&out, out_page_id, b"Link"), 1);
-        assert_eq!(page_annotation_count_by_subtype(&out, out_page_id, b"Widget"), 1);
+        let out_page_id = *out.get_pages().values().next().expect("output page id");
+        assert_eq!(
+            page_annotation_count_by_subtype(&out, out_page_id, b"Link"),
+            1
+        );
+        assert_eq!(
+            page_annotation_count_by_subtype(&out, out_page_id, b"Widget"),
+            1
+        );
     }
 
     #[test]

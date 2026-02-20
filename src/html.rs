@@ -1,6 +1,6 @@
 use crate::flowable::{
-    AbsolutePositionedFlowable, AlignContent, AlignItems, BorderRadiusSpec, BorderSpec,
-    CalcLength, ContainerFlowable, EdgeSizes, FlexDirection, FlexFlowable, ImageFlowable,
+    AbsolutePositionedFlowable, AlignContent, AlignItems, BorderRadiusSpec, BorderSpec, CalcLength,
+    ContainerFlowable, EdgeSizes, FlexDirection, FlexFlowable, ImageFlowable,
     InlineBlockLayoutFlowable, JustifyContent, LengthSpec, ListItemFlowable, MetaFlowable,
     Paragraph, RelativePositionedFlowable, Spacer, SvgFlowable, TableCell, TableFlowable,
     TextAlign, TextStyle, VerticalAlign,
@@ -9,8 +9,8 @@ use crate::font::FontRegistry;
 use crate::glyph_report::GlyphCoverageReport;
 use crate::style::{
     AlignContentMode, AlignItemsMode, AlignSelfMode, ComputedStyle, DisplayMode, ElementInfo,
-    FlexDirectionMode, FlexWrapMode, JustifyContentMode, OverflowMode, PositionMode,
-    StyleResolver, TextAlignMode, WhiteSpaceMode,
+    FlexDirectionMode, FlexWrapMode, JustifyContentMode, OverflowMode, PositionMode, StyleResolver,
+    TextAlignMode, WhiteSpaceMode,
 };
 use crate::types::Pt;
 use crate::{BreakAfter, BreakBefore, BreakInside, Flowable};
@@ -718,7 +718,7 @@ fn node_to_flowables(
                             text = format!("{before}{text}{after}");
                         }
                         if text.is_empty() {
-                            Vec::new()
+                            container_flowables_with_role(Vec::new(), &style, Some(role))
                         } else {
                             let t_transform = std::time::Instant::now();
                             let text = apply_text_transform(&text, style.text_transform);
@@ -803,7 +803,7 @@ fn node_to_flowables(
                         text = format!("{before}{text}{after}");
                     }
                     if text.is_empty() {
-                        Vec::new()
+                        container_flowables(Vec::new(), &style)
                     } else {
                         let t_transform = std::time::Instant::now();
                         let text = apply_text_transform(&text, style.text_transform);
@@ -1150,10 +1150,17 @@ fn node_to_flowables(
                         style.font_size,
                         style.root_font_size,
                     )
+                    .with_establishes_abs_containing_block(establishes_abs_containing_block(&style))
                     .with_margin(style.margin)
                     .with_border(
                         style.border_width,
                         style.border_color.unwrap_or(style.color),
+                    )
+                    .with_border_colors(
+                        style.resolved_border_colors(style.color).top,
+                        style.resolved_border_colors(style.color).right,
+                        style.resolved_border_colors(style.color).bottom,
+                        style.resolved_border_colors(style.color).left,
                     )
                     .with_border_radius(style.border_radius)
                     .with_padding(style.padding)
@@ -1196,7 +1203,7 @@ fn node_to_flowables(
                 "li" => {
                     let text = extract_text(node, style.white_space);
                     if text.is_empty() {
-                        Vec::new()
+                        container_flowables_with_role(Vec::new(), &style, Some("LI"))
                     } else {
                         let text = apply_text_transform(&text, style.text_transform);
                         let label = format!("- {}", text);
@@ -1287,7 +1294,7 @@ fn node_to_flowables(
                             text = format!("{before}{text}{after}");
                         }
                         if text.is_empty() {
-                            Vec::new()
+                            container_flowables(Vec::new(), &style)
                         } else {
                             let text = apply_text_transform(&text, style.text_transform);
                             let text_style = style.to_text_style();
@@ -2010,6 +2017,7 @@ fn list_flowables(
             }
             let li_body: Box<dyn Flowable> = Box::new(
                 ContainerFlowable::new_pt(li_body_flowables, style.font_size, style.root_font_size)
+                    .with_establishes_abs_containing_block(establishes_abs_containing_block(&style))
                     .with_pagination(style.pagination)
                     .with_tag_role("LBody"),
             );
@@ -2082,6 +2090,10 @@ fn container_flowables(children: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<
     container_flowables_with_role(children, style, None)
 }
 
+fn establishes_abs_containing_block(style: &ComputedStyle) -> bool {
+    !matches!(style.position, PositionMode::Static) || !style.transform.is_empty()
+}
+
 fn container_flowable_with_role(
     children: Vec<LayoutItem>,
     style: &ComputedStyle,
@@ -2102,6 +2114,7 @@ fn container_flowable_with_role(
         {
             let mut container =
                 ContainerFlowable::new_pt(Vec::new(), style.font_size, style.root_font_size)
+                    .with_establishes_abs_containing_block(establishes_abs_containing_block(style))
                     .with_transforms(style.transform.clone())
                     .with_transform_origin(style.transform_origin)
                     .with_pagination(style.pagination);
@@ -2120,10 +2133,17 @@ fn container_flowable_with_role(
 
     let flowables = layout_children_to_flowables(children, forced_line_height);
     let mut container = ContainerFlowable::new_pt(flowables, style.font_size, style.root_font_size)
+        .with_establishes_abs_containing_block(establishes_abs_containing_block(style))
         .with_margin(style.margin)
         .with_border(
             style.border_width,
             style.border_color.unwrap_or(style.color),
+        )
+        .with_border_colors(
+            style.resolved_border_colors(style.color).top,
+            style.resolved_border_colors(style.color).right,
+            style.resolved_border_colors(style.color).bottom,
+            style.resolved_border_colors(style.color).left,
         )
         .with_border_radius(style.border_radius)
         .with_padding(style.padding)
@@ -2209,11 +2229,10 @@ fn wrap_absolute(flowables: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<Layou
         }
     } else {
         let flowables = layout_children_to_flowables(flowables, None);
-        Box::new(ContainerFlowable::new_pt(
-            flowables,
-            style.font_size,
-            style.root_font_size,
-        ))
+        Box::new(
+            ContainerFlowable::new_pt(flowables, style.font_size, style.root_font_size)
+                .with_establishes_abs_containing_block(true),
+        )
     };
     let abs = AbsolutePositionedFlowable::new_pt(
         boxed,
@@ -2221,6 +2240,8 @@ fn wrap_absolute(flowables: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<Layou
         style.inset_top,
         style.inset_right,
         style.inset_bottom,
+        style.width,
+        style.height,
         style.z_index,
         style.font_size,
         style.root_font_size,
@@ -2247,11 +2268,10 @@ fn wrap_relative(flowables: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<Layou
         }
     } else {
         let flowables = layout_children_to_flowables(flowables, None);
-        Box::new(ContainerFlowable::new_pt(
-            flowables,
-            style.font_size,
-            style.root_font_size,
-        ))
+        Box::new(
+            ContainerFlowable::new_pt(flowables, style.font_size, style.root_font_size)
+                .with_establishes_abs_containing_block(true),
+        )
     };
     let rel = RelativePositionedFlowable::new_pt(
         boxed,
@@ -2295,7 +2315,19 @@ fn flex_container_flowables(
     }
 
     let is_grid_like = matches!(style.display, DisplayMode::Grid | DisplayMode::InlineGrid);
-    let grid_track_count = style.grid_columns.unwrap_or(0);
+    let grid_child_hint = if is_grid_like {
+        node.children()
+            .filter(|child| child.as_element().is_some())
+            .count()
+            .max(1)
+    } else {
+        0
+    };
+    let grid_track_count = if is_grid_like {
+        resolve_grid_track_count(style, grid_child_hint)
+    } else {
+        0
+    };
     let grid_basis = if is_grid_like && grid_track_count > 0 {
         Some(grid_track_basis(grid_track_count, style.gap))
     } else {
@@ -2311,6 +2343,8 @@ fn flex_container_flowables(
         Option<LengthSpec>,
         Option<AlignItems>,
     )> = Vec::new();
+    let mut grid_auto_slot = 0usize;
+    let mut grid_occupied_slots: std::collections::HashSet<usize> = std::collections::HashSet::new();
     let mut report = report;
 
     for (child_idx, child) in node.children().enumerate() {
@@ -2361,19 +2395,27 @@ fn flex_container_flowables(
         let effective_width_spec = width_spec.or(grid_basis);
         let effective_grow = if is_grid_like { 0.0 } else { grow };
         let effective_shrink = if is_grid_like { 1.0 } else { shrink };
-        let align_self = child
-            .as_element()
-            .map(|el| {
-                let child_info = element_info(&child, resolver.has_sibling_selectors());
-                let inline_style = el.attributes.borrow().get("style").map(|s| s.to_string());
-                let child_style =
-                    resolver.compute_style(&child_info, style, inline_style.as_deref(), ancestors);
-                align_self_override(child_style.align_self)
-            })
-            .unwrap_or(None);
+        let child_style = child.as_element().map(|el| {
+            let child_info = element_info(&child, resolver.has_sibling_selectors());
+            let inline_style = el.attributes.borrow().get("style").map(|s| s.to_string());
+            resolver.compute_style(&child_info, style, inline_style.as_deref(), ancestors)
+        });
+        let align_self = child_style
+            .as_ref()
+            .and_then(|child_style| align_self_override(child_style.align_self));
+        let effective_order = if is_grid_like && grid_track_count > 0 {
+            grid_item_order_slot(
+                grid_track_count,
+                child_style.as_ref(),
+                &mut grid_auto_slot,
+                &mut grid_occupied_slots,
+            )
+        } else {
+            order
+        };
 
         items_with_order.push((
-            order,
+            effective_order,
             child_idx,
             boxed,
             effective_grow,
@@ -2384,13 +2426,64 @@ fn flex_container_flowables(
     }
 
     items_with_order.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-    let items: Vec<(Box<dyn Flowable>, f32, f32, Option<LengthSpec>, Option<AlignItems>)> =
+    let items: Vec<(
+        Box<dyn Flowable>,
+        f32,
+        f32,
+        Option<LengthSpec>,
+        Option<AlignItems>,
+    )> = if is_grid_like && grid_track_count > 0 {
+        let mut padded_items: Vec<(
+            Box<dyn Flowable>,
+            f32,
+            f32,
+            Option<LengthSpec>,
+            Option<AlignItems>,
+        )> = Vec::new();
+        let max_slot = items_with_order
+            .iter()
+            .map(|(slot, _, _, _, _, _, _)| *slot)
+            .max()
+            .unwrap_or(-1)
+            .max(0);
+        let mut iter = items_with_order.into_iter().peekable();
+        for slot in 0..=max_slot {
+            let mut placed = false;
+            loop {
+                let should_take = iter
+                    .peek()
+                    .map(|(item_slot, _, _, _, _, _, _)| *item_slot == slot)
+                    .unwrap_or(false);
+                if !should_take {
+                    break;
+                }
+                if let Some((_, _, boxed, grow, shrink, width_spec, align_self)) = iter.next() {
+                    padded_items.push((boxed, grow, shrink, width_spec, align_self));
+                    placed = true;
+                }
+            }
+            if !placed {
+                padded_items.push((
+                    Box::new(Spacer::new_pt(Pt::ZERO)) as Box<dyn Flowable>,
+                    0.0,
+                    1.0,
+                    grid_basis,
+                    None,
+                ));
+            }
+        }
+        while let Some((_, _, boxed, grow, shrink, width_spec, align_self)) = iter.next() {
+            padded_items.push((boxed, grow, shrink, width_spec, align_self));
+        }
+        padded_items
+    } else {
         items_with_order
-        .into_iter()
-        .map(|(_, _, boxed, grow, shrink, width_spec, align_self)| {
-            (boxed, grow, shrink, width_spec, align_self)
-        })
-        .collect();
+            .into_iter()
+            .map(|(_, _, boxed, grow, shrink, width_spec, align_self)| {
+                (boxed, grow, shrink, width_spec, align_self)
+            })
+            .collect()
+    };
     let grid_wrap = is_grid_like && grid_track_count > 0 && items.len() > grid_track_count;
 
     let dir = if is_grid_like {
@@ -2442,10 +2535,17 @@ fn flex_container_flowables(
 
     let container =
         ContainerFlowable::new_pt(vec![Box::new(flex)], style.font_size, style.root_font_size)
+            .with_establishes_abs_containing_block(establishes_abs_containing_block(&style))
             .with_margin(style.margin)
             .with_border(
                 style.border_width,
                 style.border_color.unwrap_or(style.color),
+            )
+            .with_border_colors(
+                style.resolved_border_colors(style.color).top,
+                style.resolved_border_colors(style.color).right,
+                style.resolved_border_colors(style.color).bottom,
+                style.resolved_border_colors(style.color).left,
             )
             .with_border_radius(style.border_radius)
             .with_padding(style.padding)
@@ -2756,8 +2856,13 @@ fn table_row_flowable_from_cells(
     }
     let mut report = report;
     let cell_count = cells.len().max(1) as f32;
-    let mut row_items: Vec<(Box<dyn Flowable>, f32, f32, Option<LengthSpec>, Option<AlignItems>)> =
-        Vec::new();
+    let mut row_items: Vec<(
+        Box<dyn Flowable>,
+        f32,
+        f32,
+        Option<LengthSpec>,
+        Option<AlignItems>,
+    )> = Vec::new();
 
     for (cell_node, cell_style) in cells {
         let mut cell_ancestors = ancestors.to_vec();
@@ -2775,19 +2880,29 @@ fn table_row_flowable_from_cells(
         );
         let mut cell_flowables = layout_children_to_flowables(cell_items, None);
         let cell_flowable: Box<dyn Flowable> = if cell_flowables.is_empty() {
-            Box::new(ContainerFlowable::new_pt(
-                Vec::new(),
-                cell_style.font_size,
-                cell_style.root_font_size,
-            ))
+            Box::new(
+                ContainerFlowable::new_pt(
+                    Vec::new(),
+                    cell_style.font_size,
+                    cell_style.root_font_size,
+                )
+                .with_establishes_abs_containing_block(
+                    establishes_abs_containing_block(&cell_style),
+                ),
+            )
         } else if cell_flowables.len() == 1 {
             cell_flowables.remove(0)
         } else {
-            Box::new(ContainerFlowable::new_pt(
-                cell_flowables,
-                cell_style.font_size,
-                cell_style.root_font_size,
-            ))
+            Box::new(
+                ContainerFlowable::new_pt(
+                    cell_flowables,
+                    cell_style.font_size,
+                    cell_style.root_font_size,
+                )
+                .with_establishes_abs_containing_block(
+                    establishes_abs_containing_block(&cell_style),
+                ),
+            )
         };
         let explicit_width = !matches!(cell_style.width, LengthSpec::Auto);
         let width_spec = if explicit_width {
@@ -2830,6 +2945,20 @@ fn table_row_flowable_from_cells(
     Some(row_wrapped)
 }
 
+fn resolve_grid_track_count(style: &ComputedStyle, child_hint: usize) -> usize {
+    if let Some(columns) = style.grid_columns {
+        return columns.max(1);
+    }
+    if let Some(rows) = style.grid_rows {
+        let rows = rows.max(1);
+        return child_hint
+            .saturating_add(rows.saturating_sub(1))
+            .saturating_div(rows)
+            .max(1);
+    }
+    1
+}
+
 fn grid_track_basis(track_count: usize, gap: LengthSpec) -> LengthSpec {
     let columns = track_count.max(1) as f32;
     let base_percent = 1.0 / columns;
@@ -2864,6 +2993,63 @@ fn grid_track_basis(track_count: usize, gap: LengthSpec) -> LengthSpec {
     }
 
     LengthSpec::Calc(calc)
+}
+
+fn grid_explicit_slot(
+    track_count: usize,
+    row_start: Option<usize>,
+    column_start: Option<usize>,
+) -> Option<usize> {
+    if row_start.is_none() && column_start.is_none() {
+        return None;
+    }
+    let columns = track_count.max(1);
+    let row = row_start.unwrap_or(1).saturating_sub(1);
+    let column = column_start.unwrap_or(1).saturating_sub(1);
+    Some(row.saturating_mul(columns).saturating_add(column))
+}
+
+fn grid_item_order_slot(
+    track_count: usize,
+    child_style: Option<&ComputedStyle>,
+    auto_slot: &mut usize,
+    occupied_slots: &mut std::collections::HashSet<usize>,
+) -> i32 {
+    while occupied_slots.contains(auto_slot) {
+        *auto_slot = auto_slot.saturating_add(1);
+    }
+
+    let auto_row = auto_slot
+        .saturating_div(track_count.max(1))
+        .saturating_add(1);
+    let auto_column = auto_slot
+        .checked_rem(track_count.max(1))
+        .unwrap_or(0)
+        .saturating_add(1);
+
+    let mut assigned_slot = child_style
+        .and_then(|style| {
+            if style.grid_row_start.is_some() || style.grid_column_start.is_some() {
+                let row_start = style.grid_row_start.or(Some(auto_row));
+                let column_start = style.grid_column_start.or(Some(auto_column));
+                grid_explicit_slot(track_count, row_start, column_start)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(*auto_slot);
+
+    while occupied_slots.contains(&assigned_slot) {
+        assigned_slot = assigned_slot.saturating_add(1);
+    }
+    occupied_slots.insert(assigned_slot);
+
+    *auto_slot = assigned_slot.saturating_add(1);
+    while occupied_slots.contains(auto_slot) {
+        *auto_slot = auto_slot.saturating_add(1);
+    }
+
+    assigned_slot.min(i32::MAX as usize) as i32
 }
 
 fn table_flowable(
@@ -3294,11 +3480,16 @@ fn table_flowable(
                 } else if cell_flowables.len() == 1 {
                     Some(cell_flowables.remove(0))
                 } else {
-                    Some(Box::new(ContainerFlowable::new_pt(
-                        cell_flowables,
-                        cell_style.font_size,
-                        cell_style.root_font_size,
-                    )) as Box<dyn Flowable>)
+                    Some(Box::new(
+                        ContainerFlowable::new_pt(
+                            cell_flowables,
+                            cell_style.font_size,
+                            cell_style.root_font_size,
+                        )
+                        .with_establishes_abs_containing_block(
+                            establishes_abs_containing_block(&cell_style),
+                        ),
+                    ) as Box<dyn Flowable>)
                 };
             }
 

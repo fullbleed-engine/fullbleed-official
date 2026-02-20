@@ -1,4 +1,4 @@
-use crate::debug::{json_escape, DebugLogger};
+use crate::debug::{DebugLogger, json_escape};
 use crate::flowable::CalcLength;
 use crate::flowable::{
     BackgroundPaint, BorderCollapseMode, BorderRadiusSpec, BorderSpacingSpec, BoxShadowSpec,
@@ -35,8 +35,8 @@ use lightningcss::traits::{Parse, ToCss, Zero};
 use lightningcss::values::calc::{Calc, MathFunction};
 use lightningcss::values::color::{CssColor, SRGB};
 use lightningcss::values::length::{LengthPercentage, LengthValue};
-use lightningcss::values::position as css_position;
 use lightningcss::values::percentage::NumberOrPercentage;
+use lightningcss::values::position as css_position;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -731,6 +731,10 @@ struct StyleDelta {
     color_var: Option<String>,
     background_color_var: Option<String>,
     border_color_var: Option<String>,
+    border_top_color_var: Option<String>,
+    border_right_color_var: Option<String>,
+    border_bottom_color_var: Option<String>,
+    border_left_color_var: Option<String>,
     width: Option<LengthSpec>,
     height: Option<LengthSpec>,
     width_var: Option<String>,
@@ -765,6 +769,10 @@ struct StyleDelta {
     letter_spacing: Option<LengthSpec>,
     border_width: EdgeDelta,
     border_color: Option<ColorSpec>,
+    border_top_color: Option<ColorSpec>,
+    border_right_color: Option<ColorSpec>,
+    border_bottom_color: Option<ColorSpec>,
+    border_left_color: Option<ColorSpec>,
     border_style: BorderStyleDelta,
     border_collapse: Option<BorderCollapseMode>,
     caption_side: Option<CaptionSideMode>,
@@ -800,6 +808,9 @@ struct StyleDelta {
     align_self: Option<AlignSelfMode>,
     align_content: Option<AlignContentMode>,
     grid_columns: Option<usize>,
+    grid_rows: Option<usize>,
+    grid_column_start: Option<usize>,
+    grid_row_start: Option<usize>,
     gap: Option<LengthSpec>,
     gap_var: Option<String>,
     flex_grow: Option<f32>,
@@ -813,6 +824,14 @@ struct StyleDelta {
     custom_font_stacks: HashMap<String, Vec<Arc<str>>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ComputedBorderColors {
+    pub top: Color,
+    pub right: Color,
+    pub bottom: Color,
+    pub left: Color,
+}
+
 #[derive(Debug, Clone)]
 pub struct ComputedStyle {
     pub font_size: Pt,
@@ -823,6 +842,10 @@ pub struct ComputedStyle {
     pending_color_var: Option<String>,
     pending_background_color_var: Option<String>,
     pending_border_color_var: Option<String>,
+    pending_border_top_color_var: Option<String>,
+    pending_border_right_color_var: Option<String>,
+    pending_border_bottom_color_var: Option<String>,
+    pending_border_left_color_var: Option<String>,
     pending_font_name_var: Option<String>,
     pub pagination: Pagination,
     pub margin: EdgeSizes,
@@ -862,6 +885,10 @@ pub struct ComputedStyle {
     pub letter_spacing: Pt,
     pub border_width: EdgeSizes,
     pub border_color: Option<Color>,
+    pub border_top_color: Option<Color>,
+    pub border_right_color: Option<Color>,
+    pub border_bottom_color: Option<Color>,
+    pub border_left_color: Option<Color>,
     border_style: BorderStyleState,
     pub border_collapse: BorderCollapseMode,
     pub caption_side: CaptionSideMode,
@@ -894,6 +921,9 @@ pub struct ComputedStyle {
     pub align_self: AlignSelfMode,
     pub align_content: AlignContentMode,
     pub grid_columns: Option<usize>,
+    pub grid_rows: Option<usize>,
+    pub grid_column_start: Option<usize>,
+    pub grid_row_start: Option<usize>,
     pub gap: LengthSpec,
     pending_gap_var: Option<String>,
     pub flex_grow: f32,
@@ -936,6 +966,16 @@ impl ComputedStyle {
             text_overflow: self.text_overflow,
             word_break: self.word_break,
             letter_spacing: self.letter_spacing,
+        }
+    }
+
+    pub fn resolved_border_colors(&self, fallback: Color) -> ComputedBorderColors {
+        let uniform = self.border_color.unwrap_or(fallback);
+        ComputedBorderColors {
+            top: self.border_top_color.unwrap_or(uniform),
+            right: self.border_right_color.unwrap_or(uniform),
+            bottom: self.border_bottom_color.unwrap_or(uniform),
+            left: self.border_left_color.unwrap_or(uniform),
         }
     }
 }
@@ -983,6 +1023,150 @@ struct EdgeDelta {
     right_var: Option<LengthVarExpr>,
     bottom_var: Option<LengthVarExpr>,
     left_var: Option<LengthVarExpr>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BorderColorTarget {
+    All,
+    Top,
+    Right,
+    Bottom,
+    Left,
+}
+
+fn set_delta_border_color_spec(delta: &mut StyleDelta, target: BorderColorTarget, spec: ColorSpec) {
+    match target {
+        BorderColorTarget::All => {
+            delta.border_color = Some(spec.clone());
+            delta.border_top_color = Some(spec.clone());
+            delta.border_right_color = Some(spec.clone());
+            delta.border_bottom_color = Some(spec.clone());
+            delta.border_left_color = Some(spec);
+            delta.border_color_var = None;
+            delta.border_top_color_var = None;
+            delta.border_right_color_var = None;
+            delta.border_bottom_color_var = None;
+            delta.border_left_color_var = None;
+        }
+        BorderColorTarget::Top => {
+            delta.border_top_color = Some(spec);
+            delta.border_top_color_var = None;
+        }
+        BorderColorTarget::Right => {
+            delta.border_right_color = Some(spec);
+            delta.border_right_color_var = None;
+        }
+        BorderColorTarget::Bottom => {
+            delta.border_bottom_color = Some(spec);
+            delta.border_bottom_color_var = None;
+        }
+        BorderColorTarget::Left => {
+            delta.border_left_color = Some(spec);
+            delta.border_left_color_var = None;
+        }
+    }
+}
+
+fn set_delta_border_color_var(delta: &mut StyleDelta, target: BorderColorTarget, var: String) {
+    match target {
+        BorderColorTarget::All => {
+            delta.border_color_var = Some(var.clone());
+            delta.border_top_color_var = Some(var.clone());
+            delta.border_right_color_var = Some(var.clone());
+            delta.border_bottom_color_var = Some(var.clone());
+            delta.border_left_color_var = Some(var);
+            delta.border_color = None;
+            delta.border_top_color = None;
+            delta.border_right_color = None;
+            delta.border_bottom_color = None;
+            delta.border_left_color = None;
+        }
+        BorderColorTarget::Top => {
+            delta.border_top_color_var = Some(var);
+            delta.border_top_color = None;
+        }
+        BorderColorTarget::Right => {
+            delta.border_right_color_var = Some(var);
+            delta.border_right_color = None;
+        }
+        BorderColorTarget::Bottom => {
+            delta.border_bottom_color_var = Some(var);
+            delta.border_bottom_color = None;
+        }
+        BorderColorTarget::Left => {
+            delta.border_left_color_var = Some(var);
+            delta.border_left_color = None;
+        }
+    }
+}
+
+fn apply_border_color_from_raw(delta: &mut StyleDelta, target: BorderColorTarget, raw: &str) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    if lowered.contains("var(") {
+        if let Some((color, alpha)) = parse_color_string(&lowered) {
+            set_delta_border_color_spec(
+                delta,
+                target,
+                ColorSpec::Value(blend_over_white(color, alpha)),
+            );
+        } else {
+            set_delta_border_color_var(delta, target, lowered);
+        }
+        return true;
+    }
+    if let Some((color, alpha)) = parse_color_string(&lowered) {
+        set_delta_border_color_spec(
+            delta,
+            target,
+            ColorSpec::Value(blend_over_white(color, alpha)),
+        );
+        return true;
+    }
+    if let Some(var) = var_name_from_string(&lowered) {
+        set_delta_border_color_var(delta, target, var);
+        return true;
+    }
+    false
+}
+
+fn border_color_target_from_property_name(property_name: &str) -> BorderColorTarget {
+    match property_name {
+        "border-top-color" | "border-top" | "border-block-start-color" | "border-block-start" => {
+            BorderColorTarget::Top
+        }
+        "border-right-color" | "border-right" | "border-inline-end-color" | "border-inline-end" => {
+            BorderColorTarget::Right
+        }
+        "border-bottom-color" | "border-bottom" | "border-block-end-color" | "border-block-end" => {
+            BorderColorTarget::Bottom
+        }
+        "border-left-color" | "border-left" | "border-inline-start-color" | "border-inline-start" => {
+            BorderColorTarget::Left
+        }
+        _ => BorderColorTarget::All,
+    }
+}
+
+fn border_color_target_from_property_id(property_id: &PropertyId) -> BorderColorTarget {
+    match property_id {
+        PropertyId::BorderTop
+        | PropertyId::BorderTopColor
+        | PropertyId::BorderBlockStart
+        | PropertyId::BorderBlockStartColor => BorderColorTarget::Top,
+        PropertyId::BorderRight
+        | PropertyId::BorderRightColor
+        | PropertyId::BorderInlineEnd
+        | PropertyId::BorderInlineEndColor => BorderColorTarget::Right,
+        PropertyId::BorderBottom
+        | PropertyId::BorderBottomColor
+        | PropertyId::BorderBlockEnd
+        | PropertyId::BorderBlockEndColor => BorderColorTarget::Bottom,
+        PropertyId::BorderLeft
+        | PropertyId::BorderLeftColor
+        | PropertyId::BorderInlineStart
+        | PropertyId::BorderInlineStartColor => BorderColorTarget::Left,
+        _ => BorderColorTarget::All,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1371,6 +1555,10 @@ impl StyleResolver {
             pending_color_var: None,
             pending_background_color_var: None,
             pending_border_color_var: None,
+            pending_border_top_color_var: None,
+            pending_border_right_color_var: None,
+            pending_border_bottom_color_var: None,
+            pending_border_left_color_var: None,
             pending_font_name_var: None,
             pagination: Pagination::default(),
             margin: EdgeSizes::zero(),
@@ -1410,6 +1598,10 @@ impl StyleResolver {
             letter_spacing: Pt::ZERO,
             border_width: EdgeSizes::zero(),
             border_color: None,
+            border_top_color: None,
+            border_right_color: None,
+            border_bottom_color: None,
+            border_left_color: None,
             border_style: BorderStyleState::none(),
             border_collapse: BorderCollapseMode::Separate,
             caption_side: CaptionSideMode::Top,
@@ -1442,6 +1634,9 @@ impl StyleResolver {
             align_self: AlignSelfMode::Auto,
             align_content: AlignContentMode::FlexStart,
             grid_columns: None,
+            grid_rows: None,
+            grid_column_start: None,
+            grid_row_start: None,
             gap: LengthSpec::Absolute(Pt::ZERO),
             pending_gap_var: None,
             flex_grow: 0.0,
@@ -1474,6 +1669,10 @@ impl StyleResolver {
             pending_color_var: None,
             pending_background_color_var: None,
             pending_border_color_var: None,
+            pending_border_top_color_var: None,
+            pending_border_right_color_var: None,
+            pending_border_bottom_color_var: None,
+            pending_border_left_color_var: None,
             pending_font_name_var: None,
             pagination: Pagination::default(),
             margin: EdgeSizes::zero(),
@@ -1513,6 +1712,10 @@ impl StyleResolver {
             letter_spacing: parent.letter_spacing,
             border_width: EdgeSizes::zero(),
             border_color: None,
+            border_top_color: None,
+            border_right_color: None,
+            border_bottom_color: None,
+            border_left_color: None,
             border_style: BorderStyleState::none(),
             border_collapse: BorderCollapseMode::Separate,
             caption_side: parent.caption_side,
@@ -1545,6 +1748,9 @@ impl StyleResolver {
             align_self: AlignSelfMode::Auto,
             align_content: parent.align_content,
             grid_columns: None,
+            grid_rows: None,
+            grid_column_start: None,
+            grid_row_start: None,
             gap: parent.gap,
             pending_gap_var: None,
             flex_grow: parent.flex_grow,
@@ -1888,6 +2094,26 @@ impl StyleResolver {
                 unresolved.push(name);
             }
         }
+        if let Some(name) = computed.pending_border_top_color_var.clone() {
+            if resolve_custom_color(&computed, &name).is_none() {
+                unresolved.push(name);
+            }
+        }
+        if let Some(name) = computed.pending_border_right_color_var.clone() {
+            if resolve_custom_color(&computed, &name).is_none() {
+                unresolved.push(name);
+            }
+        }
+        if let Some(name) = computed.pending_border_bottom_color_var.clone() {
+            if resolve_custom_color(&computed, &name).is_none() {
+                unresolved.push(name);
+            }
+        }
+        if let Some(name) = computed.pending_border_left_color_var.clone() {
+            if resolve_custom_color(&computed, &name).is_none() {
+                unresolved.push(name);
+            }
+        }
         if let Some(name) = computed.pending_font_name_var.clone() {
             if resolve_custom_font_stack_from_maps(
                 &computed.custom_font_stacks,
@@ -1939,6 +2165,10 @@ impl StyleResolver {
             pending_color_var: None,
             pending_background_color_var: None,
             pending_border_color_var: None,
+            pending_border_top_color_var: None,
+            pending_border_right_color_var: None,
+            pending_border_bottom_color_var: None,
+            pending_border_left_color_var: None,
             pending_font_name_var: None,
             pagination: Pagination::default(),
             margin: EdgeSizes::zero(),
@@ -1978,6 +2208,10 @@ impl StyleResolver {
             letter_spacing: parent.letter_spacing,
             border_width: EdgeSizes::zero(),
             border_color: None,
+            border_top_color: None,
+            border_right_color: None,
+            border_bottom_color: None,
+            border_left_color: None,
             border_style: BorderStyleState::none(),
             border_collapse: BorderCollapseMode::Separate,
             caption_side: parent.caption_side,
@@ -2010,6 +2244,9 @@ impl StyleResolver {
             align_self: AlignSelfMode::Auto,
             align_content: parent.align_content,
             grid_columns: None,
+            grid_rows: None,
+            grid_column_start: None,
+            grid_row_start: None,
             gap: parent.gap,
             pending_gap_var: None,
             flex_grow: parent.flex_grow,
@@ -2653,6 +2890,26 @@ fn log_declaration_no_effects(
             logger.increment("jit.known_loss.layout_mode_normalized", 1);
         }
 
+        if let Some(name) = declaration_multicol_fallback_property_name(property) {
+            let json = format!(
+                "{{\"type\":\"jit.known_loss\",\"code\":\"MULTICOL_SINGLE_COLUMN_FALLBACK\",\"property\":{},\"fallback\":\"single-column\",\"selector\":{}}}",
+                json_string(&name),
+                json_string(selector)
+            );
+            logger.log_json(&json);
+            logger.increment("jit.known_loss.multicol_single_column_fallback", 1);
+        }
+
+        if let Some(name) = declaration_filters_effects_fallback_property_name(property) {
+            let json = format!(
+                "{{\"type\":\"jit.known_loss\",\"code\":\"FILTERS_EFFECTS_FALLBACK\",\"property\":{},\"fallback\":\"effect-ignored\",\"selector\":{}}}",
+                json_string(&name),
+                json_string(selector)
+            );
+            logger.log_json(&json);
+            logger.increment("jit.known_loss.filters_effects_fallback", 1);
+        }
+
         let name = declaration_no_effect_property_name(property).or_else(|| {
             declaration_parsed_no_effect_property_name(property).map(|v| v.to_string())
         });
@@ -2667,6 +2924,91 @@ fn log_declaration_no_effects(
         logger.log_json(&json);
         logger.increment("jit.known_loss.declaration_parsed_no_effect", 1);
     }
+}
+
+fn declaration_multicol_fallback_property_name(property: &Property) -> Option<String> {
+    let name = match property {
+        Property::Custom(custom) => match &custom.name {
+            CustomPropertyName::Unknown(name) => name.as_ref().to_ascii_lowercase(),
+            _ => return None,
+        },
+        Property::Unparsed(unparsed) => match &unparsed.property_id {
+            PropertyId::Custom(name) => name.as_ref().to_ascii_lowercase(),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    if is_multicol_fallback_property_name(&name) {
+        Some(name)
+    } else {
+        None
+    }
+}
+
+fn is_multicol_fallback_property_name(name: &str) -> bool {
+    matches!(
+        name,
+        "columns"
+            | "column-count"
+            | "column-width"
+            | "column-fill"
+            | "column-span"
+            | "column-rule"
+            | "column-rule-width"
+            | "column-rule-style"
+            | "column-rule-color"
+    )
+}
+
+fn declaration_filters_effects_fallback_property_name(property: &Property) -> Option<String> {
+    match property {
+        Property::Opacity(_) => Some("opacity".to_string()),
+        Property::Filter(_, _) => Some("filter".to_string()),
+        Property::BackdropFilter(_, _) => Some("backdrop-filter".to_string()),
+        Property::ClipPath(_, _) => Some("clip-path".to_string()),
+        Property::Custom(custom) => match &custom.name {
+            CustomPropertyName::Unknown(name) => {
+                let name = name.as_ref().to_ascii_lowercase();
+                if is_filters_effects_fallback_property_name(&name) {
+                    Some(name)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        },
+        Property::Unparsed(unparsed) => match &unparsed.property_id {
+            PropertyId::Opacity => Some("opacity".to_string()),
+            PropertyId::Filter(_) => Some("filter".to_string()),
+            PropertyId::BackdropFilter(_) => Some("backdrop-filter".to_string()),
+            PropertyId::ClipPath(_) => Some("clip-path".to_string()),
+            PropertyId::Custom(name) => {
+                let name = name.as_ref().to_ascii_lowercase();
+                if is_filters_effects_fallback_property_name(&name) {
+                    Some(name)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn is_filters_effects_fallback_property_name(name: &str) -> bool {
+    matches!(
+        name,
+        "opacity"
+            | "filter"
+            | "backdrop-filter"
+            | "clip-path"
+            | "mix-blend-mode"
+            | "isolation"
+            | "mask"
+            | "mask-image"
+            | "mask-composite"
+    )
 }
 
 fn declaration_no_effect_property_name(property: &Property) -> Option<String> {
@@ -2727,8 +3069,6 @@ fn declaration_parsed_no_effect_property_name(property: &Property) -> Option<&'s
     match property {
         Property::JustifyItems(_) => Some("justify-items"),
         Property::JustifySelf(_) => Some("justify-self"),
-        Property::PlaceItems(_) => Some("place-items"),
-        Property::PlaceSelf(_) => Some("place-self"),
         Property::GridTemplateRows(_) => Some("grid-template-rows"),
         Property::GridAutoColumns(_) => Some("grid-auto-columns"),
         Property::GridAutoRows(_) => Some("grid-auto-rows"),
@@ -2746,8 +3086,6 @@ fn declaration_parsed_no_effect_property_name(property: &Property) -> Option<&'s
         Property::Unparsed(unparsed) => match &unparsed.property_id {
             PropertyId::JustifyItems => Some("justify-items"),
             PropertyId::JustifySelf => Some("justify-self"),
-            PropertyId::PlaceItems => Some("place-items"),
-            PropertyId::PlaceSelf => Some("place-self"),
             PropertyId::GridTemplateRows => Some("grid-template-rows"),
             PropertyId::GridAutoColumns => Some("grid-auto-columns"),
             PropertyId::GridAutoRows => Some("grid-auto-rows"),
@@ -2825,6 +3163,24 @@ fn is_engine_supported_unknown_property(name: &str) -> bool {
             | "gap"
             | "row-gap"
             | "column-gap"
+            | "columns"
+            | "column-count"
+            | "column-width"
+            | "column-fill"
+            | "column-span"
+            | "column-rule"
+            | "column-rule-width"
+            | "column-rule-style"
+            | "column-rule-color"
+            | "opacity"
+            | "filter"
+            | "backdrop-filter"
+            | "clip-path"
+            | "mix-blend-mode"
+            | "isolation"
+            | "mask"
+            | "mask-image"
+            | "mask-composite"
             | "box-shadow"
             | "transform-origin"
             | "content"
@@ -2834,6 +3190,35 @@ fn is_engine_supported_unknown_property(name: &str) -> bool {
             | "margin-right"
             | "margin-bottom"
             | "margin-left"
+            | "margin-block-start"
+            | "margin-block-end"
+            | "margin-inline-start"
+            | "margin-inline-end"
+            | "margin-block"
+            | "margin-inline"
+            | "padding"
+            | "padding-top"
+            | "padding-right"
+            | "padding-bottom"
+            | "padding-left"
+            | "padding-block-start"
+            | "padding-block-end"
+            | "padding-inline-start"
+            | "padding-inline-end"
+            | "padding-block"
+            | "padding-inline"
+            | "inline-size"
+            | "block-size"
+            | "min-inline-size"
+            | "max-inline-size"
+            | "min-block-size"
+            | "max-block-size"
+            | "inset-inline-start"
+            | "inset-inline-end"
+            | "inset-block-start"
+            | "inset-block-end"
+            | "inset-inline"
+            | "inset-block"
     )
 }
 
@@ -3502,8 +3887,7 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                         ..
                     } => AlignContentMode::Center,
                     css_align::AlignContent::ContentPosition {
-                        value: css_align::ContentPosition::End
-                            | css_align::ContentPosition::FlexEnd,
+                        value: css_align::ContentPosition::End | css_align::ContentPosition::FlexEnd,
                         ..
                     } => AlignContentMode::FlexEnd,
                     _ => AlignContentMode::FlexStart,
@@ -3517,9 +3901,59 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                     }
                 }
             }
+            Property::PlaceItems(value) => {
+                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
+                    if let Some(align) = parse_place_items_align_str(&raw) {
+                        delta.align_items = Some(align);
+                    }
+                }
+            }
+            Property::PlaceSelf(value) => {
+                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
+                    if let Some(align) = parse_place_self_align_str(&raw) {
+                        delta.align_self = Some(align);
+                    }
+                }
+            }
             Property::GridTemplateColumns(value) => {
                 if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
                     delta.grid_columns = parse_grid_track_count(&raw);
+                }
+            }
+            Property::GridTemplateRows(value) => {
+                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
+                    delta.grid_rows = parse_grid_track_count(&raw);
+                }
+            }
+            Property::GridColumnStart(value) => {
+                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
+                    delta.grid_column_start = parse_grid_track_start(&raw);
+                }
+            }
+            Property::GridRowStart(value) => {
+                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
+                    delta.grid_row_start = parse_grid_track_start(&raw);
+                }
+            }
+            Property::GridColumn(value) => {
+                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
+                    delta.grid_column_start = parse_grid_track_start(&raw);
+                }
+            }
+            Property::GridRow(value) => {
+                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
+                    delta.grid_row_start = parse_grid_track_start(&raw);
+                }
+            }
+            Property::GridArea(value) => {
+                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
+                    let (row_start, col_start) = parse_grid_area_starts(&raw);
+                    if row_start.is_some() {
+                        delta.grid_row_start = row_start;
+                    }
+                    if col_start.is_some() {
+                        delta.grid_column_start = col_start;
+                    }
                 }
             }
             Property::Gap(value) => {
@@ -3594,7 +4028,16 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                 delta.width = length_spec_from_size(value);
                 delta.width_var = None;
             }
+            Property::InlineSize(value) => {
+                // Baseline logical mapping for horizontal-tb/LTR: inline axis -> width.
+                delta.width = length_spec_from_size(value);
+                delta.width_var = None;
+            }
             Property::MinWidth(value) => {
+                delta.min_width = length_spec_from_size(value);
+                delta.min_width_var = None;
+            }
+            Property::MinInlineSize(value) => {
                 delta.min_width = length_spec_from_size(value);
                 delta.min_width_var = None;
             }
@@ -3602,7 +4045,16 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                 delta.max_width = length_spec_from_max_size(value);
                 delta.max_width_var = None;
             }
+            Property::MaxInlineSize(value) => {
+                delta.max_width = length_spec_from_max_size(value);
+                delta.max_width_var = None;
+            }
             Property::Height(value) => {
+                delta.height = length_spec_from_size(value);
+                delta.height_var = None;
+            }
+            Property::BlockSize(value) => {
+                // Baseline logical mapping for horizontal-tb/LTR: block axis -> height.
                 delta.height = length_spec_from_size(value);
                 delta.height_var = None;
             }
@@ -3610,7 +4062,15 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                 delta.min_height = length_spec_from_size(value);
                 delta.min_height_var = None;
             }
+            Property::MinBlockSize(value) => {
+                delta.min_height = length_spec_from_size(value);
+                delta.min_height_var = None;
+            }
             Property::MaxHeight(value) => {
+                delta.max_height = length_spec_from_max_size(value);
+                delta.max_height_var = None;
+            }
+            Property::MaxBlockSize(value) => {
                 delta.max_height = length_spec_from_max_size(value);
                 delta.max_height_var = None;
             }
@@ -3618,7 +4078,15 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                 delta.inset_left = length_spec_from_lpa(value);
                 delta.inset_left_var = None;
             }
+            Property::InsetInlineStart(value) => {
+                delta.inset_left = length_spec_from_lpa(value);
+                delta.inset_left_var = None;
+            }
             Property::Top(value) => {
+                delta.inset_top = length_spec_from_lpa(value);
+                delta.inset_top_var = None;
+            }
+            Property::InsetBlockStart(value) => {
                 delta.inset_top = length_spec_from_lpa(value);
                 delta.inset_top_var = None;
             }
@@ -3626,7 +4094,15 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                 delta.inset_right = length_spec_from_lpa(value);
                 delta.inset_right_var = None;
             }
+            Property::InsetInlineEnd(value) => {
+                delta.inset_right = length_spec_from_lpa(value);
+                delta.inset_right_var = None;
+            }
             Property::Bottom(value) => {
+                delta.inset_bottom = length_spec_from_lpa(value);
+                delta.inset_bottom_var = None;
+            }
+            Property::InsetBlockEnd(value) => {
                 delta.inset_bottom = length_spec_from_lpa(value);
                 delta.inset_bottom_var = None;
             }
@@ -3640,16 +4116,40 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                 delta.inset_bottom_var = None;
                 delta.inset_left_var = None;
             }
+            Property::InsetInline(value) => {
+                delta.inset_left = length_spec_from_lpa(&value.inline_start);
+                delta.inset_right = length_spec_from_lpa(&value.inline_end);
+                delta.inset_left_var = None;
+                delta.inset_right_var = None;
+            }
+            Property::InsetBlock(value) => {
+                delta.inset_top = length_spec_from_lpa(&value.block_start);
+                delta.inset_bottom = length_spec_from_lpa(&value.block_end);
+                delta.inset_top_var = None;
+                delta.inset_bottom_var = None;
+            }
             Property::MarginTop(value) => {
+                delta.margin.top = length_spec_from_lpa(value);
+            }
+            Property::MarginBlockStart(value) => {
                 delta.margin.top = length_spec_from_lpa(value);
             }
             Property::MarginRight(value) => {
                 delta.margin.right = length_spec_from_lpa(value);
             }
+            Property::MarginInlineEnd(value) => {
+                delta.margin.right = length_spec_from_lpa(value);
+            }
             Property::MarginBottom(value) => {
                 delta.margin.bottom = length_spec_from_lpa(value);
             }
+            Property::MarginBlockEnd(value) => {
+                delta.margin.bottom = length_spec_from_lpa(value);
+            }
             Property::MarginLeft(value) => {
+                delta.margin.left = length_spec_from_lpa(value);
+            }
+            Property::MarginInlineStart(value) => {
                 delta.margin.left = length_spec_from_lpa(value);
             }
             Property::Margin(value) => {
@@ -3658,16 +4158,36 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                 delta.margin.bottom = length_spec_from_lpa(&value.bottom);
                 delta.margin.left = length_spec_from_lpa(&value.left);
             }
+            Property::MarginBlock(value) => {
+                delta.margin.top = length_spec_from_lpa(&value.block_start);
+                delta.margin.bottom = length_spec_from_lpa(&value.block_end);
+            }
+            Property::MarginInline(value) => {
+                delta.margin.left = length_spec_from_lpa(&value.inline_start);
+                delta.margin.right = length_spec_from_lpa(&value.inline_end);
+            }
             Property::PaddingTop(value) => {
+                delta.padding.top = length_spec_from_lpa(value);
+            }
+            Property::PaddingBlockStart(value) => {
                 delta.padding.top = length_spec_from_lpa(value);
             }
             Property::PaddingRight(value) => {
                 delta.padding.right = length_spec_from_lpa(value);
             }
+            Property::PaddingInlineEnd(value) => {
+                delta.padding.right = length_spec_from_lpa(value);
+            }
             Property::PaddingBottom(value) => {
                 delta.padding.bottom = length_spec_from_lpa(value);
             }
+            Property::PaddingBlockEnd(value) => {
+                delta.padding.bottom = length_spec_from_lpa(value);
+            }
             Property::PaddingLeft(value) => {
+                delta.padding.left = length_spec_from_lpa(value);
+            }
+            Property::PaddingInlineStart(value) => {
                 delta.padding.left = length_spec_from_lpa(value);
             }
             Property::Padding(value) => {
@@ -3675,6 +4195,14 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                 delta.padding.right = length_spec_from_lpa(&value.right);
                 delta.padding.bottom = length_spec_from_lpa(&value.bottom);
                 delta.padding.left = length_spec_from_lpa(&value.left);
+            }
+            Property::PaddingBlock(value) => {
+                delta.padding.top = length_spec_from_lpa(&value.block_start);
+                delta.padding.bottom = length_spec_from_lpa(&value.block_end);
+            }
+            Property::PaddingInline(value) => {
+                delta.padding.left = length_spec_from_lpa(&value.inline_start);
+                delta.padding.right = length_spec_from_lpa(&value.inline_end);
             }
             Property::BorderWidth(value) => {
                 delta.border_width.top = border_width_spec(&value.top);
@@ -3708,209 +4236,128 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
             }
             Property::BorderColor(value) => {
                 if let Ok(raw) = value.top.to_css_string(PrinterOptions::default()) {
-                    if raw.to_ascii_lowercase().contains("var(") {
-                        if let Some((color, alpha)) = parse_color_string(&raw) {
-                            delta.border_color =
-                                Some(ColorSpec::Value(blend_over_white(color, alpha)));
-                        } else {
-                            delta.border_color_var = Some(raw.trim().to_ascii_lowercase());
-                        }
-                        continue;
-                    }
-                    if let Some((color, alpha)) = parse_color_string(&raw) {
-                        delta.border_color = Some(ColorSpec::Value(blend_over_white(color, alpha)));
-                        continue;
-                    } else if let Some(var) = var_name_from_string(&raw) {
-                        delta.border_color_var = Some(var);
+                    if apply_border_color_from_raw(delta, BorderColorTarget::All, &raw) {
                         continue;
                     }
                 }
                 if let Some(color) = css_color_to_color(&value.top) {
-                    delta.border_color = Some(ColorSpec::Value(color));
+                    set_delta_border_color_spec(
+                        delta,
+                        BorderColorTarget::All,
+                        ColorSpec::Value(color),
+                    );
                 }
             }
             Property::BorderTopColor(value) => {
                 if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    if raw.to_ascii_lowercase().contains("var(") {
-                        if let Some((color, alpha)) = parse_color_string(&raw) {
-                            delta.border_color =
-                                Some(ColorSpec::Value(blend_over_white(color, alpha)));
-                        } else {
-                            delta.border_color_var = Some(raw.trim().to_ascii_lowercase());
-                        }
-                        continue;
-                    }
-                    if let Some((color, alpha)) = parse_color_string(&raw) {
-                        delta.border_color = Some(ColorSpec::Value(blend_over_white(color, alpha)));
-                        continue;
-                    } else if let Some(var) = var_name_from_string(&raw) {
-                        delta.border_color_var = Some(var);
+                    if apply_border_color_from_raw(delta, BorderColorTarget::Top, &raw) {
                         continue;
                     }
                 }
                 if let Some(color) = css_color_to_color(value) {
-                    delta.border_color = Some(ColorSpec::Value(color));
+                    set_delta_border_color_spec(
+                        delta,
+                        BorderColorTarget::Top,
+                        ColorSpec::Value(color),
+                    );
                 }
             }
             Property::BorderRightColor(value) => {
                 if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    if raw.to_ascii_lowercase().contains("var(") {
-                        if let Some((color, alpha)) = parse_color_string(&raw) {
-                            delta.border_color =
-                                Some(ColorSpec::Value(blend_over_white(color, alpha)));
-                        } else {
-                            delta.border_color_var = Some(raw.trim().to_ascii_lowercase());
-                        }
-                        continue;
-                    }
-                    if let Some((color, alpha)) = parse_color_string(&raw) {
-                        delta.border_color = Some(ColorSpec::Value(blend_over_white(color, alpha)));
-                        continue;
-                    } else if let Some(var) = var_name_from_string(&raw) {
-                        delta.border_color_var = Some(var);
+                    if apply_border_color_from_raw(delta, BorderColorTarget::Right, &raw) {
                         continue;
                     }
                 }
                 if let Some(color) = css_color_to_color(value) {
-                    delta.border_color = Some(ColorSpec::Value(color));
+                    set_delta_border_color_spec(
+                        delta,
+                        BorderColorTarget::Right,
+                        ColorSpec::Value(color),
+                    );
                 }
             }
             Property::BorderBottomColor(value) => {
                 if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    if raw.to_ascii_lowercase().contains("var(") {
-                        if let Some((color, alpha)) = parse_color_string(&raw) {
-                            delta.border_color =
-                                Some(ColorSpec::Value(blend_over_white(color, alpha)));
-                        } else {
-                            delta.border_color_var = Some(raw.trim().to_ascii_lowercase());
-                        }
-                        continue;
-                    }
-                    if let Some((color, alpha)) = parse_color_string(&raw) {
-                        delta.border_color = Some(ColorSpec::Value(blend_over_white(color, alpha)));
-                        continue;
-                    } else if let Some(var) = var_name_from_string(&raw) {
-                        delta.border_color_var = Some(var);
+                    if apply_border_color_from_raw(delta, BorderColorTarget::Bottom, &raw) {
                         continue;
                     }
                 }
                 if let Some(color) = css_color_to_color(value) {
-                    delta.border_color = Some(ColorSpec::Value(color));
+                    set_delta_border_color_spec(
+                        delta,
+                        BorderColorTarget::Bottom,
+                        ColorSpec::Value(color),
+                    );
                 }
             }
             Property::BorderLeftColor(value) => {
                 if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    if raw.to_ascii_lowercase().contains("var(") {
-                        if let Some((color, alpha)) = parse_color_string(&raw) {
-                            delta.border_color =
-                                Some(ColorSpec::Value(blend_over_white(color, alpha)));
-                        } else {
-                            delta.border_color_var = Some(raw.trim().to_ascii_lowercase());
-                        }
-                        continue;
-                    }
-                    if let Some((color, alpha)) = parse_color_string(&raw) {
-                        delta.border_color = Some(ColorSpec::Value(blend_over_white(color, alpha)));
-                        continue;
-                    } else if let Some(var) = var_name_from_string(&raw) {
-                        delta.border_color_var = Some(var);
+                    if apply_border_color_from_raw(delta, BorderColorTarget::Left, &raw) {
                         continue;
                     }
                 }
                 if let Some(color) = css_color_to_color(value) {
-                    delta.border_color = Some(ColorSpec::Value(color));
+                    set_delta_border_color_spec(
+                        delta,
+                        BorderColorTarget::Left,
+                        ColorSpec::Value(color),
+                    );
                 }
             }
             Property::BorderBlockStartColor(value) => {
                 if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    if raw.to_ascii_lowercase().contains("var(") {
-                        if let Some((color, alpha)) = parse_color_string(&raw) {
-                            delta.border_color =
-                                Some(ColorSpec::Value(blend_over_white(color, alpha)));
-                        } else {
-                            delta.border_color_var = Some(raw.trim().to_ascii_lowercase());
-                        }
-                        continue;
-                    }
-                    if let Some((color, alpha)) = parse_color_string(&raw) {
-                        delta.border_color = Some(ColorSpec::Value(blend_over_white(color, alpha)));
-                        continue;
-                    } else if let Some(var) = var_name_from_string(&raw) {
-                        delta.border_color_var = Some(var);
+                    if apply_border_color_from_raw(delta, BorderColorTarget::Top, &raw) {
                         continue;
                     }
                 }
                 if let Some(color) = css_color_to_color(value) {
-                    delta.border_color = Some(ColorSpec::Value(color));
+                    set_delta_border_color_spec(
+                        delta,
+                        BorderColorTarget::Top,
+                        ColorSpec::Value(color),
+                    );
                 }
             }
             Property::BorderBlockEndColor(value) => {
                 if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    if raw.to_ascii_lowercase().contains("var(") {
-                        if let Some((color, alpha)) = parse_color_string(&raw) {
-                            delta.border_color =
-                                Some(ColorSpec::Value(blend_over_white(color, alpha)));
-                        } else {
-                            delta.border_color_var = Some(raw.trim().to_ascii_lowercase());
-                        }
-                        continue;
-                    }
-                    if let Some((color, alpha)) = parse_color_string(&raw) {
-                        delta.border_color = Some(ColorSpec::Value(blend_over_white(color, alpha)));
-                        continue;
-                    } else if let Some(var) = var_name_from_string(&raw) {
-                        delta.border_color_var = Some(var);
+                    if apply_border_color_from_raw(delta, BorderColorTarget::Bottom, &raw) {
                         continue;
                     }
                 }
                 if let Some(color) = css_color_to_color(value) {
-                    delta.border_color = Some(ColorSpec::Value(color));
+                    set_delta_border_color_spec(
+                        delta,
+                        BorderColorTarget::Bottom,
+                        ColorSpec::Value(color),
+                    );
                 }
             }
             Property::BorderInlineStartColor(value) => {
                 if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    if raw.to_ascii_lowercase().contains("var(") {
-                        if let Some((color, alpha)) = parse_color_string(&raw) {
-                            delta.border_color =
-                                Some(ColorSpec::Value(blend_over_white(color, alpha)));
-                        } else {
-                            delta.border_color_var = Some(raw.trim().to_ascii_lowercase());
-                        }
-                        continue;
-                    }
-                    if let Some((color, alpha)) = parse_color_string(&raw) {
-                        delta.border_color = Some(ColorSpec::Value(blend_over_white(color, alpha)));
-                        continue;
-                    } else if let Some(var) = var_name_from_string(&raw) {
-                        delta.border_color_var = Some(var);
+                    if apply_border_color_from_raw(delta, BorderColorTarget::Left, &raw) {
                         continue;
                     }
                 }
                 if let Some(color) = css_color_to_color(value) {
-                    delta.border_color = Some(ColorSpec::Value(color));
+                    set_delta_border_color_spec(
+                        delta,
+                        BorderColorTarget::Left,
+                        ColorSpec::Value(color),
+                    );
                 }
             }
             Property::BorderInlineEndColor(value) => {
                 if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    if raw.to_ascii_lowercase().contains("var(") {
-                        if let Some((color, alpha)) = parse_color_string(&raw) {
-                            delta.border_color =
-                                Some(ColorSpec::Value(blend_over_white(color, alpha)));
-                        } else {
-                            delta.border_color_var = Some(raw.trim().to_ascii_lowercase());
-                        }
-                        continue;
-                    }
-                    if let Some((color, alpha)) = parse_color_string(&raw) {
-                        delta.border_color = Some(ColorSpec::Value(blend_over_white(color, alpha)));
-                        continue;
-                    } else if let Some(var) = var_name_from_string(&raw) {
-                        delta.border_color_var = Some(var);
+                    if apply_border_color_from_raw(delta, BorderColorTarget::Right, &raw) {
                         continue;
                     }
                 }
                 if let Some(color) = css_color_to_color(value) {
-                    delta.border_color = Some(ColorSpec::Value(color));
+                    set_delta_border_color_spec(
+                        delta,
+                        BorderColorTarget::Right,
+                        ColorSpec::Value(color),
+                    );
                 }
             }
             Property::BorderStyle(value) => {
@@ -3950,7 +4397,11 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                 delta.border_width.bottom = w;
                 delta.border_width.left = w;
                 if let Some(color) = css_color_to_color(&value.color) {
-                    delta.border_color = Some(ColorSpec::Value(color));
+                    set_delta_border_color_spec(
+                        delta,
+                        BorderColorTarget::All,
+                        ColorSpec::Value(color),
+                    );
                 }
                 let style = border_line_style_from_line_style(&value.style);
                 delta.border_style.top = Some(style);
@@ -3961,56 +4412,88 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
             Property::BorderTop(value) => {
                 delta.border_width.top = border_width_spec(&value.width);
                 if let Some(color) = css_color_to_color(&value.color) {
-                    delta.border_color = Some(ColorSpec::Value(color));
+                    set_delta_border_color_spec(
+                        delta,
+                        BorderColorTarget::Top,
+                        ColorSpec::Value(color),
+                    );
                 }
                 delta.border_style.top = Some(border_line_style_from_line_style(&value.style));
             }
             Property::BorderRight(value) => {
                 delta.border_width.right = border_width_spec(&value.width);
                 if let Some(color) = css_color_to_color(&value.color) {
-                    delta.border_color = Some(ColorSpec::Value(color));
+                    set_delta_border_color_spec(
+                        delta,
+                        BorderColorTarget::Right,
+                        ColorSpec::Value(color),
+                    );
                 }
                 delta.border_style.right = Some(border_line_style_from_line_style(&value.style));
             }
             Property::BorderBottom(value) => {
                 delta.border_width.bottom = border_width_spec(&value.width);
                 if let Some(color) = css_color_to_color(&value.color) {
-                    delta.border_color = Some(ColorSpec::Value(color));
+                    set_delta_border_color_spec(
+                        delta,
+                        BorderColorTarget::Bottom,
+                        ColorSpec::Value(color),
+                    );
                 }
                 delta.border_style.bottom = Some(border_line_style_from_line_style(&value.style));
             }
             Property::BorderLeft(value) => {
                 delta.border_width.left = border_width_spec(&value.width);
                 if let Some(color) = css_color_to_color(&value.color) {
-                    delta.border_color = Some(ColorSpec::Value(color));
+                    set_delta_border_color_spec(
+                        delta,
+                        BorderColorTarget::Left,
+                        ColorSpec::Value(color),
+                    );
                 }
                 delta.border_style.left = Some(border_line_style_from_line_style(&value.style));
             }
             Property::BorderBlockStart(value) => {
                 delta.border_width.top = border_width_spec(&value.width);
                 if let Some(color) = css_color_to_color(&value.color) {
-                    delta.border_color = Some(ColorSpec::Value(color));
+                    set_delta_border_color_spec(
+                        delta,
+                        BorderColorTarget::Top,
+                        ColorSpec::Value(color),
+                    );
                 }
                 delta.border_style.top = Some(border_line_style_from_line_style(&value.style));
             }
             Property::BorderBlockEnd(value) => {
                 delta.border_width.bottom = border_width_spec(&value.width);
                 if let Some(color) = css_color_to_color(&value.color) {
-                    delta.border_color = Some(ColorSpec::Value(color));
+                    set_delta_border_color_spec(
+                        delta,
+                        BorderColorTarget::Bottom,
+                        ColorSpec::Value(color),
+                    );
                 }
                 delta.border_style.bottom = Some(border_line_style_from_line_style(&value.style));
             }
             Property::BorderInlineStart(value) => {
                 delta.border_width.left = border_width_spec(&value.width);
                 if let Some(color) = css_color_to_color(&value.color) {
-                    delta.border_color = Some(ColorSpec::Value(color));
+                    set_delta_border_color_spec(
+                        delta,
+                        BorderColorTarget::Left,
+                        ColorSpec::Value(color),
+                    );
                 }
                 delta.border_style.left = Some(border_line_style_from_line_style(&value.style));
             }
             Property::BorderInlineEnd(value) => {
                 delta.border_width.right = border_width_spec(&value.width);
                 if let Some(color) = css_color_to_color(&value.color) {
-                    delta.border_color = Some(ColorSpec::Value(color));
+                    set_delta_border_color_spec(
+                        delta,
+                        BorderColorTarget::Right,
+                        ColorSpec::Value(color),
+                    );
                 }
                 delta.border_style.right = Some(border_line_style_from_line_style(&value.style));
             }
@@ -4091,7 +4574,7 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                 PropertyId::Display => {
                     apply_inherit_initial_display(&unparsed.value.0, delta);
                 }
-                PropertyId::Width => {
+                PropertyId::Width | PropertyId::InlineSize => {
                     delta.width_var = None;
                     apply_inherit_initial_size(&unparsed.value.0, &mut delta.width);
                     let raw = tokens_debug_string(&unparsed.value.0);
@@ -4102,7 +4585,7 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                         delta.width_var = Some(var);
                     }
                 }
-                PropertyId::MaxWidth => {
+                PropertyId::MaxWidth | PropertyId::MaxInlineSize => {
                     delta.max_width_var = None;
                     apply_inherit_initial_size(&unparsed.value.0, &mut delta.max_width);
                     let raw = tokens_debug_string(&unparsed.value.0);
@@ -4113,7 +4596,7 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                         delta.max_width_var = Some(var);
                     }
                 }
-                PropertyId::Height => {
+                PropertyId::Height | PropertyId::BlockSize => {
                     delta.height_var = None;
                     apply_inherit_initial_size(&unparsed.value.0, &mut delta.height);
                     let raw = tokens_debug_string(&unparsed.value.0);
@@ -4124,7 +4607,7 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                         delta.height_var = Some(var);
                     }
                 }
-                PropertyId::MinWidth => {
+                PropertyId::MinWidth | PropertyId::MinInlineSize => {
                     delta.min_width_var = None;
                     apply_inherit_initial_size(&unparsed.value.0, &mut delta.min_width);
                     let raw = tokens_debug_string(&unparsed.value.0);
@@ -4133,7 +4616,7 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                         delta.min_width_var = Some(raw_lower);
                     }
                 }
-                PropertyId::MinHeight => {
+                PropertyId::MinHeight | PropertyId::MinBlockSize => {
                     delta.min_height_var = None;
                     apply_inherit_initial_size(&unparsed.value.0, &mut delta.min_height);
                     let raw = tokens_debug_string(&unparsed.value.0);
@@ -4142,7 +4625,7 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                         delta.min_height_var = Some(raw_lower);
                     }
                 }
-                PropertyId::MaxHeight => {
+                PropertyId::MaxHeight | PropertyId::MaxBlockSize => {
                     delta.max_height_var = None;
                     apply_inherit_initial_size(&unparsed.value.0, &mut delta.max_height);
                     let raw = tokens_debug_string(&unparsed.value.0);
@@ -4234,7 +4717,8 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                 | PropertyId::BorderBlockEnd
                 | PropertyId::BorderInlineStart
                 | PropertyId::BorderInlineEnd => {
-                    apply_inherit_initial_border_color(&unparsed.value.0, delta);
+                    let target = border_color_target_from_property_id(&unparsed.property_id);
+                    apply_inherit_initial_border_color_target(&unparsed.value.0, delta, target);
                     if let Some(spec) = length_spec_from_custom_tokens(&unparsed.value.0) {
                         match &unparsed.property_id {
                             PropertyId::Border => {
@@ -4281,16 +4765,19 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                         }
                     }
                     if let Some(color) = color_from_tokens(&unparsed.value.0) {
-                        delta.border_color = Some(ColorSpec::Value(color));
+                        set_delta_border_color_spec(delta, target, ColorSpec::Value(color));
                     } else {
                         let raw = tokens_debug_string(&unparsed.value.0);
                         if let Some((color, alpha)) = parse_color_string(&raw) {
-                            delta.border_color =
-                                Some(ColorSpec::Value(blend_over_white(color, alpha)));
+                            set_delta_border_color_spec(
+                                delta,
+                                target,
+                                ColorSpec::Value(blend_over_white(color, alpha)),
+                            );
                         } else if let Some(var) = last_var_name_from_tokens(&unparsed.value.0)
                             .or_else(|| var_name_from_tokens(&unparsed.value.0))
                         {
-                            delta.border_color_var = Some(var);
+                            set_delta_border_color_var(delta, target, var);
                         }
                     }
                     if let Some(style) = border_line_style_from_tokens(&unparsed.value.0) {
@@ -4326,20 +4813,28 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                 | PropertyId::BorderBlockEndColor
                 | PropertyId::BorderInlineStartColor
                 | PropertyId::BorderInlineEndColor => {
-                    apply_inherit_initial_border_color(&unparsed.value.0, delta);
+                    let target = border_color_target_from_property_id(&unparsed.property_id);
+                    apply_inherit_initial_border_color_target(&unparsed.value.0, delta, target);
                     if let Some(color) = color_from_tokens(&unparsed.value.0) {
-                        delta.border_color = Some(ColorSpec::Value(color));
+                        set_delta_border_color_spec(delta, target, ColorSpec::Value(color));
                     } else {
                         let raw = tokens_debug_string(&unparsed.value.0);
                         if let Some((color, alpha)) = parse_color_string(&raw) {
-                            delta.border_color =
-                                Some(ColorSpec::Value(blend_over_white(color, alpha)));
+                            set_delta_border_color_spec(
+                                delta,
+                                target,
+                                ColorSpec::Value(blend_over_white(color, alpha)),
+                            );
                         } else if raw.to_ascii_lowercase().contains("var(") {
-                            delta.border_color_var = Some(raw.to_ascii_lowercase());
+                            set_delta_border_color_var(
+                                delta,
+                                target,
+                                raw.to_ascii_lowercase(),
+                            );
                         } else if let Some(var) = last_var_name_from_tokens(&unparsed.value.0)
                             .or_else(|| var_name_from_tokens(&unparsed.value.0))
                         {
-                            delta.border_color_var = Some(var);
+                            set_delta_border_color_var(delta, target, var);
                         }
                     }
                 }
@@ -4481,6 +4976,12 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                         });
                     }
                 }
+                PropertyId::PlaceItems => {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    if let Some(align) = parse_place_items_align_str(&raw) {
+                        delta.align_items = Some(align);
+                    }
+                }
                 PropertyId::AlignSelf(_) => {
                     if let Some(value) = first_ident(&unparsed.value.0) {
                         delta.align_self = Some(match value.as_str() {
@@ -4511,9 +5012,45 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                         delta.justify_content = Some(justify);
                     }
                 }
+                PropertyId::PlaceSelf => {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    if let Some(align) = parse_place_self_align_str(&raw) {
+                        delta.align_self = Some(align);
+                    }
+                }
                 PropertyId::GridTemplateColumns => {
                     let raw = tokens_debug_string(&unparsed.value.0);
                     delta.grid_columns = parse_grid_track_count(&raw);
+                }
+                PropertyId::GridTemplateRows => {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    delta.grid_rows = parse_grid_track_count(&raw);
+                }
+                PropertyId::GridColumnStart => {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    delta.grid_column_start = parse_grid_track_start(&raw);
+                }
+                PropertyId::GridRowStart => {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    delta.grid_row_start = parse_grid_track_start(&raw);
+                }
+                PropertyId::GridColumn => {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    delta.grid_column_start = parse_grid_track_start(&raw);
+                }
+                PropertyId::GridRow => {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    delta.grid_row_start = parse_grid_track_start(&raw);
+                }
+                PropertyId::GridArea => {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    let (row_start, col_start) = parse_grid_area_starts(&raw);
+                    if row_start.is_some() {
+                        delta.grid_row_start = row_start;
+                    }
+                    if col_start.is_some() {
+                        delta.grid_column_start = col_start;
+                    }
                 }
                 PropertyId::BoxSizing(_) => {
                     if let Some(value) = first_ident(&unparsed.value.0) {
@@ -4584,7 +5121,7 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                         }
                     }
                 }
-                PropertyId::Left => {
+                PropertyId::Left | PropertyId::InsetInlineStart => {
                     delta.inset_left_var = None;
                     apply_inherit_initial_size(&unparsed.value.0, &mut delta.inset_left);
                     if let Some(spec) = length_spec_from_custom_tokens(&unparsed.value.0) {
@@ -4603,7 +5140,7 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                         }
                     }
                 }
-                PropertyId::Top => {
+                PropertyId::Top | PropertyId::InsetBlockStart => {
                     delta.inset_top_var = None;
                     apply_inherit_initial_size(&unparsed.value.0, &mut delta.inset_top);
                     if let Some(spec) = length_spec_from_custom_tokens(&unparsed.value.0) {
@@ -4622,7 +5159,7 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                         }
                     }
                 }
-                PropertyId::Right => {
+                PropertyId::Right | PropertyId::InsetInlineEnd => {
                     delta.inset_right_var = None;
                     apply_inherit_initial_size(&unparsed.value.0, &mut delta.inset_right);
                     if let Some(spec) = length_spec_from_custom_tokens(&unparsed.value.0) {
@@ -4641,7 +5178,7 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                         }
                     }
                 }
-                PropertyId::Bottom => {
+                PropertyId::Bottom | PropertyId::InsetBlockEnd => {
                     delta.inset_bottom_var = None;
                     apply_inherit_initial_size(&unparsed.value.0, &mut delta.inset_bottom);
                     if let Some(spec) = length_spec_from_custom_tokens(&unparsed.value.0) {
@@ -4702,11 +5239,41 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                         }
                     }
                 }
+                PropertyId::InsetInline => {
+                    delta.inset_left_var = None;
+                    delta.inset_right_var = None;
+                    apply_inherit_initial_edge_pair(
+                        &unparsed.value.0,
+                        &mut delta.inset_left,
+                        &mut delta.inset_right,
+                        &mut delta.inset_left_var,
+                        &mut delta.inset_right_var,
+                        true,
+                    );
+                }
+                PropertyId::InsetBlock => {
+                    delta.inset_top_var = None;
+                    delta.inset_bottom_var = None;
+                    apply_inherit_initial_edge_pair(
+                        &unparsed.value.0,
+                        &mut delta.inset_top,
+                        &mut delta.inset_bottom,
+                        &mut delta.inset_top_var,
+                        &mut delta.inset_bottom_var,
+                        true,
+                    );
+                }
                 PropertyId::Margin
                 | PropertyId::MarginTop
                 | PropertyId::MarginRight
                 | PropertyId::MarginBottom
-                | PropertyId::MarginLeft => {
+                | PropertyId::MarginLeft
+                | PropertyId::MarginBlockStart
+                | PropertyId::MarginBlockEnd
+                | PropertyId::MarginInlineStart
+                | PropertyId::MarginInlineEnd
+                | PropertyId::MarginBlock
+                | PropertyId::MarginInline => {
                     apply_inherit_initial_edge(
                         &unparsed.value.0,
                         &unparsed.property_id,
@@ -4718,7 +5285,13 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                 | PropertyId::PaddingTop
                 | PropertyId::PaddingRight
                 | PropertyId::PaddingBottom
-                | PropertyId::PaddingLeft => {
+                | PropertyId::PaddingLeft
+                | PropertyId::PaddingBlockStart
+                | PropertyId::PaddingBlockEnd
+                | PropertyId::PaddingInlineStart
+                | PropertyId::PaddingInlineEnd
+                | PropertyId::PaddingBlock
+                | PropertyId::PaddingInline => {
                     apply_inherit_initial_edge(
                         &unparsed.value.0,
                         &unparsed.property_id,
@@ -4772,6 +5345,7 @@ fn apply_custom_property(property_name: &str, tokens: &[TokenOrValue], delta: &m
         | "border-block-end"
         | "border-inline-start"
         | "border-inline-end" => {
+            let target = border_color_target_from_property_name(property_name);
             if let Some(spec) = length_spec_from_custom_tokens(tokens) {
                 match property_name {
                     "border" => {
@@ -4808,15 +5382,19 @@ fn apply_custom_property(property_name: &str, tokens: &[TokenOrValue], delta: &m
                 }
             }
             if let Some(color) = color_from_tokens(tokens) {
-                delta.border_color = Some(ColorSpec::Value(color));
+                set_delta_border_color_spec(delta, target, ColorSpec::Value(color));
             } else {
                 let raw = tokens_debug_string(tokens);
                 if let Some((color, alpha)) = parse_color_string(&raw) {
-                    delta.border_color = Some(ColorSpec::Value(blend_over_white(color, alpha)));
+                    set_delta_border_color_spec(
+                        delta,
+                        target,
+                        ColorSpec::Value(blend_over_white(color, alpha)),
+                    );
                 } else if let Some(var) =
                     last_var_name_from_tokens(tokens).or_else(|| var_name_from_tokens(tokens))
                 {
-                    delta.border_color_var = Some(var);
+                    set_delta_border_color_var(delta, target, var);
                 }
             }
             if let Some(style) = border_line_style_from_tokens(tokens) {
@@ -4844,18 +5422,23 @@ fn apply_custom_property(property_name: &str, tokens: &[TokenOrValue], delta: &m
         | "border-block-end-color"
         | "border-inline-start-color"
         | "border-inline-end-color" => {
+            let target = border_color_target_from_property_name(property_name);
             if let Some(color) = color_from_tokens(tokens) {
-                delta.border_color = Some(ColorSpec::Value(color));
+                set_delta_border_color_spec(delta, target, ColorSpec::Value(color));
             } else {
                 let raw = tokens_debug_string(tokens);
                 if let Some((color, alpha)) = parse_color_string(&raw) {
-                    delta.border_color = Some(ColorSpec::Value(blend_over_white(color, alpha)));
+                    set_delta_border_color_spec(
+                        delta,
+                        target,
+                        ColorSpec::Value(blend_over_white(color, alpha)),
+                    );
                 } else if raw.to_ascii_lowercase().contains("var(") {
-                    delta.border_color_var = Some(raw.to_ascii_lowercase());
+                    set_delta_border_color_var(delta, target, raw.to_ascii_lowercase());
                 } else if let Some(var) =
                     last_var_name_from_tokens(tokens).or_else(|| var_name_from_tokens(tokens))
                 {
-                    delta.border_color_var = Some(var);
+                    set_delta_border_color_var(delta, target, var);
                 }
             }
         }
@@ -5057,7 +5640,9 @@ fn apply_custom_property(property_name: &str, tokens: &[TokenOrValue], delta: &m
                 clear_custom_property_delta_value(delta, &name);
                 let raw = tokens_debug_string(tokens);
                 let raw_lower = raw.trim().to_ascii_lowercase();
-                delta.custom_raw_values.insert(name.clone(), raw_lower.clone());
+                delta
+                    .custom_raw_values
+                    .insert(name.clone(), raw_lower.clone());
                 if let Some(color) = color_from_tokens(tokens) {
                     delta.custom_colors.insert(name.clone(), color);
                     delta.custom_color_alpha.insert(name.clone(), 1.0);
@@ -5320,7 +5905,14 @@ fn last_var_name_from_tokens(tokens: &[TokenOrValue]) -> Option<String> {
 }
 
 fn length_spec_from_custom_tokens(tokens: &[TokenOrValue]) -> Option<LengthSpec> {
-    // Minimal parser for `40%`, `20px`, `12pt`, `10mm`, etc. Used for custom properties and gap.
+    // First attempt the canonical parser path so custom/unparsed tokens share evaluator semantics
+    // with typed declarations (calc/min/max/clamp where supported by our reducer).
+    let raw = tokens_debug_string(tokens);
+    if let Some(spec) = length_spec_from_string(raw.trim()) {
+        return Some(spec);
+    }
+
+    // Minimal parser fallback for `40%`, `20px`, `12pt`, `10mm`, etc.
     let mut i = 0usize;
     while i < tokens.len() {
         match &tokens[i] {
@@ -5973,7 +6565,11 @@ fn transform_debug(ops: &[CssTransformOp]) -> String {
 }
 
 fn transform_origin_debug(origin: CssTransformOrigin) -> String {
-    format!("{} {}", length_spec_debug(origin.x), length_spec_debug(origin.y))
+    format!(
+        "{} {}",
+        length_spec_debug(origin.x),
+        length_spec_debug(origin.y)
+    )
 }
 
 fn debug_style_json(style: &ComputedStyle) -> String {
@@ -6055,6 +6651,22 @@ fn debug_style_json(style: &ComputedStyle) -> String {
         json_opt_string(style.border_color.map(color_to_hex))
     ));
     fields.push(format!(
+        "\"border_top_color\":{}",
+        json_opt_string(style.border_top_color.map(color_to_hex))
+    ));
+    fields.push(format!(
+        "\"border_right_color\":{}",
+        json_opt_string(style.border_right_color.map(color_to_hex))
+    ));
+    fields.push(format!(
+        "\"border_bottom_color\":{}",
+        json_opt_string(style.border_bottom_color.map(color_to_hex))
+    ));
+    fields.push(format!(
+        "\"border_left_color\":{}",
+        json_opt_string(style.border_left_color.map(color_to_hex))
+    ));
+    fields.push(format!(
         "\"border_collapse\":{}",
         json_string(&format!("{:?}", style.border_collapse))
     ));
@@ -6130,6 +6742,27 @@ fn debug_style_json(style: &ComputedStyle) -> String {
         "\"grid_columns\":{}",
         style
             .grid_columns
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "null".to_string())
+    ));
+    fields.push(format!(
+        "\"grid_rows\":{}",
+        style
+            .grid_rows
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "null".to_string())
+    ));
+    fields.push(format!(
+        "\"grid_column_start\":{}",
+        style
+            .grid_column_start
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "null".to_string())
+    ));
+    fields.push(format!(
+        "\"grid_row_start\":{}",
+        style
+            .grid_row_start
             .map(|v| v.to_string())
             .unwrap_or_else(|| "null".to_string())
     ));
@@ -6467,15 +7100,84 @@ fn apply_delta(
         computed.border_width.left = normalize_length_spec(spec, parent.border_width.left);
     }
     if let Some(color) = &delta.border_color {
-        computed.border_color = Some(match color {
+        let resolved = match color {
             ColorSpec::Value(value) => *value,
             ColorSpec::Inherit => parent.border_color.unwrap_or(parent.color),
             ColorSpec::Initial => Color::BLACK,
             ColorSpec::CurrentColor => computed.color,
-        });
+        };
+        computed.border_color = Some(resolved);
+        computed.border_top_color = Some(resolved);
+        computed.border_right_color = Some(resolved);
+        computed.border_bottom_color = Some(resolved);
+        computed.border_left_color = Some(resolved);
+        computed.pending_border_top_color_var = None;
+        computed.pending_border_right_color_var = None;
+        computed.pending_border_bottom_color_var = None;
+        computed.pending_border_left_color_var = None;
     }
     if let Some(var) = &delta.border_color_var {
         computed.pending_border_color_var = Some(var.clone());
+        computed.pending_border_top_color_var = Some(var.clone());
+        computed.pending_border_right_color_var = Some(var.clone());
+        computed.pending_border_bottom_color_var = Some(var.clone());
+        computed.pending_border_left_color_var = Some(var.clone());
+    }
+    if let Some(color) = &delta.border_top_color {
+        computed.border_top_color = Some(match color {
+            ColorSpec::Value(value) => *value,
+            ColorSpec::Inherit => parent
+                .border_top_color
+                .or(parent.border_color)
+                .unwrap_or(parent.color),
+            ColorSpec::Initial => Color::BLACK,
+            ColorSpec::CurrentColor => computed.color,
+        });
+    }
+    if let Some(color) = &delta.border_right_color {
+        computed.border_right_color = Some(match color {
+            ColorSpec::Value(value) => *value,
+            ColorSpec::Inherit => parent
+                .border_right_color
+                .or(parent.border_color)
+                .unwrap_or(parent.color),
+            ColorSpec::Initial => Color::BLACK,
+            ColorSpec::CurrentColor => computed.color,
+        });
+    }
+    if let Some(color) = &delta.border_bottom_color {
+        computed.border_bottom_color = Some(match color {
+            ColorSpec::Value(value) => *value,
+            ColorSpec::Inherit => parent
+                .border_bottom_color
+                .or(parent.border_color)
+                .unwrap_or(parent.color),
+            ColorSpec::Initial => Color::BLACK,
+            ColorSpec::CurrentColor => computed.color,
+        });
+    }
+    if let Some(color) = &delta.border_left_color {
+        computed.border_left_color = Some(match color {
+            ColorSpec::Value(value) => *value,
+            ColorSpec::Inherit => parent
+                .border_left_color
+                .or(parent.border_color)
+                .unwrap_or(parent.color),
+            ColorSpec::Initial => Color::BLACK,
+            ColorSpec::CurrentColor => computed.color,
+        });
+    }
+    if let Some(var) = &delta.border_top_color_var {
+        computed.pending_border_top_color_var = Some(var.clone());
+    }
+    if let Some(var) = &delta.border_right_color_var {
+        computed.pending_border_right_color_var = Some(var.clone());
+    }
+    if let Some(var) = &delta.border_bottom_color_var {
+        computed.pending_border_bottom_color_var = Some(var.clone());
+    }
+    if let Some(var) = &delta.border_left_color_var {
+        computed.pending_border_left_color_var = Some(var.clone());
     }
     if let Some(style) = delta.border_style.top {
         computed.border_style.top = style;
@@ -6588,6 +7290,19 @@ fn apply_delta(
     }
     if let Some(columns) = delta.grid_columns {
         computed.grid_columns = if columns == 0 { None } else { Some(columns) };
+    }
+    if let Some(rows) = delta.grid_rows {
+        computed.grid_rows = if rows == 0 { None } else { Some(rows) };
+    }
+    if let Some(column_start) = delta.grid_column_start {
+        computed.grid_column_start = if column_start == 0 {
+            None
+        } else {
+            Some(column_start)
+        };
+    }
+    if let Some(row_start) = delta.grid_row_start {
+        computed.grid_row_start = if row_start == 0 { None } else { Some(row_start) };
     }
     if let Some(gap) = delta.gap {
         computed.gap = normalize_length_spec(gap, parent.gap);
@@ -6933,6 +7648,189 @@ fn parse_var_function(raw: &str) -> Option<(String, Option<String>)> {
     Some((name, fallback))
 }
 
+fn strip_calc_wrapper(expr: &str) -> &str {
+    let trimmed = expr.trim();
+    let lowered = trimmed.to_ascii_lowercase();
+    if lowered.starts_with("calc(") && trimmed.ends_with(')') && trimmed.len() > 6 {
+        &trimmed[5..trimmed.len() - 1]
+    } else {
+        trimmed
+    }
+}
+
+fn split_top_level_mul_div_once(raw: &str) -> Option<(&str, char, &str)> {
+    let mut depth = 0usize;
+    for (idx, ch) in raw.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            '*' | '/' if depth == 0 => {
+                let left = raw[..idx].trim();
+                let right = raw[idx + ch.len_utf8()..].trim();
+                if !left.is_empty() && !right.is_empty() {
+                    return Some((left, ch, right));
+                }
+                return None;
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn parse_unitless_scalar(raw: &str) -> Option<f32> {
+    raw.trim().parse::<f32>().ok()
+}
+
+fn parse_percent_scalar(raw: &str) -> Option<f32> {
+    let value = raw.trim().strip_suffix('%')?.trim();
+    value.parse::<f32>().ok().map(|v| v / 100.0)
+}
+
+fn resolve_custom_scalar_from_maps_inner(
+    custom_lengths: &HashMap<String, LengthSpec>,
+    custom_refs: &HashMap<String, String>,
+    expr: &str,
+    depth: usize,
+    stack: &mut Vec<String>,
+) -> Option<f32> {
+    if depth > 16 {
+        return None;
+    }
+    let expr = expr.trim();
+    if expr.is_empty() {
+        return None;
+    }
+    if let Some((name, fallback)) = parse_var_function(expr) {
+        if let Some(value) = resolve_custom_scalar_from_maps_inner(
+            custom_lengths,
+            custom_refs,
+            &name,
+            depth + 1,
+            stack,
+        ) {
+            return Some(value);
+        }
+        if let Some(fallback_expr) = fallback {
+            return resolve_custom_scalar_from_maps_inner(
+                custom_lengths,
+                custom_refs,
+                &fallback_expr,
+                depth + 1,
+                stack,
+            );
+        }
+        return None;
+    }
+    if expr.starts_with("--") {
+        let key = expr.to_ascii_lowercase();
+        if stack.iter().any(|entry| entry == &key) {
+            return None;
+        }
+        stack.push(key.clone());
+        let resolved = if let Some(value) = custom_lengths.get(&key).and_then(length_spec_to_scalar)
+        {
+            Some(value)
+        } else if let Some(next) = custom_refs.get(&key) {
+            resolve_custom_scalar_from_maps_inner(
+                custom_lengths,
+                custom_refs,
+                next,
+                depth + 1,
+                stack,
+            )
+        } else {
+            None
+        };
+        stack.pop();
+        return resolved;
+    }
+    if let Some(value) = parse_percent_scalar(expr) {
+        return Some(value);
+    }
+    parse_unitless_scalar(expr)
+}
+
+fn resolve_custom_calc_scaled_length_from_maps_inner(
+    custom_lengths: &HashMap<String, LengthSpec>,
+    custom_refs: &HashMap<String, String>,
+    expr: &str,
+    depth: usize,
+    stack: &mut Vec<String>,
+) -> Option<LengthSpec> {
+    if depth > 16 {
+        return None;
+    }
+    let inner = strip_calc_wrapper(expr);
+    let (left, op, right) = split_top_level_mul_div_once(inner)?;
+    match op {
+        '*' => {
+            if let Some(scale) = parse_percent_scalar(right) {
+                if let Some(value) = resolve_custom_scalar_from_maps_inner(
+                    custom_lengths,
+                    custom_refs,
+                    left,
+                    depth + 1,
+                    stack,
+                ) {
+                    return Some(LengthSpec::Percent(value * scale));
+                }
+            }
+            if let Some(scale) = parse_percent_scalar(left) {
+                if let Some(value) = resolve_custom_scalar_from_maps_inner(
+                    custom_lengths,
+                    custom_refs,
+                    right,
+                    depth + 1,
+                    stack,
+                ) {
+                    return Some(LengthSpec::Percent(value * scale));
+                }
+            }
+            if let Some(scale) = parse_unitless_scalar(right) {
+                if let Some(spec) = resolve_custom_length_from_maps_inner(
+                    custom_lengths,
+                    custom_refs,
+                    left,
+                    depth + 1,
+                    stack,
+                ) {
+                    return Some(scale_length_spec(spec, scale));
+                }
+            }
+            if let Some(scale) = parse_unitless_scalar(left) {
+                if let Some(spec) = resolve_custom_length_from_maps_inner(
+                    custom_lengths,
+                    custom_refs,
+                    right,
+                    depth + 1,
+                    stack,
+                ) {
+                    return Some(scale_length_spec(spec, scale));
+                }
+            }
+        }
+        '/' => {
+            if let Some(divisor) = parse_unitless_scalar(right) {
+                if divisor.abs() <= CALC_LENGTH_EPSILON {
+                    return None;
+                }
+                if let Some(spec) = resolve_custom_length_from_maps_inner(
+                    custom_lengths,
+                    custom_refs,
+                    left,
+                    depth + 1,
+                    stack,
+                ) {
+                    return Some(scale_length_spec(spec, 1.0 / divisor));
+                }
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
 fn resolve_custom_length_from_maps(
     custom_lengths: &HashMap<String, LengthSpec>,
     custom_refs: &HashMap<String, String>,
@@ -6998,6 +7896,15 @@ fn resolve_custom_length_from_maps_inner(
         };
         stack.pop();
         return resolved;
+    }
+    if let Some(spec) = resolve_custom_calc_scaled_length_from_maps_inner(
+        custom_lengths,
+        custom_refs,
+        expr,
+        depth + 1,
+        stack,
+    ) {
+        return Some(spec);
     }
     length_spec_from_string(expr)
 }
@@ -7111,8 +8018,7 @@ fn resolve_custom_transform_ops_from_maps_inner(
             parse_fn,
             depth + 1,
             stack,
-        )
-        {
+        ) {
             return Some(value);
         }
         if let Some(fallback_expr) = fallback {
@@ -7305,7 +8211,32 @@ fn resolve_pending_vars(style: &mut ComputedStyle) {
     }
     if let Some(name) = style.pending_border_color_var.take() {
         if let Some((color, alpha)) = resolve_custom_color_expr_with_alpha(style, &name) {
-            style.border_color = Some(blend_over_white(color, alpha));
+            let resolved = blend_over_white(color, alpha);
+            style.border_color = Some(resolved);
+            style.border_top_color = Some(resolved);
+            style.border_right_color = Some(resolved);
+            style.border_bottom_color = Some(resolved);
+            style.border_left_color = Some(resolved);
+        }
+    }
+    if let Some(name) = style.pending_border_top_color_var.take() {
+        if let Some((color, alpha)) = resolve_custom_color_expr_with_alpha(style, &name) {
+            style.border_top_color = Some(blend_over_white(color, alpha));
+        }
+    }
+    if let Some(name) = style.pending_border_right_color_var.take() {
+        if let Some((color, alpha)) = resolve_custom_color_expr_with_alpha(style, &name) {
+            style.border_right_color = Some(blend_over_white(color, alpha));
+        }
+    }
+    if let Some(name) = style.pending_border_bottom_color_var.take() {
+        if let Some((color, alpha)) = resolve_custom_color_expr_with_alpha(style, &name) {
+            style.border_bottom_color = Some(blend_over_white(color, alpha));
+        }
+    }
+    if let Some(name) = style.pending_border_left_color_var.take() {
+        if let Some((color, alpha)) = resolve_custom_color_expr_with_alpha(style, &name) {
+            style.border_left_color = Some(blend_over_white(color, alpha));
         }
     }
     if let Some(name) = style.pending_font_name_var.take() {
@@ -7492,6 +8423,16 @@ fn justify_content_mode_from_keyword(keyword: &str) -> Option<JustifyContentMode
     }
 }
 
+fn align_items_mode_from_keyword(keyword: &str) -> Option<AlignItemsMode> {
+    match keyword {
+        "flex-start" | "start" | "normal" | "baseline" => Some(AlignItemsMode::FlexStart),
+        "flex-end" | "end" => Some(AlignItemsMode::FlexEnd),
+        "center" => Some(AlignItemsMode::Center),
+        "stretch" => Some(AlignItemsMode::Stretch),
+        _ => None,
+    }
+}
+
 fn align_content_mode_from_keyword(keyword: &str) -> Option<AlignContentMode> {
     match keyword {
         "flex-start" | "start" | "normal" | "stretch" => Some(AlignContentMode::FlexStart),
@@ -7500,6 +8441,19 @@ fn align_content_mode_from_keyword(keyword: &str) -> Option<AlignContentMode> {
         "space-between" => Some(AlignContentMode::SpaceBetween),
         "space-around" => Some(AlignContentMode::SpaceAround),
         "space-evenly" => Some(AlignContentMode::SpaceEvenly),
+        _ => None,
+    }
+}
+
+fn align_self_mode_from_keyword(keyword: &str) -> Option<AlignSelfMode> {
+    match keyword {
+        "auto" | "normal" => Some(AlignSelfMode::Auto),
+        "flex-end" | "end" | "self-end" => Some(AlignSelfMode::FlexEnd),
+        "center" => Some(AlignSelfMode::Center),
+        "stretch" => Some(AlignSelfMode::Stretch),
+        "flex-start" | "start" | "self-start" | "baseline" | "first" | "last" => {
+            Some(AlignSelfMode::FlexStart)
+        }
         _ => None,
     }
 }
@@ -7517,6 +8471,28 @@ fn parse_place_content_str(raw: &str) -> Option<(AlignContentMode, JustifyConten
         return None;
     }
     Some((align, justify))
+}
+
+fn parse_place_items_align_str(raw: &str) -> Option<AlignItemsMode> {
+    let mut tokens = raw.split_ascii_whitespace().map(|v| v.to_ascii_lowercase());
+    let first = tokens.next()?;
+    let align = align_items_mode_from_keyword(first.as_str())?;
+    let _justify = tokens.next();
+    if tokens.next().is_some() {
+        return None;
+    }
+    Some(align)
+}
+
+fn parse_place_self_align_str(raw: &str) -> Option<AlignSelfMode> {
+    let mut tokens = raw.split_ascii_whitespace().map(|v| v.to_ascii_lowercase());
+    let first = tokens.next()?;
+    let align = align_self_mode_from_keyword(first.as_str())?;
+    let _justify = tokens.next();
+    if tokens.next().is_some() {
+        return None;
+    }
+    Some(align)
 }
 
 fn parse_font_weight_str(raw: &str) -> Option<u16> {
@@ -7596,10 +8572,11 @@ fn transform_ops_from_transform_list(
                     y: scale_factor_from_number_or_percentage(y),
                 }
             }
-            css_transform::Transform::Rotate(angle)
-            | css_transform::Transform::RotateZ(angle) => CssTransformOp::Rotate {
-                radians: angle.to_radians(),
-            },
+            css_transform::Transform::Rotate(angle) | css_transform::Transform::RotateZ(angle) => {
+                CssTransformOp::Rotate {
+                    radians: angle.to_radians(),
+                }
+            }
             css_transform::Transform::Rotate3d(x, y, z, angle) => {
                 if x.abs() > f32::EPSILON || y.abs() > f32::EPSILON || z.abs() <= f32::EPSILON {
                     return None;
@@ -7620,9 +8597,9 @@ fn transform_ops_from_transform_list(
                 x_radians: 0.0,
                 y_radians: y.to_radians(),
             },
-            css_transform::Transform::Matrix(m) => matrix_op_from_components(
-                m.a, m.b, m.c, m.d, m.e, m.f,
-            )?,
+            css_transform::Transform::Matrix(m) => {
+                matrix_op_from_components(m.a, m.b, m.c, m.d, m.e, m.f)?
+            }
             css_transform::Transform::Matrix3d(m) => matrix_op_from_matrix_3d(m)?,
             _ => return None,
         };
@@ -7679,7 +8656,14 @@ fn scale_factor_from_number_or_percentage(value: &NumberOrPercentage) -> f32 {
     }
 }
 
-fn matrix_op_from_components(a: f32, b: f32, c: f32, d: f32, e_px: f32, f_px: f32) -> Option<CssTransformOp> {
+fn matrix_op_from_components(
+    a: f32,
+    b: f32,
+    c: f32,
+    d: f32,
+    e_px: f32,
+    f_px: f32,
+) -> Option<CssTransformOp> {
     if !a.is_finite()
         || !b.is_finite()
         || !c.is_finite()
@@ -7997,9 +8981,7 @@ fn parse_transform_calls(raw: &str) -> Option<Vec<(String, String)>> {
             break;
         }
         let start = i;
-        while i < chars.len()
-            && (chars[i].is_ascii_alphanumeric() || chars[i] == '-')
-        {
+        while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '-') {
             i += 1;
         }
         if i == start || i >= chars.len() || chars[i] != '(' {
@@ -8175,7 +9157,9 @@ fn parse_skew_components(raw: &str) -> Option<(f32, f32)> {
 
 fn parse_matrix_components(raw: &str) -> Option<(f32, f32, f32, f32, f32, f32)> {
     let values = parse_numeric_components(raw, 6)?;
-    Some((values[0], values[1], values[2], values[3], values[4], values[5]))
+    Some((
+        values[0], values[1], values[2], values[3], values[4], values[5],
+    ))
 }
 
 fn parse_matrix3d_components(raw: &str) -> Option<[f32; 16]> {
@@ -8208,11 +9192,7 @@ fn parse_numeric_components(raw: &str, expected: usize) -> Option<Vec<f32>> {
 
 fn parse_single_number(raw: &str) -> Option<f32> {
     let value = raw.trim().parse::<f32>().ok()?;
-    if value.is_finite() {
-        Some(value)
-    } else {
-        None
-    }
+    if value.is_finite() { Some(value) } else { None }
 }
 
 fn matrix_op_from_matrix_3d_components(values: [f32; 16]) -> Option<CssTransformOp> {
@@ -8381,11 +9361,7 @@ fn parse_text_decoration_str(raw: &str) -> Option<TextDecorationMode> {
             _ => {}
         }
     }
-    if saw {
-        Some(mode)
-    } else {
-        None
-    }
+    if saw { Some(mode) } else { None }
 }
 
 fn parse_letter_spacing_str(raw: &str) -> Option<LengthSpec> {
@@ -8403,6 +9379,9 @@ fn length_spec_from_string(raw: &str) -> Option<LengthSpec> {
     let raw = raw.trim();
     if raw.is_empty() {
         return None;
+    }
+    if let Ok(lp) = LengthPercentage::parse_string(raw) {
+        return length_spec_from_lp(&lp);
     }
     if let Some(value) = raw.strip_suffix('%') {
         if let Ok(v) = value.trim().parse::<f32>() {
@@ -8444,10 +9423,6 @@ fn parse_grid_track_count(raw: &str) -> Option<usize> {
         return None;
     }
 
-    if let Some(columns_only) = parse_repeat_track_count(&normalized) {
-        return Some(columns_only.max(1));
-    }
-
     if let Some((before_slash, _)) = normalized.split_once('/') {
         normalized = before_slash.trim().to_string();
     }
@@ -8456,7 +9431,46 @@ fn parse_grid_track_count(raw: &str) -> Option<usize> {
         return None;
     }
 
-    let tracks = split_top_level_whitespace_tokens(&normalized);
+    let count = count_grid_tracks_in_segment(&normalized, 0);
+    if count > 0 { Some(count) } else { None }
+}
+
+fn parse_grid_track_start(raw: &str) -> Option<usize> {
+    let mut normalized = raw.trim().to_ascii_lowercase();
+    if normalized.is_empty() || normalized == "auto" {
+        return None;
+    }
+
+    if let Some((before_slash, _)) = normalized.split_once('/') {
+        normalized = before_slash.trim().to_string();
+    }
+    if normalized.is_empty() || normalized == "auto" {
+        return None;
+    }
+
+    let first = split_top_level_whitespace_tokens(&normalized)
+        .into_iter()
+        .next()?;
+    if first == "span" {
+        return None;
+    }
+
+    let parsed = first.parse::<i32>().ok()?;
+    (parsed > 0).then_some(parsed as usize)
+}
+
+fn parse_grid_area_starts(raw: &str) -> (Option<usize>, Option<usize>) {
+    let mut parts = raw.split('/');
+    let row_start = parts.next().and_then(parse_grid_track_start);
+    let column_start = parts.next().and_then(parse_grid_track_start);
+    (row_start, column_start)
+}
+
+fn count_grid_tracks_in_segment(raw: &str, depth: usize) -> usize {
+    if depth > 8 {
+        return 0;
+    }
+    let tracks = split_top_level_whitespace_tokens(raw);
     let mut count = 0usize;
     for track in tracks {
         let track = track.trim();
@@ -8466,27 +9480,46 @@ fn parse_grid_track_count(raw: &str) -> Option<usize> {
         if track.starts_with('[') && track.ends_with(']') {
             continue;
         }
-        count += 1;
+        if track.starts_with("repeat(") && track.ends_with(')') {
+            let inner = &track[7..track.len().saturating_sub(1)];
+            if let Some((repeat_raw, segment_raw)) = split_top_level_comma_once(inner) {
+                if let Ok(repeat_count) = repeat_raw.trim().parse::<usize>() {
+                    if repeat_count > 0 {
+                        let segment_count = count_grid_tracks_in_segment(segment_raw.trim(), depth + 1);
+                        if segment_count > 0 {
+                            count = count.saturating_add(repeat_count.saturating_mul(segment_count));
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+        count = count.saturating_add(1);
     }
-    if count > 0 {
-        Some(count)
-    } else {
-        None
-    }
+    count
 }
 
-fn parse_repeat_track_count(raw: &str) -> Option<usize> {
-    let text = raw.trim();
-    if !(text.starts_with("repeat(") && text.ends_with(')')) {
-        return None;
+fn split_top_level_comma_once(raw: &str) -> Option<(&str, &str)> {
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    for (idx, ch) in raw.char_indices() {
+        match ch {
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            ',' if paren_depth == 0 && bracket_depth == 0 => {
+                let head = raw[..idx].trim();
+                let tail = raw[idx + ch.len_utf8()..].trim();
+                if !head.is_empty() && !tail.is_empty() {
+                    return Some((head, tail));
+                }
+                return None;
+            }
+            _ => {}
+        }
     }
-    let inner = &text[7..text.len().saturating_sub(1)];
-    let (count_raw, tracks_raw) = inner.split_once(',')?;
-    if tracks_raw.trim().is_empty() {
-        return None;
-    }
-    let count = count_raw.trim().parse::<usize>().ok()?;
-    (count > 0).then_some(count)
+    None
 }
 
 fn split_top_level_whitespace_tokens(raw: &str) -> Vec<String> {
@@ -9225,8 +10258,209 @@ fn length_spec_from_lp(value: &LengthPercentage) -> Option<LengthSpec> {
             LengthValue::Rem(val) => Some(LengthSpec::Rem(*val)),
             _ => length_value_to_pt(length).map(LengthSpec::Absolute),
         },
-        LengthPercentage::Calc(calc) => calc_length_from_calc(calc).map(LengthSpec::Calc),
+        LengthPercentage::Calc(calc) => calc_length_from_calc(calc).map(length_spec_from_calc_length),
     }
+}
+
+const CALC_LENGTH_EPSILON: f32 = 1.0e-6;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CalcLengthDomain {
+    Absolute,
+    Percent,
+    Em,
+    Rem,
+}
+
+fn calc_length_component_is_zero(value: f32) -> bool {
+    value.abs() <= CALC_LENGTH_EPSILON
+}
+
+fn calc_length_domain(value: CalcLength) -> Option<CalcLengthDomain> {
+    let abs = value.abs.to_f32();
+    let percent = value.percent;
+    let em = value.em;
+    let rem = value.rem;
+    if !calc_length_component_is_zero(abs)
+        && calc_length_component_is_zero(percent)
+        && calc_length_component_is_zero(em)
+        && calc_length_component_is_zero(rem)
+    {
+        return Some(CalcLengthDomain::Absolute);
+    }
+    if calc_length_component_is_zero(abs)
+        && !calc_length_component_is_zero(percent)
+        && calc_length_component_is_zero(em)
+        && calc_length_component_is_zero(rem)
+    {
+        return Some(CalcLengthDomain::Percent);
+    }
+    if calc_length_component_is_zero(abs)
+        && calc_length_component_is_zero(percent)
+        && !calc_length_component_is_zero(em)
+        && calc_length_component_is_zero(rem)
+    {
+        return Some(CalcLengthDomain::Em);
+    }
+    if calc_length_component_is_zero(abs)
+        && calc_length_component_is_zero(percent)
+        && calc_length_component_is_zero(em)
+        && !calc_length_component_is_zero(rem)
+    {
+        return Some(CalcLengthDomain::Rem);
+    }
+    None
+}
+
+fn calc_length_domain_value(value: CalcLength, domain: CalcLengthDomain) -> f32 {
+    match domain {
+        CalcLengthDomain::Absolute => value.abs.to_f32(),
+        CalcLengthDomain::Percent => value.percent,
+        CalcLengthDomain::Em => value.em,
+        CalcLengthDomain::Rem => value.rem,
+    }
+}
+
+fn calc_length_from_domain_value(domain: CalcLengthDomain, value: f32) -> CalcLength {
+    match domain {
+        CalcLengthDomain::Absolute => CalcLength {
+            abs: Pt::from_f32(value),
+            percent: 0.0,
+            em: 0.0,
+            rem: 0.0,
+        },
+        CalcLengthDomain::Percent => CalcLength {
+            abs: Pt::ZERO,
+            percent: value,
+            em: 0.0,
+            rem: 0.0,
+        },
+        CalcLengthDomain::Em => CalcLength {
+            abs: Pt::ZERO,
+            percent: 0.0,
+            em: value,
+            rem: 0.0,
+        },
+        CalcLengthDomain::Rem => CalcLength {
+            abs: Pt::ZERO,
+            percent: 0.0,
+            em: 0.0,
+            rem: value,
+        },
+    }
+}
+
+fn calc_length_same_non_abs_components(a: CalcLength, b: CalcLength) -> bool {
+    calc_length_component_is_zero(a.percent - b.percent)
+        && calc_length_component_is_zero(a.em - b.em)
+        && calc_length_component_is_zero(a.rem - b.rem)
+}
+
+fn calc_length_from_same_slope_clamp(
+    min: CalcLength,
+    preferred: CalcLength,
+    max: CalcLength,
+) -> Option<CalcLength> {
+    if !(calc_length_same_non_abs_components(min, preferred)
+        && calc_length_same_non_abs_components(min, max))
+    {
+        return None;
+    }
+    let min_abs = min.abs.to_f32();
+    let preferred_abs = preferred.abs.to_f32();
+    let max_abs = max.abs.to_f32();
+    // Spec-compatible behavior for inverted bounds: minimum wins.
+    let upper = if min_abs > max_abs { min_abs } else { max_abs };
+    Some(CalcLength {
+        abs: Pt::from_f32(preferred_abs.max(min_abs).min(upper)),
+        percent: min.percent,
+        em: min.em,
+        rem: min.rem,
+    })
+}
+
+fn calc_length_from_domain_clamp(
+    min: CalcLength,
+    preferred: CalcLength,
+    max: CalcLength,
+) -> Option<CalcLength> {
+    let domain = calc_length_domain(min)?;
+    if calc_length_domain(preferred) != Some(domain) || calc_length_domain(max) != Some(domain) {
+        return None;
+    }
+    let min_value = calc_length_domain_value(min, domain);
+    let preferred_value = calc_length_domain_value(preferred, domain);
+    let max_value = calc_length_domain_value(max, domain);
+    let upper = if min_value > max_value {
+        min_value
+    } else {
+        max_value
+    };
+    Some(calc_length_from_domain_value(
+        domain,
+        preferred_value.max(min_value).min(upper),
+    ))
+}
+
+fn calc_length_from_min_max(values: &[CalcLength], pick_max: bool) -> Option<CalcLength> {
+    let first = *values.first()?;
+    if values
+        .iter()
+        .all(|value| calc_length_same_non_abs_components(first, *value))
+    {
+        let mut best = first;
+        for value in values.iter().skip(1) {
+            if (pick_max && value.abs > best.abs) || (!pick_max && value.abs < best.abs) {
+                best = *value;
+            }
+        }
+        return Some(best);
+    }
+
+    let domain = calc_length_domain(first)?;
+    if values
+        .iter()
+        .all(|value| calc_length_domain(*value) == Some(domain))
+    {
+        let mut best = calc_length_domain_value(first, domain);
+        for value in values.iter().skip(1) {
+            let current = calc_length_domain_value(*value, domain);
+            if (pick_max && current > best) || (!pick_max && current < best) {
+                best = current;
+            }
+        }
+        return Some(calc_length_from_domain_value(domain, best));
+    }
+
+    None
+}
+
+fn length_spec_from_calc_length(calc: CalcLength) -> LengthSpec {
+    if calc_length_component_is_zero(calc.percent)
+        && calc_length_component_is_zero(calc.em)
+        && calc_length_component_is_zero(calc.rem)
+    {
+        return LengthSpec::Absolute(calc.abs);
+    }
+    if calc_length_component_is_zero(calc.abs.to_f32())
+        && calc_length_component_is_zero(calc.em)
+        && calc_length_component_is_zero(calc.rem)
+    {
+        return LengthSpec::Percent(calc.percent);
+    }
+    if calc_length_component_is_zero(calc.abs.to_f32())
+        && calc_length_component_is_zero(calc.percent)
+        && calc_length_component_is_zero(calc.rem)
+    {
+        return LengthSpec::Em(calc.em);
+    }
+    if calc_length_component_is_zero(calc.abs.to_f32())
+        && calc_length_component_is_zero(calc.percent)
+        && calc_length_component_is_zero(calc.em)
+    {
+        return LengthSpec::Rem(calc.rem);
+    }
+    LengthSpec::Calc(calc)
 }
 
 fn calc_length_from_calc(
@@ -9259,6 +10493,35 @@ fn calc_length_from_calc(
         }
         Calc::Function(func) => match func.as_ref() {
             MathFunction::Calc(inner) => calc_length_from_calc(inner),
+            MathFunction::Min(values) => {
+                let mut resolved: Vec<CalcLength> = Vec::with_capacity(values.len());
+                for value in values {
+                    resolved.push(calc_length_from_calc(value)?);
+                }
+                calc_length_from_min_max(&resolved, false)
+            }
+            MathFunction::Max(values) => {
+                let mut resolved: Vec<CalcLength> = Vec::with_capacity(values.len());
+                for value in values {
+                    resolved.push(calc_length_from_calc(value)?);
+                }
+                calc_length_from_min_max(&resolved, true)
+            }
+            MathFunction::Clamp(min, preferred, max) => {
+                let min = calc_length_from_calc(min)?;
+                let preferred = calc_length_from_calc(preferred)?;
+                let max = calc_length_from_calc(max)?;
+                calc_length_from_same_slope_clamp(min, preferred, max)
+                    .or_else(|| calc_length_from_domain_clamp(min, preferred, max))
+            }
+            MathFunction::Abs(inner) => {
+                let value = calc_length_from_calc(inner)?;
+                let domain = calc_length_domain(value)?;
+                Some(calc_length_from_domain_value(
+                    domain,
+                    calc_length_domain_value(value, domain).abs(),
+                ))
+            }
             _ => None,
         },
     }
@@ -9390,27 +10653,50 @@ fn apply_inherit_initial_edge(
 ) {
     if let Some(ident) = first_ident(tokens) {
         let value = match ident.as_str() {
-            "inherit" => LengthSpec::Inherit,
-            "initial" | "unset" | "revert" | "revert-layer" => LengthSpec::Initial,
-            _ => return,
+            "inherit" => Some(LengthSpec::Inherit),
+            "initial" | "unset" | "revert" | "revert-layer" => Some(LengthSpec::Initial),
+            _ => None,
         };
-        let target = if is_margin {
-            &mut delta.margin
-        } else {
-            &mut delta.padding
-        };
-        match property_id {
-            PropertyId::Margin | PropertyId::Padding => {
-                target.top = Some(value);
-                target.right = Some(value);
-                target.bottom = Some(value);
-                target.left = Some(value);
+        if let Some(value) = value {
+            let target = if is_margin {
+                &mut delta.margin
+            } else {
+                &mut delta.padding
+            };
+            match property_id {
+                PropertyId::Margin | PropertyId::Padding => {
+                    target.top = Some(value);
+                    target.right = Some(value);
+                    target.bottom = Some(value);
+                    target.left = Some(value);
+                }
+                PropertyId::MarginBlock | PropertyId::PaddingBlock => {
+                    target.top = Some(value);
+                    target.bottom = Some(value);
+                }
+                PropertyId::MarginInline | PropertyId::PaddingInline => {
+                    target.left = Some(value);
+                    target.right = Some(value);
+                }
+                PropertyId::MarginTop | PropertyId::PaddingTop => target.top = Some(value),
+                PropertyId::MarginRight | PropertyId::PaddingRight => target.right = Some(value),
+                PropertyId::MarginBottom | PropertyId::PaddingBottom => target.bottom = Some(value),
+                PropertyId::MarginLeft | PropertyId::PaddingLeft => target.left = Some(value),
+                PropertyId::MarginBlockStart | PropertyId::PaddingBlockStart => {
+                    target.top = Some(value)
+                }
+                PropertyId::MarginBlockEnd | PropertyId::PaddingBlockEnd => {
+                    target.bottom = Some(value)
+                }
+                PropertyId::MarginInlineStart | PropertyId::PaddingInlineStart => {
+                    target.left = Some(value)
+                }
+                PropertyId::MarginInlineEnd | PropertyId::PaddingInlineEnd => {
+                    target.right = Some(value)
+                }
+                _ => {}
             }
-            PropertyId::MarginTop | PropertyId::PaddingTop => target.top = Some(value),
-            PropertyId::MarginRight | PropertyId::PaddingRight => target.right = Some(value),
-            PropertyId::MarginBottom | PropertyId::PaddingBottom => target.bottom = Some(value),
-            PropertyId::MarginLeft | PropertyId::PaddingLeft => target.left = Some(value),
-            _ => {}
+            return;
         }
     }
     let target = if is_margin {
@@ -9426,10 +10712,30 @@ fn apply_inherit_initial_edge(
                 target.bottom_var = Some(expr.clone());
                 target.left_var = Some(expr);
             }
+            PropertyId::MarginBlock | PropertyId::PaddingBlock => {
+                target.top_var = Some(expr.clone());
+                target.bottom_var = Some(expr);
+            }
+            PropertyId::MarginInline | PropertyId::PaddingInline => {
+                target.left_var = Some(expr.clone());
+                target.right_var = Some(expr);
+            }
             PropertyId::MarginTop | PropertyId::PaddingTop => target.top_var = Some(expr),
             PropertyId::MarginRight | PropertyId::PaddingRight => target.right_var = Some(expr),
             PropertyId::MarginBottom | PropertyId::PaddingBottom => target.bottom_var = Some(expr),
             PropertyId::MarginLeft | PropertyId::PaddingLeft => target.left_var = Some(expr),
+            PropertyId::MarginBlockStart | PropertyId::PaddingBlockStart => {
+                target.top_var = Some(expr)
+            }
+            PropertyId::MarginBlockEnd | PropertyId::PaddingBlockEnd => {
+                target.bottom_var = Some(expr)
+            }
+            PropertyId::MarginInlineStart | PropertyId::PaddingInlineStart => {
+                target.left_var = Some(expr)
+            }
+            PropertyId::MarginInlineEnd | PropertyId::PaddingInlineEnd => {
+                target.right_var = Some(expr)
+            }
             _ => {}
         }
         return;
@@ -9442,12 +10748,119 @@ fn apply_inherit_initial_edge(
                 target.bottom = Some(spec);
                 target.left = Some(spec);
             }
+            PropertyId::MarginBlock | PropertyId::PaddingBlock => {
+                target.top = Some(spec);
+                target.bottom = Some(spec);
+            }
+            PropertyId::MarginInline | PropertyId::PaddingInline => {
+                target.left = Some(spec);
+                target.right = Some(spec);
+            }
             PropertyId::MarginTop | PropertyId::PaddingTop => target.top = Some(spec),
             PropertyId::MarginRight | PropertyId::PaddingRight => target.right = Some(spec),
             PropertyId::MarginBottom | PropertyId::PaddingBottom => target.bottom = Some(spec),
             PropertyId::MarginLeft | PropertyId::PaddingLeft => target.left = Some(spec),
+            PropertyId::MarginBlockStart | PropertyId::PaddingBlockStart => target.top = Some(spec),
+            PropertyId::MarginBlockEnd | PropertyId::PaddingBlockEnd => target.bottom = Some(spec),
+            PropertyId::MarginInlineStart | PropertyId::PaddingInlineStart => {
+                target.left = Some(spec)
+            }
+            PropertyId::MarginInlineEnd | PropertyId::PaddingInlineEnd => target.right = Some(spec),
             _ => {}
         }
+        return;
+    }
+
+    let raw = tokens_debug_string(tokens);
+    if let Some([start, end]) = parse_logical_edge_pair_components(raw.trim(), is_margin) {
+        match property_id {
+            PropertyId::MarginBlock | PropertyId::PaddingBlock => {
+                target.top = Some(start);
+                target.bottom = Some(end);
+            }
+            PropertyId::MarginInline | PropertyId::PaddingInline => {
+                target.left = Some(start);
+                target.right = Some(end);
+            }
+            _ => {}
+        }
+        return;
+    }
+
+}
+
+fn apply_inherit_initial_edge_pair(
+    tokens: &[TokenOrValue],
+    start: &mut Option<LengthSpec>,
+    end: &mut Option<LengthSpec>,
+    start_var: &mut Option<String>,
+    end_var: &mut Option<String>,
+    allow_auto: bool,
+) {
+    if let Some(ident) = first_ident(tokens) {
+        match ident.as_str() {
+            "inherit" => {
+                *start = Some(LengthSpec::Inherit);
+                *end = Some(LengthSpec::Inherit);
+                return;
+            }
+            "initial" | "unset" | "revert" | "revert-layer" => {
+                *start = Some(LengthSpec::Initial);
+                *end = Some(LengthSpec::Initial);
+                return;
+            }
+            _ => {}
+        }
+    }
+    if let Some(expr) = length_var_expr_from_tokens(tokens) {
+        let name = expr.name;
+        *start_var = Some(name.clone());
+        *end_var = Some(name);
+        return;
+    }
+    if let Some(spec) = length_spec_from_custom_tokens(tokens) {
+        *start = Some(spec);
+        *end = Some(spec);
+        return;
+    }
+    let raw = tokens_debug_string(tokens);
+    if let Some([first, second]) = parse_logical_edge_pair_components(raw.trim(), allow_auto) {
+        *start = Some(first);
+        *end = Some(second);
+        return;
+    }
+    let raw_lower = raw.trim().to_ascii_lowercase();
+    if raw_lower.contains("var(") {
+        *start_var = Some(raw_lower.clone());
+        *end_var = Some(raw_lower);
+    } else if let Some(var) = var_name_from_tokens(tokens) {
+        *start_var = Some(var.clone());
+        *end_var = Some(var);
+    }
+}
+
+fn parse_logical_edge_pair_components(raw: &str, allow_auto: bool) -> Option<[LengthSpec; 2]> {
+    let parts = split_top_level_whitespace(raw);
+    if parts.is_empty() || parts.len() > 2 {
+        return None;
+    }
+    let mut values: Vec<LengthSpec> = Vec::with_capacity(parts.len());
+    for part in parts {
+        let part = part.trim();
+        let spec = if allow_auto && part.eq_ignore_ascii_case("auto") {
+            LengthSpec::Auto
+        } else {
+            length_spec_from_string(part)?
+        };
+        values.push(spec);
+    }
+    match values.len() {
+        1 => {
+            let v = values[0];
+            Some([v, v])
+        }
+        2 => Some([values[0], values[1]]),
+        _ => None,
     }
 }
 
@@ -9554,14 +10967,18 @@ fn apply_inherit_initial_background_color(tokens: &[TokenOrValue], delta: &mut S
     }
 }
 
-fn apply_inherit_initial_border_color(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
+fn apply_inherit_initial_border_color_target(
+    tokens: &[TokenOrValue],
+    delta: &mut StyleDelta,
+    target: BorderColorTarget,
+) {
     if let Some(ident) = first_ident(tokens) {
         match ident.as_str() {
-            "inherit" => delta.border_color = Some(ColorSpec::Inherit),
+            "inherit" => set_delta_border_color_spec(delta, target, ColorSpec::Inherit),
             "initial" | "unset" | "revert" | "revert-layer" => {
-                delta.border_color = Some(ColorSpec::Initial)
+                set_delta_border_color_spec(delta, target, ColorSpec::Initial)
             }
-            "currentcolor" => delta.border_color = Some(ColorSpec::CurrentColor),
+            "currentcolor" => set_delta_border_color_spec(delta, target, ColorSpec::CurrentColor),
             _ => {}
         }
     }
@@ -9619,9 +11036,7 @@ fn apply_inherit_initial_transform(tokens: &[TokenOrValue], slot: &mut Option<Tr
     if let Some(ident) = first_ident(tokens) {
         match ident.as_str() {
             "inherit" => *slot = Some(TransformSpec::Inherit),
-            "initial" | "unset" | "revert" | "revert-layer" => {
-                *slot = Some(TransformSpec::Initial)
-            }
+            "initial" | "unset" | "revert" | "revert-layer" => *slot = Some(TransformSpec::Initial),
             "none" => *slot = Some(TransformSpec::Value(Vec::new())),
             _ => {}
         }
@@ -9720,6 +11135,10 @@ impl StyleDelta {
             && self.color_var.is_none()
             && self.background_color_var.is_none()
             && self.border_color_var.is_none()
+            && self.border_top_color_var.is_none()
+            && self.border_right_color_var.is_none()
+            && self.border_bottom_color_var.is_none()
+            && self.border_left_color_var.is_none()
             && self.width.is_none()
             && self.height.is_none()
             && self.width_var.is_none()
@@ -9761,6 +11180,10 @@ impl StyleDelta {
             && self.border_width.bottom_var.is_none()
             && self.border_width.left_var.is_none()
             && self.border_color.is_none()
+            && self.border_top_color.is_none()
+            && self.border_right_color.is_none()
+            && self.border_bottom_color.is_none()
+            && self.border_left_color.is_none()
             && self.border_style.top.is_none()
             && self.border_style.right.is_none()
             && self.border_style.bottom.is_none()
@@ -9817,6 +11240,9 @@ impl StyleDelta {
             && self.align_self.is_none()
             && self.align_content.is_none()
             && self.grid_columns.is_none()
+            && self.grid_rows.is_none()
+            && self.grid_column_start.is_none()
+            && self.grid_row_start.is_none()
             && self.gap.is_none()
             && self.gap_var.is_none()
             && self.flex_grow.is_none()
@@ -10036,6 +11462,53 @@ mod tests {
     }
 
     #[test]
+    fn debug_logs_multicol_single_column_fallback_for_multicol_props() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "fullbleed_style_multicol_known_loss_{}_{}.jsonl",
+            std::process::id(),
+            nanos
+        ));
+        let logger = Arc::new(DebugLogger::new(&path).expect("debug logger"));
+        let resolver = StyleResolver::new_with_debug(
+            ".x { column-count: 2; column-width: 120px; column-span: all; background: red; }",
+            Some(logger.clone()),
+        );
+        drop(resolver);
+        drop(logger);
+        let log = std::fs::read_to_string(&path).expect("read debug log");
+        assert!(log.contains("\"MULTICOL_SINGLE_COLUMN_FALLBACK\""));
+        assert!(!log.contains("\"DECLARATION_PARSED_NO_EFFECT\""));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn debug_logs_filters_effects_fallback_for_effect_props() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "fullbleed_style_effects_known_loss_{}_{}.jsonl",
+            std::process::id(),
+            nanos
+        ));
+        let logger = Arc::new(DebugLogger::new(&path).expect("debug logger"));
+        let resolver = StyleResolver::new_with_debug(
+            ".x { opacity: 0.5; filter: blur(2px); backdrop-filter: blur(1px); }",
+            Some(logger.clone()),
+        );
+        drop(resolver);
+        drop(logger);
+        let log = std::fs::read_to_string(&path).expect("read debug log");
+        assert!(log.contains("\"FILTERS_EFFECTS_FALLBACK\""));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn display_table_is_not_normalized() {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -10068,6 +11541,46 @@ mod tests {
         let style = resolver.compute_style(&info, &root, None, &[]);
         assert_eq!(style.display, DisplayMode::Grid);
         assert_eq!(style.grid_columns, Some(3));
+    }
+
+    #[test]
+    fn grid_template_rows_sets_row_count() {
+        let resolver =
+            StyleResolver::new(".menu { display: grid; grid-template-rows: 1fr 2fr; }");
+        let root = resolver.default_style();
+        let info = element("div", None, &["menu"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.display, DisplayMode::Grid);
+        assert_eq!(style.grid_rows, Some(2));
+    }
+
+    #[test]
+    fn grid_track_count_handles_repeat_segments() {
+        let resolver = StyleResolver::new(
+            ".menu { display: grid; grid-template-columns: repeat(2, 1fr 2fr) 10px; }",
+        );
+        let root = resolver.default_style();
+        let info = element("div", None, &["menu"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.grid_columns, Some(5));
+    }
+
+    #[test]
+    fn grid_start_lines_parse_from_longhands_and_shorthands() {
+        let resolver = StyleResolver::new(
+            ".a{grid-column-start:2;grid-row-start:3}.b{grid-column:4/6;grid-row:5/8}.c{grid-area:7/8/span 2/span 1}",
+        );
+        let root = resolver.default_style();
+        let a = resolver.compute_style(&element("div", None, &["a"]), &root, None, &[]);
+        let b = resolver.compute_style(&element("div", None, &["b"]), &root, None, &[]);
+        let c = resolver.compute_style(&element("div", None, &["c"]), &root, None, &[]);
+
+        assert_eq!(a.grid_column_start, Some(2));
+        assert_eq!(a.grid_row_start, Some(3));
+        assert_eq!(b.grid_column_start, Some(4));
+        assert_eq!(b.grid_row_start, Some(5));
+        assert_eq!(c.grid_row_start, Some(7));
+        assert_eq!(c.grid_column_start, Some(8));
     }
 
     #[test]
@@ -10653,6 +12166,93 @@ mod tests {
     }
 
     #[test]
+    fn custom_property_length_min_max_functions_resolve() {
+        let css = ".x { --w-min: min(40px, 20px); --w-max: max(40px, 20px); width: var(--w-min); min-width: var(--w-max); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.width, LengthSpec::Absolute(Pt::from_f32(15.0)));
+        assert_eq!(style.min_width, LengthSpec::Absolute(Pt::from_f32(30.0)));
+    }
+
+    #[test]
+    fn custom_property_length_clamp_function_resolves() {
+        let css = ".x { --w: clamp(10px, 30px, 20px); width: var(--w); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.width, LengthSpec::Absolute(Pt::from_f32(15.0)));
+    }
+
+    #[test]
+    fn custom_property_length_min_same_slope_calc_resolves() {
+        let css = ".x { --w: min(calc(50% + 10px), calc(50% + 20px)); width: var(--w); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        match style.width {
+            LengthSpec::Calc(calc) => {
+                assert!((calc.abs.to_f32() - 7.5).abs() < 0.001, "unexpected calc={calc:?}");
+                assert!((calc.percent - 0.5).abs() < 0.0001, "unexpected calc={calc:?}");
+                assert!(calc.em.abs() < 0.0001 && calc.rem.abs() < 0.0001);
+            }
+            other => panic!("expected calc width, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn custom_property_calc_var_times_percent_resolves_width_percent() {
+        let css = ".x { --pct: 60; width: calc(var(--pct) * 1%); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        match style.width {
+            LengthSpec::Percent(value) => assert!((value - 0.6).abs() < 1.0e-6),
+            other => panic!("expected percent width, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn custom_property_calc_percent_times_var_resolves_width_percent() {
+        let css = ".x { --pct: 60; width: calc(1% * var(--pct)); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        match style.width {
+            LengthSpec::Percent(value) => assert!((value - 0.6).abs() < 1.0e-6),
+            other => panic!("expected percent width, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn custom_property_calc_var_percent_fallback_resolves() {
+        let css = ".x { width: calc(var(--missing, 25) * 1%); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        match style.width {
+            LengthSpec::Percent(value) => assert!((value - 0.25).abs() < 1.0e-6),
+            other => panic!("expected percent width, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn custom_property_calc_var_times_number_scales_length() {
+        let css = ".x { --w: 20px; width: calc(var(--w) * 2); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.width, LengthSpec::Absolute(Pt::from_f32(30.0)));
+    }
+
+    #[test]
     fn custom_property_length_var_cycle_bails_out_deterministically() {
         let css = ".x { --a: var(--b); --b: var(--a); width: var(--a); }";
         let resolver = StyleResolver::new(css);
@@ -10811,6 +12411,26 @@ mod tests {
     }
 
     #[test]
+    fn place_items_shorthand_sets_align_items() {
+        let css = ".x { place-items: flex-end center; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.align_items, AlignItemsMode::FlexEnd);
+    }
+
+    #[test]
+    fn place_items_single_value_sets_align_items() {
+        let css = ".x { place-items: center; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.align_items, AlignItemsMode::Center);
+    }
+
+    #[test]
     fn align_self_auto_is_default() {
         let css = ".x { align-self: auto; }";
         let resolver = StyleResolver::new(css);
@@ -10818,6 +12438,26 @@ mod tests {
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
         assert_eq!(style.align_self, AlignSelfMode::Auto);
+    }
+
+    #[test]
+    fn place_self_shorthand_sets_align_self() {
+        let css = ".x { place-self: flex-end center; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.align_self, AlignSelfMode::FlexEnd);
+    }
+
+    #[test]
+    fn place_self_single_value_sets_align_self() {
+        let css = ".x { place-self: center; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.align_self, AlignSelfMode::Center);
     }
 
     #[test]

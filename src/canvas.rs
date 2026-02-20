@@ -179,6 +179,8 @@ pub struct Canvas {
     state_stack: Vec<GraphicsState>,
     current_state: GraphicsState,
     current_mcid: u32,
+    // Nearest positioned-ancestor containing block stack for out-of-flow absolute placement.
+    abs_containing_block_stack: Vec<Rect>,
 }
 
 impl Canvas {
@@ -198,11 +200,24 @@ impl Canvas {
                 font_name: "Helvetica".to_string(),
             },
             current_mcid: 0,
+            abs_containing_block_stack: Vec::new(),
         }
     }
 
     pub fn page_size(&self) -> Size {
         self.page_size
+    }
+
+    pub fn push_abs_containing_block(&mut self, rect: Rect) {
+        self.abs_containing_block_stack.push(rect);
+    }
+
+    pub fn pop_abs_containing_block(&mut self) {
+        self.abs_containing_block_stack.pop();
+    }
+
+    pub fn current_abs_containing_block(&self) -> Option<Rect> {
+        self.abs_containing_block_stack.last().copied()
     }
 
     pub fn save_state(&mut self) {

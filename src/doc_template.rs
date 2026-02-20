@@ -95,45 +95,72 @@ impl DocTemplate {
         let mut page_start = Instant::now();
         let mut page_flowables = 0usize;
 
-        let draw_fixed_overlays = |canvas: &mut Canvas,
-                                   overlays: &[Box<dyn Flowable>],
-                                   page_flowables: &mut usize| {
-            if overlays.is_empty() {
-                return;
-            }
-            let page_size = canvas.page_size();
-            for overlay in overlays {
-                overlay.draw(
-                    canvas,
-                    Pt::ZERO,
-                    Pt::ZERO,
-                    page_size.width,
-                    page_size.height,
-                );
-                *page_flowables += 1;
-            }
-        };
+        let draw_fixed_overlays =
+            |canvas: &mut Canvas, overlays: &[Box<dyn Flowable>], page_flowables: &mut usize| {
+                if overlays.is_empty() {
+                    return;
+                }
+                let page_size = canvas.page_size();
+                for overlay in overlays {
+                    overlay.draw(
+                        canvas,
+                        Pt::ZERO,
+                        Pt::ZERO,
+                        page_size.width,
+                        page_size.height,
+                    );
+                    *page_flowables += 1;
+                }
+            };
 
-        let mut fixed_overlays: Vec<Box<dyn Flowable>> = Vec::new();
+        let mut fixed_overlays_back: Vec<Box<dyn Flowable>> = Vec::new();
+        let mut fixed_overlays_front: Vec<Box<dyn Flowable>> = Vec::new();
+        let mut root_out_of_flow_back: Vec<Box<dyn Flowable>> = Vec::new();
+        let mut root_out_of_flow_front: Vec<Box<dyn Flowable>> = Vec::new();
         let mut story: VecDeque<Box<dyn Flowable>> = VecDeque::new();
         for flowable in self.story {
             if flowable.is_fixed_positioned() {
-                fixed_overlays.push(flowable);
+                if flowable.z_index() < 0 {
+                    fixed_overlays_back.push(flowable);
+                } else {
+                    fixed_overlays_front.push(flowable);
+                }
+            } else if flowable.out_of_flow() {
+                // Root-level non-fixed out-of-flow (e.g. position:absolute) is treated as a
+                // page-one overlay lane. z-index<0 paints behind flow, z-index>=0 paints above.
+                if flowable.z_index() < 0 {
+                    root_out_of_flow_back.push(flowable);
+                } else {
+                    root_out_of_flow_front.push(flowable);
+                }
             } else {
                 story.push_back(flowable);
             }
         }
+        // Keep fixed overlay paint order deterministic and z-index aware.
+        // Lower z-index paints first, higher z-index paints later (on top).
+        fixed_overlays_back.sort_by(|left, right| left.z_index().cmp(&right.z_index()));
+        fixed_overlays_front.sort_by(|left, right| left.z_index().cmp(&right.z_index()));
+        root_out_of_flow_back.sort_by(|left, right| left.z_index().cmp(&right.z_index()));
+        root_out_of_flow_front.sort_by(|left, right| left.z_index().cmp(&right.z_index()));
 
         let finish_page = |canvas: &mut Canvas,
                            page_number: usize,
                            page_flowables: &mut usize,
                            metrics: &mut DocumentMetrics,
                            page_start: &mut Instant,
-                           fixed_overlays: &[Box<dyn Flowable>]| {
-            if canvas.is_current_empty() && fixed_overlays.is_empty() {
+                           fixed_overlays_front: &[Box<dyn Flowable>],
+                           root_out_of_flow_front: &[Box<dyn Flowable>]| {
+            if canvas.is_current_empty()
+                && fixed_overlays_front.is_empty()
+                && (page_number != 1 || root_out_of_flow_front.is_empty())
+            {
                 return;
             }
-            draw_fixed_overlays(canvas, fixed_overlays, page_flowables);
+            if page_number == 1 {
+                draw_fixed_overlays(canvas, root_out_of_flow_front, page_flowables);
+            }
+            draw_fixed_overlays(canvas, fixed_overlays_front, page_flowables);
             if canvas.is_current_empty() {
                 return;
             }
@@ -158,6 +185,8 @@ impl DocTemplate {
             crate::META_PAGE_TEMPLATE_KEY.to_string(),
             template.name.clone(),
         );
+        draw_fixed_overlays(&mut canvas, &fixed_overlays_back, &mut page_flowables);
+        draw_fixed_overlays(&mut canvas, &root_out_of_flow_back, &mut page_flowables);
 
         while let Some(flowable) = story.pop_front() {
             let mut current = flowable;
@@ -182,7 +211,8 @@ impl DocTemplate {
                         &mut page_flowables,
                         &mut metrics,
                         &mut page_start,
-                        &fixed_overlays,
+                        &fixed_overlays_front,
+                        &root_out_of_flow_front,
                     );
                     page_number += 1;
                     let template = select_template(&self.page_templates, page_number);
@@ -196,6 +226,7 @@ impl DocTemplate {
                         crate::META_PAGE_TEMPLATE_KEY.to_string(),
                         template.name.clone(),
                     );
+                    draw_fixed_overlays(&mut canvas, &fixed_overlays_back, &mut page_flowables);
                 }
 
                 if frame_index >= frames.len() {
@@ -212,7 +243,8 @@ impl DocTemplate {
                         &mut page_flowables,
                         &mut metrics,
                         &mut page_start,
-                        &fixed_overlays,
+                        &fixed_overlays_front,
+                        &root_out_of_flow_front,
                     );
                     page_number += 1;
                     let template = select_template(&self.page_templates, page_number);
@@ -226,6 +258,7 @@ impl DocTemplate {
                         crate::META_PAGE_TEMPLATE_KEY.to_string(),
                         template.name.clone(),
                     );
+                    draw_fixed_overlays(&mut canvas, &fixed_overlays_back, &mut page_flowables);
                 }
 
                 if frames.is_empty() {
@@ -271,7 +304,8 @@ impl DocTemplate {
                                 &mut page_flowables,
                                 &mut metrics,
                                 &mut page_start,
-                                &fixed_overlays,
+                                &fixed_overlays_front,
+                                &root_out_of_flow_front,
                             );
                             page_number += 1;
                             let template = select_template(&self.page_templates, page_number);
@@ -287,6 +321,11 @@ impl DocTemplate {
                             canvas.meta(
                                 crate::META_PAGE_TEMPLATE_KEY.to_string(),
                                 template.name.clone(),
+                            );
+                            draw_fixed_overlays(
+                                &mut canvas,
+                                &fixed_overlays_back,
+                                &mut page_flowables,
                             );
                         }
                         break;
@@ -331,7 +370,8 @@ impl DocTemplate {
                 &mut page_flowables,
                 &mut metrics,
                 &mut page_start,
-                &fixed_overlays,
+                &fixed_overlays_front,
+                &root_out_of_flow_front,
             );
         }
 

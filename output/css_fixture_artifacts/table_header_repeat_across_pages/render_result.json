@@ -1,0 +1,160 @@
+{
+  "schema": "fullbleed.css_fixture_render_result.v1",
+  "id": "table_header_repeat_across_pages",
+  "ok": true,
+  "warnings_ok": true,
+  "expected_warnings": [],
+  "actual_warnings": [],
+  "stages": {
+    "parser": {
+      "ok": true,
+      "error": null
+    },
+    "compute": {
+      "ok": true,
+      "glyph_report_count": 0,
+      "page_data_present": false,
+      "assertions_enabled": true,
+      "assertions_ok": true,
+      "assertions": {
+        "assertion_count": 1,
+        "computed_event_count": 45,
+        "checks": [
+          {
+            "index": 0,
+            "ok": true,
+            "node": "html:nth-child(1) > body:nth-child(2) > table.t:nth-child(1) > thead:nth-child(1) > tr:nth-child(1) > th:nth-child(1)",
+            "style_mismatches": [],
+            "vars_mismatch": null,
+            "vars_count_mismatch": null
+          }
+        ]
+      }
+    },
+    "layout": {
+      "ok": true,
+      "expected_page_count": 2,
+      "actual_page_count": 2,
+      "dpi": 120,
+      "assertions_enabled": true,
+      "assertions_ok": true,
+      "assertions": {
+        "assertion_count": 2,
+        "checks": [
+          {
+            "index": 0,
+            "ok": true,
+            "kind": "color_run_length",
+            "page": 1,
+            "axis": "x",
+            "fixed": 30,
+            "start": 0,
+            "expected_rgba": [
+              0,
+              0,
+              255,
+              255
+            ],
+            "tolerance": 10,
+            "actual_run_length": 480,
+            "expected_length": 480,
+            "length_tolerance": 1
+          },
+          {
+            "index": 1,
+            "ok": true,
+            "kind": "color_run_length",
+            "page": 2,
+            "axis": "x",
+            "fixed": 30,
+            "start": 0,
+            "expected_rgba": [
+              0,
+              0,
+              255,
+              255
+            ],
+            "tolerance": 10,
+            "actual_run_length": 480,
+            "expected_length": 480,
+            "length_tolerance": 1
+          }
+        ]
+      }
+    },
+    "paint": {
+      "ok": true,
+      "checks": [
+        {
+          "page": 1,
+          "x": 20,
+          "y": 20,
+          "expected_rgba": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "actual_rgba": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "tolerance": 10,
+          "ok": true
+        },
+        {
+          "page": 2,
+          "x": 20,
+          "y": 20,
+          "expected_rgba": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "actual_rgba": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "tolerance": 10,
+          "ok": true
+        },
+        {
+          "page": 2,
+          "x": 20,
+          "y": 120,
+          "expected_rgba": [
+            255,
+            255,
+            0,
+            255
+          ],
+          "actual_rgba": [
+            255,
+            255,
+            0,
+            255
+          ],
+          "tolerance": 10,
+          "ok": true
+        }
+      ]
+    },
+    "diagnostics": {
+      "ok": true,
+      "enabled": true,
+      "details": {
+        "summary_counts_total": {
+          "jit.layout.strategy": 3,
+          "jit.page_break.trigger": 6
+        },
+        "summary_context_count": 3,
+        "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_table_header_repeat_across_pages_110000_1771609188884233300.jsonl"
+      }
+    }
+  }
+}

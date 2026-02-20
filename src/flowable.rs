@@ -2,7 +2,7 @@ use crate::canvas::Canvas;
 use crate::font::FontRegistry;
 use crate::perf::PerfLogger;
 use crate::svg;
-use crate::types::{BoxSizingMode, Color, Pt, Shading, ShadingStop, Size};
+use crate::types::{BoxSizingMode, Color, Pt, Rect, Shading, ShadingStop, Size};
 use rayon::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -276,10 +276,21 @@ impl LengthSpec {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CssTransformOp {
-    Translate { x: LengthSpec, y: LengthSpec },
-    Scale { x: f32, y: f32 },
-    Rotate { radians: f32 },
-    Skew { x_radians: f32, y_radians: f32 },
+    Translate {
+        x: LengthSpec,
+        y: LengthSpec,
+    },
+    Scale {
+        x: f32,
+        y: f32,
+    },
+    Rotate {
+        radians: f32,
+    },
+    Skew {
+        x_radians: f32,
+        y_radians: f32,
+    },
     Matrix {
         a: f32,
         b: f32,
@@ -4133,7 +4144,13 @@ pub struct FlexFlowable {
 
 impl FlexFlowable {
     pub fn new_pt(
-        items: Vec<(Box<dyn Flowable>, f32, f32, Option<LengthSpec>, Option<AlignItems>)>,
+        items: Vec<(
+            Box<dyn Flowable>,
+            f32,
+            f32,
+            Option<LengthSpec>,
+            Option<AlignItems>,
+        )>,
         direction: FlexDirection,
         justify: JustifyContent,
         align: AlignItems,
@@ -4943,7 +4960,7 @@ pub struct ContainerFlowable {
     children: Vec<Box<dyn Flowable>>,
     margin: EdgeSizes,
     border_width: EdgeSizes,
-    border_color: Color,
+    border_colors: ResolvedEdgeColors,
     border_radius: BorderRadiusSpec,
     padding: EdgeSizes,
     width: LengthSpec,
@@ -4957,6 +4974,7 @@ pub struct ContainerFlowable {
     transform_origin: CssTransformOrigin,
     overflow_hidden: bool,
     tag_role: Option<Arc<str>>,
+    establishes_abs_containing_block: bool,
     font_size: Pt,
     root_font_size: Pt,
     pagination: Pagination,
@@ -4977,7 +4995,7 @@ impl ContainerFlowable {
             children,
             margin: EdgeSizes::zero(),
             border_width: EdgeSizes::zero(),
-            border_color: Color::BLACK,
+            border_colors: ResolvedEdgeColors::uniform(Color::BLACK),
             border_radius: BorderRadiusSpec::zero(),
             padding: EdgeSizes::zero(),
             width: LengthSpec::Auto,
@@ -4991,6 +5009,7 @@ impl ContainerFlowable {
             transform_origin: CssTransformOrigin::center(),
             overflow_hidden: false,
             tag_role: None,
+            establishes_abs_containing_block: false,
             font_size,
             root_font_size,
             pagination: Pagination::default(),
@@ -5005,7 +5024,23 @@ impl ContainerFlowable {
 
     pub fn with_border(mut self, border_width: EdgeSizes, border_color: Color) -> Self {
         self.border_width = border_width;
-        self.border_color = border_color;
+        self.border_colors = ResolvedEdgeColors::uniform(border_color);
+        self
+    }
+
+    pub fn with_border_colors(
+        mut self,
+        top: Color,
+        right: Color,
+        bottom: Color,
+        left: Color,
+    ) -> Self {
+        self.border_colors = ResolvedEdgeColors {
+            top,
+            right,
+            bottom,
+            left,
+        };
         self
     }
 
@@ -5071,6 +5106,11 @@ impl ContainerFlowable {
 
     pub fn with_tag_role(mut self, role: impl Into<Arc<str>>) -> Self {
         self.tag_role = Some(role.into());
+        self
+    }
+
+    pub fn with_establishes_abs_containing_block(mut self, enabled: bool) -> Self {
+        self.establishes_abs_containing_block = enabled;
         self
     }
 
@@ -5312,22 +5352,22 @@ impl ContainerFlowable {
         width: Pt,
         height: Pt,
         border: ResolvedEdges,
-        color: Color,
+        colors: ResolvedEdgeColors,
     ) {
         if border.top > Pt::ZERO {
-            canvas.set_fill_color(color);
+            canvas.set_fill_color(colors.top);
             canvas.draw_rect(x, y, width, border.top);
         }
         if border.bottom > Pt::ZERO {
-            canvas.set_fill_color(color);
+            canvas.set_fill_color(colors.bottom);
             canvas.draw_rect(x, y + height - border.bottom, width, border.bottom);
         }
         if border.left > Pt::ZERO {
-            canvas.set_fill_color(color);
+            canvas.set_fill_color(colors.left);
             canvas.draw_rect(x, y, border.left, height);
         }
         if border.right > Pt::ZERO {
-            canvas.set_fill_color(color);
+            canvas.set_fill_color(colors.right);
             canvas.draw_rect(x + width - border.right, y, border.right, height);
         }
     }
@@ -5637,7 +5677,7 @@ impl Flowable for ContainerFlowable {
             children: placed,
             margin: Self::zero_bottom(self.margin),
             border_width: Self::zero_bottom(self.border_width),
-            border_color: self.border_color,
+            border_colors: self.border_colors,
             border_radius: self.border_radius,
             padding: Self::zero_bottom(self.padding),
             width: self.width,
@@ -5651,6 +5691,7 @@ impl Flowable for ContainerFlowable {
             transform_origin: self.transform_origin,
             overflow_hidden: self.overflow_hidden,
             tag_role: self.tag_role.clone(),
+            establishes_abs_containing_block: self.establishes_abs_containing_block,
             font_size: self.font_size,
             root_font_size: self.root_font_size,
             pagination: Pagination {
@@ -5664,7 +5705,7 @@ impl Flowable for ContainerFlowable {
             children: remaining,
             margin: Self::zero_top(self.margin),
             border_width: Self::zero_top(self.border_width),
-            border_color: self.border_color,
+            border_colors: self.border_colors,
             border_radius: self.border_radius,
             padding: Self::zero_top(self.padding),
             width: self.width,
@@ -5678,6 +5719,7 @@ impl Flowable for ContainerFlowable {
             transform_origin: self.transform_origin,
             overflow_hidden: self.overflow_hidden,
             tag_role: self.tag_role.clone(),
+            establishes_abs_containing_block: self.establishes_abs_containing_block,
             font_size: self.font_size,
             root_font_size: self.root_font_size,
             pagination: Pagination {
@@ -5776,13 +5818,16 @@ impl Flowable for ContainerFlowable {
         }
 
         if Self::has_border(border) {
-            let uniform = border.top == border.right
+            let uniform_width = border.top == border.right
                 && border.top == border.bottom
                 && border.top == border.left;
-            if radius > Pt::ZERO && uniform && border.top > Pt::ZERO {
+            let uniform_color = self.border_colors.top == self.border_colors.right
+                && self.border_colors.top == self.border_colors.bottom
+                && self.border_colors.top == self.border_colors.left;
+            if radius > Pt::ZERO && uniform_width && uniform_color && border.top > Pt::ZERO {
                 let inset = border.top / 2.0;
                 let stroke_radius = (radius - inset).max(Pt::ZERO);
-                canvas.set_stroke_color(self.border_color);
+                canvas.set_stroke_color(self.border_colors.top);
                 canvas.set_line_width(border.top);
                 Self::draw_rounded_rect_stroke(
                     canvas,
@@ -5800,7 +5845,7 @@ impl Flowable for ContainerFlowable {
                     border_box_width,
                     border_box_height,
                     border,
-                    self.border_color,
+                    self.border_colors,
                 );
             }
         }
@@ -5836,33 +5881,49 @@ impl Flowable for ContainerFlowable {
         let padding_box_w = (border_box_width - border.left - border.right).max(Pt::ZERO);
         let padding_box_h = (border_box_height - border.top - border.bottom).max(Pt::ZERO);
 
-        let mut out_of_flow_neg: Vec<(i32, usize, &Box<dyn Flowable>)> = Vec::new();
-        let mut out_of_flow_zero: Vec<(usize, &Box<dyn Flowable>)> = Vec::new();
-        let mut out_of_flow_pos: Vec<(i32, usize, &Box<dyn Flowable>)> = Vec::new();
+        let pushed_abs_cb = if self.establishes_abs_containing_block {
+            canvas.push_abs_containing_block(Rect {
+                x: padding_box_x,
+                y: padding_box_y,
+                width: padding_box_w,
+                height: padding_box_h,
+            });
+            true
+        } else {
+            false
+        };
+
+        let mut out_of_flow_neg: Vec<(i32, usize, Pt, Pt, &Box<dyn Flowable>)> = Vec::new();
+        let mut out_of_flow_zero: Vec<(usize, Pt, Pt, &Box<dyn Flowable>)> = Vec::new();
+        let mut out_of_flow_pos: Vec<(i32, usize, Pt, Pt, &Box<dyn Flowable>)> = Vec::new();
+        let mut static_cursor_y = inner_y;
         for (idx, child) in self.children.iter().enumerate() {
-            if !child.out_of_flow() {
+            if child.out_of_flow() {
+                let static_x = inner_x;
+                let static_y = static_cursor_y;
+                let z = child.z_index();
+                if z < 0 {
+                    out_of_flow_neg.push((z, idx, static_x, static_y, child));
+                } else if z > 0 {
+                    out_of_flow_pos.push((z, idx, static_x, static_y, child));
+                } else {
+                    out_of_flow_zero.push((idx, static_x, static_y, child));
+                }
                 continue;
             }
-            let z = child.z_index();
-            if z < 0 {
-                out_of_flow_neg.push((z, idx, child));
-            } else if z > 0 {
-                out_of_flow_pos.push((z, idx, child));
-            } else {
-                out_of_flow_zero.push((idx, child));
-            }
+            let size = cache
+                .child_sizes
+                .get(idx)
+                .copied()
+                .flatten()
+                .unwrap_or_else(|| child.wrap(content_width, child_avail_height));
+            static_cursor_y = static_cursor_y + size.height;
         }
 
         if !out_of_flow_neg.is_empty() {
             out_of_flow_neg.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-            for (_, _, child) in out_of_flow_neg {
-                child.draw(
-                    canvas,
-                    padding_box_x,
-                    padding_box_y,
-                    padding_box_w,
-                    padding_box_h,
-                );
+            for (_, _, static_x, static_y, child) in out_of_flow_neg {
+                child.draw(canvas, static_x, static_y, padding_box_w, padding_box_h);
             }
         }
 
@@ -5889,28 +5950,20 @@ impl Flowable for ContainerFlowable {
 
         if !out_of_flow_zero.is_empty() {
             out_of_flow_zero.sort_by(|a, b| a.0.cmp(&b.0));
-            for (_, child) in out_of_flow_zero {
-                child.draw(
-                    canvas,
-                    padding_box_x,
-                    padding_box_y,
-                    padding_box_w,
-                    padding_box_h,
-                );
+            for (_, static_x, static_y, child) in out_of_flow_zero {
+                child.draw(canvas, static_x, static_y, padding_box_w, padding_box_h);
             }
         }
 
         if !out_of_flow_pos.is_empty() {
             out_of_flow_pos.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-            for (_, _, child) in out_of_flow_pos {
-                child.draw(
-                    canvas,
-                    padding_box_x,
-                    padding_box_y,
-                    padding_box_w,
-                    padding_box_h,
-                );
+            for (_, _, static_x, static_y, child) in out_of_flow_pos {
+                child.draw(canvas, static_x, static_y, padding_box_w, padding_box_h);
             }
+        }
+
+        if pushed_abs_cb {
+            canvas.pop_abs_containing_block();
         }
 
         if self.overflow_hidden {
@@ -5936,6 +5989,8 @@ pub struct AbsolutePositionedFlowable {
     top: LengthSpec,
     right: LengthSpec,
     bottom: LengthSpec,
+    width_spec: LengthSpec,
+    height_spec: LengthSpec,
     z_index: i32,
     font_size: Pt,
     root_font_size: Pt,
@@ -6027,6 +6082,8 @@ impl AbsolutePositionedFlowable {
         top: LengthSpec,
         right: LengthSpec,
         bottom: LengthSpec,
+        width_spec: LengthSpec,
+        height_spec: LengthSpec,
         z_index: i32,
         font_size: f32,
         root_font_size: f32,
@@ -6037,6 +6094,8 @@ impl AbsolutePositionedFlowable {
             top,
             right,
             bottom,
+            width_spec,
+            height_spec,
             z_index,
             Pt::from_f32(font_size),
             Pt::from_f32(root_font_size),
@@ -6049,6 +6108,8 @@ impl AbsolutePositionedFlowable {
         top: LengthSpec,
         right: LengthSpec,
         bottom: LengthSpec,
+        width_spec: LengthSpec,
+        height_spec: LengthSpec,
         z_index: i32,
         font_size: Pt,
         root_font_size: Pt,
@@ -6059,6 +6120,8 @@ impl AbsolutePositionedFlowable {
             top,
             right,
             bottom,
+            width_spec,
+            height_spec,
             z_index,
             font_size,
             root_font_size,
@@ -6122,7 +6185,24 @@ impl Flowable for AbsolutePositionedFlowable {
         None
     }
 
-    fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt) {
+    fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, _avail_width: Pt, _avail_height: Pt) {
+        let (containing_x, containing_y, containing_width, containing_height) =
+            if let Some(rect) = canvas.current_abs_containing_block() {
+                (
+                    rect.x,
+                    rect.y,
+                    rect.width.max(Pt::ZERO),
+                    rect.height.max(Pt::ZERO),
+                )
+            } else {
+                let page = canvas.page_size();
+                (
+                    Pt::ZERO,
+                    Pt::ZERO,
+                    page.width.max(Pt::ZERO),
+                    page.height.max(Pt::ZERO),
+                )
+            };
         let has_left = !matches!(self.left, LengthSpec::Auto);
         let has_right = !matches!(self.right, LengthSpec::Auto);
         let has_top = !matches!(self.top, LengthSpec::Auto);
@@ -6130,25 +6210,25 @@ impl Flowable for AbsolutePositionedFlowable {
 
         let left = if has_left {
             self.left
-                .resolve_width(avail_width, self.font_size, self.root_font_size)
+                .resolve_width(containing_width, self.font_size, self.root_font_size)
         } else {
             Pt::ZERO
         };
         let right = if has_right {
             self.right
-                .resolve_width(avail_width, self.font_size, self.root_font_size)
+                .resolve_width(containing_width, self.font_size, self.root_font_size)
         } else {
             Pt::ZERO
         };
         let top = if has_top {
             self.top
-                .resolve_height(avail_height, self.font_size, self.root_font_size)
+                .resolve_height(containing_height, self.font_size, self.root_font_size)
         } else {
             Pt::ZERO
         };
         let bottom = if has_bottom {
             self.bottom
-                .resolve_height(avail_height, self.font_size, self.root_font_size)
+                .resolve_height(containing_height, self.font_size, self.root_font_size)
         } else {
             Pt::ZERO
         };
@@ -6158,34 +6238,63 @@ impl Flowable for AbsolutePositionedFlowable {
         let bottom = bottom;
 
         // CSS-ish positioning behavior:
-        // - If both sides are set, stretch to fill.
+        // - If both sides are set and size is auto, stretch to fill.
+        // - If both sides are set and size is explicit, keep explicit size
+        //   and anchor from the start side (left/top in current LTR model).
         // - If only one side is set, anchor there and use the child's intrinsic size.
         // - If neither is set, default to 0.
-        let stretch_w = has_left && has_right;
-        let stretch_h = has_top && has_bottom;
+        let width_auto = matches!(self.width_spec, LengthSpec::Auto);
+        let height_auto = matches!(self.height_spec, LengthSpec::Auto);
+        let stretch_w = has_left && has_right && width_auto;
+        let stretch_h = has_top && has_bottom && height_auto;
 
-        let avail_w_for_child = if stretch_w {
-            (avail_width - left - right).max(Pt::ZERO)
-        } else if has_left {
-            (avail_width - left).max(Pt::ZERO)
-        } else if has_right {
-            (avail_width - right).max(Pt::ZERO)
+        let explicit_w = if width_auto {
+            None
         } else {
-            avail_width
+            Some(
+                self.width_spec
+                    .resolve_width(containing_width, self.font_size, self.root_font_size)
+                    .max(Pt::ZERO),
+            )
         };
-        let avail_h_for_child = if stretch_h {
-            (avail_height - top - bottom).max(Pt::ZERO)
-        } else if has_top {
-            (avail_height - top).max(Pt::ZERO)
-        } else if has_bottom {
-            (avail_height - bottom).max(Pt::ZERO)
+        let explicit_h = if height_auto {
+            None
         } else {
-            avail_height
+            Some(
+                self.height_spec
+                    .resolve_height(containing_height, self.font_size, self.root_font_size)
+                    .max(Pt::ZERO),
+            )
+        };
+
+        let avail_w_for_child = if let Some(explicit_w) = explicit_w {
+            explicit_w.max(Pt::ZERO)
+        } else if stretch_w {
+            (containing_width - left - right).max(Pt::ZERO)
+        } else if has_left {
+            (containing_width - left).max(Pt::ZERO)
+        } else if has_right {
+            (containing_width - right).max(Pt::ZERO)
+        } else {
+            containing_width
+        };
+        let avail_h_for_child = if let Some(explicit_h) = explicit_h {
+            explicit_h.max(Pt::ZERO)
+        } else if stretch_h {
+            (containing_height - top - bottom).max(Pt::ZERO)
+        } else if has_top {
+            (containing_height - top).max(Pt::ZERO)
+        } else if has_bottom {
+            (containing_height - bottom).max(Pt::ZERO)
+        } else {
+            containing_height
         };
 
         // Shrink-to-fit for absolutely positioned elements when width is auto.
         // Prefer intrinsic width when available, clamped to the available space.
-        let target_w = if stretch_w {
+        let target_w = if let Some(explicit_w) = explicit_w {
+            explicit_w.max(Pt::ZERO)
+        } else if stretch_w {
             avail_w_for_child
         } else if let Some(intrinsic) = self.child.intrinsic_width() {
             intrinsic.min(avail_w_for_child).max(Pt::ZERO)
@@ -6195,28 +6304,32 @@ impl Flowable for AbsolutePositionedFlowable {
 
         let size = self.child.wrap(target_w, avail_h_for_child);
 
-        let child_w = if stretch_w {
+        let child_w = if let Some(explicit_w) = explicit_w {
+            explicit_w.max(Pt::ZERO)
+        } else if stretch_w {
             avail_w_for_child
         } else {
             size.width.min(target_w).max(Pt::ZERO)
         };
-        let child_h = if stretch_h {
+        let child_h = if let Some(explicit_h) = explicit_h {
+            explicit_h.max(Pt::ZERO)
+        } else if stretch_h {
             avail_h_for_child
         } else {
             size.height.min(avail_h_for_child).max(Pt::ZERO)
         };
 
         let child_x = if has_left {
-            x + left
+            containing_x + left
         } else if has_right {
-            x + (avail_width - right - child_w)
+            containing_x + (containing_width - right - child_w)
         } else {
             x
         };
         let child_y = if has_top {
-            y + top
+            containing_y + top
         } else if has_bottom {
-            y + (avail_height - bottom - child_h)
+            containing_y + (containing_height - bottom - child_h)
         } else {
             y
         };

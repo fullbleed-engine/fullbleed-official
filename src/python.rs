@@ -3,9 +3,9 @@
 use crate::assets::is_supported_font_path;
 use crate::{
     Asset, AssetBundle, AssetKind, Color, ColorSpace, FullBleed, FullBleedBuilder, FullBleedError,
-    GlyphCoverageReport, JitMode, Margins, OutputIntent, PageDataContext, PageDataValue,
-    PdfProfile, PdfVersion, Pt, Size, WatermarkLayer, WatermarkSemantics, WatermarkSpec,
-    composition_compatibility_issues, inspect_pdf_bytes, inspect_pdf_path,
+    GlyphCoverageReport, JitMode, LayoutStrategy, Margins, OutputIntent, PageDataContext,
+    PageDataValue, PdfProfile, PdfVersion, Pt, Size, WatermarkLayer, WatermarkSemantics,
+    WatermarkSpec, composition_compatibility_issues, inspect_pdf_bytes, inspect_pdf_path,
     require_pdf_composition_compatibility,
 };
 use base64::Engine;
@@ -780,6 +780,16 @@ fn parse_color_space(raw: &str) -> PyResult<ColorSpace> {
     }
 }
 
+fn parse_layout_strategy(raw: &str) -> PyResult<LayoutStrategy> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "eager" => Ok(LayoutStrategy::Eager),
+        "lazy" => Ok(LayoutStrategy::Lazy),
+        _ => Err(PyValueError::new_err(format!(
+            "invalid layout_strategy '{raw}' (expected 'eager' or 'lazy')"
+        ))),
+    }
+}
+
 #[pyclass(name = "WatermarkSpec")]
 #[derive(Clone)]
 struct PyWatermarkSpec {
@@ -1273,6 +1283,10 @@ impl PdfEngine {
             watermark_color=None,
             paginated_context=None,
             template_binding=None,
+            layout_strategy=None,
+            accept_lazy_layout_cost=false,
+            lazy_max_passes=4,
+            lazy_budget_ms=50.0,
             jit_mode=None,
             debug=false,
             debug_out=None,
@@ -1338,6 +1352,10 @@ impl PdfEngine {
         watermark_color: Option<String>,
         paginated_context: Option<HashMap<String, String>>,
         template_binding: Option<&Bound<'_, PyAny>>,
+        layout_strategy: Option<String>,
+        accept_lazy_layout_cost: bool,
+        lazy_max_passes: usize,
+        lazy_budget_ms: f64,
         jit_mode: Option<String>,
         debug: bool,
         debug_out: Option<String>,
@@ -1570,6 +1588,12 @@ impl PdfEngine {
             let spec = parse_template_binding_spec(raw)?;
             builder = builder.template_binding_spec(spec);
         }
+        if let Some(strategy_raw) = layout_strategy {
+            let strategy = parse_layout_strategy(&strategy_raw)?;
+            builder = builder.layout_strategy(strategy);
+        }
+        builder = builder.accept_lazy_layout_cost(accept_lazy_layout_cost);
+        builder = builder.lazy_layout_limits(lazy_max_passes, lazy_budget_ms);
         if let Some(mode) = jit_mode {
             let mode = mode.trim().to_ascii_lowercase();
             let jit_mode = match mode.as_str() {

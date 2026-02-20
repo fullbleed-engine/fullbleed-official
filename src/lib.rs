@@ -36,13 +36,13 @@ pub use doc_context::DocContext;
 pub use doc_template::DocTemplate;
 pub use error::FullBleedError;
 pub use finalize::{
-    BindingSource, ComposeAnnotationMode, ComposePagePlan, FinalizeComposeSummary, FinalizeStampSummary,
-    META_PAGE_TEMPLATE_KEY, PageBindingDecision, TemplateAsset, TemplateBindingSpec,
-    TemplateCatalog, collect_page_feature_flags, collect_page_template_names,
-    compose_overlay_with_template_catalog, compose_overlay_with_template_catalog_with_annotation_mode,
-    default_page_map, resolve_template_bindings,
-    resolve_template_bindings_for_document, stamp_overlay_on_template_pdf,
-    validate_bindings_against_catalog, validate_page_map,
+    BindingSource, ComposeAnnotationMode, ComposePagePlan, FinalizeComposeSummary,
+    FinalizeStampSummary, META_PAGE_TEMPLATE_KEY, PageBindingDecision, TemplateAsset,
+    TemplateBindingSpec, TemplateCatalog, collect_page_feature_flags, collect_page_template_names,
+    compose_overlay_with_template_catalog,
+    compose_overlay_with_template_catalog_with_annotation_mode, default_page_map,
+    resolve_template_bindings, resolve_template_bindings_for_document,
+    stamp_overlay_on_template_pdf, validate_bindings_against_catalog, validate_page_map,
 };
 pub use flowable::{
     AbsolutePositionedFlowable, BreakAfter, BreakBefore, BreakInside, ContainerFlowable, EdgeSizes,
@@ -82,6 +82,9 @@ pub struct FullBleed {
     debug: Option<Arc<DebugLogger>>,
     perf: Option<Arc<PerfLogger>>,
     jit_mode: JitMode,
+    layout_strategy: LayoutStrategy,
+    lazy_max_passes: usize,
+    lazy_budget_ms: f64,
     page_header: Option<PageHeaderSpec>,
     page_header_html: Option<PageHeaderHtmlSpec>,
     page_footer: Option<PageFooterSpec>,
@@ -107,6 +110,10 @@ pub struct FullBleedBuilder {
     perf_enabled: bool,
     perf_path: Option<std::path::PathBuf>,
     jit_mode: JitMode,
+    layout_strategy: LayoutStrategy,
+    accept_lazy_layout_cost: bool,
+    lazy_max_passes: usize,
+    lazy_budget_ms: f64,
     page_header: Option<PageHeaderSpec>,
     page_header_html: Option<PageHeaderHtmlSpec>,
     page_footer: Option<PageFooterSpec>,
@@ -120,6 +127,18 @@ pub struct FullBleedBuilder {
 struct RenderContext {
     resolver: style::StyleResolver,
     page_templates: Vec<PageTemplate>,
+}
+
+struct LayoutBuildResult {
+    document: Document,
+    story_ms: f64,
+    layout_ms: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutStrategy {
+    Eager,
+    Lazy,
 }
 
 #[derive(Debug, Clone)]
@@ -283,11 +302,23 @@ fn hash_bytes_local(data: &[u8]) -> u64 {
     hasher.finish()
 }
 
+fn document_layout_signature(doc: &Document) -> u64 {
+    let debug_repr = format!("{:?}", doc);
+    hash_bytes_local(debug_repr.as_bytes())
+}
+
 fn jit_mode_str(mode: JitMode) -> &'static str {
     match mode {
         JitMode::Off => "off",
         JitMode::PlanOnly => "plan",
         JitMode::PlanAndReplay => "replay",
+    }
+}
+
+fn layout_strategy_str(strategy: LayoutStrategy) -> &'static str {
+    match strategy {
+        LayoutStrategy::Eager => "eager",
+        LayoutStrategy::Lazy => "lazy",
     }
 }
 
@@ -1084,6 +1115,157 @@ impl FullBleed {
         }
     }
 
+    fn layout_pass_limit(&self) -> usize {
+        match self.layout_strategy {
+            LayoutStrategy::Eager => 1,
+            LayoutStrategy::Lazy => self.lazy_max_passes.max(1),
+        }
+    }
+
+    fn emit_layout_strategy_diagnostics(
+        &self,
+        doc_id: usize,
+        pass_limit: usize,
+        passes: usize,
+        converged: bool,
+        budget_hit: bool,
+        elapsed_ms: f64,
+    ) {
+        if let Some(logger) = self.debug.as_deref() {
+            let json = format!(
+                "{{\"type\":\"jit.layout_strategy\",\"doc_id\":{},\"strategy\":\"{}\",\"pass_limit\":{},\"passes\":{},\"converged\":{},\"budget_ms\":{:.3},\"elapsed_ms\":{:.3},\"budget_hit\":{}}}",
+                doc_id,
+                layout_strategy_str(self.layout_strategy),
+                pass_limit,
+                passes,
+                if converged { "true" } else { "false" },
+                self.lazy_budget_ms,
+                elapsed_ms,
+                if budget_hit { "true" } else { "false" }
+            );
+            logger.log_json(&json);
+            logger.increment("jit.layout.strategy", 1);
+            if self.layout_strategy == LayoutStrategy::Lazy && !converged {
+                logger.increment("jit.known_loss.lazy_layout_no_convergence", 1);
+            }
+        }
+        if let Some(perf) = self.perf.as_deref() {
+            perf.log_span_ms("layout.strategy", Some(doc_id), elapsed_ms);
+            perf.log_counts(
+                "layout.strategy",
+                Some(doc_id),
+                &[
+                    ("passes", passes as u64),
+                    ("pass_limit", pass_limit as u64),
+                    ("converged", if converged { 1 } else { 0 }),
+                    ("budget_hit", if budget_hit { 1 } else { 0 }),
+                ],
+            );
+        }
+    }
+
+    fn build_document_with_layout_strategy(
+        &self,
+        doc_id: usize,
+        html: &str,
+        page_templates: &[PageTemplate],
+        resolver: &style::StyleResolver,
+        report: Option<&mut GlyphCoverageReport>,
+    ) -> Result<LayoutBuildResult, FullBleedError> {
+        let lazy = self.layout_strategy == LayoutStrategy::Lazy;
+        let pass_limit = self.layout_pass_limit();
+        let started = std::time::Instant::now();
+        let mut story_ms = 0.0;
+        let mut layout_ms = 0.0;
+        let mut passes = 0usize;
+        let mut converged = false;
+        let mut budget_hit = false;
+        let mut previous_signature: Option<u64> = None;
+        let mut built: Option<Document> = None;
+        let mut report = report;
+        let collect_report = report.is_some();
+        let mut final_report: Option<GlyphCoverageReport> = None;
+
+        for pass in 0..pass_limit {
+            if lazy && pass > 0 && started.elapsed().as_secs_f64() * 1000.0 >= self.lazy_budget_ms {
+                budget_hit = true;
+                break;
+            }
+
+            let mut pass_report = GlyphCoverageReport::default();
+            let mut pass_report_ref = if collect_report {
+                Some(&mut pass_report)
+            } else {
+                None
+            };
+
+            passes += 1;
+            let t_story = std::time::Instant::now();
+            let story = html::html_to_story_with_resolver_and_fonts_and_report(
+                html,
+                resolver,
+                Some(self.font_registry.clone()),
+                pass_report_ref.as_deref_mut(),
+                self.svg_form_xobjects,
+                self.svg_raster_fallback,
+                self.perf.as_deref(),
+                Some(doc_id),
+            );
+            story_ms += t_story.elapsed().as_secs_f64() * 1000.0;
+
+            let mut doc = DocTemplate::new(page_templates.to_vec());
+            if let Some(logger) = self.debug.clone() {
+                doc = doc.with_debug(logger, Some(doc_id));
+            }
+            for flowable in story {
+                doc.add_flowable(flowable);
+            }
+
+            let t_layout = std::time::Instant::now();
+            let _perf_guard = flowable::set_perf_context(self.perf.clone(), Some(doc_id));
+            let next_built = doc.build()?;
+            layout_ms += t_layout.elapsed().as_secs_f64() * 1000.0;
+
+            let signature = document_layout_signature(&next_built);
+            converged = !lazy || previous_signature.is_some_and(|last| last == signature);
+            previous_signature = Some(signature);
+            built = Some(next_built);
+            if collect_report {
+                final_report = Some(pass_report);
+            }
+            if converged {
+                break;
+            }
+        }
+
+        self.emit_layout_strategy_diagnostics(
+            doc_id,
+            pass_limit,
+            passes,
+            converged,
+            budget_hit,
+            started.elapsed().as_secs_f64() * 1000.0,
+        );
+
+        if let Some(report) = report.as_deref_mut() {
+            if let Some(pass_report) = final_report {
+                *report = pass_report;
+            }
+        }
+
+        let Some(document) = built else {
+            return Err(FullBleedError::InvalidConfiguration(
+                "layout pass budget prevented any layout pass".to_string(),
+            ));
+        };
+
+        Ok(LayoutBuildResult {
+            document,
+            story_ms,
+            layout_ms,
+        })
+    }
+
     fn resolve_page_templates_for_css(
         &self,
         merged_css: &str,
@@ -1383,29 +1565,16 @@ impl FullBleed {
         let mut report = report;
         let perf = self.perf.as_deref();
         self.emit_html_asset_warnings(doc_id, html);
-        let t_story = std::time::Instant::now();
-        let story = html::html_to_story_with_resolver_and_fonts_and_report(
+        let layout = self.build_document_with_layout_strategy(
+            doc_id,
             html,
+            page_templates,
             resolver,
-            Some(self.font_registry.clone()),
             report.as_deref_mut(),
-            self.svg_form_xobjects,
-            self.svg_raster_fallback,
-            perf,
-            Some(doc_id),
-        );
-        let story_ms = t_story.elapsed().as_secs_f64() * 1000.0;
-        let mut doc = DocTemplate::new(page_templates.to_vec());
-        if let Some(logger) = self.debug.clone() {
-            doc = doc.with_debug(logger, Some(doc_id));
-        }
-        for flowable in story {
-            doc.add_flowable(flowable);
-        }
-        let t_layout = std::time::Instant::now();
-        let _perf_guard = flowable::set_perf_context(self.perf.clone(), Some(doc_id));
-        let built = doc.build()?;
-        let layout_ms = t_layout.elapsed().as_secs_f64() * 1000.0;
+        )?;
+        let built = layout.document;
+        let story_ms = layout.story_ms;
+        let layout_ms = layout.layout_ms;
 
         let page_data_override = self
             .paginated_context
@@ -1513,29 +1682,16 @@ impl FullBleed {
     ) -> Result<plan::PlannedDoc, FullBleedError> {
         let mut report = report;
         let perf = self.perf.as_deref();
-        let t_story = std::time::Instant::now();
-        let story = html::html_to_story_with_resolver_and_fonts_and_report(
+        let layout = self.build_document_with_layout_strategy(
+            doc_id,
             html,
+            page_templates,
             resolver,
-            Some(self.font_registry.clone()),
             report.as_deref_mut(),
-            self.svg_form_xobjects,
-            self.svg_raster_fallback,
-            perf,
-            Some(doc_id),
-        );
-        let story_ms = t_story.elapsed().as_secs_f64() * 1000.0;
-        let mut doc = DocTemplate::new(page_templates.to_vec());
-        if let Some(logger) = self.debug.clone() {
-            doc = doc.with_debug(logger, Some(doc_id));
-        }
-        for flowable in story {
-            doc.add_flowable(flowable);
-        }
-        let t_layout = std::time::Instant::now();
-        let _perf_guard = flowable::set_perf_context(self.perf.clone(), Some(doc_id));
-        let built = doc.build()?;
-        let layout_ms = t_layout.elapsed().as_secs_f64() * 1000.0;
+        )?;
+        let built = layout.document;
+        let story_ms = layout.story_ms;
+        let layout_ms = layout.layout_ms;
 
         let page_data_override = self
             .paginated_context
@@ -1662,26 +1818,28 @@ impl FullBleed {
         css: &str,
     ) -> Result<(Vec<u8>, DocumentMetrics), FullBleedError> {
         let context = self.build_render_context(css, Some(0));
-        let mut doc = DocTemplate::new(context.page_templates.clone());
-        if let Some(logger) = self.debug.clone() {
-            doc = doc.with_debug(logger, Some(0));
-        }
-        let perf = self.perf.as_deref();
-        let story = html::html_to_story_with_resolver_and_fonts_and_report(
+        let mut metrics = DocumentMetrics::default();
+        let layout = self.build_document_with_layout_strategy(
+            0,
             html,
+            &context.page_templates,
             &context.resolver,
-            Some(self.font_registry.clone()),
             None,
-            self.svg_form_xobjects,
-            self.svg_raster_fallback,
-            perf,
-            Some(0),
-        );
-        for flowable in story {
-            doc.add_flowable(flowable);
-        }
-        let _perf_guard = flowable::set_perf_context(self.perf.clone(), Some(0));
-        let (document, mut metrics) = doc.build_with_metrics()?;
+        )?;
+        let document = layout.document;
+        metrics.total_render_ms = layout.layout_ms;
+        metrics.pages = document
+            .pages
+            .iter()
+            .enumerate()
+            .map(|(idx, page)| PageMetrics {
+                page_number: idx + 1,
+                render_ms: 0.0,
+                command_count: page.commands.len(),
+                flowable_count: 0,
+                content_bytes: 0,
+            })
+            .collect();
 
         let page_data_override = self
             .paginated_context
@@ -2664,6 +2822,10 @@ impl FullBleedBuilder {
             perf_enabled: false,
             perf_path: None,
             jit_mode: JitMode::Off,
+            layout_strategy: LayoutStrategy::Eager,
+            accept_lazy_layout_cost: false,
+            lazy_max_passes: 4,
+            lazy_budget_ms: 50.0,
             page_header: None,
             page_header_html: None,
             page_footer: None,
@@ -2752,6 +2914,31 @@ impl FullBleedBuilder {
     // Batch JIT pipeline mode. Off by default.
     pub fn jit_mode(mut self, mode: JitMode) -> Self {
         self.jit_mode = mode;
+        self
+    }
+
+    pub fn layout_strategy(mut self, strategy: LayoutStrategy) -> Self {
+        self.layout_strategy = strategy;
+        self
+    }
+
+    pub fn lazy_layout(mut self, enabled: bool) -> Self {
+        self.layout_strategy = if enabled {
+            LayoutStrategy::Lazy
+        } else {
+            LayoutStrategy::Eager
+        };
+        self
+    }
+
+    pub fn accept_lazy_layout_cost(mut self, accepted: bool) -> Self {
+        self.accept_lazy_layout_cost = accepted;
+        self
+    }
+
+    pub fn lazy_layout_limits(mut self, max_passes: usize, budget_ms: f64) -> Self {
+        self.lazy_max_passes = max_passes;
+        self.lazy_budget_ms = budget_ms;
         self
     }
 
@@ -2946,6 +3133,23 @@ impl FullBleedBuilder {
     }
 
     pub fn build(self) -> Result<FullBleed, FullBleedError> {
+        if self.layout_strategy == LayoutStrategy::Lazy && !self.accept_lazy_layout_cost {
+            return Err(FullBleedError::InvalidConfiguration(
+                "layout_strategy=lazy requires accept_lazy_layout_cost(true)".to_string(),
+            ));
+        }
+        if self.layout_strategy == LayoutStrategy::Lazy && self.lazy_max_passes < 2 {
+            return Err(FullBleedError::InvalidConfiguration(
+                "layout_strategy=lazy requires lazy_max_passes >= 2".to_string(),
+            ));
+        }
+        if self.layout_strategy == LayoutStrategy::Lazy
+            && (!self.lazy_budget_ms.is_finite() || self.lazy_budget_ms <= 0.0)
+        {
+            return Err(FullBleedError::InvalidConfiguration(
+                "layout_strategy=lazy requires lazy_budget_ms > 0".to_string(),
+            ));
+        }
         validate_pdf_options(&self.pdf_options)?;
         let mut registry = FontRegistry::new();
         registry.set_use_full_unicode_metrics(self.unicode_metrics);
@@ -2985,6 +3189,9 @@ impl FullBleedBuilder {
             debug,
             perf,
             jit_mode: self.jit_mode,
+            layout_strategy: self.layout_strategy,
+            lazy_max_passes: self.lazy_max_passes,
+            lazy_budget_ms: self.lazy_budget_ms,
             page_header: self.page_header,
             page_header_html: self.page_header_html,
             page_footer: self.page_footer,
@@ -3155,6 +3362,56 @@ mod tests {
         };
         assert!(matches!(err, FullBleedError::InvalidConfiguration(_)));
         assert!(err.to_string().contains("output_intent"));
+    }
+
+    #[test]
+    fn lazy_layout_requires_explicit_cost_acceptance() {
+        let err = match FullBleed::builder()
+            .layout_strategy(LayoutStrategy::Lazy)
+            .build()
+        {
+            Ok(_) => panic!("lazy layout should require explicit opt-in"),
+            Err(err) => err,
+        };
+        assert!(matches!(err, FullBleedError::InvalidConfiguration(_)));
+        assert!(err.to_string().contains("accept_lazy_layout_cost"));
+    }
+
+    #[test]
+    fn lazy_layout_limits_are_validated() {
+        let err = match FullBleed::builder()
+            .layout_strategy(LayoutStrategy::Lazy)
+            .accept_lazy_layout_cost(true)
+            .lazy_layout_limits(1, 50.0)
+            .build()
+        {
+            Ok(_) => panic!("lazy max passes must be >= 2"),
+            Err(err) => err,
+        };
+        assert!(matches!(err, FullBleedError::InvalidConfiguration(_)));
+        assert!(err.to_string().contains("lazy_max_passes"));
+
+        let err = match FullBleed::builder()
+            .layout_strategy(LayoutStrategy::Lazy)
+            .accept_lazy_layout_cost(true)
+            .lazy_layout_limits(4, 0.0)
+            .build()
+        {
+            Ok(_) => panic!("lazy budget must be positive"),
+            Err(err) => err,
+        };
+        assert!(matches!(err, FullBleedError::InvalidConfiguration(_)));
+        assert!(err.to_string().contains("lazy_budget_ms"));
+    }
+
+    #[test]
+    fn lazy_layout_configuration_builds_with_opt_in() {
+        FullBleed::builder()
+            .layout_strategy(LayoutStrategy::Lazy)
+            .accept_lazy_layout_cost(true)
+            .lazy_layout_limits(4, 50.0)
+            .build()
+            .expect("valid lazy config should build");
     }
 
     #[test]

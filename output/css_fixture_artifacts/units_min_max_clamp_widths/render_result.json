@@ -240,9 +240,11 @@
       "ok": true,
       "enabled": true,
       "details": {
-        "summary_counts_total": {},
+        "summary_counts_total": {
+          "jit.layout.strategy": 3
+        },
         "summary_context_count": 3,
-        "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_min_max_clamp_widths_119304_1771535540147516800.jsonl"
+        "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_min_max_clamp_widths_20556_1771614401209129500.jsonl"
       }
     }
   }

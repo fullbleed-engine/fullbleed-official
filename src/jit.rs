@@ -542,14 +542,8 @@ fn commands_bbox(commands: &[Command], font_registry: Option<&FontRegistry>) -> 
                 transform = transform.mul(Transform::rotate(*angle));
             }
             Command::ConcatMatrix { a, b, c, d, e, f } => {
-                transform = transform.mul(Transform::matrix(
-                    *a,
-                    *b,
-                    *c,
-                    *d,
-                    e.to_f32(),
-                    f.to_f32(),
-                ));
+                transform =
+                    transform.mul(Transform::matrix(*a, *b, *c, *d, e.to_f32(), f.to_f32()));
             }
             Command::SetFontName(name) => font_name = name.clone(),
             Command::SetFontSize(size) => font_size = *size,
