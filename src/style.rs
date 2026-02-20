@@ -1,8 +1,9 @@
-use crate::debug::{DebugLogger, json_escape};
+use crate::debug::{json_escape, DebugLogger};
 use crate::flowable::CalcLength;
 use crate::flowable::{
     BackgroundPaint, BorderCollapseMode, BorderRadiusSpec, BorderSpacingSpec, BoxShadowSpec,
-    BreakAfter, BreakBefore, BreakInside, EdgeSizes, LengthSpec, Pagination, TextStyle,
+    BreakAfter, BreakBefore, BreakInside, CssTransformOp, CssTransformOrigin, EdgeSizes,
+    LengthSpec, Pagination, TextStyle,
 };
 use crate::types::{BoxSizingMode, Color, Margins, Pt, ShadingStop, Size};
 use fixed::types::I32F32;
@@ -26,13 +27,16 @@ use lightningcss::properties::size as css_size;
 use lightningcss::properties::text::{
     OverflowWrap, TextAlign, TextDecorationLine, WhiteSpace, WordBreak,
 };
+use lightningcss::properties::transform as css_transform;
 use lightningcss::properties::{Property, PropertyId};
 use lightningcss::rules::{CssRule, CssRuleList};
 use lightningcss::stylesheet::{ParserOptions, PrinterOptions, StyleAttribute, StyleSheet};
-use lightningcss::traits::ToCss;
+use lightningcss::traits::{Parse, ToCss, Zero};
 use lightningcss::values::calc::{Calc, MathFunction};
 use lightningcss::values::color::{CssColor, SRGB};
 use lightningcss::values::length::{LengthPercentage, LengthValue};
+use lightningcss::values::position as css_position;
+use lightningcss::values::percentage::NumberOrPercentage;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -591,6 +595,7 @@ pub enum PositionMode {
     Static,
     Relative,
     Absolute,
+    Fixed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -611,6 +616,8 @@ pub enum JustifyContentMode {
     FlexEnd,
     Center,
     SpaceBetween,
+    SpaceAround,
+    SpaceEvenly,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -619,6 +626,25 @@ pub enum AlignItemsMode {
     FlexEnd,
     Center,
     Stretch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlignSelfMode {
+    Auto,
+    FlexStart,
+    FlexEnd,
+    Center,
+    Stretch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlignContentMode {
+    FlexStart,
+    FlexEnd,
+    Center,
+    SpaceBetween,
+    SpaceAround,
+    SpaceEvenly,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -676,6 +702,20 @@ enum TextOverflowSpec {
     Initial,
 }
 
+#[derive(Debug, Clone)]
+enum TransformSpec {
+    Value(Vec<CssTransformOp>),
+    Inherit,
+    Initial,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TransformOriginSpec {
+    Value(CssTransformOrigin),
+    Inherit,
+    Initial,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ListStyleTypeMode {
     Auto,
@@ -699,12 +739,24 @@ struct StyleDelta {
     min_width: Option<LengthSpec>,
     min_height: Option<LengthSpec>,
     max_height: Option<LengthSpec>,
+    min_width_var: Option<String>,
+    min_height_var: Option<String>,
+    max_height_var: Option<String>,
     max_width_var: Option<String>,
     text_align: Option<TextAlignMode>,
     vertical_align: Option<VerticalAlignMode>,
     font_weight: Option<u16>,
     font_style: Option<FontStyleMode>,
     text_transform: Option<TextTransformMode>,
+    transform: Option<TransformSpec>,
+    transform_var: Option<String>,
+    translate: Option<TransformSpec>,
+    translate_var: Option<String>,
+    rotate: Option<TransformSpec>,
+    rotate_var: Option<String>,
+    scale: Option<TransformSpec>,
+    scale_var: Option<String>,
+    transform_origin: Option<TransformOriginSpec>,
     text_decoration: Option<TextDecorationSpec>,
     text_overflow: Option<TextOverflowSpec>,
     content: Option<ContentSpec>,
@@ -733,15 +785,23 @@ struct StyleDelta {
     inset_top: Option<LengthSpec>,
     inset_right: Option<LengthSpec>,
     inset_bottom: Option<LengthSpec>,
+    inset_left_var: Option<String>,
+    inset_top_var: Option<String>,
+    inset_right_var: Option<String>,
+    inset_bottom_var: Option<String>,
     box_sizing: Option<BoxSizingMode>,
     flex_direction: Option<FlexDirectionMode>,
     flex_wrap: Option<FlexWrapMode>,
     flex_basis: Option<LengthSpec>,
+    flex_basis_var: Option<String>,
     order: Option<i32>,
     justify_content: Option<JustifyContentMode>,
     align_items: Option<AlignItemsMode>,
+    align_self: Option<AlignSelfMode>,
+    align_content: Option<AlignContentMode>,
     grid_columns: Option<usize>,
     gap: Option<LengthSpec>,
+    gap_var: Option<String>,
     flex_grow: Option<f32>,
     flex_shrink: Option<f32>,
     overflow: Option<OverflowMode>,
@@ -749,6 +809,7 @@ struct StyleDelta {
     custom_colors: HashMap<String, Color>,
     custom_color_alpha: HashMap<String, f32>,
     custom_color_refs: HashMap<String, String>,
+    custom_raw_values: HashMap<String, String>,
     custom_font_stacks: HashMap<String, Vec<Arc<str>>>,
 }
 
@@ -774,12 +835,25 @@ pub struct ComputedStyle {
     pub min_width: LengthSpec,
     pub min_height: LengthSpec,
     pub max_height: LengthSpec,
+    pending_min_width_var: Option<String>,
+    pending_min_height_var: Option<String>,
+    pending_max_height_var: Option<String>,
     pending_max_width_var: Option<String>,
     pub text_align: TextAlignMode,
     pub vertical_align: VerticalAlignMode,
     pub font_weight: u16,
     pub font_style: FontStyleMode,
     pub text_transform: TextTransformMode,
+    transform_list: Vec<CssTransformOp>,
+    translate: Vec<CssTransformOp>,
+    rotate: Vec<CssTransformOp>,
+    scale: Vec<CssTransformOp>,
+    pending_translate_var: Option<String>,
+    pending_rotate_var: Option<String>,
+    pending_scale_var: Option<String>,
+    pending_transform_var: Option<String>,
+    pub transform: Vec<CssTransformOp>,
+    pub transform_origin: CssTransformOrigin,
     pub text_decoration: TextDecorationMode,
     pub text_overflow: TextOverflowMode,
     pub content: Option<String>,
@@ -805,15 +879,23 @@ pub struct ComputedStyle {
     pub inset_top: LengthSpec,
     pub inset_right: LengthSpec,
     pub inset_bottom: LengthSpec,
+    pending_inset_left_var: Option<String>,
+    pending_inset_top_var: Option<String>,
+    pending_inset_right_var: Option<String>,
+    pending_inset_bottom_var: Option<String>,
     pub box_sizing: BoxSizingMode,
     pub flex_direction: FlexDirectionMode,
     pub flex_wrap: FlexWrapMode,
     pub flex_basis: LengthSpec,
+    pending_flex_basis_var: Option<String>,
     pub order: i32,
     pub justify_content: JustifyContentMode,
     pub align_items: AlignItemsMode,
+    pub align_self: AlignSelfMode,
+    pub align_content: AlignContentMode,
     pub grid_columns: Option<usize>,
     pub gap: LengthSpec,
+    pending_gap_var: Option<String>,
     pub flex_grow: f32,
     pub flex_shrink: f32,
     pub overflow: OverflowMode,
@@ -821,6 +903,7 @@ pub struct ComputedStyle {
     pub custom_colors: HashMap<String, Color>,
     pub custom_color_alpha: HashMap<String, f32>,
     pub custom_color_refs: HashMap<String, String>,
+    pub custom_raw_values: HashMap<String, String>,
     pub custom_font_stacks: HashMap<String, Vec<Arc<str>>>,
 }
 
@@ -1300,12 +1383,25 @@ impl StyleResolver {
             min_width: LengthSpec::Auto,
             min_height: LengthSpec::Auto,
             max_height: LengthSpec::Auto,
+            pending_min_width_var: None,
+            pending_min_height_var: None,
+            pending_max_height_var: None,
             pending_max_width_var: None,
             text_align: TextAlignMode::Left,
             vertical_align: VerticalAlignMode::Top,
             font_weight: 400,
             font_style: FontStyleMode::Normal,
             text_transform: TextTransformMode::None,
+            transform_list: Vec::new(),
+            translate: Vec::new(),
+            rotate: Vec::new(),
+            scale: Vec::new(),
+            pending_translate_var: None,
+            pending_rotate_var: None,
+            pending_scale_var: None,
+            pending_transform_var: None,
+            transform: Vec::new(),
+            transform_origin: CssTransformOrigin::center(),
             text_decoration: TextDecorationMode::default(),
             text_overflow: TextOverflowMode::Clip,
             content: None,
@@ -1331,15 +1427,23 @@ impl StyleResolver {
             inset_top: LengthSpec::Auto,
             inset_right: LengthSpec::Auto,
             inset_bottom: LengthSpec::Auto,
+            pending_inset_left_var: None,
+            pending_inset_top_var: None,
+            pending_inset_right_var: None,
+            pending_inset_bottom_var: None,
             box_sizing: BoxSizingMode::ContentBox,
             flex_direction: FlexDirectionMode::Row,
             flex_wrap: FlexWrapMode::NoWrap,
             flex_basis: LengthSpec::Auto,
+            pending_flex_basis_var: None,
             order: 0,
             justify_content: JustifyContentMode::FlexStart,
             align_items: AlignItemsMode::Stretch,
+            align_self: AlignSelfMode::Auto,
+            align_content: AlignContentMode::FlexStart,
             grid_columns: None,
             gap: LengthSpec::Absolute(Pt::ZERO),
+            pending_gap_var: None,
             flex_grow: 0.0,
             flex_shrink: 1.0,
             overflow: OverflowMode::Visible,
@@ -1347,6 +1451,7 @@ impl StyleResolver {
             custom_colors: HashMap::new(),
             custom_color_alpha: HashMap::new(),
             custom_color_refs: HashMap::new(),
+            custom_raw_values: HashMap::new(),
             custom_font_stacks: HashMap::new(),
         }
     }
@@ -1381,12 +1486,25 @@ impl StyleResolver {
             min_width: LengthSpec::Auto,
             min_height: LengthSpec::Auto,
             max_height: LengthSpec::Auto,
+            pending_min_width_var: None,
+            pending_min_height_var: None,
+            pending_max_height_var: None,
             pending_max_width_var: None,
             text_align: parent.text_align,
             vertical_align: parent.vertical_align,
             font_weight: parent.font_weight,
             font_style: parent.font_style,
             text_transform: parent.text_transform,
+            transform_list: Vec::new(),
+            translate: Vec::new(),
+            rotate: Vec::new(),
+            scale: Vec::new(),
+            pending_translate_var: None,
+            pending_rotate_var: None,
+            pending_scale_var: None,
+            pending_transform_var: None,
+            transform: Vec::new(),
+            transform_origin: CssTransformOrigin::center(),
             text_decoration: parent.text_decoration,
             text_overflow: TextOverflowMode::Clip,
             content: None,
@@ -1412,15 +1530,23 @@ impl StyleResolver {
             inset_top: LengthSpec::Auto,
             inset_right: LengthSpec::Auto,
             inset_bottom: LengthSpec::Auto,
+            pending_inset_left_var: None,
+            pending_inset_top_var: None,
+            pending_inset_right_var: None,
+            pending_inset_bottom_var: None,
             box_sizing: BoxSizingMode::ContentBox,
             flex_direction: parent.flex_direction,
             flex_wrap: parent.flex_wrap,
             flex_basis: parent.flex_basis,
+            pending_flex_basis_var: None,
             order: parent.order,
             justify_content: parent.justify_content,
             align_items: parent.align_items,
+            align_self: AlignSelfMode::Auto,
+            align_content: parent.align_content,
             grid_columns: None,
             gap: parent.gap,
+            pending_gap_var: None,
             flex_grow: parent.flex_grow,
             flex_shrink: parent.flex_shrink,
             overflow: OverflowMode::Visible,
@@ -1428,6 +1554,7 @@ impl StyleResolver {
             custom_colors: parent.custom_colors.clone(),
             custom_color_alpha: parent.custom_color_alpha.clone(),
             custom_color_refs: parent.custom_color_refs.clone(),
+            custom_raw_values: parent.custom_raw_values.clone(),
             custom_font_stacks: parent.custom_font_stacks.clone(),
         };
         let parent_font_size = parent.font_size;
@@ -1567,17 +1694,182 @@ impl StyleResolver {
 
         let mut unresolved = Vec::new();
         if let Some(name) = computed.pending_width_var.clone() {
-            if !computed.custom_lengths.contains_key(&name) {
+            if resolve_custom_length_from_maps(
+                &computed.custom_lengths,
+                &computed.custom_color_refs,
+                &name,
+            )
+            .is_none()
+            {
                 unresolved.push(name);
             }
         }
         if let Some(name) = computed.pending_max_width_var.clone() {
-            if !computed.custom_lengths.contains_key(&name) {
+            if resolve_custom_length_from_maps(
+                &computed.custom_lengths,
+                &computed.custom_color_refs,
+                &name,
+            )
+            .is_none()
+            {
                 unresolved.push(name);
             }
         }
         if let Some(name) = computed.pending_height_var.clone() {
-            if !computed.custom_lengths.contains_key(&name) {
+            if resolve_custom_length_from_maps(
+                &computed.custom_lengths,
+                &computed.custom_color_refs,
+                &name,
+            )
+            .is_none()
+            {
+                unresolved.push(name);
+            }
+        }
+        if let Some(name) = computed.pending_min_width_var.clone() {
+            if resolve_custom_length_from_maps(
+                &computed.custom_lengths,
+                &computed.custom_color_refs,
+                &name,
+            )
+            .is_none()
+            {
+                unresolved.push(name);
+            }
+        }
+        if let Some(name) = computed.pending_min_height_var.clone() {
+            if resolve_custom_length_from_maps(
+                &computed.custom_lengths,
+                &computed.custom_color_refs,
+                &name,
+            )
+            .is_none()
+            {
+                unresolved.push(name);
+            }
+        }
+        if let Some(name) = computed.pending_max_height_var.clone() {
+            if resolve_custom_length_from_maps(
+                &computed.custom_lengths,
+                &computed.custom_color_refs,
+                &name,
+            )
+            .is_none()
+            {
+                unresolved.push(name);
+            }
+        }
+        if let Some(name) = computed.pending_inset_left_var.clone() {
+            if resolve_custom_length_from_maps(
+                &computed.custom_lengths,
+                &computed.custom_color_refs,
+                &name,
+            )
+            .is_none()
+            {
+                unresolved.push(name);
+            }
+        }
+        if let Some(name) = computed.pending_inset_top_var.clone() {
+            if resolve_custom_length_from_maps(
+                &computed.custom_lengths,
+                &computed.custom_color_refs,
+                &name,
+            )
+            .is_none()
+            {
+                unresolved.push(name);
+            }
+        }
+        if let Some(name) = computed.pending_inset_right_var.clone() {
+            if resolve_custom_length_from_maps(
+                &computed.custom_lengths,
+                &computed.custom_color_refs,
+                &name,
+            )
+            .is_none()
+            {
+                unresolved.push(name);
+            }
+        }
+        if let Some(name) = computed.pending_inset_bottom_var.clone() {
+            if resolve_custom_length_from_maps(
+                &computed.custom_lengths,
+                &computed.custom_color_refs,
+                &name,
+            )
+            .is_none()
+            {
+                unresolved.push(name);
+            }
+        }
+        if let Some(name) = computed.pending_flex_basis_var.clone() {
+            if resolve_custom_length_from_maps(
+                &computed.custom_lengths,
+                &computed.custom_color_refs,
+                &name,
+            )
+            .is_none()
+            {
+                unresolved.push(name);
+            }
+        }
+        if let Some(name) = computed.pending_gap_var.clone() {
+            if resolve_custom_length_from_maps(
+                &computed.custom_lengths,
+                &computed.custom_color_refs,
+                &name,
+            )
+            .is_none()
+            {
+                unresolved.push(name);
+            }
+        }
+        if let Some(name) = computed.pending_translate_var.clone() {
+            if resolve_custom_transform_ops_from_maps(
+                &computed.custom_color_refs,
+                &computed.custom_raw_values,
+                &name,
+                transform_ops_from_translate_string,
+            )
+            .is_none()
+            {
+                unresolved.push(name);
+            }
+        }
+        if let Some(name) = computed.pending_rotate_var.clone() {
+            if resolve_custom_transform_ops_from_maps(
+                &computed.custom_color_refs,
+                &computed.custom_raw_values,
+                &name,
+                transform_ops_from_rotate_string,
+            )
+            .is_none()
+            {
+                unresolved.push(name);
+            }
+        }
+        if let Some(name) = computed.pending_scale_var.clone() {
+            if resolve_custom_transform_ops_from_maps(
+                &computed.custom_color_refs,
+                &computed.custom_raw_values,
+                &name,
+                transform_ops_from_scale_string,
+            )
+            .is_none()
+            {
+                unresolved.push(name);
+            }
+        }
+        if let Some(name) = computed.pending_transform_var.clone() {
+            if resolve_custom_transform_ops_from_maps(
+                &computed.custom_color_refs,
+                &computed.custom_raw_values,
+                &name,
+                transform_ops_from_string,
+            )
+            .is_none()
+            {
                 unresolved.push(name);
             }
         }
@@ -1597,7 +1889,13 @@ impl StyleResolver {
             }
         }
         if let Some(name) = computed.pending_font_name_var.clone() {
-            if !computed.custom_font_stacks.contains_key(&name) {
+            if resolve_custom_font_stack_from_maps(
+                &computed.custom_font_stacks,
+                &computed.custom_color_refs,
+                &name,
+            )
+            .is_none()
+            {
                 unresolved.push(name);
             }
         }
@@ -1653,12 +1951,25 @@ impl StyleResolver {
             min_width: LengthSpec::Auto,
             min_height: LengthSpec::Auto,
             max_height: LengthSpec::Auto,
+            pending_min_width_var: None,
+            pending_min_height_var: None,
+            pending_max_height_var: None,
             pending_max_width_var: None,
             text_align: parent.text_align,
             vertical_align: parent.vertical_align,
             font_weight: parent.font_weight,
             font_style: parent.font_style,
             text_transform: parent.text_transform,
+            transform_list: Vec::new(),
+            translate: Vec::new(),
+            rotate: Vec::new(),
+            scale: Vec::new(),
+            pending_translate_var: None,
+            pending_rotate_var: None,
+            pending_scale_var: None,
+            pending_transform_var: None,
+            transform: Vec::new(),
+            transform_origin: CssTransformOrigin::center(),
             text_decoration: parent.text_decoration,
             text_overflow: TextOverflowMode::Clip,
             content: None,
@@ -1684,15 +1995,23 @@ impl StyleResolver {
             inset_top: LengthSpec::Auto,
             inset_right: LengthSpec::Auto,
             inset_bottom: LengthSpec::Auto,
+            pending_inset_left_var: None,
+            pending_inset_top_var: None,
+            pending_inset_right_var: None,
+            pending_inset_bottom_var: None,
             box_sizing: BoxSizingMode::ContentBox,
             flex_direction: parent.flex_direction,
             flex_wrap: parent.flex_wrap,
             flex_basis: parent.flex_basis,
+            pending_flex_basis_var: None,
             order: parent.order,
             justify_content: parent.justify_content,
             align_items: parent.align_items,
+            align_self: AlignSelfMode::Auto,
+            align_content: parent.align_content,
             grid_columns: None,
             gap: parent.gap,
+            pending_gap_var: None,
             flex_grow: parent.flex_grow,
             flex_shrink: parent.flex_shrink,
             overflow: OverflowMode::Visible,
@@ -1700,6 +2019,7 @@ impl StyleResolver {
             custom_colors: parent.custom_colors.clone(),
             custom_color_alpha: parent.custom_color_alpha.clone(),
             custom_color_refs: parent.custom_color_refs.clone(),
+            custom_raw_values: parent.custom_raw_values.clone(),
             custom_font_stacks: parent.custom_font_stacks.clone(),
         };
 
@@ -1756,6 +2076,9 @@ fn parse_selector_pattern(selector: &str) -> Option<SelectorPattern> {
     let mut combinators: Vec<Combinator> = Vec::new();
     let mut buf = String::new();
     let mut pending: Option<Combinator> = None;
+    let mut bracket_depth = 0usize;
+    let mut paren_depth = 0usize;
+    let mut in_quote: Option<char> = None;
 
     let flush_buf = |buf: &mut String,
                      parts: &mut Vec<SimpleSelector>,
@@ -1777,28 +2100,67 @@ fn parse_selector_pattern(selector: &str) -> Option<SelectorPattern> {
     };
 
     for ch in selector.chars() {
-        if ch == '>' {
+        if let Some(quote) = in_quote {
+            buf.push(ch);
+            if ch == quote {
+                in_quote = None;
+            }
+            continue;
+        }
+
+        match ch {
+            '\'' | '"' if bracket_depth > 0 || paren_depth > 0 => {
+                in_quote = Some(ch);
+                buf.push(ch);
+                continue;
+            }
+            '[' => {
+                bracket_depth += 1;
+                buf.push(ch);
+                continue;
+            }
+            ']' => {
+                bracket_depth = bracket_depth.saturating_sub(1);
+                buf.push(ch);
+                continue;
+            }
+            '(' => {
+                paren_depth += 1;
+                buf.push(ch);
+                continue;
+            }
+            ')' => {
+                paren_depth = paren_depth.saturating_sub(1);
+                buf.push(ch);
+                continue;
+            }
+            _ => {}
+        }
+
+        let at_top_level = bracket_depth == 0 && paren_depth == 0;
+
+        if at_top_level && ch == '>' {
             if flush_buf(&mut buf, &mut parts, &mut combinators, &mut pending).is_none() {
                 return None;
             }
             pending = Some(Combinator::Child);
             continue;
         }
-        if ch == '+' {
+        if at_top_level && ch == '+' {
             if flush_buf(&mut buf, &mut parts, &mut combinators, &mut pending).is_none() {
                 return None;
             }
             pending = Some(Combinator::AdjacentSibling);
             continue;
         }
-        if ch == '~' {
+        if at_top_level && ch == '~' {
             if flush_buf(&mut buf, &mut parts, &mut combinators, &mut pending).is_none() {
                 return None;
             }
             pending = Some(Combinator::GeneralSibling);
             continue;
         }
-        if ch.is_whitespace() {
+        if at_top_level && ch.is_whitespace() {
             if !buf.trim().is_empty() {
                 if flush_buf(&mut buf, &mut parts, &mut combinators, &mut pending).is_none() {
                     return None;
@@ -2363,16 +2725,10 @@ fn declaration_layout_mode_normalization(
 
 fn declaration_parsed_no_effect_property_name(property: &Property) -> Option<&'static str> {
     match property {
-        Property::AlignContent(_, _) => Some("align-content"),
-        Property::AlignSelf(_, _) => Some("align-self"),
         Property::JustifyItems(_) => Some("justify-items"),
         Property::JustifySelf(_) => Some("justify-self"),
-        Property::PlaceContent(_) => Some("place-content"),
         Property::PlaceItems(_) => Some("place-items"),
         Property::PlaceSelf(_) => Some("place-self"),
-        Property::RowGap(_) => Some("row-gap"),
-        Property::ColumnGap(_) => Some("column-gap"),
-        Property::FlexFlow(_, _) => Some("flex-flow"),
         Property::GridTemplateRows(_) => Some("grid-template-rows"),
         Property::GridAutoColumns(_) => Some("grid-auto-columns"),
         Property::GridAutoRows(_) => Some("grid-auto-rows"),
@@ -2388,16 +2744,10 @@ fn declaration_parsed_no_effect_property_name(property: &Property) -> Option<&'s
         Property::GridColumn(_) => Some("grid-column"),
         Property::GridArea(_) => Some("grid-area"),
         Property::Unparsed(unparsed) => match &unparsed.property_id {
-            PropertyId::AlignContent(_) => Some("align-content"),
-            PropertyId::AlignSelf(_) => Some("align-self"),
             PropertyId::JustifyItems => Some("justify-items"),
             PropertyId::JustifySelf => Some("justify-self"),
-            PropertyId::PlaceContent => Some("place-content"),
             PropertyId::PlaceItems => Some("place-items"),
             PropertyId::PlaceSelf => Some("place-self"),
-            PropertyId::RowGap => Some("row-gap"),
-            PropertyId::ColumnGap => Some("column-gap"),
-            PropertyId::FlexFlow(_) => Some("flex-flow"),
             PropertyId::GridTemplateRows => Some("grid-template-rows"),
             PropertyId::GridAutoColumns => Some("grid-auto-columns"),
             PropertyId::GridAutoRows => Some("grid-auto-rows"),
@@ -2461,14 +2811,22 @@ fn is_engine_supported_unknown_property(name: &str) -> bool {
             | "right"
             | "top"
             | "bottom"
+            | "inset"
             | "flex-direction"
             | "flex-wrap"
+            | "flex-flow"
             | "order"
             | "justify-content"
+            | "place-content"
             | "align-items"
+            | "align-self"
+            | "align-content"
             | "box-sizing"
             | "gap"
+            | "row-gap"
+            | "column-gap"
             | "box-shadow"
+            | "transform-origin"
             | "content"
             | "size"
             | "margin"
@@ -2891,6 +3249,17 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                 }
             }
             Property::Background(background) => {
+                if let Some(last) = background.last() {
+                    if let Some((color, alpha)) = css_color_to_color_with_alpha(&last.color) {
+                        delta.background_color =
+                            Some(BackgroundSpec::Value(blend_over_white(color, alpha)));
+                    }
+                    if let Ok(image_raw) = last.image.to_css_string(PrinterOptions::default()) {
+                        if let Some(paint) = parse_linear_gradient_str(&image_raw) {
+                            delta.background_paint = Some(paint);
+                        }
+                    }
+                }
                 if let Ok(raw) = background.to_css_string(PrinterOptions::default()) {
                     apply_background_from_string(&raw, delta);
                 }
@@ -2898,6 +3267,59 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
             Property::TextTransform(value) => {
                 if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
                     delta.text_transform = parse_text_transform_str(&raw);
+                }
+            }
+            Property::Transform(value, _) => {
+                if let Some(ops) = transform_ops_from_transform_list(value) {
+                    delta.transform = Some(TransformSpec::Value(ops));
+                } else if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
+                    let raw_lower = raw.trim().to_ascii_lowercase();
+                    if let Some(ops) = transform_ops_from_string(&raw) {
+                        delta.transform = Some(TransformSpec::Value(ops));
+                    } else if raw_lower.contains("var(") {
+                        delta.transform_var = Some(raw_lower);
+                    }
+                }
+            }
+            Property::TransformOrigin(value, _) => {
+                if let Some(origin) = transform_origin_from_position(value) {
+                    delta.transform_origin = Some(TransformOriginSpec::Value(origin));
+                }
+            }
+            Property::Translate(value) => {
+                if let Some(ops) = transform_ops_from_translate(value) {
+                    delta.translate = Some(TransformSpec::Value(ops));
+                } else if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
+                    let raw_lower = raw.trim().to_ascii_lowercase();
+                    if let Some(ops) = transform_ops_from_translate_string(&raw) {
+                        delta.translate = Some(TransformSpec::Value(ops));
+                    } else if raw_lower.contains("var(") {
+                        delta.translate_var = Some(raw_lower);
+                    }
+                }
+            }
+            Property::Rotate(value) => {
+                if let Some(ops) = transform_ops_from_rotate(value) {
+                    delta.rotate = Some(TransformSpec::Value(ops));
+                } else if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
+                    let raw_lower = raw.trim().to_ascii_lowercase();
+                    if let Some(ops) = transform_ops_from_rotate_string(&raw) {
+                        delta.rotate = Some(TransformSpec::Value(ops));
+                    } else if raw_lower.contains("var(") {
+                        delta.rotate_var = Some(raw_lower);
+                    }
+                }
+            }
+            Property::Scale(value) => {
+                if let Some(ops) = transform_ops_from_scale(value) {
+                    delta.scale = Some(TransformSpec::Value(ops));
+                } else if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
+                    let raw_lower = raw.trim().to_ascii_lowercase();
+                    if let Some(ops) = transform_ops_from_scale_string(&raw) {
+                        delta.scale = Some(TransformSpec::Value(ops));
+                    } else if raw_lower.contains("var(") {
+                        delta.scale_var = Some(raw_lower);
+                    }
                 }
             }
             Property::TextDecorationLine(value, _) => {
@@ -2993,6 +3415,14 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                     _ => FlexWrapMode::NoWrap,
                 });
             }
+            Property::FlexFlow(value, _) => {
+                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
+                    if let Some((direction, wrap)) = parse_flex_flow_str(&raw) {
+                        delta.flex_direction = Some(direction);
+                        delta.flex_wrap = Some(wrap);
+                    }
+                }
+            }
             Property::Order(value, _) => {
                 delta.order = Some(*value);
             }
@@ -3004,6 +3434,12 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                     css_align::JustifyContent::ContentDistribution(
                         css_align::ContentDistribution::SpaceBetween,
                     ) => JustifyContentMode::SpaceBetween,
+                    css_align::JustifyContent::ContentDistribution(
+                        css_align::ContentDistribution::SpaceAround,
+                    ) => JustifyContentMode::SpaceAround,
+                    css_align::JustifyContent::ContentDistribution(
+                        css_align::ContentDistribution::SpaceEvenly,
+                    ) => JustifyContentMode::SpaceEvenly,
                     css_align::JustifyContent::ContentPosition {
                         value: css_align::ContentPosition::Center,
                         ..
@@ -3029,6 +3465,58 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                     _ => AlignItemsMode::FlexStart,
                 });
             }
+            Property::AlignSelf(value, _) => {
+                delta.align_self = Some(match value {
+                    css_align::AlignSelf::Auto | css_align::AlignSelf::Normal => {
+                        AlignSelfMode::Auto
+                    }
+                    css_align::AlignSelf::Stretch => AlignSelfMode::Stretch,
+                    css_align::AlignSelf::SelfPosition {
+                        value: css_align::SelfPosition::Center,
+                        ..
+                    } => AlignSelfMode::Center,
+                    css_align::AlignSelf::SelfPosition {
+                        value:
+                            css_align::SelfPosition::End
+                            | css_align::SelfPosition::FlexEnd
+                            | css_align::SelfPosition::SelfEnd,
+                        ..
+                    } => AlignSelfMode::FlexEnd,
+                    css_align::AlignSelf::SelfPosition { .. } => AlignSelfMode::FlexStart,
+                    css_align::AlignSelf::BaselinePosition(_) => AlignSelfMode::FlexStart,
+                });
+            }
+            Property::AlignContent(value, _) => {
+                delta.align_content = Some(match value {
+                    css_align::AlignContent::ContentDistribution(
+                        css_align::ContentDistribution::SpaceBetween,
+                    ) => AlignContentMode::SpaceBetween,
+                    css_align::AlignContent::ContentDistribution(
+                        css_align::ContentDistribution::SpaceAround,
+                    ) => AlignContentMode::SpaceAround,
+                    css_align::AlignContent::ContentDistribution(
+                        css_align::ContentDistribution::SpaceEvenly,
+                    ) => AlignContentMode::SpaceEvenly,
+                    css_align::AlignContent::ContentPosition {
+                        value: css_align::ContentPosition::Center,
+                        ..
+                    } => AlignContentMode::Center,
+                    css_align::AlignContent::ContentPosition {
+                        value: css_align::ContentPosition::End
+                            | css_align::ContentPosition::FlexEnd,
+                        ..
+                    } => AlignContentMode::FlexEnd,
+                    _ => AlignContentMode::FlexStart,
+                });
+            }
+            Property::PlaceContent(value) => {
+                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
+                    if let Some((align, justify)) = parse_place_content_str(&raw) {
+                        delta.align_content = Some(align);
+                        delta.justify_content = Some(justify);
+                    }
+                }
+            }
             Property::GridTemplateColumns(value) => {
                 if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
                     delta.grid_columns = parse_grid_track_count(&raw);
@@ -3036,11 +3524,21 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
             }
             Property::Gap(value) => {
                 // Use row gap (single-value `gap:` sets both row/column the same).
-                let row = &value.row;
-                if let css_align::GapValue::LengthPercentage(lp) = row {
-                    if let Some(spec) = length_spec_from_lp(lp) {
-                        delta.gap = Some(spec);
-                    }
+                if let Some(spec) = length_spec_from_gap_value(&value.row) {
+                    delta.gap = Some(spec);
+                    delta.gap_var = None;
+                }
+            }
+            Property::RowGap(value) => {
+                if let Some(spec) = length_spec_from_gap_value(value) {
+                    delta.gap = Some(spec);
+                    delta.gap_var = None;
+                }
+            }
+            Property::ColumnGap(value) => {
+                if let Some(spec) = length_spec_from_gap_value(value) {
+                    delta.gap = Some(spec);
+                    delta.gap_var = None;
                 }
             }
             Property::Flex(value, _) => {
@@ -3049,6 +3547,7 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                 delta.flex_shrink = Some(value.shrink);
                 if let Some(spec) = length_spec_from_lpa(&value.basis) {
                     delta.flex_basis = Some(spec);
+                    delta.flex_basis_var = None;
                 }
             }
             Property::FlexGrow(value, _) => {
@@ -3059,6 +3558,7 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
             }
             Property::FlexBasis(value, _) => {
                 delta.flex_basis = length_spec_from_lpa(value);
+                delta.flex_basis_var = None;
             }
             Property::Overflow(value) => {
                 delta.overflow = Some(overflow_mode_from_overflow(value));
@@ -3092,33 +3592,53 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
             }
             Property::Width(value) => {
                 delta.width = length_spec_from_size(value);
+                delta.width_var = None;
             }
             Property::MinWidth(value) => {
                 delta.min_width = length_spec_from_size(value);
+                delta.min_width_var = None;
             }
             Property::MaxWidth(value) => {
                 delta.max_width = length_spec_from_max_size(value);
+                delta.max_width_var = None;
             }
             Property::Height(value) => {
                 delta.height = length_spec_from_size(value);
+                delta.height_var = None;
             }
             Property::MinHeight(value) => {
                 delta.min_height = length_spec_from_size(value);
+                delta.min_height_var = None;
             }
             Property::MaxHeight(value) => {
                 delta.max_height = length_spec_from_max_size(value);
+                delta.max_height_var = None;
             }
             Property::Left(value) => {
                 delta.inset_left = length_spec_from_lpa(value);
+                delta.inset_left_var = None;
             }
             Property::Top(value) => {
                 delta.inset_top = length_spec_from_lpa(value);
+                delta.inset_top_var = None;
             }
             Property::Right(value) => {
                 delta.inset_right = length_spec_from_lpa(value);
+                delta.inset_right_var = None;
             }
             Property::Bottom(value) => {
                 delta.inset_bottom = length_spec_from_lpa(value);
+                delta.inset_bottom_var = None;
+            }
+            Property::Inset(value) => {
+                delta.inset_top = length_spec_from_lpa(&value.top);
+                delta.inset_right = length_spec_from_lpa(&value.right);
+                delta.inset_bottom = length_spec_from_lpa(&value.bottom);
+                delta.inset_left = length_spec_from_lpa(&value.left);
+                delta.inset_top_var = None;
+                delta.inset_right_var = None;
+                delta.inset_bottom_var = None;
+                delta.inset_left_var = None;
             }
             Property::MarginTop(value) => {
                 delta.margin.top = length_spec_from_lpa(value);
@@ -3554,7 +4074,12 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                     }
                 }
                 PropertyId::FontFamily => {
-                    if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
+                    delta.font_name_var = None;
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    let raw_lower = raw.trim().to_ascii_lowercase();
+                    if raw_lower.contains("var(") {
+                        delta.font_name_var = Some(raw_lower);
+                    } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
                         delta.font_name_var = Some(var);
                     } else {
                         apply_inherit_initial_font_name(&unparsed.value.0, delta);
@@ -3567,18 +4092,63 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                     apply_inherit_initial_display(&unparsed.value.0, delta);
                 }
                 PropertyId::Width => {
-                    if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
+                    delta.width_var = None;
+                    apply_inherit_initial_size(&unparsed.value.0, &mut delta.width);
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    let raw_lower = raw.trim().to_ascii_lowercase();
+                    if raw_lower.contains("var(") {
+                        delta.width_var = Some(raw_lower);
+                    } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
                         delta.width_var = Some(var);
                     }
                 }
                 PropertyId::MaxWidth => {
-                    if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
+                    delta.max_width_var = None;
+                    apply_inherit_initial_size(&unparsed.value.0, &mut delta.max_width);
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    let raw_lower = raw.trim().to_ascii_lowercase();
+                    if raw_lower.contains("var(") {
+                        delta.max_width_var = Some(raw_lower);
+                    } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
                         delta.max_width_var = Some(var);
                     }
                 }
                 PropertyId::Height => {
-                    if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
+                    delta.height_var = None;
+                    apply_inherit_initial_size(&unparsed.value.0, &mut delta.height);
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    let raw_lower = raw.trim().to_ascii_lowercase();
+                    if raw_lower.contains("var(") {
+                        delta.height_var = Some(raw_lower);
+                    } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
                         delta.height_var = Some(var);
+                    }
+                }
+                PropertyId::MinWidth => {
+                    delta.min_width_var = None;
+                    apply_inherit_initial_size(&unparsed.value.0, &mut delta.min_width);
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    let raw_lower = raw.trim().to_ascii_lowercase();
+                    if raw_lower.contains("var(") {
+                        delta.min_width_var = Some(raw_lower);
+                    }
+                }
+                PropertyId::MinHeight => {
+                    delta.min_height_var = None;
+                    apply_inherit_initial_size(&unparsed.value.0, &mut delta.min_height);
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    let raw_lower = raw.trim().to_ascii_lowercase();
+                    if raw_lower.contains("var(") {
+                        delta.min_height_var = Some(raw_lower);
+                    }
+                }
+                PropertyId::MaxHeight => {
+                    delta.max_height_var = None;
+                    apply_inherit_initial_size(&unparsed.value.0, &mut delta.max_height);
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    let raw_lower = raw.trim().to_ascii_lowercase();
+                    if raw_lower.contains("var(") {
+                        delta.max_height_var = Some(raw_lower);
                     }
                 }
                 PropertyId::FontWeight => {
@@ -3589,6 +4159,62 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                 }
                 PropertyId::TextTransform => {
                     apply_inherit_initial_text_transform(&unparsed.value.0, delta);
+                }
+                PropertyId::Transform(_) => {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    let raw_lower = raw.trim().to_ascii_lowercase();
+                    if let Some(ops) = transform_ops_from_string(&raw) {
+                        delta.transform = Some(TransformSpec::Value(ops));
+                    } else {
+                        apply_inherit_initial_transform(&unparsed.value.0, &mut delta.transform);
+                        if raw_lower.contains("var(") {
+                            delta.transform_var = Some(raw_lower);
+                        }
+                    }
+                }
+                PropertyId::TransformOrigin(_) => {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    if let Some(origin) = transform_origin_from_string(&raw) {
+                        delta.transform_origin = Some(TransformOriginSpec::Value(origin));
+                    } else {
+                        apply_inherit_initial_transform_origin(&unparsed.value.0, delta);
+                    }
+                }
+                PropertyId::Translate => {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    let raw_lower = raw.trim().to_ascii_lowercase();
+                    if let Some(ops) = transform_ops_from_translate_string(&raw) {
+                        delta.translate = Some(TransformSpec::Value(ops));
+                    } else {
+                        apply_inherit_initial_transform(&unparsed.value.0, &mut delta.translate);
+                        if raw_lower.contains("var(") {
+                            delta.translate_var = Some(raw_lower);
+                        }
+                    }
+                }
+                PropertyId::Rotate => {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    let raw_lower = raw.trim().to_ascii_lowercase();
+                    if let Some(ops) = transform_ops_from_rotate_string(&raw) {
+                        delta.rotate = Some(TransformSpec::Value(ops));
+                    } else {
+                        apply_inherit_initial_transform(&unparsed.value.0, &mut delta.rotate);
+                        if raw_lower.contains("var(") {
+                            delta.rotate_var = Some(raw_lower);
+                        }
+                    }
+                }
+                PropertyId::Scale => {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    let raw_lower = raw.trim().to_ascii_lowercase();
+                    if let Some(ops) = transform_ops_from_scale_string(&raw) {
+                        delta.scale = Some(TransformSpec::Value(ops));
+                    } else {
+                        apply_inherit_initial_transform(&unparsed.value.0, &mut delta.scale);
+                        if raw_lower.contains("var(") {
+                            delta.scale_var = Some(raw_lower);
+                        }
+                    }
                 }
                 PropertyId::TextDecorationLine(_) | PropertyId::TextDecoration(_) => {
                     apply_inherit_initial_text_decoration(&unparsed.value.0, delta);
@@ -3821,6 +4447,13 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                         });
                     }
                 }
+                PropertyId::FlexFlow(_) => {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    if let Some((direction, wrap)) = parse_flex_flow_str(&raw) {
+                        delta.flex_direction = Some(direction);
+                        delta.flex_wrap = Some(wrap);
+                    }
+                }
                 PropertyId::Order(_) | PropertyId::FlexOrder(_) => {
                     if let Some(value) = first_number(&unparsed.value.0) {
                         delta.order = Some(value.round() as i32);
@@ -3832,6 +4465,8 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                             "flex-end" | "end" => JustifyContentMode::FlexEnd,
                             "center" => JustifyContentMode::Center,
                             "space-between" => JustifyContentMode::SpaceBetween,
+                            "space-around" => JustifyContentMode::SpaceAround,
+                            "space-evenly" => JustifyContentMode::SpaceEvenly,
                             _ => JustifyContentMode::FlexStart,
                         });
                     }
@@ -3846,6 +4481,36 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                         });
                     }
                 }
+                PropertyId::AlignSelf(_) => {
+                    if let Some(value) = first_ident(&unparsed.value.0) {
+                        delta.align_self = Some(match value.as_str() {
+                            "auto" | "normal" => AlignSelfMode::Auto,
+                            "flex-end" | "end" | "self-end" => AlignSelfMode::FlexEnd,
+                            "center" => AlignSelfMode::Center,
+                            "stretch" => AlignSelfMode::Stretch,
+                            _ => AlignSelfMode::FlexStart,
+                        });
+                    }
+                }
+                PropertyId::AlignContent(_) => {
+                    if let Some(value) = first_ident(&unparsed.value.0) {
+                        delta.align_content = Some(match value.as_str() {
+                            "flex-end" | "end" => AlignContentMode::FlexEnd,
+                            "center" => AlignContentMode::Center,
+                            "space-between" => AlignContentMode::SpaceBetween,
+                            "space-around" => AlignContentMode::SpaceAround,
+                            "space-evenly" => AlignContentMode::SpaceEvenly,
+                            _ => AlignContentMode::FlexStart,
+                        });
+                    }
+                }
+                PropertyId::PlaceContent => {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    if let Some((align, justify)) = parse_place_content_str(&raw) {
+                        delta.align_content = Some(align);
+                        delta.justify_content = Some(justify);
+                    }
+                }
                 PropertyId::GridTemplateColumns => {
                     let raw = tokens_debug_string(&unparsed.value.0);
                     delta.grid_columns = parse_grid_track_count(&raw);
@@ -3858,10 +4523,8 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                         });
                     }
                 }
-                PropertyId::Gap => {
-                    if let Some(spec) = length_spec_from_custom_tokens(&unparsed.value.0) {
-                        delta.gap = Some(spec);
-                    }
+                PropertyId::Gap | PropertyId::RowGap | PropertyId::ColumnGap => {
+                    apply_gap_tokens(&unparsed.value.0, delta);
                 }
                 PropertyId::BorderSpacing => {
                     let raw = tokens_debug_string(&unparsed.value.0);
@@ -3889,20 +4552,153 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                     if let Some(value) = first_number(&unparsed.value.0) {
                         delta.flex_grow = Some(value);
                     }
+                    delta.flex_basis_var = None;
+                    apply_inherit_initial_size(&unparsed.value.0, &mut delta.flex_basis);
                     if let Some(spec) = length_spec_from_custom_tokens(&unparsed.value.0) {
                         delta.flex_basis = Some(spec);
                     } else if let Some(value) = first_ident(&unparsed.value.0) {
                         if value.eq_ignore_ascii_case("auto") {
                             delta.flex_basis = Some(LengthSpec::Auto);
                         }
+                    } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
+                        // For shorthand we resolve against the first custom-property ref token.
+                        delta.flex_basis_var = Some(var);
                     }
                 }
                 PropertyId::FlexBasis(_) => {
+                    delta.flex_basis_var = None;
+                    apply_inherit_initial_size(&unparsed.value.0, &mut delta.flex_basis);
                     if let Some(spec) = length_spec_from_custom_tokens(&unparsed.value.0) {
                         delta.flex_basis = Some(spec);
                     } else if let Some(value) = first_ident(&unparsed.value.0) {
                         if value.eq_ignore_ascii_case("auto") {
                             delta.flex_basis = Some(LengthSpec::Auto);
+                        }
+                    } else {
+                        let raw = tokens_debug_string(&unparsed.value.0);
+                        let raw_lower = raw.trim().to_ascii_lowercase();
+                        if raw_lower.contains("var(") {
+                            delta.flex_basis_var = Some(raw_lower);
+                        } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
+                            delta.flex_basis_var = Some(var);
+                        }
+                    }
+                }
+                PropertyId::Left => {
+                    delta.inset_left_var = None;
+                    apply_inherit_initial_size(&unparsed.value.0, &mut delta.inset_left);
+                    if let Some(spec) = length_spec_from_custom_tokens(&unparsed.value.0) {
+                        delta.inset_left = Some(spec);
+                    } else if let Some(value) = first_ident(&unparsed.value.0) {
+                        if value.eq_ignore_ascii_case("auto") {
+                            delta.inset_left = Some(LengthSpec::Auto);
+                        }
+                    } else {
+                        let raw = tokens_debug_string(&unparsed.value.0);
+                        let raw_lower = raw.trim().to_ascii_lowercase();
+                        if raw_lower.contains("var(") {
+                            delta.inset_left_var = Some(raw_lower);
+                        } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
+                            delta.inset_left_var = Some(var);
+                        }
+                    }
+                }
+                PropertyId::Top => {
+                    delta.inset_top_var = None;
+                    apply_inherit_initial_size(&unparsed.value.0, &mut delta.inset_top);
+                    if let Some(spec) = length_spec_from_custom_tokens(&unparsed.value.0) {
+                        delta.inset_top = Some(spec);
+                    } else if let Some(value) = first_ident(&unparsed.value.0) {
+                        if value.eq_ignore_ascii_case("auto") {
+                            delta.inset_top = Some(LengthSpec::Auto);
+                        }
+                    } else {
+                        let raw = tokens_debug_string(&unparsed.value.0);
+                        let raw_lower = raw.trim().to_ascii_lowercase();
+                        if raw_lower.contains("var(") {
+                            delta.inset_top_var = Some(raw_lower);
+                        } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
+                            delta.inset_top_var = Some(var);
+                        }
+                    }
+                }
+                PropertyId::Right => {
+                    delta.inset_right_var = None;
+                    apply_inherit_initial_size(&unparsed.value.0, &mut delta.inset_right);
+                    if let Some(spec) = length_spec_from_custom_tokens(&unparsed.value.0) {
+                        delta.inset_right = Some(spec);
+                    } else if let Some(value) = first_ident(&unparsed.value.0) {
+                        if value.eq_ignore_ascii_case("auto") {
+                            delta.inset_right = Some(LengthSpec::Auto);
+                        }
+                    } else {
+                        let raw = tokens_debug_string(&unparsed.value.0);
+                        let raw_lower = raw.trim().to_ascii_lowercase();
+                        if raw_lower.contains("var(") {
+                            delta.inset_right_var = Some(raw_lower);
+                        } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
+                            delta.inset_right_var = Some(var);
+                        }
+                    }
+                }
+                PropertyId::Bottom => {
+                    delta.inset_bottom_var = None;
+                    apply_inherit_initial_size(&unparsed.value.0, &mut delta.inset_bottom);
+                    if let Some(spec) = length_spec_from_custom_tokens(&unparsed.value.0) {
+                        delta.inset_bottom = Some(spec);
+                    } else if let Some(value) = first_ident(&unparsed.value.0) {
+                        if value.eq_ignore_ascii_case("auto") {
+                            delta.inset_bottom = Some(LengthSpec::Auto);
+                        }
+                    } else {
+                        let raw = tokens_debug_string(&unparsed.value.0);
+                        let raw_lower = raw.trim().to_ascii_lowercase();
+                        if raw_lower.contains("var(") {
+                            delta.inset_bottom_var = Some(raw_lower);
+                        } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
+                            delta.inset_bottom_var = Some(var);
+                        }
+                    }
+                }
+                PropertyId::Inset => {
+                    delta.inset_top_var = None;
+                    delta.inset_right_var = None;
+                    delta.inset_bottom_var = None;
+                    delta.inset_left_var = None;
+                    apply_inherit_initial_inset(&unparsed.value.0, delta);
+                    if let Some(spec) = length_spec_from_custom_tokens(&unparsed.value.0) {
+                        delta.inset_top = Some(spec);
+                        delta.inset_right = Some(spec);
+                        delta.inset_bottom = Some(spec);
+                        delta.inset_left = Some(spec);
+                    } else if let Some(expr) = length_var_expr_from_tokens(&unparsed.value.0) {
+                        let name = expr.name;
+                        delta.inset_top_var = Some(name.clone());
+                        delta.inset_right_var = Some(name.clone());
+                        delta.inset_bottom_var = Some(name.clone());
+                        delta.inset_left_var = Some(name);
+                    } else {
+                        let raw = tokens_debug_string(&unparsed.value.0);
+                        if let Some([top, right, bottom, left]) =
+                            parse_inset_shorthand_components(raw.trim())
+                        {
+                            delta.inset_top = Some(top);
+                            delta.inset_right = Some(right);
+                            delta.inset_bottom = Some(bottom);
+                            delta.inset_left = Some(left);
+                        } else {
+                            let raw_lower = raw.trim().to_ascii_lowercase();
+                            if raw_lower.contains("var(") {
+                                delta.inset_top_var = Some(raw_lower.clone());
+                                delta.inset_right_var = Some(raw_lower.clone());
+                                delta.inset_bottom_var = Some(raw_lower.clone());
+                                delta.inset_left_var = Some(raw_lower);
+                            } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
+                                delta.inset_top_var = Some(var.clone());
+                                delta.inset_right_var = Some(var.clone());
+                                delta.inset_bottom_var = Some(var.clone());
+                                delta.inset_left_var = Some(var);
+                            }
                         }
                     }
                 }
@@ -4157,6 +4953,65 @@ fn apply_custom_property(property_name: &str, tokens: &[TokenOrValue], delta: &m
                 delta.box_shadow = Some(shadow);
             }
         }
+        "transform" => {
+            let raw = tokens_debug_string(tokens);
+            let raw_lower = raw.trim().to_ascii_lowercase();
+            if let Some(ops) = transform_ops_from_string(&raw) {
+                delta.transform = Some(TransformSpec::Value(ops));
+            } else {
+                apply_inherit_initial_transform(tokens, &mut delta.transform);
+                if raw_lower.contains("var(") {
+                    delta.transform_var = Some(raw_lower);
+                }
+            }
+        }
+        "translate" => {
+            let raw = tokens_debug_string(tokens);
+            let raw_lower = raw.trim().to_ascii_lowercase();
+            if let Some(ops) = transform_ops_from_translate_string(&raw) {
+                delta.translate = Some(TransformSpec::Value(ops));
+            } else {
+                apply_inherit_initial_transform(tokens, &mut delta.translate);
+                if raw_lower.contains("var(") {
+                    delta.translate_var = Some(raw_lower);
+                }
+            }
+        }
+        "rotate" => {
+            let raw = tokens_debug_string(tokens);
+            let raw_lower = raw.trim().to_ascii_lowercase();
+            if let Some(ops) = transform_ops_from_rotate_string(&raw) {
+                delta.rotate = Some(TransformSpec::Value(ops));
+            } else {
+                apply_inherit_initial_transform(tokens, &mut delta.rotate);
+                if raw_lower.contains("var(") {
+                    delta.rotate_var = Some(raw_lower);
+                }
+            }
+        }
+        "scale" => {
+            let raw = tokens_debug_string(tokens);
+            let raw_lower = raw.trim().to_ascii_lowercase();
+            if let Some(ops) = transform_ops_from_scale_string(&raw) {
+                delta.scale = Some(TransformSpec::Value(ops));
+            } else {
+                apply_inherit_initial_transform(tokens, &mut delta.scale);
+                if raw_lower.contains("var(") {
+                    delta.scale_var = Some(raw_lower);
+                }
+            }
+        }
+        "transform-origin" => {
+            let raw = tokens_debug_string(tokens);
+            if let Some(origin) = transform_origin_from_string(&raw) {
+                delta.transform_origin = Some(TransformOriginSpec::Value(origin));
+            } else {
+                apply_inherit_initial_transform_origin(tokens, delta);
+            }
+        }
+        "gap" | "row-gap" | "column-gap" => {
+            apply_gap_tokens(tokens, delta);
+        }
         "break-before" | "page-break-before" => {
             if let Some(value) = first_ident(tokens) {
                 delta.pagination.break_before = Some(match value.as_str() {
@@ -4199,55 +5054,54 @@ fn apply_custom_property(property_name: &str, tokens: &[TokenOrValue], delta: &m
         _ => {
             if property_name.starts_with("--") {
                 let name = property_name.to_string();
+                clear_custom_property_delta_value(delta, &name);
+                let raw = tokens_debug_string(tokens);
+                let raw_lower = raw.trim().to_ascii_lowercase();
+                delta.custom_raw_values.insert(name.clone(), raw_lower.clone());
                 if let Some(color) = color_from_tokens(tokens) {
                     delta.custom_colors.insert(name.clone(), color);
                     delta.custom_color_alpha.insert(name.clone(), 1.0);
-                    delta.custom_color_refs.remove(&name);
+                } else if let Some((color, alpha)) = parse_color_string(&raw) {
+                    let blended = if alpha < 1.0 {
+                        Color::rgb(
+                            color.r * alpha + (1.0 - alpha),
+                            color.g * alpha + (1.0 - alpha),
+                            color.b * alpha + (1.0 - alpha),
+                        )
+                    } else {
+                        color
+                    };
+                    delta.custom_colors.insert(name.clone(), blended);
+                    delta
+                        .custom_color_alpha
+                        .insert(name.clone(), alpha.clamp(0.0, 1.0));
+                } else if let Some(color) = parse_rgb_triplet_string(&raw) {
+                    delta.custom_colors.insert(name.clone(), color);
+                    delta.custom_color_alpha.insert(name.clone(), 1.0);
+                } else if raw_lower.contains("var(") {
+                    delta.custom_color_refs.insert(name.clone(), raw_lower);
                 } else if let Some(var) = var_name_from_tokens(tokens) {
                     delta.custom_color_refs.insert(name.clone(), var);
-                    delta.custom_colors.remove(&name);
-                    delta.custom_color_alpha.remove(&name);
+                } else if let Some(spec) = length_spec_from_custom_tokens(tokens) {
+                    delta.custom_lengths.insert(name.clone(), spec);
+                } else if let Some(stack) = font_stack_from_tokens(tokens) {
+                    delta.custom_font_stacks.insert(name, stack);
                 } else {
-                    let raw = tokens_debug_string(tokens);
-                    let raw_lower = raw.trim().to_ascii_lowercase();
-                    if let Some((color, alpha)) = parse_color_string(&raw) {
-                        let blended = if alpha < 1.0 {
-                            Color::rgb(
-                                color.r * alpha + (1.0 - alpha),
-                                color.g * alpha + (1.0 - alpha),
-                                color.b * alpha + (1.0 - alpha),
-                            )
-                        } else {
-                            color
-                        };
-                        delta.custom_colors.insert(name.clone(), blended);
-                        delta
-                            .custom_color_alpha
-                            .insert(name.clone(), alpha.clamp(0.0, 1.0));
-                        delta.custom_color_refs.remove(&name);
-                    } else if let Some(color) = parse_rgb_triplet_string(&raw) {
-                        delta.custom_colors.insert(name.clone(), color);
-                        delta.custom_color_alpha.insert(name.clone(), 1.0);
-                        delta.custom_color_refs.remove(&name);
-                    } else if raw_lower.contains("var(")
-                        && (raw_lower.starts_with("var(")
-                            || raw_lower.starts_with("rgb(")
-                            || raw_lower.starts_with("rgba(")
-                            || raw_lower.starts_with("hsl(")
-                            || raw_lower.starts_with("hsla("))
-                    {
-                        delta.custom_color_refs.insert(name.clone(), raw_lower);
-                        delta.custom_colors.remove(&name);
-                        delta.custom_color_alpha.remove(&name);
-                    } else if let Some(spec) = length_spec_from_custom_tokens(tokens) {
-                        delta.custom_lengths.insert(name.clone(), spec);
-                    } else if let Some(stack) = font_stack_from_tokens(tokens) {
-                        delta.custom_font_stacks.insert(name, stack);
-                    }
+                    // Preserve the raw stream as an unresolved expression so this declaration still overrides prior typed caches.
+                    delta.custom_color_refs.insert(name, raw_lower);
                 }
             }
         }
     }
+}
+
+fn clear_custom_property_delta_value(delta: &mut StyleDelta, name: &str) {
+    delta.custom_lengths.remove(name);
+    delta.custom_colors.remove(name);
+    delta.custom_color_alpha.remove(name);
+    delta.custom_color_refs.remove(name);
+    delta.custom_raw_values.remove(name);
+    delta.custom_font_stacks.remove(name);
 }
 
 fn overflow_mode_from_keyword(value: &css_overflow::OverflowKeyword) -> OverflowMode {
@@ -4267,6 +5121,35 @@ fn overflow_mode_from_overflow(value: &css_overflow::Overflow) -> OverflowMode {
         OverflowMode::Hidden
     } else {
         OverflowMode::Visible
+    }
+}
+
+fn length_spec_from_gap_value(value: &css_align::GapValue) -> Option<LengthSpec> {
+    match value {
+        css_align::GapValue::LengthPercentage(lp) => length_spec_from_lp(lp),
+        css_align::GapValue::Normal => Some(LengthSpec::Absolute(Pt::ZERO)),
+    }
+}
+
+fn apply_gap_tokens(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
+    delta.gap_var = None;
+    apply_inherit_initial_size(tokens, &mut delta.gap);
+    if let Some(value) = first_ident(tokens) {
+        if value.eq_ignore_ascii_case("normal") {
+            delta.gap = Some(LengthSpec::Absolute(Pt::ZERO));
+            return;
+        }
+    }
+    if let Some(spec) = length_spec_from_custom_tokens(tokens) {
+        delta.gap = Some(spec);
+        return;
+    }
+    let raw = tokens_debug_string(tokens);
+    let raw_lower = raw.trim().to_ascii_lowercase();
+    if raw_lower.contains("var(") {
+        delta.gap_var = Some(raw_lower);
+    } else if let Some(var) = var_name_from_tokens(tokens) {
+        delta.gap_var = Some(var);
     }
 }
 
@@ -4325,7 +5208,11 @@ fn content_from_tokens(tokens: &[TokenOrValue]) -> Option<ContentSpec> {
                 if value.eq_ignore_ascii_case("inherit") {
                     return Some(ContentSpec::Inherit);
                 }
-                if value.eq_ignore_ascii_case("initial") {
+                if value.eq_ignore_ascii_case("initial")
+                    || value.eq_ignore_ascii_case("unset")
+                    || value.eq_ignore_ascii_case("revert")
+                    || value.eq_ignore_ascii_case("revert-layer")
+                {
                     return Some(ContentSpec::Initial);
                 }
             }
@@ -4665,21 +5552,51 @@ fn parse_rgb_triplet_string(raw: &str) -> Option<Color> {
     Some(Color::rgb(r / 255.0, g / 255.0, b / 255.0))
 }
 
+fn map_font_family_name(raw: &str) -> Option<Arc<str>> {
+    let cleaned = raw.trim().trim_matches('"').trim_matches('\'');
+    if cleaned.is_empty() {
+        return None;
+    }
+    let lower = cleaned.to_ascii_lowercase();
+    let mapped = match lower.as_str() {
+        "monospace" | "ui-monospace" => "Courier",
+        "serif" | "ui-serif" => "Times-Roman",
+        "sans-serif" | "ui-sans-serif" => "Helvetica",
+        _ => cleaned,
+    };
+    Some(Arc::<str>::from(mapped.to_string()))
+}
+
+fn finalize_font_stack(mut stack: Vec<Arc<str>>) -> Option<Vec<Arc<str>>> {
+    if stack.is_empty() {
+        return None;
+    }
+    let has_base14 = stack.iter().any(|name| {
+        let lower = name.to_ascii_lowercase();
+        lower == "helvetica" || lower == "times-roman" || lower == "courier"
+    });
+    if !has_base14 {
+        stack.push(Arc::<str>::from("Helvetica"));
+    }
+    Some(stack)
+}
+
+fn font_stack_from_string(raw: &str) -> Option<Vec<Arc<str>>> {
+    let mut stack = Vec::new();
+    for part in split_args(raw) {
+        if let Some(mapped) = map_font_family_name(&part) {
+            stack.push(mapped);
+        }
+    }
+    finalize_font_stack(stack)
+}
+
 fn font_stack_from_tokens(tokens: &[TokenOrValue]) -> Option<Vec<Arc<str>>> {
     let mut stack = Vec::new();
     let mut current = String::new();
     let push_current = |stack: &mut Vec<Arc<str>>, current: &mut String| {
-        let cleaned = current.trim().trim_matches('"').trim_matches('\'');
-        if !cleaned.is_empty() {
-            let lower = cleaned.to_ascii_lowercase();
-            let mapped = match lower.as_str() {
-                "monospace" | "ui-monospace" => Some("Courier"),
-                "serif" | "ui-serif" => Some("Times-Roman"),
-                "sans-serif" | "ui-sans-serif" => Some("Helvetica"),
-                _ => None,
-            };
-            let name = mapped.unwrap_or(cleaned);
-            stack.push(Arc::<str>::from(name.to_string()));
+        if let Some(mapped) = map_font_family_name(current) {
+            stack.push(mapped);
         }
         current.clear();
     };
@@ -4714,18 +5631,7 @@ fn font_stack_from_tokens(tokens: &[TokenOrValue]) -> Option<Vec<Arc<str>>> {
     if !current.trim().is_empty() {
         push_current(&mut stack, &mut current);
     }
-    if stack.is_empty() {
-        None
-    } else {
-        let has_base14 = stack.iter().any(|name| {
-            let lower = name.to_ascii_lowercase();
-            lower == "helvetica" || lower == "times-roman" || lower == "courier"
-        });
-        if !has_base14 {
-            stack.push(Arc::<str>::from("Helvetica"));
-        }
-        Some(stack)
-    }
+    finalize_font_stack(stack)
 }
 
 fn color_from_tokens(tokens: &[TokenOrValue]) -> Option<Color> {
@@ -4835,6 +5741,10 @@ fn tokens_debug_string(tokens: &[TokenOrValue]) -> String {
             TokenOrValue::Color(color) => css_color_to_color(color)
                 .map(color_to_hex)
                 .unwrap_or_else(|| "color".to_string()),
+            TokenOrValue::UnresolvedColor(_) => "color".to_string(),
+            TokenOrValue::Url(url) => url
+                .to_css_string(PrinterOptions::default())
+                .unwrap_or_else(|_| "url".to_string()),
             TokenOrValue::Var(var) => {
                 let mut rendered = format!("var({}", var.name.ident.as_ref());
                 if let Some(fallback) = &var.fallback {
@@ -4858,6 +5768,20 @@ fn tokens_debug_string(tokens: &[TokenOrValue]) -> String {
                     .map(|pt| format!("{:.3}pt", pt.to_f32()))
                     .unwrap_or_else(|| "length".to_string()),
             },
+            TokenOrValue::Angle(angle) => angle
+                .to_css_string(PrinterOptions::default())
+                .unwrap_or_else(|_| "angle".to_string()),
+            TokenOrValue::Time(time) => time
+                .to_css_string(PrinterOptions::default())
+                .unwrap_or_else(|_| "time".to_string()),
+            TokenOrValue::Resolution(resolution) => resolution
+                .to_css_string(PrinterOptions::default())
+                .unwrap_or_else(|_| "resolution".to_string()),
+            TokenOrValue::DashedIdent(ident) => ident.as_ref().to_string(),
+            TokenOrValue::AnimationName(name) => name
+                .to_css_string(PrinterOptions::default())
+                .unwrap_or_else(|_| "animation-name".to_string()),
+            TokenOrValue::Env(env) => format!("env({})", env.name.name()),
             TokenOrValue::Token(Token::Ident(ident)) => ident.as_ref().to_string(),
             TokenOrValue::Token(Token::String(s)) => s.as_ref().to_string(),
             TokenOrValue::Token(Token::Hash(hash)) => format!("#{}", hash.as_ref()),
@@ -4873,7 +5797,6 @@ fn tokens_debug_string(tokens: &[TokenOrValue]) -> String {
             TokenOrValue::Token(Token::Comma) => ",".to_string(),
             TokenOrValue::Token(Token::WhiteSpace(_)) => " ".to_string(),
             TokenOrValue::Token(_) => "token".to_string(),
-            _ => "value".to_string(),
         };
         out.push(value);
     }
@@ -5013,6 +5936,46 @@ fn text_decoration_debug(decoration: TextDecorationMode) -> String {
     }
 }
 
+fn transform_op_debug(op: CssTransformOp) -> String {
+    match op {
+        CssTransformOp::Translate { x, y } => format!(
+            "translate({}, {})",
+            length_spec_debug(x),
+            length_spec_debug(y)
+        ),
+        CssTransformOp::Scale { x, y } => format!("scale({:.6}, {:.6})", x, y),
+        CssTransformOp::Rotate { radians } => format!("rotate({:.6}rad)", radians),
+        CssTransformOp::Skew {
+            x_radians,
+            y_radians,
+        } => format!("skew({:.6}rad, {:.6}rad)", x_radians, y_radians),
+        CssTransformOp::Matrix { a, b, c, d, e, f } => format!(
+            "matrix({:.6}, {:.6}, {:.6}, {:.6}, {}, {})",
+            a,
+            b,
+            c,
+            d,
+            length_spec_debug(LengthSpec::Absolute(e)),
+            length_spec_debug(LengthSpec::Absolute(f))
+        ),
+    }
+}
+
+fn transform_debug(ops: &[CssTransformOp]) -> String {
+    if ops.is_empty() {
+        "none".to_string()
+    } else {
+        ops.iter()
+            .map(|op| transform_op_debug(*op))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+fn transform_origin_debug(origin: CssTransformOrigin) -> String {
+    format!("{} {}", length_spec_debug(origin.x), length_spec_debug(origin.y))
+}
+
 fn debug_style_json(style: &ComputedStyle) -> String {
     let mut fields = Vec::new();
     fields.push(format!(
@@ -5032,6 +5995,18 @@ fn debug_style_json(style: &ComputedStyle) -> String {
     fields.push(format!(
         "\"font_style\":{}",
         json_string(&format!("{:?}", style.font_style))
+    ));
+    fields.push(format!(
+        "\"text_transform\":{}",
+        json_string(&format!("{:?}", style.text_transform))
+    ));
+    fields.push(format!(
+        "\"transform\":{}",
+        json_string(&transform_debug(&style.transform))
+    ));
+    fields.push(format!(
+        "\"transform_origin\":{}",
+        json_string(&transform_origin_debug(style.transform_origin))
     ));
     fields.push(format!(
         "\"text_decoration\":{}",
@@ -5132,6 +6107,22 @@ fn debug_style_json(style: &ComputedStyle) -> String {
         json_string(&format!("{:?}", style.box_sizing))
     ));
     fields.push(format!(
+        "\"inset_left\":{}",
+        json_string(&length_spec_debug(style.inset_left))
+    ));
+    fields.push(format!(
+        "\"inset_top\":{}",
+        json_string(&length_spec_debug(style.inset_top))
+    ));
+    fields.push(format!(
+        "\"inset_right\":{}",
+        json_string(&length_spec_debug(style.inset_right))
+    ));
+    fields.push(format!(
+        "\"inset_bottom\":{}",
+        json_string(&length_spec_debug(style.inset_bottom))
+    ));
+    fields.push(format!(
         "\"gap\":{}",
         json_string(&length_spec_debug(style.gap))
     ));
@@ -5143,8 +6134,28 @@ fn debug_style_json(style: &ComputedStyle) -> String {
             .unwrap_or_else(|| "null".to_string())
     ));
     fields.push(format!(
+        "\"flex_direction\":{}",
+        json_string(&format!("{:?}", style.flex_direction))
+    ));
+    fields.push(format!(
         "\"flex_wrap\":{}",
         json_string(&format!("{:?}", style.flex_wrap))
+    ));
+    fields.push(format!(
+        "\"justify_content\":{}",
+        json_string(&format!("{:?}", style.justify_content))
+    ));
+    fields.push(format!(
+        "\"align_items\":{}",
+        json_string(&format!("{:?}", style.align_items))
+    ));
+    fields.push(format!(
+        "\"align_self\":{}",
+        json_string(&format!("{:?}", style.align_self))
+    ));
+    fields.push(format!(
+        "\"align_content\":{}",
+        json_string(&format!("{:?}", style.align_content))
     ));
     fields.push(format!(
         "\"flex_basis\":{}",
@@ -5183,6 +6194,14 @@ fn format_element_segment(info: &ElementInfo) -> String {
         out.push_str(&format!(":nth-child({})", info.child_index));
     }
     out
+}
+
+fn recompose_transform_ops(style: &mut ComputedStyle) {
+    style.transform.clear();
+    style.transform.extend_from_slice(&style.translate);
+    style.transform.extend_from_slice(&style.rotate);
+    style.transform.extend_from_slice(&style.scale);
+    style.transform.extend_from_slice(&style.transform_list);
 }
 
 fn apply_delta(
@@ -5265,6 +6284,66 @@ fn apply_delta(
     if let Some(transform) = delta.text_transform {
         computed.text_transform = transform;
     }
+    if let Some(transform) = &delta.translate {
+        computed.pending_translate_var = None;
+        computed.translate = match transform {
+            TransformSpec::Value(value) => value.clone(),
+            TransformSpec::Inherit => parent.translate.clone(),
+            TransformSpec::Initial => Vec::new(),
+        };
+    }
+    if delta.translate.is_none() {
+        if let Some(var) = &delta.translate_var {
+            computed.pending_translate_var = Some(var.clone());
+        }
+    }
+    if let Some(transform) = &delta.rotate {
+        computed.pending_rotate_var = None;
+        computed.rotate = match transform {
+            TransformSpec::Value(value) => value.clone(),
+            TransformSpec::Inherit => parent.rotate.clone(),
+            TransformSpec::Initial => Vec::new(),
+        };
+    }
+    if delta.rotate.is_none() {
+        if let Some(var) = &delta.rotate_var {
+            computed.pending_rotate_var = Some(var.clone());
+        }
+    }
+    if let Some(transform) = &delta.scale {
+        computed.pending_scale_var = None;
+        computed.scale = match transform {
+            TransformSpec::Value(value) => value.clone(),
+            TransformSpec::Inherit => parent.scale.clone(),
+            TransformSpec::Initial => Vec::new(),
+        };
+    }
+    if delta.scale.is_none() {
+        if let Some(var) = &delta.scale_var {
+            computed.pending_scale_var = Some(var.clone());
+        }
+    }
+    if let Some(transform) = &delta.transform {
+        computed.pending_transform_var = None;
+        computed.transform_list = match transform {
+            TransformSpec::Value(value) => value.clone(),
+            TransformSpec::Inherit => parent.transform_list.clone(),
+            TransformSpec::Initial => Vec::new(),
+        };
+    }
+    if delta.transform.is_none() {
+        if let Some(var) = &delta.transform_var {
+            computed.pending_transform_var = Some(var.clone());
+        }
+    }
+    recompose_transform_ops(computed);
+    if let Some(transform_origin) = &delta.transform_origin {
+        computed.transform_origin = match transform_origin {
+            TransformOriginSpec::Value(value) => *value,
+            TransformOriginSpec::Inherit => parent.transform_origin,
+            TransformOriginSpec::Initial => CssTransformOrigin::center(),
+        };
+    }
     if let Some(decoration) = &delta.text_decoration {
         computed.text_decoration = match decoration {
             TextDecorationSpec::Value(value) => *value,
@@ -5327,21 +6406,27 @@ fn apply_delta(
 
     if let Some(width) = delta.width {
         computed.width = normalize_size_spec(width, parent.width);
+        computed.pending_width_var = None;
     }
     if let Some(min_width) = delta.min_width {
         computed.min_width = normalize_size_spec(min_width, parent.min_width);
+        computed.pending_min_width_var = None;
     }
     if let Some(max_width) = delta.max_width {
         computed.max_width = normalize_size_spec(max_width, parent.max_width);
+        computed.pending_max_width_var = None;
     }
     if let Some(height) = delta.height {
         computed.height = normalize_size_spec(height, parent.height);
+        computed.pending_height_var = None;
     }
     if let Some(min_height) = delta.min_height {
         computed.min_height = normalize_size_spec(min_height, parent.min_height);
+        computed.pending_min_height_var = None;
     }
     if let Some(max_height) = delta.max_height {
         computed.max_height = normalize_size_spec(max_height, parent.max_height);
+        computed.pending_max_height_var = None;
     }
     if let Some(var) = &delta.width_var {
         computed.pending_width_var = Some(var.clone());
@@ -5351,6 +6436,15 @@ fn apply_delta(
     }
     if let Some(var) = &delta.height_var {
         computed.pending_height_var = Some(var.clone());
+    }
+    if let Some(var) = &delta.min_width_var {
+        computed.pending_min_width_var = Some(var.clone());
+    }
+    if let Some(var) = &delta.min_height_var {
+        computed.pending_min_height_var = Some(var.clone());
+    }
+    if let Some(var) = &delta.max_height_var {
+        computed.pending_max_height_var = Some(var.clone());
     }
 
     if let Some(align) = delta.text_align {
@@ -5436,16 +6530,32 @@ fn apply_delta(
         computed.box_sizing = box_sizing;
     }
     if let Some(inset_left) = delta.inset_left {
-        computed.inset_left = normalize_length_spec(inset_left, parent.inset_left);
+        computed.inset_left = normalize_size_spec(inset_left, parent.inset_left);
+        computed.pending_inset_left_var = None;
     }
     if let Some(inset_top) = delta.inset_top {
-        computed.inset_top = normalize_length_spec(inset_top, parent.inset_top);
+        computed.inset_top = normalize_size_spec(inset_top, parent.inset_top);
+        computed.pending_inset_top_var = None;
     }
     if let Some(inset_right) = delta.inset_right {
-        computed.inset_right = normalize_length_spec(inset_right, parent.inset_right);
+        computed.inset_right = normalize_size_spec(inset_right, parent.inset_right);
+        computed.pending_inset_right_var = None;
     }
     if let Some(inset_bottom) = delta.inset_bottom {
-        computed.inset_bottom = normalize_length_spec(inset_bottom, parent.inset_bottom);
+        computed.inset_bottom = normalize_size_spec(inset_bottom, parent.inset_bottom);
+        computed.pending_inset_bottom_var = None;
+    }
+    if let Some(var) = &delta.inset_left_var {
+        computed.pending_inset_left_var = Some(var.clone());
+    }
+    if let Some(var) = &delta.inset_top_var {
+        computed.pending_inset_top_var = Some(var.clone());
+    }
+    if let Some(var) = &delta.inset_right_var {
+        computed.pending_inset_right_var = Some(var.clone());
+    }
+    if let Some(var) = &delta.inset_bottom_var {
+        computed.pending_inset_bottom_var = Some(var.clone());
     }
 
     if let Some(dir) = delta.flex_direction {
@@ -5455,7 +6565,11 @@ fn apply_delta(
         computed.flex_wrap = wrap;
     }
     if let Some(basis) = delta.flex_basis {
-        computed.flex_basis = basis;
+        computed.flex_basis = normalize_size_spec(basis, parent.flex_basis);
+        computed.pending_flex_basis_var = None;
+    }
+    if let Some(var) = &delta.flex_basis_var {
+        computed.pending_flex_basis_var = Some(var.clone());
     }
     if let Some(order) = delta.order {
         computed.order = order;
@@ -5466,11 +6580,21 @@ fn apply_delta(
     if let Some(align) = delta.align_items {
         computed.align_items = align;
     }
+    if let Some(align_self) = delta.align_self {
+        computed.align_self = align_self;
+    }
+    if let Some(align_content) = delta.align_content {
+        computed.align_content = align_content;
+    }
     if let Some(columns) = delta.grid_columns {
         computed.grid_columns = if columns == 0 { None } else { Some(columns) };
     }
     if let Some(gap) = delta.gap {
         computed.gap = normalize_length_spec(gap, parent.gap);
+        computed.pending_gap_var = None;
+    }
+    if let Some(var) = &delta.gap_var {
+        computed.pending_gap_var = Some(var.clone());
     }
     if let Some(grow) = delta.flex_grow {
         computed.flex_grow = grow.max(0.0);
@@ -5485,11 +6609,18 @@ fn apply_delta(
     if !delta.custom_lengths.is_empty() {
         for (k, v) in &delta.custom_lengths {
             computed.custom_lengths.insert(k.clone(), *v);
+            computed.custom_colors.remove(k);
+            computed.custom_color_alpha.remove(k);
+            computed.custom_color_refs.remove(k);
+            computed.custom_font_stacks.remove(k);
         }
     }
     if !delta.custom_colors.is_empty() {
         for (k, v) in &delta.custom_colors {
             computed.custom_colors.insert(k.clone(), *v);
+            computed.custom_lengths.remove(k);
+            computed.custom_color_refs.remove(k);
+            computed.custom_font_stacks.remove(k);
         }
     }
     if !delta.custom_color_alpha.is_empty() {
@@ -5500,13 +6631,24 @@ fn apply_delta(
     if !delta.custom_color_refs.is_empty() {
         for (k, v) in &delta.custom_color_refs {
             computed.custom_color_refs.insert(k.clone(), v.clone());
+            computed.custom_lengths.remove(k);
             computed.custom_colors.remove(k);
             computed.custom_color_alpha.remove(k);
+            computed.custom_font_stacks.remove(k);
+        }
+    }
+    if !delta.custom_raw_values.is_empty() {
+        for (k, v) in &delta.custom_raw_values {
+            computed.custom_raw_values.insert(k.clone(), v.clone());
         }
     }
     if !delta.custom_font_stacks.is_empty() {
         for (k, v) in &delta.custom_font_stacks {
             computed.custom_font_stacks.insert(k.clone(), v.clone());
+            computed.custom_lengths.remove(k);
+            computed.custom_colors.remove(k);
+            computed.custom_color_alpha.remove(k);
+            computed.custom_color_refs.remove(k);
         }
     }
 
@@ -5515,18 +6657,21 @@ fn apply_delta(
         &delta.margin,
         &parent.margin,
         &computed.custom_lengths,
+        &computed.custom_color_refs,
     );
     apply_edge_var_delta(
         &mut computed.padding,
         &delta.padding,
         &parent.padding,
         &computed.custom_lengths,
+        &computed.custom_color_refs,
     );
     apply_edge_var_delta(
         &mut computed.border_width,
         &delta.border_width,
         &parent.border_width,
         &computed.custom_lengths,
+        &computed.custom_color_refs,
     );
 
     if matches!(computed.pagination.break_inside, BreakInside::AvoidPage) {
@@ -5709,6 +6854,10 @@ fn resolve_rgb_component(style: &ComputedStyle, expr: &str, depth: usize) -> Opt
 }
 
 fn resolve_custom_number_expr(style: &ComputedStyle, expr: &str, depth: usize) -> Option<f32> {
+    resolve_custom_number_inner(style, expr, depth)
+}
+
+fn resolve_custom_number_inner(style: &ComputedStyle, expr: &str, depth: usize) -> Option<f32> {
     if depth > 12 {
         return None;
     }
@@ -5717,48 +6866,33 @@ fn resolve_custom_number_expr(style: &ComputedStyle, expr: &str, depth: usize) -
         return None;
     }
     if let Some((name, fallback)) = parse_var_function(expr) {
-        if let Some(value) = resolve_custom_number(style, &name) {
+        if let Some(value) = resolve_custom_number_inner(style, &name, depth + 1) {
             return Some(value);
         }
         if let Some(fallback_expr) = fallback {
-            return resolve_custom_number_expr(style, &fallback_expr, depth + 1);
+            return resolve_custom_number_inner(style, &fallback_expr, depth + 1);
         }
         return None;
     }
     if expr.starts_with("--") {
-        return resolve_custom_number(style, expr);
+        let key = expr.to_ascii_lowercase();
+        if let Some(value) = style
+            .custom_lengths
+            .get(&key)
+            .and_then(length_spec_to_scalar)
+        {
+            return Some(value);
+        }
+        if let Some(next) = style.custom_color_refs.get(&key) {
+            return resolve_custom_number_inner(style, next, depth + 1);
+        }
+        return None;
     }
     if expr.ends_with('%') {
         let pct = expr.trim_end_matches('%').trim().parse::<f32>().ok()?;
         return Some((pct / 100.0).clamp(0.0, 1.0));
     }
     expr.parse::<f32>().ok()
-}
-
-fn resolve_custom_number(style: &ComputedStyle, name: &str) -> Option<f32> {
-    let mut current = name.trim().to_ascii_lowercase();
-    if current.is_empty() {
-        return None;
-    }
-    let mut hops = 0usize;
-    loop {
-        if let Some(value) = style
-            .custom_lengths
-            .get(&current)
-            .and_then(length_spec_to_scalar)
-        {
-            return Some(value);
-        }
-        let Some(next) = style.custom_color_refs.get(&current) else {
-            break;
-        };
-        current = next.clone();
-        hops += 1;
-        if hops > 8 {
-            break;
-        }
-    }
-    None
 }
 
 fn length_spec_to_scalar(spec: &LengthSpec) -> Option<f32> {
@@ -5799,21 +6933,365 @@ fn parse_var_function(raw: &str) -> Option<(String, Option<String>)> {
     Some((name, fallback))
 }
 
+fn resolve_custom_length_from_maps(
+    custom_lengths: &HashMap<String, LengthSpec>,
+    custom_refs: &HashMap<String, String>,
+    expr: &str,
+) -> Option<LengthSpec> {
+    let mut stack: Vec<String> = Vec::new();
+    resolve_custom_length_from_maps_inner(custom_lengths, custom_refs, expr, 0, &mut stack)
+}
+
+fn resolve_custom_length_from_maps_inner(
+    custom_lengths: &HashMap<String, LengthSpec>,
+    custom_refs: &HashMap<String, String>,
+    expr: &str,
+    depth: usize,
+    stack: &mut Vec<String>,
+) -> Option<LengthSpec> {
+    if depth > 16 {
+        return None;
+    }
+    let expr = expr.trim();
+    if expr.is_empty() {
+        return None;
+    }
+    if let Some((name, fallback)) = parse_var_function(expr) {
+        if let Some(spec) = resolve_custom_length_from_maps_inner(
+            custom_lengths,
+            custom_refs,
+            &name,
+            depth + 1,
+            stack,
+        ) {
+            return Some(spec);
+        }
+        if let Some(fallback_expr) = fallback {
+            return resolve_custom_length_from_maps_inner(
+                custom_lengths,
+                custom_refs,
+                &fallback_expr,
+                depth + 1,
+                stack,
+            );
+        }
+        return None;
+    }
+    if expr.starts_with("--") {
+        let key = expr.to_ascii_lowercase();
+        if stack.iter().any(|entry| entry == &key) {
+            return None;
+        }
+        stack.push(key.clone());
+        let resolved = if let Some(spec) = custom_lengths.get(&key).copied() {
+            Some(spec)
+        } else if let Some(next) = custom_refs.get(&key) {
+            resolve_custom_length_from_maps_inner(
+                custom_lengths,
+                custom_refs,
+                next,
+                depth + 1,
+                stack,
+            )
+        } else {
+            None
+        };
+        stack.pop();
+        return resolved;
+    }
+    length_spec_from_string(expr)
+}
+
+fn resolve_custom_font_stack_from_maps(
+    custom_fonts: &HashMap<String, Vec<Arc<str>>>,
+    custom_refs: &HashMap<String, String>,
+    expr: &str,
+) -> Option<Vec<Arc<str>>> {
+    let mut stack: Vec<String> = Vec::new();
+    resolve_custom_font_stack_from_maps_inner(custom_fonts, custom_refs, expr, 0, &mut stack)
+}
+
+fn resolve_custom_font_stack_from_maps_inner(
+    custom_fonts: &HashMap<String, Vec<Arc<str>>>,
+    custom_refs: &HashMap<String, String>,
+    expr: &str,
+    depth: usize,
+    stack: &mut Vec<String>,
+) -> Option<Vec<Arc<str>>> {
+    if depth > 16 {
+        return None;
+    }
+    let expr = expr.trim();
+    if expr.is_empty() {
+        return None;
+    }
+    if let Some((name, fallback)) = parse_var_function(expr) {
+        if let Some(value) = resolve_custom_font_stack_from_maps_inner(
+            custom_fonts,
+            custom_refs,
+            &name,
+            depth + 1,
+            stack,
+        ) {
+            return Some(value);
+        }
+        if let Some(fallback_expr) = fallback {
+            return resolve_custom_font_stack_from_maps_inner(
+                custom_fonts,
+                custom_refs,
+                &fallback_expr,
+                depth + 1,
+                stack,
+            );
+        }
+        return None;
+    }
+    if expr.starts_with("--") {
+        let key = expr.to_ascii_lowercase();
+        if stack.iter().any(|entry| entry == &key) {
+            return None;
+        }
+        stack.push(key.clone());
+        let resolved = if let Some(value) = custom_fonts.get(&key).cloned() {
+            Some(value)
+        } else if let Some(next) = custom_refs.get(&key) {
+            resolve_custom_font_stack_from_maps_inner(
+                custom_fonts,
+                custom_refs,
+                next,
+                depth + 1,
+                stack,
+            )
+        } else {
+            None
+        };
+        stack.pop();
+        return resolved;
+    }
+    font_stack_from_string(expr)
+}
+
+fn resolve_custom_transform_ops_from_maps(
+    custom_refs: &HashMap<String, String>,
+    custom_raw_values: &HashMap<String, String>,
+    expr: &str,
+    parse_fn: fn(&str) -> Option<Vec<CssTransformOp>>,
+) -> Option<Vec<CssTransformOp>> {
+    let mut stack: Vec<String> = Vec::new();
+    resolve_custom_transform_ops_from_maps_inner(
+        custom_refs,
+        custom_raw_values,
+        expr,
+        parse_fn,
+        0,
+        &mut stack,
+    )
+}
+
+fn resolve_custom_transform_ops_from_maps_inner(
+    custom_refs: &HashMap<String, String>,
+    custom_raw_values: &HashMap<String, String>,
+    expr: &str,
+    parse_fn: fn(&str) -> Option<Vec<CssTransformOp>>,
+    depth: usize,
+    stack: &mut Vec<String>,
+) -> Option<Vec<CssTransformOp>> {
+    if depth > 16 {
+        return None;
+    }
+    let expr = expr.trim();
+    if expr.is_empty() {
+        return None;
+    }
+    if let Some((name, fallback)) = parse_var_function(expr) {
+        if let Some(value) = resolve_custom_transform_ops_from_maps_inner(
+            custom_refs,
+            custom_raw_values,
+            &name,
+            parse_fn,
+            depth + 1,
+            stack,
+        )
+        {
+            return Some(value);
+        }
+        if let Some(fallback_expr) = fallback {
+            return resolve_custom_transform_ops_from_maps_inner(
+                custom_refs,
+                custom_raw_values,
+                &fallback_expr,
+                parse_fn,
+                depth + 1,
+                stack,
+            );
+        }
+        return None;
+    }
+    if expr.starts_with("--") {
+        let key = expr.to_ascii_lowercase();
+        if stack.iter().any(|entry| entry == &key) {
+            return None;
+        }
+        stack.push(key.clone());
+        let resolved = if let Some(raw) = custom_raw_values.get(&key) {
+            resolve_custom_transform_ops_from_maps_inner(
+                custom_refs,
+                custom_raw_values,
+                raw,
+                parse_fn,
+                depth + 1,
+                stack,
+            )
+        } else if let Some(next) = custom_refs.get(&key) {
+            resolve_custom_transform_ops_from_maps_inner(
+                custom_refs,
+                custom_raw_values,
+                next,
+                parse_fn,
+                depth + 1,
+                stack,
+            )
+        } else {
+            None
+        };
+        stack.pop();
+        return resolved;
+    }
+    parse_fn(expr)
+}
+
 fn resolve_pending_vars(style: &mut ComputedStyle) {
     if let Some(name) = style.pending_width_var.take() {
-        if let Some(spec) = style.custom_lengths.get(&name).copied() {
+        if let Some(spec) =
+            resolve_custom_length_from_maps(&style.custom_lengths, &style.custom_color_refs, &name)
+        {
             style.width = spec;
         }
     }
     if let Some(name) = style.pending_max_width_var.take() {
-        if let Some(spec) = style.custom_lengths.get(&name).copied() {
+        if let Some(spec) =
+            resolve_custom_length_from_maps(&style.custom_lengths, &style.custom_color_refs, &name)
+        {
             style.max_width = spec;
         }
     }
     if let Some(name) = style.pending_height_var.take() {
-        if let Some(spec) = style.custom_lengths.get(&name).copied() {
+        if let Some(spec) =
+            resolve_custom_length_from_maps(&style.custom_lengths, &style.custom_color_refs, &name)
+        {
             style.height = spec;
         }
+    }
+    if let Some(name) = style.pending_min_width_var.take() {
+        if let Some(spec) =
+            resolve_custom_length_from_maps(&style.custom_lengths, &style.custom_color_refs, &name)
+        {
+            style.min_width = spec;
+        }
+    }
+    if let Some(name) = style.pending_min_height_var.take() {
+        if let Some(spec) =
+            resolve_custom_length_from_maps(&style.custom_lengths, &style.custom_color_refs, &name)
+        {
+            style.min_height = spec;
+        }
+    }
+    if let Some(name) = style.pending_max_height_var.take() {
+        if let Some(spec) =
+            resolve_custom_length_from_maps(&style.custom_lengths, &style.custom_color_refs, &name)
+        {
+            style.max_height = spec;
+        }
+    }
+    if let Some(name) = style.pending_inset_left_var.take() {
+        if let Some(spec) =
+            resolve_custom_length_from_maps(&style.custom_lengths, &style.custom_color_refs, &name)
+        {
+            style.inset_left = spec;
+        }
+    }
+    if let Some(name) = style.pending_inset_top_var.take() {
+        if let Some(spec) =
+            resolve_custom_length_from_maps(&style.custom_lengths, &style.custom_color_refs, &name)
+        {
+            style.inset_top = spec;
+        }
+    }
+    if let Some(name) = style.pending_inset_right_var.take() {
+        if let Some(spec) =
+            resolve_custom_length_from_maps(&style.custom_lengths, &style.custom_color_refs, &name)
+        {
+            style.inset_right = spec;
+        }
+    }
+    if let Some(name) = style.pending_inset_bottom_var.take() {
+        if let Some(spec) =
+            resolve_custom_length_from_maps(&style.custom_lengths, &style.custom_color_refs, &name)
+        {
+            style.inset_bottom = spec;
+        }
+    }
+    if let Some(name) = style.pending_flex_basis_var.take() {
+        if let Some(spec) =
+            resolve_custom_length_from_maps(&style.custom_lengths, &style.custom_color_refs, &name)
+        {
+            style.flex_basis = spec;
+        }
+    }
+    if let Some(name) = style.pending_gap_var.take() {
+        if let Some(spec) =
+            resolve_custom_length_from_maps(&style.custom_lengths, &style.custom_color_refs, &name)
+        {
+            style.gap = spec;
+        }
+    }
+    let mut transforms_dirty = false;
+    if let Some(name) = style.pending_translate_var.take() {
+        if let Some(ops) = resolve_custom_transform_ops_from_maps(
+            &style.custom_color_refs,
+            &style.custom_raw_values,
+            &name,
+            transform_ops_from_translate_string,
+        ) {
+            style.translate = ops;
+            transforms_dirty = true;
+        }
+    }
+    if let Some(name) = style.pending_rotate_var.take() {
+        if let Some(ops) = resolve_custom_transform_ops_from_maps(
+            &style.custom_color_refs,
+            &style.custom_raw_values,
+            &name,
+            transform_ops_from_rotate_string,
+        ) {
+            style.rotate = ops;
+            transforms_dirty = true;
+        }
+    }
+    if let Some(name) = style.pending_scale_var.take() {
+        if let Some(ops) = resolve_custom_transform_ops_from_maps(
+            &style.custom_color_refs,
+            &style.custom_raw_values,
+            &name,
+            transform_ops_from_scale_string,
+        ) {
+            style.scale = ops;
+            transforms_dirty = true;
+        }
+    }
+    if let Some(name) = style.pending_transform_var.take() {
+        if let Some(ops) = resolve_custom_transform_ops_from_maps(
+            &style.custom_color_refs,
+            &style.custom_raw_values,
+            &name,
+            transform_ops_from_string,
+        ) {
+            style.transform_list = ops;
+            transforms_dirty = true;
+        }
+    }
+    if transforms_dirty {
+        recompose_transform_ops(style);
     }
     if let Some(name) = style.pending_color_var.take() {
         if let Some((color, alpha)) = resolve_custom_color_expr_with_alpha(style, &name) {
@@ -5831,7 +7309,11 @@ fn resolve_pending_vars(style: &mut ComputedStyle) {
         }
     }
     if let Some(name) = style.pending_font_name_var.take() {
-        if let Some(stack) = style.custom_font_stacks.get(&name) {
+        if let Some(stack) = resolve_custom_font_stack_from_maps(
+            &style.custom_font_stacks,
+            &style.custom_color_refs,
+            &name,
+        ) {
             if !stack.is_empty() {
                 style.font_stack = stack.clone();
                 style.font_name = stack[0].clone();
@@ -5965,6 +7447,78 @@ fn line_height_spec(value: &LineHeight) -> Option<LineHeightSpec> {
     }
 }
 
+fn parse_flex_flow_str(raw: &str) -> Option<(FlexDirectionMode, FlexWrapMode)> {
+    let mut direction = FlexDirectionMode::Row;
+    let mut wrap = FlexWrapMode::NoWrap;
+    let mut saw_component = false;
+    for token in raw.split_ascii_whitespace() {
+        let token = token.to_ascii_lowercase();
+        match token.as_str() {
+            "row" | "row-reverse" => {
+                direction = FlexDirectionMode::Row;
+                saw_component = true;
+            }
+            "column" | "column-reverse" => {
+                direction = FlexDirectionMode::Column;
+                saw_component = true;
+            }
+            "nowrap" => {
+                wrap = FlexWrapMode::NoWrap;
+                saw_component = true;
+            }
+            "wrap" | "wrap-reverse" => {
+                wrap = FlexWrapMode::Wrap;
+                saw_component = true;
+            }
+            _ => return None,
+        }
+    }
+    if saw_component {
+        Some((direction, wrap))
+    } else {
+        None
+    }
+}
+
+fn justify_content_mode_from_keyword(keyword: &str) -> Option<JustifyContentMode> {
+    match keyword {
+        "flex-start" | "start" | "normal" | "stretch" => Some(JustifyContentMode::FlexStart),
+        "flex-end" | "end" => Some(JustifyContentMode::FlexEnd),
+        "center" => Some(JustifyContentMode::Center),
+        "space-between" => Some(JustifyContentMode::SpaceBetween),
+        "space-around" => Some(JustifyContentMode::SpaceAround),
+        "space-evenly" => Some(JustifyContentMode::SpaceEvenly),
+        _ => None,
+    }
+}
+
+fn align_content_mode_from_keyword(keyword: &str) -> Option<AlignContentMode> {
+    match keyword {
+        "flex-start" | "start" | "normal" | "stretch" => Some(AlignContentMode::FlexStart),
+        "flex-end" | "end" => Some(AlignContentMode::FlexEnd),
+        "center" => Some(AlignContentMode::Center),
+        "space-between" => Some(AlignContentMode::SpaceBetween),
+        "space-around" => Some(AlignContentMode::SpaceAround),
+        "space-evenly" => Some(AlignContentMode::SpaceEvenly),
+        _ => None,
+    }
+}
+
+fn parse_place_content_str(raw: &str) -> Option<(AlignContentMode, JustifyContentMode)> {
+    let mut tokens = raw.split_ascii_whitespace().map(|v| v.to_ascii_lowercase());
+    let first = tokens.next()?;
+    let align = align_content_mode_from_keyword(first.as_str())?;
+    let justify = if let Some(second) = tokens.next() {
+        justify_content_mode_from_keyword(second.as_str())?
+    } else {
+        justify_content_mode_from_keyword(first.as_str()).unwrap_or(JustifyContentMode::FlexStart)
+    };
+    if tokens.next().is_some() {
+        return None;
+    }
+    Some((align, justify))
+}
+
 fn parse_font_weight_str(raw: &str) -> Option<u16> {
     let raw = raw.trim().to_ascii_lowercase();
     if raw.is_empty() {
@@ -5991,6 +7545,807 @@ fn parse_text_transform_str(raw: &str) -> Option<TextTransformMode> {
         "none" => Some(TextTransformMode::None),
         _ => None,
     }
+}
+
+fn transform_ops_from_transform_list(
+    value: &css_transform::TransformList,
+) -> Option<Vec<CssTransformOp>> {
+    let mut ops = Vec::new();
+    for transform in &value.0 {
+        let op = match transform {
+            css_transform::Transform::Translate(x, y) => CssTransformOp::Translate {
+                x: length_spec_from_lp(x)?,
+                y: length_spec_from_lp(y)?,
+            },
+            css_transform::Transform::TranslateX(x) => CssTransformOp::Translate {
+                x: length_spec_from_lp(x)?,
+                y: LengthSpec::Absolute(Pt::ZERO),
+            },
+            css_transform::Transform::TranslateY(y) => CssTransformOp::Translate {
+                x: LengthSpec::Absolute(Pt::ZERO),
+                y: length_spec_from_lp(y)?,
+            },
+            css_transform::Transform::Translate3d(x, y, z) => {
+                if !z.is_zero() {
+                    return None;
+                }
+                CssTransformOp::Translate {
+                    x: length_spec_from_lp(x)?,
+                    y: length_spec_from_lp(y)?,
+                }
+            }
+            css_transform::Transform::Scale(x, y) => CssTransformOp::Scale {
+                x: scale_factor_from_number_or_percentage(x),
+                y: scale_factor_from_number_or_percentage(y),
+            },
+            css_transform::Transform::ScaleX(x) => CssTransformOp::Scale {
+                x: scale_factor_from_number_or_percentage(x),
+                y: 1.0,
+            },
+            css_transform::Transform::ScaleY(y) => CssTransformOp::Scale {
+                x: 1.0,
+                y: scale_factor_from_number_or_percentage(y),
+            },
+            css_transform::Transform::Scale3d(x, y, z) => {
+                let z = scale_factor_from_number_or_percentage(z);
+                if (z - 1.0).abs() > f32::EPSILON {
+                    return None;
+                }
+                CssTransformOp::Scale {
+                    x: scale_factor_from_number_or_percentage(x),
+                    y: scale_factor_from_number_or_percentage(y),
+                }
+            }
+            css_transform::Transform::Rotate(angle)
+            | css_transform::Transform::RotateZ(angle) => CssTransformOp::Rotate {
+                radians: angle.to_radians(),
+            },
+            css_transform::Transform::Rotate3d(x, y, z, angle) => {
+                if x.abs() > f32::EPSILON || y.abs() > f32::EPSILON || z.abs() <= f32::EPSILON {
+                    return None;
+                }
+                CssTransformOp::Rotate {
+                    radians: angle.to_radians() * z.signum(),
+                }
+            }
+            css_transform::Transform::Skew(x, y) => CssTransformOp::Skew {
+                x_radians: x.to_radians(),
+                y_radians: y.to_radians(),
+            },
+            css_transform::Transform::SkewX(x) => CssTransformOp::Skew {
+                x_radians: x.to_radians(),
+                y_radians: 0.0,
+            },
+            css_transform::Transform::SkewY(y) => CssTransformOp::Skew {
+                x_radians: 0.0,
+                y_radians: y.to_radians(),
+            },
+            css_transform::Transform::Matrix(m) => matrix_op_from_components(
+                m.a, m.b, m.c, m.d, m.e, m.f,
+            )?,
+            css_transform::Transform::Matrix3d(m) => matrix_op_from_matrix_3d(m)?,
+            _ => return None,
+        };
+        ops.push(op);
+    }
+    Some(ops)
+}
+
+fn transform_ops_from_translate(value: &css_transform::Translate) -> Option<Vec<CssTransformOp>> {
+    match value {
+        css_transform::Translate::None => Some(Vec::new()),
+        css_transform::Translate::XYZ { x, y, z } => {
+            if !z.is_zero() {
+                return None;
+            }
+            Some(vec![CssTransformOp::Translate {
+                x: length_spec_from_lp(x)?,
+                y: length_spec_from_lp(y)?,
+            }])
+        }
+    }
+}
+
+fn transform_ops_from_rotate(value: &css_transform::Rotate) -> Option<Vec<CssTransformOp>> {
+    if value.x.abs() > f32::EPSILON || value.y.abs() > f32::EPSILON || value.z.abs() <= f32::EPSILON
+    {
+        return None;
+    }
+    Some(vec![CssTransformOp::Rotate {
+        radians: value.angle.to_radians() * value.z.signum(),
+    }])
+}
+
+fn transform_ops_from_scale(value: &css_transform::Scale) -> Option<Vec<CssTransformOp>> {
+    match value {
+        css_transform::Scale::None => Some(Vec::new()),
+        css_transform::Scale::XYZ { x, y, z } => {
+            let z = scale_factor_from_number_or_percentage(z);
+            if (z - 1.0).abs() > f32::EPSILON {
+                return None;
+            }
+            Some(vec![CssTransformOp::Scale {
+                x: scale_factor_from_number_or_percentage(x),
+                y: scale_factor_from_number_or_percentage(y),
+            }])
+        }
+    }
+}
+
+fn scale_factor_from_number_or_percentage(value: &NumberOrPercentage) -> f32 {
+    match value {
+        NumberOrPercentage::Number(value) => *value,
+        NumberOrPercentage::Percentage(value) => value.0,
+    }
+}
+
+fn matrix_op_from_components(a: f32, b: f32, c: f32, d: f32, e_px: f32, f_px: f32) -> Option<CssTransformOp> {
+    if !a.is_finite()
+        || !b.is_finite()
+        || !c.is_finite()
+        || !d.is_finite()
+        || !e_px.is_finite()
+        || !f_px.is_finite()
+    {
+        return None;
+    }
+    Some(CssTransformOp::Matrix {
+        a,
+        b,
+        c,
+        d,
+        e: px_to_pt(e_px),
+        f: px_to_pt(f_px),
+    })
+}
+
+fn matrix_op_from_matrix_3d(matrix: &css_transform::Matrix3d<f32>) -> Option<CssTransformOp> {
+    let m2 = matrix.to_matrix2d()?;
+    matrix_op_from_components(m2.a, m2.b, m2.c, m2.d, m2.e, m2.f)
+}
+
+fn length_spec_from_far_edge(offset: LengthSpec) -> LengthSpec {
+    match offset {
+        LengthSpec::Absolute(value) => {
+            if value == Pt::ZERO {
+                LengthSpec::Percent(1.0)
+            } else {
+                LengthSpec::Calc(CalcLength {
+                    abs: -value,
+                    percent: 1.0,
+                    em: 0.0,
+                    rem: 0.0,
+                })
+            }
+        }
+        LengthSpec::Percent(pct) => LengthSpec::Percent(1.0 - pct),
+        LengthSpec::Em(value) => LengthSpec::Calc(CalcLength {
+            abs: Pt::ZERO,
+            percent: 1.0,
+            em: -value,
+            rem: 0.0,
+        }),
+        LengthSpec::Rem(value) => LengthSpec::Calc(CalcLength {
+            abs: Pt::ZERO,
+            percent: 1.0,
+            em: 0.0,
+            rem: -value,
+        }),
+        LengthSpec::Calc(calc) => LengthSpec::Calc(CalcLength {
+            abs: -calc.abs,
+            percent: 1.0 - calc.percent,
+            em: -calc.em,
+            rem: -calc.rem,
+        }),
+        LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => LengthSpec::Percent(1.0),
+    }
+}
+
+fn transform_origin_from_position(value: &css_position::Position) -> Option<CssTransformOrigin> {
+    Some(CssTransformOrigin {
+        x: transform_origin_x_from_position_component(&value.x)?,
+        y: transform_origin_y_from_position_component(&value.y)?,
+    })
+}
+
+fn transform_origin_x_from_position_component(
+    value: &css_position::HorizontalPosition,
+) -> Option<LengthSpec> {
+    match value {
+        css_position::PositionComponent::Center => Some(LengthSpec::Percent(0.5)),
+        css_position::PositionComponent::Length(length) => length_spec_from_lp(length),
+        css_position::PositionComponent::Side { side, offset } => {
+            let offset = if let Some(offset) = offset {
+                Some(length_spec_from_lp(offset)?)
+            } else {
+                None
+            };
+            Some(match side {
+                css_position::HorizontalPositionKeyword::Left => {
+                    offset.unwrap_or(LengthSpec::Percent(0.0))
+                }
+                css_position::HorizontalPositionKeyword::Right => {
+                    length_spec_from_far_edge(offset.unwrap_or(LengthSpec::Percent(0.0)))
+                }
+            })
+        }
+    }
+}
+
+fn transform_origin_y_from_position_component(
+    value: &css_position::VerticalPosition,
+) -> Option<LengthSpec> {
+    match value {
+        css_position::PositionComponent::Center => Some(LengthSpec::Percent(0.5)),
+        css_position::PositionComponent::Length(length) => length_spec_from_lp(length),
+        css_position::PositionComponent::Side { side, offset } => {
+            let offset = if let Some(offset) = offset {
+                Some(length_spec_from_lp(offset)?)
+            } else {
+                None
+            };
+            Some(match side {
+                css_position::VerticalPositionKeyword::Top => {
+                    offset.unwrap_or(LengthSpec::Percent(0.0))
+                }
+                css_position::VerticalPositionKeyword::Bottom => {
+                    length_spec_from_far_edge(offset.unwrap_or(LengthSpec::Percent(0.0)))
+                }
+            })
+        }
+    }
+}
+
+fn transform_origin_component_from_string(
+    token: &str,
+    prefer_x: bool,
+) -> Option<(Option<LengthSpec>, Option<LengthSpec>)> {
+    let lower = token.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        return None;
+    }
+    match lower.as_str() {
+        "left" => Some((Some(LengthSpec::Percent(0.0)), None)),
+        "right" => Some((Some(LengthSpec::Percent(1.0)), None)),
+        "top" => Some((None, Some(LengthSpec::Percent(0.0)))),
+        "bottom" => Some((None, Some(LengthSpec::Percent(1.0)))),
+        "center" => {
+            if prefer_x {
+                Some((Some(LengthSpec::Percent(0.5)), None))
+            } else {
+                Some((None, Some(LengthSpec::Percent(0.5))))
+            }
+        }
+        _ => {
+            let length = parse_single_length_spec(lower.as_str())?;
+            if prefer_x {
+                Some((Some(length), None))
+            } else {
+                Some((None, Some(length)))
+            }
+        }
+    }
+}
+
+fn transform_origin_from_string(raw: &str) -> Option<CssTransformOrigin> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let parts = split_top_level_whitespace(raw);
+    if parts.is_empty() || parts.len() > 2 {
+        return None;
+    }
+
+    let mut x: Option<LengthSpec> = None;
+    let mut y: Option<LengthSpec> = None;
+    for part in parts {
+        let prefer_x = x.is_none();
+        let (candidate_x, candidate_y) = transform_origin_component_from_string(&part, prefer_x)?;
+        if let Some(cx) = candidate_x {
+            if x.is_some() {
+                return None;
+            }
+            x = Some(cx);
+            continue;
+        }
+        if let Some(cy) = candidate_y {
+            if y.is_some() {
+                return None;
+            }
+            y = Some(cy);
+        }
+    }
+
+    Some(CssTransformOrigin {
+        x: x.unwrap_or(LengthSpec::Percent(0.5)),
+        y: y.unwrap_or(LengthSpec::Percent(0.5)),
+    })
+}
+
+fn transform_ops_from_string(raw: &str) -> Option<Vec<CssTransformOp>> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if raw.eq_ignore_ascii_case("none") {
+        return Some(Vec::new());
+    }
+    let calls = parse_transform_calls(raw)?;
+    let mut ops = Vec::new();
+    for (name, args) in calls {
+        let op = match name.as_str() {
+            "translate" => {
+                let (x, y) = parse_translate_components(&args)?;
+                CssTransformOp::Translate { x, y }
+            }
+            "translatex" => CssTransformOp::Translate {
+                x: parse_single_length_spec(&args)?,
+                y: LengthSpec::Absolute(Pt::ZERO),
+            },
+            "translatey" => CssTransformOp::Translate {
+                x: LengthSpec::Absolute(Pt::ZERO),
+                y: parse_single_length_spec(&args)?,
+            },
+            "scale" => {
+                let (x, y) = parse_scale_components(&args)?;
+                CssTransformOp::Scale { x, y }
+            }
+            "scale3d" => {
+                let (x, y, z) = parse_scale_3d_components(&args)?;
+                if (z - 1.0).abs() > f32::EPSILON {
+                    return None;
+                }
+                CssTransformOp::Scale { x, y }
+            }
+            "scalex" => CssTransformOp::Scale {
+                x: parse_single_scale_factor(&args)?,
+                y: 1.0,
+            },
+            "scaley" => CssTransformOp::Scale {
+                x: 1.0,
+                y: parse_single_scale_factor(&args)?,
+            },
+            "rotate" | "rotatez" => CssTransformOp::Rotate {
+                radians: parse_angle_radians(&args)?,
+            },
+            "rotate3d" => {
+                let (x, y, z, radians) = parse_rotate_3d_components(&args)?;
+                if x.abs() > f32::EPSILON || y.abs() > f32::EPSILON || z.abs() <= f32::EPSILON {
+                    return None;
+                }
+                CssTransformOp::Rotate {
+                    radians: radians * z.signum(),
+                }
+            }
+            "skew" => {
+                let (x_radians, y_radians) = parse_skew_components(&args)?;
+                CssTransformOp::Skew {
+                    x_radians,
+                    y_radians,
+                }
+            }
+            "skewx" => CssTransformOp::Skew {
+                x_radians: parse_angle_radians(&args)?,
+                y_radians: 0.0,
+            },
+            "skewy" => CssTransformOp::Skew {
+                x_radians: 0.0,
+                y_radians: parse_angle_radians(&args)?,
+            },
+            "matrix" => {
+                let (a, b, c, d, e_px, f_px) = parse_matrix_components(&args)?;
+                matrix_op_from_components(a, b, c, d, e_px, f_px)?
+            }
+            "matrix3d" => {
+                let values = parse_matrix3d_components(&args)?;
+                matrix_op_from_matrix_3d_components(values)?
+            }
+            _ => return None,
+        };
+        ops.push(op);
+    }
+    Some(ops)
+}
+
+fn transform_ops_from_translate_string(raw: &str) -> Option<Vec<CssTransformOp>> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if raw.eq_ignore_ascii_case("none") {
+        return Some(Vec::new());
+    }
+    let (x, y) = parse_translate_components(raw)?;
+    Some(vec![CssTransformOp::Translate { x, y }])
+}
+
+fn transform_ops_from_rotate_string(raw: &str) -> Option<Vec<CssTransformOp>> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if raw.eq_ignore_ascii_case("none") {
+        return Some(Vec::new());
+    }
+    Some(vec![CssTransformOp::Rotate {
+        radians: parse_angle_radians(raw)?,
+    }])
+}
+
+fn transform_ops_from_scale_string(raw: &str) -> Option<Vec<CssTransformOp>> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if raw.eq_ignore_ascii_case("none") {
+        return Some(Vec::new());
+    }
+    let (x, y) = parse_scale_components(raw)?;
+    Some(vec![CssTransformOp::Scale { x, y }])
+}
+
+fn parse_transform_calls(raw: &str) -> Option<Vec<(String, String)>> {
+    let chars: Vec<char> = raw.chars().collect();
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut i = 0usize;
+    while i < chars.len() {
+        while i < chars.len() && chars[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= chars.len() {
+            break;
+        }
+        let start = i;
+        while i < chars.len()
+            && (chars[i].is_ascii_alphanumeric() || chars[i] == '-')
+        {
+            i += 1;
+        }
+        if i == start || i >= chars.len() || chars[i] != '(' {
+            return None;
+        }
+        let name = chars[start..i]
+            .iter()
+            .collect::<String>()
+            .to_ascii_lowercase();
+        i += 1;
+        let args_start = i;
+        let mut depth = 1usize;
+        while i < chars.len() {
+            match chars[i] {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        if depth != 0 || i >= chars.len() {
+            return None;
+        }
+        let args = chars[args_start..i].iter().collect::<String>();
+        out.push((name, args));
+        i += 1;
+    }
+    if out.is_empty() { None } else { Some(out) }
+}
+
+fn parse_single_length_spec(raw: &str) -> Option<LengthSpec> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    length_spec_from_string(raw)
+}
+
+fn parse_translate_components(raw: &str) -> Option<(LengthSpec, LengthSpec)> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let comma_parts = split_top_level_delimited(raw, ',');
+    if comma_parts.len() > 1 {
+        if comma_parts.len() > 2 {
+            return None;
+        }
+        let x = parse_single_length_spec(comma_parts[0].as_str())?;
+        let y = parse_single_length_spec(comma_parts[1].as_str())?;
+        return Some((x, y));
+    }
+
+    let ws_parts = split_top_level_whitespace(raw);
+    if ws_parts.is_empty() || ws_parts.len() > 2 {
+        return None;
+    }
+    let x = parse_single_length_spec(ws_parts[0].as_str())?;
+    let y = if ws_parts.len() == 2 {
+        parse_single_length_spec(ws_parts[1].as_str())?
+    } else {
+        LengthSpec::Absolute(Pt::ZERO)
+    };
+    Some((x, y))
+}
+
+fn parse_scale_components(raw: &str) -> Option<(f32, f32)> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let comma_parts = split_top_level_delimited(raw, ',');
+    if comma_parts.len() > 1 {
+        if comma_parts.len() > 2 {
+            return None;
+        }
+        let x = parse_single_scale_factor(comma_parts[0].as_str())?;
+        let y = parse_single_scale_factor(comma_parts[1].as_str())?;
+        return Some((x, y));
+    }
+
+    let ws_parts = split_top_level_whitespace(raw);
+    if ws_parts.is_empty() || ws_parts.len() > 2 {
+        return None;
+    }
+    let x = parse_single_scale_factor(ws_parts[0].as_str())?;
+    let y = if ws_parts.len() == 2 {
+        parse_single_scale_factor(ws_parts[1].as_str())?
+    } else {
+        x
+    };
+    Some((x, y))
+}
+
+fn parse_scale_3d_components(raw: &str) -> Option<(f32, f32, f32)> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let comma_parts = split_top_level_delimited(raw, ',');
+    if comma_parts.len() == 3 {
+        let x = parse_single_scale_factor(comma_parts[0].as_str())?;
+        let y = parse_single_scale_factor(comma_parts[1].as_str())?;
+        let z = parse_single_scale_factor(comma_parts[2].as_str())?;
+        return Some((x, y, z));
+    }
+    let ws_parts = split_top_level_whitespace(raw);
+    if ws_parts.len() != 3 {
+        return None;
+    }
+    let x = parse_single_scale_factor(ws_parts[0].as_str())?;
+    let y = parse_single_scale_factor(ws_parts[1].as_str())?;
+    let z = parse_single_scale_factor(ws_parts[2].as_str())?;
+    Some((x, y, z))
+}
+
+fn parse_rotate_3d_components(raw: &str) -> Option<(f32, f32, f32, f32)> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let comma_parts = split_top_level_delimited(raw, ',');
+    if comma_parts.len() == 4 {
+        let x = parse_single_scale_factor(comma_parts[0].as_str())?;
+        let y = parse_single_scale_factor(comma_parts[1].as_str())?;
+        let z = parse_single_scale_factor(comma_parts[2].as_str())?;
+        let angle = parse_angle_radians(comma_parts[3].as_str())?;
+        return Some((x, y, z, angle));
+    }
+    let ws_parts = split_top_level_whitespace(raw);
+    if ws_parts.len() != 4 {
+        return None;
+    }
+    let x = parse_single_scale_factor(ws_parts[0].as_str())?;
+    let y = parse_single_scale_factor(ws_parts[1].as_str())?;
+    let z = parse_single_scale_factor(ws_parts[2].as_str())?;
+    let angle = parse_angle_radians(ws_parts[3].as_str())?;
+    Some((x, y, z, angle))
+}
+
+fn parse_skew_components(raw: &str) -> Option<(f32, f32)> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let comma_parts = split_top_level_delimited(raw, ',');
+    if comma_parts.len() > 1 {
+        if comma_parts.len() > 2 {
+            return None;
+        }
+        let x = parse_angle_radians(comma_parts[0].as_str())?;
+        let y = parse_angle_radians(comma_parts[1].as_str())?;
+        return Some((x, y));
+    }
+
+    let ws_parts = split_top_level_whitespace(raw);
+    if ws_parts.is_empty() || ws_parts.len() > 2 {
+        return None;
+    }
+    let x = parse_angle_radians(ws_parts[0].as_str())?;
+    let y = if ws_parts.len() == 2 {
+        parse_angle_radians(ws_parts[1].as_str())?
+    } else {
+        0.0
+    };
+    Some((x, y))
+}
+
+fn parse_matrix_components(raw: &str) -> Option<(f32, f32, f32, f32, f32, f32)> {
+    let values = parse_numeric_components(raw, 6)?;
+    Some((values[0], values[1], values[2], values[3], values[4], values[5]))
+}
+
+fn parse_matrix3d_components(raw: &str) -> Option<[f32; 16]> {
+    let values = parse_numeric_components(raw, 16)?;
+    let mut out = [0.0f32; 16];
+    out.copy_from_slice(values.as_slice());
+    Some(out)
+}
+
+fn parse_numeric_components(raw: &str, expected: usize) -> Option<Vec<f32>> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let comma_parts = split_top_level_delimited(raw, ',');
+    let parts = if comma_parts.len() > 1 {
+        comma_parts
+    } else {
+        split_top_level_whitespace(raw)
+    };
+    if parts.len() != expected {
+        return None;
+    }
+    let mut out = Vec::with_capacity(expected);
+    for part in parts {
+        out.push(parse_single_number(&part)?);
+    }
+    Some(out)
+}
+
+fn parse_single_number(raw: &str) -> Option<f32> {
+    let value = raw.trim().parse::<f32>().ok()?;
+    if value.is_finite() {
+        Some(value)
+    } else {
+        None
+    }
+}
+
+fn matrix_op_from_matrix_3d_components(values: [f32; 16]) -> Option<CssTransformOp> {
+    let eps = 1.0e-6f32;
+    let near = |value: f32, target: f32| (value - target).abs() <= eps;
+    if !near(values[2], 0.0)
+        || !near(values[3], 0.0)
+        || !near(values[6], 0.0)
+        || !near(values[7], 0.0)
+        || !near(values[8], 0.0)
+        || !near(values[9], 0.0)
+        || !near(values[11], 0.0)
+        || !near(values[14], 0.0)
+        || !near(values[10], 1.0)
+        || !near(values[15], 1.0)
+    {
+        return None;
+    }
+    matrix_op_from_components(
+        values[0], values[1], values[4], values[5], values[12], values[13],
+    )
+}
+
+fn parse_single_scale_factor(raw: &str) -> Option<f32> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if let Some(value) = raw.strip_suffix('%') {
+        let parsed = value.trim().parse::<f32>().ok()?;
+        if !parsed.is_finite() {
+            return None;
+        }
+        return Some(parsed / 100.0);
+    }
+    let parsed = raw.parse::<f32>().ok()?;
+    if !parsed.is_finite() {
+        return None;
+    }
+    Some(parsed)
+}
+
+fn parse_angle_radians(raw: &str) -> Option<f32> {
+    let raw = raw.trim().to_ascii_lowercase();
+    if raw.is_empty() {
+        return None;
+    }
+    if raw == "0" {
+        return Some(0.0);
+    }
+
+    let parse_value = |value: &str| -> Option<f32> {
+        let parsed = value.trim().parse::<f32>().ok()?;
+        if parsed.is_finite() {
+            Some(parsed)
+        } else {
+            None
+        }
+    };
+
+    if let Some(value) = raw.strip_suffix("deg") {
+        return parse_value(value).map(|v| v.to_radians());
+    }
+    if let Some(value) = raw.strip_suffix("grad") {
+        return parse_value(value).map(|v| v * (std::f32::consts::PI / 200.0));
+    }
+    if let Some(value) = raw.strip_suffix("rad") {
+        return parse_value(value);
+    }
+    if let Some(value) = raw.strip_suffix("turn") {
+        return parse_value(value).map(|v| v * (2.0 * std::f32::consts::PI));
+    }
+    None
+}
+
+fn split_top_level_delimited(raw: &str, delimiter: char) -> Vec<String> {
+    let mut parts: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0usize;
+    for ch in raw.chars() {
+        match ch {
+            '(' => {
+                depth += 1;
+                current.push(ch);
+            }
+            ')' => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+                current.push(ch);
+            }
+            c if c == delimiter && depth == 0 => {
+                parts.push(current.trim().to_string());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+    if !current.trim().is_empty() {
+        parts.push(current.trim().to_string());
+    }
+    parts
+}
+
+fn split_top_level_whitespace(raw: &str) -> Vec<String> {
+    let mut parts: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0usize;
+    for ch in raw.chars() {
+        match ch {
+            '(' => {
+                depth += 1;
+                current.push(ch);
+            }
+            ')' => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+                current.push(ch);
+            }
+            c if c.is_ascii_whitespace() && depth == 0 => {
+                if !current.trim().is_empty() {
+                    parts.push(current.trim().to_string());
+                    current.clear();
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+    if !current.trim().is_empty() {
+        parts.push(current.trim().to_string());
+    }
+    parts
 }
 
 fn text_decoration_from_line(value: &TextDecorationLine) -> TextDecorationMode {
@@ -6026,7 +8381,11 @@ fn parse_text_decoration_str(raw: &str) -> Option<TextDecorationMode> {
             _ => {}
         }
     }
-    if saw { Some(mode) } else { None }
+    if saw {
+        Some(mode)
+    } else {
+        None
+    }
 }
 
 fn parse_letter_spacing_str(raw: &str) -> Option<LengthSpec> {
@@ -6109,7 +8468,11 @@ fn parse_grid_track_count(raw: &str) -> Option<usize> {
         }
         count += 1;
     }
-    if count > 0 { Some(count) } else { None }
+    if count > 0 {
+        Some(count)
+    } else {
+        None
+    }
 }
 
 fn parse_repeat_track_count(raw: &str) -> Option<usize> {
@@ -6210,6 +8573,12 @@ fn apply_background_from_string(raw: &str, delta: &mut StyleDelta) {
     if let Some((color, alpha)) = parse_color_string(raw) {
         delta.background_color = Some(BackgroundSpec::Value(blend_over_white(color, alpha)));
         return;
+    }
+    for token in split_ws_preserve_parens(raw) {
+        if let Some((color, alpha)) = parse_color_string(&token) {
+            delta.background_color = Some(BackgroundSpec::Value(blend_over_white(color, alpha)));
+            return;
+        }
     }
     if raw.to_ascii_lowercase().contains("var(") {
         delta.background_color_var = Some(raw.trim().to_ascii_lowercase());
@@ -6474,6 +8843,9 @@ fn parse_color_string(raw: &str) -> Option<(Color, f32)> {
         };
         return Some((Color::rgb(r, g, b), a));
     }
+    if let Ok(color) = CssColor::parse_string(s) {
+        return css_color_to_color_with_alpha(&color);
+    }
     None
 }
 
@@ -6566,16 +8938,23 @@ fn absolute_font_size(size: AbsoluteFontSize) -> Pt {
 }
 
 fn css_color_to_color(color: &CssColor) -> Option<Color> {
+    let (resolved, alpha) = css_color_to_color_with_alpha(color)?;
+    Some(blend_over_white(resolved, alpha))
+}
+
+fn css_color_to_color_with_alpha(color: &CssColor) -> Option<(Color, f32)> {
     if let CssColor::RGBA(rgba) = color {
-        let alpha = rgba.alpha as f32 / 255.0;
-        // Preblend over white until we support alpha fills directly.
-        let r = (rgba.red as f32 / 255.0) * alpha + (1.0 - alpha);
-        let g = (rgba.green as f32 / 255.0) * alpha + (1.0 - alpha);
-        let b = (rgba.blue as f32 / 255.0) * alpha + (1.0 - alpha);
-        return Some(Color::rgb(r, g, b));
+        return Some((
+            Color::rgb(
+                rgba.red as f32 / 255.0,
+                rgba.green as f32 / 255.0,
+                rgba.blue as f32 / 255.0,
+            ),
+            rgba.alpha as f32 / 255.0,
+        ));
     }
     if let Ok(srgb) = SRGB::try_from(color) {
-        return Some(Color::rgb(srgb.r, srgb.g, srgb.b));
+        return Some((Color::rgb(srgb.r, srgb.g, srgb.b), 1.0));
     }
     None
 }
@@ -6801,7 +9180,8 @@ fn display_mode_name(mode: DisplayMode) -> &'static str {
 
 fn position_mode_from_css(position: &CssPosition) -> PositionMode {
     match position {
-        CssPosition::Absolute | CssPosition::Fixed => PositionMode::Absolute,
+        CssPosition::Absolute => PositionMode::Absolute,
+        CssPosition::Fixed => PositionMode::Fixed,
         CssPosition::Relative | CssPosition::Sticky(_) => PositionMode::Relative,
         _ => PositionMode::Static,
     }
@@ -6948,25 +9328,30 @@ fn apply_edge_var_delta(
     delta: &EdgeDelta,
     parent: &EdgeSizes,
     custom_lengths: &HashMap<String, LengthSpec>,
+    custom_refs: &HashMap<String, String>,
 ) {
     if let Some(expr) = &delta.top_var {
-        if let Some(spec) = custom_lengths.get(&expr.name).copied() {
+        if let Some(spec) = resolve_custom_length_from_maps(custom_lengths, custom_refs, &expr.name)
+        {
             target.top = normalize_length_spec(scale_length_spec(spec, expr.scale), parent.top);
         }
     }
     if let Some(expr) = &delta.right_var {
-        if let Some(spec) = custom_lengths.get(&expr.name).copied() {
+        if let Some(spec) = resolve_custom_length_from_maps(custom_lengths, custom_refs, &expr.name)
+        {
             target.right = normalize_length_spec(scale_length_spec(spec, expr.scale), parent.right);
         }
     }
     if let Some(expr) = &delta.bottom_var {
-        if let Some(spec) = custom_lengths.get(&expr.name).copied() {
+        if let Some(spec) = resolve_custom_length_from_maps(custom_lengths, custom_refs, &expr.name)
+        {
             target.bottom =
                 normalize_length_spec(scale_length_spec(spec, expr.scale), parent.bottom);
         }
     }
     if let Some(expr) = &delta.left_var {
-        if let Some(spec) = custom_lengths.get(&expr.name).copied() {
+        if let Some(spec) = resolve_custom_length_from_maps(custom_lengths, custom_refs, &expr.name)
+        {
             target.left = normalize_length_spec(scale_length_spec(spec, expr.scale), parent.left);
         }
     }
@@ -7006,7 +9391,7 @@ fn apply_inherit_initial_edge(
     if let Some(ident) = first_ident(tokens) {
         let value = match ident.as_str() {
             "inherit" => LengthSpec::Inherit,
-            "initial" => LengthSpec::Initial,
+            "initial" | "unset" | "revert" | "revert-layer" => LengthSpec::Initial,
             _ => return,
         };
         let target = if is_margin {
@@ -7066,10 +9451,65 @@ fn apply_inherit_initial_edge(
     }
 }
 
+fn apply_inherit_initial_size(tokens: &[TokenOrValue], target: &mut Option<LengthSpec>) {
+    if let Some(ident) = first_ident(tokens) {
+        *target = match ident.as_str() {
+            "inherit" => Some(LengthSpec::Inherit),
+            "initial" | "unset" | "revert" | "revert-layer" => Some(LengthSpec::Initial),
+            _ => *target,
+        };
+    }
+}
+
+fn apply_inherit_initial_inset(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
+    let Some(ident) = first_ident(tokens) else {
+        return;
+    };
+    let value = match ident.as_str() {
+        "inherit" => LengthSpec::Inherit,
+        "initial" | "unset" | "revert" | "revert-layer" => LengthSpec::Initial,
+        _ => return,
+    };
+    delta.inset_top = Some(value);
+    delta.inset_right = Some(value);
+    delta.inset_bottom = Some(value);
+    delta.inset_left = Some(value);
+}
+
+fn parse_inset_shorthand_components(raw: &str) -> Option<[LengthSpec; 4]> {
+    let parts = split_top_level_whitespace(raw);
+    if parts.is_empty() || parts.len() > 4 {
+        return None;
+    }
+    let mut values: Vec<LengthSpec> = Vec::with_capacity(parts.len());
+    for part in parts {
+        let part = part.trim();
+        let spec = if part.eq_ignore_ascii_case("auto") {
+            LengthSpec::Auto
+        } else {
+            length_spec_from_string(part)?
+        };
+        values.push(spec);
+    }
+    let result = match values.len() {
+        1 => {
+            let v = values[0];
+            [v, v, v, v]
+        }
+        2 => [values[0], values[1], values[0], values[1]],
+        3 => [values[0], values[1], values[2], values[1]],
+        4 => [values[0], values[1], values[2], values[3]],
+        _ => return None,
+    };
+    Some(result)
+}
+
 fn apply_inherit_initial_font_size(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
     if let Some(ident) = first_ident(tokens) {
         match ident.as_str() {
-            "inherit" => delta.font_size = Some(FontSizeSpec::Inherit),
+            "inherit" | "unset" | "revert" | "revert-layer" => {
+                delta.font_size = Some(FontSizeSpec::Inherit)
+            }
             "initial" => delta.font_size = Some(FontSizeSpec::Initial),
             _ => {}
         }
@@ -7079,7 +9519,9 @@ fn apply_inherit_initial_font_size(tokens: &[TokenOrValue], delta: &mut StyleDel
 fn apply_inherit_initial_line_height(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
     if let Some(ident) = first_ident(tokens) {
         match ident.as_str() {
-            "inherit" => delta.line_height = Some(LineHeightSpec::Inherit),
+            "inherit" | "unset" | "revert" | "revert-layer" => {
+                delta.line_height = Some(LineHeightSpec::Inherit)
+            }
             "initial" => delta.line_height = Some(LineHeightSpec::Initial),
             _ => {}
         }
@@ -7089,7 +9531,9 @@ fn apply_inherit_initial_line_height(tokens: &[TokenOrValue], delta: &mut StyleD
 fn apply_inherit_initial_color(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
     if let Some(ident) = first_ident(tokens) {
         match ident.as_str() {
-            "inherit" => delta.color = Some(ColorSpec::Inherit),
+            "inherit" | "unset" | "revert" | "revert-layer" => {
+                delta.color = Some(ColorSpec::Inherit)
+            }
             "initial" => delta.color = Some(ColorSpec::Initial),
             "currentcolor" => delta.color = Some(ColorSpec::CurrentColor),
             _ => {}
@@ -7101,7 +9545,9 @@ fn apply_inherit_initial_background_color(tokens: &[TokenOrValue], delta: &mut S
     if let Some(ident) = first_ident(tokens) {
         match ident.as_str() {
             "inherit" => delta.background_color = Some(BackgroundSpec::Inherit),
-            "initial" => delta.background_color = Some(BackgroundSpec::Initial),
+            "initial" | "unset" | "revert" | "revert-layer" => {
+                delta.background_color = Some(BackgroundSpec::Initial)
+            }
             "currentcolor" => delta.background_color = Some(BackgroundSpec::CurrentColor),
             _ => {}
         }
@@ -7112,7 +9558,9 @@ fn apply_inherit_initial_border_color(tokens: &[TokenOrValue], delta: &mut Style
     if let Some(ident) = first_ident(tokens) {
         match ident.as_str() {
             "inherit" => delta.border_color = Some(ColorSpec::Inherit),
-            "initial" => delta.border_color = Some(ColorSpec::Initial),
+            "initial" | "unset" | "revert" | "revert-layer" => {
+                delta.border_color = Some(ColorSpec::Initial)
+            }
             "currentcolor" => delta.border_color = Some(ColorSpec::CurrentColor),
             _ => {}
         }
@@ -7122,7 +9570,9 @@ fn apply_inherit_initial_border_color(tokens: &[TokenOrValue], delta: &mut Style
 fn apply_inherit_initial_font_name(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
     if let Some(ident) = first_ident(tokens) {
         match ident.as_str() {
-            "inherit" => delta.font_name = Some(FontSpec::Inherit),
+            "inherit" | "unset" | "revert" | "revert-layer" => {
+                delta.font_name = Some(FontSpec::Inherit)
+            }
             "initial" => delta.font_name = Some(FontSpec::Initial),
             _ => {}
         }
@@ -7132,7 +9582,7 @@ fn apply_inherit_initial_font_name(tokens: &[TokenOrValue], delta: &mut StyleDel
 fn apply_inherit_initial_font_weight(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
     if let Some(ident) = first_ident(tokens) {
         match ident.as_str() {
-            "inherit" => {}
+            "inherit" | "unset" | "revert" | "revert-layer" => {}
             "initial" => delta.font_weight = Some(400),
             "normal" => delta.font_weight = Some(400),
             "bold" => delta.font_weight = Some(700),
@@ -7144,7 +9594,7 @@ fn apply_inherit_initial_font_weight(tokens: &[TokenOrValue], delta: &mut StyleD
 fn apply_inherit_initial_font_style(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
     if let Some(ident) = first_ident(tokens) {
         match ident.as_str() {
-            "inherit" => {}
+            "inherit" | "unset" | "revert" | "revert-layer" => {}
             "initial" | "normal" => delta.font_style = Some(FontStyleMode::Normal),
             "italic" | "oblique" => delta.font_style = Some(FontStyleMode::Italic),
             _ => {}
@@ -7155,7 +9605,7 @@ fn apply_inherit_initial_font_style(tokens: &[TokenOrValue], delta: &mut StyleDe
 fn apply_inherit_initial_text_transform(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
     if let Some(ident) = first_ident(tokens) {
         match ident.as_str() {
-            "inherit" => {}
+            "inherit" | "unset" | "revert" | "revert-layer" => {}
             "initial" | "none" => delta.text_transform = Some(TextTransformMode::None),
             "uppercase" => delta.text_transform = Some(TextTransformMode::Uppercase),
             "lowercase" => delta.text_transform = Some(TextTransformMode::Lowercase),
@@ -7165,11 +9615,38 @@ fn apply_inherit_initial_text_transform(tokens: &[TokenOrValue], delta: &mut Sty
     }
 }
 
+fn apply_inherit_initial_transform(tokens: &[TokenOrValue], slot: &mut Option<TransformSpec>) {
+    if let Some(ident) = first_ident(tokens) {
+        match ident.as_str() {
+            "inherit" => *slot = Some(TransformSpec::Inherit),
+            "initial" | "unset" | "revert" | "revert-layer" => {
+                *slot = Some(TransformSpec::Initial)
+            }
+            "none" => *slot = Some(TransformSpec::Value(Vec::new())),
+            _ => {}
+        }
+    }
+}
+
+fn apply_inherit_initial_transform_origin(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
+    if let Some(ident) = first_ident(tokens) {
+        match ident.as_str() {
+            "inherit" => delta.transform_origin = Some(TransformOriginSpec::Inherit),
+            "initial" | "unset" | "revert" | "revert-layer" => {
+                delta.transform_origin = Some(TransformOriginSpec::Initial)
+            }
+            _ => {}
+        }
+    }
+}
+
 fn apply_inherit_initial_text_decoration(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
     if let Some(ident) = first_ident(tokens) {
         match ident.as_str() {
             "inherit" => delta.text_decoration = Some(TextDecorationSpec::Inherit),
-            "initial" => delta.text_decoration = Some(TextDecorationSpec::Initial),
+            "initial" | "unset" | "revert" | "revert-layer" => {
+                delta.text_decoration = Some(TextDecorationSpec::Initial)
+            }
             "none" => {
                 delta.text_decoration =
                     Some(TextDecorationSpec::Value(TextDecorationMode::default()))
@@ -7187,7 +9664,9 @@ fn apply_inherit_initial_text_overflow(tokens: &[TokenOrValue], delta: &mut Styl
     if let Some(ident) = first_ident(tokens) {
         match ident.as_str() {
             "inherit" => delta.text_overflow = Some(TextOverflowSpec::Inherit),
-            "initial" => delta.text_overflow = Some(TextOverflowSpec::Initial),
+            "initial" | "unset" | "revert" | "revert-layer" => {
+                delta.text_overflow = Some(TextOverflowSpec::Initial)
+            }
             "clip" => delta.text_overflow = Some(TextOverflowSpec::Value(TextOverflowMode::Clip)),
             "ellipsis" => {
                 delta.text_overflow = Some(TextOverflowSpec::Value(TextOverflowMode::Ellipsis))
@@ -7200,7 +9679,9 @@ fn apply_inherit_initial_text_overflow(tokens: &[TokenOrValue], delta: &mut Styl
 fn apply_inherit_initial_letter_spacing(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
     if let Some(ident) = first_ident(tokens) {
         match ident.as_str() {
-            "inherit" => delta.letter_spacing = Some(LengthSpec::Inherit),
+            "inherit" | "unset" | "revert" | "revert-layer" => {
+                delta.letter_spacing = Some(LengthSpec::Inherit)
+            }
             "initial" | "normal" => delta.letter_spacing = Some(LengthSpec::Absolute(Pt::ZERO)),
             _ => {}
         }
@@ -7209,7 +9690,9 @@ fn apply_inherit_initial_letter_spacing(tokens: &[TokenOrValue], delta: &mut Sty
 fn apply_inherit_initial_white_space(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
     if let Some(ident) = first_ident(tokens) {
         match ident.as_str() {
-            "inherit" => delta.white_space = Some(WhiteSpaceSpec::Inherit),
+            "inherit" | "unset" | "revert" | "revert-layer" => {
+                delta.white_space = Some(WhiteSpaceSpec::Inherit)
+            }
             "initial" => delta.white_space = Some(WhiteSpaceSpec::Initial),
             _ => {}
         }
@@ -7220,7 +9703,9 @@ fn apply_inherit_initial_display(tokens: &[TokenOrValue], delta: &mut StyleDelta
     if let Some(ident) = first_ident(tokens) {
         match ident.as_str() {
             "inherit" => delta.display = Some(DisplaySpec::Inherit),
-            "initial" => delta.display = Some(DisplaySpec::Initial),
+            "initial" | "unset" | "revert" | "revert-layer" => {
+                delta.display = Some(DisplaySpec::Initial)
+            }
             _ => {}
         }
     }
@@ -7243,12 +9728,24 @@ impl StyleDelta {
             && self.min_width.is_none()
             && self.min_height.is_none()
             && self.max_height.is_none()
+            && self.min_width_var.is_none()
+            && self.min_height_var.is_none()
+            && self.max_height_var.is_none()
             && self.max_width_var.is_none()
             && self.text_align.is_none()
             && self.vertical_align.is_none()
             && self.font_weight.is_none()
             && self.font_style.is_none()
             && self.text_transform.is_none()
+            && self.transform.is_none()
+            && self.transform_var.is_none()
+            && self.translate.is_none()
+            && self.translate_var.is_none()
+            && self.rotate.is_none()
+            && self.rotate_var.is_none()
+            && self.scale.is_none()
+            && self.scale_var.is_none()
+            && self.transform_origin.is_none()
             && self.text_decoration.is_none()
             && self.text_overflow.is_none()
             && self.content.is_none()
@@ -7306,14 +9803,22 @@ impl StyleDelta {
             && self.inset_top.is_none()
             && self.inset_right.is_none()
             && self.inset_bottom.is_none()
+            && self.inset_left_var.is_none()
+            && self.inset_top_var.is_none()
+            && self.inset_right_var.is_none()
+            && self.inset_bottom_var.is_none()
             && self.flex_direction.is_none()
             && self.flex_wrap.is_none()
             && self.flex_basis.is_none()
+            && self.flex_basis_var.is_none()
             && self.order.is_none()
             && self.justify_content.is_none()
             && self.align_items.is_none()
+            && self.align_self.is_none()
+            && self.align_content.is_none()
             && self.grid_columns.is_none()
             && self.gap.is_none()
+            && self.gap_var.is_none()
             && self.flex_grow.is_none()
             && self.flex_shrink.is_none()
             && self.overflow.is_none()
@@ -7321,6 +9826,7 @@ impl StyleDelta {
             && self.custom_colors.is_empty()
             && self.custom_color_alpha.is_empty()
             && self.custom_color_refs.is_empty()
+            && self.custom_raw_values.is_empty()
             && self.custom_font_stacks.is_empty()
     }
 }
@@ -7388,6 +9894,65 @@ mod tests {
         let p_info = element("p", None, &["note"]);
         let p_style = resolver.compute_style(&p_info, &root, None, &[]);
         assert_eq!(p_style.color, Color::rgb(1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn background_named_color_matches_single_letter_class_selector() {
+        let css = ".a { background: red; } .b { background: rgb(0, 255, 0); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let a_style = resolver.compute_style(&element("div", None, &["a"]), &root, None, &[]);
+        let b_style = resolver.compute_style(&element("div", None, &["b"]), &root, None, &[]);
+        assert_eq!(a_style.background_color, Some(Color::rgb(1.0, 0.0, 0.0)));
+        assert_eq!(b_style.background_color, Some(Color::rgb(0.0, 1.0, 0.0)));
+    }
+
+    #[test]
+    fn background_shorthand_extracts_color_token() {
+        let css = ".x { background: red no-repeat center / cover; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
+        assert_eq!(style.background_color, Some(Color::rgb(1.0, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn attribute_includes_selector_matches_space_separated_values() {
+        let css = "[data-tags~='beta'] { color: red; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let mut info = element("div", None, &[]);
+        info.attrs
+            .insert("data-tags".to_string(), "alpha beta".to_string());
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.color, Color::rgb(1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn width_unset_resets_to_auto() {
+        let css = ".x { width: 100px; width: unset; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
+        assert_eq!(style.width, LengthSpec::Auto);
+    }
+
+    #[test]
+    fn background_color_unset_resets_to_initial_none() {
+        let css = ".x { background-color: rgb(0,0,255); background-color: unset; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
+        assert_eq!(style.background_color, None);
+    }
+
+    #[test]
+    fn display_unset_resets_to_initial_inline() {
+        let css = ".x { display: flex; display: unset; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
+        assert_eq!(style.display, DisplayMode::Inline);
     }
 
     #[test]
@@ -7594,6 +10159,466 @@ mod tests {
     }
 
     #[test]
+    fn transform_translate_functions_resolve() {
+        let css = ".x { transform: translate(16px, 8px) translateY(4px); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(
+            style.transform,
+            vec![
+                CssTransformOp::Translate {
+                    x: LengthSpec::Absolute(Pt::from_f32(12.0)),
+                    y: LengthSpec::Absolute(Pt::from_f32(6.0))
+                },
+                CssTransformOp::Translate {
+                    x: LengthSpec::Absolute(Pt::ZERO),
+                    y: LengthSpec::Absolute(Pt::from_f32(3.0))
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn translate_longhand_resolves() {
+        let css = ".x { translate: 16px 8px; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(
+            style.transform,
+            vec![CssTransformOp::Translate {
+                x: LengthSpec::Absolute(Pt::from_f32(12.0)),
+                y: LengthSpec::Absolute(Pt::from_f32(6.0))
+            }]
+        );
+    }
+
+    #[test]
+    fn transform_scale_and_rotate_functions_resolve() {
+        let css = ".x { transform: scale(2, 0.5) rotate(90deg); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.transform.len(), 2);
+        match style.transform[0] {
+            CssTransformOp::Scale { x, y } => {
+                assert!((x - 2.0).abs() < 1.0e-6);
+                assert!((y - 0.5).abs() < 1.0e-6);
+            }
+            _ => panic!("expected scale op"),
+        }
+        match style.transform[1] {
+            CssTransformOp::Rotate { radians } => {
+                assert!((radians - std::f32::consts::FRAC_PI_2).abs() < 1.0e-6);
+            }
+            _ => panic!("expected rotate op"),
+        }
+    }
+
+    #[test]
+    fn rotate_longhand_resolves() {
+        let css = ".x { rotate: 90deg; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.transform.len(), 1);
+        match style.transform[0] {
+            CssTransformOp::Rotate { radians } => {
+                assert!((radians - std::f32::consts::FRAC_PI_2).abs() < 1.0e-6);
+            }
+            _ => panic!("expected rotate op"),
+        }
+    }
+
+    #[test]
+    fn scale_longhand_resolves() {
+        let css = ".x { scale: 200% 50%; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.transform.len(), 1);
+        match style.transform[0] {
+            CssTransformOp::Scale { x, y } => {
+                assert!((x - 2.0).abs() < 1.0e-6);
+                assert!((y - 0.5).abs() < 1.0e-6);
+            }
+            _ => panic!("expected scale op"),
+        }
+    }
+
+    #[test]
+    fn transform_skew_functions_resolve() {
+        let css = ".x { transform: skewX(45deg) skewY(30deg); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.transform.len(), 2);
+        match style.transform[0] {
+            CssTransformOp::Skew {
+                x_radians,
+                y_radians,
+            } => {
+                assert!((x_radians - std::f32::consts::FRAC_PI_4).abs() < 1.0e-6);
+                assert!(y_radians.abs() < 1.0e-6);
+            }
+            _ => panic!("expected skew op"),
+        }
+        match style.transform[1] {
+            CssTransformOp::Skew {
+                x_radians,
+                y_radians,
+            } => {
+                assert!(x_radians.abs() < 1.0e-6);
+                assert!((y_radians - std::f32::consts::PI / 6.0).abs() < 1.0e-6);
+            }
+            _ => panic!("expected skew op"),
+        }
+    }
+
+    #[test]
+    fn transform_matrix_function_resolves() {
+        let css = ".x { transform: matrix(1, 0.5, 0.25, 1, 96, 12); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.transform.len(), 1);
+        match style.transform[0] {
+            CssTransformOp::Matrix { a, b, c, d, e, f } => {
+                assert!((a - 1.0).abs() < 1.0e-6);
+                assert!((b - 0.5).abs() < 1.0e-6);
+                assert!((c - 0.25).abs() < 1.0e-6);
+                assert!((d - 1.0).abs() < 1.0e-6);
+                assert!((e.to_f32() - 72.0).abs() < 0.001);
+                assert!((f.to_f32() - 9.0).abs() < 0.001);
+            }
+            _ => panic!("expected matrix op"),
+        }
+    }
+
+    #[test]
+    fn transform_matrix3d_2d_components_resolve() {
+        let css = ".x { transform: matrix3d(1, 0, 0, 0, 0.5, 1, 0, 0, 0, 0, 1, 0, 96, 12, 0, 1); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.transform.len(), 1);
+        match style.transform[0] {
+            CssTransformOp::Matrix { a, b, c, d, e, f } => {
+                assert!((a - 1.0).abs() < 1.0e-6);
+                assert!(b.abs() < 1.0e-6);
+                assert!((c - 0.5).abs() < 1.0e-6);
+                assert!((d - 1.0).abs() < 1.0e-6);
+                assert!((e.to_f32() - 72.0).abs() < 0.001);
+                assert!((f.to_f32() - 9.0).abs() < 0.001);
+            }
+            _ => panic!("expected matrix op"),
+        }
+    }
+
+    #[test]
+    fn transform_matrix3d_with_3d_terms_is_rejected() {
+        let css = ".x { transform: matrix3d(1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert!(style.transform.is_empty());
+    }
+
+    #[test]
+    fn transform_origin_keywords_resolve() {
+        let css = ".x { transform-origin: left top; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(
+            style.transform_origin,
+            CssTransformOrigin {
+                x: LengthSpec::Percent(0.0),
+                y: LengthSpec::Percent(0.0)
+            }
+        );
+    }
+
+    #[test]
+    fn transform_origin_far_edge_offset_resolves() {
+        let css = ".x { transform-origin: right 10px bottom 4px; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        let w = Pt::from_f32(100.0);
+        let h = Pt::from_f32(80.0);
+        let ox = style
+            .transform_origin
+            .x
+            .resolve_width(w, style.font_size, style.root_font_size);
+        let oy = style
+            .transform_origin
+            .y
+            .resolve_height(h, style.font_size, style.root_font_size);
+        assert!((ox.to_f32() - 92.5).abs() < 0.001);
+        assert!((oy.to_f32() - 77.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn transform_origin_unset_resets_to_center() {
+        let css = ".x { transform-origin: left top; transform-origin: unset; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.transform_origin, CssTransformOrigin::center());
+    }
+
+    #[test]
+    fn transform_origin_inherit_uses_parent_value() {
+        let css = ".parent { transform-origin: left top; } .child { transform-origin: inherit; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let parent_info = element("div", None, &["parent"]);
+        let parent_style = resolver.compute_style(&parent_info, &root, None, &[]);
+        let child_info = element("span", None, &["child"]);
+        let child_style = resolver.compute_style(&child_info, &parent_style, None, &[parent_info]);
+        assert_eq!(child_style.transform_origin, parent_style.transform_origin);
+    }
+
+    #[test]
+    fn transform_unset_resets_to_none() {
+        let css = ".x { transform: translateX(16px); transform: unset; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert!(style.transform.is_empty());
+    }
+
+    #[test]
+    fn transform_inherit_uses_parent_value() {
+        let css = ".parent { transform: translateX(16px); } .child { transform: inherit; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let parent_info = element("div", None, &["parent"]);
+        let parent_style = resolver.compute_style(&parent_info, &root, None, &[]);
+        let child_info = element("span", None, &["child"]);
+        let child_style = resolver.compute_style(&child_info, &parent_style, None, &[parent_info]);
+        assert_eq!(child_style.transform, parent_style.transform);
+    }
+
+    #[test]
+    fn individual_transform_properties_compose_with_transform() {
+        let css = ".x { translate: 16px 8px; rotate: 90deg; scale: 200% 50%; transform: translateX(4px); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.transform.len(), 4);
+        match style.transform[0] {
+            CssTransformOp::Translate { x, y } => {
+                assert_eq!(x, LengthSpec::Absolute(Pt::from_f32(12.0)));
+                assert_eq!(y, LengthSpec::Absolute(Pt::from_f32(6.0)));
+            }
+            _ => panic!("expected translate op"),
+        }
+        match style.transform[1] {
+            CssTransformOp::Rotate { radians } => {
+                assert!((radians - std::f32::consts::FRAC_PI_2).abs() < 1.0e-6);
+            }
+            _ => panic!("expected rotate op"),
+        }
+        match style.transform[2] {
+            CssTransformOp::Scale { x, y } => {
+                assert!((x - 2.0).abs() < 1.0e-6);
+                assert!((y - 0.5).abs() < 1.0e-6);
+            }
+            _ => panic!("expected scale op"),
+        }
+        match style.transform[3] {
+            CssTransformOp::Translate { x, y } => {
+                assert_eq!(x, LengthSpec::Absolute(Pt::from_f32(3.0)));
+                assert_eq!(y, LengthSpec::Absolute(Pt::ZERO));
+            }
+            _ => panic!("expected translate op"),
+        }
+    }
+
+    #[test]
+    fn translate_inherit_is_scoped_to_translate_property() {
+        let css = ".parent { translate: 16px 0; rotate: 90deg; transform: translateX(4px); } .child { translate: inherit; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let parent_info = element("div", None, &["parent"]);
+        let parent_style = resolver.compute_style(&parent_info, &root, None, &[]);
+        let child_info = element("span", None, &["child"]);
+        let child_style = resolver.compute_style(&child_info, &parent_style, None, &[parent_info]);
+        assert_eq!(
+            child_style.transform,
+            vec![CssTransformOp::Translate {
+                x: LengthSpec::Absolute(Pt::from_f32(12.0)),
+                y: LengthSpec::Absolute(Pt::ZERO)
+            }]
+        );
+    }
+
+    #[test]
+    fn transform_inherit_does_not_pull_translate_rotate_or_scale() {
+        let css = ".parent { translate: 16px 0; rotate: 90deg; scale: 200% 50%; transform: translateX(4px); } .child { transform: inherit; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let parent_info = element("div", None, &["parent"]);
+        let parent_style = resolver.compute_style(&parent_info, &root, None, &[]);
+        let child_info = element("span", None, &["child"]);
+        let child_style = resolver.compute_style(&child_info, &parent_style, None, &[parent_info]);
+        assert_eq!(
+            child_style.transform,
+            vec![CssTransformOp::Translate {
+                x: LengthSpec::Absolute(Pt::from_f32(3.0)),
+                y: LengthSpec::Absolute(Pt::ZERO)
+            }]
+        );
+        assert_eq!(parent_style.transform.len(), 4);
+    }
+
+    #[test]
+    fn transform_var_reference_resolves_custom_transform_list() {
+        let css = ".x { --t: translateX(16px); transform: var(--t); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(
+            style.transform,
+            vec![CssTransformOp::Translate {
+                x: LengthSpec::Absolute(Pt::from_f32(12.0)),
+                y: LengthSpec::Absolute(Pt::ZERO)
+            }]
+        );
+    }
+
+    #[test]
+    fn transform_var_fallback_resolves_when_missing() {
+        let css = ".x { transform: var(--missing, translateX(16px)); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(
+            style.transform,
+            vec![CssTransformOp::Translate {
+                x: LengthSpec::Absolute(Pt::from_f32(12.0)),
+                y: LengthSpec::Absolute(Pt::ZERO)
+            }]
+        );
+    }
+
+    #[test]
+    fn transform_var_cycle_uses_fallback() {
+        let css = ".x { --a: var(--b); --b: var(--a); transform: var(--a, translateX(8px)); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(
+            style.transform,
+            vec![CssTransformOp::Translate {
+                x: LengthSpec::Absolute(Pt::from_f32(6.0)),
+                y: LengthSpec::Absolute(Pt::ZERO)
+            }]
+        );
+    }
+
+    #[test]
+    fn translate_var_fallback_resolves_when_missing() {
+        let css = ".x { translate: var(--missing, 16px 8px); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(
+            style.transform,
+            vec![CssTransformOp::Translate {
+                x: LengthSpec::Absolute(Pt::from_f32(12.0)),
+                y: LengthSpec::Absolute(Pt::from_f32(6.0))
+            }]
+        );
+    }
+
+    #[test]
+    fn translate_var_chain_resolves_custom_value() {
+        let css = ".x { --a: var(--b); --b: 16px 8px; translate: var(--a); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(
+            style.transform,
+            vec![CssTransformOp::Translate {
+                x: LengthSpec::Absolute(Pt::from_f32(12.0)),
+                y: LengthSpec::Absolute(Pt::from_f32(6.0))
+            }]
+        );
+    }
+
+    #[test]
+    fn rotate_var_reference_resolves_custom_angle() {
+        let css = ".x { --r: 90deg; rotate: var(--r); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.transform.len(), 1);
+        match style.transform[0] {
+            CssTransformOp::Rotate { radians } => {
+                assert!((radians - std::f32::consts::FRAC_PI_2).abs() < 1.0e-6);
+            }
+            _ => panic!("expected rotate op"),
+        }
+    }
+
+    #[test]
+    fn scale_var_reference_resolves_custom_pair() {
+        let css = ".x { --s: 200% 50%; scale: var(--s); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.transform.len(), 1);
+        match style.transform[0] {
+            CssTransformOp::Scale { x, y } => {
+                assert!((x - 2.0).abs() < 1.0e-6);
+                assert!((y - 0.5).abs() < 1.0e-6);
+            }
+            _ => panic!("expected scale op"),
+        }
+    }
+
+    #[test]
+    fn concrete_transform_overrides_prior_pending_var() {
+        let css = ".x { transform: var(--missing, translateX(16px)); transform: translateX(4px); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(
+            style.transform,
+            vec![CssTransformOp::Translate {
+                x: LengthSpec::Absolute(Pt::from_f32(3.0)),
+                y: LengthSpec::Absolute(Pt::ZERO)
+            }]
+        );
+    }
+
+    #[test]
     fn custom_property_var_height_resolves() {
         let css = ".bar { height: var(--h); }";
         let resolver = StyleResolver::new(css);
@@ -7605,6 +10630,359 @@ mod tests {
             Some(LengthSpec::Percent(0.4))
         );
         assert_eq!(bar_style.height, LengthSpec::Percent(0.4));
+    }
+
+    #[test]
+    fn custom_property_length_var_chain_resolves() {
+        let css = ".x { --a: var(--b); --b: 40%; height: var(--a); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.height, LengthSpec::Percent(0.4));
+    }
+
+    #[test]
+    fn custom_property_length_var_fallback_resolves() {
+        let css = ".x { --w: var(--missing, 25px); width: var(--w); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.width, LengthSpec::Absolute(Pt::from_f32(18.75)));
+    }
+
+    #[test]
+    fn custom_property_length_var_cycle_bails_out_deterministically() {
+        let css = ".x { --a: var(--b); --b: var(--a); width: var(--a); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.width, LengthSpec::Auto);
+    }
+
+    #[test]
+    fn custom_property_redefinition_clears_stale_length_cache() {
+        let css = ".x { --w: 20px; --w: nope; width: var(--w); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.width, LengthSpec::Auto);
+    }
+
+    #[test]
+    fn concrete_size_overrides_prior_pending_var() {
+        let css = ".x { width: var(--missing, 40px); width: 10px; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.width, LengthSpec::Absolute(Pt::from_f32(7.5)));
+    }
+
+    #[test]
+    fn edge_length_var_chain_resolves_through_custom_refs() {
+        let css = ".x { --pad-a: var(--pad-b); --pad-b: 8px; padding-left: var(--pad-a); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.padding.left, LengthSpec::Absolute(Pt::from_f32(6.0)));
+    }
+
+    #[test]
+    fn min_and_max_height_vars_resolve() {
+        let css = ".x { --mn: 10px; --mx: var(--missing, 20px); min-height: var(--mn); max-height: var(--mx); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.min_height, LengthSpec::Absolute(Pt::from_f32(7.5)));
+        assert_eq!(style.max_height, LengthSpec::Absolute(Pt::from_f32(15.0)));
+    }
+
+    #[test]
+    fn min_width_var_cycle_does_not_override_initial() {
+        let css = ".x { --a: var(--b); --b: var(--a); min-width: var(--a); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.min_width, LengthSpec::Auto);
+    }
+
+    #[test]
+    fn gap_var_resolves_from_custom_length() {
+        let css = ".x { --g: 12px; gap: var(--g); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.gap, LengthSpec::Absolute(Pt::from_f32(9.0)));
+    }
+
+    #[test]
+    fn row_gap_and_column_gap_map_to_engine_gap_last_wins() {
+        let css = ".x { row-gap: 10px; column-gap: 4px; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.gap, LengthSpec::Absolute(Pt::from_f32(3.0)));
+    }
+
+    #[test]
+    fn row_gap_var_resolves_from_custom_length() {
+        let css = ".x { --rg: 14px; row-gap: var(--rg); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.gap, LengthSpec::Absolute(Pt::from_f32(10.5)));
+    }
+
+    #[test]
+    fn column_gap_normal_resets_to_zero() {
+        let css = ".x { column-gap: normal; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.gap, LengthSpec::Absolute(Pt::ZERO));
+    }
+
+    #[test]
+    fn flex_flow_shorthand_sets_direction_and_wrap() {
+        let css = ".x { flex-flow: column wrap; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.flex_direction, FlexDirectionMode::Column);
+        assert_eq!(style.flex_wrap, FlexWrapMode::Wrap);
+    }
+
+    #[test]
+    fn flex_flow_shorthand_defaults_missing_component() {
+        let css = ".a { flex-flow: wrap; } .b { flex-flow: column; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let a_info = element("div", None, &["a"]);
+        let a_style = resolver.compute_style(&a_info, &root, None, &[]);
+        assert_eq!(a_style.flex_direction, FlexDirectionMode::Row);
+        assert_eq!(a_style.flex_wrap, FlexWrapMode::Wrap);
+
+        let b_info = element("div", None, &["b"]);
+        let b_style = resolver.compute_style(&b_info, &root, None, &[]);
+        assert_eq!(b_style.flex_direction, FlexDirectionMode::Column);
+        assert_eq!(b_style.flex_wrap, FlexWrapMode::NoWrap);
+    }
+
+    #[test]
+    fn align_content_property_resolves() {
+        let css = ".x { align-content: flex-end; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.align_content, AlignContentMode::FlexEnd);
+    }
+
+    #[test]
+    fn align_content_distribution_keyword_resolves() {
+        let css = ".x { align-content: space-evenly; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.align_content, AlignContentMode::SpaceEvenly);
+    }
+
+    #[test]
+    fn align_self_property_resolves() {
+        let css = ".x { align-self: flex-end; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.align_self, AlignSelfMode::FlexEnd);
+    }
+
+    #[test]
+    fn align_self_auto_is_default() {
+        let css = ".x { align-self: auto; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.align_self, AlignSelfMode::Auto);
+    }
+
+    #[test]
+    fn justify_content_distribution_keywords_resolve() {
+        let css = ".a { justify-content: space-around; } .b { justify-content: space-evenly; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+
+        let a_info = element("div", None, &["a"]);
+        let a_style = resolver.compute_style(&a_info, &root, None, &[]);
+        assert_eq!(a_style.justify_content, JustifyContentMode::SpaceAround);
+
+        let b_info = element("div", None, &["b"]);
+        let b_style = resolver.compute_style(&b_info, &root, None, &[]);
+        assert_eq!(b_style.justify_content, JustifyContentMode::SpaceEvenly);
+    }
+
+    #[test]
+    fn place_content_shorthand_sets_align_and_justify() {
+        let css = ".x { place-content: flex-end center; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.align_content, AlignContentMode::FlexEnd);
+        assert_eq!(style.justify_content, JustifyContentMode::Center);
+    }
+
+    #[test]
+    fn place_content_single_value_copies_distribution_keyword() {
+        let css = ".x { place-content: space-between; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.align_content, AlignContentMode::SpaceBetween);
+        assert_eq!(style.justify_content, JustifyContentMode::SpaceBetween);
+    }
+
+    #[test]
+    fn flex_basis_var_fallback_resolves() {
+        let css = ".x { flex-basis: var(--missing, 24px); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.flex_basis, LengthSpec::Absolute(Pt::from_f32(18.0)));
+    }
+
+    #[test]
+    fn inset_var_resolves_from_custom_length() {
+        let css = ".x { --l: 8px; left: var(--l); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.inset_left, LengthSpec::Absolute(Pt::from_f32(6.0)));
+    }
+
+    #[test]
+    fn inset_shorthand_sets_all_sides() {
+        let css = ".x { inset: 16px 8px 4px 2px; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.inset_top, LengthSpec::Absolute(Pt::from_f32(12.0)));
+        assert_eq!(style.inset_right, LengthSpec::Absolute(Pt::from_f32(6.0)));
+        assert_eq!(style.inset_bottom, LengthSpec::Absolute(Pt::from_f32(3.0)));
+        assert_eq!(style.inset_left, LengthSpec::Absolute(Pt::from_f32(1.5)));
+    }
+
+    #[test]
+    fn inset_shorthand_single_value_sets_uniform_sides() {
+        let css = ".x { inset: 12px; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        let expected = LengthSpec::Absolute(Pt::from_f32(9.0));
+        assert_eq!(style.inset_top, expected);
+        assert_eq!(style.inset_right, expected);
+        assert_eq!(style.inset_bottom, expected);
+        assert_eq!(style.inset_left, expected);
+    }
+
+    #[test]
+    fn position_fixed_maps_to_fixed_mode() {
+        let css = ".x { position: fixed; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.position, PositionMode::Fixed);
+    }
+
+    #[test]
+    fn concrete_inset_overrides_prior_pending_var() {
+        let css = ".x { left: var(--missing, 40px); left: 5px; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.inset_left, LengthSpec::Absolute(Pt::from_f32(3.75)));
+    }
+
+    #[test]
+    fn concrete_gap_overrides_prior_pending_var() {
+        let css = ".x { gap: var(--missing, 40px); gap: 5px; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.gap, LengthSpec::Absolute(Pt::from_f32(3.75)));
+    }
+
+    #[test]
+    fn concrete_row_gap_overrides_prior_pending_var() {
+        let css = ".x { row-gap: var(--missing, 40px); row-gap: 5px; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.gap, LengthSpec::Absolute(Pt::from_f32(3.75)));
+    }
+
+    #[test]
+    fn concrete_flex_basis_overrides_prior_pending_var() {
+        let css = ".x { flex-basis: var(--missing, 40px); flex-basis: 5px; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.flex_basis, LengthSpec::Absolute(Pt::from_f32(3.75)));
+    }
+
+    #[test]
+    fn font_family_var_chain_resolves_custom_stack() {
+        let css = ".x { --ff-a: var(--ff-b); --ff-b: monospace; font-family: var(--ff-a); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.font_name.as_ref(), "Courier");
+    }
+
+    #[test]
+    fn font_family_var_fallback_resolves_when_missing() {
+        let css = ".x { font-family: var(--missing, monospace); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.font_name.as_ref(), "Courier");
+    }
+
+    #[test]
+    fn font_family_var_cycle_uses_fallback() {
+        let css =
+            ".x { --ff-a: var(--ff-b); --ff-b: var(--ff-a); font-family: var(--ff-a, serif); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.font_name.as_ref(), "Times-Roman");
     }
 
     #[test]

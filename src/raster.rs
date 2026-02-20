@@ -153,6 +153,16 @@ fn render_commands(
                 let deg = *angle * 180.0 / core::f32::consts::PI;
                 state.transform = state.transform.post_concat(Transform::from_rotate(deg));
             }
+            Command::ConcatMatrix { a, b, c, d, e, f } => {
+                state.transform = state.transform.post_concat(Transform::from_row(
+                    *a,
+                    *b,
+                    *c,
+                    *d,
+                    e.to_f32(),
+                    f.to_f32(),
+                ));
+            }
             Command::Meta { .. } => {}
             Command::BeginTag { .. } => {}
             Command::EndTag => {}

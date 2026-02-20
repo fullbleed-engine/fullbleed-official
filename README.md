@@ -30,6 +30,7 @@ This README is the canonical usage guide for:
 
 Additional focused references are in `docs/`:
 
+- `docs/install-non-technical.md` (step-by-step setup for non-technical users)
 - `docs/README.md`
 - `docs/engine.md`
 - `docs/python-api.md`
@@ -60,6 +61,8 @@ Additional focused references are in `docs/`:
 - Do not assume every single-document render path will fully saturate all cores end-to-end.
 
 ## Install
+
+New to Python or setting up on a fresh machine? Start with `docs/install-non-technical.md`.
 
 ```bash
 python -m pip install fullbleed

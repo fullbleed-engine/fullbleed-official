@@ -1,0 +1,85 @@
+{
+  "schema": "fullbleed.css_fixture_render_result.v1",
+  "id": "tmp_absolute_fragment_repeat_probe",
+  "ok": true,
+  "warnings_ok": true,
+  "expected_warnings": [],
+  "actual_warnings": [],
+  "stages": {
+    "parser": {
+      "ok": true,
+      "error": null
+    },
+    "compute": {
+      "ok": true,
+      "glyph_report_count": 0,
+      "page_data_present": false,
+      "assertions_enabled": false,
+      "assertions_ok": true,
+      "assertions": {
+        "assertion_count": 0,
+        "checks": []
+      }
+    },
+    "layout": {
+      "ok": true,
+      "expected_page_count": 5,
+      "actual_page_count": 5,
+      "dpi": 120,
+      "assertions_enabled": false,
+      "assertions_ok": true,
+      "assertions": {
+        "assertion_count": 0,
+        "checks": []
+      }
+    },
+    "paint": {
+      "ok": true,
+      "checks": [
+        {
+          "page": 1,
+          "x": 60,
+          "y": 60,
+          "expected_rgba": [
+            255,
+            0,
+            0,
+            255
+          ],
+          "actual_rgba": [
+            255,
+            0,
+            0,
+            255
+          ],
+          "tolerance": 8,
+          "ok": true
+        },
+        {
+          "page": 2,
+          "x": 60,
+          "y": 60,
+          "expected_rgba": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "actual_rgba": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "tolerance": 8,
+          "ok": true
+        }
+      ]
+    },
+    "diagnostics": {
+      "ok": true,
+      "enabled": false,
+      "details": {}
+    }
+  }
+}

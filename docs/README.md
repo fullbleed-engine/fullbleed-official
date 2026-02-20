@@ -12,6 +12,7 @@ These docs target the `0.2.7` stable line and the current repository source layo
 
 ## Documents
 
+- `docs/install-non-technical.md`: beginner install/setup guide (Python + Fullbleed)
 - `docs/engine.md`: Rust engine architecture, render flow, pagination model, diagnostics
 - `docs/python-api.md`: Python bindings, classes, methods, and usage patterns
 - `docs/cli.md`: command reference, JSON/machine mode, reproducibility and validation flows
@@ -19,10 +20,11 @@ These docs target the `0.2.7` stable line and the current repository source layo
 
 ## Recommended reading order
 
-1. `docs/python-api.md` if you are building reports/components in Python
-2. `docs/cli.md` if you are automating builds/validation in CI
-3. `docs/pdf-templates.md` if your workflow overlays variable data onto source PDF templates
-4. `docs/engine.md` if you need to reason about behavior, constraints, or performance
+1. `docs/install-non-technical.md` if you are setting up Python and Fullbleed for the first time
+2. `docs/python-api.md` if you are building reports/components in Python
+3. `docs/cli.md` if you are automating builds/validation in CI
+4. `docs/pdf-templates.md` if your workflow overlays variable data onto source PDF templates
+5. `docs/engine.md` if you need to reason about behavior, constraints, or performance
 
 ## Scaffold and component workflow
 

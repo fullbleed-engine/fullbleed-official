@@ -1,0 +1,138 @@
+{
+  "schema": "fullbleed.css_fixture_render_result.v1",
+  "id": "transform_origin_left_scale_anchor",
+  "ok": true,
+  "warnings_ok": true,
+  "expected_warnings": [],
+  "actual_warnings": [],
+  "stages": {
+    "parser": {
+      "ok": true,
+      "error": null
+    },
+    "compute": {
+      "ok": true,
+      "glyph_report_count": 0,
+      "page_data_present": false,
+      "assertions_enabled": true,
+      "assertions_ok": true,
+      "assertions": {
+        "assertion_count": 1,
+        "computed_event_count": 9,
+        "checks": [
+          {
+            "index": 0,
+            "ok": true,
+            "node": "html:nth-child(1) > body:nth-child(2) > div.box:nth-child(1)",
+            "style_mismatches": [],
+            "vars_mismatch": null,
+            "vars_count_mismatch": null
+          }
+        ]
+      }
+    },
+    "layout": {
+      "ok": true,
+      "expected_page_count": 1,
+      "actual_page_count": 1,
+      "dpi": 120,
+      "assertions_enabled": true,
+      "assertions_ok": true,
+      "assertions": {
+        "assertion_count": 2,
+        "checks": [
+          {
+            "index": 0,
+            "ok": true,
+            "kind": "color_run_length",
+            "page": 1,
+            "axis": "x",
+            "fixed": 60,
+            "start": 0,
+            "expected_rgba": [
+              0,
+              0,
+              255,
+              255
+            ],
+            "tolerance": 8,
+            "actual_run_length": 60,
+            "expected_length": 60,
+            "length_tolerance": 2
+          },
+          {
+            "index": 1,
+            "ok": true,
+            "kind": "color_run_length",
+            "page": 1,
+            "axis": "x",
+            "fixed": 60,
+            "start": 60,
+            "expected_rgba": [
+              255,
+              255,
+              255,
+              255
+            ],
+            "tolerance": 8,
+            "actual_run_length": 420,
+            "expected_length": 420,
+            "length_tolerance": 2
+          }
+        ]
+      }
+    },
+    "paint": {
+      "ok": true,
+      "checks": [
+        {
+          "page": 1,
+          "x": 30,
+          "y": 60,
+          "expected_rgba": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "actual_rgba": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "tolerance": 8,
+          "ok": true
+        },
+        {
+          "page": 1,
+          "x": 90,
+          "y": 60,
+          "expected_rgba": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "actual_rgba": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "tolerance": 8,
+          "ok": true
+        }
+      ]
+    },
+    "diagnostics": {
+      "ok": true,
+      "enabled": true,
+      "details": {
+        "summary_counts_total": {},
+        "summary_context_count": 3,
+        "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_origin_left_scale_anchor_58096_1771548309587624300.jsonl"
+      }
+    }
+  }
+}

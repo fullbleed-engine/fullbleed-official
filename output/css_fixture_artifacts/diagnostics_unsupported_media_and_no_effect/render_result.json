@@ -1,0 +1,129 @@
+{
+  "schema": "fullbleed.css_fixture_render_result.v1",
+  "id": "diagnostics_unsupported_media_and_no_effect",
+  "ok": true,
+  "warnings_ok": true,
+  "expected_warnings": [],
+  "actual_warnings": [],
+  "stages": {
+    "parser": {
+      "ok": true,
+      "error": null
+    },
+    "compute": {
+      "ok": true,
+      "glyph_report_count": 0,
+      "page_data_present": false,
+      "assertions_enabled": true,
+      "assertions_ok": true,
+      "assertions": {
+        "assertion_count": 1,
+        "computed_event_count": 9,
+        "checks": [
+          {
+            "index": 0,
+            "ok": true,
+            "node": "html:nth-child(1) > body:nth-child(2) > section.x:nth-child(1)",
+            "style_mismatches": [],
+            "vars_mismatch": null,
+            "vars_count_mismatch": null
+          }
+        ]
+      }
+    },
+    "layout": {
+      "ok": true,
+      "expected_page_count": 1,
+      "actual_page_count": 1,
+      "dpi": 120,
+      "assertions_enabled": true,
+      "assertions_ok": true,
+      "assertions": {
+        "assertion_count": 1,
+        "checks": [
+          {
+            "index": 0,
+            "ok": true,
+            "kind": "color_run_length",
+            "page": 1,
+            "axis": "x",
+            "fixed": 200,
+            "start": 0,
+            "expected_rgba": [
+              0,
+              0,
+              255,
+              255
+            ],
+            "tolerance": 8,
+            "actual_run_length": 480,
+            "expected_length": 480,
+            "length_tolerance": 1
+          }
+        ]
+      }
+    },
+    "paint": {
+      "ok": true,
+      "checks": [
+        {
+          "page": 1,
+          "x": 200,
+          "y": 200,
+          "expected_rgba": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "actual_rgba": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "tolerance": 8,
+          "ok": true
+        }
+      ]
+    },
+    "diagnostics": {
+      "ok": true,
+      "enabled": true,
+      "details": {
+        "checks": [
+          {
+            "kind": "event_contains",
+            "condition": {
+              "type": "jit.known_loss",
+              "code": "DECLARATION_PARSED_NO_EFFECT"
+            },
+            "ok": true
+          },
+          {
+            "kind": "summary_count_at_least",
+            "key": "css.media.unsupported",
+            "expected": 1,
+            "actual": 6,
+            "ok": true
+          },
+          {
+            "kind": "summary_count_at_least",
+            "key": "jit.known_loss.declaration_parsed_no_effect",
+            "expected": 1,
+            "actual": 6,
+            "ok": true
+          }
+        ],
+        "summary_counts_total": {
+          "css.media.rules": 3,
+          "css.media.rules_skipped": 3,
+          "css.media.unsupported": 6,
+          "jit.known_loss.declaration_parsed_no_effect": 6
+        },
+        "summary_context_count": 3,
+        "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_unsupported_media_and_no_effect_119304_1771535533135545300.jsonl"
+      }
+    }
+  }
+}

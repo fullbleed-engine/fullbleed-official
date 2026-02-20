@@ -7,6 +7,14 @@ pub enum Command {
     Translate(Pt, Pt),
     Scale(f32, f32),
     Rotate(f32),
+    ConcatMatrix {
+        a: f32,
+        b: f32,
+        c: f32,
+        d: f32,
+        e: Pt,
+        f: Pt,
+    },
     // Non-rendered metadata used for page-aware reporting. Ignored by the PDF renderer.
     Meta {
         key: String,
@@ -219,6 +227,12 @@ impl Canvas {
 
     pub fn rotate(&mut self, angle_radians: f32) {
         self.current.commands.push(Command::Rotate(angle_radians));
+    }
+
+    pub fn concat_matrix(&mut self, a: f32, b: f32, c: f32, d: f32, e: Pt, f: Pt) {
+        self.current
+            .commands
+            .push(Command::ConcatMatrix { a, b, c, d, e, f });
     }
 
     pub fn record_flowable_bounds(&mut self, rect: Rect) {

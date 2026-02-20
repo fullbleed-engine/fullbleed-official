@@ -1,14 +1,16 @@
 use crate::flowable::{
-    AbsolutePositionedFlowable, AlignItems, BorderRadiusSpec, BorderSpec, CalcLength,
-    ContainerFlowable, EdgeSizes, FlexDirection, FlexFlowable, ImageFlowable,
+    AbsolutePositionedFlowable, AlignContent, AlignItems, BorderRadiusSpec, BorderSpec,
+    CalcLength, ContainerFlowable, EdgeSizes, FlexDirection, FlexFlowable, ImageFlowable,
     InlineBlockLayoutFlowable, JustifyContent, LengthSpec, ListItemFlowable, MetaFlowable,
-    Paragraph, Spacer, SvgFlowable, TableCell, TableFlowable, TextAlign, TextStyle, VerticalAlign,
+    Paragraph, RelativePositionedFlowable, Spacer, SvgFlowable, TableCell, TableFlowable,
+    TextAlign, TextStyle, VerticalAlign,
 };
 use crate::font::FontRegistry;
 use crate::glyph_report::GlyphCoverageReport;
 use crate::style::{
-    AlignItemsMode, ComputedStyle, DisplayMode, ElementInfo, FlexDirectionMode, FlexWrapMode,
-    JustifyContentMode, OverflowMode, PositionMode, StyleResolver, TextAlignMode, WhiteSpaceMode,
+    AlignContentMode, AlignItemsMode, AlignSelfMode, ComputedStyle, DisplayMode, ElementInfo,
+    FlexDirectionMode, FlexWrapMode, JustifyContentMode, OverflowMode, PositionMode,
+    StyleResolver, TextAlignMode, WhiteSpaceMode,
 };
 use crate::types::Pt;
 use crate::{BreakAfter, BreakBefore, BreakInside, Flowable};
@@ -1162,6 +1164,8 @@ fn node_to_flowables(
                     .with_background(style.background_color)
                     .with_background_paint(style.background_paint.clone())
                     .with_box_shadow(style.box_shadow.clone())
+                    .with_transforms(style.transform.clone())
+                    .with_transform_origin(style.transform_origin)
                     .with_overflow_hidden(matches!(style.overflow, OverflowMode::Hidden))
                     .with_pagination(style.pagination);
 
@@ -1375,8 +1379,10 @@ fn node_to_flowables(
                 });
             }
 
-            if matches!(style.position, PositionMode::Absolute) {
+            if matches!(style.position, PositionMode::Absolute | PositionMode::Fixed) {
                 flowables = wrap_absolute(flowables, &style);
+            } else if matches!(style.position, PositionMode::Relative) {
+                flowables = wrap_relative(flowables, &style);
             }
 
             let width_spec_override = if parent_is_flex {
@@ -2096,6 +2102,8 @@ fn container_flowable_with_role(
         {
             let mut container =
                 ContainerFlowable::new_pt(Vec::new(), style.font_size, style.root_font_size)
+                    .with_transforms(style.transform.clone())
+                    .with_transform_origin(style.transform_origin)
                     .with_pagination(style.pagination);
             if let Some(role) = role {
                 container = container.with_tag_role(role);
@@ -2126,6 +2134,8 @@ fn container_flowable_with_role(
         .with_background(style.background_color)
         .with_background_paint(style.background_paint.clone())
         .with_box_shadow(style.box_shadow.clone())
+        .with_transforms(style.transform.clone())
+        .with_transform_origin(style.transform_origin)
         .with_overflow_hidden(matches!(style.overflow, OverflowMode::Hidden))
         .with_pagination(style.pagination);
     if let Some(role) = role {
@@ -2215,12 +2225,49 @@ fn wrap_absolute(flowables: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<Layou
         style.font_size,
         style.root_font_size,
     )
-    .with_pagination(style.pagination);
+    .with_pagination(style.pagination)
+    .with_fixed_positioned(matches!(style.position, PositionMode::Fixed));
     vec![LayoutItem::Block {
         flowable: Box::new(abs) as Box<dyn Flowable>,
         flex_grow: style.flex_grow,
         flex_shrink: style.flex_shrink,
         width_spec: flex_item_basis(&style),
+        order: 0,
+    }]
+}
+
+fn wrap_relative(flowables: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<LayoutItem> {
+    if flowables.is_empty() {
+        return Vec::new();
+    }
+    let boxed: Box<dyn Flowable> = if flowables.len() == 1 {
+        match flowables.into_iter().next().unwrap() {
+            LayoutItem::Block { flowable, .. } => flowable,
+            LayoutItem::Inline { flowable, .. } => flowable,
+        }
+    } else {
+        let flowables = layout_children_to_flowables(flowables, None);
+        Box::new(ContainerFlowable::new_pt(
+            flowables,
+            style.font_size,
+            style.root_font_size,
+        ))
+    };
+    let rel = RelativePositionedFlowable::new_pt(
+        boxed,
+        style.inset_left,
+        style.inset_top,
+        style.inset_right,
+        style.inset_bottom,
+        style.font_size,
+        style.root_font_size,
+    )
+    .with_pagination(style.pagination);
+    vec![LayoutItem::Block {
+        flowable: Box::new(rel) as Box<dyn Flowable>,
+        flex_grow: style.flex_grow,
+        flex_shrink: style.flex_shrink,
+        width_spec: flex_item_basis(style),
         order: 0,
     }]
 }
@@ -2237,6 +2284,16 @@ fn flex_container_flowables(
     perf: Option<&crate::perf::PerfLogger>,
     doc_id: Option<usize>,
 ) -> Vec<LayoutItem> {
+    fn align_self_override(mode: AlignSelfMode) -> Option<AlignItems> {
+        match mode {
+            AlignSelfMode::Auto => None,
+            AlignSelfMode::FlexEnd => Some(AlignItems::FlexEnd),
+            AlignSelfMode::Center => Some(AlignItems::Center),
+            AlignSelfMode::Stretch => Some(AlignItems::Stretch),
+            AlignSelfMode::FlexStart => Some(AlignItems::FlexStart),
+        }
+    }
+
     let is_grid_like = matches!(style.display, DisplayMode::Grid | DisplayMode::InlineGrid);
     let grid_track_count = style.grid_columns.unwrap_or(0);
     let grid_basis = if is_grid_like && grid_track_count > 0 {
@@ -2245,8 +2302,15 @@ fn flex_container_flowables(
         None
     };
 
-    let mut items_with_order: Vec<(i32, usize, Box<dyn Flowable>, f32, f32, Option<LengthSpec>)> =
-        Vec::new();
+    let mut items_with_order: Vec<(
+        i32,
+        usize,
+        Box<dyn Flowable>,
+        f32,
+        f32,
+        Option<LengthSpec>,
+        Option<AlignItems>,
+    )> = Vec::new();
     let mut report = report;
 
     for (child_idx, child) in node.children().enumerate() {
@@ -2297,6 +2361,17 @@ fn flex_container_flowables(
         let effective_width_spec = width_spec.or(grid_basis);
         let effective_grow = if is_grid_like { 0.0 } else { grow };
         let effective_shrink = if is_grid_like { 1.0 } else { shrink };
+        let align_self = child
+            .as_element()
+            .map(|el| {
+                let child_info = element_info(&child, resolver.has_sibling_selectors());
+                let inline_style = el.attributes.borrow().get("style").map(|s| s.to_string());
+                let child_style =
+                    resolver.compute_style(&child_info, style, inline_style.as_deref(), ancestors);
+                align_self_override(child_style.align_self)
+            })
+            .unwrap_or(None);
+
         items_with_order.push((
             order,
             child_idx,
@@ -2304,13 +2379,17 @@ fn flex_container_flowables(
             effective_grow,
             effective_shrink,
             effective_width_spec,
+            align_self,
         ));
     }
 
     items_with_order.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-    let items: Vec<(Box<dyn Flowable>, f32, f32, Option<LengthSpec>)> = items_with_order
+    let items: Vec<(Box<dyn Flowable>, f32, f32, Option<LengthSpec>, Option<AlignItems>)> =
+        items_with_order
         .into_iter()
-        .map(|(_, _, boxed, grow, shrink, width_spec)| (boxed, grow, shrink, width_spec))
+        .map(|(_, _, boxed, grow, shrink, width_spec, align_self)| {
+            (boxed, grow, shrink, width_spec, align_self)
+        })
         .collect();
     let grid_wrap = is_grid_like && grid_track_count > 0 && items.len() > grid_track_count;
 
@@ -2326,6 +2405,8 @@ fn flex_container_flowables(
         JustifyContentMode::FlexEnd => JustifyContent::FlexEnd,
         JustifyContentMode::Center => JustifyContent::Center,
         JustifyContentMode::SpaceBetween => JustifyContent::SpaceBetween,
+        JustifyContentMode::SpaceAround => JustifyContent::SpaceAround,
+        JustifyContentMode::SpaceEvenly => JustifyContent::SpaceEvenly,
         _ => JustifyContent::FlexStart,
     };
     let align = match style.align_items {
@@ -2334,12 +2415,21 @@ fn flex_container_flowables(
         AlignItemsMode::Stretch => AlignItems::Stretch,
         _ => AlignItems::FlexStart,
     };
+    let align_content = match style.align_content {
+        AlignContentMode::FlexEnd => AlignContent::FlexEnd,
+        AlignContentMode::Center => AlignContent::Center,
+        AlignContentMode::SpaceBetween => AlignContent::SpaceBetween,
+        AlignContentMode::SpaceAround => AlignContent::SpaceAround,
+        AlignContentMode::SpaceEvenly => AlignContent::SpaceEvenly,
+        _ => AlignContent::FlexStart,
+    };
 
     let flex = FlexFlowable::new_pt(
         items,
         dir,
         justify,
         align,
+        align_content,
         style.gap,
         if is_grid_like {
             grid_wrap
@@ -2366,6 +2456,8 @@ fn flex_container_flowables(
             .with_background(style.background_color)
             .with_background_paint(style.background_paint.clone())
             .with_box_shadow(style.box_shadow.clone())
+            .with_transforms(style.transform.clone())
+            .with_transform_origin(style.transform_origin)
             .with_overflow_hidden(matches!(style.overflow, OverflowMode::Hidden))
             .with_pagination(style.pagination);
 
@@ -2664,7 +2756,8 @@ fn table_row_flowable_from_cells(
     }
     let mut report = report;
     let cell_count = cells.len().max(1) as f32;
-    let mut row_items: Vec<(Box<dyn Flowable>, f32, f32, Option<LengthSpec>)> = Vec::new();
+    let mut row_items: Vec<(Box<dyn Flowable>, f32, f32, Option<LengthSpec>, Option<AlignItems>)> =
+        Vec::new();
 
     for (cell_node, cell_style) in cells {
         let mut cell_ancestors = ancestors.to_vec();
@@ -2707,6 +2800,7 @@ fn table_row_flowable_from_cells(
             if explicit_width { 0.0 } else { 1.0 },
             1.0,
             width_spec,
+            None,
         ));
     }
 
@@ -2715,6 +2809,7 @@ fn table_row_flowable_from_cells(
         FlexDirection::Row,
         JustifyContent::FlexStart,
         AlignItems::Stretch,
+        AlignContent::FlexStart,
         row_style.gap,
         false,
         row_style.font_size,

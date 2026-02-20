@@ -104,6 +104,15 @@ fn write_command<W: Write>(out: &mut W, command: &Command) -> io::Result<()> {
             write_u8(out, 5)?;
             write_f32(out, *angle)
         }
+        Command::ConcatMatrix { a, b, c, d, e, f } => {
+            write_u8(out, 41)?;
+            write_f32(out, *a)?;
+            write_f32(out, *b)?;
+            write_f32(out, *c)?;
+            write_f32(out, *d)?;
+            write_pt(out, *e)?;
+            write_pt(out, *f)
+        }
         Command::Meta { key, value } => {
             write_u8(out, 6)?;
             write_string(out, key)?;
@@ -353,6 +362,14 @@ fn read_command<R: Read>(input: &mut R) -> io::Result<Command> {
         3 => Command::Translate(read_pt(input)?, read_pt(input)?),
         4 => Command::Scale(read_f32(input)?, read_f32(input)?),
         5 => Command::Rotate(read_f32(input)?),
+        41 => Command::ConcatMatrix {
+            a: read_f32(input)?,
+            b: read_f32(input)?,
+            c: read_f32(input)?,
+            d: read_f32(input)?,
+            e: read_pt(input)?,
+            f: read_pt(input)?,
+        },
         6 => Command::Meta {
             key: read_string(input)?,
             value: read_string(input)?,

@@ -80,6 +80,10 @@ impl Transform {
         }
     }
 
+    pub fn matrix(a: f32, b: f32, c: f32, d: f32, e: f32, f: f32) -> Self {
+        Self { a, b, c, d, e, f }
+    }
+
     pub fn mul(self, other: Self) -> Self {
         Self {
             a: self.a * other.a + self.c * other.b,
@@ -536,6 +540,16 @@ fn commands_bbox(commands: &[Command], font_registry: Option<&FontRegistry>) -> 
             }
             Command::Rotate(angle) => {
                 transform = transform.mul(Transform::rotate(*angle));
+            }
+            Command::ConcatMatrix { a, b, c, d, e, f } => {
+                transform = transform.mul(Transform::matrix(
+                    *a,
+                    *b,
+                    *c,
+                    *d,
+                    e.to_f32(),
+                    f.to_f32(),
+                ));
             }
             Command::SetFontName(name) => font_name = name.clone(),
             Command::SetFontSize(size) => font_size = *size,

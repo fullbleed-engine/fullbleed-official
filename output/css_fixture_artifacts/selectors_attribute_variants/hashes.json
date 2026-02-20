@@ -1,0 +1,8 @@
+{
+  "schema": "fullbleed.css_fixture_artifacts_hashes.v1",
+  "pdf_sha256": "b91b69ecc89aa61f61ce41639470b388ae73988e7fb5fab2005d0f8787daed0a",
+  "image_sha256": [
+    "cbd197a677ac80239841f5131b00a7fc26bb5edeb046fb6682a5fe10818d8a83"
+  ],
+  "artifact_sha256": "c211bc3cb7723bb1d826dcb166b5d75bfdd4b9c65219c200a98658860696b339"
+}

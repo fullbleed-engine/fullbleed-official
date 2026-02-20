@@ -856,6 +856,17 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                         fmt(cos)
                     ));
                 }
+                Command::ConcatMatrix { a, b, c, d, e, f } => {
+                    out.push_str(&format!(
+                        "{} {} {} {} {} {} cm\n",
+                        fmt(*a),
+                        fmt(*b),
+                        fmt(*c),
+                        fmt(*d),
+                        fmt_pt(*e),
+                        fmt_pt(*f)
+                    ));
+                }
                 Command::Meta { .. } => {}
                 Command::BeginTag {
                     role,
@@ -2645,6 +2656,17 @@ fn render_page(
                     fmt(sin),
                     fmt(-sin),
                     fmt(cos)
+                ));
+            }
+            Command::ConcatMatrix { a, b, c, d, e, f } => {
+                out.push_str(&format!(
+                    "{} {} {} {} {} {} cm\n",
+                    fmt(*a),
+                    fmt(*b),
+                    fmt(*c),
+                    fmt(*d),
+                    fmt_pt(*e),
+                    fmt_pt(*f)
                 ));
             }
             Command::Meta { .. } => {}

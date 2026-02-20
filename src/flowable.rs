@@ -275,6 +275,37 @@ impl LengthSpec {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CssTransformOp {
+    Translate { x: LengthSpec, y: LengthSpec },
+    Scale { x: f32, y: f32 },
+    Rotate { radians: f32 },
+    Skew { x_radians: f32, y_radians: f32 },
+    Matrix {
+        a: f32,
+        b: f32,
+        c: f32,
+        d: f32,
+        e: Pt,
+        f: Pt,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CssTransformOrigin {
+    pub x: LengthSpec,
+    pub y: LengthSpec,
+}
+
+impl CssTransformOrigin {
+    pub fn center() -> Self {
+        Self {
+            x: LengthSpec::Percent(0.5),
+            y: LengthSpec::Percent(0.5),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EdgeSizes {
     pub top: LengthSpec,
     pub right: LengthSpec,
@@ -457,6 +488,16 @@ pub trait Flowable: FlowableClone + Send + Sync {
     }
     fn pagination(&self) -> Pagination {
         Pagination::default()
+    }
+
+    // Some flowables (for example relative-position wrappers) need containing-block
+    // draw-space dimensions rather than the child's own wrapped height.
+    fn prefers_containing_block_draw_space(&self) -> bool {
+        false
+    }
+
+    fn is_fixed_positioned(&self) -> bool {
+        false
     }
 
     fn debug_name(&self) -> &'static str {
@@ -4008,6 +4049,8 @@ pub enum JustifyContent {
     FlexEnd,
     Center,
     SpaceBetween,
+    SpaceAround,
+    SpaceEvenly,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4018,6 +4061,16 @@ pub enum AlignItems {
     Stretch,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlignContent {
+    FlexStart,
+    FlexEnd,
+    Center,
+    SpaceBetween,
+    SpaceAround,
+    SpaceEvenly,
+}
+
 #[derive(Clone)]
 pub struct FlexItem {
     child: Box<dyn Flowable>,
@@ -4025,6 +4078,7 @@ pub struct FlexItem {
     #[allow(dead_code)]
     shrink: f32,
     basis: Option<LengthSpec>,
+    align_self: Option<AlignItems>,
 }
 
 #[derive(Clone)]
@@ -4068,6 +4122,7 @@ pub struct FlexFlowable {
     direction: FlexDirection,
     justify: JustifyContent,
     align: AlignItems,
+    align_content: AlignContent,
     gap: LengthSpec,
     wrap: bool,
     font_size: Pt,
@@ -4078,10 +4133,11 @@ pub struct FlexFlowable {
 
 impl FlexFlowable {
     pub fn new_pt(
-        items: Vec<(Box<dyn Flowable>, f32, f32, Option<LengthSpec>)>,
+        items: Vec<(Box<dyn Flowable>, f32, f32, Option<LengthSpec>, Option<AlignItems>)>,
         direction: FlexDirection,
         justify: JustifyContent,
         align: AlignItems,
+        align_content: AlignContent,
         gap: LengthSpec,
         wrap: bool,
         font_size: Pt,
@@ -4090,16 +4146,18 @@ impl FlexFlowable {
         Self {
             items: items
                 .into_iter()
-                .map(|(child, grow, shrink, basis)| FlexItem {
+                .map(|(child, grow, shrink, basis, align_self)| FlexItem {
                     child,
                     grow: grow.max(0.0),
                     shrink: shrink.max(0.0),
                     basis,
+                    align_self,
                 })
                 .collect(),
             direction,
             justify,
             align,
+            align_content,
             gap,
             wrap,
             font_size,
@@ -4142,6 +4200,7 @@ impl FlexFlowable {
             direction: self.direction,
             justify: self.justify,
             align: self.align,
+            align_content: self.align_content,
             gap: self.gap,
             wrap: self.wrap,
             font_size: self.font_size,
@@ -4691,13 +4750,24 @@ impl Flowable for FlexFlowable {
                     JustifyContent::SpaceBetween if n > 1 && total_grow == 0.0 => {
                         gap = gap_base + (extra / ((n as i32) - 1));
                     }
+                    JustifyContent::SpaceAround if n > 0 && total_grow == 0.0 => {
+                        let share = extra / (n as i32);
+                        start_x = share.mul_ratio(1, 2);
+                        gap = gap_base + share;
+                    }
+                    JustifyContent::SpaceEvenly if n > 0 && total_grow == 0.0 => {
+                        let share = extra / ((n as i32) + 1);
+                        start_x = share;
+                        gap = gap_base + share;
+                    }
                     _ => {}
                 }
 
                 let mut cursor_x = x + start_x;
                 for (idx, item) in self.items.iter().enumerate() {
                     let size = sizes[idx];
-                    let y_off = match self.align {
+                    let item_align = item.align_self.unwrap_or(self.align);
+                    let y_off = match item_align {
                         AlignItems::Center => (*container_h - size.height).mul_ratio(1, 2),
                         AlignItems::FlexEnd => *container_h - size.height,
                         _ => Pt::ZERO,
@@ -4712,9 +4782,37 @@ impl Flowable for FlexFlowable {
                     }
                 }
             }
-            FlexLayout::RowWrap { lines, .. } => {
-                let mut cursor_y = y;
-                for line in lines {
+            FlexLayout::RowWrap { lines, container_h } => {
+                let total_lines_h: Pt = lines
+                    .iter()
+                    .fold(Pt::ZERO, |acc, line| acc + line.line_h.max(Pt::ZERO));
+                let extra_cross = (*container_h - total_lines_h).max(Pt::ZERO);
+                let line_count = lines.len();
+                let mut start_y = Pt::ZERO;
+                let mut line_gap = Pt::ZERO;
+                match self.align_content {
+                    AlignContent::Center => {
+                        start_y = extra_cross.mul_ratio(1, 2);
+                    }
+                    AlignContent::FlexEnd => {
+                        start_y = extra_cross;
+                    }
+                    AlignContent::SpaceBetween if line_count > 1 => {
+                        line_gap = extra_cross / ((line_count as i32) - 1);
+                    }
+                    AlignContent::SpaceAround if line_count > 0 => {
+                        line_gap = extra_cross / (line_count as i32);
+                        start_y = line_gap.mul_ratio(1, 2);
+                    }
+                    AlignContent::SpaceEvenly if line_count > 0 => {
+                        line_gap = extra_cross / ((line_count as i32) + 1);
+                        start_y = line_gap;
+                    }
+                    _ => {}
+                }
+
+                let mut cursor_y = y + start_y;
+                for (line_idx, line) in lines.iter().enumerate() {
                     let used_w: Pt = line.widths.iter().fold(Pt::ZERO, |acc, w| acc + *w)
                         + gap_base * (line.indices.len().saturating_sub(1) as i32);
                     let extra = (avail_width - used_w).max(Pt::ZERO);
@@ -4726,13 +4824,24 @@ impl Flowable for FlexFlowable {
                         JustifyContent::SpaceBetween if line.indices.len() > 1 => {
                             gap = gap_base + (extra / ((line.indices.len() as i32) - 1));
                         }
+                        JustifyContent::SpaceAround if !line.indices.is_empty() => {
+                            let share = extra / (line.indices.len() as i32);
+                            start_x = share.mul_ratio(1, 2);
+                            gap = gap_base + share;
+                        }
+                        JustifyContent::SpaceEvenly if !line.indices.is_empty() => {
+                            let share = extra / ((line.indices.len() as i32) + 1);
+                            start_x = share;
+                            gap = gap_base + share;
+                        }
                         _ => {}
                     }
 
                     let mut cursor_x = x + start_x;
                     for (pos, idx) in line.indices.iter().enumerate() {
                         let size = line.sizes[pos];
-                        let y_off = match self.align {
+                        let item_align = self.items[*idx].align_self.unwrap_or(self.align);
+                        let y_off = match item_align {
                             AlignItems::Center => (line.line_h - size.height).mul_ratio(1, 2),
                             AlignItems::FlexEnd => line.line_h - size.height,
                             _ => Pt::ZERO,
@@ -4752,6 +4861,9 @@ impl Flowable for FlexFlowable {
                         }
                     }
                     cursor_y = cursor_y + line.line_h;
+                    if line_idx + 1 < line_count {
+                        cursor_y = cursor_y + line_gap;
+                    }
                 }
             }
             FlexLayout::Column { sizes, container_h } => {
@@ -4767,13 +4879,24 @@ impl Flowable for FlexFlowable {
                     JustifyContent::SpaceBetween if n > 1 => {
                         gap = gap_base + (extra / ((n as i32) - 1));
                     }
+                    JustifyContent::SpaceAround if n > 0 => {
+                        let share = extra / (n as i32);
+                        start_y = share.mul_ratio(1, 2);
+                        gap = gap_base + share;
+                    }
+                    JustifyContent::SpaceEvenly if n > 0 => {
+                        let share = extra / ((n as i32) + 1);
+                        start_y = share;
+                        gap = gap_base + share;
+                    }
                     _ => {}
                 }
 
                 let mut cursor_y = y + start_y;
                 for (idx, item) in self.items.iter().enumerate() {
                     let size = sizes[idx];
-                    let x_off = match self.align {
+                    let item_align = item.align_self.unwrap_or(self.align);
+                    let x_off = match item_align {
                         AlignItems::Center => (avail_width - size.width).mul_ratio(1, 2),
                         AlignItems::FlexEnd => avail_width - size.width,
                         _ => Pt::ZERO,
@@ -4830,6 +4953,8 @@ pub struct ContainerFlowable {
     background: Option<Color>,
     background_paint: Option<BackgroundPaint>,
     box_shadow: Option<BoxShadowSpec>,
+    transforms: Vec<CssTransformOp>,
+    transform_origin: CssTransformOrigin,
     overflow_hidden: bool,
     tag_role: Option<Arc<str>>,
     font_size: Pt,
@@ -4862,6 +4987,8 @@ impl ContainerFlowable {
             background: None,
             background_paint: None,
             box_shadow: None,
+            transforms: Vec::new(),
+            transform_origin: CssTransformOrigin::center(),
             overflow_hidden: false,
             tag_role: None,
             font_size,
@@ -4924,6 +5051,16 @@ impl ContainerFlowable {
 
     pub fn with_box_shadow(mut self, shadow: Option<BoxShadowSpec>) -> Self {
         self.box_shadow = shadow;
+        self
+    }
+
+    pub fn with_transforms(mut self, transforms: Vec<CssTransformOp>) -> Self {
+        self.transforms = transforms;
+        self
+    }
+
+    pub fn with_transform_origin(mut self, transform_origin: CssTransformOrigin) -> Self {
+        self.transform_origin = transform_origin;
         self
     }
 
@@ -5038,6 +5175,43 @@ impl ContainerFlowable {
             margin.right = extra;
         }
         (margin, border, padding, content_width, border_box_width)
+    }
+
+    fn has_transforms(&self) -> bool {
+        !self.transforms.is_empty()
+    }
+
+    fn apply_transforms(&self, canvas: &mut Canvas, ref_width: Pt, ref_height: Pt) {
+        for op in &self.transforms {
+            match op {
+                CssTransformOp::Translate { x, y } => {
+                    let tx = x.resolve_width(ref_width, self.font_size, self.root_font_size);
+                    let ty = y.resolve_height(ref_height, self.font_size, self.root_font_size);
+                    canvas.translate(tx, ty);
+                }
+                CssTransformOp::Scale { x, y } => {
+                    canvas.scale(*x, *y);
+                }
+                CssTransformOp::Rotate { radians } => {
+                    canvas.rotate(*radians);
+                }
+                CssTransformOp::Skew {
+                    x_radians,
+                    y_radians,
+                } => {
+                    let c = x_radians.tan();
+                    let b = y_radians.tan();
+                    if c.is_finite() && b.is_finite() {
+                        canvas.concat_matrix(1.0, b, c, 1.0, Pt::ZERO, Pt::ZERO);
+                    }
+                }
+                CssTransformOp::Matrix { a, b, c, d, e, f } => {
+                    if a.is_finite() && b.is_finite() && c.is_finite() && d.is_finite() {
+                        canvas.concat_matrix(*a, *b, *c, *d, *e, *f);
+                    }
+                }
+            }
+        }
     }
 
     fn compute_layout(&self, avail_width: Pt, avail_height: Pt) -> ContainerLayoutCache {
@@ -5473,6 +5647,8 @@ impl Flowable for ContainerFlowable {
             background: self.background,
             background_paint: self.background_paint.clone(),
             box_shadow: self.box_shadow.clone(),
+            transforms: self.transforms.clone(),
+            transform_origin: self.transform_origin,
             overflow_hidden: self.overflow_hidden,
             tag_role: self.tag_role.clone(),
             font_size: self.font_size,
@@ -5498,6 +5674,8 @@ impl Flowable for ContainerFlowable {
             background: self.background,
             background_paint: self.background_paint.clone(),
             box_shadow: self.box_shadow.clone(),
+            transforms: self.transforms.clone(),
+            transform_origin: self.transform_origin,
             overflow_hidden: self.overflow_hidden,
             tag_role: self.tag_role.clone(),
             font_size: self.font_size,
@@ -5527,6 +5705,27 @@ impl Flowable for ContainerFlowable {
 
         let border_box_x = x + margin.left;
         let border_box_y = y + margin.top;
+        let transformed = self.has_transforms();
+        if transformed {
+            // CSS transforms apply around transform-origin (default: center center) and do
+            // not participate in wrap/split geometry in this phase.
+            let origin_dx = self.transform_origin.x.resolve_width(
+                border_box_width,
+                self.font_size,
+                self.root_font_size,
+            );
+            let origin_dy = self.transform_origin.y.resolve_height(
+                border_box_height,
+                self.font_size,
+                self.root_font_size,
+            );
+            let origin_x = border_box_x + origin_dx;
+            let origin_y = border_box_y + origin_dy;
+            canvas.save_state();
+            canvas.translate(-origin_x, -origin_y);
+            self.apply_transforms(canvas, border_box_width, border_box_height);
+            canvas.translate(origin_x, origin_y);
+        }
         let radius = Self::uniform_radius(self.border_radius.resolve(
             border_box_width,
             self.font_size,
@@ -5677,7 +5876,14 @@ impl Flowable for ContainerFlowable {
                 .copied()
                 .flatten()
                 .unwrap_or_else(|| child.wrap(content_width, child_avail_height));
-            child.draw(canvas, inner_x, cursor_y, content_width, size.height);
+            let draw_height = if child.prefers_containing_block_draw_space()
+                && child_avail_height < Pt::from_f32(1.0e8)
+            {
+                child_avail_height
+            } else {
+                size.height
+            };
+            child.draw(canvas, inner_x, cursor_y, content_width, draw_height);
             cursor_y = cursor_y + size.height;
         }
 
@@ -5710,6 +5916,9 @@ impl Flowable for ContainerFlowable {
         if self.overflow_hidden {
             canvas.restore_state();
         }
+        if transformed {
+            canvas.restore_state();
+        }
         if tagged.is_some() {
             canvas.end_tag();
         }
@@ -5728,6 +5937,19 @@ pub struct AbsolutePositionedFlowable {
     right: LengthSpec,
     bottom: LengthSpec,
     z_index: i32,
+    font_size: Pt,
+    root_font_size: Pt,
+    pagination: Pagination,
+    fixed_positioned: bool,
+}
+
+#[derive(Clone)]
+pub struct RelativePositionedFlowable {
+    child: Box<dyn Flowable>,
+    left: LengthSpec,
+    top: LengthSpec,
+    right: LengthSpec,
+    bottom: LengthSpec,
     font_size: Pt,
     root_font_size: Pt,
     pagination: Pagination,
@@ -5792,6 +6014,10 @@ impl Flowable for MetaFlowable {
     fn pagination(&self) -> Pagination {
         self.child.pagination()
     }
+
+    fn is_fixed_positioned(&self) -> bool {
+        self.child.is_fixed_positioned()
+    }
 }
 
 impl AbsolutePositionedFlowable {
@@ -5834,6 +6060,40 @@ impl AbsolutePositionedFlowable {
             right,
             bottom,
             z_index,
+            font_size,
+            root_font_size,
+            pagination: Pagination::default(),
+            fixed_positioned: false,
+        }
+    }
+
+    pub fn with_pagination(mut self, pagination: Pagination) -> Self {
+        self.pagination = pagination;
+        self
+    }
+
+    pub fn with_fixed_positioned(mut self, fixed_positioned: bool) -> Self {
+        self.fixed_positioned = fixed_positioned;
+        self
+    }
+}
+
+impl RelativePositionedFlowable {
+    pub fn new_pt(
+        child: Box<dyn Flowable>,
+        left: LengthSpec,
+        top: LengthSpec,
+        right: LengthSpec,
+        bottom: LengthSpec,
+        font_size: Pt,
+        root_font_size: Pt,
+    ) -> Self {
+        Self {
+            child,
+            left,
+            top,
+            right,
+            bottom,
             font_size,
             root_font_size,
             pagination: Pagination::default(),
@@ -5974,5 +6234,127 @@ impl Flowable for AbsolutePositionedFlowable {
 
     fn pagination(&self) -> Pagination {
         self.pagination
+    }
+
+    fn is_fixed_positioned(&self) -> bool {
+        self.fixed_positioned
+    }
+}
+
+impl Flowable for RelativePositionedFlowable {
+    fn wrap(&self, avail_width: Pt, avail_height: Pt) -> Size {
+        self.child.wrap(avail_width, avail_height)
+    }
+
+    fn split(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        let (first, second) = self.child.split(avail_width, avail_height)?;
+        let first = Self {
+            child: first,
+            left: self.left,
+            top: self.top,
+            right: self.right,
+            bottom: self.bottom,
+            font_size: self.font_size,
+            root_font_size: self.root_font_size,
+            pagination: self.pagination,
+        };
+        let second = Self {
+            child: second,
+            left: self.left,
+            top: self.top,
+            right: self.right,
+            bottom: self.bottom,
+            font_size: self.font_size,
+            root_font_size: self.root_font_size,
+            pagination: self.pagination,
+        };
+        Some((
+            Box::new(first) as Box<dyn Flowable>,
+            Box::new(second) as Box<dyn Flowable>,
+        ))
+    }
+
+    fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt) {
+        let _size = self.child.wrap(avail_width, avail_height);
+
+        let has_left = !matches!(self.left, LengthSpec::Auto);
+        let has_right = !matches!(self.right, LengthSpec::Auto);
+        let has_top = !matches!(self.top, LengthSpec::Auto);
+        let has_bottom = !matches!(self.bottom, LengthSpec::Auto);
+
+        // Relative inset percentages resolve against the containing block dimensions.
+        // For horizontal offsets use provided available width; for vertical use available
+        // height (which is currently the container-provided draw height in this pipeline).
+        let offset_width_basis = avail_width.max(Pt::ZERO);
+        let offset_height_basis = avail_height.max(Pt::ZERO);
+
+        let left = if has_left {
+            self.left
+                .resolve_width(offset_width_basis, self.font_size, self.root_font_size)
+        } else {
+            Pt::ZERO
+        };
+        let right = if has_right {
+            self.right
+                .resolve_width(offset_width_basis, self.font_size, self.root_font_size)
+        } else {
+            Pt::ZERO
+        };
+        let top = if has_top {
+            self.top
+                .resolve_height(offset_height_basis, self.font_size, self.root_font_size)
+        } else {
+            Pt::ZERO
+        };
+        let bottom = if has_bottom {
+            self.bottom
+                .resolve_height(offset_height_basis, self.font_size, self.root_font_size)
+        } else {
+            Pt::ZERO
+        };
+
+        // Relative positioning shifts paint only; the element keeps its original flow slot.
+        // For phase-1 parity we use left/top when provided, otherwise right/bottom as inverse.
+        let dx = if has_left {
+            left
+        } else if has_right {
+            -right
+        } else {
+            Pt::ZERO
+        };
+        let dy = if has_top {
+            top
+        } else if has_bottom {
+            -bottom
+        } else {
+            Pt::ZERO
+        };
+
+        self.child
+            .draw(canvas, x + dx, y + dy, avail_width, avail_height);
+    }
+
+    fn intrinsic_width(&self) -> Option<Pt> {
+        self.child.intrinsic_width()
+    }
+
+    fn out_of_flow(&self) -> bool {
+        self.child.out_of_flow()
+    }
+
+    fn z_index(&self) -> i32 {
+        self.child.z_index()
+    }
+
+    fn pagination(&self) -> Pagination {
+        self.pagination
+    }
+
+    fn prefers_containing_block_draw_space(&self) -> bool {
+        true
     }
 }

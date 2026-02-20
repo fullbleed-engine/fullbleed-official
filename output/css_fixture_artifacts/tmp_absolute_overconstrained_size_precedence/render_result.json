@@ -1,0 +1,124 @@
+{
+  "schema": "fullbleed.css_fixture_render_result.v1",
+  "id": "tmp_absolute_overconstrained_size_precedence",
+  "ok": true,
+  "warnings_ok": true,
+  "expected_warnings": [],
+  "actual_warnings": [],
+  "stages": {
+    "parser": {
+      "ok": true,
+      "error": null
+    },
+    "compute": {
+      "ok": true,
+      "glyph_report_count": 0,
+      "page_data_present": false,
+      "assertions_enabled": false,
+      "assertions_ok": true,
+      "assertions": {
+        "assertion_count": 0,
+        "checks": []
+      }
+    },
+    "layout": {
+      "ok": true,
+      "expected_page_count": 1,
+      "actual_page_count": 1,
+      "dpi": 120,
+      "assertions_enabled": true,
+      "assertions_ok": true,
+      "assertions": {
+        "assertion_count": 3,
+        "checks": [
+          {
+            "index": 0,
+            "ok": true,
+            "kind": "color_run_length",
+            "page": 1,
+            "axis": "x",
+            "fixed": 180,
+            "start": 0,
+            "expected_rgba": [
+              255,
+              255,
+              255,
+              255
+            ],
+            "tolerance": 10,
+            "actual_run_length": 120,
+            "expected_length": 120,
+            "length_tolerance": 2
+          },
+          {
+            "index": 1,
+            "ok": true,
+            "kind": "color_run_length",
+            "page": 1,
+            "axis": "x",
+            "fixed": 180,
+            "start": 120,
+            "expected_rgba": [
+              0,
+              0,
+              255,
+              255
+            ],
+            "tolerance": 10,
+            "actual_run_length": 120,
+            "expected_length": 120,
+            "length_tolerance": 2
+          },
+          {
+            "index": 2,
+            "ok": true,
+            "kind": "color_run_length",
+            "page": 1,
+            "axis": "x",
+            "fixed": 180,
+            "start": 240,
+            "expected_rgba": [
+              255,
+              255,
+              255,
+              255
+            ],
+            "tolerance": 10,
+            "actual_run_length": 240,
+            "expected_length": 240,
+            "length_tolerance": 2
+          }
+        ]
+      }
+    },
+    "paint": {
+      "ok": true,
+      "checks": [
+        {
+          "page": 1,
+          "x": 180,
+          "y": 180,
+          "expected_rgba": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "actual_rgba": [
+            0,
+            0,
+            255,
+            255
+          ],
+          "tolerance": 10,
+          "ok": true
+        }
+      ]
+    },
+    "diagnostics": {
+      "ok": true,
+      "enabled": false,
+      "details": {}
+    }
+  }
+}

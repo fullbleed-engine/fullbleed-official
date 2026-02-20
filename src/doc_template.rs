@@ -6,6 +6,7 @@ use crate::flowable::{BreakAfter, BreakBefore, Flowable};
 use crate::frame::AddResult;
 use crate::metrics::{DocumentMetrics, PageMetrics};
 use crate::page_template::PageTemplate;
+use crate::types::Pt;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
@@ -94,11 +95,45 @@ impl DocTemplate {
         let mut page_start = Instant::now();
         let mut page_flowables = 0usize;
 
+        let draw_fixed_overlays = |canvas: &mut Canvas,
+                                   overlays: &[Box<dyn Flowable>],
+                                   page_flowables: &mut usize| {
+            if overlays.is_empty() {
+                return;
+            }
+            let page_size = canvas.page_size();
+            for overlay in overlays {
+                overlay.draw(
+                    canvas,
+                    Pt::ZERO,
+                    Pt::ZERO,
+                    page_size.width,
+                    page_size.height,
+                );
+                *page_flowables += 1;
+            }
+        };
+
+        let mut fixed_overlays: Vec<Box<dyn Flowable>> = Vec::new();
+        let mut story: VecDeque<Box<dyn Flowable>> = VecDeque::new();
+        for flowable in self.story {
+            if flowable.is_fixed_positioned() {
+                fixed_overlays.push(flowable);
+            } else {
+                story.push_back(flowable);
+            }
+        }
+
         let finish_page = |canvas: &mut Canvas,
                            page_number: usize,
                            page_flowables: &mut usize,
                            metrics: &mut DocumentMetrics,
-                           page_start: &mut Instant| {
+                           page_start: &mut Instant,
+                           fixed_overlays: &[Box<dyn Flowable>]| {
+            if canvas.is_current_empty() && fixed_overlays.is_empty() {
+                return;
+            }
+            draw_fixed_overlays(canvas, fixed_overlays, page_flowables);
             if canvas.is_current_empty() {
                 return;
             }
@@ -124,8 +159,6 @@ impl DocTemplate {
             template.name.clone(),
         );
 
-        let mut story = VecDeque::from(self.story);
-
         while let Some(flowable) = story.pop_front() {
             let mut current = flowable;
             let mut suppress_break_before = false;
@@ -149,6 +182,7 @@ impl DocTemplate {
                         &mut page_flowables,
                         &mut metrics,
                         &mut page_start,
+                        &fixed_overlays,
                     );
                     page_number += 1;
                     let template = select_template(&self.page_templates, page_number);
@@ -178,6 +212,7 @@ impl DocTemplate {
                         &mut page_flowables,
                         &mut metrics,
                         &mut page_start,
+                        &fixed_overlays,
                     );
                     page_number += 1;
                     let template = select_template(&self.page_templates, page_number);
@@ -236,6 +271,7 @@ impl DocTemplate {
                                 &mut page_flowables,
                                 &mut metrics,
                                 &mut page_start,
+                                &fixed_overlays,
                             );
                             page_number += 1;
                             let template = select_template(&self.page_templates, page_number);
@@ -295,6 +331,7 @@ impl DocTemplate {
                 &mut page_flowables,
                 &mut metrics,
                 &mut page_start,
+                &fixed_overlays,
             );
         }
 

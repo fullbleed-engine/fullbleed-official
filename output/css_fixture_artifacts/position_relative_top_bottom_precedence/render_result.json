@@ -1,0 +1,176 @@
+{
+  "schema": "fullbleed.css_fixture_render_result.v1",
+  "id": "position_relative_top_bottom_precedence",
+  "ok": true,
+  "warnings_ok": true,
+  "expected_warnings": [],
+  "actual_warnings": [],
+  "stages": {
+    "parser": {
+      "ok": true,
+      "error": null
+    },
+    "compute": {
+      "ok": true,
+      "glyph_report_count": 0,
+      "page_data_present": false,
+      "assertions_enabled": true,
+      "assertions_ok": true,
+      "assertions": {
+        "assertion_count": 1,
+        "computed_event_count": 12,
+        "checks": [
+          {
+            "index": 0,
+            "ok": true,
+            "node": "html:nth-child(1) > body:nth-child(2) > div.box.b:nth-child(2)",
+            "style_mismatches": [],
+            "vars_mismatch": null,
+            "vars_count_mismatch": null
+          }
+        ]
+      }
+    },
+    "layout": {
+      "ok": true,
+      "expected_page_count": 1,
+      "actual_page_count": 1,
+      "dpi": 120,
+      "assertions_enabled": true,
+      "assertions_ok": true,
+      "assertions": {
+        "assertion_count": 4,
+        "checks": [
+          {
+            "index": 0,
+            "ok": true,
+            "kind": "color_run_length",
+            "page": 1,
+            "axis": "x",
+            "fixed": 30,
+            "start": 0,
+            "expected_rgba": [
+              255,
+              0,
+              0,
+              255
+            ],
+            "tolerance": 10,
+            "actual_run_length": 120,
+            "expected_length": 120,
+            "length_tolerance": 1
+          },
+          {
+            "index": 1,
+            "ok": true,
+            "kind": "color_run_length",
+            "page": 1,
+            "axis": "x",
+            "fixed": 90,
+            "start": 0,
+            "expected_rgba": [
+              255,
+              255,
+              255,
+              255
+            ],
+            "tolerance": 10,
+            "actual_run_length": 480,
+            "expected_length": 480,
+            "length_tolerance": 1
+          },
+          {
+            "index": 2,
+            "ok": true,
+            "kind": "color_run_length",
+            "page": 1,
+            "axis": "x",
+            "fixed": 150,
+            "start": 0,
+            "expected_rgba": [
+              0,
+              255,
+              0,
+              255
+            ],
+            "tolerance": 10,
+            "actual_run_length": 120,
+            "expected_length": 120,
+            "length_tolerance": 1
+          },
+          {
+            "index": 3,
+            "ok": true,
+            "kind": "color_run_length",
+            "page": 1,
+            "axis": "x",
+            "fixed": 150,
+            "start": 120,
+            "expected_rgba": [
+              255,
+              255,
+              255,
+              255
+            ],
+            "tolerance": 10,
+            "actual_run_length": 360,
+            "expected_length": 360,
+            "length_tolerance": 1
+          }
+        ]
+      }
+    },
+    "paint": {
+      "ok": true,
+      "checks": [
+        {
+          "page": 1,
+          "x": 60,
+          "y": 30,
+          "expected_rgba": [
+            255,
+            0,
+            0,
+            255
+          ],
+          "actual_rgba": [
+            255,
+            0,
+            0,
+            255
+          ],
+          "tolerance": 10,
+          "ok": true
+        },
+        {
+          "page": 1,
+          "x": 60,
+          "y": 150,
+          "expected_rgba": [
+            0,
+            255,
+            0,
+            255
+          ],
+          "actual_rgba": [
+            0,
+            255,
+            0,
+            255
+          ],
+          "tolerance": 10,
+          "ok": true
+        }
+      ]
+    },
+    "diagnostics": {
+      "ok": true,
+      "enabled": true,
+      "details": {
+        "summary_counts_total": {},
+        "summary_context_count": 3,
+        "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_top_bottom_precedence_78776_1771560688297978700.jsonl"
+      }
+    }
+  }
+}
