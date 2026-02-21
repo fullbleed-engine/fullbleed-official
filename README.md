@@ -20,8 +20,6 @@ Fullbleed is a deterministic, offline-first document rendering engine for transa
 
 HTML and CSS are used as a familiar DSL for layout, styling, and data placement in transactional documents.
 
-HTML/CSS are the familiar document DSL; with pinned assets and flags, Fullbleed targets reproducible outputs.
-See our [publicly available targets](https://github.com/fullbleed-engine/fullbleed-targets).
 
 This README is the canonical usage guide for:
 
