@@ -1,0 +1,428 @@
+{
+  "schema": "fullbleed.css_parity_ledger.v1",
+  "status_scale": [
+    "not_started",
+    "in_progress",
+    "partial",
+    "implemented",
+    "n/a"
+  ],
+  "stage_order": [
+    "parser",
+    "compute",
+    "layout",
+    "paint"
+  ],
+  "modules": [
+    {
+      "id": "syntax_at_rules",
+      "label": "Syntax and at-rules",
+      "priority": 1,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_syntax",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "n/a",
+        "paint": "n/a"
+      },
+      "owner_paths": [
+        "src/style.rs"
+      ],
+      "notes": "Typed + unparsed declaration paths exist; advanced at-rule handling remains incomplete."
+    },
+    {
+      "id": "selectors",
+      "label": "Selectors",
+      "priority": 2,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_selectors",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "n/a",
+        "paint": "n/a"
+      },
+      "owner_paths": [
+        "src/style.rs",
+        "src/html.rs"
+      ],
+      "notes": "Custom selector parser/indexing is in place; parity expansion is planned."
+    },
+    {
+      "id": "cascade_inheritance",
+      "label": "Cascade and inheritance",
+      "priority": 3,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/Cascade",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "n/a",
+        "paint": "n/a"
+      },
+      "owner_paths": [
+        "src/style.rs"
+      ],
+      "notes": "Specificity + source order + important channels implemented; full keyword/layer parity pending."
+    },
+    {
+      "id": "values_units",
+      "label": "Values and units",
+      "priority": 4,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_values_and_units",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "n/a",
+        "paint": "n/a"
+      },
+      "owner_paths": [
+        "src/style.rs",
+        "src/flowable.rs",
+        "src/types.rs"
+      ],
+      "notes": "LengthSpec/CalcLength and fixed-point conversions exist; custom/unparsed length token paths now route through canonical `LengthPercentage` parsing and deterministic `min/max/clamp` reduction for context-free comparable calc domains (`custom_property_math_min_max_clamp_lengths`), while full value grammar parity remains open."
+    },
+    {
+      "id": "box_model",
+      "label": "Box model",
+      "priority": 5,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_box_model",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "partial",
+        "paint": "partial"
+      },
+      "owner_paths": [
+        "src/style.rs",
+        "src/flowable.rs"
+      ],
+      "notes": "ContainerFlowable handles margins/padding/borders/box-sizing; parity edge cases remain."
+    },
+    {
+      "id": "display_formatting",
+      "label": "Display and formatting contexts",
+      "priority": 6,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/display",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "partial",
+        "paint": "n/a"
+      },
+      "owner_paths": [
+        "src/style.rs",
+        "src/html.rs",
+        "src/flowable.rs"
+      ],
+      "notes": "Block/inline/flex/table/grid-like lowering exists; broader display parity remains."
+    },
+    {
+      "id": "positioning",
+      "label": "Positioning",
+      "priority": 7,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/position",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "partial",
+        "paint": "n/a"
+      },
+      "owner_paths": [
+        "src/style.rs",
+        "src/html.rs",
+        "src/flowable.rs"
+      ],
+      "notes": "Absolute, relative, and fixed positioning draw paths are implemented (including relative left/top/right/bottom in-flow offsets, fixed overlay repetition across paged output, fixed z-index underlay/overlay layering, deterministic z-index ordering within fixed overlay lanes, root-level absolute z-index back/front overlay composition on page one, explicit page-one scoping for both positive and negative z-index root absolute overlays under pagination, equal-specificity source-order z-index resolution coverage for root absolute overlays, specificity-precedence coverage where higher-specificity id selectors deterministically beat later lower-specificity class selectors for root absolute overlays, explicit width/height precedence over opposing inset pairs for absolute positioning in the current LTR model, empty absolutely positioned boxes with explicit size/background paint even with no text children, nearest-positioned-ancestor containing-block resolution for absolute insets including percentage inset basis, explicit-size absolute overflow without containing-block clamping, and auto-inset static-position fallback for absolute out-of-flow placement); full positioning semantics are not complete."
+    },
+    {
+      "id": "sizing",
+      "label": "Sizing",
+      "priority": 8,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_sizing",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "partial",
+        "paint": "n/a"
+      },
+      "owner_paths": [
+        "src/style.rs",
+        "src/flowable.rs"
+      ],
+      "notes": "Width/height/min/max coverage exists for core containers; sizing algorithm parity is still partial."
+    },
+    {
+      "id": "text_fonts",
+      "label": "Text and fonts",
+      "priority": 9,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_text",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "partial",
+        "paint": "partial"
+      },
+      "owner_paths": [
+        "src/style.rs",
+        "src/flowable.rs",
+        "src/font.rs"
+      ],
+      "notes": "Line-break, fallback, shaping hooks, and text styling exist; broad typography parity remains."
+    },
+    {
+      "id": "backgrounds_borders",
+      "label": "Backgrounds and borders",
+      "priority": 10,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_backgrounds_and_borders",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "partial",
+        "paint": "partial"
+      },
+      "owner_paths": [
+        "src/style.rs",
+        "src/flowable.rs",
+        "src/html.rs"
+      ],
+      "notes": "Background colors, gradients, borders, radius, shadows exist with partial parity; fixture-backed border paint matrix now covers uniform borders and side-specific border color overrides (`borders_uniform_frame_paint_matrix`, `borders_left_color_override`) with evaluator-to-paint propagation."
+    },
+    {
+      "id": "lists_counters",
+      "label": "Lists and counters",
+      "priority": 11,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_lists",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "partial",
+        "paint": "partial"
+      },
+      "owner_paths": [
+        "src/style.rs",
+        "src/html.rs",
+        "src/flowable.rs"
+      ],
+      "notes": "List rendering exists; full counters/generated-content scope handling is pending."
+    },
+    {
+      "id": "overflow",
+      "label": "Overflow",
+      "priority": 12,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/overflow",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "partial",
+        "paint": "partial"
+      },
+      "owner_paths": [
+        "src/style.rs",
+        "src/flowable.rs"
+      ],
+      "notes": "Visible/hidden clipping support exists with fixture-backed absolute-child clip/bleed coverage (`overflow_hidden_clips_absolute_child`, `overflow_visible_allows_absolute_bleed`); richer overflow behavior remains open."
+    },
+    {
+      "id": "flexbox",
+      "label": "Flexbox",
+      "priority": 13,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_flexible_box_layout",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "partial",
+        "paint": "n/a"
+      },
+      "owner_paths": [
+        "src/style.rs",
+        "src/html.rs",
+        "src/flowable.rs"
+      ],
+      "notes": "FlexFlowable covers core behavior, including first-class flex-flow and place-content shorthand mapping into computed direction/wrap and align/justify channels, wrapped-line align-content distribution, item-level align-self cross-axis overrides, place-self shorthand mapping into item-level align-self compute semantics, place-items shorthand mapping into container align-items compute semantics, and justify-content distribution keywords (space-around/space-evenly); full flex spec edge-case parity remains."
+    },
+    {
+      "id": "grid",
+      "label": "Grid",
+      "priority": 14,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_grid_layout",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "partial",
+        "paint": "n/a"
+      },
+      "owner_paths": [
+        "src/style.rs",
+        "src/html.rs",
+        "src/flowable.rs"
+      ],
+      "notes": "Baseline grid handling is implemented over deterministic flex internals with explicit `grid-template-columns`/`grid-template-rows` track counts (including `repeat(...)` mixed-list counting), slot-based `grid-row`/`grid-column`/`grid-area` start-line placement, deterministic conflict fallback to next free slot for overlapping explicit starts, and row-template-only column derivation; dedicated full grid solver parity is still planned."
+    },
+    {
+      "id": "tables",
+      "label": "Tables",
+      "priority": 15,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/display/table",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "partial",
+        "paint": "partial"
+      },
+      "owner_paths": [
+        "src/style.rs",
+        "src/html.rs",
+        "src/flowable.rs"
+      ],
+      "notes": "TableFlowable and table display modes exist, including split logic; deterministic header-repeat pagination baseline is fixture-covered (`table_header_repeat_across_pages`), while broader table parity remains partial."
+    },
+    {
+      "id": "transforms_coordinates",
+      "label": "Transforms and coordinate spaces",
+      "priority": 16,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_transforms",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "n/a",
+        "paint": "partial"
+      },
+      "owner_paths": [
+        "src/style.rs",
+        "src/flowable.rs",
+        "src/canvas.rs"
+      ],
+      "notes": "Phase-1 transform path implemented for 2D translate/scale/rotate/skew/matrix (including longhands), transform-origin, deterministic composition of individual transform properties (translate/rotate/scale + transform), and var()/fallback chain resolution into computed transform ops; broader 3D/perspective parity remains open."
+    },
+    {
+      "id": "filters_effects_compositing",
+      "label": "Filters/effects/compositing",
+      "priority": 17,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/filter",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "partial",
+        "paint": "partial"
+      },
+      "owner_paths": [
+        "src/style.rs",
+        "src/flowable.rs",
+        "src/canvas.rs"
+      ],
+      "notes": "Deterministic fallback baseline is implemented for unsupported effects/compositing declarations via explicit known-loss diagnostics while keeping stable paint output; full filter/effect rendering semantics remain planned."
+    },
+    {
+      "id": "multi_column",
+      "label": "Multi-column",
+      "priority": 18,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_multicol_layout",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "partial",
+        "paint": "partial"
+      },
+      "owner_paths": [
+        "src/style.rs",
+        "src/html.rs",
+        "src/flowable.rs"
+      ],
+      "notes": "Deterministic baseline fallback is implemented: multicol declarations are accepted and explicitly logged as known-loss with single-column degradation; dedicated multicol layout flow remains planned."
+    },
+    {
+      "id": "fragmentation",
+      "label": "Fragmentation",
+      "priority": 19,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_fragmentation",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "partial",
+        "paint": "n/a"
+      },
+      "owner_paths": [
+        "src/style.rs",
+        "src/frame.rs",
+        "src/doc_template.rs",
+        "src/flowable.rs"
+      ],
+      "notes": "Break controls and split behavior exist across core flowables, with fixture-backed `break-inside: avoid` pagination baseline (`fragmentation_break_inside_avoid_block`); parity is still partial."
+    },
+    {
+      "id": "paged_media",
+      "label": "Paged media",
+      "priority": 20,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_paged_media",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "partial",
+        "paint": "n/a"
+      },
+      "owner_paths": [
+        "src/style.rs",
+        "src/lib.rs",
+        "src/page_template.rs",
+        "src/doc_template.rs"
+      ],
+      "notes": "@page extraction and template selection exist, with fixture-backed forced page-break baseline (`paged_break_before_forced_block`); advanced paged media parity remains."
+    },
+    {
+      "id": "writing_modes_logical",
+      "label": "Writing modes and logical properties",
+      "priority": 21,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_writing_modes",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "partial",
+        "paint": "partial"
+      },
+      "owner_paths": [
+        "src/style.rs",
+        "src/html.rs",
+        "src/flowable.rs"
+      ],
+      "notes": "Baseline horizontal-tb/LTR logical mapping is implemented for inline/block sizing and logical margin/padding/inset longhands + shorthands with fixture coverage; full writing-mode/direction axis remapping and deeper logical sizing edge semantics remain open."
+    },
+    {
+      "id": "custom_properties_api_adjacent",
+      "label": "Custom properties and API-adjacent parsing",
+      "priority": 22,
+      "status": "in_progress",
+      "mdn_reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/--*",
+      "stage_status": {
+        "parser": "partial",
+        "compute": "partial",
+        "layout": "n/a",
+        "paint": "n/a"
+      },
+      "owner_paths": [
+        "src/style.rs"
+      ],
+      "notes": "Custom property support exists for key value classes; full generic token graph resolution is pending."
+    }
+  ]
+}

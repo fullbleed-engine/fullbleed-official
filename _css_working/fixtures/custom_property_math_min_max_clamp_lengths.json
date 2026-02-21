@@ -1,0 +1,179 @@
+{
+  "id": "custom_property_math_min_max_clamp_lengths",
+  "description": "Custom-property length math functions should resolve through var() into deterministic widths.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "custom-properties",
+    "values",
+    "min-function",
+    "max-function",
+    "clamp-function",
+    "var-chain"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='bar min'>Min</div><div class='bar max'>Max</div><div class='bar clamp'>Clamp</div></body></html>",
+  "css": "@page { size: 4in 3in; margin: 0; } :root { --w-min: min(1in, 2in); --w-max: max(1in, 2in); --w-clamp: clamp(1in, 3in, 2in); } body { margin: 0; font-size: 12pt; } .bar { display: block; height: 1in; } .min { width: var(--w-min); background: rgb(255,0,0); } .max { width: var(--w-max); background: rgb(0,255,0); } .clamp { width: var(--w-clamp); background: rgb(0,0,255); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.bar.min",
+        "style": {
+          "display": "Block",
+          "width": "72.000pt",
+          "height": "72.000pt",
+          "background": "#ff0000"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.bar.max",
+        "style": {
+          "display": "Block",
+          "width": "144.000pt",
+          "height": "72.000pt",
+          "background": "#00ff00"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.bar.clamp",
+        "style": {
+          "display": "Block",
+          "width": "144.000pt",
+          "height": "72.000pt",
+          "background": "#0000ff"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 0,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 180,
+        "start": 0,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 240,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 300,
+        "start": 0,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 240,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 60,
+        "y": 60,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 60,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 180,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 300,
+        "y": 180,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 300,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 300,
+        "y": 300,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "1fa349f6c4db9f77b59ab7fa50ad7eb684e11d38e6350976aea4a666dd23101b"
+}

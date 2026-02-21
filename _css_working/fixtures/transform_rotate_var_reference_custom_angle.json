@@ -1,0 +1,98 @@
+{
+  "id": "transform_rotate_var_reference_custom_angle",
+  "description": "rotate: var(--r) should resolve custom-property angles through compute and paint.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "transform",
+    "rotate",
+    "custom-properties",
+    "var-chain",
+    "compute-assertions"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='box'>V</div></body></html>",
+  "css": "@page { size: 4in 2in; margin: 0; } body { margin: 0; background: #fff; font-family: Helvetica, Arial, sans-serif; } .box { margin-left: 1in; margin-top: 0.5in; width: 1in; height: 0.5in; background: rgb(0,0,255); --r: 90deg; rotate: var(--r); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.box",
+        "style": {
+          "display": "Block",
+          "width": "72.000pt",
+          "height": "36.000pt",
+          "transform": "rotate(1.570796rad)"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 160,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 90,
+        "length_tolerance": 2
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 160,
+        "start": 90,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 60,
+        "length_tolerance": 2
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 160,
+        "start": 150,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 330,
+        "length_tolerance": 2
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 120,
+        "y": 160,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "edee78bba70da8da54f80f0c4c9f3eaba182d40232a1ea795d71d713c2cd28a0"
+}

@@ -1,0 +1,121 @@
+{
+  "id": "position_absolute_left_right_width_precedence",
+  "description": "Absolute positioning with left+right+explicit width should keep explicit width and anchor from left.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "position",
+    "absolute",
+    "inset-precedence",
+    "width"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='box'>X</div><section class='page'></section></body></html>",
+  "css": "@page { size: 4in 2in; margin: 0; } body { margin: 0; } .box { position: absolute; left: 1in; right: 1in; width: 1in; height: 1in; background: rgb(0,0,255); z-index: 1; } .page { width: 4in; height: 2in; background: rgb(255,255,255); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.box",
+        "style": {
+          "position": "Absolute",
+          "width": "72.000pt",
+          "height": "72.000pt",
+          "background": "#0000ff"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 120,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 240,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 240,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 60,
+        "y": 60,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 60,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 300,
+        "y": 60,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "898db1d9d69bf7233c426ebdeda00d2ff4f4a90ba1e0444d20694527a4ad8545"
+}

@@ -1,0 +1,114 @@
+{
+  "id": "inheritance_unset_noninherited_resets",
+  "description": "Unset should reset non-inherited properties to initial values in deterministic layout/paint.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "inheritance",
+    "css-wide-keyword-unset",
+    "non-inherited-reset"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='row a'>Row A</div><div class='row b'>Row B</div></body></html>",
+  "css": "@page { size: 4in 2in; margin: 0; } body { margin: 0; font-size: 12pt; } .row { display: block; height: 1in; background: rgb(255,255,255); } .a { width: 1in; width: unset; background: rgb(255,0,0); } .b { width: 4in; background: rgb(0,0,255); background-color: unset; }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.row.a",
+        "style": {
+          "display": "Block",
+          "width": "auto",
+          "height": "72.000pt",
+          "background": "#ff0000"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.row.b",
+        "style": {
+          "display": "Block",
+          "width": "288.000pt",
+          "height": "72.000pt",
+          "background": null
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 0,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 180,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 60,
+        "y": 60,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 60,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 60,
+        "y": 180,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "53a76679879a49b0bafd1a7c1c9c7149b62e58a6b2a3fa688e95d25a8423a191"
+}

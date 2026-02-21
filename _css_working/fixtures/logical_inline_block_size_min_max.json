@@ -1,0 +1,177 @@
+{
+  "id": "logical_inline_block_size_min_max",
+  "description": "inline-size/block-size should resolve through width/height baseline mapping in horizontal-tb LTR.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "writing-modes",
+    "logical-properties",
+    "inline-size",
+    "block-size"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='row a'></div><div class='row b'></div><div class='row c'></div></body></html>",
+  "css": "@page { size: 4in 3in; margin: 0; } body { margin: 0; background: rgb(255,255,255); } .row { display: block; } .a { inline-size: 1in; block-size: 0.5in; background: rgb(255,0,0); } .b { inline-size: 2in; block-size: 0.5in; background: rgb(0,255,0); } .c { inline-size: 1in; block-size: 1in; background: rgb(0,0,255); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.row.a",
+        "style": {
+          "display": "Block",
+          "width": "72.000pt",
+          "height": "36.000pt",
+          "background": "#ff0000"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.row.b",
+        "style": {
+          "display": "Block",
+          "width": "144.000pt",
+          "height": "36.000pt",
+          "background": "#00ff00"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.row.c",
+        "style": {
+          "display": "Block",
+          "width": "72.000pt",
+          "height": "72.000pt",
+          "background": "#0000ff"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 30,
+        "start": 0,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 90,
+        "start": 0,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 240,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 180,
+        "start": 0,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 60,
+        "y": 30,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 30,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 90,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 260,
+        "y": 90,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 60,
+        "y": 180,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 150,
+        "y": 180,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "b8d14e6ad10d1dd35989803be69e9dc26d8d5dc8982a067695680521733efa6a"
+}

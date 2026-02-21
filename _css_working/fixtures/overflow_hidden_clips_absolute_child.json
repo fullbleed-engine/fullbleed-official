@@ -1,0 +1,149 @@
+{
+  "id": "overflow_hidden_clips_absolute_child",
+  "description": "overflow:hidden should clip absolute child paint to the host border box.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "overflow",
+    "position",
+    "absolute",
+    "clipping"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='host'><div class='child'></div></div></body></html>",
+  "css": "@page { size: 4in 4in; margin: 0; } body { margin: 0; background: rgb(255,255,255); } .host { position: relative; width: 1in; height: 1in; margin-left: 1in; margin-top: 1in; background: rgb(255,0,0); overflow: hidden; } .child { position: absolute; left: 0.5in; top: 0; width: 1in; height: 1in; background: rgb(0,0,255); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.host",
+        "style": {
+          "position": "Relative",
+          "width": "72.000pt",
+          "height": "72.000pt",
+          "background": "#ff0000"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.child",
+        "style": {
+          "position": "Absolute",
+          "inset_left": "36.000pt",
+          "inset_top": "0.000pt",
+          "width": "72.000pt",
+          "height": "72.000pt",
+          "background": "#0000ff"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 180,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 180,
+        "start": 120,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 60,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 180,
+        "start": 180,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 60,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 180,
+        "start": 240,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 240,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 150,
+        "y": 180,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 210,
+        "y": 180,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 270,
+        "y": 180,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "9806a9fdc1fe12490ca9e70cb4525a1aeff6c822e5c7a1713c4e86e21d090a38"
+}

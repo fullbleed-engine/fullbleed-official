@@ -1,0 +1,212 @@
+{
+  "id": "flex_place_content_flex_end_center_wrap",
+  "description": "place-content:flex-end center should map to align-content and justify-content for wrapped flex rows.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "flexbox",
+    "place-content",
+    "align-content",
+    "justify-content"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><section class='row'><div class='cell a'>A</div><div class='cell b'>B</div><div class='cell c'>C</div><div class='cell d'>D</div></section></body></html>",
+  "css": "@page { size: 4in 4in; margin: 0; } body { margin: 0; font-family: Helvetica, Arial, sans-serif; } .row { display: flex; flex-flow: row wrap; place-content: flex-end center; width: 2.5in; height: 4in; } .cell { flex-grow: 0; flex-shrink: 0; flex-basis: 1in; width: 1in; height: 1in; } .a { background: rgb(255,0,0); } .b { background: rgb(0,255,0); } .c { background: rgb(0,0,255); } .d { background: rgb(255,255,0); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "section.row",
+        "style": {
+          "display": "Flex",
+          "width": "180.000pt",
+          "height": "288.000pt",
+          "flex_direction": "Row",
+          "flex_wrap": "Wrap",
+          "justify_content": "Center",
+          "align_content": "FlexEnd"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 480,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 300,
+        "start": 30,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 300,
+        "start": 150,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 300,
+        "start": 270,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 210,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 420,
+        "start": 30,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 420,
+        "start": 150,
+        "rgba": [
+          255,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 420,
+        "start": 270,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 210,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 60,
+        "y": 60,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 10
+      },
+      {
+        "page": 1,
+        "x": 90,
+        "y": 300,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 10
+      },
+      {
+        "page": 1,
+        "x": 210,
+        "y": 300,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 10
+      },
+      {
+        "page": 1,
+        "x": 90,
+        "y": 420,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 10
+      },
+      {
+        "page": 1,
+        "x": 210,
+        "y": 420,
+        "rgba": [
+          255,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 10
+      }
+    ]
+  },
+  "stability_hash": "eb585b744b40d37c59b2b7b3abf3960f9f7a38360c58e4cb142347f27ee70ffa"
+}

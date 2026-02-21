@@ -1,0 +1,97 @@
+{
+  "id": "transform_scale_var_reference_custom_pair",
+  "description": "scale: var(--s) should resolve custom-property scale pairs through compute and paint.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "transform",
+    "scale",
+    "custom-properties",
+    "compute-assertions"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='box'>S</div></body></html>",
+  "css": "@page { size: 4in 1in; margin: 0; } body { margin: 0; background: #fff; font-family: Helvetica, Arial, sans-serif; } .box { width: 1in; height: 1in; background: rgb(0,0,255); --s: 0.5 1; scale: var(--s); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.box",
+        "style": {
+          "display": "Block",
+          "width": "72.000pt",
+          "height": "72.000pt",
+          "transform": "scale(0.500000, 1.000000)"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 30,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 30,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 60,
+        "length_tolerance": 2
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 90,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 390,
+        "length_tolerance": 2
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 60,
+        "y": 60,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "e633923deaac3e6cd41c36787c4ffeaa55660b1e43981b8dd180416aecc1a3b0"
+}

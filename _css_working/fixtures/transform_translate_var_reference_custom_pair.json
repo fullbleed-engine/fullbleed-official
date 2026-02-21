@@ -1,0 +1,98 @@
+{
+  "id": "transform_translate_var_reference_custom_pair",
+  "description": "translate: var(--t) should resolve custom-property translate pairs through compute and paint.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "transform",
+    "translate",
+    "custom-properties",
+    "var-chain",
+    "compute-assertions"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='box'>T</div></body></html>",
+  "css": "@page { size: 4in 1in; margin: 0; } body { margin: 0; background: #fff; font-family: Helvetica, Arial, sans-serif; } .box { width: 1in; height: 1in; background: rgb(0,0,255); --a: var(--b); --b: 1in 0; translate: var(--a); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.box",
+        "style": {
+          "display": "Block",
+          "width": "72.000pt",
+          "height": "72.000pt",
+          "transform": "translate(72.000pt, 0.000pt)"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 40,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 40,
+        "start": 120,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 40,
+        "start": 240,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 240,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 160,
+        "y": 40,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "ee537c68910fe113af9405bc7d490e704f441802087a2f2e443d647a86008a56"
+}

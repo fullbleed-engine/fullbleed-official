@@ -1,0 +1,66 @@
+{
+  "id": "selectors_specificity_id_wins",
+  "description": "Selector specificity check: id selector should override class selector for background color.",
+  "labels": [
+    "fast",
+    "full"
+  ],
+  "required_features": [
+    "selectors",
+    "specificity",
+    "id-selector",
+    "class-selector"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><section id='target' class='target'>X</section></body></html>",
+  "css": "@page { size: 4in 4in; margin: 0; } body { margin: 0; } .target { width: 4in; height: 4in; background: rgb(255,0,0); } #target { background: rgb(0,255,0); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "section#target.target",
+        "style": {
+          "display": "Block",
+          "background": "#00ff00",
+          "width": "288.000pt",
+          "height": "288.000pt"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 200,
+        "start": 0,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 200,
+        "y": 200,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "3b7419de29beb8e8ac095b4c009e00e0d06cedc39792eec666bf38eb9f0f2b08"
+}

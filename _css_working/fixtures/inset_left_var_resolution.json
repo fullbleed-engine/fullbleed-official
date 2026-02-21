@@ -1,0 +1,86 @@
+{
+  "id": "inset_left_var_resolution",
+  "description": "Inset left var should resolve in computed style for positioned elements.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "position",
+    "left",
+    "custom-properties",
+    "compute-assertions"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='box'>X</div></body></html>",
+  "css": "@page { size: 4in 1in; margin: 0; } body { margin: 0; } .box { --x: 16px; position: relative; left: var(--x); top: 0; width: 1in; height: 1in; background: rgb(0,0,255); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.box",
+        "style": {
+          "position": "Relative",
+          "width": "72.000pt",
+          "height": "72.000pt",
+          "inset_left": "12.000pt",
+          "inset_top": "0.000pt",
+          "background": "#0000ff"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 40,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 20,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 40,
+        "start": 20,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 40,
+        "start": 140,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 340,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": []
+  },
+  "stability_hash": "ef184637968d59c574725f4457defff3794db58a7482cef5828a9f9eaae125c9"
+}

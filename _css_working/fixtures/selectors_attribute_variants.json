@@ -1,0 +1,190 @@
+{
+  "id": "selectors_attribute_variants",
+  "description": "Attribute selector operators should match deterministically, with equal-specificity source-order tie breaks.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "selectors",
+    "attribute-exists",
+    "attribute-equals",
+    "attribute-includes",
+    "attribute-dash-match",
+    "attribute-prefix"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><section class='page'><div class='row one' data-role='cta'>One</div><div class='row two' data-tags='alpha beta'>Two</div><div class='row three' lang='en-US'>Three</div><div class='row four' data-code='xy-12'>Four</div></section></body></html>",
+  "css": "@page { size: 4in 4in; margin: 0; } body { margin: 0; font-size: 12pt; } .page { width: 4in; height: 4in; } .row { width: 4in; height: 1in; background: rgb(255,255,255); } [data-role] { background: rgb(255,0,0); } [data-tags~='beta'] { background: rgb(0,255,0); } [lang|='en'] { background: rgb(0,0,255); } [data-code^='xy'] { background: rgb(255,255,0); } [data-role='cta'] { background: rgb(255,0,255); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "section.page",
+        "style": {
+          "display": "Block",
+          "width": "288.000pt",
+          "height": "288.000pt"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.row.one",
+        "style": {
+          "display": "Block",
+          "width": "288.000pt",
+          "height": "72.000pt",
+          "background": "#ff00ff"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.row.two",
+        "style": {
+          "display": "Block",
+          "width": "288.000pt",
+          "height": "72.000pt",
+          "background": "#00ff00"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.row.three",
+        "style": {
+          "display": "Block",
+          "width": "288.000pt",
+          "height": "72.000pt",
+          "background": "#0000ff"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.row.four",
+        "style": {
+          "display": "Block",
+          "width": "288.000pt",
+          "height": "72.000pt",
+          "background": "#ffff00"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 0,
+        "rgba": [
+          255,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 180,
+        "start": 0,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 300,
+        "start": 0,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 420,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 240,
+        "y": 60,
+        "rgba": [
+          255,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 240,
+        "y": 180,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 240,
+        "y": 300,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 240,
+        "y": 420,
+        "rgba": [
+          255,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "c211bc3cb7723bb1d826dcb166b5d75bfdd4b9c65219c200a98658860696b339"
+}

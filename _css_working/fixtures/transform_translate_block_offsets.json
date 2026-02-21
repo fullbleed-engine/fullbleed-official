@@ -1,0 +1,97 @@
+{
+  "id": "transform_translate_block_offsets",
+  "description": "transform: translateX should shift paint output while preserving deterministic layout flow.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "transform",
+    "translate",
+    "block-layout",
+    "compute-assertions"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='box'>X</div></body></html>",
+  "css": "@page { size: 4in 1in; margin: 0; } body { margin: 0; background: #fff; font-family: Helvetica, Arial, sans-serif; } .box { width: 1in; height: 1in; background: rgb(0,0,255); transform: translateX(1in); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.box",
+        "style": {
+          "display": "Block",
+          "width": "72.000pt",
+          "height": "72.000pt",
+          "transform": "translate(72.000pt, 0.000pt)"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 40,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 40,
+        "start": 120,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 40,
+        "start": 240,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 240,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 160,
+        "y": 40,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "f63ea58649498e190813b583e0181df56c0f55b4b003f3a8f2ad6ab55c26e1ff"
+}

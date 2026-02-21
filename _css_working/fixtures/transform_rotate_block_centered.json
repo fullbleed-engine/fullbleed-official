@@ -1,0 +1,97 @@
+{
+  "id": "transform_rotate_block_centered",
+  "description": "transform: rotate should evaluate through compute and paint around default center origin.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "transform",
+    "rotate",
+    "block-layout",
+    "compute-assertions"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='box'>X</div></body></html>",
+  "css": "@page { size: 4in 2in; margin: 0; } body { margin: 0; background: #fff; font-family: Helvetica, Arial, sans-serif; } .box { margin-left: 1in; margin-top: 0.5in; width: 1in; height: 0.5in; background: rgb(255,0,0); transform: rotate(90deg); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.box",
+        "style": {
+          "display": "Block",
+          "width": "72.000pt",
+          "height": "36.000pt",
+          "transform": "rotate(1.570796rad)"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 160,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 90,
+        "length_tolerance": 2
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 160,
+        "start": 90,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 60,
+        "length_tolerance": 2
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 160,
+        "start": 150,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 330,
+        "length_tolerance": 2
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 120,
+        "y": 160,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "bd00108b9b1ccc34fd77f65134e443df9e305d521f4ed2cea0977156774365bd"
+}

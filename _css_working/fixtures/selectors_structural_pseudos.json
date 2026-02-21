@@ -1,0 +1,189 @@
+{
+  "id": "selectors_structural_pseudos",
+  "description": "Structural pseudo-classes should resolve deterministically across sibling rows.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "selectors",
+    "first-child",
+    "last-child",
+    "nth-child",
+    "not-pseudo"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><section class='page'><div class='row'>One</div><div class='row skip'>Two</div><div class='row'>Three</div><div class='row'>Four</div></section></body></html>",
+  "css": "@page { size: 4in 4in; margin: 0; } body { margin: 0; font-size: 12pt; } .page { width: 4in; height: 4in; } .row { width: 4in; height: 1in; background: rgb(255,255,255); } .row:nth-child(odd) { background: rgb(255,0,0); } .row:first-child { background: rgb(0,0,255); } .row:not(.skip):last-child { background: rgb(0,255,0); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "section.page",
+        "style": {
+          "display": "Block",
+          "width": "288.000pt",
+          "height": "288.000pt"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.row:nth-child(1)",
+        "style": {
+          "display": "Block",
+          "width": "288.000pt",
+          "height": "72.000pt",
+          "background": "#0000ff"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.row.skip:nth-child(2)",
+        "style": {
+          "display": "Block",
+          "width": "288.000pt",
+          "height": "72.000pt",
+          "background": "#ffffff"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.row:nth-child(3)",
+        "style": {
+          "display": "Block",
+          "width": "288.000pt",
+          "height": "72.000pt",
+          "background": "#ff0000"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.row:nth-child(4)",
+        "style": {
+          "display": "Block",
+          "width": "288.000pt",
+          "height": "72.000pt",
+          "background": "#00ff00"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 0,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 180,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 300,
+        "start": 0,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 420,
+        "start": 0,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 240,
+        "y": 60,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 240,
+        "y": 180,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 240,
+        "y": 300,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 240,
+        "y": 420,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "d9ecfbd656a5a1db28d37976ee6a1bde78cc0b549a4a0f430864ef73974af73c"
+}

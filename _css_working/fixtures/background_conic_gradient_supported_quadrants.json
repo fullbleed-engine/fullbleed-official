@@ -1,0 +1,82 @@
+{
+  "id": "background_conic_gradient_supported_quadrants",
+  "description": "Supported conic-gradient should paint deterministic quadrant colors without fallback diagnostics.",
+  "labels": [
+    "full",
+    "paint"
+  ],
+  "required_features": [
+    "gradients",
+    "conic-gradient",
+    "paint"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><section class='x'>Conic support</section></body></html>",
+  "css": "@page { size: 4in 4in; margin: 0; } body { margin: 0; } .x { width: 4in; height: 4in; background: conic-gradient(from 0deg at 50% 50%, red 0%, red 25%, green 25%, green 50%, blue 50%, blue 75%, yellow 75%, yellow 100%); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "section.x",
+        "style": {
+          "display": "Block",
+          "width": "288.000pt",
+          "height": "288.000pt"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 380,
+        "y": 80,
+        "rgba": [
+          137,
+          59,
+          0,
+          255
+        ],
+        "tolerance": 30
+      },
+      {
+        "page": 1,
+        "x": 430,
+        "y": 240,
+        "rgba": [
+          0,
+          127,
+          1,
+          255
+        ],
+        "tolerance": 30
+      },
+      {
+        "page": 1,
+        "x": 380,
+        "y": 380,
+        "rgba": [
+          0,
+          64,
+          128,
+          255
+        ],
+        "tolerance": 30
+      },
+      {
+        "page": 1,
+        "x": 80,
+        "y": 80,
+        "rgba": [
+          255,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 10
+      }
+    ]
+  },
+  "stability_hash": "453e2a57c48a0abd00e625e40b6f8c93024d1d48de8d7bec304b9bd956fc2aac"
+}

@@ -1,0 +1,178 @@
+{
+  "id": "units_min_max_clamp_widths",
+  "description": "Min/max/clamp expressions should resolve deterministic widths for stacked bars.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "values",
+    "min-function",
+    "max-function",
+    "clamp-function",
+    "width-resolution"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='bar b1'>Min</div><div class='bar b2'>Max</div><div class='bar b3'>Clamp</div></body></html>",
+  "css": "@page { size: 4in 3in; margin: 0; } body { margin: 0; font-size: 12pt; } .bar { display: block; height: 1in; } .b1 { width: min(1in, 2in); background: rgb(255,0,0); } .b2 { width: max(1in, 2in); background: rgb(0,255,0); } .b3 { width: clamp(1in, 2in, 3in); background: rgb(0,0,255); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.bar.b1",
+        "style": {
+          "display": "Block",
+          "width": "72.000pt",
+          "height": "72.000pt",
+          "background": "#ff0000"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.bar.b2",
+        "style": {
+          "display": "Block",
+          "width": "144.000pt",
+          "height": "72.000pt",
+          "background": "#00ff00"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.bar.b3",
+        "style": {
+          "display": "Block",
+          "width": "144.000pt",
+          "height": "72.000pt",
+          "background": "#0000ff"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 0,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 180,
+        "start": 0,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 240,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 300,
+        "start": 0,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 240,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 60,
+        "y": 60,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 60,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 180,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 300,
+        "y": 180,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 300,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 300,
+        "y": 300,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "1fa349f6c4db9f77b59ab7fa50ad7eb684e11d38e6350976aea4a666dd23101b"
+}

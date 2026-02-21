@@ -1,0 +1,181 @@
+{
+  "schema": "fullbleed.css_fixture_suite.v1",
+  "ok": true,
+  "summary": {
+    "fixtures_total": 1,
+    "fixtures_passed": 1,
+    "fixtures_failed": 0,
+    "jobs": 1,
+    "selected_labels": []
+  },
+  "fixtures": [
+    {
+      "id": "box_shadow_negative_spread_offset_paints_shrunk_shadow",
+      "path": "_css_working/fixtures/box_shadow_negative_spread_offset_paints_shrunk_shadow.json",
+      "labels": [
+        "full",
+        "paint"
+      ],
+      "description": "Negative spread should shrink the painted shadow geometry instead of being clamped away.",
+      "required_features": [
+        "box-shadow",
+        "paint"
+      ],
+      "expected_warnings": [],
+      "actual_warnings": [],
+      "warnings_ok": true,
+      "stages": {
+        "parser": {
+          "ok": true,
+          "error": null
+        },
+        "compute": {
+          "ok": true,
+          "glyph_report_count": 0,
+          "page_data_present": false,
+          "assertions_enabled": true,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 1,
+            "computed_event_count": 9,
+            "checks": [
+              {
+                "index": 0,
+                "ok": true,
+                "node": "html:nth-child(1) > body:nth-child(2) > section.box:nth-child(1)",
+                "style_mismatches": [],
+                "vars_mismatch": null,
+                "vars_count_mismatch": null
+              }
+            ]
+          }
+        },
+        "layout": {
+          "ok": true,
+          "expected_page_count": 1,
+          "actual_page_count": 1,
+          "dpi": 120,
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
+        "paint": {
+          "ok": true,
+          "checks": [
+            {
+              "page": 1,
+              "x": 150,
+              "y": 150,
+              "expected_rgba": [
+                255,
+                0,
+                0,
+                255
+              ],
+              "actual_rgba": [
+                255,
+                0,
+                0,
+                255
+              ],
+              "tolerance": 8,
+              "ok": true
+            },
+            {
+              "page": 1,
+              "x": 292,
+              "y": 166,
+              "expected_rgba": [
+                0,
+                0,
+                255,
+                255
+              ],
+              "actual_rgba": [
+                0,
+                0,
+                255,
+                255
+              ],
+              "tolerance": 8,
+              "ok": true
+            },
+            {
+              "page": 1,
+              "x": 355,
+              "y": 166,
+              "expected_rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "actual_rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "tolerance": 8,
+              "ok": true
+            },
+            {
+              "page": 1,
+              "x": 24,
+              "y": 24,
+              "expected_rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "actual_rgba": [
+                255,
+                255,
+                255,
+                255
+              ],
+              "tolerance": 8,
+              "ok": true
+            }
+          ]
+        },
+        "diagnostics": {
+          "ok": true,
+          "enabled": true,
+          "details": {
+            "summary_counts_total": {
+              "jit.layout.strategy": 3
+            },
+            "summary_context_count": 3,
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_box_shadow_negative_spread_offset_paints_shrunk_shadow_66768_1771657672203865800.jsonl"
+          }
+        }
+      },
+      "artifacts": {
+        "pdf_bytes": 922,
+        "pdf_sha256": "2f08753ee05f8e0c34d0d1df402a5d2c60c04eb3d83e94fd946a5bd533295320",
+        "image_count": 1,
+        "image_sha256": [
+          "450591e73894c84181d5b3476c00f676812be7bdf1884914a854185511e4540e"
+        ],
+        "stability_hash_expected": null,
+        "stability_hash_actual": "218765d88e20649e731bfc0560be455c52a2426973f9ee81b02422f1f6b6d38f",
+        "stability_hash_ok": true,
+        "emitted": {
+          "dir": "output/css_fixture_artifacts/box_shadow_negative_spread_offset_paints_shrunk_shadow",
+          "pdf": "output/css_fixture_artifacts/box_shadow_negative_spread_offset_paints_shrunk_shadow/output.pdf",
+          "images": [
+            "output/css_fixture_artifacts/box_shadow_negative_spread_offset_paints_shrunk_shadow/output_page1.png"
+          ],
+          "hashes": "output/css_fixture_artifacts/box_shadow_negative_spread_offset_paints_shrunk_shadow/hashes.json",
+          "render_result": "output/css_fixture_artifacts/box_shadow_negative_spread_offset_paints_shrunk_shadow/render_result.json"
+        }
+      },
+      "ok": true
+    }
+  ]
+}

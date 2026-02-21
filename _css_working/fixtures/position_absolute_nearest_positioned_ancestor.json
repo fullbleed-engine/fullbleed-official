@@ -1,0 +1,143 @@
+{
+  "id": "position_absolute_nearest_positioned_ancestor",
+  "description": "Absolute element should use the nearest positioned ancestor as its containing block across static intermediates.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "position",
+    "absolute",
+    "relative",
+    "containing-block"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='cb'><div class='mid'><div class='abs'></div></div></div></body></html>",
+  "css": "@page { size: 4in 2in; margin: 0; } body { margin: 0; background: rgb(255,255,255); } .cb { position: relative; width: 2in; height: 2in; margin-left: 1in; background: rgb(255,0,0); } .mid { width: 1in; height: 1in; margin-left: 1in; margin-top: 0.5in; background: rgb(0,255,0); } .abs { position: absolute; left: 0.25in; top: 0.25in; width: 0.5in; height: 0.5in; background: rgb(0,0,255); z-index: 1; }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.abs",
+        "style": {
+          "position": "Absolute",
+          "inset_left": "18.000pt",
+          "inset_top": "18.000pt",
+          "width": "36.000pt",
+          "height": "36.000pt",
+          "background": "#0000ff"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 30,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 30,
+        "start": 120,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 30,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 30,
+        "start": 150,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 60,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 30,
+        "start": 210,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 150,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 30,
+        "start": 360,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 170,
+        "y": 30,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 290,
+        "y": 30,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "4a87c213af7c8ac28f1a380b85d6eb484f20dea0fbfa94ce537daa6b0ac89391"
+}

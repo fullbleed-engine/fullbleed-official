@@ -1,0 +1,123 @@
+{
+  "id": "custom_property_length_chain_fallback",
+  "description": "Length custom properties should resolve through var chains and var fallbacks for box sizing.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "custom-properties",
+    "length-resolution",
+    "var-chain",
+    "var-fallback"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='row a'>A</div><div class='row b'>B</div></body></html>",
+  "css": "@page { size: 4in 2in; margin: 0; } body { margin: 0; font-size: 12pt; } .row { display: block; height: 1in; color: #fff; } .a { --w: var(--missing, 1in); width: var(--w); background: rgb(255,0,0); } .b { --base: 1in; --chain: var(--base); width: var(--chain); background: rgb(0,0,255); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.row.a",
+        "style": {
+          "width": "72.000pt",
+          "background": "#ff0000"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.row.b",
+        "style": {
+          "width": "72.000pt",
+          "background": "#0000ff"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 0,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 180,
+        "start": 0,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 60,
+        "y": 60,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 60,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 60,
+        "y": 180,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 180,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "aab13998cd319268a7a430e8deda6f7a6db55327e4312b06358ca9d92c361611"
+}

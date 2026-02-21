@@ -1,0 +1,188 @@
+{
+  "id": "selectors_sibling_combinators",
+  "description": "Adjacent and general sibling combinators should target deterministic sibling rows.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "selectors",
+    "adjacent-sibling",
+    "general-sibling",
+    "source-order"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><section class='page'><div class='marker'>M</div><div class='a'>A</div><div class='b'>B</div><div class='c'>C</div></section></body></html>",
+  "css": "@page { size: 4in 4in; margin: 0; } body { margin: 0; font-size: 12pt; } .page { width: 4in; height: 4in; } .page > div { width: 4in; height: 1in; background: rgb(255,255,255); } .page > .marker { background: rgb(0,0,0); } .marker + .a { background: rgb(255,0,0); } .marker ~ .c { background: rgb(0,255,0); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "section.page",
+        "style": {
+          "display": "Block",
+          "width": "288.000pt",
+          "height": "288.000pt"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.marker",
+        "style": {
+          "display": "Block",
+          "width": "288.000pt",
+          "height": "72.000pt",
+          "background": "#000000"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.a",
+        "style": {
+          "display": "Block",
+          "width": "288.000pt",
+          "height": "72.000pt",
+          "background": "#ff0000"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.b",
+        "style": {
+          "display": "Block",
+          "width": "288.000pt",
+          "height": "72.000pt",
+          "background": "#ffffff"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.c",
+        "style": {
+          "display": "Block",
+          "width": "288.000pt",
+          "height": "72.000pt",
+          "background": "#00ff00"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 0,
+        "rgba": [
+          0,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 180,
+        "start": 0,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 300,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 420,
+        "start": 0,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 240,
+        "y": 60,
+        "rgba": [
+          0,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 240,
+        "y": 180,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 240,
+        "y": 300,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 240,
+        "y": 420,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "8e98760c8233b014f8dd93f240525547cf217b4e1f45d0cebb4c4f62f305da50"
+}

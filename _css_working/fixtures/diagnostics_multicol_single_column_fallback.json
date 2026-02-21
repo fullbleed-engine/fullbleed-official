@@ -1,0 +1,59 @@
+{
+  "id": "diagnostics_multicol_single_column_fallback",
+  "description": "Multi-column properties should deterministically degrade to single-column layout with explicit known-loss diagnostics.",
+  "labels": [
+    "full",
+    "diagnostics"
+  ],
+  "required_features": [
+    "multi-column",
+    "fallback-policy",
+    "diagnostics"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><section class='x'>Line 1<br/>Line 2<br/>Line 3<br/>Line 4<br/>Line 5</section></body></html>",
+  "css": "@page { size: 4in 4in; margin: 0; } body { margin: 0; } .x { width: 4in; height: 4in; background: rgb(255,0,0); columns: 2 1in; column-count: 2; column-width: 1in; column-fill: auto; column-span: all; column-rule: 1px solid rgb(0,0,0); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "section.x",
+        "style": {
+          "display": "Block",
+          "width": "288.000pt",
+          "height": "288.000pt",
+          "background": "#ff0000"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 200,
+        "y": 200,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "expected_diagnostics": {
+    "summary_count_at_least": {
+      "jit.known_loss.multicol_single_column_fallback": 1
+    },
+    "event_contains": [
+      {
+        "type": "jit.known_loss",
+        "code": "MULTICOL_SINGLE_COLUMN_FALLBACK",
+        "property": "column-count"
+      }
+    ]
+  },
+  "stability_hash": "99a9674b962d46d60ff461b0525d2414bfd52e3655ed2dcda6a4dd702775e033"
+}

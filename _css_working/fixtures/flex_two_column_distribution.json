@@ -1,0 +1,113 @@
+{
+  "id": "flex_two_column_distribution",
+  "description": "Flex row with two equal flex items should distribute space evenly left/right.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "flexbox",
+    "flex-grow",
+    "flex-basis",
+    "layout-distribution"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><section class='row'><div class='cell a'>A</div><div class='cell b'>B</div></section></body></html>",
+  "css": "@page { size: 4in 4in; margin: 0; } body { margin: 0; font-family: Helvetica, Arial, sans-serif; } .row { display: flex; width: 4in; height: 4in; align-items: stretch; } .cell { flex: 1 1 0; height: 4in; } .a { background: rgb(255,0,0); } .b { background: rgb(0,255,0); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "section.row",
+        "style": {
+          "display": "Flex",
+          "width": "288.000pt",
+          "height": "288.000pt",
+          "gap": "0.000pt"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.cell.a",
+        "style": {
+          "background": "#ff0000",
+          "flex_basis": "0.000pt",
+          "flex_grow": 1.0,
+          "flex_shrink": 1.0
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.cell.b",
+        "style": {
+          "background": "#00ff00",
+          "flex_basis": "0.000pt",
+          "flex_grow": 1.0,
+          "flex_shrink": 1.0
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 180,
+        "start": 0,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 240,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 180,
+        "start": 240,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 240,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 120,
+        "y": 180,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 10
+      },
+      {
+        "page": 1,
+        "x": 360,
+        "y": 180,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 10
+      }
+    ]
+  },
+  "stability_hash": "7126c5bc8faabe1e3dd95b2afb27d27daa2b6b46fae636dc0302cc39d30c3ce2"
+}

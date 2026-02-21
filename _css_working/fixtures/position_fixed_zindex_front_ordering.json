@@ -1,0 +1,134 @@
+{
+  "id": "position_fixed_zindex_front_ordering",
+  "description": "Fixed overlays with higher z-index should paint above lower fixed overlays in deterministic order.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "position",
+    "fixed",
+    "z-index"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='low'>L</div><div class='high'>H</div><section class='page'><p>Page one</p></section></body></html>",
+  "css": "@page { size: 4in 4in; margin: 0; } body { margin: 0; font-family: Helvetica, Arial, sans-serif; } .low { position: fixed; left: 0; top: 0; width: 2in; height: 2in; background: rgb(0,0,255); z-index: 1; } .high { position: fixed; left: 0; top: 0; width: 1in; height: 1in; background: rgb(255,0,0); z-index: 2; } .page { width: 4in; height: 4in; background: rgb(0,255,0); } p { margin: 0; font-size: 12pt; color: #fff; }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.low",
+        "style": {
+          "position": "Fixed",
+          "inset_left": "0.000pt",
+          "inset_top": "0.000pt",
+          "width": "144.000pt",
+          "height": "144.000pt",
+          "background": "#0000ff"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.high",
+        "style": {
+          "position": "Fixed",
+          "inset_left": "0.000pt",
+          "inset_top": "0.000pt",
+          "width": "72.000pt",
+          "height": "72.000pt",
+          "background": "#ff0000"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 0,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 120,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 240,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 240,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 60,
+        "y": 60,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 60,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 300,
+        "y": 300,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "9c14707dcc93b3c250b5a4c2463e3fee5dfd1d96b864a4cfd7d2d3dcbf601912"
+}

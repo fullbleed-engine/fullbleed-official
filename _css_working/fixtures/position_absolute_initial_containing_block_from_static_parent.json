@@ -1,0 +1,138 @@
+{
+  "id": "position_absolute_initial_containing_block_from_static_parent",
+  "description": "Absolute child under static parent should fall back to initial containing block, not parent padding box.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "position",
+    "absolute",
+    "initial-containing-block"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='host'><div class='abs'></div></div></body></html>",
+  "css": "@page { size: 4in 2in; margin: 0; } body { margin: 0; background: rgb(255,255,255); } .host { width: 2in; height: 2in; margin-left: 1in; background: rgb(255,0,0); } .abs { position: absolute; left: 0; top: 0; width: 0.5in; height: 0.5in; background: rgb(0,0,255); z-index: 1; }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.abs",
+        "style": {
+          "position": "Absolute",
+          "inset_left": "0.000pt",
+          "inset_top": "0.000pt",
+          "width": "36.000pt",
+          "height": "36.000pt",
+          "background": "#0000ff"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 30,
+        "start": 0,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 60,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 30,
+        "start": 60,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 60,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 30,
+        "start": 120,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 240,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 30,
+        "start": 360,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 30,
+        "y": 30,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 90,
+        "y": 30,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 30,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "ece31850cb73b7b833849eee24fec92546edda90247a91abf3b103c468232ad4"
+}

@@ -1,0 +1,61 @@
+{
+  "id": "diagnostics_filters_effects_fallback",
+  "description": "Unsupported filters/effects/compositing declarations should keep deterministic paint and emit explicit known-loss diagnostics.",
+  "labels": [
+    "full",
+    "diagnostics"
+  ],
+  "required_features": [
+    "filters",
+    "effects",
+    "compositing",
+    "fallback-policy",
+    "diagnostics"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><section class='x'>Effects fallback</section></body></html>",
+  "css": "@page { size: 4in 4in; margin: 0; } body { margin: 0; } .x { width: 4in; height: 4in; background: rgb(255,0,0); opacity: 0.5; filter: blur(2px); backdrop-filter: blur(1px); mix-blend-mode: multiply; isolation: isolate; }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "section.x",
+        "style": {
+          "display": "Block",
+          "width": "288.000pt",
+          "height": "288.000pt",
+          "background": "#ff0000"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 200,
+        "y": 200,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "expected_diagnostics": {
+    "summary_count_at_least": {
+      "jit.known_loss.filters_effects_fallback": 1
+    },
+    "event_contains": [
+      {
+        "type": "jit.known_loss",
+        "code": "FILTERS_EFFECTS_FALLBACK",
+        "property": "opacity"
+      }
+    ]
+  },
+  "stability_hash": "fd5706af4a44a948b8572e07189bdc7a5d0c33039414400a0363f91d746df9d5"
+}

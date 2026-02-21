@@ -1,0 +1,77 @@
+{
+  "id": "diagnostics_unsupported_media_and_no_effect",
+  "description": "Debug diagnostics should report unsupported media evaluation and parsed-no-effect declarations.",
+  "labels": [
+    "full",
+    "diagnostics"
+  ],
+  "required_features": [
+    "diagnostics",
+    "media-query",
+    "known-loss"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><section class='x'>Diagnostics fixture</section></body></html>",
+  "css": "@page { size: 4in 4in; margin: 0; } @media (hover: hover) { .x { color: rgb(255,0,0); } } .x { width: 4in; height: 4in; background: rgb(0,0,255); vendor-unknown-prop: 12px; display: grid; grid-template-rows: 1fr 1fr; }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "section.x",
+        "style": {
+          "display": "Grid",
+          "width": "288.000pt",
+          "height": "288.000pt",
+          "background": "#0000ff"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 200,
+        "start": 0,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 200,
+        "y": 200,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "expected_diagnostics": {
+    "summary_count_at_least": {
+      "css.media.unsupported": 1,
+      "jit.known_loss.declaration_parsed_no_effect": 1
+    },
+    "event_contains": [
+      {
+        "type": "jit.known_loss",
+        "code": "DECLARATION_PARSED_NO_EFFECT"
+      }
+    ]
+  },
+  "stability_hash": "31980b157c923268718a4b2e6829e55c05833a4d447c193f23670105d3076586"
+}

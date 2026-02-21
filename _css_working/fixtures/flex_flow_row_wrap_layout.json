@@ -1,0 +1,159 @@
+{
+  "id": "flex_flow_row_wrap_layout",
+  "description": "flex-flow: row wrap should enable wrapping and preserve deterministic flex row ordering.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "flexbox",
+    "flex-flow-shorthand",
+    "flex-wrap-layout"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><section class='row'><div class='cell a'>A</div><div class='cell b'>B</div><div class='cell c'>C</div><div class='cell d'>D</div></section></body></html>",
+  "css": "@page { size: 4in 4in; margin: 0; } body { margin: 0; font-family: Helvetica, Arial, sans-serif; } .row { display: flex; flex-flow: row wrap; width: 2in; height: 2in; } .cell { flex-grow: 0; flex-shrink: 0; flex-basis: 1in; width: 1in; height: 1in; } .a { background: rgb(255,0,0); } .b { background: rgb(0,255,0); } .c { background: rgb(0,0,255); } .d { background: rgb(255,255,0); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "section.row",
+        "style": {
+          "display": "Flex",
+          "width": "144.000pt",
+          "height": "144.000pt",
+          "flex_direction": "Row",
+          "flex_wrap": "Wrap"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.cell.a",
+        "style": {
+          "background": "#ff0000",
+          "flex_basis": "72.000pt",
+          "flex_grow": 0.0,
+          "flex_shrink": 0.0
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 0,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 120,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 180,
+        "start": 0,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 180,
+        "start": 120,
+        "rgba": [
+          255,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 120,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 60,
+        "y": 60,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 10
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 60,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 10
+      },
+      {
+        "page": 1,
+        "x": 60,
+        "y": 180,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 10
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 180,
+        "rgba": [
+          255,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 10
+      }
+    ]
+  },
+  "stability_hash": "0cf0a20e842e34511c1216c4f340a7a84ce7ea54e3a83b7b60aa82321280050d"
+}

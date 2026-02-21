@@ -1,0 +1,128 @@
+{
+  "id": "custom_property_calc_var_additive_mixed_lengths",
+  "description": "Custom-property calc additive expressions should resolve through pending var paths with mixed units.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "custom-properties",
+    "calc-function",
+    "length-resolution",
+    "mixed-units",
+    "var-resolution"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='bar a'>A</div><div class='bar b'>B</div></body></html>",
+  "css": "@page { size: 4in 3in; margin: 0; } body { margin: 0; font-size: 12pt; } .bar { display: block; height: 1in; } .a { --half: 50%; width: calc(var(--half) + 12pt); background: rgb(255,0,0); } .b { --offset: 24pt; width: calc(100% - var(--offset)); background: rgb(0,255,0); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.bar.a",
+        "style": {
+          "display": "Block",
+          "width": "calc(12.000pt + 50.000% + 0.000em + 0.000rem)",
+          "height": "72.000pt",
+          "background": "#ff0000"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.bar.b",
+        "style": {
+          "display": "Block",
+          "width": "calc(-24.000pt + 100.000% + 0.000em + 0.000rem)",
+          "height": "72.000pt",
+          "background": "#00ff00"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 0,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 260,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 180,
+        "start": 0,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 440,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 240,
+        "y": 60,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 300,
+        "y": 60,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 420,
+        "y": 180,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 450,
+        "y": 180,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "c912fb29b30d035b6156f1e9db54c15e188603b7f5b4712258b0a15bb515df45"
+}

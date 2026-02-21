@@ -1,0 +1,81 @@
+{
+  "id": "box_shadow_negative_spread_offset_paints_shrunk_shadow",
+  "description": "Negative spread should shrink the painted shadow geometry instead of being clamped away.",
+  "labels": [
+    "full",
+    "paint"
+  ],
+  "required_features": [
+    "box-shadow",
+    "paint"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><section class='box'>X</section></body></html>",
+  "css": "@page { size: 4in 4in; margin: 0; } body { margin: 0; background: #d9d9d9; } .box { width: 120pt; height: 120pt; margin: 40pt; background: #ff0000; box-shadow: 50pt 0 0 -20pt rgba(0, 0, 255, 1); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "section.box",
+        "style": {
+          "display": "Block",
+          "width": "120.000pt",
+          "height": "120.000pt"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 150,
+        "y": 150,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 292,
+        "y": 166,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 355,
+        "y": 166,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 24,
+        "y": 24,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "218765d88e20649e731bfc0560be455c52a2426973f9ee81b02422f1f6b6d38f"
+}

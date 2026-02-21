@@ -1,0 +1,65 @@
+{
+  "id": "custom_property_fallback_chain",
+  "description": "Custom property fallback chain should resolve to nested fallback value.",
+  "labels": [
+    "fast",
+    "full"
+  ],
+  "required_features": [
+    "custom-properties",
+    "var-fallback",
+    "nested-fallback"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><section class='page'>Var fallback</section></body></html>",
+  "css": "@page { size: 4in 4in; margin: 0; } body { margin: 0; } .page { width: 4in; height: 4in; --brand: rgb(0,0,255); background: var(--missing, var(--brand, rgb(255,0,0))); color: #fff; }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "section.page",
+        "style": {
+          "display": "Block",
+          "width": "288.000pt",
+          "height": "288.000pt",
+          "background": "#0000ff"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 200,
+        "start": 0,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 200,
+        "y": 200,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "099e9cb338035db65f7ca088ae66f6308ff1d192493d9979139ace56938275d1"
+}

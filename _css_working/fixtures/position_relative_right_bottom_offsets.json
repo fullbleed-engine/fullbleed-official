@@ -1,0 +1,143 @@
+{
+  "id": "position_relative_right_bottom_offsets",
+  "description": "position:relative right/bottom should shift paint left/up while preserving flow slot.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "position",
+    "relative",
+    "right",
+    "bottom"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='box a'>A</div><div class='box b'>B</div></body></html>",
+  "css": "@page { size: 4in 3in; margin: 0; } body { margin: 0; font-family: Helvetica, Arial, sans-serif; } .box { width: 1in; height: 0.5in; } .a { background: rgb(255,0,0); } .b { margin-left: 2in; margin-top: 1in; position: relative; right: 1in; bottom: 0.5in; background: rgb(0,255,0); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.box.b",
+        "style": {
+          "position": "Relative",
+          "width": "72.000pt",
+          "height": "36.000pt",
+          "inset_right": "72.000pt",
+          "inset_bottom": "36.000pt",
+          "background": "#00ff00"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 30,
+        "start": 0,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 30,
+        "start": 120,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 360,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 150,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 150,
+        "start": 120,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 150,
+        "start": 240,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 240,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 60,
+        "y": 30,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 10
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 150,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 10
+      }
+    ]
+  },
+  "stability_hash": "6d8344443452972255e63e16d28d91eb7424630df34f79cb3c7d448094ae3473"
+}

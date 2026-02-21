@@ -1,0 +1,169 @@
+{
+  "id": "flex_place_self_item_override",
+  "description": "place-self should map to align-self semantics for item-level flex cross-axis override.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "flexbox",
+    "place-self",
+    "align-self"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><section class='row'><div class='cell a'>A</div><div class='cell b'>B</div></section></body></html>",
+  "css": "@page { size: 4in 2in; margin: 0; } body { margin: 0; font-family: Helvetica, Arial, sans-serif; } .row { display: flex; width: 2in; height: 2in; align-items: flex-start; } .cell { flex-grow: 0; flex-shrink: 0; flex-basis: 1in; width: 1in; height: 0.5in; } .a { background: rgb(255,0,0); } .b { background: rgb(0,255,0); place-self: flex-end center; }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "section.row",
+        "style": {
+          "display": "Flex",
+          "align_items": "FlexStart"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "div.cell.b",
+        "style": {
+          "align_self": "FlexEnd"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 30,
+        "start": 0,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 30,
+        "start": 120,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 360,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 210,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 210,
+        "start": 120,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 210,
+        "start": 240,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 240,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 60,
+        "y": 30,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 10
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 30,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 10
+      },
+      {
+        "page": 1,
+        "x": 60,
+        "y": 210,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 10
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 210,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 10
+      }
+    ]
+  },
+  "stability_hash": "3da2faa3308a8f2cb758db42c55b19e45ade76566b47c7b48cd256a8c8918b17"
+}

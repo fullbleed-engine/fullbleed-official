@@ -1,0 +1,51 @@
+{
+  "id": "fragmentation_long_paragraph",
+  "description": "Long paragraph should fragment across multiple pages in deterministic page count.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "fragmentation",
+    "paragraph-split",
+    "widows-orphans"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><p class='lines'>Line 01<br/>Line 02<br/>Line 03<br/>Line 04<br/>Line 05<br/>Line 06<br/>Line 07<br/>Line 08<br/>Line 09<br/>Line 10<br/>Line 11<br/>Line 12<br/>Line 13<br/>Line 14<br/>Line 15<br/>Line 16<br/>Line 17<br/>Line 18<br/>Line 19<br/>Line 20<br/>Line 21<br/>Line 22<br/>Line 23<br/>Line 24<br/>Line 25<br/>Line 26<br/>Line 27<br/>Line 28<br/>Line 29<br/>Line 30<br/>Line 31<br/>Line 32<br/>Line 33<br/>Line 34<br/>Line 35<br/>Line 36<br/>Line 37<br/>Line 38<br/>Line 39<br/>Line 40<br/>Line 41<br/>Line 42<br/>Line 43<br/>Line 44<br/>Line 45<br/>Line 46<br/>Line 47<br/>Line 48<br/>Line 49<br/>Line 50<br/>Line 51<br/>Line 52<br/>Line 53<br/>Line 54<br/>Line 55<br/>Line 56<br/>Line 57<br/>Line 58<br/>Line 59<br/>Line 60</p></body></html>",
+  "css": "@page { size: 4in 4in; margin: 0; } body { margin: 0; font-family: Helvetica, Arial, sans-serif; } .lines { margin: 0; font-size: 12pt; line-height: 12pt; orphans: 2; widows: 2; }",
+  "expected": {
+    "page_count": 5,
+    "compute_assertions": [
+      {
+        "node_contains": "p.lines",
+        "style": {
+          "display": "Block",
+          "font_size": 12.0,
+          "line_height": 12.0,
+          "margin": "0.000pt 0.000pt 0.000pt 0.000pt"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 5,
+        "axis": "x",
+        "fixed": 470,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": []
+  },
+  "stability_hash": "c0d7fc2d24df43df820928d8ac66b148a34510fdad0acf9db9a009fea3954587"
+}

@@ -1,0 +1,159 @@
+{
+  "id": "position_relative_offset_preserves_flow_slot",
+  "description": "position:relative offsets should shift paint while preserving normal flow space.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "position",
+    "relative",
+    "left",
+    "top"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='box a'>A</div><div class='box b'>B</div></body></html>",
+  "css": "@page { size: 4in 2.4in; margin: 0; } body { margin: 0; font-family: Helvetica, Arial, sans-serif; } .box { width: 1in; height: 0.6in; } .a { background: rgb(255,0,0); } .b { position: relative; left: 1in; top: 0.9in; background: rgb(0,255,0); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.box.b",
+        "style": {
+          "position": "Relative",
+          "width": "72.000pt",
+          "height": "43.200pt",
+          "inset_left": "72.000pt",
+          "inset_top": "64.800pt",
+          "background": "#00ff00"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 30,
+        "start": 0,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 30,
+        "start": 120,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 360,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 90,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 480,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 200,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 200,
+        "start": 120,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 200,
+        "start": 240,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 240,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 60,
+        "y": 36,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 10
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 216,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 10
+      }
+    ]
+  },
+  "stability_hash": "c6bea22d619062125e572d62bf0ec098a339f313ec45923c5572302c9d4c3f81"
+}

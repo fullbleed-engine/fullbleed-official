@@ -1,0 +1,77 @@
+{
+  "id": "custom_property_calc_var_percent_width",
+  "description": "Pending var length resolution should handle calc(var(--x) * 1%) and produce percent widths.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "custom-properties",
+    "calc-function",
+    "length-resolution",
+    "var-resolution"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='bar'>PCT</div></body></html>",
+  "css": "@page { size: 4in 2in; margin: 0; } body { margin: 0; font-size: 12pt; } .bar { --pct: 60; display: block; width: calc(var(--pct) * 1%); height: 2in; background: rgb(255,0,0); color: #000; }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.bar",
+        "style": {
+          "display": "Block",
+          "width": "60.000%",
+          "height": "144.000pt",
+          "background": "#ff0000"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 120,
+        "start": 0,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 288,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 80,
+        "y": 120,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 360,
+        "y": 120,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "01109ac8c428cec5f31f0ee17b90b92bfd2deaa395e8f07b7c832a869fdab6bf"
+}

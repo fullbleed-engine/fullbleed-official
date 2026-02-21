@@ -1,0 +1,102 @@
+{
+  "id": "table_header_repeat_across_pages",
+  "description": "Table header row should repeat on each fragmented page in deterministic table pagination.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "tables",
+    "fragmentation",
+    "thead-repeat",
+    "pagination"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><table class='t'><thead><tr><th><div class='hbox'>H</div></th></tr></thead><tbody><tr><td><div class='rowbox r1'>R1</div></td></tr><tr><td><div class='rowbox r2'>R2</div></td></tr><tr><td><div class='rowbox r3'>R3</div></td></tr></tbody></table></body></html>",
+  "css": "@page { size: 4in 2in; margin: 0; } body { margin: 0; font-family: Helvetica, Arial, sans-serif; } table.t { width: 4in; border-collapse: collapse; } .hbox { height: 0.5in; background: rgb(0,0,255); color: rgb(255,255,255); font-size: 14pt; } .rowbox { height: 0.75in; color: rgb(0,0,0); font-size: 12pt; } .r1 { background: rgb(255,0,0); } .r2 { background: rgb(0,255,0); } .r3 { background: rgb(255,255,0); }",
+  "expected": {
+    "page_count": 2,
+    "compute_assertions": [
+      {
+        "node_contains": "thead:nth-child(1) > tr:nth-child(1) > th:nth-child(1)",
+        "style": {
+          "display": "Block"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 30,
+        "start": 0,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 480,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 2,
+        "axis": "x",
+        "fixed": 30,
+        "start": 0,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 10,
+        "expected_length": 480,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 20,
+        "y": 20,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 10
+      },
+      {
+        "page": 2,
+        "x": 20,
+        "y": 20,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 10
+      },
+      {
+        "page": 2,
+        "x": 20,
+        "y": 120,
+        "rgba": [
+          255,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 10
+      }
+    ]
+  },
+  "stability_hash": "ac5b3b1dbc8cbaad359b3b1dbcb32c6e5184a662682e508ec09f3fd42e03199f"
+}

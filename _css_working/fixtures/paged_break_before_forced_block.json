@@ -1,0 +1,89 @@
+{
+  "id": "paged_break_before_forced_block",
+  "description": "page-break-before:always on a later block should force deterministic pagination even when remaining page space exists.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "paged-media",
+    "break-before",
+    "pagination"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><section class='a'>Page one</section><section class='b'>Page two</section></body></html>",
+  "css": "@page { size: 4in 4in; margin: 0; } body { margin: 0; font-family: Helvetica, Arial, sans-serif; } .a, .b { width: 4in; height: 2in; color: rgb(255,255,255); font-size: 20pt; } .a { background: rgb(255,0,0); } .b { background: rgb(0,255,0); page-break-before: always; }",
+  "expected": {
+    "page_count": 2,
+    "compute_assertions": [
+      {
+        "node_contains": "section.b",
+        "style": {
+          "background": "#00ff00"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 200,
+        "start": 0,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 2,
+        "axis": "x",
+        "fixed": 200,
+        "start": 0,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 20,
+        "y": 20,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 2,
+        "x": 20,
+        "y": 20,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "dd7a3dfa5f28c50b9c2008a7ed7b8ec36ce735d8577d0c172632b9b824c1256e"
+}

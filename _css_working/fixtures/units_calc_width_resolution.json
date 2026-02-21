@@ -1,0 +1,76 @@
+{
+  "id": "units_calc_width_resolution",
+  "description": "Calc expression should resolve deterministic absolute width for layout and paint.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "values",
+    "calc-function",
+    "width-resolution"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='bar'>Calc width</div></body></html>",
+  "css": "@page { size: 4in 1in; margin: 0; } body { margin: 0; font-size: 12pt; } .bar { display: block; height: 1in; width: calc(2in - 1in); background: rgb(0,0,255); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.bar",
+        "style": {
+          "display": "Block",
+          "width": "72.000pt",
+          "height": "72.000pt",
+          "background": "#0000ff"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 60,
+        "start": 0,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 60,
+        "y": 60,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 180,
+        "y": 60,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "5b8dc027acf9c8cd1f1d25445c38c6ce56c60db8139d3842edeb5faf4873a709"
+}

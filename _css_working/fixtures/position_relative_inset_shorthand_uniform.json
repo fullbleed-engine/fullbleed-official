@@ -1,0 +1,117 @@
+{
+  "id": "position_relative_inset_shorthand_uniform",
+  "description": "position:relative inset shorthand should map to top/right/bottom/left offsets.",
+  "labels": [
+    "full"
+  ],
+  "required_features": [
+    "position",
+    "relative",
+    "inset",
+    "shorthand"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><div class='box'>I</div></body></html>",
+  "css": "@page { size: 4in 2in; margin: 0; } body { margin: 0; font-family: Helvetica, Arial, sans-serif; } .box { position: relative; inset: 1in; width: 1in; height: 1in; background: rgb(0,0,255); }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "div.box",
+        "style": {
+          "position": "Relative",
+          "inset_left": "72.000pt",
+          "inset_top": "72.000pt",
+          "inset_right": "72.000pt",
+          "inset_bottom": "72.000pt",
+          "width": "72.000pt",
+          "height": "72.000pt",
+          "background": "#0000ff"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 40,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 480,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 160,
+        "start": 0,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 160,
+        "start": 120,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 160,
+        "start": 240,
+        "rgba": [
+          255,
+          255,
+          255,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 240,
+        "length_tolerance": 1
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 180,
+        "y": 160,
+        "rgba": [
+          0,
+          0,
+          255,
+          255
+        ],
+        "tolerance": 8
+      }
+    ]
+  },
+  "stability_hash": "8833c30274c1dcf700b87385a869203b9dfd6feb11864cc268a56a7620d2aad7"
+}
