@@ -31,6 +31,7 @@ This README is the canonical usage guide for:
 Additional focused references are in `docs/`:
 
 - `docs/install-non-technical.md` (step-by-step setup for non-technical users)
+- `docs/css-coverage.md` (validated CSS coverage, parity status, and active gaps)
 - `docs/README.md`
 - `docs/engine.md`
 - `docs/python-api.md`
@@ -71,7 +72,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-0.2.7-cp311-cp311-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-0.5.0-cp311-cp311-win_amd64.whl
 ```
 
 Platform artifact policy:
@@ -600,7 +601,7 @@ Notes:
 - Barcode packages in the remote registry are currently OFL-1.1 families from Google Fonts (`Libre Barcode`).
 - USPS IMB fonts are not currently auto-installable via `assets install`; use local vetted font files and track licensing separately.
 
-## Bootstrap Vendoring + Coverage
+## Bootstrap Vendoring
 
 Bootstrap builtin package details:
 
@@ -620,32 +621,36 @@ Bootstrap Icons builtin package details:
 - License: `MIT`
 - License source: `https://raw.githubusercontent.com/twbs/icons/v1.11.3/LICENSE`
 
-Transactional-document coverage status:
+Bootstrap notes:
 
-- `[sat]` Bootstrap is vendored and installable through the asset pipeline.
-- `[sat]` Current Bootstrap preflight pass set is suitable for static transactional PDF workflows.
-- `[sat]` Bootstrap CSS is consumed as an explicit asset (`--asset @bootstrap` or `AssetBundle`); external HTML `<link rel="stylesheet">` is not the execution path.
-- Evidence source: `bootstrap_preflight.md` (visual pass dated `2026-02-10`).
+- Bootstrap is vendored and installable through the asset pipeline.
+- Bootstrap CSS is consumed as an explicit local asset (`--asset @bootstrap` or `AssetBundle`); external HTML `<link rel="stylesheet">` is not an execution path.
+- Bootstrap preflight examples remain useful smoke examples, but they are not the canonical source of CSS parity claims.
 
-Current `[pass]` fixtures from Bootstrap preflight:
+## Validated CSS Coverage
 
-| Feature | Status | Evidence |
-| --- | --- | --- |
-| `components/pagination` | [pass] | `examples/bootstrap5/out/components_pagination_component_page1.png` |
-| `content/inline_styles` | [pass] | `examples/bootstrap5/out/content_inline_styles_component_page1.png` |
-| `content/tables` | [pass] | `examples/bootstrap5/out/content_tables_component_page1.png` |
-| `content/typography` | [pass] | `examples/bootstrap5/out/content_typography_component_page1.png` |
-| `helpers/text_truncation` | [pass] | `examples/bootstrap5/out/helpers_text_truncation_component_page1.png` |
-| `layout/bank_statement` | [pass] | `examples/bootstrap5/out/layout_bank_statement_component_page1.png` |
-| `layout/breakpoints` | [pass] | `examples/bootstrap5/out/layout_breakpoints_component_page1.png` |
-| `layout/columns` | [pass] | `examples/bootstrap5/out/layout_columns_component_page1.png` |
-| `layout/containers` | [pass] | `examples/bootstrap5/out/layout_containers_component_page1.png` |
-| `layout/grid` | [pass] | `examples/bootstrap5/out/layout_grid_component_page1.png` |
-| `layout/gutters` | [pass] | `examples/bootstrap5/out/layout_gutters_component_page1.png` |
-| `layout/layout_and_utility` | [pass] | `examples/bootstrap5/out/layout_layout_and_utility_component_page1.png` |
-| `utilities/text_decoration` | [pass] | `examples/bootstrap5/out/utilities_text_decoration_component_page1.png` |
-| `utilities/utilities` | [pass] | `examples/bootstrap5/out/utilities_utilities_component_page1.png` |
-| `utilities/z_index` | [pass] | `examples/bootstrap5/out/utilities_z_index_component_page1.png` |
+For the full, maintained coverage statement, see `docs/css-coverage.md`.
+
+Summary as of February 21, 2026:
+
+- Tracked CSS modules: `22`
+- Module state: `22/22 in_progress`
+- Full CSS fixture lane: `85/85` passing
+- Parity status check: green (`tools/generate_css_parity_status.py --check --json`)
+- Canonical validation artifact: `_css_working/css_parity_status.json`
+- Canonical validation artifact: `_css_working/tmp/fixture_full_latest.json`
+- Canonical validation artifact: `_css_working/css_broad_coverage_sprint_s14.md`
+
+Current validated behavior includes first-class parser -> evaluator -> calculator -> layout/paint coverage across broad static-document CSS domains (values math, layout primitives, pagination/fragmentation baselines, transforms phase-1, gradient/effects subsets, and deterministic diagnostics).
+
+Known gap categories are explicitly tracked for the final parity push:
+
+- filter/backdrop-filter function breadth beyond current subset
+- clip-path shapes beyond `inset(...)`
+- blend-mode and isolation breadth
+- multi-shadow list semantics
+- multi-layer background compositing
+- table layout edge semantics hardening
 
 ## `run` Command (Python Factory Interop)
 

@@ -3912,6 +3912,70 @@ mod tests {
     }
 
     #[test]
+    fn html_table_layout_fixed_ignores_later_row_intrinsic_pressure() {
+        let html = r#"
+            <!doctype html>
+            <html>
+              <body>
+                <table class="t">
+                  <tr><td>ROW1_LEFT</td><td>ROW1_RIGHT</td></tr>
+                  <tr><td>SUPERCALIFRAGILISTICEXTRAORDINARILYLONGTOKEN</td><td>R2</td></tr>
+                </table>
+              </body>
+            </html>
+        "#;
+        let css_fixed = r#"
+            @page { size: 4in 4in; margin: 0.25in; }
+            body { margin: 0; font-size: 12px; line-height: 1.2; }
+            table.t { border-collapse: collapse; width: 300px; table-layout: fixed; }
+            table.t td { border: 0; padding: 0; }
+        "#;
+        let css_auto = r#"
+            @page { size: 4in 4in; margin: 0.25in; }
+            body { margin: 0; font-size: 12px; line-height: 1.2; }
+            table.t { border-collapse: collapse; width: 300px; table-layout: auto; }
+            table.t td { border: 0; padding: 0; }
+        "#;
+
+        let engine = FullBleed::builder().build().expect("engine");
+
+        let doc_fixed = engine
+            .render_to_document(html, css_fixed)
+            .expect("render fixed document");
+        let page_fixed = doc_fixed.pages.first().expect("fixed page");
+        let mut right_fixed_x: Option<Pt> = None;
+        for cmd in &page_fixed.commands {
+            if let Command::DrawString { text, x, .. } = cmd {
+                if text == "R2" {
+                    right_fixed_x = Some(*x);
+                }
+            }
+        }
+        let right_fixed_x = right_fixed_x.expect("expected R2 draw command in fixed layout");
+
+        let doc_auto = engine
+            .render_to_document(html, css_auto)
+            .expect("render auto document");
+        let page_auto = doc_auto.pages.first().expect("auto page");
+        let mut right_auto_x: Option<Pt> = None;
+        for cmd in &page_auto.commands {
+            if let Command::DrawString { text, x, .. } = cmd {
+                if text == "R2" {
+                    right_auto_x = Some(*x);
+                }
+            }
+        }
+        let right_auto_x = right_auto_x.expect("expected R2 draw command in auto layout");
+
+        assert!(
+            right_auto_x > right_fixed_x + Pt::from_f32(15.0),
+            "expected fixed layout to keep the right column further left than auto layout, fixed={} auto={}",
+            right_fixed_x.to_f32(),
+            right_auto_x.to_f32()
+        );
+    }
+
+    #[test]
     fn list_item_block_children_preserve_vertical_flow() {
         let html = r#"
             <!doctype html>

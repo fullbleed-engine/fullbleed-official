@@ -1,16 +1,17 @@
 use crate::canvas::{Command, Document};
 use crate::error::FullBleedError;
 use crate::font::FontRegistry;
-use crate::types::{Color, Pt, Shading, ShadingStop};
+use crate::flowable::PaintFilterSpec;
+use crate::types::{Color, MixBlendMode, Pt, Shading, ShadingStop};
 use base64::Engine;
 use rustybuzz::{Direction as HbDirection, Face as HbFace, UnicodeBuffer};
 use std::collections::HashMap;
 use std::path::Path as FsPath;
 use std::sync::{Arc, Mutex, OnceLock};
 use tiny_skia::{
-    FillRule, FilterQuality, GradientStop, LineCap, LineJoin, LinearGradient, Mask, Paint, Path,
-    PathBuilder, Pixmap, PixmapPaint, Point, RadialGradient, Rect, Shader, SpreadMode, Stroke,
-    StrokeDash, Transform,
+    BlendMode as SkBlendMode, FillRule, FilterQuality, GradientStop, LineCap, LineJoin,
+    LinearGradient, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Point, RadialGradient,
+    Rect, Shader, SpreadMode, Stroke, StrokeDash, Transform,
 };
 use ttf_parser::{GlyphId, OutlineBuilder};
 
@@ -27,6 +28,7 @@ struct RasterState {
     dash_phase: Pt,
     fill_opacity: f32,
     stroke_opacity: f32,
+    blend_mode: MixBlendMode,
     font_name: String,
     font_size: Pt,
     clip_mask: Option<Mask>,
@@ -46,6 +48,7 @@ impl Default for RasterState {
             dash_phase: Pt::ZERO,
             fill_opacity: 1.0,
             stroke_opacity: 1.0,
+            blend_mode: MixBlendMode::Normal,
             font_name: "Helvetica".to_string(),
             font_size: Pt::from_f32(12.0),
             clip_mask: None,
@@ -186,6 +189,30 @@ fn render_commands(
             Command::SetOpacity { fill, stroke } => {
                 state.fill_opacity = fill.clamp(0.0, 1.0);
                 state.stroke_opacity = stroke.clamp(0.0, 1.0);
+            }
+            Command::SetBlendMode { mode } => {
+                state.blend_mode = *mode;
+            }
+            Command::ApplyBackdropFilter {
+                x,
+                y,
+                width,
+                height,
+                radius,
+                filter,
+            } => {
+                apply_backdrop_filter(
+                    pixmap,
+                    state,
+                    page_height_pt,
+                    base_transform,
+                    *x,
+                    *y,
+                    *width,
+                    *height,
+                    *radius,
+                    *filter,
+                );
             }
             Command::SetFontName(name) => state.font_name = name.clone(),
             Command::SetFontSize(size) => state.font_size = *size,
@@ -387,7 +414,7 @@ fn render_commands(
                     Rect::from_xywh(x.to_f32(), draw_y, width.to_f32(), height.to_f32())
                 {
                     let path = PathBuilder::from_rect(rect);
-                    let paint = fill_paint(state.fill_color, state.fill_opacity);
+                    let paint = fill_paint(state.fill_color, state.fill_opacity, state.blend_mode);
                     pixmap.fill_path(
                         &path,
                         &paint,
@@ -429,6 +456,7 @@ fn render_commands(
                         let mut paint = PixmapPaint::default();
                         paint.quality = FilterQuality::Bilinear;
                         paint.opacity = state.fill_opacity.clamp(0.0, 1.0);
+                        paint.blend_mode = sk_blend_mode(state.blend_mode);
                         pixmap.draw_pixmap(
                             0,
                             0,
@@ -515,7 +543,7 @@ fn fill_current_path(
     let Some(path) = take_path(path_builder, has_path) else {
         return;
     };
-    let paint = fill_paint(state.fill_color, state.fill_opacity);
+    let paint = fill_paint(state.fill_color, state.fill_opacity, state.blend_mode);
     pixmap.fill_path(
         &path,
         &paint,
@@ -535,7 +563,7 @@ fn stroke_current_path(
     let Some(path) = take_path(path_builder, has_path) else {
         return;
     };
-    let paint = fill_paint(state.stroke_color, state.stroke_opacity);
+    let paint = fill_paint(state.stroke_color, state.stroke_opacity, state.blend_mode);
     let stroke = build_stroke(state);
     pixmap.stroke_path(
         &path,
@@ -557,7 +585,7 @@ fn fill_stroke_current_path(
     let Some(path) = take_path(path_builder, has_path) else {
         return;
     };
-    let fill = fill_paint(state.fill_color, state.fill_opacity);
+    let fill = fill_paint(state.fill_color, state.fill_opacity, state.blend_mode);
     pixmap.fill_path(
         &path,
         &fill,
@@ -565,7 +593,7 @@ fn fill_stroke_current_path(
         base_transform.pre_concat(state.transform),
         state.clip_mask.as_ref(),
     );
-    let stroke_paint = fill_paint(state.stroke_color, state.stroke_opacity);
+    let stroke_paint = fill_paint(state.stroke_color, state.stroke_opacity, state.blend_mode);
     let stroke = build_stroke(state);
     pixmap.stroke_path(
         &path,
@@ -595,6 +623,235 @@ fn apply_clip_path(
     state.clip_mask = Some(mask);
 }
 
+#[allow(clippy::too_many_arguments)]
+fn apply_backdrop_filter(
+    pixmap: &mut Pixmap,
+    state: &RasterState,
+    page_height_pt: f32,
+    base_transform: Transform,
+    x: Pt,
+    y: Pt,
+    width: Pt,
+    height: Pt,
+    radius: Pt,
+    filter: PaintFilterSpec,
+) {
+    if filter.is_identity() {
+        return;
+    }
+    let width_f = width.to_f32().max(0.0);
+    let height_f = height.to_f32().max(0.0);
+    if width_f <= 0.0 || height_f <= 0.0 {
+        return;
+    }
+
+    let draw_y = page_height_pt - y.to_f32() - height_f;
+    let Some(path) = rounded_rect_path(x.to_f32(), draw_y, width_f, height_f, radius.to_f32())
+    else {
+        return;
+    };
+
+    let device_transform = base_transform.pre_concat(state.transform);
+    let Some(mut mask) = Mask::new(pixmap.width(), pixmap.height()) else {
+        return;
+    };
+    mask.fill_path(&path, FillRule::Winding, true, device_transform);
+
+    if let Some(clip) = state.clip_mask.as_ref() {
+        let mask_data = mask.data_mut();
+        let clip_data = clip.data();
+        for (dst, src) in mask_data.iter_mut().zip(clip_data.iter()) {
+            *dst = mul_alpha_u8(*dst, *src);
+        }
+    }
+
+    let (min_x, min_y, max_x, max_y) = mask_bounds(mask.data(), pixmap.width(), pixmap.height());
+    if min_x >= max_x || min_y >= max_y {
+        return;
+    }
+
+    let roi_w = max_x - min_x;
+    let roi_h = max_y - min_y;
+    if roi_w == 0 || roi_h == 0 {
+        return;
+    }
+
+    let row_stride = (pixmap.width() as usize) * 4;
+    let mut src_rgba = vec![0u8; (roi_w as usize) * (roi_h as usize) * 4];
+    {
+        let data = pixmap.data();
+        for row in 0..roi_h as usize {
+            let src_off = ((min_y as usize + row) * row_stride) + (min_x as usize * 4);
+            let dst_off = row * (roi_w as usize) * 4;
+            for col in 0..roi_w as usize {
+                let s = src_off + col * 4;
+                let d = dst_off + col * 4;
+                let (r, g, b, a) = unpremul_rgba(data[s], data[s + 1], data[s + 2], data[s + 3]);
+                src_rgba[d] = r;
+                src_rgba[d + 1] = g;
+                src_rgba[d + 2] = b;
+                src_rgba[d + 3] = a;
+            }
+        }
+    }
+
+    let base_img = match image::RgbaImage::from_raw(roi_w, roi_h, src_rgba.clone()) {
+        Some(img) => img,
+        None => return,
+    };
+
+    let blur_px = backdrop_blur_sigma_px(filter.blur_radius, device_transform);
+    let filtered_img = if blur_px > 0.05 {
+        image::imageops::blur(&base_img, blur_px)
+    } else {
+        base_img.clone()
+    };
+    let filtered = filtered_img.as_raw();
+    let saturate = filter.saturate.max(0.0);
+
+    let mask_data = mask.data();
+    let pixmap_width = pixmap.width() as usize;
+    let dst = pixmap.data_mut();
+    for row in 0..roi_h as usize {
+        let global_y = min_y as usize + row;
+        for col in 0..roi_w as usize {
+            let global_x = min_x as usize + col;
+            let mask_idx = global_y * pixmap_width + global_x;
+            let mask_alpha = mask_data[mask_idx];
+            if mask_alpha == 0 {
+                continue;
+            }
+            let mix = (mask_alpha as f32) / 255.0;
+            let src_idx = (row * roi_w as usize + col) * 4;
+            let dst_idx = global_y * row_stride + global_x * 4;
+
+            let orig_r = src_rgba[src_idx] as f32;
+            let orig_g = src_rgba[src_idx + 1] as f32;
+            let orig_b = src_rgba[src_idx + 2] as f32;
+            let orig_a = src_rgba[src_idx + 3];
+
+            let mut filt_r = filtered[src_idx] as f32;
+            let mut filt_g = filtered[src_idx + 1] as f32;
+            let mut filt_b = filtered[src_idx + 2] as f32;
+            apply_saturate_rgb(&mut filt_r, &mut filt_g, &mut filt_b, saturate);
+
+            let out_r = (orig_r * (1.0 - mix) + filt_r * mix).clamp(0.0, 255.0);
+            let out_g = (orig_g * (1.0 - mix) + filt_g * mix).clamp(0.0, 255.0);
+            let out_b = (orig_b * (1.0 - mix) + filt_b * mix).clamp(0.0, 255.0);
+
+            dst[dst_idx + 3] = orig_a;
+            dst[dst_idx] = premul_u8(out_r.round() as u8, orig_a);
+            dst[dst_idx + 1] = premul_u8(out_g.round() as u8, orig_a);
+            dst[dst_idx + 2] = premul_u8(out_b.round() as u8, orig_a);
+        }
+    }
+}
+
+fn backdrop_blur_sigma_px(blur_radius: Pt, transform: Transform) -> f32 {
+    if blur_radius <= Pt::ZERO {
+        return 0.0;
+    }
+    let (sx, sy) = transform.get_scale();
+    let scale = ((sx.abs() + sy.abs()) * 0.5).max(0.0);
+    blur_radius.to_f32().max(0.0) * scale
+}
+
+fn rounded_rect_path(x: f32, y: f32, width: f32, height: f32, radius: f32) -> Option<Path> {
+    let rect = Rect::from_xywh(x, y, width, height)?;
+    if radius <= 0.0 {
+        return Some(PathBuilder::from_rect(rect));
+    }
+    let mut r = radius.max(0.0);
+    let max_r = (width * 0.5).min(height * 0.5);
+    if r > max_r {
+        r = max_r;
+    }
+    if r <= 0.0 {
+        return Some(PathBuilder::from_rect(rect));
+    }
+
+    let mut builder = PathBuilder::new();
+    let k = 0.55228475_f32;
+    let c = r * k;
+    let right = x + width;
+    let bottom = y + height;
+    builder.move_to(x + r, y);
+    builder.line_to(right - r, y);
+    builder.cubic_to(right - r + c, y, right, y + r - c, right, y + r);
+    builder.line_to(right, bottom - r);
+    builder.cubic_to(
+        right,
+        bottom - r + c,
+        right - r + c,
+        bottom,
+        right - r,
+        bottom,
+    );
+    builder.line_to(x + r, bottom);
+    builder.cubic_to(x + r - c, bottom, x, bottom - r + c, x, bottom - r);
+    builder.line_to(x, y + r);
+    builder.cubic_to(x, y + r - c, x + r - c, y, x + r, y);
+    builder.close();
+    builder.finish()
+}
+
+fn mask_bounds(mask: &[u8], width: u32, height: u32) -> (u32, u32, u32, u32) {
+    let mut min_x = width;
+    let mut min_y = height;
+    let mut max_x = 0_u32;
+    let mut max_y = 0_u32;
+    for y in 0..height {
+        let row_off = (y as usize) * (width as usize);
+        for x in 0..width {
+            if mask[row_off + x as usize] == 0 {
+                continue;
+            }
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x + 1);
+            max_y = max_y.max(y + 1);
+        }
+    }
+    (min_x, min_y, max_x, max_y)
+}
+
+fn mul_alpha_u8(a: u8, b: u8) -> u8 {
+    let prod = (a as u16) * (b as u16) + 127;
+    ((prod + (prod >> 8)) >> 8) as u8
+}
+
+fn unpremul_rgba(r: u8, g: u8, b: u8, a: u8) -> (u8, u8, u8, u8) {
+    if a == 0 {
+        return (0, 0, 0, 0);
+    }
+    if a == 255 {
+        return (r, g, b, a);
+    }
+    let inv = 255.0 / (a as f32);
+    (
+        ((r as f32) * inv).round().clamp(0.0, 255.0) as u8,
+        ((g as f32) * inv).round().clamp(0.0, 255.0) as u8,
+        ((b as f32) * inv).round().clamp(0.0, 255.0) as u8,
+        a,
+    )
+}
+
+fn apply_saturate_rgb(r: &mut f32, g: &mut f32, b: &mut f32, saturate: f32) {
+    if (saturate - 1.0).abs() <= 1.0e-6 {
+        return;
+    }
+    let rr = *r;
+    let gg = *g;
+    let bb = *b;
+    let s = saturate.max(0.0);
+    *r = ((0.213 + 0.787 * s) * rr + (0.715 - 0.715 * s) * gg + (0.072 - 0.072 * s) * bb)
+        .clamp(0.0, 255.0);
+    *g = ((0.213 - 0.213 * s) * rr + (0.715 + 0.285 * s) * gg + (0.072 - 0.072 * s) * bb)
+        .clamp(0.0, 255.0);
+    *b = ((0.213 - 0.213 * s) * rr + (0.715 - 0.715 * s) * gg + (0.072 + 0.928 * s) * bb)
+        .clamp(0.0, 255.0);
+}
+
 fn draw_shading_fill(
     pixmap: &mut Pixmap,
     shading: &Shading,
@@ -615,6 +872,7 @@ fn draw_shading_fill(
     let mut paint = Paint::default();
     paint.shader = shader;
     paint.anti_alias = true;
+    paint.blend_mode = sk_blend_mode(state.blend_mode);
     pixmap.fill_path(
         &page_path,
         &paint,
@@ -706,7 +964,7 @@ fn draw_string(
 
     let baseline_x = x;
     let baseline_y = page_height_pt - y - font_size;
-    let paint = fill_paint(state.fill_color, state.fill_opacity);
+    let paint = fill_paint(state.fill_color, state.fill_opacity, state.blend_mode);
     let device_transform = base_transform.pre_concat(state.transform);
     let mut try_draw = |font_data: &[u8], used_system_fallback: bool| -> Result<(), &'static str> {
         let Ok(face) = ttf_parser::Face::parse(font_data, 0) else {
@@ -841,7 +1099,7 @@ fn draw_string_transformed(
         return;
     }
 
-    let paint = fill_paint(state.fill_color, state.fill_opacity);
+    let paint = fill_paint(state.fill_color, state.fill_opacity, state.blend_mode);
     let device_transform = base_transform.pre_concat(state.transform);
     let run_transform = Transform::from_row(m00, m01, m10, m11, x, y);
 
@@ -924,7 +1182,7 @@ fn draw_glyph_run(
 
     let baseline_x = x;
     let baseline_y = page_height_pt - y;
-    let paint = fill_paint(state.fill_color, state.fill_opacity);
+    let paint = fill_paint(state.fill_color, state.fill_opacity, state.blend_mode);
     let device_transform = base_transform.pre_concat(state.transform);
 
     let mut try_draw = |font_data: &[u8], used_system_fallback: bool| -> Result<(), &'static str> {
@@ -1800,11 +2058,20 @@ fn build_stroke(state: &RasterState) -> Stroke {
     stroke
 }
 
-fn fill_paint(color: Color, opacity: f32) -> Paint<'static> {
+fn fill_paint(color: Color, opacity: f32, blend_mode: MixBlendMode) -> Paint<'static> {
     let mut paint = Paint::default();
     paint.set_color(to_sk_color(color, opacity));
     paint.anti_alias = true;
+    paint.blend_mode = sk_blend_mode(blend_mode);
     paint
+}
+
+fn sk_blend_mode(mode: MixBlendMode) -> SkBlendMode {
+    match mode {
+        MixBlendMode::Normal => SkBlendMode::SourceOver,
+        MixBlendMode::Multiply => SkBlendMode::Multiply,
+        MixBlendMode::Screen => SkBlendMode::Screen,
+    }
 }
 
 fn to_sk_color(color: Color, opacity: f32) -> tiny_skia::Color {

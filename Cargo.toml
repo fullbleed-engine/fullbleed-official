@@ -1,6 +1,6 @@
 [package]
 name = "fullbleed"
-version = "0.2.7"
+version = "0.5.0"
 edition = "2024"
 license = "AGPL-3.0-only"
 description = "Deterministic, dependency-free HTML/CSS-to-PDF engine in Rust for transactional document generation and AI agent workflows."

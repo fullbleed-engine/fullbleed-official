@@ -294,6 +294,13 @@ pub enum BoxSizingMode {
     BorderBox,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MixBlendMode {
+    Normal,
+    Multiply,
+    Screen,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ShadingStop {
     pub offset: f32, // 0..=1

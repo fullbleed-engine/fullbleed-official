@@ -3,7 +3,7 @@ use crate::debug::json_escape;
 use crate::font::{FontProgramKind, FontRegistry, RegisteredFont};
 use crate::metrics::{DocumentMetrics, PageMetrics};
 use crate::perf::PerfLogger;
-use crate::types::{Color, ColorSpace, Pt, Shading, ShadingStop, Size};
+use crate::types::{Color, ColorSpace, MixBlendMode, Pt, Shading, ShadingStop, Size};
 use base64::Engine;
 use fixed::types::I32F32;
 use image::GenericImageView;
@@ -187,6 +187,7 @@ pub(crate) struct PdfStreamWriter<'a, W: Write> {
 
     gs_resources: Vec<(String, usize)>,
     gs_name_map: HashMap<(u16, u16), String>,
+    gs_blend_name_map: HashMap<MixBlendMode, String>,
     next_gs_index: usize,
 
     shading_resources: Vec<(String, usize)>,
@@ -251,6 +252,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             next_form_index: 1,
             gs_resources: Vec::new(),
             gs_name_map: HashMap::new(),
+            gs_blend_name_map: HashMap::new(),
             next_gs_index: 1,
             shading_resources: Vec::new(),
             shading_name_map: HashMap::new(),
@@ -963,6 +965,12 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                         out.push_str(&format!("/{} gs\n", name));
                     }
                 }
+                Command::SetBlendMode { mode } => {
+                    if let Some(name) = self.ensure_blend_extgstate(*mode)? {
+                        out.push_str(&format!("/{} gs\n", name));
+                    }
+                }
+                Command::ApplyBackdropFilter { .. } => {}
                 Command::SetFontName(name) => {
                     current_font_name = name.clone();
                     self.ensure_font(&current_font_name)?;
@@ -1591,6 +1599,29 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         self.write_object(obj_id, &obj)?;
         self.gs_resources.push((name.clone(), obj_id));
         self.gs_name_map.insert(key, name.clone());
+        Ok(Some(name))
+    }
+
+    fn ensure_blend_extgstate(&mut self, mode: MixBlendMode) -> io::Result<Option<String>> {
+        if matches!(mode, MixBlendMode::Normal) {
+            return Ok(None);
+        }
+        if let Some(name) = self.gs_blend_name_map.get(&mode) {
+            return Ok(Some(name.clone()));
+        }
+
+        let obj_id = self.alloc_ids(1);
+        let name = format!("GS{}", self.next_gs_index);
+        self.next_gs_index += 1;
+        let blend = match mode {
+            MixBlendMode::Normal => "Normal",
+            MixBlendMode::Multiply => "Multiply",
+            MixBlendMode::Screen => "Screen",
+        };
+        let obj = format!("<< /Type /ExtGState /BM /{} >>", blend);
+        self.write_object(obj_id, &obj)?;
+        self.gs_resources.push((name.clone(), obj_id));
+        self.gs_blend_name_map.insert(mode, name.clone());
         Ok(Some(name))
     }
 
@@ -2624,6 +2655,7 @@ fn render_page(
     font_glyph_maps: &HashMap<String, BTreeMap<u16, String>>,
     image_map: &HashMap<String, String>,
     gs_map: &HashMap<(u16, u16), String>,
+    gs_blend_map: &HashMap<MixBlendMode, String>,
     shading_map: &HashMap<u64, String>,
     registry: Option<&FontRegistry>,
     tj_cache: &mut HashMap<String, String>,
@@ -2766,6 +2798,12 @@ fn render_page(
                     out.push_str(&format!("/{} gs\n", name));
                 }
             }
+            Command::SetBlendMode { mode } => {
+                if let Some(name) = gs_blend_map.get(mode) {
+                    out.push_str(&format!("/{} gs\n", name));
+                }
+            }
+            Command::ApplyBackdropFilter { .. } => {}
             Command::SetFontName(name) => {
                 current_font_name = name.clone();
             }

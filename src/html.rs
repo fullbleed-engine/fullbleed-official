@@ -1134,6 +1134,7 @@ fn node_to_flowables(
                     .with_tag_role("Table")
                     .with_border_collapse(style.border_collapse)
                     .with_border_spacing(style.border_spacing)
+                    .with_table_layout(style.table_layout)
                     .with_font_metrics(style.font_size, style.root_font_size);
 
                     let mut table_children: Vec<Box<dyn Flowable>> = Vec::new();
@@ -1170,7 +1171,11 @@ fn node_to_flowables(
                     .with_height(style.height)
                     .with_background(style.background_color)
                     .with_background_paint(style.background_paint.clone())
+                    .with_clip_path_inset(style.clip_path_inset)
                     .with_box_shadow(style.box_shadow.clone())
+                    .with_paint_filter(style.paint_filter)
+                    .with_backdrop_filter(style.backdrop_filter)
+                    .with_mix_blend_mode(style.mix_blend_mode)
                     .with_transforms(style.transform.clone())
                     .with_transform_origin(style.transform_origin)
                     .with_overflow_hidden(matches!(style.overflow, OverflowMode::Hidden))
@@ -2103,7 +2108,11 @@ fn container_flowable_with_role(
         || !matches!(style.height, LengthSpec::Auto)
         || style.background_color.is_some()
         || style.background_paint.is_some()
+        || style.clip_path_inset.is_some()
         || style.box_shadow.is_some()
+        || style.paint_filter.is_some()
+        || style.backdrop_filter.is_some()
+        || !matches!(style.mix_blend_mode, crate::types::MixBlendMode::Normal)
         || style.border_radius != BorderRadiusSpec::zero()
         || style.border_width != EdgeSizes::zero();
 
@@ -2153,7 +2162,11 @@ fn container_flowable_with_role(
         .with_height(style.height)
         .with_background(style.background_color)
         .with_background_paint(style.background_paint.clone())
+        .with_clip_path_inset(style.clip_path_inset)
         .with_box_shadow(style.box_shadow.clone())
+        .with_paint_filter(style.paint_filter)
+        .with_backdrop_filter(style.backdrop_filter)
+        .with_mix_blend_mode(style.mix_blend_mode)
         .with_transforms(style.transform.clone())
         .with_transform_origin(style.transform_origin)
         .with_overflow_hidden(matches!(style.overflow, OverflowMode::Hidden))
@@ -2344,7 +2357,8 @@ fn flex_container_flowables(
         Option<AlignItems>,
     )> = Vec::new();
     let mut grid_auto_slot = 0usize;
-    let mut grid_occupied_slots: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    let mut grid_occupied_slots: std::collections::HashSet<usize> =
+        std::collections::HashSet::new();
     let mut report = report;
 
     for (child_idx, child) in node.children().enumerate() {
@@ -2555,7 +2569,11 @@ fn flex_container_flowables(
             .with_height(style.height)
             .with_background(style.background_color)
             .with_background_paint(style.background_paint.clone())
+            .with_clip_path_inset(style.clip_path_inset)
             .with_box_shadow(style.box_shadow.clone())
+            .with_paint_filter(style.paint_filter)
+            .with_backdrop_filter(style.backdrop_filter)
+            .with_mix_blend_mode(style.mix_blend_mode)
             .with_transforms(style.transform.clone())
             .with_transform_origin(style.transform_origin)
             .with_overflow_hidden(matches!(style.overflow, OverflowMode::Hidden))

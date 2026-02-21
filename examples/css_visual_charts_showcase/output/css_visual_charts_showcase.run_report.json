@@ -1,7 +1,7 @@
 {
   "schema": "fullbleed.css_visual_charts_showcase.v1",
   "record_count": 72,
-  "bytes_written": 937237,
+  "bytes_written": 988285,
   "pdf_path": "C:\\dev\\workbench\\fullbleed-official\\examples\\css_visual_charts_showcase\\output\\css_visual_charts_showcase.pdf",
   "png_paths": [
     "C:\\dev\\workbench\\fullbleed-official\\examples\\css_visual_charts_showcase\\output\\css_visual_charts_showcase_page1.png",
@@ -9,8 +9,9 @@
     "C:\\dev\\workbench\\fullbleed-official\\examples\\css_visual_charts_showcase\\output\\css_visual_charts_showcase_page3.png"
   ],
   "perf_path": "C:\\dev\\workbench\\fullbleed-official\\examples\\css_visual_charts_showcase\\output\\css_visual_charts_showcase.perf.jsonl",
-  "debug_path": null,
-  "render_ms": 209.18,
-  "raster_ms": 5617.48,
-  "emit_png": true
+  "debug_path": "C:\\dev\\workbench\\fullbleed-official\\examples\\css_visual_charts_showcase\\output\\css_visual_charts_showcase.debug.log",
+  "render_ms": 2009.82,
+  "raster_ms": 7602.81,
+  "emit_png": true,
+  "fancy_mode": true
 }

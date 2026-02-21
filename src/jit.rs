@@ -770,6 +770,8 @@ fn commands_bbox(commands: &[Command], font_registry: Option<&FontRegistry>) -> 
             | Command::SetMiterLimit(_)
             | Command::SetDash { .. }
             | Command::SetOpacity { .. }
+            | Command::SetBlendMode { .. }
+            | Command::ApplyBackdropFilter { .. }
             | Command::DefineForm { .. }
             | Command::BeginTag { .. }
             | Command::EndTag

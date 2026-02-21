@@ -132,7 +132,7 @@ def _tone_class(index: int) -> str:
     return f"tone-{index % 6}"
 
 
-def build_html(data: dict[str, object]) -> str:
+def build_html(data: dict[str, object], fancy: bool = False) -> str:
     months: list[str] = data["months"]  # type: ignore[assignment]
     monthly: list[int] = data["monthly"]  # type: ignore[assignment]
     mix: list[dict[str, object]] = data["mix"]  # type: ignore[assignment]
@@ -147,12 +147,17 @@ def build_html(data: dict[str, object]) -> str:
     for idx, value in enumerate(monthly):
         pct = int((value / max_month) * 100)
         tone = _tone_class(idx)
+        fill_style = (
+            f'--pct:{pct};'
+            if fancy
+            else f'transform:scaleX({pct / 100.0:.3f});'
+        )
         throughput_rows.append(
             (
                 '<div class="throughput-row">'
                 f'<span class="tp-month">{months[idx]}</span>'
                 '<div class="tp-track">'
-                f'<div class="tp-fill {tone}" style="transform:scaleX({pct / 100.0:.3f});"></div>'
+                f'<div class="tp-fill {tone}" style="{fill_style}"></div>'
                 "</div>"
                 f'<strong class="tp-value">{value}</strong>'
                 "</div>"
@@ -163,12 +168,17 @@ def build_html(data: dict[str, object]) -> str:
     for idx, part in enumerate(mix):
         pct = float(part["pct"])
         tone = _tone_class(idx + 1)
+        seg_style = (
+            f'--pct:{pct:.2f};'
+            if fancy
+            else f'transform:scaleX({pct / 100.0:.3f});'
+        )
         mix_rows.append(
             (
                 '<div class="mix-row">'
                 f'<span class="mix-name">{part["name"]}</span>'
                 '<div class="mix-track"><div class="mix-seg '
-                f'{tone}" style="transform:scaleX({pct / 100.0:.3f});"></div></div>'
+                f'{tone}" style="{seg_style}"></div></div>'
                 f'<strong>{part["pct"]:.1f}%</strong>'
                 "</div>"
             )
@@ -177,10 +187,11 @@ def build_html(data: dict[str, object]) -> str:
     gauges_html = []
     for idx, g in enumerate(gauges):
         tone = _bar_color(idx + 2)
+        gauge_pct_style = f"--pct:{int(g['pct'])};border-color:{tone};"
         gauges_html.append(
             (
                 '<article class="gauge-card">'
-                f'<div class="gauge" style="border-color:{tone};">'
+                f'<div class="gauge{" fancy-gauge" if fancy else ""}" style="{gauge_pct_style}">'
                 f'<span class="gauge-value">{g["pct"]}%</span>'
                 "</div>"
                 f'<div class="gauge-strip"><span style="width:{g["pct"]}%;background:{tone};"></span></div>'
@@ -217,6 +228,11 @@ def build_html(data: dict[str, object]) -> str:
 
     mini_cards = []
     for rec in records:
+        meter_style = (
+            f'--score:{int(rec["score"])};width:calc(var(--score) * 1%);'
+            if fancy
+            else f'width:{rec["score"]}%;'
+        )
         mini_cards.append(
             (
                 f'<article class="mini-card status-{rec["status"]}">'
@@ -228,7 +244,7 @@ def build_html(data: dict[str, object]) -> str:
                 f'${rec["amount"]:,.2f} | score {rec["score"]}% | {rec["velocity"]}d'
                 "</p>"
                 '<div class="mini-meter">'
-                f'<span style="width:{rec["score"]}%;"></span>'
+                f'<span style="{meter_style}"></span>'
                 "</div>"
                 "</article>"
             )
@@ -306,8 +322,8 @@ def build_html(data: dict[str, object]) -> str:
     )
 
 
-def build_css() -> str:
-    return """
+def build_css(fancy: bool = False) -> str:
+    base_css = """
 @page { size: 8.5in 11in; margin: 0.25in; }
 
 :root {
@@ -685,6 +701,80 @@ p {
 }
 """.strip()
 
+    if not fancy:
+        return base_css
+
+    fancy_css = """
+
+/* Fancy stress lane: intentionally includes advanced CSS to probe parity edges. */
+body {
+  background:
+    radial-gradient(circle at 12% 2%, #2b4ea3 0%, #0c1430 38%, #070b19 100%),
+    conic-gradient(from 120deg at 80% 10%, rgba(91, 112, 180, 0.45), rgba(38, 53, 99, 0.10), rgba(91, 112, 180, 0.45));
+}
+
+.page {
+  clip-path: inset(0 round 12pt);
+}
+
+.panel {
+  background: color-mix(in srgb, var(--panel) 78%, #4c6eb4);
+  box-shadow: 0 8pt 22pt rgba(3, 8, 28, 0.38);
+  backdrop-filter: blur(3px) saturate(1.2);
+}
+
+.tp-fill {
+  transform: none !important;
+  width: calc(var(--pct) * 1%);
+  background: linear-gradient(90deg, #35b6ff 0%, #8df6ff 100%);
+  filter: saturate(1.25);
+}
+
+.mix-seg {
+  transform: none !important;
+  width: calc(var(--pct) * 1%);
+  background: linear-gradient(90deg, #43b3ff 0%, #7ff0ff 100%);
+}
+
+.fancy-gauge {
+  border: 4pt solid rgba(133, 149, 191, 0.28);
+  color: #31b0ff;
+  background:
+    conic-gradient(from -90deg, currentColor calc(var(--pct) * 1%), rgba(128, 142, 185, 0.16) 0%);
+}
+
+.gauge-card:nth-child(1) .fancy-gauge { color: #7f6bff; }
+.gauge-card:nth-child(2) .fancy-gauge { color: #ffd84c; }
+.gauge-card:nth-child(3) .fancy-gauge { color: #ff6f6f; }
+.gauge-card:nth-child(4) .fancy-gauge { color: #56f0ff; }
+
+.fancy-gauge::before {
+  content: "";
+  position: absolute;
+  width: 42pt;
+  height: 42pt;
+  border-radius: 50%;
+  background: rgba(128, 142, 185, 0.16);
+}
+
+.fancy-gauge .gauge-value {
+  position: relative;
+  z-index: 1;
+}
+
+.timeline .dot {
+  background: radial-gradient(circle at 30% 30%, #8ad7ff, #2aa9ff 64%, #1164a3 100%);
+  mix-blend-mode: screen;
+}
+
+.mini-card {
+  background:
+    linear-gradient(160deg, rgba(21, 30, 62, 0.9) 0%, rgba(9, 16, 34, 0.75) 100%);
+}
+""".strip()
+
+    return f"{base_css}\n\n{fancy_css}"
+
 
 def create_engine() -> fullbleed.PdfEngine:
     debug_enabled = _env_truthy("FULLBLEED_DEBUG", default=False)
@@ -728,8 +818,9 @@ def emit_pngs(engine: fullbleed.PdfEngine, html: str, css: str) -> list[str]:
 def main() -> None:
     _clean_outputs()
     data = generate_data()
-    html = build_html(data)
-    css = build_css()
+    fancy_mode = _env_truthy("FULLBLEED_FANCY", default=False)
+    html = build_html(data, fancy=fancy_mode)
+    css = build_css(fancy=fancy_mode)
     engine = create_engine()
     emit_png = _env_truthy("FULLBLEED_EMIT_PNG", default=True)
 
@@ -755,6 +846,7 @@ def main() -> None:
         "render_ms": render_ms,
         "raster_ms": raster_ms,
         "emit_png": emit_png,
+        "fancy_mode": fancy_mode,
     }
     REPORT_PATH.write_text(json.dumps(report, indent=2), encoding="utf-8")
 

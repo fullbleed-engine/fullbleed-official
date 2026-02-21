@@ -1,5 +1,6 @@
 use crate::canvas::{Command, Document, Page};
-use crate::types::{Color, Pt, Shading, ShadingStop, Size};
+use crate::flowable::PaintFilterSpec;
+use crate::types::{Color, MixBlendMode, Pt, Shading, ShadingStop, Size};
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -154,6 +155,33 @@ fn write_command<W: Write>(out: &mut W, command: &Command) -> io::Result<()> {
             write_u8(out, 14)?;
             write_f32(out, *fill)?;
             write_f32(out, *stroke)
+        }
+        Command::SetBlendMode { mode } => {
+            write_u8(out, 42)?;
+            write_u8(
+                out,
+                match mode {
+                    MixBlendMode::Normal => 0,
+                    MixBlendMode::Multiply => 1,
+                    MixBlendMode::Screen => 2,
+                },
+            )
+        }
+        Command::ApplyBackdropFilter {
+            x,
+            y,
+            width,
+            height,
+            radius,
+            filter,
+        } => {
+            write_u8(out, 43)?;
+            write_pt(out, *x)?;
+            write_pt(out, *y)?;
+            write_pt(out, *width)?;
+            write_pt(out, *height)?;
+            write_pt(out, *radius)?;
+            write_paint_filter(out, *filter)
         }
         Command::SetFontName(name) => {
             write_u8(out, 15)?;
@@ -392,6 +420,22 @@ fn read_command<R: Read>(input: &mut R) -> io::Result<Command> {
         14 => Command::SetOpacity {
             fill: read_f32(input)?,
             stroke: read_f32(input)?,
+        },
+        42 => {
+            let mode = match read_u8(input)? {
+                1 => MixBlendMode::Multiply,
+                2 => MixBlendMode::Screen,
+                _ => MixBlendMode::Normal,
+            };
+            Command::SetBlendMode { mode }
+        }
+        43 => Command::ApplyBackdropFilter {
+            x: read_pt(input)?,
+            y: read_pt(input)?,
+            width: read_pt(input)?,
+            height: read_pt(input)?,
+            radius: read_pt(input)?,
+            filter: read_paint_filter(input)?,
         },
         15 => Command::SetFontName(read_string(input)?),
         16 => Command::SetFontSize(read_pt(input)?),
@@ -667,6 +711,18 @@ fn write_pt<W: Write>(out: &mut W, value: Pt) -> io::Result<()> {
 fn read_pt<R: Read>(input: &mut R) -> io::Result<Pt> {
     let milli = read_i64(input)?;
     Ok(Pt::from_milli_i64(milli))
+}
+
+fn write_paint_filter<W: Write>(out: &mut W, filter: PaintFilterSpec) -> io::Result<()> {
+    write_f32(out, filter.saturate)?;
+    write_pt(out, filter.blur_radius)
+}
+
+fn read_paint_filter<R: Read>(input: &mut R) -> io::Result<PaintFilterSpec> {
+    Ok(PaintFilterSpec {
+        saturate: read_f32(input)?,
+        blur_radius: read_pt(input)?,
+    })
 }
 
 fn write_string<W: Write>(out: &mut W, value: &str) -> io::Result<()> {

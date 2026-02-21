@@ -2,10 +2,10 @@ use crate::debug::{DebugLogger, json_escape};
 use crate::flowable::CalcLength;
 use crate::flowable::{
     BackgroundPaint, BorderCollapseMode, BorderRadiusSpec, BorderSpacingSpec, BoxShadowSpec,
-    BreakAfter, BreakBefore, BreakInside, CssTransformOp, CssTransformOrigin, EdgeSizes,
-    LengthSpec, Pagination, TextStyle,
+    BreakAfter, BreakBefore, BreakInside, ClipPathInsetSpec, CssTransformOp, CssTransformOrigin,
+    EdgeSizes, LengthSpec, PaintFilterSpec, Pagination, TableLayoutMode, TextStyle,
 };
-use crate::types::{BoxSizingMode, Color, Margins, Pt, ShadingStop, Size};
+use crate::types::{BoxSizingMode, Color, Margins, MixBlendMode, Pt, ShadingStop, Size};
 use fixed::types::I32F32;
 use lightningcss::media_query::{
     MediaCondition, MediaFeature, MediaFeatureComparison, MediaFeatureId, MediaFeatureName,
@@ -709,6 +709,14 @@ enum TransformSpec {
     Initial,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ClipPathSpec {
+    Inset(ClipPathInsetSpec),
+    None,
+    Inherit,
+    Initial,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum TransformOriginSpec {
     Value(CssTransformOrigin),
@@ -777,11 +785,16 @@ struct StyleDelta {
     border_collapse: Option<BorderCollapseMode>,
     caption_side: Option<CaptionSideMode>,
     border_spacing: Option<BorderSpacingSpec>,
+    table_layout: Option<TableLayoutMode>,
     border_radius: Option<BorderRadiusSpec>,
     font_name: Option<FontSpec>,
     font_name_var: Option<String>,
     box_shadow: Option<BoxShadowSpec>,
+    paint_filter: Option<PaintFilterSpec>,
+    backdrop_filter: Option<PaintFilterSpec>,
+    mix_blend_mode: Option<MixBlendMode>,
     background_paint: Option<BackgroundPaint>,
+    clip_path: Option<ClipPathSpec>,
     pagination: PaginationDelta,
     margin: EdgeDelta,
     padding: EdgeDelta,
@@ -893,8 +906,13 @@ pub struct ComputedStyle {
     pub border_collapse: BorderCollapseMode,
     pub caption_side: CaptionSideMode,
     pub border_spacing: BorderSpacingSpec,
+    pub table_layout: TableLayoutMode,
     pub border_radius: BorderRadiusSpec,
     pub box_shadow: Option<BoxShadowSpec>,
+    pub paint_filter: Option<PaintFilterSpec>,
+    pub backdrop_filter: Option<PaintFilterSpec>,
+    pub mix_blend_mode: MixBlendMode,
+    pub clip_path_inset: Option<ClipPathInsetSpec>,
     pub root_font_size: Pt,
     pub white_space: WhiteSpaceMode,
     pub display: DisplayMode,
@@ -1100,7 +1118,11 @@ fn set_delta_border_color_var(delta: &mut StyleDelta, target: BorderColorTarget,
     }
 }
 
-fn apply_border_color_from_raw(delta: &mut StyleDelta, target: BorderColorTarget, raw: &str) -> bool {
+fn apply_border_color_from_raw(
+    delta: &mut StyleDelta,
+    target: BorderColorTarget,
+    raw: &str,
+) -> bool {
     let lowered = raw.trim().to_ascii_lowercase();
     if lowered.contains("var(") {
         if let Some((color, alpha)) = parse_color_string(&lowered) {
@@ -1140,9 +1162,10 @@ fn border_color_target_from_property_name(property_name: &str) -> BorderColorTar
         "border-bottom-color" | "border-bottom" | "border-block-end-color" | "border-block-end" => {
             BorderColorTarget::Bottom
         }
-        "border-left-color" | "border-left" | "border-inline-start-color" | "border-inline-start" => {
-            BorderColorTarget::Left
-        }
+        "border-left-color"
+        | "border-left"
+        | "border-inline-start-color"
+        | "border-inline-start" => BorderColorTarget::Left,
         _ => BorderColorTarget::All,
     }
 }
@@ -1606,8 +1629,13 @@ impl StyleResolver {
             border_collapse: BorderCollapseMode::Separate,
             caption_side: CaptionSideMode::Top,
             border_spacing: BorderSpacingSpec::zero(),
+            table_layout: TableLayoutMode::Auto,
             border_radius: BorderRadiusSpec::zero(),
             box_shadow: None,
+            paint_filter: None,
+            backdrop_filter: None,
+            mix_blend_mode: MixBlendMode::Normal,
+            clip_path_inset: None,
             root_font_size: self.root_font_size,
             white_space: WhiteSpaceMode::Normal,
             display: DisplayMode::Inline,
@@ -1720,8 +1748,13 @@ impl StyleResolver {
             border_collapse: BorderCollapseMode::Separate,
             caption_side: parent.caption_side,
             border_spacing: BorderSpacingSpec::zero(),
+            table_layout: TableLayoutMode::Auto,
             border_radius: BorderRadiusSpec::zero(),
             box_shadow: None,
+            paint_filter: None,
+            backdrop_filter: None,
+            mix_blend_mode: MixBlendMode::Normal,
+            clip_path_inset: None,
             root_font_size: parent.root_font_size,
             white_space: parent.white_space,
             display: DisplayMode::Inline,
@@ -2085,7 +2118,9 @@ impl StyleResolver {
             }
         }
         if let Some(name) = computed.pending_background_color_var.clone() {
-            if resolve_custom_color(&computed, &name).is_none() {
+            if resolve_custom_color(&computed, &name).is_none()
+                && parse_background_paint_with_style(&computed, &name).is_none()
+            {
                 unresolved.push(name);
             }
         }
@@ -2216,8 +2251,13 @@ impl StyleResolver {
             border_collapse: BorderCollapseMode::Separate,
             caption_side: parent.caption_side,
             border_spacing: BorderSpacingSpec::zero(),
+            table_layout: TableLayoutMode::Auto,
             border_radius: BorderRadiusSpec::zero(),
             box_shadow: None,
+            paint_filter: None,
+            backdrop_filter: None,
+            mix_blend_mode: MixBlendMode::Normal,
+            clip_path_inset: None,
             root_font_size: parent.root_font_size,
             white_space: parent.white_space,
             display: DisplayMode::Inline,
@@ -2910,6 +2950,16 @@ fn log_declaration_no_effects(
             logger.increment("jit.known_loss.filters_effects_fallback", 1);
         }
 
+        if let Some(name) = declaration_conic_gradient_fallback_property_name(property) {
+            let json = format!(
+                "{{\"type\":\"jit.known_loss\",\"code\":\"CONIC_GRADIENT_FALLBACK\",\"property\":{},\"fallback\":\"gradient-ignored\",\"selector\":{}}}",
+                json_string(&name),
+                json_string(selector)
+            );
+            logger.log_json(&json);
+            logger.increment("jit.known_loss.conic_gradient_fallback", 1);
+        }
+
         let name = declaration_no_effect_property_name(property).or_else(|| {
             declaration_parsed_no_effect_property_name(property).map(|v| v.to_string())
         });
@@ -2963,13 +3013,62 @@ fn is_multicol_fallback_property_name(name: &str) -> bool {
 fn declaration_filters_effects_fallback_property_name(property: &Property) -> Option<String> {
     match property {
         Property::Opacity(_) => Some("opacity".to_string()),
-        Property::Filter(_, _) => Some("filter".to_string()),
-        Property::BackdropFilter(_, _) => Some("backdrop-filter".to_string()),
-        Property::ClipPath(_, _) => Some("clip-path".to_string()),
+        Property::Filter(value, _) => {
+            let raw = value.to_css_string(PrinterOptions::default()).ok()?;
+            if parse_filter_spec_str(&raw).is_some() {
+                None
+            } else {
+                Some("filter".to_string())
+            }
+        }
+        Property::BackdropFilter(value, _) => {
+            let raw = value.to_css_string(PrinterOptions::default()).ok()?;
+            if parse_backdrop_filter_spec_str(&raw).is_some() {
+                None
+            } else {
+                Some("backdrop-filter".to_string())
+            }
+        }
+        Property::ClipPath(value, _) => {
+            let raw = value.to_css_string(PrinterOptions::default()).ok()?;
+            if parse_clip_path_spec_str(&raw).is_some() {
+                None
+            } else {
+                Some("clip-path".to_string())
+            }
+        }
         Property::Custom(custom) => match &custom.name {
             CustomPropertyName::Unknown(name) => {
                 let name = name.as_ref().to_ascii_lowercase();
-                if is_filters_effects_fallback_property_name(&name) {
+                if name == "clip-path" {
+                    let raw = tokens_debug_string(&custom.value.0);
+                    if parse_clip_path_spec_str(&raw).is_some() {
+                        None
+                    } else {
+                        Some(name)
+                    }
+                } else if name == "filter" {
+                    let raw = tokens_debug_string(&custom.value.0);
+                    if parse_filter_spec_str(&raw).is_some() {
+                        None
+                    } else {
+                        Some(name)
+                    }
+                } else if name == "backdrop-filter" {
+                    let raw = tokens_debug_string(&custom.value.0);
+                    if parse_backdrop_filter_spec_str(&raw).is_some() {
+                        None
+                    } else {
+                        Some(name)
+                    }
+                } else if name == "mix-blend-mode" {
+                    let raw = tokens_debug_string(&custom.value.0);
+                    if parse_mix_blend_mode_str(&raw).is_some() {
+                        None
+                    } else {
+                        Some(name)
+                    }
+                } else if is_filters_effects_fallback_property_name(&name) {
                     Some(name)
                 } else {
                     None
@@ -2979,12 +3078,61 @@ fn declaration_filters_effects_fallback_property_name(property: &Property) -> Op
         },
         Property::Unparsed(unparsed) => match &unparsed.property_id {
             PropertyId::Opacity => Some("opacity".to_string()),
-            PropertyId::Filter(_) => Some("filter".to_string()),
-            PropertyId::BackdropFilter(_) => Some("backdrop-filter".to_string()),
-            PropertyId::ClipPath(_) => Some("clip-path".to_string()),
+            PropertyId::Filter(_) => {
+                let raw = tokens_debug_string(&unparsed.value.0);
+                if parse_filter_spec_str(&raw).is_some() {
+                    None
+                } else {
+                    Some("filter".to_string())
+                }
+            }
+            PropertyId::BackdropFilter(_) => {
+                let raw = tokens_debug_string(&unparsed.value.0);
+                if parse_backdrop_filter_spec_str(&raw).is_some() {
+                    None
+                } else {
+                    Some("backdrop-filter".to_string())
+                }
+            }
+            PropertyId::ClipPath(_) => {
+                let raw = tokens_debug_string(&unparsed.value.0);
+                if parse_clip_path_spec_str(&raw).is_some() {
+                    None
+                } else {
+                    Some("clip-path".to_string())
+                }
+            }
             PropertyId::Custom(name) => {
                 let name = name.as_ref().to_ascii_lowercase();
-                if is_filters_effects_fallback_property_name(&name) {
+                if name == "clip-path" {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    if parse_clip_path_spec_str(&raw).is_some() {
+                        None
+                    } else {
+                        Some(name)
+                    }
+                } else if name == "filter" {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    if parse_filter_spec_str(&raw).is_some() {
+                        None
+                    } else {
+                        Some(name)
+                    }
+                } else if name == "backdrop-filter" {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    if parse_backdrop_filter_spec_str(&raw).is_some() {
+                        None
+                    } else {
+                        Some(name)
+                    }
+                } else if name == "mix-blend-mode" {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    if parse_mix_blend_mode_str(&raw).is_some() {
+                        None
+                    } else {
+                        Some(name)
+                    }
+                } else if is_filters_effects_fallback_property_name(&name) {
                     Some(name)
                 } else {
                     None
@@ -3009,6 +3157,50 @@ fn is_filters_effects_fallback_property_name(name: &str) -> bool {
             | "mask-image"
             | "mask-composite"
     )
+}
+
+fn declaration_conic_gradient_fallback_property_name(property: &Property) -> Option<String> {
+    match property {
+        Property::Background(background) => {
+            let raw = background.to_css_string(PrinterOptions::default()).ok()?;
+            if has_conic_gradient_function(&raw)
+                && parse_conic_gradient_str(&raw).is_none()
+                && !is_dynamic_conic_gradient_expression(&raw)
+            {
+                Some("background".to_string())
+            } else {
+                None
+            }
+        }
+        Property::Unparsed(unparsed) => match &unparsed.property_id {
+            PropertyId::Background => {
+                let raw = tokens_debug_string(&unparsed.value.0);
+                if has_conic_gradient_function(&raw)
+                    && parse_conic_gradient_str(&raw).is_none()
+                    && !is_dynamic_conic_gradient_expression(&raw)
+                {
+                    Some("background".to_string())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn has_conic_gradient_function(raw: &str) -> bool {
+    let lower = raw.to_ascii_lowercase();
+    lower.contains("conic-gradient(") || lower.contains("repeating-conic-gradient(")
+}
+
+fn is_dynamic_conic_gradient_expression(raw: &str) -> bool {
+    let lower = raw.to_ascii_lowercase();
+    has_conic_gradient_function(&lower)
+        && (lower.contains("var(")
+            || lower.contains("currentcolor")
+            || lower.contains("color-mix("))
 }
 
 fn declaration_no_effect_property_name(property: &Property) -> Option<String> {
@@ -3112,6 +3304,7 @@ fn is_engine_supported_unknown_property(name: &str) -> bool {
         "border-collapse"
             | "caption-side"
             | "border-spacing"
+            | "table-layout"
             | "border-radius"
             | "border"
             | "border-top"
@@ -3640,7 +3833,7 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                             Some(BackgroundSpec::Value(blend_over_white(color, alpha)));
                     }
                     if let Ok(image_raw) = last.image.to_css_string(PrinterOptions::default()) {
-                        if let Some(paint) = parse_linear_gradient_str(&image_raw) {
+                        if let Some(paint) = parse_background_paint_str(&image_raw) {
                             delta.background_paint = Some(paint);
                         }
                     }
@@ -3757,6 +3950,27 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                 if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
                     if let Some(shadow) = parse_box_shadow_str(&raw) {
                         delta.box_shadow = Some(shadow);
+                    }
+                }
+            }
+            Property::ClipPath(value, _) => {
+                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
+                    if let Some(spec) = parse_clip_path_spec_str(&raw) {
+                        delta.clip_path = Some(spec);
+                    }
+                }
+            }
+            Property::Filter(value, _) => {
+                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
+                    if let Some(filter) = parse_filter_spec_str(&raw) {
+                        delta.paint_filter = Some(filter);
+                    }
+                }
+            }
+            Property::BackdropFilter(value, _) => {
+                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
+                    if let Some(filter) = parse_backdrop_filter_spec_str(&raw) {
+                        delta.backdrop_filter = Some(filter);
                     }
                 }
             }
@@ -4826,11 +5040,7 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                                 ColorSpec::Value(blend_over_white(color, alpha)),
                             );
                         } else if raw.to_ascii_lowercase().contains("var(") {
-                            set_delta_border_color_var(
-                                delta,
-                                target,
-                                raw.to_ascii_lowercase(),
-                            );
+                            set_delta_border_color_var(delta, target, raw.to_ascii_lowercase());
                         } else if let Some(var) = last_var_name_from_tokens(&unparsed.value.0)
                             .or_else(|| var_name_from_tokens(&unparsed.value.0))
                         {
@@ -5081,6 +5291,24 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                         delta.box_shadow = Some(shadow);
                     }
                 }
+                PropertyId::ClipPath(_) => {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    if let Some(spec) = parse_clip_path_spec_str(&raw) {
+                        delta.clip_path = Some(spec);
+                    }
+                }
+                PropertyId::Filter(_) => {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    if let Some(filter) = parse_filter_spec_str(&raw) {
+                        delta.paint_filter = Some(filter);
+                    }
+                }
+                PropertyId::BackdropFilter(_) => {
+                    let raw = tokens_debug_string(&unparsed.value.0);
+                    if let Some(filter) = parse_backdrop_filter_spec_str(&raw) {
+                        delta.backdrop_filter = Some(filter);
+                    }
+                }
                 PropertyId::Custom(name) => {
                     let name = name.as_ref().to_ascii_lowercase();
                     apply_custom_property(&name, &unparsed.value.0, delta);
@@ -5299,7 +5527,21 @@ fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
                         false,
                     );
                 }
-                _ => {}
+                _ => {
+                    if let Ok(property_name) = unparsed
+                        .property_id
+                        .to_css_string(PrinterOptions::default())
+                    {
+                        if property_name.eq_ignore_ascii_case("table-layout") {
+                            if let Some(value) = first_ident(&unparsed.value.0) {
+                                delta.table_layout = Some(match value.as_str() {
+                                    "fixed" => TableLayoutMode::Fixed,
+                                    _ => TableLayoutMode::Auto,
+                                });
+                            }
+                        }
+                    }
+                }
             },
             _ => {}
         }
@@ -5328,6 +5570,14 @@ fn apply_custom_property(property_name: &str, tokens: &[TokenOrValue], delta: &m
             let raw = tokens_debug_string(tokens);
             if let Some(spacing) = parse_border_spacing_str(&raw) {
                 delta.border_spacing = Some(spacing);
+            }
+        }
+        "table-layout" => {
+            if let Some(value) = first_ident(tokens) {
+                delta.table_layout = Some(match value.as_str() {
+                    "fixed" => TableLayoutMode::Fixed,
+                    _ => TableLayoutMode::Auto,
+                });
             }
         }
         "border-radius" => {
@@ -5534,6 +5784,36 @@ fn apply_custom_property(property_name: &str, tokens: &[TokenOrValue], delta: &m
             let raw = tokens_debug_string(tokens);
             if let Some(shadow) = parse_box_shadow_str(&raw) {
                 delta.box_shadow = Some(shadow);
+            }
+        }
+        "filter" => {
+            let raw = tokens_debug_string(tokens);
+            if let Some(filter) = parse_filter_spec_str(&raw) {
+                delta.paint_filter = Some(filter);
+            }
+        }
+        "backdrop-filter" => {
+            let raw = tokens_debug_string(tokens);
+            if let Some(filter) = parse_backdrop_filter_spec_str(&raw) {
+                delta.backdrop_filter = Some(filter);
+            }
+        }
+        "mix-blend-mode" => {
+            if let Some(value) = first_ident(tokens) {
+                if let Some(mode) = parse_mix_blend_mode_str(&value) {
+                    delta.mix_blend_mode = Some(mode);
+                }
+            } else {
+                let raw = tokens_debug_string(tokens);
+                if let Some(mode) = parse_mix_blend_mode_str(&raw) {
+                    delta.mix_blend_mode = Some(mode);
+                }
+            }
+        }
+        "clip-path" => {
+            let raw = tokens_debug_string(tokens);
+            if let Some(spec) = parse_clip_path_spec_str(&raw) {
+                delta.clip_path = Some(spec);
             }
         }
         "transform" => {
@@ -6572,6 +6852,31 @@ fn transform_origin_debug(origin: CssTransformOrigin) -> String {
     )
 }
 
+fn clip_path_inset_debug(spec: ClipPathInsetSpec) -> String {
+    format!(
+        "{} {} {} {}",
+        length_spec_debug(spec.top),
+        length_spec_debug(spec.right),
+        length_spec_debug(spec.bottom),
+        length_spec_debug(spec.left)
+    )
+}
+
+fn filter_spec_debug(spec: PaintFilterSpec) -> String {
+    let mut parts = Vec::new();
+    if spec.blur_radius > Pt::ZERO {
+        parts.push(format!("blur({:.3}pt)", spec.blur_radius.to_f32()));
+    }
+    if (spec.saturate - 1.0).abs() > 1.0e-6 {
+        parts.push(format!("saturate({:.3})", spec.saturate));
+    }
+    if parts.is_empty() {
+        "none".to_string()
+    } else {
+        parts.join(" ")
+    }
+}
+
 fn debug_style_json(style: &ComputedStyle) -> String {
     let mut fields = Vec::new();
     fields.push(format!(
@@ -6643,6 +6948,22 @@ fn debug_style_json(style: &ComputedStyle) -> String {
         ));
     }
     fields.push(format!(
+        "\"clip_path_inset\":{}",
+        json_opt_string(style.clip_path_inset.map(clip_path_inset_debug))
+    ));
+    fields.push(format!(
+        "\"paint_filter\":{}",
+        json_opt_string(style.paint_filter.map(filter_spec_debug))
+    ));
+    fields.push(format!(
+        "\"backdrop_filter\":{}",
+        json_opt_string(style.backdrop_filter.map(filter_spec_debug))
+    ));
+    fields.push(format!(
+        "\"mix_blend_mode\":{}",
+        json_string(&format!("{:?}", style.mix_blend_mode))
+    ));
+    fields.push(format!(
         "\"border_width\":{}",
         json_string(&edges_debug(style.border_width))
     ));
@@ -6677,6 +6998,10 @@ fn debug_style_json(style: &ComputedStyle) -> String {
     fields.push(format!(
         "\"border_spacing\":{}",
         json_string(&border_spacing_debug(style.border_spacing))
+    ));
+    fields.push(format!(
+        "\"table_layout\":{}",
+        json_string(&format!("{:?}", style.table_layout))
     ));
     fields.push(format!(
         "\"border_radius\":{}",
@@ -7201,11 +7526,39 @@ fn apply_delta(
     if let Some(spacing) = &delta.border_spacing {
         computed.border_spacing = *spacing;
     }
+    if let Some(mode) = delta.table_layout {
+        computed.table_layout = mode;
+    }
     if let Some(radius) = &delta.border_radius {
         computed.border_radius = *radius;
     }
     if let Some(shadow) = &delta.box_shadow {
         computed.box_shadow = Some(shadow.clone());
+    }
+    if let Some(filter) = delta.paint_filter {
+        computed.paint_filter = if filter.is_identity() {
+            None
+        } else {
+            Some(filter)
+        };
+    }
+    if let Some(filter) = delta.backdrop_filter {
+        computed.backdrop_filter = if filter.is_identity() {
+            None
+        } else {
+            Some(filter)
+        };
+    }
+    if let Some(mode) = delta.mix_blend_mode {
+        computed.mix_blend_mode = mode;
+    }
+    if let Some(clip_path) = delta.clip_path {
+        computed.clip_path_inset = match clip_path {
+            ClipPathSpec::Inset(spec) => Some(spec),
+            ClipPathSpec::None => None,
+            ClipPathSpec::Inherit => parent.clip_path_inset,
+            ClipPathSpec::Initial => None,
+        };
     }
 
     if let Some(mode) = delta.white_space {
@@ -7302,7 +7655,11 @@ fn apply_delta(
         };
     }
     if let Some(row_start) = delta.grid_row_start {
-        computed.grid_row_start = if row_start == 0 { None } else { Some(row_start) };
+        computed.grid_row_start = if row_start == 0 {
+            None
+        } else {
+            Some(row_start)
+        };
     }
     if let Some(gap) = delta.gap {
         computed.gap = normalize_length_spec(gap, parent.gap);
@@ -7418,6 +7775,60 @@ fn apply_border_style_mask(style: &mut ComputedStyle) {
     if matches!(style.border_style.left, BorderLineStyle::None) {
         style.border_width.left = LengthSpec::Absolute(Pt::ZERO);
     }
+    promote_uniform_border_color_from_active_edges(style);
+}
+
+fn is_effective_zero_border_width(spec: LengthSpec) -> bool {
+    match spec {
+        LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => true,
+        LengthSpec::Absolute(value) => value == Pt::ZERO,
+        LengthSpec::Percent(value) => value.abs() <= f32::EPSILON,
+        LengthSpec::Em(value) => value.abs() <= f32::EPSILON,
+        LengthSpec::Rem(value) => value.abs() <= f32::EPSILON,
+        LengthSpec::Calc(calc) => {
+            calc.abs == Pt::ZERO
+                && calc.percent.abs() <= f32::EPSILON
+                && calc.em.abs() <= f32::EPSILON
+                && calc.rem.abs() <= f32::EPSILON
+        }
+    }
+}
+
+fn promote_uniform_border_color_from_active_edges(style: &mut ComputedStyle) {
+    if style.border_color.is_some() {
+        return;
+    }
+    let mut candidate: Option<Color> = None;
+    let mut active_edges = 0usize;
+    let edges = [
+        (style.border_width.top, style.border_top_color),
+        (style.border_width.right, style.border_right_color),
+        (style.border_width.bottom, style.border_bottom_color),
+        (style.border_width.left, style.border_left_color),
+    ];
+    for (width, color) in edges {
+        if is_effective_zero_border_width(width) {
+            continue;
+        }
+        active_edges += 1;
+        let Some(edge_color) = color else {
+            // Another active side still relies on fallback; keep border_color unset.
+            return;
+        };
+        match candidate {
+            Some(existing) if existing != edge_color => {
+                // Active edges disagree; shorthand color is not uniform.
+                return;
+            }
+            None => {
+                candidate = Some(edge_color);
+            }
+            _ => {}
+        }
+    }
+    if active_edges > 0 {
+        style.border_color = candidate;
+    }
 }
 
 fn resolve_custom_color(style: &ComputedStyle, expr: &str) -> Option<Color> {
@@ -7484,6 +7895,9 @@ fn resolve_custom_color_expr_with_alpha_inner(
         return None;
     }
     if let Some((color, alpha)) = resolve_rgb_color_function_with_vars(style, expr, depth + 1) {
+        return Some((color, alpha.clamp(0.0, 1.0)));
+    }
+    if let Some((color, alpha)) = resolve_color_mix_expr_with_alpha(style, expr, depth + 1) {
         return Some((color, alpha.clamp(0.0, 1.0)));
     }
     if let Some((color, alpha)) = parse_color_string(expr) {
@@ -7610,6 +8024,113 @@ fn resolve_custom_number_inner(style: &ComputedStyle, expr: &str, depth: usize) 
     expr.parse::<f32>().ok()
 }
 
+fn split_color_mix_stop(expr: &str) -> Option<(String, Option<f32>)> {
+    let trimmed = expr.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut split_idx: Option<usize> = None;
+    for (idx, ch) in trimmed.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            c if c.is_whitespace() && depth == 0 => split_idx = Some(idx),
+            _ => {}
+        }
+    }
+    if let Some(idx) = split_idx {
+        let color_part = trimmed[..idx].trim();
+        let weight_part = trimmed[idx..].trim();
+        if !color_part.is_empty() {
+            if let Some(weight) = parse_percent_scalar(weight_part) {
+                return Some((color_part.to_string(), Some(weight.clamp(0.0, 1.0))));
+            }
+        }
+    }
+    Some((trimmed.to_string(), None))
+}
+
+fn resolve_color_mix_component(
+    style: &ComputedStyle,
+    expr: &str,
+    depth: usize,
+) -> Option<(Color, f32)> {
+    let trimmed = expr.trim();
+    if trimmed.eq_ignore_ascii_case("currentcolor") {
+        return Some((style.color, 1.0));
+    }
+    resolve_custom_color_expr_with_alpha_inner(style, trimmed, depth + 1)
+}
+
+fn resolve_color_mix_expr_with_alpha(
+    style: &ComputedStyle,
+    expr: &str,
+    depth: usize,
+) -> Option<(Color, f32)> {
+    if depth > 12 {
+        return None;
+    }
+    let expr = expr.trim();
+    if !(expr.to_ascii_lowercase().starts_with("color-mix(") && expr.ends_with(')')) {
+        return None;
+    }
+    let inside = extract_function_args(expr, "color-mix(")?;
+    let args = split_args(inside);
+    if args.len() < 3 {
+        return None;
+    }
+    let interpolation = args[0].trim().to_ascii_lowercase();
+    if !interpolation.starts_with("in ") || !interpolation.contains("srgb") {
+        return None;
+    }
+    let (left_expr, left_weight) = split_color_mix_stop(&args[1])?;
+    let (right_expr, right_weight) = split_color_mix_stop(&args[2])?;
+    let (left_color, left_alpha) = resolve_color_mix_component(style, &left_expr, depth + 1)?;
+    let (right_color, right_alpha) = resolve_color_mix_component(style, &right_expr, depth + 1)?;
+
+    let (mut left_weight, mut right_weight) = match (left_weight, right_weight) {
+        (Some(a), Some(b)) => (a.max(0.0), b.max(0.0)),
+        (Some(a), None) => {
+            let left = a.clamp(0.0, 1.0);
+            (left, (1.0 - left).clamp(0.0, 1.0))
+        }
+        (None, Some(b)) => {
+            let right = b.clamp(0.0, 1.0);
+            ((1.0 - right).clamp(0.0, 1.0), right)
+        }
+        (None, None) => (0.5, 0.5),
+    };
+    let total = left_weight + right_weight;
+    if total <= f32::EPSILON {
+        return None;
+    }
+    left_weight /= total;
+    right_weight /= total;
+
+    let out_alpha = (left_alpha * left_weight + right_alpha * right_weight).clamp(0.0, 1.0);
+    let (out_r, out_g, out_b) = if out_alpha <= f32::EPSILON {
+        (0.0, 0.0, 0.0)
+    } else {
+        let left_factor = left_alpha * left_weight;
+        let right_factor = right_alpha * right_weight;
+        (
+            (left_color.r * left_factor + right_color.r * right_factor) / out_alpha,
+            (left_color.g * left_factor + right_color.g * right_factor) / out_alpha,
+            (left_color.b * left_factor + right_color.b * right_factor) / out_alpha,
+        )
+    };
+
+    Some((
+        Color::rgb(
+            out_r.clamp(0.0, 1.0),
+            out_g.clamp(0.0, 1.0),
+            out_b.clamp(0.0, 1.0),
+        ),
+        out_alpha,
+    ))
+}
+
 fn length_spec_to_scalar(spec: &LengthSpec) -> Option<f32> {
     match spec {
         LengthSpec::Absolute(value) => Some(value.to_f32() / 0.75),
@@ -7676,6 +8197,45 @@ fn split_top_level_mul_div_once(raw: &str) -> Option<(&str, char, &str)> {
         }
     }
     None
+}
+
+fn split_top_level_add_sub_terms(raw: &str) -> Option<Vec<(f32, String)>> {
+    let mut terms: Vec<(f32, String)> = Vec::new();
+    let mut depth = 0usize;
+    let mut sign = 1.0f32;
+    let mut start = 0usize;
+
+    for (idx, ch) in raw.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            '+' | '-' if depth == 0 => {
+                if idx == start {
+                    sign = if ch == '-' { -1.0 } else { 1.0 };
+                    start = idx + ch.len_utf8();
+                    continue;
+                }
+                let part = raw[start..idx].trim();
+                if part.is_empty() {
+                    return None;
+                }
+                terms.push((sign, part.to_string()));
+                sign = if ch == '-' { -1.0 } else { 1.0 };
+                start = idx + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+
+    if start < raw.len() {
+        let part = raw[start..].trim();
+        if part.is_empty() {
+            return None;
+        }
+        terms.push((sign, part.to_string()));
+    }
+
+    if terms.len() >= 2 { Some(terms) } else { None }
 }
 
 fn parse_unitless_scalar(raw: &str) -> Option<f32> {
@@ -7831,6 +8391,67 @@ fn resolve_custom_calc_scaled_length_from_maps_inner(
     None
 }
 
+fn calc_length_from_length_spec_for_custom_eval(spec: LengthSpec) -> Option<CalcLength> {
+    match spec {
+        LengthSpec::Absolute(value) => Some(CalcLength {
+            abs: value,
+            percent: 0.0,
+            em: 0.0,
+            rem: 0.0,
+        }),
+        LengthSpec::Percent(value) => Some(CalcLength {
+            abs: Pt::ZERO,
+            percent: value,
+            em: 0.0,
+            rem: 0.0,
+        }),
+        LengthSpec::Em(value) => Some(CalcLength {
+            abs: Pt::ZERO,
+            percent: 0.0,
+            em: value,
+            rem: 0.0,
+        }),
+        LengthSpec::Rem(value) => Some(CalcLength {
+            abs: Pt::ZERO,
+            percent: 0.0,
+            em: 0.0,
+            rem: value,
+        }),
+        LengthSpec::Calc(calc) => Some(calc),
+        LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => None,
+    }
+}
+
+fn resolve_custom_calc_additive_length_from_maps_inner(
+    custom_lengths: &HashMap<String, LengthSpec>,
+    custom_refs: &HashMap<String, String>,
+    expr: &str,
+    depth: usize,
+    stack: &mut Vec<String>,
+) -> Option<LengthSpec> {
+    if depth > 16 {
+        return None;
+    }
+    let inner = strip_calc_wrapper(expr);
+    let terms = split_top_level_add_sub_terms(inner)?;
+    let mut combined = CalcLength::zero();
+    for (sign, term) in terms {
+        let spec = resolve_custom_length_from_maps_inner(
+            custom_lengths,
+            custom_refs,
+            &term,
+            depth + 1,
+            stack,
+        )?;
+        let value = calc_length_from_length_spec_for_custom_eval(spec)?;
+        combined.abs = combined.abs + (value.abs * sign);
+        combined.percent += value.percent * sign;
+        combined.em += value.em * sign;
+        combined.rem += value.rem * sign;
+    }
+    Some(length_spec_from_calc_length(combined))
+}
+
 fn resolve_custom_length_from_maps(
     custom_lengths: &HashMap<String, LengthSpec>,
     custom_refs: &HashMap<String, String>,
@@ -7896,6 +8517,15 @@ fn resolve_custom_length_from_maps_inner(
         };
         stack.pop();
         return resolved;
+    }
+    if let Some(spec) = resolve_custom_calc_additive_length_from_maps_inner(
+        custom_lengths,
+        custom_refs,
+        expr,
+        depth + 1,
+        stack,
+    ) {
+        return Some(spec);
     }
     if let Some(spec) = resolve_custom_calc_scaled_length_from_maps_inner(
         custom_lengths,
@@ -8205,7 +8835,9 @@ fn resolve_pending_vars(style: &mut ComputedStyle) {
         }
     }
     if let Some(name) = style.pending_background_color_var.take() {
-        if let Some((color, alpha)) = resolve_custom_color_expr_with_alpha(style, &name) {
+        if let Some(paint) = parse_background_paint_with_style(style, &name) {
+            style.background_paint = Some(paint);
+        } else if let Some((color, alpha)) = resolve_custom_color_expr_with_alpha(style, &name) {
             style.background_color = Some(blend_over_white(color, alpha));
         }
     }
@@ -9485,9 +10117,11 @@ fn count_grid_tracks_in_segment(raw: &str, depth: usize) -> usize {
             if let Some((repeat_raw, segment_raw)) = split_top_level_comma_once(inner) {
                 if let Ok(repeat_count) = repeat_raw.trim().parse::<usize>() {
                     if repeat_count > 0 {
-                        let segment_count = count_grid_tracks_in_segment(segment_raw.trim(), depth + 1);
+                        let segment_count =
+                            count_grid_tracks_in_segment(segment_raw.trim(), depth + 1);
                         if segment_count > 0 {
-                            count = count.saturating_add(repeat_count.saturating_mul(segment_count));
+                            count =
+                                count.saturating_add(repeat_count.saturating_mul(segment_count));
                             continue;
                         }
                     }
@@ -9599,7 +10233,7 @@ fn parse_border_radius_str(raw: &str) -> Option<BorderRadiusSpec> {
 }
 
 fn apply_background_from_string(raw: &str, delta: &mut StyleDelta) {
-    if let Some(paint) = parse_linear_gradient_str(raw) {
+    if let Some(paint) = parse_background_paint_str(raw) {
         delta.background_paint = Some(paint);
         return;
     }
@@ -9612,6 +10246,12 @@ fn apply_background_from_string(raw: &str, delta: &mut StyleDelta) {
             delta.background_color = Some(BackgroundSpec::Value(blend_over_white(color, alpha)));
             return;
         }
+    }
+    if has_conic_gradient_function(raw) {
+        // Preserve unresolved conic expressions (e.g. currentColor/var() stop offsets)
+        // so we can resolve them during computed-style var substitution.
+        delta.background_color_var = Some(raw.trim().to_ascii_lowercase());
+        return;
     }
     if raw.to_ascii_lowercase().contains("var(") {
         delta.background_color_var = Some(raw.trim().to_ascii_lowercase());
@@ -9704,12 +10344,199 @@ fn parse_box_shadow_str(raw: &str) -> Option<BoxShadowSpec> {
     })
 }
 
-fn parse_linear_gradient_str(raw: &str) -> Option<BackgroundPaint> {
+fn parse_clip_path_spec_str(raw: &str) -> Option<ClipPathSpec> {
     let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
     let lower = raw.to_ascii_lowercase();
-    let start = lower.find("linear-gradient(")?;
-    let inside = &raw[start + "linear-gradient(".len()..];
-    let inside = inside.strip_suffix(')')?;
+    if lower == "none" {
+        return Some(ClipPathSpec::None);
+    }
+    if lower == "inherit" {
+        return Some(ClipPathSpec::Inherit);
+    }
+    if lower == "initial" || lower == "unset" {
+        return Some(ClipPathSpec::Initial);
+    }
+    parse_clip_path_inset_str(raw).map(ClipPathSpec::Inset)
+}
+
+fn parse_clip_path_inset_str(raw: &str) -> Option<ClipPathInsetSpec> {
+    let inside = extract_function_args(raw.trim(), "inset(")?;
+    let mut values: Vec<LengthSpec> = Vec::new();
+    for token in split_ws_preserve_parens(inside) {
+        let trimmed = token.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.eq_ignore_ascii_case("round") {
+            break;
+        }
+        let value = length_spec_from_string(trimmed)?;
+        values.push(value);
+    }
+    if values.is_empty() || values.len() > 4 {
+        return None;
+    }
+    let (top, right, bottom, left) = match values.len() {
+        1 => (values[0], values[0], values[0], values[0]),
+        2 => (values[0], values[1], values[0], values[1]),
+        3 => (values[0], values[1], values[2], values[1]),
+        _ => (values[0], values[1], values[2], values[3]),
+    };
+    Some(ClipPathInsetSpec {
+        top,
+        right,
+        bottom,
+        left,
+    })
+}
+
+fn parse_filter_spec_str(raw: &str) -> Option<PaintFilterSpec> {
+    parse_filter_spec_str_with_mode(raw, false)
+}
+
+fn parse_backdrop_filter_spec_str(raw: &str) -> Option<PaintFilterSpec> {
+    parse_filter_spec_str_with_mode(raw, true)
+}
+
+fn parse_filter_spec_str_with_mode(raw: &str, allow_blur: bool) -> Option<PaintFilterSpec> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let lower = raw.to_ascii_lowercase();
+    if lower == "none" {
+        return Some(PaintFilterSpec::identity());
+    }
+
+    let mut saw_component = false;
+    let mut saturate = 1.0_f32;
+    let mut blur_radius = Pt::ZERO;
+    for token in split_ws_preserve_parens(&lower) {
+        let token = token.trim();
+        if token.is_empty() {
+            continue;
+        }
+        if token.starts_with("saturate(") {
+            let arg = extract_function_args(token, "saturate(")?.trim();
+            let value = if let Some(pct) = arg.strip_suffix('%') {
+                let pct = pct.trim().parse::<f32>().ok()?;
+                pct / 100.0
+            } else {
+                arg.parse::<f32>().ok()?
+            };
+            if !value.is_finite() {
+                return None;
+            }
+            saw_component = true;
+            saturate *= value.max(0.0);
+            continue;
+        }
+        if allow_blur && token.starts_with("blur(") {
+            let arg = extract_function_args(token, "blur(")?.trim();
+            let length = length_spec_from_string(arg)?;
+            let radius = match length {
+                LengthSpec::Absolute(value) => value.max(Pt::ZERO),
+                _ => return None,
+            };
+            saw_component = true;
+            blur_radius = blur_radius + radius;
+            continue;
+        }
+        return None;
+    }
+    if !saw_component {
+        return None;
+    }
+    Some(PaintFilterSpec {
+        saturate,
+        blur_radius,
+    })
+}
+
+fn parse_mix_blend_mode_str(raw: &str) -> Option<MixBlendMode> {
+    let lower = raw.trim().to_ascii_lowercase();
+    match lower.as_str() {
+        "normal" => Some(MixBlendMode::Normal),
+        "multiply" => Some(MixBlendMode::Multiply),
+        "screen" => Some(MixBlendMode::Screen),
+        _ => None,
+    }
+}
+
+fn parse_background_paint_str(raw: &str) -> Option<BackgroundPaint> {
+    let layers = split_args(raw);
+    for layer in &layers {
+        if let Some(paint) = parse_linear_gradient_str(layer) {
+            return Some(paint);
+        }
+        if let Some(paint) = parse_radial_gradient_str(layer) {
+            return Some(paint);
+        }
+        if let Some(paint) = parse_conic_gradient_str(layer) {
+            return Some(paint);
+        }
+    }
+    None
+}
+
+fn parse_background_paint_with_style(style: &ComputedStyle, raw: &str) -> Option<BackgroundPaint> {
+    let layers = split_args(raw);
+    for layer in &layers {
+        if has_dynamic_gradient_expression(layer) {
+            if let Some(paint) = parse_linear_gradient_str_with_style(style, layer, 0) {
+                return Some(paint);
+            }
+            if let Some(paint) = parse_radial_gradient_str_with_style(style, layer, 0) {
+                return Some(paint);
+            }
+            if let Some(paint) = parse_conic_gradient_str_with_style(style, layer, 0) {
+                return Some(paint);
+            }
+        }
+        if let Some(paint) = parse_linear_gradient_str(layer) {
+            return Some(paint);
+        }
+        if let Some(paint) = parse_radial_gradient_str(layer) {
+            return Some(paint);
+        }
+        if let Some(paint) = parse_conic_gradient_str(layer) {
+            return Some(paint);
+        }
+    }
+    None
+}
+
+fn has_dynamic_gradient_expression(raw: &str) -> bool {
+    let lower = raw.to_ascii_lowercase();
+    lower.contains("var(") || lower.contains("currentcolor") || lower.contains("color-mix(")
+}
+
+fn extract_function_args<'a>(raw: &'a str, function: &str) -> Option<&'a str> {
+    let lower = raw.to_ascii_lowercase();
+    let start = lower.find(function)?;
+    let open_idx = start + function.len() - 1;
+    let mut depth = 0usize;
+    for (idx, ch) in raw[open_idx..].char_indices() {
+        let absolute = open_idx + idx;
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(raw[open_idx + 1..absolute].trim());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn parse_linear_gradient_str(raw: &str) -> Option<BackgroundPaint> {
+    let inside = extract_function_args(raw.trim(), "linear-gradient(")?;
     let parts = split_args(inside);
     if parts.len() < 2 {
         return None;
@@ -9728,44 +10555,555 @@ fn parse_linear_gradient_str(raw: &str) -> Option<BackgroundPaint> {
             stops.push(stop);
         }
     }
-    if stops.len() < 2 {
+    let shading_stops = normalize_gradient_stops(&stops);
+    if shading_stops.len() < 2 {
         return None;
-    }
-
-    let mut shading_stops = Vec::with_capacity(stops.len());
-    let has_offsets = stops.iter().any(|(_, off)| off.is_some());
-    if has_offsets {
-        for (idx, (color, offset)) in stops.iter().enumerate() {
-            let off = offset.unwrap_or_else(|| {
-                if stops.len() == 1 {
-                    0.0
-                } else {
-                    idx as f32 / ((stops.len() - 1) as f32)
-                }
-            });
-            shading_stops.push(ShadingStop {
-                offset: off.clamp(0.0, 1.0),
-                color: *color,
-            });
-        }
-    } else {
-        for (idx, (color, _)) in stops.iter().enumerate() {
-            let off = if stops.len() == 1 {
-                0.0
-            } else {
-                idx as f32 / ((stops.len() - 1) as f32)
-            };
-            shading_stops.push(ShadingStop {
-                offset: off,
-                color: *color,
-            });
-        }
     }
 
     Some(BackgroundPaint::LinearGradient {
         angle_deg,
         stops: shading_stops,
     })
+}
+
+fn parse_linear_gradient_str_with_style(
+    style: &ComputedStyle,
+    raw: &str,
+    depth: usize,
+) -> Option<BackgroundPaint> {
+    if depth > 12 {
+        return None;
+    }
+    let inside = extract_function_args(raw.trim(), "linear-gradient(")?;
+    let parts = split_args(inside);
+    if parts.len() < 2 {
+        return None;
+    }
+
+    let mut angle_deg = 180.0;
+    let mut stop_start = 0usize;
+    if let Some(angle) = parse_gradient_angle(&parts[0]) {
+        angle_deg = angle;
+        stop_start = 1;
+    }
+
+    let mut stops: Vec<(Color, Option<f32>)> = Vec::new();
+    for part in parts.iter().skip(stop_start) {
+        let stop = parse_gradient_stop_with_style(style, part, depth + 1)?;
+        stops.push(stop);
+    }
+    let shading_stops = normalize_gradient_stops(&stops);
+    if shading_stops.len() < 2 {
+        return None;
+    }
+
+    Some(BackgroundPaint::LinearGradient {
+        angle_deg,
+        stops: shading_stops,
+    })
+}
+
+fn parse_radial_gradient_str(raw: &str) -> Option<BackgroundPaint> {
+    let inside = extract_function_args(raw.trim(), "radial-gradient(")?;
+    let parts = split_args(inside);
+    if parts.len() < 2 {
+        return None;
+    }
+
+    let mut center_x_pct = 0.5f32;
+    let mut center_y_pct = 0.5f32;
+    let mut stop_start = 0usize;
+    if let Some((cx, cy)) = parse_radial_gradient_preamble(&parts[0]) {
+        center_x_pct = cx;
+        center_y_pct = cy;
+        stop_start = 1;
+    }
+
+    let mut stops: Vec<(Color, Option<f32>)> = Vec::new();
+    for part in parts.iter().skip(stop_start) {
+        if let Some(stop) = parse_gradient_stop(part) {
+            stops.push(stop);
+        }
+    }
+    let shading_stops = normalize_gradient_stops(&stops);
+    if shading_stops.len() < 2 {
+        return None;
+    }
+
+    Some(BackgroundPaint::RadialGradient {
+        center_x_pct,
+        center_y_pct,
+        stops: shading_stops,
+    })
+}
+
+fn parse_radial_gradient_str_with_style(
+    style: &ComputedStyle,
+    raw: &str,
+    depth: usize,
+) -> Option<BackgroundPaint> {
+    if depth > 12 {
+        return None;
+    }
+    let inside = extract_function_args(raw.trim(), "radial-gradient(")?;
+    let parts = split_args(inside);
+    if parts.len() < 2 {
+        return None;
+    }
+
+    let mut center_x_pct = 0.5f32;
+    let mut center_y_pct = 0.5f32;
+    let mut stop_start = 0usize;
+    if let Some((cx, cy)) = parse_radial_gradient_preamble(&parts[0]) {
+        center_x_pct = cx;
+        center_y_pct = cy;
+        stop_start = 1;
+    }
+
+    let mut stops: Vec<(Color, Option<f32>)> = Vec::new();
+    for part in parts.iter().skip(stop_start) {
+        let stop = parse_gradient_stop_with_style(style, part, depth + 1)?;
+        stops.push(stop);
+    }
+    let shading_stops = normalize_gradient_stops(&stops);
+    if shading_stops.len() < 2 {
+        return None;
+    }
+
+    Some(BackgroundPaint::RadialGradient {
+        center_x_pct,
+        center_y_pct,
+        stops: shading_stops,
+    })
+}
+
+fn parse_conic_gradient_str(raw: &str) -> Option<BackgroundPaint> {
+    let inside = extract_function_args(raw.trim(), "conic-gradient(")?;
+    let parts = split_args(inside);
+    if parts.len() < 2 {
+        return None;
+    }
+
+    let mut start_angle_deg = 0.0f32;
+    let mut center_x_pct = 0.5f32;
+    let mut center_y_pct = 0.5f32;
+    let mut stop_start = 0usize;
+    if let Some((angle_deg, cx, cy)) = parse_conic_gradient_preamble(&parts[0]) {
+        start_angle_deg = angle_deg;
+        center_x_pct = cx;
+        center_y_pct = cy;
+        stop_start = 1;
+    }
+
+    let mut stops: Vec<(Color, Option<f32>)> = Vec::new();
+    for part in parts.iter().skip(stop_start) {
+        if let Some(stop) = parse_conic_gradient_stop(part) {
+            stops.push(stop);
+        }
+    }
+    let shading_stops = normalize_gradient_stops(&stops);
+    if shading_stops.len() < 2 {
+        return None;
+    }
+
+    Some(BackgroundPaint::ConicGradient {
+        start_angle_deg,
+        center_x_pct,
+        center_y_pct,
+        stops: shading_stops,
+    })
+}
+
+fn parse_conic_gradient_str_with_style(
+    style: &ComputedStyle,
+    raw: &str,
+    depth: usize,
+) -> Option<BackgroundPaint> {
+    if depth > 12 {
+        return None;
+    }
+    let inside = extract_function_args(raw.trim(), "conic-gradient(")?;
+    let parts = split_args(inside);
+    if parts.len() < 2 {
+        return None;
+    }
+
+    let mut start_angle_deg = 0.0f32;
+    let mut center_x_pct = 0.5f32;
+    let mut center_y_pct = 0.5f32;
+    let mut stop_start = 0usize;
+    if let Some((angle_deg, cx, cy)) = parse_conic_gradient_preamble(&parts[0]) {
+        start_angle_deg = angle_deg;
+        center_x_pct = cx;
+        center_y_pct = cy;
+        stop_start = 1;
+    }
+
+    let mut stops: Vec<(Color, Option<f32>)> = Vec::new();
+    for part in parts.iter().skip(stop_start) {
+        let stop = parse_conic_gradient_stop_with_style(style, part, depth + 1)?;
+        stops.push(stop);
+    }
+    let shading_stops = normalize_gradient_stops(&stops);
+    if shading_stops.len() < 2 {
+        return None;
+    }
+
+    Some(BackgroundPaint::ConicGradient {
+        start_angle_deg,
+        center_x_pct,
+        center_y_pct,
+        stops: shading_stops,
+    })
+}
+
+fn parse_conic_gradient_preamble(part: &str) -> Option<(f32, f32, f32)> {
+    let part_trimmed = part.trim();
+    let lower = part_trimmed.to_ascii_lowercase();
+    let has_from = lower.contains("from ");
+    let has_at = lower.starts_with("at ") || lower.contains(" at ");
+    if !has_from && !has_at {
+        return None;
+    }
+
+    let mut start_angle_deg = 0.0f32;
+    let mut center_x_pct = 0.5f32;
+    let mut center_y_pct = 0.5f32;
+
+    if has_from {
+        let from_index = lower.find("from ")?;
+        let after = part_trimmed[from_index + 5..].trim();
+        let token = after.split_whitespace().next()?;
+        start_angle_deg = parse_angle_to_degrees(token)?;
+    }
+    if has_at {
+        let after = if lower.starts_with("at ") {
+            &part_trimmed[3..]
+        } else if let Some(idx) = lower.find(" at ") {
+            &part_trimmed[idx + 4..]
+        } else {
+            return None;
+        };
+        let (x, y) = parse_conic_position(after.trim())?;
+        center_x_pct = x;
+        center_y_pct = y;
+    }
+
+    Some((start_angle_deg, center_x_pct, center_y_pct))
+}
+
+fn parse_radial_gradient_preamble(part: &str) -> Option<(f32, f32)> {
+    let part_trimmed = part.trim();
+    if part_trimmed.is_empty() {
+        return None;
+    }
+    let lower = part_trimmed.to_ascii_lowercase();
+    let has_at = lower.starts_with("at ") || lower.contains(" at ");
+    let is_shape_or_size = lower.starts_with("circle")
+        || lower.starts_with("ellipse")
+        || lower.contains("closest-side")
+        || lower.contains("closest-corner")
+        || lower.contains("farthest-side")
+        || lower.contains("farthest-corner");
+    if has_at {
+        let after = if lower.starts_with("at ") {
+            &part_trimmed[3..]
+        } else if let Some(idx) = lower.find(" at ") {
+            &part_trimmed[idx + 4..]
+        } else {
+            return None;
+        };
+        return parse_conic_position(after.trim());
+    }
+    if let Some((x, y)) = parse_conic_position(part_trimmed) {
+        return Some((x, y));
+    }
+    if is_shape_or_size {
+        return Some((0.5, 0.5));
+    }
+    None
+}
+
+fn parse_conic_position(raw: &str) -> Option<(f32, f32)> {
+    let tokens = split_ws_preserve_parens(raw);
+    if tokens.is_empty() {
+        return None;
+    }
+
+    let mut x = 0.5f32;
+    let mut y = 0.5f32;
+    let mut percent_tokens: Vec<f32> = Vec::new();
+
+    for token in tokens.iter().take(2) {
+        let lower = token.trim().to_ascii_lowercase();
+        if lower.is_empty() {
+            continue;
+        }
+        match lower.as_str() {
+            "left" => x = 0.0,
+            "right" => x = 1.0,
+            "top" => y = 0.0,
+            "bottom" => y = 1.0,
+            "center" => {}
+            _ => {
+                if let Some(value) = parse_percentage_unit(&lower) {
+                    percent_tokens.push(value);
+                } else if let Ok(value) = lower.parse::<f32>() {
+                    if value.abs() <= f32::EPSILON {
+                        percent_tokens.push(0.0);
+                    } else {
+                        return None;
+                    }
+                } else {
+                    return None;
+                }
+            }
+        }
+    }
+
+    if let Some(first) = percent_tokens.first().copied() {
+        x = first;
+    }
+    if percent_tokens.len() >= 2 {
+        y = percent_tokens[1];
+    }
+    Some((x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)))
+}
+
+fn parse_conic_gradient_stop(part: &str) -> Option<(Color, Option<f32>)> {
+    let part = part.trim();
+    if part.is_empty() {
+        return None;
+    }
+    let mut split_at = None;
+    let mut depth = 0usize;
+    for (idx, ch) in part.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ' ' if depth == 0 => {
+                split_at = Some(idx);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let (color_part, offset_part) = if let Some(idx) = split_at {
+        (&part[..idx], part[idx + 1..].trim())
+    } else {
+        (part, "")
+    };
+    let (color, _) = parse_color_string(color_part)?;
+    let offset_token = offset_part.split_whitespace().next().unwrap_or("").trim();
+    let offset = if offset_token.is_empty() {
+        None
+    } else {
+        parse_conic_stop_offset(offset_token)
+    };
+    Some((color, offset))
+}
+
+fn parse_conic_gradient_stop_with_style(
+    style: &ComputedStyle,
+    part: &str,
+    depth: usize,
+) -> Option<(Color, Option<f32>)> {
+    if depth > 12 {
+        return None;
+    }
+    let part = part.trim();
+    if part.is_empty() {
+        return None;
+    }
+    let mut split_at = None;
+    let mut paren_depth = 0usize;
+    for (idx, ch) in part.char_indices() {
+        match ch {
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            ' ' if paren_depth == 0 => {
+                split_at = Some(idx);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let (color_part, offset_part) = if let Some(idx) = split_at {
+        (&part[..idx], part[idx + 1..].trim())
+    } else {
+        (part, "")
+    };
+    let color_part = color_part.trim();
+    let (color, alpha) = if color_part.eq_ignore_ascii_case("currentcolor") {
+        (style.color, 1.0)
+    } else {
+        resolve_custom_color_expr_with_alpha_inner(style, color_part, depth + 1)
+            .or_else(|| parse_color_string(color_part))?
+    };
+    let offset_token = offset_part.trim();
+    let offset = if offset_token.is_empty() {
+        None
+    } else {
+        parse_conic_stop_offset_with_style(style, offset_token, depth + 1)
+    };
+    Some((blend_over_white(color, alpha), offset))
+}
+
+fn parse_conic_stop_offset(raw: &str) -> Option<f32> {
+    if let Some(value) = parse_percentage_unit(raw) {
+        return Some(value.clamp(0.0, 1.0));
+    }
+    if let Some(angle_deg) = parse_angle_to_degrees(raw) {
+        let turn = angle_deg / 360.0;
+        let wrapped = turn.rem_euclid(1.0);
+        if wrapped == 0.0 && angle_deg > 0.0 {
+            return Some(1.0);
+        }
+        return Some(wrapped);
+    }
+    if let Ok(value) = raw.trim().parse::<f32>() {
+        if (0.0..=1.0).contains(&value) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn parse_conic_stop_offset_with_style(
+    style: &ComputedStyle,
+    raw: &str,
+    depth: usize,
+) -> Option<f32> {
+    if depth > 12 {
+        return None;
+    }
+    if let Some(value) = parse_conic_stop_offset(raw) {
+        return Some(value);
+    }
+    if let Some(spec) =
+        resolve_custom_length_from_maps(&style.custom_lengths, &style.custom_color_refs, raw)
+    {
+        let percent = match spec {
+            LengthSpec::Percent(value) => Some(value),
+            LengthSpec::Calc(calc)
+                if calc.abs == Pt::ZERO
+                    && calc.em.abs() <= f32::EPSILON
+                    && calc.rem.abs() <= f32::EPSILON =>
+            {
+                Some(calc.percent)
+            }
+            _ => None,
+        };
+        if let Some(value) = percent {
+            return Some(value.clamp(0.0, 1.0));
+        }
+    }
+    let resolved = resolve_custom_number_expr(style, raw, depth + 1)?;
+    if (0.0..=1.0).contains(&resolved) {
+        Some(resolved)
+    } else {
+        None
+    }
+}
+
+fn parse_percentage_unit(raw: &str) -> Option<f32> {
+    let trimmed = raw.trim();
+    if !trimmed.ends_with('%') {
+        return None;
+    }
+    let value = trimmed.trim_end_matches('%').trim().parse::<f32>().ok()?;
+    Some(value / 100.0)
+}
+
+fn parse_angle_to_degrees(raw: &str) -> Option<f32> {
+    let lower = raw.trim().to_ascii_lowercase();
+    if let Some(value) = lower.strip_suffix("deg") {
+        return value.trim().parse::<f32>().ok();
+    }
+    if let Some(value) = lower.strip_suffix("turn") {
+        return value.trim().parse::<f32>().ok().map(|v| v * 360.0);
+    }
+    if let Some(value) = lower.strip_suffix("grad") {
+        return value.trim().parse::<f32>().ok().map(|v| v * 0.9);
+    }
+    if let Some(value) = lower.strip_suffix("rad") {
+        return value
+            .trim()
+            .parse::<f32>()
+            .ok()
+            .map(|v| v * (180.0 / std::f32::consts::PI));
+    }
+    None
+}
+
+fn normalize_gradient_stops(stops: &[(Color, Option<f32>)]) -> Vec<ShadingStop> {
+    if stops.len() < 2 {
+        return Vec::new();
+    }
+    let mut offsets: Vec<Option<f32>> = stops.iter().map(|(_, off)| *off).collect();
+    if offsets.iter().all(|off| off.is_none()) {
+        let denom = (stops.len() - 1) as f32;
+        return stops
+            .iter()
+            .enumerate()
+            .map(|(idx, (color, _))| ShadingStop {
+                offset: idx as f32 / denom,
+                color: *color,
+            })
+            .collect();
+    }
+
+    if offsets[0].is_none() {
+        offsets[0] = Some(0.0);
+    }
+    let last_idx = offsets.len() - 1;
+    if offsets[last_idx].is_none() {
+        offsets[last_idx] = Some(1.0);
+    }
+
+    let mut idx = 0usize;
+    while idx < offsets.len() {
+        if offsets[idx].is_some() {
+            idx += 1;
+            continue;
+        }
+        let left = idx.saturating_sub(1);
+        let mut right = idx;
+        while right < offsets.len() && offsets[right].is_none() {
+            right += 1;
+        }
+        let left_value = offsets[left].unwrap_or(0.0);
+        let right_value = offsets
+            .get(right)
+            .and_then(|v| *v)
+            .unwrap_or(left_value)
+            .max(left_value);
+        let span = (right - left) as f32;
+        for fill in idx..right {
+            let t = (fill - left) as f32 / span;
+            offsets[fill] = Some(left_value + (right_value - left_value) * t);
+        }
+        idx = right;
+    }
+
+    let mut previous = 0.0f32;
+    for off in &mut offsets {
+        let mut value = off.unwrap_or(previous).clamp(0.0, 1.0);
+        if value < previous {
+            value = previous;
+        }
+        *off = Some(value);
+        previous = value;
+    }
+
+    stops
+        .iter()
+        .enumerate()
+        .map(|(idx, (color, _))| ShadingStop {
+            offset: offsets[idx].unwrap_or(0.0),
+            color: *color,
+        })
+        .collect()
 }
 
 fn parse_gradient_angle(part: &str) -> Option<f32> {
@@ -9829,17 +11167,80 @@ fn parse_gradient_stop(part: &str) -> Option<(Color, Option<f32>)> {
         (part, "")
     };
     let (color, _) = parse_color_string(color_part)?;
-    let offset = if offset_part.ends_with('%') {
-        let v = offset_part
-            .trim_end_matches('%')
-            .trim()
-            .parse::<f32>()
-            .ok()?;
-        Some((v / 100.0).clamp(0.0, 1.0))
-    } else {
-        None
-    };
+    let offset_token = offset_part.split_whitespace().next().unwrap_or("").trim();
+    let offset = parse_percentage_unit(offset_token).map(|v| v.clamp(0.0, 1.0));
     Some((color, offset))
+}
+
+fn parse_gradient_stop_with_style(
+    style: &ComputedStyle,
+    part: &str,
+    depth: usize,
+) -> Option<(Color, Option<f32>)> {
+    if depth > 12 {
+        return None;
+    }
+    let part = part.trim();
+    if part.is_empty() {
+        return None;
+    }
+    let mut split_at = None;
+    let mut paren_depth = 0usize;
+    for (idx, ch) in part.char_indices() {
+        match ch {
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            ' ' if paren_depth == 0 => {
+                split_at = Some(idx);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let (color_part, offset_part) = if let Some(idx) = split_at {
+        (&part[..idx], part[idx + 1..].trim())
+    } else {
+        (part, "")
+    };
+    let color_part = color_part.trim();
+    let (color, alpha) = if color_part.eq_ignore_ascii_case("currentcolor") {
+        (style.color, 1.0)
+    } else {
+        resolve_custom_color_expr_with_alpha_inner(style, color_part, depth + 1)
+            .or_else(|| parse_color_string(color_part))?
+    };
+
+    let offset_token = offset_part.split_whitespace().next().unwrap_or("").trim();
+    let offset = if offset_token.is_empty() {
+        None
+    } else if let Some(value) = parse_percentage_unit(offset_token) {
+        Some(value.clamp(0.0, 1.0))
+    } else if let Some(spec) = resolve_custom_length_from_maps(
+        &style.custom_lengths,
+        &style.custom_color_refs,
+        offset_token,
+    ) {
+        match spec {
+            LengthSpec::Percent(value) => Some(value.clamp(0.0, 1.0)),
+            LengthSpec::Calc(calc)
+                if calc.abs == Pt::ZERO
+                    && calc.em.abs() <= f32::EPSILON
+                    && calc.rem.abs() <= f32::EPSILON =>
+            {
+                Some(calc.percent.clamp(0.0, 1.0))
+            }
+            _ => None,
+        }
+    } else {
+        let resolved = resolve_custom_number_expr(style, offset_token, depth + 1)?;
+        if (0.0..=1.0).contains(&resolved) {
+            Some(resolved)
+        } else {
+            None
+        }
+    };
+
+    Some((blend_over_white(color, alpha), offset))
 }
 
 fn parse_color_string(raw: &str) -> Option<(Color, f32)> {
@@ -10258,7 +11659,9 @@ fn length_spec_from_lp(value: &LengthPercentage) -> Option<LengthSpec> {
             LengthValue::Rem(val) => Some(LengthSpec::Rem(*val)),
             _ => length_value_to_pt(length).map(LengthSpec::Absolute),
         },
-        LengthPercentage::Calc(calc) => calc_length_from_calc(calc).map(length_spec_from_calc_length),
+        LengthPercentage::Calc(calc) => {
+            calc_length_from_calc(calc).map(length_spec_from_calc_length)
+        }
     }
 }
 
@@ -10786,7 +12189,6 @@ fn apply_inherit_initial_edge(
         }
         return;
     }
-
 }
 
 fn apply_inherit_initial_edge_pair(
@@ -11191,11 +12593,16 @@ impl StyleDelta {
             && self.border_collapse.is_none()
             && self.caption_side.is_none()
             && self.border_spacing.is_none()
+            && self.table_layout.is_none()
             && self.border_radius.is_none()
             && self.font_name.is_none()
             && self.font_name_var.is_none()
             && self.box_shadow.is_none()
+            && self.paint_filter.is_none()
+            && self.backdrop_filter.is_none()
+            && self.mix_blend_mode.is_none()
             && self.background_paint.is_none()
+            && self.clip_path.is_none()
             && self.pagination.break_before.is_none()
             && self.pagination.break_after.is_none()
             && self.pagination.break_inside.is_none()
@@ -11509,6 +12916,377 @@ mod tests {
     }
 
     #[test]
+    fn debug_does_not_log_filters_effects_fallback_for_supported_clip_path_inset() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "fullbleed_style_effects_clip_path_supported_{}_{}.jsonl",
+            std::process::id(),
+            nanos
+        ));
+        let logger = Arc::new(DebugLogger::new(&path).expect("debug logger"));
+        let resolver = StyleResolver::new_with_debug(
+            ".x { clip-path: inset(8px 12px 16px 20px round 10px); }",
+            Some(logger.clone()),
+        );
+        drop(resolver);
+        drop(logger);
+        let log = std::fs::read_to_string(&path).expect("read debug log");
+        assert!(
+            !log.contains("\"FILTERS_EFFECTS_FALLBACK\",\"property\":\"clip-path\""),
+            "supported clip-path inset should not emit filters/effects fallback, log={log}"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn filter_saturate_property_resolves_on_computed_style() {
+        let css = ".x { filter: saturate(125%); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
+        let filter = style.paint_filter.expect("expected filter spec");
+        assert!((filter.saturate - 1.25).abs() < 0.0001);
+        assert_eq!(filter.blur_radius, Pt::ZERO);
+    }
+
+    #[test]
+    fn backdrop_filter_blur_and_saturate_resolves_on_computed_style() {
+        let css = ".x { backdrop-filter: blur(4px) saturate(140%); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
+        let filter = style.backdrop_filter.expect("expected backdrop filter spec");
+        assert!((filter.saturate - 1.4).abs() < 0.0001);
+        assert!(filter.blur_radius > Pt::ZERO);
+    }
+
+    #[test]
+    fn mix_blend_mode_property_resolves_on_computed_style() {
+        let css = ".x { mix-blend-mode: screen; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
+        assert_eq!(style.mix_blend_mode, MixBlendMode::Screen);
+    }
+
+    #[test]
+    fn debug_does_not_log_filters_effects_fallback_for_supported_filter_and_mix_blend_mode() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "fullbleed_style_effects_supported_filter_mix_{}_{}.jsonl",
+            std::process::id(),
+            nanos
+        ));
+        let logger = Arc::new(DebugLogger::new(&path).expect("debug logger"));
+        let resolver = StyleResolver::new_with_debug(
+            ".x { filter: saturate(1.2); mix-blend-mode: screen; }",
+            Some(logger.clone()),
+        );
+        drop(resolver);
+        drop(logger);
+        let log = std::fs::read_to_string(&path).expect("read debug log");
+        assert!(
+            !log.contains("\"FILTERS_EFFECTS_FALLBACK\",\"property\":\"filter\""),
+            "supported filter should not emit fallback, log={log}"
+        );
+        assert!(
+            !log.contains("\"FILTERS_EFFECTS_FALLBACK\",\"property\":\"mix-blend-mode\""),
+            "supported mix-blend-mode should not emit fallback, log={log}"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn debug_does_not_log_filters_effects_fallback_for_supported_backdrop_filter() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "fullbleed_style_effects_supported_backdrop_{}_{}.jsonl",
+            std::process::id(),
+            nanos
+        ));
+        let logger = Arc::new(DebugLogger::new(&path).expect("debug logger"));
+        let resolver = StyleResolver::new_with_debug(
+            ".x { backdrop-filter: blur(3px) saturate(120%); }",
+            Some(logger.clone()),
+        );
+        drop(resolver);
+        drop(logger);
+        let log = std::fs::read_to_string(&path).expect("read debug log");
+        assert!(
+            !log.contains("\"FILTERS_EFFECTS_FALLBACK\",\"property\":\"backdrop-filter\""),
+            "supported backdrop-filter should not emit fallback, log={log}"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn clip_path_inset_property_resolves_on_computed_style() {
+        let css = ".x { clip-path: inset(10px 20px 30px 40px); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
+        assert_eq!(
+            style.clip_path_inset,
+            Some(ClipPathInsetSpec {
+                top: LengthSpec::Absolute(px_to_pt(10.0)),
+                right: LengthSpec::Absolute(px_to_pt(20.0)),
+                bottom: LengthSpec::Absolute(px_to_pt(30.0)),
+                left: LengthSpec::Absolute(px_to_pt(40.0)),
+            })
+        );
+    }
+
+    #[test]
+    fn debug_logs_conic_gradient_fallback_for_unsupported_background() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "fullbleed_style_conic_known_loss_{}_{}.jsonl",
+            std::process::id(),
+            nanos
+        ));
+        let logger = Arc::new(DebugLogger::new(&path).expect("debug logger"));
+        let resolver = StyleResolver::new_with_debug(
+            ".x { background: conic-gradient(red); }",
+            Some(logger.clone()),
+        );
+        drop(resolver);
+        drop(logger);
+        let log = std::fs::read_to_string(&path).expect("read debug log");
+        assert!(log.contains("\"CONIC_GRADIENT_FALLBACK\""));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn debug_does_not_log_conic_gradient_fallback_for_dynamic_background() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "fullbleed_style_conic_known_loss_dynamic_{}_{}.jsonl",
+            std::process::id(),
+            nanos
+        ));
+        let logger = Arc::new(DebugLogger::new(&path).expect("debug logger"));
+        let resolver = StyleResolver::new_with_debug(
+            ".x { --pct: 60; color: rgb(0, 0, 255); background: conic-gradient(from -90deg, currentColor calc(var(--pct) * 1%), rgba(128, 142, 185, 0.16) 0%); }",
+            Some(logger.clone()),
+        );
+        drop(resolver);
+        drop(logger);
+        let log = std::fs::read_to_string(&path).expect("read debug log");
+        assert!(
+            !log.contains("\"CONIC_GRADIENT_FALLBACK\""),
+            "dynamic conic gradients should resolve without fallback diagnostics, log={log}"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn debug_does_not_log_conic_gradient_fallback_for_supported_background() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "fullbleed_style_conic_known_loss_{}_{}.jsonl",
+            std::process::id(),
+            nanos
+        ));
+        let logger = Arc::new(DebugLogger::new(&path).expect("debug logger"));
+        let resolver = StyleResolver::new_with_debug(
+            ".x { background: conic-gradient(from 90deg at 25% 75%, red 0%, blue 100%); }",
+            Some(logger.clone()),
+        );
+        drop(resolver);
+        drop(logger);
+        let log = std::fs::read_to_string(&path).expect("read debug log");
+        assert!(
+            !log.contains("\"CONIC_GRADIENT_FALLBACK\""),
+            "supported conic gradients should not emit fallback diagnostics, log={log}"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn conic_gradient_background_sets_background_paint() {
+        let resolver = StyleResolver::new(
+            ".x { background: conic-gradient(from 90deg at 25% 75%, red 0%, blue 100%); }",
+        );
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        match style.background_paint {
+            Some(BackgroundPaint::ConicGradient {
+                start_angle_deg,
+                center_x_pct,
+                center_y_pct,
+                stops,
+            }) => {
+                assert!((start_angle_deg - 90.0).abs() < 0.01);
+                assert!((center_x_pct - 0.25).abs() < 0.01);
+                assert!((center_y_pct - 0.75).abs() < 0.01);
+                assert_eq!(stops.len(), 2);
+                assert_eq!(stops[0].offset, 0.0);
+                assert_eq!(stops[1].offset, 1.0);
+            }
+            other => panic!("expected conic background paint, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn conic_gradient_angle_offsets_resolve_to_turn_fractions() {
+        let resolver = StyleResolver::new(
+            ".x { background: conic-gradient(red 0deg, green 180deg, blue 360deg); }",
+        );
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        match style.background_paint {
+            Some(BackgroundPaint::ConicGradient { stops, .. }) => {
+                assert_eq!(stops.len(), 3);
+                assert!((stops[0].offset - 0.0).abs() < 0.001);
+                assert!((stops[1].offset - 0.5).abs() < 0.001);
+                assert!((stops[2].offset - 1.0).abs() < 0.001);
+            }
+            other => panic!("expected conic background paint, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn conic_gradient_background_with_currentcolor_and_var_stop_resolves() {
+        let css = ":root { --pct: 60; } .x { color: rgb(0, 0, 255); background: conic-gradient(from -90deg, currentColor calc(var(--pct) * 1%), #ebedf4 0%); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let mut root_info = element("html", None, &[]);
+        root_info.is_root = true;
+        let root_style = resolver.compute_style(&root_info, &root, None, &[]);
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root_style, None, &[root_info]);
+        match style.background_paint {
+            Some(BackgroundPaint::ConicGradient { stops, .. }) => {
+                assert!(
+                    !stops.is_empty(),
+                    "expected conic-gradient stops for dynamic currentColor + var expression"
+                );
+                assert!(
+                    stops.iter().any(|stop| (stop.offset - 0.6).abs() < 0.01),
+                    "expected at least one stop offset near 60%, stops={stops:?}"
+                );
+                assert!(
+                    stops.iter().any(|stop| {
+                        (stop.color.r - 0.0).abs() < 0.01
+                            && (stop.color.g - 0.0).abs() < 0.01
+                            && (stop.color.b - 1.0).abs() < 0.01
+                    }),
+                    "expected a stop resolved from currentColor, stops={stops:?}"
+                );
+            }
+            other => panic!("expected conic background paint, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn radial_gradient_background_sets_background_paint() {
+        let direct = parse_background_paint_str(
+            "radial-gradient(circle at 10% 0%, #1d2f6d 0%, #0c1430 48%, #070b19 100%)",
+        );
+        match direct {
+            Some(BackgroundPaint::RadialGradient {
+                center_x_pct,
+                center_y_pct,
+                ..
+            }) => {
+                assert!(
+                    (center_x_pct - 0.10).abs() < 0.01,
+                    "direct parse center_x_pct={center_x_pct}"
+                );
+                assert!(
+                    (center_y_pct - 0.00).abs() < 0.01,
+                    "direct parse center_y_pct={center_y_pct}"
+                );
+            }
+            other => panic!("expected direct radial parse, got {other:?}"),
+        }
+        let resolver = StyleResolver::new(
+            ".x { background: radial-gradient(circle at 10% 0%, #1d2f6d 0%, #0c1430 48%, #070b19 100%); }",
+        );
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        match style.background_paint {
+            Some(BackgroundPaint::RadialGradient {
+                center_x_pct,
+                center_y_pct,
+                stops,
+            }) => {
+                assert!(
+                    (center_x_pct - 0.10).abs() < 0.01,
+                    "unexpected center_x_pct={center_x_pct}"
+                );
+                assert!(
+                    (center_y_pct - 0.00).abs() < 0.01,
+                    "unexpected center_y_pct={center_y_pct}"
+                );
+                assert_eq!(stops.len(), 3);
+                assert!((stops[0].offset - 0.0).abs() < 0.001);
+                assert!((stops[1].offset - 0.48).abs() < 0.01);
+                assert!((stops[2].offset - 1.0).abs() < 0.001);
+            }
+            other => panic!("expected radial background paint, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn radial_gradient_background_with_var_stop_resolves() {
+        let css = ":root { --bg0: #0c1430; } .x { background: radial-gradient(circle at 10% 0%, #1d2f6d 0%, var(--bg0) 48%, #070b19 100%); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let mut root_info = element("html", None, &[]);
+        root_info.is_root = true;
+        let root_style = resolver.compute_style(&root_info, &root, None, &[]);
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root_style, None, &[root_info]);
+        match style.background_paint {
+            Some(BackgroundPaint::RadialGradient {
+                center_x_pct,
+                center_y_pct,
+                stops,
+            }) => {
+                assert!(
+                    (center_x_pct - 0.10).abs() < 0.01,
+                    "unexpected center_x_pct={center_x_pct}"
+                );
+                assert!(
+                    (center_y_pct - 0.00).abs() < 0.01,
+                    "unexpected center_y_pct={center_y_pct}"
+                );
+                assert_eq!(stops.len(), 3);
+                assert!(
+                    (stops[1].color.r - (12.0 / 255.0)).abs() < 0.01
+                        && (stops[1].color.g - (20.0 / 255.0)).abs() < 0.01
+                        && (stops[1].color.b - (48.0 / 255.0)).abs() < 0.01,
+                    "expected var-resolved middle stop, got {:?}",
+                    stops[1].color
+                );
+            }
+            other => panic!("expected radial background paint, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn display_table_is_not_normalized() {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -11545,8 +13323,7 @@ mod tests {
 
     #[test]
     fn grid_template_rows_sets_row_count() {
-        let resolver =
-            StyleResolver::new(".menu { display: grid; grid-template-rows: 1fr 2fr; }");
+        let resolver = StyleResolver::new(".menu { display: grid; grid-template-rows: 1fr 2fr; }");
         let root = resolver.default_style();
         let info = element("div", None, &["menu"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
@@ -12195,8 +13972,14 @@ mod tests {
         let style = resolver.compute_style(&info, &root, None, &[]);
         match style.width {
             LengthSpec::Calc(calc) => {
-                assert!((calc.abs.to_f32() - 7.5).abs() < 0.001, "unexpected calc={calc:?}");
-                assert!((calc.percent - 0.5).abs() < 0.0001, "unexpected calc={calc:?}");
+                assert!(
+                    (calc.abs.to_f32() - 7.5).abs() < 0.001,
+                    "unexpected calc={calc:?}"
+                );
+                assert!(
+                    (calc.percent - 0.5).abs() < 0.0001,
+                    "unexpected calc={calc:?}"
+                );
                 assert!(calc.em.abs() < 0.0001 && calc.rem.abs() < 0.0001);
             }
             other => panic!("expected calc width, got {other:?}"),
@@ -12250,6 +14033,86 @@ mod tests {
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
         assert_eq!(style.width, LengthSpec::Absolute(Pt::from_f32(30.0)));
+    }
+
+    #[test]
+    fn custom_property_calc_var_plus_absolute_resolves_mixed_calc() {
+        let css = ".x { --base: 50%; width: calc(var(--base) + 10px); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        match style.width {
+            LengthSpec::Calc(calc) => {
+                assert!(
+                    (calc.percent - 0.5).abs() < 1.0e-6,
+                    "unexpected calc={calc:?}"
+                );
+                assert!(
+                    (calc.abs.to_f32() - 7.5).abs() < 1.0e-6,
+                    "unexpected calc={calc:?}"
+                );
+            }
+            other => panic!("expected calc width, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn custom_property_calc_percent_minus_var_length_resolves_mixed_calc() {
+        let css = ".x { --pad: 24pt; width: calc(100% - var(--pad)); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        match style.width {
+            LengthSpec::Calc(calc) => {
+                assert!(
+                    (calc.percent - 1.0).abs() < 1.0e-6,
+                    "unexpected calc={calc:?}"
+                );
+                assert!(
+                    (calc.abs.to_f32() + 24.0).abs() < 1.0e-6,
+                    "unexpected calc={calc:?}"
+                );
+            }
+            other => panic!("expected calc width, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn custom_property_calc_var_plus_var_mixed_units_resolves() {
+        let css = ".x { --a: 1in; --b: 20px; width: calc(var(--a) + var(--b)); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.width, LengthSpec::Absolute(Pt::from_f32(87.0)));
+    }
+
+    #[test]
+    fn custom_property_calc_percent_minus_var_scaled_term_resolves() {
+        let css = ".x { --gutter: 10px; width: calc(100% - var(--gutter) * 2); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(
+            style.custom_lengths.get("--gutter").copied(),
+            Some(LengthSpec::Absolute(Pt::from_f32(7.5)))
+        );
+        match style.width {
+            LengthSpec::Calc(calc) => {
+                assert!(
+                    (calc.percent - 1.0).abs() < 1.0e-6,
+                    "unexpected calc={calc:?}"
+                );
+                assert!(
+                    (calc.abs.to_f32() + 15.0).abs() < 1.0e-6,
+                    "unexpected calc={calc:?}"
+                );
+            }
+            other => panic!("expected calc width, got {other:?}"),
+        }
     }
 
     #[test]
@@ -12683,6 +14546,21 @@ mod tests {
     }
 
     #[test]
+    fn table_layout_custom_property_applies() {
+        let css = "table { table-layout: fixed; } .auto { table-layout: auto; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+
+        let table_fixed = element("table", None, &[]);
+        let style_fixed = resolver.compute_style(&table_fixed, &root, None, &[]);
+        assert_eq!(style_fixed.table_layout, TableLayoutMode::Fixed);
+
+        let table_auto = element("table", None, &["auto"]);
+        let style_auto = resolver.compute_style(&table_auto, &root, None, &[]);
+        assert_eq!(style_auto.table_layout, TableLayoutMode::Auto);
+    }
+
+    #[test]
     fn box_shadow_var_parses_for_unparsed_paths() {
         let css =
             ".x { --shade: rgba(0, 0, 0, 0.05); box-shadow: inset 0 0 0 9999px var(--shade); }";
@@ -12794,6 +14672,33 @@ mod tests {
     }
 
     #[test]
+    fn custom_property_color_mix_var_expression_resolves_for_background() {
+        let css = ":root { --panel: #333b52; --mixed: color-mix(in srgb, var(--panel) 78%, #4c6eb4); } .x { background-color: var(--mixed); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let mut root_info = element("html", None, &[]);
+        root_info.is_root = true;
+        let root_style = resolver.compute_style(&root_info, &root, None, &[]);
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root_style, None, &[root_info]);
+        let bg = style
+            .background_color
+            .expect("expected background color from color-mix var expression");
+        assert!(
+            (bg.r - (56.5 / 255.0)).abs() < 0.02,
+            "unexpected background={bg:?}"
+        );
+        assert!(
+            (bg.g - (70.2 / 255.0)).abs() < 0.02,
+            "unexpected background={bg:?}"
+        );
+        assert!(
+            (bg.b - (103.56 / 255.0)).abs() < 0.02,
+            "unexpected background={bg:?}"
+        );
+    }
+
+    #[test]
     fn border_color_rgba_var_expression_resolves_for_unparsed_property() {
         let css = ":root { --bs-success-rgb: 25, 135, 84; --bs-border-opacity: 1; } .x { border-width: 1px; border-color: rgba(var(--bs-success-rgb), var(--bs-border-opacity)); }";
         let resolver = StyleResolver::new(css);
@@ -12854,9 +14759,29 @@ mod tests {
     }
 
     #[test]
+    fn border_color_is_not_promoted_when_other_active_edge_has_no_explicit_color() {
+        let css = ".x { border-left: 1px solid red; border-right-width: 1px; border-right-style: solid; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(
+            style.border_width.left,
+            LengthSpec::Absolute(Pt::from_f32(0.75))
+        );
+        assert_eq!(
+            style.border_width.right,
+            LengthSpec::Absolute(Pt::from_f32(0.75))
+        );
+        assert!(style.border_color.is_none());
+        assert!(style.border_left_color.is_some());
+        assert!(style.border_right_color.is_none());
+    }
+
+    #[test]
     fn inline_style_matches_stylesheet_for_table_custom_properties() {
         let sheet_resolver = StyleResolver::new(
-            ".from-sheet { border-collapse: collapse; caption-side: bottom; border-spacing: 2px 4px; }",
+            ".from-sheet { border-collapse: collapse; caption-side: bottom; border-spacing: 2px 4px; table-layout: fixed; }",
         );
         let sheet_root = sheet_resolver.default_style();
         let sheet_table = element("table", None, &["from-sheet"]);
@@ -12868,7 +14793,9 @@ mod tests {
         let from_inline = inline_resolver.compute_style(
             &inline_table,
             &inline_root,
-            Some("border-collapse: collapse; caption-side: bottom; border-spacing: 2px 4px;"),
+            Some(
+                "border-collapse: collapse; caption-side: bottom; border-spacing: 2px 4px; table-layout: fixed;",
+            ),
             &[],
         );
 
@@ -12882,6 +14809,7 @@ mod tests {
             from_inline.border_spacing.vertical,
             from_sheet.border_spacing.vertical
         );
+        assert_eq!(from_inline.table_layout, from_sheet.table_layout);
     }
 
     #[test]

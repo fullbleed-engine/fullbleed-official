@@ -1,4 +1,5 @@
-use crate::types::{Color, Pt, Rect, Shading, Size};
+use crate::flowable::PaintFilterSpec;
+use crate::types::{Color, MixBlendMode, Pt, Rect, Shading, Size};
 
 #[derive(Debug, Clone)]
 pub enum Command {
@@ -34,6 +35,17 @@ pub enum Command {
     SetOpacity {
         fill: f32,
         stroke: f32,
+    },
+    SetBlendMode {
+        mode: MixBlendMode,
+    },
+    ApplyBackdropFilter {
+        x: Pt,
+        y: Pt,
+        width: Pt,
+        height: Pt,
+        radius: Pt,
+        filter: PaintFilterSpec,
     },
     SetFontName(String),
     SetFontSize(Pt),
@@ -168,6 +180,7 @@ struct GraphicsState {
     line_width: Pt,
     line_cap: u8,
     line_join: u8,
+    blend_mode: MixBlendMode,
     font_size: Pt,
     font_name: String,
 }
@@ -196,6 +209,7 @@ impl Canvas {
                 line_width: Pt::from_f32(1.0),
                 line_cap: 0,
                 line_join: 0,
+                blend_mode: MixBlendMode::Normal,
                 font_size: Pt::from_f32(12.0),
                 font_name: "Helvetica".to_string(),
             },
@@ -327,6 +341,33 @@ impl Canvas {
         self.current.commands.push(Command::SetOpacity {
             fill: fill.clamp(0.0, 1.0),
             stroke: stroke.clamp(0.0, 1.0),
+        });
+    }
+
+    pub fn set_blend_mode(&mut self, mode: MixBlendMode) {
+        if self.current_state.blend_mode == mode {
+            return;
+        }
+        self.current_state.blend_mode = mode;
+        self.current.commands.push(Command::SetBlendMode { mode });
+    }
+
+    pub fn apply_backdrop_filter(
+        &mut self,
+        x: Pt,
+        y: Pt,
+        width: Pt,
+        height: Pt,
+        radius: Pt,
+        filter: PaintFilterSpec,
+    ) {
+        self.current.commands.push(Command::ApplyBackdropFilter {
+            x,
+            y,
+            width,
+            height,
+            radius,
+            filter,
         });
     }
 
@@ -484,6 +525,7 @@ impl Canvas {
             line_width: Pt::from_f32(1.0),
             line_cap: 0,
             line_join: 0,
+            blend_mode: MixBlendMode::Normal,
             font_size: Pt::from_f32(12.0),
             font_name: "Helvetica".to_string(),
         };
