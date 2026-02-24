@@ -1,0 +1,110 @@
+@page { size: letter; margin: 0.5in; }
+
+body {
+  margin: 0;
+  font-family: Helvetica, Arial, sans-serif;
+  font-size: 11pt;
+  color: #172233;
+}
+
+.scaffold-root {
+  display: block;
+}
+
+.ui-section {
+  margin-bottom: 0.18in;
+}
+
+.ui-heading {
+  margin: 0 0 0.08in;
+  font-weight: 700;
+}
+
+.ui-layout-grid {
+  display: block;
+}
+
+.ui-region {
+  border: 1px solid #d7e0ec;
+  border-radius: 4px;
+  padding: 8px;
+  margin-bottom: 10px;
+}
+
+.ui-field-grid {
+  margin: 0;
+}
+
+.ui-field-grid .ui-dt {
+  font-weight: 700;
+  margin-top: 2px;
+}
+
+.ui-field-grid .ui-dd {
+  margin: 0 0 4px 0;
+}
+
+.ui-table-caption {
+  caption-side: top;
+  text-align: left;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.ui-semantic-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ui-col-header,
+.ui-row-header,
+.ui-data-cell {
+  border: 1px solid #a6b6cb;
+  padding: 6px;
+}
+
+.ui-col-header {
+  background: #eef4fc;
+  text-align: left;
+}
+
+.ui-row-header {
+  background: #f8fbff;
+  text-align: left;
+}
+
+.ui-status {
+  background: #edf8ee;
+  border: 1px solid #bedfc2;
+  padding: 6px;
+}
+
+.ui-alert {
+  background: #fff4e8;
+  border: 1px solid #efcca1;
+  padding: 6px;
+  margin-top: 6px;
+}
+
+.ui-signature-block {
+  border: 1px solid #d7e0ec;
+  border-radius: 4px;
+  padding: 8px;
+  margin-top: 8px;
+}
+
+.ui-signature-mark {
+  display: block;
+  margin-top: 6px;
+  width: 2.45in;
+  height: 0.8in;
+}
+
+.ui-figure {
+  margin: 8px 0 0;
+}
+
+.ui-figcaption {
+  color: #4a607b;
+  font-size: 10pt;
+}

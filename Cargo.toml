@@ -30,6 +30,7 @@ inherits = "release"
 debug = true
 
 [dependencies]
+fullbleed_audit_contract = { path = "crates/fullbleed_audit_contract" }
 kuchiki = "0.8.1"
 lightningcss = "1.0.0-alpha.70"
 ttf-parser = "0.20.0"

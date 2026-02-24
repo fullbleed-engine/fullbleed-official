@@ -1,0 +1,14 @@
+[package]
+name = "fullbleed_audit_contract"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "Embedded audit/compliance contract payloads and fingerprints for FullBleed verifier/PMR."
+
+[lib]
+name = "fullbleed_audit_contract"
+path = "src/lib.rs"
+
+[dependencies]
+sha2 = "0.10.8"
+serde_json = "1.0"

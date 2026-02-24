@@ -9,6 +9,18 @@ and treated as a contract for engine-safe primitives/selectors.
 - `bank_statement` (scaffolded component example)
 - `coastal_menu` (component showcase example)
 
+## Pending canary enrollment
+
+The repository now also includes accessibility-focused canary examples that are
+intended for future golden enrollment once baselines are generated and the suite
+contract is extended:
+
+- `examples/semantic_table_a11y_canary/report.py`
+- `examples/signature_accessibility_canary/report.py`
+
+These canaries emit both component-mount validation JSON and `A11yContract`
+validation JSON and are good candidates for Sprint 6/7 golden expansion.
+
 For scaffolded examples, the suite enforces:
 
 - Component mount validation is clean (`ok: true`, no warnings/failures)
@@ -48,4 +60,3 @@ Run a subset:
 ```bash
 python goldens/run_golden_suite.py --cases acme_invoice,bank_statement verify
 ```
-

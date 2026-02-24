@@ -8,6 +8,25 @@ import fullbleed
 
 `fullbleed` re-exports the Rust extension API plus license helpers in `python/fullbleed/__init__.py`.
 
+## `fullbleed.ui` (component-first authoring)
+
+Secondary import surface for component/document authoring:
+
+```python
+from fullbleed.ui import el, to_html
+from fullbleed.ui.core import Document
+```
+
+Key modules:
+
+- `fullbleed.ui.core`: `Element`, `DocumentArtifact`, `Document`, `to_html`, `mount_component_html`
+- `fullbleed.ui.primitives`: engine-safe layout/presentation primitives
+- `fullbleed.ui.style`: inline style composition (`Style`, `style(...)`)
+- `fullbleed.ui.accessibility`: semantic/a11y wrappers + `A11yContract` validator
+
+For the accessibility-first authoring workflow (semantic tables, field grids,
+signature semantics, and validation), see `docs/ui-accessibility.md`.
+
 ## Main classes and helpers
 
 ## `PdfEngine`

@@ -3,7 +3,7 @@ use crate::flowable::CalcLength;
 use crate::flowable::{
     BackgroundPaint, BorderCollapseMode, BorderRadiusSpec, BorderSpacingSpec, BoxShadowSpec,
     BreakAfter, BreakBefore, BreakInside, ClipPathInsetSpec, CssTransformOp, CssTransformOrigin,
-    EdgeSizes, LengthSpec, PaintFilterSpec, Pagination, TableLayoutMode, TextStyle,
+    EdgeSizes, LengthSpec, Pagination, PaintFilterSpec, TableLayoutMode, TextStyle,
 };
 use crate::types::{BoxSizingMode, Color, Margins, MixBlendMode, Pt, ShadingStop, Size};
 use fixed::types::I32F32;
@@ -12958,7 +12958,9 @@ mod tests {
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
-        let filter = style.backdrop_filter.expect("expected backdrop filter spec");
+        let filter = style
+            .backdrop_filter
+            .expect("expected backdrop filter spec");
         assert!((filter.saturate - 1.4).abs() < 0.0001);
         assert!(filter.blur_radius > Pt::ZERO);
     }

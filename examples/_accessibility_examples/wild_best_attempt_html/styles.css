@@ -1,0 +1,109 @@
+@page { size: letter; margin: 0.45in; }
+
+body {
+  margin: 0;
+  color: #111;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 10pt;
+  line-height: 1.3;
+}
+
+.wild-doc {
+  display: block;
+}
+
+.page-header {
+  border-bottom: 2px solid #111;
+  margin-bottom: 12px;
+  padding-bottom: 6px;
+}
+
+.page-header h1 {
+  margin: 0;
+  font-size: 18pt;
+  line-height: 1.05;
+}
+
+.subhead {
+  margin: 3px 0 0 0;
+  color: #444;
+  font-size: 9pt;
+}
+
+section {
+  margin-top: 12px;
+  page-break-inside: avoid;
+}
+
+h2 {
+  margin: 0 0 5px 0;
+  font-size: 11.5pt;
+  border-bottom: 1px solid #999;
+  padding-bottom: 2px;
+}
+
+h3 {
+  margin: 0 0 4px 0;
+  font-size: 10pt;
+}
+
+p, li {
+  margin: 0 0 4px 0;
+}
+
+.kv-grid {
+  margin: 6px 0 0 0;
+  padding: 0;
+}
+
+.kv-row {
+  display: grid;
+  grid-template-columns: 1.8in 1fr;
+  border-bottom: 1px solid #ddd;
+  padding: 2px 0;
+}
+
+.kv-row dt {
+  font-weight: 700;
+  margin: 0;
+}
+
+.kv-row dd {
+  margin: 0;
+}
+
+.plan-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+}
+
+.plan-table caption {
+  caption-side: top;
+  text-align: left;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.plan-table th,
+.plan-table td {
+  border: 1px solid #222;
+  padding: 4px 5px;
+  vertical-align: top;
+  text-align: left;
+}
+
+.plan-table thead th {
+  background: #f0f3f7;
+}
+
+.signature-box {
+  border: 1px solid #222;
+  padding: 6px 8px;
+  margin-top: 6px;
+}
+
+ul {
+  margin: 5px 0 0 14px;
+  padding: 0;
+}

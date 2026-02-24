@@ -1792,6 +1792,31 @@ mod tests {
     }
 
     #[test]
+    fn html_th_scope_maps_known_values_to_pdf_scope_names() {
+        assert_eq!(
+            html_th_scope_to_pdf_scope(Some("col")).as_deref(),
+            Some("Column")
+        );
+        assert_eq!(
+            html_th_scope_to_pdf_scope(Some("row")).as_deref(),
+            Some("Row")
+        );
+        assert_eq!(
+            html_th_scope_to_pdf_scope(Some("colgroup")).as_deref(),
+            Some("ColGroup")
+        );
+        assert_eq!(
+            html_th_scope_to_pdf_scope(Some("rowgroup")).as_deref(),
+            Some("RowGroup")
+        );
+        assert_eq!(html_th_scope_to_pdf_scope(Some(" ")), None);
+        assert_eq!(
+            html_th_scope_to_pdf_scope(Some("custom-scope")).as_deref(),
+            Some("custom-scope")
+        );
+    }
+
+    #[test]
     fn svg_serialization_roundtrip() {
         let html = r##"
         <html>
@@ -3576,7 +3601,8 @@ fn table_flowable(
                 cell_style.box_shadow.clone(),
                 Some(Arc::<str>::from(if tag == "th" { "TH" } else { "TD" })),
                 if tag == "th" {
-                    Some("Column".to_string())
+                    html_th_scope_to_pdf_scope(cell_el.attributes.borrow().get("scope"))
+                        .or_else(|| Some("Column".to_string()))
                 } else {
                     None
                 },
@@ -3812,6 +3838,23 @@ fn parse_dimension(value: Option<&str>) -> Option<Pt> {
         .parse::<f32>()
         .ok()
         .map(|px| Pt::from_f32(px * 0.75))
+}
+
+fn html_th_scope_to_pdf_scope(value: Option<&str>) -> Option<String> {
+    let raw = value?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let lower = raw.to_ascii_lowercase();
+    let mapped = match lower.as_str() {
+        "col" => "Column".to_string(),
+        "row" => "Row".to_string(),
+        "colgroup" => "ColGroup".to_string(),
+        "rowgroup" => "RowGroup".to_string(),
+        "both" => "Both".to_string(),
+        _ => raw.to_string(),
+    };
+    Some(mapped)
 }
 
 fn parse_data_uri_bytes(uri: &str) -> Option<(String, Vec<u8>)> {

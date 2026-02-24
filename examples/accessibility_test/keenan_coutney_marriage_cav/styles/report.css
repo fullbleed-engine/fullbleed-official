@@ -1,0 +1,230 @@
+@page { size: letter; margin: 0.22in; }
+
+body {
+  margin: 0;
+  font-family: Helvetica, Arial, sans-serif;
+  font-size: 7.2pt;
+  line-height: 1.15;
+  color: #000;
+}
+
+.cav-root {
+  display: block;
+}
+
+.recorded-stamp {
+  font-size: 6.6pt;
+  font-weight: 700;
+  line-height: 1.15;
+  margin: 0 0 4px 0;
+}
+
+.form-header-block {
+  margin: 0 0 3px 0;
+}
+
+.fb-row {
+  display: grid;
+  gap: 0;
+  align-items: stretch;
+}
+
+.fb-row > .fb-field + .fb-field {
+  margin-left: -1px;
+}
+
+.fb-row + .fb-row {
+  margin-top: -1px;
+}
+
+.header-row > * + * {
+  margin-left: -1px;
+}
+
+.fb-center {
+  text-align: center;
+}
+
+.fb-title-pane {
+  border: 1px solid #000;
+  min-height: 1.14in;
+  display: block;
+  padding: 2px 4px;
+}
+
+.fb-header-line {
+  font-size: 7.2pt;
+  font-weight: 700;
+  margin-top: 2px;
+}
+
+.fb-header-main {
+  font-size: 9.2pt;
+  font-weight: 800;
+  letter-spacing: 0.1px;
+  margin-top: 2px;
+}
+
+.fb-header-sub {
+  font-size: 6.7pt;
+  font-weight: 700;
+  margin-top: 1px;
+}
+
+.fb-header-note {
+  font-size: 5.8pt;
+  line-height: 1.12;
+  margin: 2px auto 0;
+  max-width: 2.6in;
+}
+
+.application-number-wrap {
+  text-align: center;
+  margin: 2px 0 3px;
+}
+
+.application-number {
+  display: inline-block;
+  border-bottom: 1px solid #000;
+  min-width: 3.25in;
+  padding: 0 10px 1px;
+  font-size: 16pt;
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+
+.application-number-label {
+  font-size: 6.4pt;
+  font-weight: 700;
+  margin-top: 1px;
+}
+
+.fb-section {
+  margin: 0 0 3px 0;
+  page-break-inside: avoid;
+}
+
+.fb-section-title {
+  display: block;
+  border: 1px solid #000;
+  margin: 0;
+  padding: 1px 3px 1px;
+  text-align: center;
+  font-size: 7.8pt;
+  line-height: 1.05;
+  font-weight: 800;
+}
+
+.form-block .fb-row:first-of-type {
+  margin-top: -1px;
+}
+
+.fb-field {
+  border: 1px solid #000;
+  background: #fff;
+  padding: 1px 2px 1px;
+  min-height: 0.18in;
+  overflow: hidden;
+}
+
+.fb-field-grid,
+.fb-field-grid.ui-field-grid {
+  margin: 0;
+}
+
+.fb-field-grid .ui-dt {
+  margin: 0;
+  font-size: 5.4pt;
+  line-height: 1.05;
+  font-weight: 700;
+  color: #000;
+}
+
+.fb-field-grid .ui-dd {
+  margin: 1px 0 0 0;
+  font-size: 7.3pt;
+  line-height: 1.05;
+  font-weight: 700;
+  color: #000;
+  word-break: break-word;
+}
+
+.fb-field.val-lg .ui-dd {
+  font-size: 7.9pt;
+}
+
+.fb-field.val-md .ui-dd {
+  font-size: 6.8pt;
+}
+
+.fb-field.center-label .ui-dt,
+.fb-field.center-label .ui-dd {
+  text-align: center;
+}
+
+.fb-field.state-file-box {
+  min-height: 0.22in;
+  align-self: start;
+}
+
+.fb-boilerplate-wrap {
+  border-left: 1px solid #000;
+  border-right: 1px solid #000;
+  border-bottom: 1px solid #000;
+  margin-top: -1px;
+  padding: 2px 4px;
+}
+
+.fb-boilerplate {
+  margin: 0;
+  font-size: 5.9pt;
+  line-height: 1.1;
+  font-weight: 700;
+  text-align: center;
+}
+
+.sig-field {
+  min-height: 0.22in;
+}
+
+.sig-value {
+  display: block;
+}
+
+.sig-line {
+  font-size: 6.5pt;
+  line-height: 1.05;
+  font-weight: 700;
+}
+
+.sig-subline {
+  font-size: 5.9pt;
+  line-height: 1.05;
+  margin-top: 1px;
+}
+
+.seal-field {
+  text-align: center;
+}
+
+.seal-field .ui-dt {
+  text-align: center;
+}
+
+.seal-value {
+  font-size: 6.4pt;
+  line-height: 1.05;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+.vital-stats-footer {
+  border-top: 1px solid #000;
+  font-size: 6.1pt;
+  line-height: 1.05;
+  font-weight: 800;
+  text-align: center;
+  margin-top: 2px;
+  padding-top: 1px;
+}

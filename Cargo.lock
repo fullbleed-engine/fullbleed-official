@@ -572,6 +572,7 @@ version = "0.5.0"
 dependencies = [
  "base64 0.22.1",
  "fixed",
+ "fullbleed_audit_contract",
  "image",
  "kuchiki",
  "libm",
@@ -585,6 +586,14 @@ dependencies = [
  "sha2",
  "tiny-skia",
  "ttf-parser 0.20.0",
+]
+
+[[package]]
+name = "fullbleed_audit_contract"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

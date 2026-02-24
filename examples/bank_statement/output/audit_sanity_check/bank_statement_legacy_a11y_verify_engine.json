@@ -1,0 +1,440 @@
+{
+  "schema": "fullbleed.a11y.verify.v1",
+  "target": {
+    "html_path": "C:\\dev\\workbench\\fullbleed-official\\examples\\bank_statement\\output\\audit_sanity_check\\bank_statement_legacy.html",
+    "css_path": "C:\\dev\\workbench\\fullbleed-official\\examples\\bank_statement\\output\\audit_sanity_check\\bank_statement_legacy.css",
+    "target_hash": "sha256:9580de6337504b0e2ca8a5a27e20de56dd70161c5a7683d3264876351e67779d"
+  },
+  "profile": "strict",
+  "conformance_status": {
+    "status": "manual_review_required",
+    "claim_scope": "manual_required",
+    "manual_review_required": true
+  },
+  "gate": {
+    "ok": true,
+    "mode": "error",
+    "error_count": 0,
+    "warn_count": 2,
+    "failed_rule_ids": []
+  },
+  "summary": {
+    "pass_count": 9,
+    "fail_count": 0,
+    "warn_count": 2,
+    "manual_needed_count": 1,
+    "not_applicable_count": 5
+  },
+  "findings": [
+    {
+      "rule_id": "fb.a11y.html.lang_present_valid",
+      "applicability": "applicable",
+      "verification_mode": "machine",
+      "verdict": "pass",
+      "severity": "high",
+      "confidence": "certain",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "message": "HTML lang attribute is present and valid.",
+      "evidence": [
+        {
+          "selector": "html",
+          "values": {
+            "lang": "en"
+          }
+        }
+      ]
+    },
+    {
+      "rule_id": "fb.a11y.language.parts_declared_valid_seed",
+      "applicability": "not_applicable",
+      "verification_mode": "hybrid",
+      "verdict": "not_applicable",
+      "severity": "low",
+      "confidence": "high",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "message": "No inline lang declarations on descendant elements detected; language-of-parts rule not applicable for this document.",
+      "evidence": [
+        {
+          "values": {
+            "part_lang_attr_count": "0",
+            "invalid_part_lang_attr_count": "0"
+          }
+        }
+      ]
+    },
+    {
+      "rule_id": "fb.a11y.html.title_present_nonempty",
+      "applicability": "applicable",
+      "verification_mode": "machine",
+      "verdict": "pass",
+      "severity": "high",
+      "confidence": "certain",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "message": "Document title is present and non-empty.",
+      "evidence": [
+        {
+          "selector": "head > title",
+          "values": {
+            "title": "Horizon Bank Statement"
+          }
+        }
+      ]
+    },
+    {
+      "rule_id": "fb.a11y.structure.single_main",
+      "applicability": "applicable",
+      "verification_mode": "machine",
+      "verdict": "pass",
+      "severity": "medium",
+      "confidence": "certain",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "message": "Single primary content root detected.",
+      "evidence": [
+        {
+          "selector": "main",
+          "values": {
+            "count": "1"
+          }
+        }
+      ]
+    },
+    {
+      "rule_id": "fb.a11y.headings_labels.present_nonempty",
+      "applicability": "applicable",
+      "verification_mode": "hybrid",
+      "verdict": "pass",
+      "severity": "medium",
+      "confidence": "medium",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "message": "No empty headings/labels or unlabeled regions detected.",
+      "evidence": [
+        {
+          "values": {
+            "empty_heading_count": "0",
+            "empty_label_count": "0",
+            "empty_aria_label_count": "0",
+            "unlabeled_region_count": "0"
+          }
+        }
+      ]
+    },
+    {
+      "rule_id": "fb.a11y.images.alt_or_decorative",
+      "applicability": "applicable",
+      "verification_mode": "machine",
+      "verdict": "pass",
+      "severity": "medium",
+      "confidence": "high",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "message": "Image text alternatives/decorative semantics look consistent.",
+      "evidence": [
+        {
+          "values": {
+            "image_count": "4",
+            "image_missing_alt_count": "0",
+            "image_title_only_count": "0",
+            "image_semantic_conflict_count": "0"
+          }
+        }
+      ]
+    },
+    {
+      "rule_id": "fb.a11y.forms.labels_or_instructions_present",
+      "applicability": "not_applicable",
+      "verification_mode": "hybrid",
+      "verdict": "not_applicable",
+      "severity": "low",
+      "confidence": "high",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "message": "No form controls detected; labels/instructions rule not applicable."
+    },
+    {
+      "rule_id": "fb.a11y.forms.error_identification_present",
+      "applicability": "not_applicable",
+      "verification_mode": "hybrid",
+      "verdict": "not_applicable",
+      "severity": "low",
+      "confidence": "high",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "message": "No invalid form controls detected; error-identification rule not applicable."
+    },
+    {
+      "rule_id": "fb.a11y.links.purpose_in_context",
+      "applicability": "not_applicable",
+      "verification_mode": "hybrid",
+      "verdict": "not_applicable",
+      "severity": "low",
+      "confidence": "high",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "message": "No links detected; link-purpose rule not applicable."
+    },
+    {
+      "rule_id": "fb.a11y.instructions.sensory_characteristics_seed",
+      "applicability": "applicable",
+      "verification_mode": "hybrid",
+      "verdict": "pass",
+      "severity": "medium",
+      "confidence": "high",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "message": "No obvious sensory-characteristics instruction phrases detected.",
+      "evidence": [
+        {
+          "values": {
+            "sensory_phrase_hit_count": "0",
+            "sensory_phrase_hits": ""
+          }
+        }
+      ]
+    },
+    {
+      "rule_id": "fb.a11y.ids.duplicate_id",
+      "applicability": "applicable",
+      "verification_mode": "machine",
+      "verdict": "pass",
+      "severity": "critical",
+      "confidence": "certain",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "message": "No duplicate IDs detected."
+    },
+    {
+      "rule_id": "fb.a11y.aria.reference_target_exists",
+      "applicability": "applicable",
+      "verification_mode": "machine",
+      "verdict": "pass",
+      "severity": "critical",
+      "confidence": "certain",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "message": "No broken ARIA ID references detected."
+    },
+    {
+      "rule_id": "fb.a11y.claim.non_interference_seed",
+      "applicability": "applicable",
+      "verification_mode": "hybrid",
+      "verdict": "pass",
+      "severity": "medium",
+      "confidence": "high",
+      "stage": "adapter",
+      "source": "adapter",
+      "message": "No obvious active-content non-interference risk signals detected in emitted HTML.",
+      "evidence": [
+        {
+          "values": {
+            "script_element_count": "0",
+            "embedded_active_content_count": "0",
+            "autoplay_media_count": "0",
+            "blink_marquee_count": "0",
+            "inline_event_handler_attr_count": "0",
+            "meta_refresh_count": "0"
+          }
+        }
+      ]
+    },
+    {
+      "rule_id": "fb.a11y.claim.complete_processes_scope_seed",
+      "applicability": "not_applicable",
+      "verification_mode": "hybrid",
+      "verdict": "not_applicable",
+      "severity": "medium",
+      "confidence": "high",
+      "stage": "adapter",
+      "source": "adapter",
+      "message": "Complete-processes conformance requirement not applicable without a declared multi-step process scope.",
+      "evidence": [
+        {
+          "values": {
+            "profile": "strict",
+            "process_scope_declared": "false"
+          }
+        }
+      ]
+    },
+    {
+      "rule_id": "fb.a11y.claim.accessibility_supported_technologies_seed",
+      "applicability": "applicable",
+      "verification_mode": "hybrid",
+      "verdict": "manual_needed",
+      "severity": "medium",
+      "confidence": "low",
+      "stage": "adapter",
+      "source": "adapter",
+      "message": "No obvious technology-support risk signals detected, but accessibility-supported technology claim still requires manual evidence.",
+      "evidence": [
+        {
+          "values": {
+            "embedded_active_content_count": "0",
+            "script_element_count": "0",
+            "autoplay_media_count": "0",
+            "blink_marquee_count": "0",
+            "inline_event_handler_attr_count": "0",
+            "meta_refresh_count": "0",
+            "css_linked": "false"
+          }
+        }
+      ]
+    },
+    {
+      "rule_id": "fb.a11y.contrast.minimum_render_seed",
+      "applicability": "applicable",
+      "verification_mode": "hybrid",
+      "verdict": "warn",
+      "severity": "medium",
+      "confidence": "medium",
+      "stage": "post-render",
+      "source": "adapter",
+      "message": "Render-based contrast seed estimate is 2.61:1 (< 4.5:1); manual confirmation required.",
+      "evidence": [
+        {
+          "values": {
+            "render_preview_png_path": "C:\\dev\\workbench\\fullbleed-official\\examples\\bank_statement\\output\\audit_sanity_check\\bank_statement_legacy_page1.png",
+            "width": "1224",
+            "height": "1584",
+            "opaque_pixel_count": "1938816",
+            "ink_pixel_count": "1648891",
+            "background_luminance": "1.000000",
+            "foreground_luminance": "0.351823",
+            "estimated_contrast_ratio": "2.6131"
+          }
+        }
+      ]
+    },
+    {
+      "rule_id": "fb.a11y.claim.wcag20aa_level_readiness",
+      "applicability": "applicable",
+      "verification_mode": "hybrid",
+      "verdict": "warn",
+      "severity": "medium",
+      "confidence": "high",
+      "stage": "adapter",
+      "source": "adapter",
+      "message": "WCAG 2.0 AA conformance-level claim scaffold status: blocked_coverage_gaps.",
+      "evidence": [
+        {
+          "values": {
+            "status": "blocked_coverage_gaps",
+            "machine_blocker_count": "0",
+            "coverage_gap_count": "26"
+          }
+        }
+      ]
+    }
+  ],
+  "observability": {
+    "original_finding_count": 17,
+    "reported_finding_count": 17,
+    "dedup_event_count": 0,
+    "dedup_merged_finding_count": 0,
+    "correlated_finding_count": 0,
+    "stage_counts": {
+      "adapter": 4,
+      "post-emit": 12,
+      "post-render": 1
+    },
+    "source_counts": {
+      "adapter": 5,
+      "fullbleed": 12
+    },
+    "original_stage_counts": {
+      "adapter": 4,
+      "post-emit": 12,
+      "post-render": 1
+    },
+    "original_source_counts": {
+      "adapter": 5,
+      "fullbleed": 12
+    },
+    "correlation_index": []
+  },
+  "coverage": {
+    "evaluated_rule_count": 17,
+    "applicable_rule_count": 12,
+    "machine_rule_count": 6,
+    "manual_rule_count": 0,
+    "manual_needed_count": 1,
+    "not_evaluated_rule_count": 0,
+    "wcag20aa": {
+      "registry_id": "wcag20aa_registry.v1",
+      "registry_version": 1,
+      "wcag_version": "2.0",
+      "target_level": "AA",
+      "total_entries": 43,
+      "success_criteria_total": 38,
+      "conformance_requirements_total": 5,
+      "mapped_entry_count": 19,
+      "mapped_success_criteria_count": 14,
+      "mapped_conformance_requirement_count": 5,
+      "implemented_mapped_entry_count": 19,
+      "implemented_mapped_entry_evaluated_count": 18,
+      "implemented_mapped_entry_pending_count": 1,
+      "supporting_only_mapped_entry_count": 0,
+      "planned_only_mapped_entry_count": 0,
+      "unmapped_entry_count": 24,
+      "implemented_mapped_result_counts": {
+        "pass": 10,
+        "fail": 0,
+        "warn": 2,
+        "manual_needed": 1,
+        "not_applicable": 5,
+        "unknown": 0
+      }
+    },
+    "rule_pack_coverage": [
+      {
+        "pack_id": "fullbleed.a11y.engine_core.v1",
+        "evaluated": 17,
+        "total": 17
+      },
+      {
+        "pack_id": "wcag20aa.implemented_map.v1",
+        "evaluated": 18,
+        "total": 19
+      }
+    ]
+  },
+  "wcag20aa_claim_readiness": {
+    "target": "wcag20aa",
+    "status": "blocked_coverage_gaps",
+    "claim_ready": false,
+    "manual_review_required": true,
+    "manual_review_debt_count": 0,
+    "machine_blocker_count": 0,
+    "coverage_gap_count": 26,
+    "implemented_mapped_entry_count": 19,
+    "implemented_mapped_entry_evaluated_count": 18,
+    "implemented_mapped_entry_pending_count": 1,
+    "unmapped_entry_count": 24,
+    "notes": [
+      "WCAG target registry still contains unmapped entries.",
+      "Implemented mapped WCAG entries remain unevaluated in this report.",
+      "Manual claim evidence is required for WCAG conformance assertions."
+    ]
+  },
+  "tooling": {
+    "fullbleed_version": "0.5.0",
+    "engine_version": "0.5.0",
+    "report_schema_version": "1.0.0-draft",
+    "audit_contract_id": "fullbleed.audit_contract",
+    "audit_contract_version": "1",
+    "audit_contract_fingerprint": "sha256:808683071cddc973d682a2c93eccde97097aea394ce2e1d550c3dc7892cf8806",
+    "audit_registry_hash": "sha256:7b38bf284f4c086dbf64bf55a6abb964fac1611b4f1f73c2fae0f8e1c8b998af",
+    "wcag20aa_registry_hash": "sha256:6be7e74948290fe8a202fea345a0bf5a5b45535d2b64263f108d1a704f95ac69",
+    "generated_at": "2026-02-24T07:48:47.953281Z"
+  },
+  "artifacts": {
+    "html_hash": "sha256:9580de6337504b0e2ca8a5a27e20de56dd70161c5a7683d3264876351e67779d",
+    "css_hash": "sha256:b2a640739298e75754d102a42be6f076f0835b545048147863ce2e777fd40d4c",
+    "css_linked": false,
+    "packaging_mode": "separate-files"
+  }
+}

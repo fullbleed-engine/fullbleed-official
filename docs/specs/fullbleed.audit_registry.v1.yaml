@@ -1,0 +1,675 @@
+{
+  "schema": "fullbleed.audit_registry.v1",
+  "version": 1,
+  "generated_for": "accessibility_audit_epic.md Sprint 1",
+  "pmr_categories": [
+    {
+      "id": "document-semantics",
+      "name": "Document Semantics",
+      "weight": 20
+    },
+    {
+      "id": "reading-order-structure",
+      "name": "Reading Order & Structure",
+      "weight": 20
+    },
+    {
+      "id": "paged-layout-integrity",
+      "name": "Paged Layout Integrity",
+      "weight": 25
+    },
+    {
+      "id": "field-table-form-integrity",
+      "name": "Field/Table/Form Integrity",
+      "weight": 20
+    },
+    {
+      "id": "artifact-packaging-reproducibility",
+      "name": "Artifact Packaging & Reproducibility",
+      "weight": 15
+    }
+  ],
+  "profiles": {
+    "strict": {
+      "description": "Default release gate profile for high-confidence machine-verifiable checks.",
+      "default_mode": "error",
+      "overrides": [
+        {
+          "id": "pmr.artifacts.linked_css_reference",
+          "level": "warn"
+        }
+      ]
+    },
+    "transactional": {
+      "description": "Transactional documents with emphasis on field/table/signature integrity.",
+      "default_mode": "error",
+      "overrides": [
+        {
+          "id": "pmr.layout.page_count_target",
+          "level": "warn"
+        }
+      ]
+    },
+    "cav": {
+      "description": "Conforming alternative version workflows with same-use parity requirements.",
+      "default_mode": "error",
+      "overrides": [
+        {
+          "id": "pmr.layout.page_count_target",
+          "level": "error"
+        },
+        {
+          "id": "pmr.cav.document_only_content",
+          "level": "error"
+        },
+        {
+          "id": "fb.a11y.cav.document_only_content",
+          "level": "error"
+        }
+      ]
+    }
+  },
+  "entries": [
+    {
+      "id": "fb.a11y.html.lang_present_valid",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "high",
+      "default_gate_level": "error"
+    },
+    {
+      "id": "fb.a11y.language.parts_declared_valid_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.html.title_present_nonempty",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "high",
+      "default_gate_level": "error"
+    },
+    {
+      "id": "fb.a11y.structure.single_main",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "medium",
+      "default_gate_level": "error"
+    },
+    {
+      "id": "fb.a11y.headings_labels.present_nonempty",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "hybrid",
+      "severity": "high",
+      "default_gate_level": "error"
+    },
+    {
+      "id": "fb.a11y.ids.duplicate_id",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "critical",
+      "default_gate_level": "error"
+    },
+    {
+      "id": "fb.a11y.aria.reference_target_exists",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "critical",
+      "default_gate_level": "error"
+    },
+    {
+      "id": "fb.a11y.tables.semantic_headers",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "high",
+      "default_gate_level": "error"
+    },
+    {
+      "id": "fb.a11y.images.alt_or_decorative",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "high",
+      "default_gate_level": "error"
+    },
+    {
+      "id": "fb.a11y.forms.labels_or_instructions_present",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "hybrid",
+      "severity": "high",
+      "default_gate_level": "error"
+    },
+    {
+      "id": "fb.a11y.forms.error_identification_present",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "hybrid",
+      "severity": "high",
+      "default_gate_level": "error"
+    },
+    {
+      "id": "fb.a11y.links.purpose_in_context",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "hybrid",
+      "severity": "high",
+      "default_gate_level": "error"
+    },
+    {
+      "id": "fb.a11y.instructions.sensory_characteristics_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.sequence.meaningful_sequence_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.focus.visible_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.focus.order_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.identification.consistent_identification_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.navigation.multiple_ways_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.navigation.consistent_navigation_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.keyboard.operable_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.keyboard.no_trap_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.forms.error_suggestion_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.forms.error_prevention_legal_financial_data_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.forms.on_input_behavior_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.focus.on_focus_behavior_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.timing.adjustable_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.timing.pause_stop_hide_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.seizures.three_flashes_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.audio.control_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.color.use_of_color_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.text.resize_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.images.of_text_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.media.prerecorded_audio_video_alternative_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.media.prerecorded_captions_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.media.prerecorded_audio_description_or_media_alternative_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.media.live_captions_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.media.prerecorded_audio_description_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.signatures.text_semantics_present",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "pre-render",
+      "verification_mode": "machine",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.cav.document_only_content",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "critical",
+      "default_gate_level": "error"
+    },
+    {
+      "id": "fb.a11y.claim.wcag20aa_level_readiness",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.claim.non_interference_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.claim.complete_processes_scope_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.claim.accessibility_supported_technologies_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.claim.section508.public_facing_content_applicability_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.claim.section508.official_communications_applicability_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.claim.section508.nara_exception_applicability_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "low",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.claim.section508.non_web_document_exceptions_html_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "adapter",
+      "verification_mode": "hybrid",
+      "severity": "low",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.contrast.minimum_render_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-render",
+      "verification_mode": "hybrid",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "pmr.doc.lang_present_valid",
+      "kind": "audit",
+      "system": "pmr",
+      "category": "document-semantics",
+      "weight": 3,
+      "class": "required",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "high",
+      "default_gate_level": "error",
+      "scored": true
+    },
+    {
+      "id": "pmr.doc.title_present_nonempty",
+      "kind": "audit",
+      "system": "pmr",
+      "category": "document-semantics",
+      "weight": 3,
+      "class": "required",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "high",
+      "default_gate_level": "error",
+      "scored": true
+    },
+    {
+      "id": "pmr.doc.metadata_engine_persistence",
+      "kind": "audit",
+      "system": "pmr",
+      "category": "document-semantics",
+      "weight": 4,
+      "class": "scored",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "high",
+      "default_gate_level": "error",
+      "scored": true
+    },
+    {
+      "id": "pmr.layout.overflow_none",
+      "kind": "audit",
+      "system": "pmr",
+      "category": "paged-layout-integrity",
+      "weight": 6,
+      "class": "required",
+      "stage": "post-render",
+      "verification_mode": "machine",
+      "severity": "critical",
+      "default_gate_level": "error",
+      "scored": true
+    },
+    {
+      "id": "pmr.layout.known_loss_none_critical",
+      "kind": "audit",
+      "system": "pmr",
+      "category": "paged-layout-integrity",
+      "weight": 5,
+      "class": "required",
+      "stage": "post-render",
+      "verification_mode": "machine",
+      "severity": "high",
+      "default_gate_level": "error",
+      "scored": true
+    },
+    {
+      "id": "pmr.layout.page_count_target",
+      "kind": "audit",
+      "system": "pmr",
+      "category": "paged-layout-integrity",
+      "weight": 4,
+      "class": "scored",
+      "stage": "post-render",
+      "verification_mode": "machine",
+      "severity": "high",
+      "default_gate_level": "warn",
+      "scored": true
+    },
+    {
+      "id": "pmr.forms.id_ref_integrity",
+      "kind": "audit",
+      "system": "pmr",
+      "category": "field-table-form-integrity",
+      "weight": 4,
+      "class": "required",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "critical",
+      "default_gate_level": "error",
+      "scored": true
+    },
+    {
+      "id": "pmr.tables.semantic_table_headers",
+      "kind": "audit",
+      "system": "pmr",
+      "category": "field-table-form-integrity",
+      "weight": 4,
+      "class": "scored",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "high",
+      "default_gate_level": "error",
+      "scored": true
+    },
+    {
+      "id": "pmr.signatures.text_semantics_present",
+      "kind": "audit",
+      "system": "pmr",
+      "category": "field-table-form-integrity",
+      "weight": 3,
+      "class": "scored",
+      "stage": "pre-render",
+      "verification_mode": "machine",
+      "severity": "medium",
+      "default_gate_level": "warn",
+      "scored": true
+    },
+    {
+      "id": "pmr.cav.document_only_content",
+      "kind": "audit",
+      "system": "pmr",
+      "category": "field-table-form-integrity",
+      "weight": 3,
+      "class": "required",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "critical",
+      "default_gate_level": "error",
+      "scored": true
+    },
+    {
+      "id": "pmr.artifacts.html_emitted",
+      "kind": "audit",
+      "system": "pmr",
+      "category": "artifact-packaging-reproducibility",
+      "weight": 3,
+      "class": "required",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "high",
+      "default_gate_level": "error",
+      "scored": true
+    },
+    {
+      "id": "pmr.artifacts.css_emitted",
+      "kind": "audit",
+      "system": "pmr",
+      "category": "artifact-packaging-reproducibility",
+      "weight": 3,
+      "class": "required",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "high",
+      "default_gate_level": "error",
+      "scored": true
+    },
+    {
+      "id": "pmr.artifacts.linked_css_reference",
+      "kind": "audit",
+      "system": "pmr",
+      "category": "artifact-packaging-reproducibility",
+      "weight": 2,
+      "class": "opportunity",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "low",
+      "default_gate_level": "warn",
+      "scored": false
+    }
+  ]
+}

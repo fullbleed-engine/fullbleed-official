@@ -50,9 +50,12 @@ pub use flowable::{
     TextStyle,
 };
 use font::FontRegistry;
+use fullbleed_audit_contract as audit_contract;
 pub use frame::{AddResult, Frame};
 pub use glyph_report::{GlyphCoverageReport, MissingGlyph};
 use image::GenericImageView;
+use kuchiki::NodeData;
+use kuchiki::traits::TendrilSink;
 pub use jit::JitMode;
 pub use metrics::{DocumentMetrics, PageMetrics};
 pub use page_data::{PageDataContext, PageDataOp, PageDataValue, PaginatedContextSpec};
@@ -139,6 +142,180 @@ struct LayoutBuildResult {
 pub enum LayoutStrategy {
     Eager,
     Lazy,
+}
+
+#[derive(Debug, Clone)]
+pub struct A11yVerifierEvidence {
+    pub selector: Option<String>,
+    pub values: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HtmlTableFacts {
+    pub has_caption: bool,
+    pub th_count: usize,
+    pub th_scope_count: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct A11yVerifierFinding {
+    pub rule_id: String,
+    pub applicability: String,
+    pub verification_mode: String,
+    pub verdict: String,
+    pub severity: String,
+    pub confidence: String,
+    pub stage: String,
+    pub source: String,
+    pub message: String,
+    pub evidence: Vec<A11yVerifierEvidence>,
+}
+
+#[derive(Debug, Clone)]
+pub struct A11yVerifierFacts {
+    pub html_lang: Option<String>,
+    pub title: String,
+    pub part_lang_attr_count: usize,
+    pub invalid_part_lang_attr_count: usize,
+    pub main_count: usize,
+    pub duplicate_ids: Vec<String>,
+    pub missing_idrefs: Vec<(String, String)>,
+    pub has_html_wrapper: bool,
+    pub has_css_link: bool,
+    pub css_link_hrefs: Vec<String>,
+    pub signature_semantic_count: usize,
+    pub empty_heading_count: usize,
+    pub empty_label_count: usize,
+    pub empty_aria_label_count: usize,
+    pub unlabeled_region_count: usize,
+    pub image_count: usize,
+    pub image_missing_alt_count: usize,
+    pub image_title_only_count: usize,
+    pub image_semantic_conflict_count: usize,
+    pub form_control_count: usize,
+    pub unlabeled_form_control_count: usize,
+    pub invalid_form_control_count: usize,
+    pub unidentified_error_form_control_count: usize,
+    pub tabindex_attr_count: usize,
+    pub positive_tabindex_count: usize,
+    pub invalid_tabindex_count: usize,
+    pub link_count: usize,
+    pub unnamed_link_count: usize,
+    pub generic_link_text_count: usize,
+    pub custom_click_handler_count: usize,
+    pub pointer_only_click_handler_count: usize,
+    pub script_element_count: usize,
+    pub embedded_active_content_count: usize,
+    pub autoplay_media_count: usize,
+    pub blink_marquee_count: usize,
+    pub inline_event_handler_attr_count: usize,
+    pub meta_refresh_count: usize,
+    pub tables: Vec<HtmlTableFacts>,
+    pub body_text: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct A11yVerifierCoreReport {
+    pub profile: String,
+    pub findings: Vec<A11yVerifierFinding>,
+    pub facts: A11yVerifierFacts,
+}
+
+#[derive(Debug, Clone)]
+pub struct PmrCoreEvidence {
+    pub selector: Option<String>,
+    pub diagnostic_ref: Option<String>,
+    pub values: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PmrCoreAudit {
+    pub audit_id: String,
+    pub category: String,
+    pub weight: f64,
+    pub class_name: String,
+    pub verification_mode: String,
+    pub severity: String,
+    pub stage: String,
+    pub source: String,
+    pub verdict: String,
+    pub scored: bool,
+    pub score: Option<f64>,
+    pub message: String,
+    pub fix_hint: Option<String>,
+    pub evidence: Vec<PmrCoreEvidence>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PmrCoreCategory {
+    pub id: String,
+    pub name: String,
+    pub weight: f64,
+    pub score: f64,
+    pub confidence: f64,
+    pub audit_count: usize,
+    pub fail_count: usize,
+    pub warn_count: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct PmrCoreManualDebtItem {
+    pub id: String,
+    pub reason: String,
+    pub severity: String,
+    pub category: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PmrCoreGate {
+    pub ok: bool,
+    pub mode: String,
+    pub error_count: usize,
+    pub warn_count: usize,
+    pub failed_audit_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PmrCoreRank {
+    pub score: f64,
+    pub confidence: f64,
+    pub band: String,
+    pub raw_score: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct PmrCoreCoverage {
+    pub evaluated_audit_count: usize,
+    pub applicable_audit_count: usize,
+    pub scored_audit_count: usize,
+    pub manual_needed_count: usize,
+    pub not_evaluated_audit_count: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PmrCoreContext {
+    pub overflow_count: Option<i64>,
+    pub known_loss_count: Option<i64>,
+    pub source_page_count: Option<i64>,
+    pub render_page_count: Option<i64>,
+    pub review_queue_items: Option<i64>,
+    pub html_artifact_bytes: Option<u64>,
+    pub css_artifact_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PmrCoreReport {
+    pub profile: String,
+    pub mode: String,
+    pub audits: Vec<PmrCoreAudit>,
+    pub categories: Vec<PmrCoreCategory>,
+    pub manual_debt_item_count: usize,
+    pub manual_debt_high_risk_count: usize,
+    pub manual_debt_items: Vec<PmrCoreManualDebtItem>,
+    pub coverage: PmrCoreCoverage,
+    pub rank: PmrCoreRank,
+    pub gate: PmrCoreGate,
+    pub facts: A11yVerifierFacts,
 }
 
 #[derive(Debug, Clone)]
@@ -1019,6 +1196,21 @@ fn merge_background_commands(base: &mut Document, background: &Document) {
     }
 }
 
+fn escape_html_text(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 impl FullBleed {
     pub fn builder() -> FullBleedBuilder {
         FullBleedBuilder::new()
@@ -1112,6 +1304,1951 @@ impl FullBleed {
             merged.push('\n');
             merged.push_str(css);
             merged
+        }
+    }
+
+    pub fn document_lang(&self) -> Option<&str> {
+        self.pdf_options.document_lang.as_deref()
+    }
+
+    pub fn document_title(&self) -> Option<&str> {
+        self.pdf_options.document_title.as_deref()
+    }
+
+    pub fn compose_document_html(&self, body_html: &str) -> String {
+        let lang = self.document_lang().unwrap_or("en");
+        let title = self.document_title().unwrap_or("fullbleed document");
+        let mut out = String::with_capacity(body_html.len() + title.len() + lang.len() + 160);
+        out.push_str("<!doctype html><html lang=\"");
+        out.push_str(&escape_html_text(lang));
+        out.push_str("\"><head><meta charset=\"utf-8\" /><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" /><title>");
+        out.push_str(&escape_html_text(title));
+        out.push_str("</title></head><body>");
+        out.push_str(body_html);
+        out.push_str("</body></html>");
+        out
+    }
+
+    pub fn compose_artifact_css(&self, css: &str) -> String {
+        self.merge_css(css)
+    }
+
+    pub fn emit_html_artifact(
+        &self,
+        html: &str,
+        path: impl AsRef<std::path::Path>,
+        wrap_document: bool,
+    ) -> Result<String, FullBleedError> {
+        let text = if wrap_document {
+            self.compose_document_html(html)
+        } else {
+            html.to_string()
+        };
+        let path = path.as_ref();
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+        std::fs::write(path, &text)?;
+        Ok(text)
+    }
+
+    pub fn emit_css_artifact(
+        &self,
+        css: &str,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<String, FullBleedError> {
+        let text = self.compose_artifact_css(css);
+        let path = path.as_ref();
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+        std::fs::write(path, &text)?;
+        Ok(text)
+    }
+
+    pub fn emit_html_css_artifacts(
+        &self,
+        html: &str,
+        css: &str,
+        html_path: impl AsRef<std::path::Path>,
+        css_path: impl AsRef<std::path::Path>,
+        wrap_document: bool,
+    ) -> Result<(String, String), FullBleedError> {
+        let html_text = self.emit_html_artifact(html, html_path, wrap_document)?;
+        let css_text = self.emit_css_artifact(css, css_path)?;
+        Ok((html_text, css_text))
+    }
+
+    fn verify_accessibility_html_facts(&self, html: &str) -> A11yVerifierFacts {
+        let document = kuchiki::parse_html().one(html);
+
+        let mut html_lang: Option<String> = None;
+        if let Ok(mut html_nodes) = document.select("html") {
+            if let Some(node) = html_nodes.next() {
+                let attrs = node.attributes.borrow();
+                html_lang = attrs.get("lang").map(|v| v.trim().to_string());
+                if matches!(html_lang.as_deref(), Some("")) {
+                    html_lang = None;
+                }
+            }
+        }
+
+        let mut title = String::new();
+        if let Ok(mut titles) = document.select("head title, title") {
+            if let Some(node) = titles.next() {
+                title = node.text_contents().trim().to_string();
+            }
+        }
+
+        let mut main_count = 0usize;
+        if let Ok(nodes) = document.select("main") {
+            main_count = nodes.count();
+        }
+
+        let mut ids_seen: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+        let mut duplicate_ids: Vec<String> = Vec::new();
+        let mut idrefs: Vec<(String, String)> = Vec::new();
+        let mut css_link_hrefs: Vec<String> = Vec::new();
+        let mut signature_semantic_count = 0usize;
+        let mut empty_heading_count = 0usize;
+        let mut empty_label_count = 0usize;
+        let mut empty_aria_label_count = 0usize;
+        let mut unlabeled_region_count = 0usize;
+        let mut image_count = 0usize;
+        let mut image_missing_alt_count = 0usize;
+        let mut image_title_only_count = 0usize;
+        let mut image_semantic_conflict_count = 0usize;
+        let mut label_for_targets: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut form_controls: Vec<(String, bool, bool, bool, String, String, bool)> = Vec::new(); // (id, in_label, aria_label_nonempty, aria_labelledby_nonempty, aria_describedby, aria_errormessage, invalid_state)
+        let mut tabindex_attr_count = 0usize;
+        let mut positive_tabindex_count = 0usize;
+        let mut invalid_tabindex_count = 0usize;
+        let mut link_count = 0usize;
+        let mut unnamed_link_count = 0usize;
+        let mut generic_link_text_count = 0usize;
+        let mut custom_click_handler_count = 0usize;
+        let mut pointer_only_click_handler_count = 0usize;
+        let mut script_element_count = 0usize;
+        let mut embedded_active_content_count = 0usize;
+        let mut autoplay_media_count = 0usize;
+        let mut blink_marquee_count = 0usize;
+        let mut inline_event_handler_attr_count = 0usize;
+        let mut meta_refresh_count = 0usize;
+        let mut has_html = false;
+        let mut has_head = false;
+        let mut has_body = false;
+        let mut part_lang_attr_count = 0usize;
+        let mut invalid_part_lang_attr_count = 0usize;
+
+        if let Ok(nodes) = document.select("*") {
+            for node in nodes {
+                let mut tag_name: Option<String> = None;
+                if let NodeData::Element(el) = node.as_node().data() {
+                    let tag = el.name.local.as_ref().to_ascii_lowercase();
+                    tag_name = Some(tag.clone());
+                    match tag.as_str() {
+                        "html" => has_html = true,
+                        "head" => has_head = true,
+                        "body" => has_body = true,
+                        "script" => script_element_count += 1,
+                        "iframe" | "embed" | "object" | "frame" => {
+                            embedded_active_content_count += 1
+                        }
+                        "audio" | "video" => {}
+                        "blink" | "marquee" => blink_marquee_count += 1,
+                        _ => {}
+                    }
+                }
+                let attrs = node.attributes.borrow();
+                inline_event_handler_attr_count += attrs
+                    .map
+                    .iter()
+                    .filter(|(name, _)| {
+                        let attr_name = name.local.as_ref().to_ascii_lowercase();
+                        attr_name.len() > 2 && attr_name.starts_with("on")
+                    })
+                    .count();
+                if let Some(id) = attrs.get("id") {
+                    let id = id.trim();
+                    if !id.is_empty() {
+                        let count = ids_seen.entry(id.to_string()).or_insert(0);
+                        *count += 1;
+                        if *count == 2 {
+                            duplicate_ids.push(id.to_string());
+                        }
+                    }
+                }
+                for attr_name in ["aria-labelledby", "aria-describedby"] {
+                    if let Some(val) = attrs.get(attr_name) {
+                        for tok in val.split_whitespace() {
+                            let tok = tok.trim();
+                            if !tok.is_empty() {
+                                idrefs.push((attr_name.to_string(), tok.to_string()));
+                            }
+                        }
+                    }
+                }
+                if attrs.get("data-fb-a11y-signature-status").is_some() {
+                    signature_semantic_count += 1;
+                }
+                if let Some(aria_label) = attrs.get("aria-label") {
+                    if aria_label.trim().is_empty() {
+                        empty_aria_label_count += 1;
+                    }
+                }
+                if let Some(tabindex) = attrs.get("tabindex") {
+                    let tabindex = tabindex.trim();
+                    if !tabindex.is_empty() {
+                        tabindex_attr_count += 1;
+                        match tabindex.parse::<i32>() {
+                            Ok(v) if v > 0 => positive_tabindex_count += 1,
+                            Ok(_) => {}
+                            Err(_) => invalid_tabindex_count += 1,
+                        }
+                    } else {
+                        tabindex_attr_count += 1;
+                        invalid_tabindex_count += 1;
+                    }
+                }
+                if !matches!(tag_name.as_deref(), Some("html")) {
+                    if let Some(lang_attr) = attrs.get("lang") {
+                        let lang_attr = lang_attr.trim();
+                        if !lang_attr.is_empty() {
+                            part_lang_attr_count += 1;
+                            if !Self::a11y_lang_value_is_valid(lang_attr) {
+                                invalid_part_lang_attr_count += 1;
+                            }
+                        } else {
+                            part_lang_attr_count += 1;
+                            invalid_part_lang_attr_count += 1;
+                        }
+                    }
+                }
+                if matches!(tag_name.as_deref(), Some("audio" | "video"))
+                    && attrs.get("autoplay").is_some()
+                {
+                    autoplay_media_count += 1;
+                }
+                if tag_name.as_deref() == Some("meta") {
+                    let http_equiv_refresh = attrs
+                        .get("http-equiv")
+                        .map(|v| v.trim().eq_ignore_ascii_case("refresh"))
+                        .unwrap_or(false);
+                    if http_equiv_refresh {
+                        meta_refresh_count += 1;
+                    }
+                }
+                if tag_name.as_deref() == Some("label") {
+                    // no-op: text check occurs after releasing attrs borrow
+                }
+                let role = attrs
+                    .get("role")
+                    .map(|v| v.trim().to_ascii_lowercase())
+                    .unwrap_or_default();
+                let has_onclick = attrs.get("onclick").is_some();
+                let has_keyboard_handler =
+                    attrs.get("onkeydown").is_some()
+                        || attrs.get("onkeyup").is_some()
+                        || attrs.get("onkeypress").is_some();
+                let has_tabindex_attr = attrs.get("tabindex").is_some();
+                let is_native_keyboard_interactive = match tag_name.as_deref() {
+                    Some("a") => attrs
+                        .get("href")
+                        .map(|v| !v.trim().is_empty())
+                        .unwrap_or(false),
+                    Some("button" | "select" | "textarea" | "summary") => true,
+                    Some("input") => !attrs
+                        .get("type")
+                        .map(|v| v.trim().eq_ignore_ascii_case("hidden"))
+                        .unwrap_or(false),
+                    _ => false,
+                };
+                if has_onclick && !is_native_keyboard_interactive {
+                    custom_click_handler_count += 1;
+                    if !has_keyboard_handler && !has_tabindex_attr {
+                        pointer_only_click_handler_count += 1;
+                    }
+                }
+                if role == "region" {
+                    let aria_label_nonempty = attrs
+                        .get("aria-label")
+                        .map(|v| !v.trim().is_empty())
+                        .unwrap_or(false);
+                    let aria_labelledby_nonempty = attrs
+                        .get("aria-labelledby")
+                        .map(|v| v.split_whitespace().any(|tok| !tok.trim().is_empty()))
+                        .unwrap_or(false);
+                    if !aria_label_nonempty && !aria_labelledby_nonempty {
+                        unlabeled_region_count += 1;
+                    }
+                }
+                if matches!(tag_name.as_deref(), Some("img" | "svg")) {
+                    image_count += 1;
+                    let role_decorative = attrs
+                        .get("role")
+                        .map(|v| {
+                            let v = v.trim().to_ascii_lowercase();
+                            v == "presentation" || v == "none"
+                        })
+                        .unwrap_or(false);
+                    let aria_hidden = attrs
+                        .get("aria-hidden")
+                        .map(|v| {
+                            matches!(
+                                v.trim().to_ascii_lowercase().as_str(),
+                                "1" | "true" | "yes" | "on"
+                            )
+                        })
+                        .unwrap_or(false);
+                    let explicit_decorative = attrs
+                        .get("data-fb-a11y-decorative")
+                        .map(|v| {
+                            matches!(
+                                v.trim().to_ascii_lowercase().as_str(),
+                                "1" | "true" | "yes" | "on"
+                            )
+                        })
+                        .unwrap_or(false);
+                    let aria_label = attrs.get("aria-label");
+                    let aria_labelledby = attrs.get("aria-labelledby");
+                    let alt_value = attrs.get("alt");
+                    let title_value = attrs.get("title");
+                    let has_informative_name = aria_label
+                        .map(|v| !v.trim().is_empty())
+                        .unwrap_or(false)
+                        || aria_labelledby
+                            .map(|v| v.split_whitespace().any(|tok| !tok.trim().is_empty()))
+                            .unwrap_or(false)
+                        || alt_value.map(|v| !v.trim().is_empty()).unwrap_or(false);
+                    let alt_empty = alt_value.map(|v| v.is_empty()).unwrap_or(false);
+                    let decorative = explicit_decorative || aria_hidden || role_decorative || alt_empty;
+                    if decorative && has_informative_name {
+                        image_semantic_conflict_count += 1;
+                    } else if !decorative && !has_informative_name {
+                        if title_value.map(|v| !v.trim().is_empty()).unwrap_or(false) {
+                            image_title_only_count += 1;
+                        } else {
+                            image_missing_alt_count += 1;
+                        }
+                    }
+                }
+                if tag_name.as_deref() == Some("label") {
+                    if let Some(for_id) = attrs.get("for") {
+                        let for_id = for_id.trim();
+                        if !for_id.is_empty() {
+                            label_for_targets.insert(for_id.to_string());
+                        }
+                    }
+                }
+                if matches!(tag_name.as_deref(), Some("input" | "select" | "textarea")) {
+                    let is_hidden_input = tag_name.as_deref() == Some("input")
+                        && attrs
+                            .get("type")
+                            .map(|v| v.trim().eq_ignore_ascii_case("hidden"))
+                            .unwrap_or(false);
+                    if !is_hidden_input {
+                        let ctl_id = attrs.get("id").map(|v| v.trim()).unwrap_or("").to_string();
+                        let aria_label_nonempty = attrs
+                            .get("aria-label")
+                            .map(|v| !v.trim().is_empty())
+                            .unwrap_or(false);
+                        let aria_labelledby_nonempty = attrs
+                            .get("aria-labelledby")
+                            .map(|v| v.split_whitespace().any(|tok| !tok.trim().is_empty()))
+                            .unwrap_or(false);
+                        let aria_describedby = attrs
+                            .get("aria-describedby")
+                            .map(|v| v.to_string())
+                            .unwrap_or_default();
+                        let aria_errormessage = attrs
+                            .get("aria-errormessage")
+                            .map(|v| v.to_string())
+                            .unwrap_or_default();
+                        let invalid_state = attrs
+                            .get("aria-invalid")
+                            .map(|v| {
+                                let t = v.trim().to_ascii_lowercase();
+                                !t.is_empty() && !matches!(t.as_str(), "0" | "false" | "no" | "off")
+                            })
+                            .unwrap_or(false);
+                        let in_label = node.as_node().ancestors().any(|anc| {
+                            if let NodeData::Element(el) = anc.data() {
+                                el.name.local.as_ref().eq_ignore_ascii_case("label")
+                            } else {
+                                false
+                            }
+                        });
+                        form_controls.push((
+                            ctl_id,
+                            in_label,
+                            aria_label_nonempty,
+                            aria_labelledby_nonempty,
+                            aria_describedby,
+                            aria_errormessage,
+                            invalid_state,
+                        ));
+                    }
+                }
+                if tag_name.as_deref() == Some("a") {
+                    let has_href = attrs
+                        .get("href")
+                        .map(|v| !v.trim().is_empty())
+                        .unwrap_or(false);
+                    if has_href {
+                        link_count += 1;
+                        let aria_label_nonempty = attrs
+                            .get("aria-label")
+                            .map(|v| !v.trim().is_empty())
+                            .unwrap_or(false);
+                        let aria_labelledby_nonempty = attrs
+                            .get("aria-labelledby")
+                            .map(|v| v.split_whitespace().any(|tok| !tok.trim().is_empty()))
+                            .unwrap_or(false);
+                        let link_text = node.as_node().text_contents();
+                        let link_text_norm = link_text
+                            .split_whitespace()
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                            .to_ascii_lowercase();
+                        let text_nonempty = !link_text_norm.trim().is_empty();
+                        if !(aria_label_nonempty || aria_labelledby_nonempty || text_nonempty) {
+                            unnamed_link_count += 1;
+                        } else if text_nonempty
+                            && matches!(
+                                link_text_norm.as_str(),
+                                "click here"
+                                    | "here"
+                                    | "read more"
+                                    | "learn more"
+                                    | "more"
+                                    | "more..."
+                            )
+                        {
+                            generic_link_text_count += 1;
+                        }
+                    }
+                }
+                if let Some(rel) = attrs.get("rel") {
+                    let rel_l = rel.to_ascii_lowercase();
+                    if rel_l.split_whitespace().any(|tok| tok == "stylesheet") {
+                        if let Some(href) = attrs.get("href") {
+                            let href = href.trim();
+                            if !href.is_empty() {
+                                css_link_hrefs.push(href.to_string());
+                            }
+                        }
+                    }
+                }
+                drop(attrs);
+                if let Some(tag) = tag_name.as_deref() {
+                    let is_empty_text = node.as_node().text_contents().trim().is_empty();
+                    if matches!(tag, "h1" | "h2" | "h3" | "h4" | "h5" | "h6") && is_empty_text {
+                        empty_heading_count += 1;
+                    }
+                    if tag == "label" && is_empty_text {
+                        empty_label_count += 1;
+                    }
+                }
+            }
+        }
+
+        let id_set: std::collections::BTreeSet<String> = ids_seen.keys().cloned().collect();
+        let mut missing_idrefs: Vec<(String, String)> = Vec::new();
+        for (attr_name, tok) in idrefs {
+            if !id_set.contains(&tok) {
+                missing_idrefs.push((attr_name, tok));
+            }
+        }
+        let mut unlabeled_form_control_count = 0usize;
+        for (ctl_id, in_label, aria_label_nonempty, aria_labelledby_nonempty, _, _, _) in &form_controls {
+            if *aria_label_nonempty || *aria_labelledby_nonempty || *in_label {
+                continue;
+            }
+            if !ctl_id.is_empty() && label_for_targets.contains(ctl_id) {
+                continue;
+            }
+            unlabeled_form_control_count += 1;
+        }
+        let mut invalid_form_control_count = 0usize;
+        let mut unidentified_error_form_control_count = 0usize;
+        for (_, _, _, _, aria_describedby, aria_errormessage, invalid_state) in &form_controls {
+            if !*invalid_state {
+                continue;
+            }
+            invalid_form_control_count += 1;
+            let describedby_ok = aria_describedby
+                .split_whitespace()
+                .any(|tok| !tok.trim().is_empty() && id_set.contains(tok));
+            let errormessage_ok = aria_errormessage
+                .split_whitespace()
+                .any(|tok| !tok.trim().is_empty() && id_set.contains(tok));
+            if !(describedby_ok || errormessage_ok) {
+                unidentified_error_form_control_count += 1;
+            }
+        }
+
+        let body_text = if let Ok(mut bodies) = document.select("body") {
+            if let Some(body) = bodies.next() {
+                body.as_node()
+                    .text_contents()
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
+        let mut tables: Vec<HtmlTableFacts> = Vec::new();
+        if let Ok(table_nodes) = document.select("table") {
+            for table in table_nodes {
+                let node = table.as_node();
+                let has_caption = node
+                    .select("caption")
+                    .ok()
+                    .map(|mut it| it.next().is_some())
+                    .unwrap_or(false);
+                let th_count = node.select("th").ok().map(|it| it.count()).unwrap_or(0);
+                let th_scope_count = node
+                    .select("th[scope]")
+                    .ok()
+                    .map(|it| it.count())
+                    .unwrap_or(0);
+                tables.push(HtmlTableFacts {
+                    has_caption,
+                    th_count,
+                    th_scope_count,
+                });
+            }
+        }
+
+        A11yVerifierFacts {
+            html_lang,
+            title,
+            part_lang_attr_count,
+            invalid_part_lang_attr_count,
+            main_count,
+            duplicate_ids,
+            missing_idrefs,
+            has_html_wrapper: has_html && has_head && has_body,
+            has_css_link: !css_link_hrefs.is_empty(),
+            css_link_hrefs,
+            signature_semantic_count,
+            empty_heading_count,
+            empty_label_count,
+            empty_aria_label_count,
+            unlabeled_region_count,
+            image_count,
+            image_missing_alt_count,
+            image_title_only_count,
+            image_semantic_conflict_count,
+            form_control_count: form_controls.len(),
+            unlabeled_form_control_count,
+            invalid_form_control_count,
+            unidentified_error_form_control_count,
+            tabindex_attr_count,
+            positive_tabindex_count,
+            invalid_tabindex_count,
+            link_count,
+            unnamed_link_count,
+            generic_link_text_count,
+            custom_click_handler_count,
+            pointer_only_click_handler_count,
+            script_element_count,
+            embedded_active_content_count,
+            autoplay_media_count,
+            blink_marquee_count,
+            inline_event_handler_attr_count,
+            meta_refresh_count,
+            tables,
+            body_text,
+        }
+    }
+
+    fn push_a11y_finding(
+        findings: &mut Vec<A11yVerifierFinding>,
+        rule_id: &str,
+        verdict: &str,
+        severity: &str,
+        stage: &str,
+        source: &str,
+        message: String,
+        evidence: Vec<A11yVerifierEvidence>,
+    ) {
+        findings.push(A11yVerifierFinding {
+            rule_id: rule_id.to_string(),
+            applicability: "applicable".to_string(),
+            verification_mode: "machine".to_string(),
+            verdict: verdict.to_string(),
+            severity: severity.to_string(),
+            confidence: "certain".to_string(),
+            stage: stage.to_string(),
+            source: source.to_string(),
+            message,
+            evidence,
+        });
+    }
+
+    pub fn verify_accessibility_html_core(&self, html: &str, profile: &str) -> A11yVerifierCoreReport {
+        let facts = self.verify_accessibility_html_facts(html);
+        let mut findings: Vec<A11yVerifierFinding> = Vec::new();
+
+        let mut lang_ok = false;
+        if let Some(lang) = &facts.html_lang {
+            lang_ok = Self::a11y_lang_value_is_valid(lang);
+            if let Some(expected) = self.document_lang() {
+                lang_ok = lang_ok && lang == expected;
+            }
+        }
+        Self::push_a11y_finding(
+            &mut findings,
+            "fb.a11y.html.lang_present_valid",
+            if lang_ok { "pass" } else { "fail" },
+            "high",
+            "post-emit",
+            "fullbleed",
+            if lang_ok {
+                "HTML lang attribute is present and valid.".to_string()
+            } else {
+                "HTML lang missing/invalid or metadata mismatch.".to_string()
+            },
+            vec![A11yVerifierEvidence {
+                selector: Some("html".to_string()),
+                values: vec![("lang".to_string(), facts.html_lang.clone().unwrap_or_default())],
+            }],
+        );
+
+        if facts.part_lang_attr_count == 0 {
+            findings.push(A11yVerifierFinding {
+                rule_id: "fb.a11y.language.parts_declared_valid_seed".to_string(),
+                applicability: "not_applicable".to_string(),
+                verification_mode: "hybrid".to_string(),
+                verdict: "not_applicable".to_string(),
+                severity: "low".to_string(),
+                confidence: "high".to_string(),
+                stage: "post-emit".to_string(),
+                source: "fullbleed".to_string(),
+                message: "No inline lang declarations on descendant elements detected; language-of-parts rule not applicable for this document."
+                    .to_string(),
+                evidence: vec![A11yVerifierEvidence {
+                    selector: None,
+                    values: vec![
+                        (
+                            "part_lang_attr_count".to_string(),
+                            facts.part_lang_attr_count.to_string(),
+                        ),
+                        (
+                            "invalid_part_lang_attr_count".to_string(),
+                            facts.invalid_part_lang_attr_count.to_string(),
+                        ),
+                    ],
+                }],
+            });
+        } else {
+            let part_lang_fail = facts.invalid_part_lang_attr_count > 0;
+            findings.push(A11yVerifierFinding {
+                rule_id: "fb.a11y.language.parts_declared_valid_seed".to_string(),
+                applicability: "applicable".to_string(),
+                verification_mode: "hybrid".to_string(),
+                verdict: if part_lang_fail { "fail" } else { "pass" }.to_string(),
+                severity: if part_lang_fail { "medium" } else { "low" }.to_string(),
+                confidence: "high".to_string(),
+                stage: "post-emit".to_string(),
+                source: "fullbleed".to_string(),
+                message: if part_lang_fail {
+                    "Invalid or empty inline language-of-parts declarations detected."
+                        .to_string()
+                } else {
+                    "Inline language-of-parts declarations are syntactically valid."
+                        .to_string()
+                },
+                evidence: vec![A11yVerifierEvidence {
+                    selector: None,
+                    values: vec![
+                        (
+                            "part_lang_attr_count".to_string(),
+                            facts.part_lang_attr_count.to_string(),
+                        ),
+                        (
+                            "invalid_part_lang_attr_count".to_string(),
+                            facts.invalid_part_lang_attr_count.to_string(),
+                        ),
+                    ],
+                }],
+            });
+        }
+
+        let mut title_ok = !facts.title.trim().is_empty();
+        if let Some(expected) = self.document_title() {
+            title_ok = title_ok && facts.title == expected;
+        }
+        Self::push_a11y_finding(
+            &mut findings,
+            "fb.a11y.html.title_present_nonempty",
+            if title_ok { "pass" } else { "fail" },
+            "high",
+            "post-emit",
+            "fullbleed",
+            if title_ok {
+                "Document title is present and non-empty.".to_string()
+            } else {
+                "Document title missing/empty or metadata mismatch.".to_string()
+            },
+            vec![A11yVerifierEvidence {
+                selector: Some("head > title".to_string()),
+                values: vec![("title".to_string(), facts.title.clone())],
+            }],
+        );
+
+        let main_ok = facts.main_count == 1;
+        Self::push_a11y_finding(
+            &mut findings,
+            "fb.a11y.structure.single_main",
+            if main_ok { "pass" } else { "fail" },
+            "medium",
+            "post-emit",
+            "fullbleed",
+            if main_ok {
+                "Single primary content root detected.".to_string()
+            } else {
+                format!("Expected exactly one <main>; found {}.", facts.main_count)
+            },
+            vec![A11yVerifierEvidence {
+                selector: Some("main".to_string()),
+                values: vec![("count".to_string(), facts.main_count.to_string())],
+            }],
+        );
+
+        let hl_fail =
+            (facts.empty_heading_count + facts.empty_label_count + facts.empty_aria_label_count) > 0;
+        let hl_warn = facts.unlabeled_region_count > 0;
+        findings.push(A11yVerifierFinding {
+            rule_id: "fb.a11y.headings_labels.present_nonempty".to_string(),
+            applicability: "applicable".to_string(),
+            verification_mode: "hybrid".to_string(),
+            verdict: if hl_fail {
+                "fail"
+            } else if hl_warn {
+                "warn"
+            } else {
+                "pass"
+            }
+            .to_string(),
+            severity: if hl_fail { "high" } else { "medium" }.to_string(),
+            confidence: if hl_fail || hl_warn {
+                "high"
+            } else {
+                "medium"
+            }
+            .to_string(),
+            stage: "post-emit".to_string(),
+            source: "fullbleed".to_string(),
+            message: if hl_fail {
+                "Empty heading/label naming signals detected.".to_string()
+            } else if hl_warn {
+                "Headings/labels are non-empty, but some region landmarks are unlabeled."
+                    .to_string()
+            } else {
+                "No empty headings/labels or unlabeled regions detected.".to_string()
+            },
+            evidence: vec![A11yVerifierEvidence {
+                selector: None,
+                values: vec![
+                    (
+                        "empty_heading_count".to_string(),
+                        facts.empty_heading_count.to_string(),
+                    ),
+                    (
+                        "empty_label_count".to_string(),
+                        facts.empty_label_count.to_string(),
+                    ),
+                    (
+                        "empty_aria_label_count".to_string(),
+                        facts.empty_aria_label_count.to_string(),
+                    ),
+                    (
+                        "unlabeled_region_count".to_string(),
+                        facts.unlabeled_region_count.to_string(),
+                    ),
+                ],
+            }],
+        });
+
+        if facts.image_count == 0 {
+            findings.push(A11yVerifierFinding {
+                rule_id: "fb.a11y.images.alt_or_decorative".to_string(),
+                applicability: "not_applicable".to_string(),
+                verification_mode: "machine".to_string(),
+                verdict: "not_applicable".to_string(),
+                severity: "low".to_string(),
+                confidence: "high".to_string(),
+                stage: "post-emit".to_string(),
+                source: "fullbleed".to_string(),
+                message:
+                    "No img/svg elements detected; non-text-content image rule not applicable."
+                        .to_string(),
+                evidence: Vec::new(),
+            });
+        } else {
+            let img_fail =
+                facts.image_missing_alt_count > 0 || facts.image_semantic_conflict_count > 0;
+            let img_warn = facts.image_title_only_count > 0;
+            findings.push(A11yVerifierFinding {
+                rule_id: "fb.a11y.images.alt_or_decorative".to_string(),
+                applicability: "applicable".to_string(),
+                verification_mode: "machine".to_string(),
+                verdict: if img_fail {
+                    "fail"
+                } else if img_warn {
+                    "warn"
+                } else {
+                    "pass"
+                }
+                .to_string(),
+                severity: if img_fail { "high" } else { "medium" }.to_string(),
+                confidence: "high".to_string(),
+                stage: "post-emit".to_string(),
+                source: "fullbleed".to_string(),
+                message: if img_fail {
+                    "Image text alternative errors detected.".to_string()
+                } else if img_warn {
+                    "Some images rely on title without alt/ARIA text alternatives.".to_string()
+                } else {
+                    "Image text alternatives/decorative semantics look consistent.".to_string()
+                },
+                evidence: vec![A11yVerifierEvidence {
+                    selector: None,
+                    values: vec![
+                        ("image_count".to_string(), facts.image_count.to_string()),
+                        (
+                            "image_missing_alt_count".to_string(),
+                            facts.image_missing_alt_count.to_string(),
+                        ),
+                        (
+                            "image_title_only_count".to_string(),
+                            facts.image_title_only_count.to_string(),
+                        ),
+                        (
+                            "image_semantic_conflict_count".to_string(),
+                            facts.image_semantic_conflict_count.to_string(),
+                        ),
+                    ],
+                }],
+            });
+        }
+
+        if facts.form_control_count == 0 {
+            findings.push(A11yVerifierFinding {
+                rule_id: "fb.a11y.forms.labels_or_instructions_present".to_string(),
+                applicability: "not_applicable".to_string(),
+                verification_mode: "hybrid".to_string(),
+                verdict: "not_applicable".to_string(),
+                severity: "low".to_string(),
+                confidence: "high".to_string(),
+                stage: "post-emit".to_string(),
+                source: "fullbleed".to_string(),
+                message: "No form controls detected; labels/instructions rule not applicable."
+                    .to_string(),
+                evidence: Vec::new(),
+            });
+        } else {
+            let ctrl_fail = facts.unlabeled_form_control_count > 0;
+            findings.push(A11yVerifierFinding {
+                rule_id: "fb.a11y.forms.labels_or_instructions_present".to_string(),
+                applicability: "applicable".to_string(),
+                verification_mode: "hybrid".to_string(),
+                verdict: if ctrl_fail { "fail" } else { "pass" }.to_string(),
+                severity: if ctrl_fail { "high" } else { "medium" }.to_string(),
+                confidence: "medium".to_string(),
+                stage: "post-emit".to_string(),
+                source: "fullbleed".to_string(),
+                message: if ctrl_fail {
+                    "Unlabeled form controls detected.".to_string()
+                } else {
+                    "Detected form controls have label/ARIA naming signals.".to_string()
+                },
+                evidence: vec![A11yVerifierEvidence {
+                    selector: None,
+                    values: vec![
+                        ("form_control_count".to_string(), facts.form_control_count.to_string()),
+                        (
+                            "unlabeled_form_control_count".to_string(),
+                            facts.unlabeled_form_control_count.to_string(),
+                        ),
+                    ],
+                }],
+            });
+        }
+
+        if facts.invalid_form_control_count == 0 {
+            findings.push(A11yVerifierFinding {
+                rule_id: "fb.a11y.forms.error_identification_present".to_string(),
+                applicability: "not_applicable".to_string(),
+                verification_mode: "hybrid".to_string(),
+                verdict: "not_applicable".to_string(),
+                severity: "low".to_string(),
+                confidence: "high".to_string(),
+                stage: "post-emit".to_string(),
+                source: "fullbleed".to_string(),
+                message:
+                    "No invalid form controls detected; error-identification rule not applicable."
+                        .to_string(),
+                evidence: Vec::new(),
+            });
+        } else {
+            let err_fail = facts.unidentified_error_form_control_count > 0;
+            findings.push(A11yVerifierFinding {
+                rule_id: "fb.a11y.forms.error_identification_present".to_string(),
+                applicability: "applicable".to_string(),
+                verification_mode: "hybrid".to_string(),
+                verdict: if err_fail { "fail" } else { "pass" }.to_string(),
+                severity: if err_fail { "high" } else { "medium" }.to_string(),
+                confidence: "medium".to_string(),
+                stage: "post-emit".to_string(),
+                source: "fullbleed".to_string(),
+                message: if err_fail {
+                    "Invalid form controls without associated error-identification text detected."
+                        .to_string()
+                } else {
+                    "Invalid form controls expose associated error-identification text signals."
+                        .to_string()
+                },
+                evidence: vec![A11yVerifierEvidence {
+                    selector: None,
+                    values: vec![
+                        (
+                            "invalid_form_control_count".to_string(),
+                            facts.invalid_form_control_count.to_string(),
+                        ),
+                        (
+                            "unidentified_error_form_control_count".to_string(),
+                            facts.unidentified_error_form_control_count.to_string(),
+                        ),
+                    ],
+                }],
+            });
+        }
+
+        let focus_order_target_count = facts.link_count + facts.form_control_count;
+        if focus_order_target_count == 0 {
+            findings.push(A11yVerifierFinding {
+                rule_id: "fb.a11y.focus.order_seed".to_string(),
+                applicability: "not_applicable".to_string(),
+                verification_mode: "hybrid".to_string(),
+                verdict: "not_applicable".to_string(),
+                severity: "medium".to_string(),
+                confidence: "high".to_string(),
+                stage: "post-emit".to_string(),
+                source: "fullbleed".to_string(),
+                message:
+                    "No interactive links or form controls detected; focus-order seed not applicable."
+                        .to_string(),
+                evidence: vec![A11yVerifierEvidence {
+                    selector: None,
+                    values: vec![
+                        (
+                            "interactive_focus_target_count".to_string(),
+                            focus_order_target_count.to_string(),
+                        ),
+                        ("link_count".to_string(), facts.link_count.to_string()),
+                        (
+                            "form_control_count".to_string(),
+                            facts.form_control_count.to_string(),
+                        ),
+                        (
+                            "tabindex_attr_count".to_string(),
+                            facts.tabindex_attr_count.to_string(),
+                        ),
+                        (
+                            "positive_tabindex_count".to_string(),
+                            facts.positive_tabindex_count.to_string(),
+                        ),
+                        (
+                            "invalid_tabindex_count".to_string(),
+                            facts.invalid_tabindex_count.to_string(),
+                        ),
+                    ],
+                }],
+            });
+        } else {
+            let focus_order_warn =
+                facts.positive_tabindex_count > 0 || facts.invalid_tabindex_count > 0;
+            findings.push(A11yVerifierFinding {
+                rule_id: "fb.a11y.focus.order_seed".to_string(),
+                applicability: "applicable".to_string(),
+                verification_mode: "hybrid".to_string(),
+                verdict: if focus_order_warn { "warn" } else { "pass" }.to_string(),
+                severity: "medium".to_string(),
+                confidence: if focus_order_warn { "medium" } else { "medium" }.to_string(),
+                stage: "post-emit".to_string(),
+                source: "fullbleed".to_string(),
+                message: if facts.positive_tabindex_count > 0 {
+                    "Positive tabindex values detected; focus order may diverge from DOM order and requires manual review."
+                        .to_string()
+                } else if facts.invalid_tabindex_count > 0 {
+                    "Invalid tabindex values detected; focus order behavior may be inconsistent and requires manual review."
+                        .to_string()
+                } else {
+                    "No positive/invalid tabindex focus-order override signals detected for interactive content."
+                        .to_string()
+                },
+                evidence: vec![A11yVerifierEvidence {
+                    selector: None,
+                    values: vec![
+                        (
+                            "interactive_focus_target_count".to_string(),
+                            focus_order_target_count.to_string(),
+                        ),
+                        ("link_count".to_string(), facts.link_count.to_string()),
+                        (
+                            "form_control_count".to_string(),
+                            facts.form_control_count.to_string(),
+                        ),
+                        (
+                            "tabindex_attr_count".to_string(),
+                            facts.tabindex_attr_count.to_string(),
+                        ),
+                        (
+                            "positive_tabindex_count".to_string(),
+                            facts.positive_tabindex_count.to_string(),
+                        ),
+                        (
+                            "invalid_tabindex_count".to_string(),
+                            facts.invalid_tabindex_count.to_string(),
+                        ),
+                    ],
+                }],
+            });
+        }
+
+        if facts.link_count == 0 {
+            findings.push(A11yVerifierFinding {
+                rule_id: "fb.a11y.links.purpose_in_context".to_string(),
+                applicability: "not_applicable".to_string(),
+                verification_mode: "hybrid".to_string(),
+                verdict: "not_applicable".to_string(),
+                severity: "low".to_string(),
+                confidence: "high".to_string(),
+                stage: "post-emit".to_string(),
+                source: "fullbleed".to_string(),
+                message: "No links detected; link-purpose rule not applicable.".to_string(),
+                evidence: Vec::new(),
+            });
+        } else {
+            let link_fail = facts.unnamed_link_count > 0;
+            let link_warn = facts.generic_link_text_count > 0;
+            findings.push(A11yVerifierFinding {
+                rule_id: "fb.a11y.links.purpose_in_context".to_string(),
+                applicability: "applicable".to_string(),
+                verification_mode: "hybrid".to_string(),
+                verdict: if link_fail {
+                    "fail"
+                } else if link_warn {
+                    "warn"
+                } else {
+                    "pass"
+                }
+                .to_string(),
+                severity: if link_fail { "high" } else { "medium" }.to_string(),
+                confidence: "medium".to_string(),
+                stage: "post-emit".to_string(),
+                source: "fullbleed".to_string(),
+                message: if link_fail {
+                    "Links without discernible text purpose signals detected.".to_string()
+                } else if link_warn {
+                    "Generic link text detected; contextual purpose may require manual review."
+                        .to_string()
+                } else {
+                    "Detected links have discernible text purpose signals.".to_string()
+                },
+                evidence: vec![A11yVerifierEvidence {
+                    selector: None,
+                    values: vec![
+                        ("link_count".to_string(), facts.link_count.to_string()),
+                        (
+                            "unnamed_link_count".to_string(),
+                            facts.unnamed_link_count.to_string(),
+                        ),
+                        (
+                            "generic_link_text_count".to_string(),
+                            facts.generic_link_text_count.to_string(),
+                        ),
+                    ],
+                }],
+            });
+        }
+
+        let sensory_hits = Self::a11y_sensory_instruction_hits(&facts.body_text);
+        findings.push(A11yVerifierFinding {
+            rule_id: "fb.a11y.instructions.sensory_characteristics_seed".to_string(),
+            applicability: "applicable".to_string(),
+            verification_mode: "hybrid".to_string(),
+            verdict: if sensory_hits.is_empty() { "pass" } else { "warn" }.to_string(),
+            severity: "medium".to_string(),
+            confidence: if sensory_hits.is_empty() { "high" } else { "medium" }.to_string(),
+            stage: "post-emit".to_string(),
+            source: "fullbleed".to_string(),
+            message: if sensory_hits.is_empty() {
+                "No obvious sensory-characteristics instruction phrases detected."
+                    .to_string()
+            } else {
+                "Potential sensory-characteristics instruction phrases detected; manual review required."
+                    .to_string()
+            },
+            evidence: vec![A11yVerifierEvidence {
+                selector: None,
+                values: vec![
+                    (
+                        "sensory_phrase_hit_count".to_string(),
+                        sensory_hits.len().to_string(),
+                    ),
+                    ("sensory_phrase_hits".to_string(), sensory_hits.join("|")),
+                ],
+            }],
+        });
+
+        if facts.duplicate_ids.is_empty() {
+            Self::push_a11y_finding(
+                &mut findings,
+                "fb.a11y.ids.duplicate_id",
+                "pass",
+                "critical",
+                "post-emit",
+                "fullbleed",
+                "No duplicate IDs detected.".to_string(),
+                Vec::new(),
+            );
+        } else {
+            for dup in &facts.duplicate_ids {
+                Self::push_a11y_finding(
+                    &mut findings,
+                    "fb.a11y.ids.duplicate_id",
+                    "fail",
+                    "critical",
+                    "post-emit",
+                    "fullbleed",
+                    format!("Duplicate id {dup:?} detected."),
+                    vec![A11yVerifierEvidence {
+                        selector: None,
+                        values: vec![("id".to_string(), dup.clone())],
+                    }],
+                );
+            }
+        }
+
+        if facts.missing_idrefs.is_empty() {
+            Self::push_a11y_finding(
+                &mut findings,
+                "fb.a11y.aria.reference_target_exists",
+                "pass",
+                "critical",
+                "post-emit",
+                "fullbleed",
+                "No broken ARIA ID references detected.".to_string(),
+                Vec::new(),
+            );
+        } else {
+            for (attr, target) in &facts.missing_idrefs {
+                Self::push_a11y_finding(
+                    &mut findings,
+                    "fb.a11y.aria.reference_target_exists",
+                    "fail",
+                    "critical",
+                    "post-emit",
+                    "fullbleed",
+                    format!("{attr} references missing id {target:?}."),
+                    vec![A11yVerifierEvidence {
+                        selector: None,
+                        values: vec![
+                            ("attr".to_string(), attr.clone()),
+                            ("target_id".to_string(), target.clone()),
+                        ],
+                    }],
+                );
+            }
+        }
+
+        if profile.eq_ignore_ascii_case("cav") || profile.eq_ignore_ascii_case("transactional") {
+            let sig_ok = facts.signature_semantic_count > 0;
+            Self::push_a11y_finding(
+                &mut findings,
+                "fb.a11y.signatures.text_semantics_present",
+                if sig_ok { "pass" } else { "fail" },
+                "medium",
+                "post-emit",
+                "fullbleed",
+                if sig_ok {
+                    "Signature fields include text-first semantics.".to_string()
+                } else {
+                    "No text-first signature semantics detected.".to_string()
+                },
+                vec![A11yVerifierEvidence {
+                    selector: None,
+                    values: vec![(
+                        "signature_semantic_count".to_string(),
+                        facts.signature_semantic_count.to_string(),
+                    )],
+                }],
+            );
+        }
+
+        let non_interference_signal_count = facts.script_element_count
+            + facts.embedded_active_content_count
+            + facts.autoplay_media_count
+            + facts.blink_marquee_count
+            + facts.inline_event_handler_attr_count
+            + facts.meta_refresh_count;
+        findings.push(A11yVerifierFinding {
+            rule_id: "fb.a11y.claim.non_interference_seed".to_string(),
+            applicability: "applicable".to_string(),
+            verification_mode: "hybrid".to_string(),
+            verdict: if non_interference_signal_count == 0 {
+                "pass"
+            } else {
+                "warn"
+            }
+            .to_string(),
+            severity: "medium".to_string(),
+            confidence: if non_interference_signal_count == 0 {
+                "high"
+            } else {
+                "medium"
+            }
+            .to_string(),
+            stage: "adapter".to_string(),
+            source: "adapter".to_string(),
+            message: if non_interference_signal_count == 0 {
+                "No obvious active-content non-interference risk signals detected in emitted HTML."
+                    .to_string()
+            } else {
+                "Potential non-interference risk signals detected; manual review required."
+                    .to_string()
+            },
+            evidence: vec![A11yVerifierEvidence {
+                selector: None,
+                values: vec![
+                    (
+                        "script_element_count".to_string(),
+                        facts.script_element_count.to_string(),
+                    ),
+                    (
+                        "embedded_active_content_count".to_string(),
+                        facts.embedded_active_content_count.to_string(),
+                    ),
+                    (
+                        "autoplay_media_count".to_string(),
+                        facts.autoplay_media_count.to_string(),
+                    ),
+                    (
+                        "blink_marquee_count".to_string(),
+                        facts.blink_marquee_count.to_string(),
+                    ),
+                    (
+                        "inline_event_handler_attr_count".to_string(),
+                        facts.inline_event_handler_attr_count.to_string(),
+                    ),
+                    (
+                        "meta_refresh_count".to_string(),
+                        facts.meta_refresh_count.to_string(),
+                    ),
+                ],
+            }],
+        });
+
+        A11yVerifierCoreReport {
+            profile: profile.to_string(),
+            findings,
+            facts,
+        }
+    }
+
+    fn pmr_push_audit(
+        audits: &mut Vec<PmrCoreAudit>,
+        audit_id: &str,
+        category: &str,
+        weight: f64,
+        class_name: &str,
+        verification_mode: &str,
+        severity: &str,
+        stage: &str,
+        source: &str,
+        verdict: &str,
+        scored: bool,
+        message: String,
+        evidence: Vec<PmrCoreEvidence>,
+        fix_hint: Option<String>,
+    ) {
+        let score = if scored {
+            match verdict {
+                "pass" => Some(1.0),
+                "warn" => Some(0.5),
+                "fail" => Some(0.0),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        audits.push(PmrCoreAudit {
+            audit_id: audit_id.to_string(),
+            category: category.to_string(),
+            weight,
+            class_name: class_name.to_string(),
+            verification_mode: verification_mode.to_string(),
+            severity: severity.to_string(),
+            stage: stage.to_string(),
+            source: source.to_string(),
+            verdict: verdict.to_string(),
+            scored,
+            score,
+            message,
+            fix_hint,
+            evidence,
+        });
+    }
+
+    fn pmr_push_contract_audit(
+        audits: &mut Vec<PmrCoreAudit>,
+        audit_id: &str,
+        verification_mode: &str,
+        verdict: &str,
+        scored: bool,
+        message: String,
+        evidence: Vec<PmrCoreEvidence>,
+        fix_hint: Option<String>,
+    ) {
+        let spec = audit_contract::pmr_audit_def(audit_id)
+            .unwrap_or_else(|| panic!("missing PMR audit contract definition for {audit_id}"));
+        Self::pmr_push_audit(
+            audits,
+            spec.id,
+            spec.category,
+            spec.weight,
+            spec.class_name,
+            verification_mode,
+            spec.severity,
+            spec.stage,
+            "fullbleed",
+            verdict,
+            scored,
+            message,
+            evidence,
+            fix_hint,
+        );
+    }
+
+    fn pmr_clamp(v: f64, lo: f64, hi: f64) -> f64 {
+        if v < lo {
+            lo
+        } else if v > hi {
+            hi
+        } else {
+            v
+        }
+    }
+
+    fn pmr_band(score: f64) -> &'static str {
+        if score >= 95.0 {
+            "excellent"
+        } else if score >= 85.0 {
+            "good"
+        } else if score >= 70.0 {
+            "watch"
+        } else {
+            "poor"
+        }
+    }
+
+    fn pmr_note_hits(body_text: &str) -> Vec<String> {
+        let lowered = body_text.to_ascii_lowercase();
+        [
+            "review queue",
+            "parity report",
+            "source analysis",
+            "component validation",
+            "a11y validation",
+            "transcription sidecar",
+            "debug log",
+            "remediation note",
+        ]
+        .iter()
+        .filter_map(|needle| {
+            if lowered.contains(needle) {
+                Some((*needle).to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+    }
+
+    fn a11y_sensory_instruction_hits(body_text: &str) -> Vec<String> {
+        let lowered = body_text.to_ascii_lowercase();
+        [
+            "see above",
+            "see below",
+            "shown above",
+            "shown below",
+            "on the left",
+            "on the right",
+            "left side",
+            "right side",
+            "top of the page",
+            "bottom of the page",
+            "red button",
+            "green button",
+            "blue button",
+        ]
+        .iter()
+        .filter_map(|needle| {
+            if lowered.contains(needle) {
+                Some((*needle).to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+    }
+
+    fn a11y_lang_value_is_valid(lang: &str) -> bool {
+        let lang = lang.trim();
+        !lang.is_empty()
+            && !lang.starts_with('-')
+            && !lang.ends_with('-')
+            && lang
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+    }
+
+    fn pmr_gate(audits: &[PmrCoreAudit], profile: &str, mode: &str) -> PmrCoreGate {
+        let mode_norm = {
+            let m = mode.trim().to_ascii_lowercase();
+            if m.is_empty() { "error".to_string() } else { m }
+        };
+        let mut ec = 0usize;
+        let mut wc = 0usize;
+        let mut failed: Vec<String> = Vec::new();
+        for audit in audits {
+            let verdict = audit.verdict.as_str();
+            if verdict != "fail" && verdict != "warn" {
+                continue;
+            }
+            let level = audit_contract::pmr_effective_gate_level(profile, &audit.audit_id);
+            if mode_norm == "off" || level == "off" {
+                continue;
+            }
+            if mode_norm == "warn" {
+                wc += 1;
+                continue;
+            }
+            if verdict == "warn" {
+                wc += 1;
+            } else if level == "error" {
+                ec += 1;
+                failed.push(audit.audit_id.clone());
+            } else {
+                wc += 1;
+            }
+        }
+        PmrCoreGate {
+            ok: ec == 0,
+            mode: mode_norm,
+            error_count: ec,
+            warn_count: wc,
+            failed_audit_ids: failed,
+        }
+    }
+
+    fn lang_is_valid(lang: &str) -> bool {
+        !lang.trim().is_empty()
+            && lang
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+            && !lang.starts_with('-')
+            && !lang.ends_with('-')
+    }
+
+    pub fn verify_paged_media_rank_html_core(
+        &self,
+        html: &str,
+        profile: &str,
+        mode: &str,
+        ctx: &PmrCoreContext,
+    ) -> PmrCoreReport {
+        let facts = self.verify_accessibility_html_facts(html);
+        let mut audits: Vec<PmrCoreAudit> = Vec::new();
+
+        let lang_pass = facts
+            .html_lang
+            .as_deref()
+            .map(Self::lang_is_valid)
+            .unwrap_or(false)
+            && self
+                .document_lang()
+                .map(|expected| facts.html_lang.as_deref() == Some(expected))
+                .unwrap_or(true);
+        Self::pmr_push_contract_audit(
+            &mut audits,
+            "pmr.doc.lang_present_valid",
+            "machine",
+            if lang_pass { "pass" } else { "fail" },
+            true,
+            if lang_pass {
+                "HTML lang is present and valid.".to_string()
+            } else {
+                "HTML lang missing/invalid or metadata mismatch.".to_string()
+            },
+            vec![PmrCoreEvidence {
+                selector: Some("html".to_string()),
+                diagnostic_ref: None,
+                values: vec![("lang".to_string(), facts.html_lang.clone().unwrap_or_default())],
+            }],
+            None,
+        );
+
+        let title_pass = !facts.title.trim().is_empty()
+            && self
+                .document_title()
+                .map(|expected| facts.title == expected)
+                .unwrap_or(true);
+        Self::pmr_push_contract_audit(
+            &mut audits,
+            "pmr.doc.title_present_nonempty",
+            "machine",
+            if title_pass { "pass" } else { "fail" },
+            true,
+            if title_pass {
+                "Document title is present and non-empty.".to_string()
+            } else {
+                "Document title missing/empty or metadata mismatch.".to_string()
+            },
+            vec![PmrCoreEvidence {
+                selector: Some("head > title".to_string()),
+                diagnostic_ref: None,
+                values: vec![("title".to_string(), facts.title.clone())],
+            }],
+            None,
+        );
+
+        if self.document_lang().is_none() && self.document_title().is_none() {
+            Self::pmr_push_contract_audit(
+                &mut audits,
+                "pmr.doc.metadata_engine_persistence",
+                "manual",
+                "manual_needed",
+                false,
+                "Expected metadata not supplied; cannot verify engine persistence.".to_string(),
+                Vec::new(),
+                None,
+            );
+        } else {
+            let ok = lang_pass && title_pass;
+            Self::pmr_push_contract_audit(
+                &mut audits,
+                "pmr.doc.metadata_engine_persistence",
+                "machine",
+                if ok { "pass" } else { "fail" },
+                true,
+                if ok {
+                    "Engine metadata persisted into emitted HTML.".to_string()
+                } else {
+                    "Engine metadata persistence check failed.".to_string()
+                },
+                Vec::new(),
+                None,
+            );
+        }
+
+        let overflow = ctx.overflow_count.unwrap_or(0);
+        Self::pmr_push_contract_audit(
+            &mut audits,
+            "pmr.layout.overflow_none",
+            "machine",
+            if overflow == 0 { "pass" } else { "fail" },
+            true,
+            if overflow == 0 {
+                "No overflow placements detected.".to_string()
+            } else {
+                format!("Overflow placements detected ({overflow}).")
+            },
+            vec![PmrCoreEvidence {
+                selector: None,
+                diagnostic_ref: Some("component_validation.overflow_count".to_string()),
+                values: vec![("overflow_count".to_string(), overflow.to_string())],
+            }],
+            None,
+        );
+
+        let known_loss = ctx.known_loss_count.unwrap_or(0);
+        Self::pmr_push_contract_audit(
+            &mut audits,
+            "pmr.layout.known_loss_none_critical",
+            "machine",
+            if known_loss == 0 { "pass" } else { "fail" },
+            true,
+            if known_loss == 0 {
+                "No critical known-loss events detected.".to_string()
+            } else {
+                format!("Known-loss events detected ({known_loss}).")
+            },
+            vec![PmrCoreEvidence {
+                selector: None,
+                diagnostic_ref: Some("component_validation.known_loss_count".to_string()),
+                values: vec![("known_loss_count".to_string(), known_loss.to_string())],
+            }],
+            None,
+        );
+
+        match (ctx.source_page_count, ctx.render_page_count) {
+            (Some(src), Some(rnd)) => {
+                let ok = src == rnd;
+                Self::pmr_push_contract_audit(
+                    &mut audits,
+                    "pmr.layout.page_count_target",
+                    "machine",
+                    if ok { "pass" } else { "fail" },
+                    true,
+                    if ok {
+                        "Page-count target satisfied.".to_string()
+                    } else {
+                        format!("Page-count parity mismatch (source={src}, render={rnd}).")
+                    },
+                    vec![PmrCoreEvidence {
+                        selector: None,
+                        diagnostic_ref: None,
+                        values: vec![
+                            ("source_page_count".to_string(), src.to_string()),
+                            ("render_page_count".to_string(), rnd.to_string()),
+                        ],
+                    }],
+                    None,
+                );
+            }
+            _ => {
+                Self::pmr_push_contract_audit(
+                    &mut audits,
+                    "pmr.layout.page_count_target",
+                    "manual",
+                    "manual_needed",
+                    false,
+                    "Page-count target could not be evaluated.".to_string(),
+                    Vec::new(),
+                    None,
+                );
+            }
+        }
+
+        let ids_ok = facts.duplicate_ids.is_empty() && facts.missing_idrefs.is_empty();
+        Self::pmr_push_contract_audit(
+            &mut audits,
+            "pmr.forms.id_ref_integrity",
+            "machine",
+            if ids_ok { "pass" } else { "fail" },
+            true,
+            if ids_ok {
+                "ID and IDREF integrity checks passed.".to_string()
+            } else {
+                "Duplicate IDs or missing IDREF targets detected.".to_string()
+            },
+            vec![PmrCoreEvidence {
+                selector: None,
+                diagnostic_ref: None,
+                values: vec![
+                    ("duplicate_id_count".to_string(), facts.duplicate_ids.len().to_string()),
+                    (
+                        "missing_idref_count".to_string(),
+                        facts.missing_idrefs.len().to_string(),
+                    ),
+                ],
+            }],
+            None,
+        );
+
+        if facts.tables.is_empty() {
+            Self::pmr_push_contract_audit(
+                &mut audits,
+                "pmr.tables.semantic_table_headers",
+                "machine",
+                "not_applicable",
+                false,
+                "No table elements detected.".to_string(),
+                Vec::new(),
+                None,
+            );
+        } else {
+            let mut ok = true;
+            let mut evidence = Vec::new();
+            for (idx, tbl) in facts.tables.iter().enumerate() {
+                if tbl.th_count > 0 {
+                    let this_ok = tbl.has_caption || tbl.th_scope_count > 0;
+                    ok = ok && this_ok;
+                    evidence.push(PmrCoreEvidence {
+                        selector: None,
+                        diagnostic_ref: None,
+                        values: vec![
+                            ("table_index".to_string(), idx.to_string()),
+                            ("has_caption".to_string(), tbl.has_caption.to_string()),
+                            ("th_count".to_string(), tbl.th_count.to_string()),
+                            ("th_scope_count".to_string(), tbl.th_scope_count.to_string()),
+                        ],
+                    });
+                }
+            }
+            if evidence.is_empty() {
+                evidence.push(PmrCoreEvidence {
+                    selector: None,
+                    diagnostic_ref: None,
+                    values: vec![("table_count".to_string(), facts.tables.len().to_string())],
+                });
+            }
+            Self::pmr_push_contract_audit(
+                &mut audits,
+                "pmr.tables.semantic_table_headers",
+                "machine",
+                if ok { "pass" } else { "fail" },
+                true,
+                if ok {
+                    "Semantic table header checks passed.".to_string()
+                } else {
+                    "Semantic table header checks failed.".to_string()
+                },
+                evidence,
+                None,
+            );
+        }
+
+        let profile_l = profile.to_ascii_lowercase();
+        if profile_l == "cav" || profile_l == "transactional" {
+            let sig_ok = facts.signature_semantic_count > 0;
+            Self::pmr_push_contract_audit(
+                &mut audits,
+                "pmr.signatures.text_semantics_present",
+                "machine",
+                if sig_ok { "pass" } else { "fail" },
+                true,
+                if sig_ok {
+                    "Text signature semantics detected.".to_string()
+                } else {
+                    "No text signature semantics detected.".to_string()
+                },
+                vec![PmrCoreEvidence {
+                    selector: None,
+                    diagnostic_ref: None,
+                    values: vec![(
+                        "signature_semantic_count".to_string(),
+                        facts.signature_semantic_count.to_string(),
+                    )],
+                }],
+                None,
+            );
+        } else {
+            Self::pmr_push_contract_audit(
+                &mut audits,
+                "pmr.signatures.text_semantics_present",
+                "machine",
+                "not_applicable",
+                false,
+                "Not applicable for this profile.".to_string(),
+                Vec::new(),
+                None,
+            );
+        }
+
+        if profile_l == "cav" {
+            let hits = Self::pmr_note_hits(&facts.body_text);
+            let mut ev = Vec::new();
+            if !hits.is_empty() {
+                ev.push(PmrCoreEvidence {
+                    selector: None,
+                    diagnostic_ref: None,
+                    values: vec![("hits".to_string(), hits.join(", "))],
+                });
+            }
+            Self::pmr_push_contract_audit(
+                &mut audits,
+                "pmr.cav.document_only_content",
+                "machine",
+                if hits.is_empty() { "pass" } else { "fail" },
+                true,
+                if hits.is_empty() {
+                    "CAV deliverable body contains document-only content.".to_string()
+                } else {
+                    "Potential remediation/provenance note leakage detected in CAV deliverable body."
+                        .to_string()
+                },
+                ev,
+                None,
+            );
+        } else {
+            Self::pmr_push_contract_audit(
+                &mut audits,
+                "pmr.cav.document_only_content",
+                "machine",
+                "not_applicable",
+                false,
+                "Not a CAV profile.".to_string(),
+                Vec::new(),
+                None,
+            );
+        }
+
+        let html_ok = ctx.html_artifact_bytes.map(|n| n > 0).unwrap_or(!html.is_empty());
+        Self::pmr_push_contract_audit(
+            &mut audits,
+            "pmr.artifacts.html_emitted",
+            "machine",
+            if html_ok { "pass" } else { "fail" },
+            true,
+            if html_ok {
+                "HTML artifact emitted.".to_string()
+            } else {
+                "HTML artifact missing or empty.".to_string()
+            },
+            Vec::new(),
+            None,
+        );
+
+        let css_ok = ctx
+            .css_artifact_bytes
+            .map(|n| n > 0)
+            .unwrap_or(true);
+        Self::pmr_push_contract_audit(
+            &mut audits,
+            "pmr.artifacts.css_emitted",
+            "machine",
+            if css_ok { "pass" } else { "fail" },
+            true,
+            if css_ok {
+                "CSS artifact emitted.".to_string()
+            } else {
+                "CSS artifact missing or empty.".to_string()
+            },
+            Vec::new(),
+            None,
+        );
+
+        Self::pmr_push_contract_audit(
+            &mut audits,
+            "pmr.artifacts.linked_css_reference",
+            "machine",
+            if facts.has_css_link { "pass" } else { "warn" },
+            false,
+            if facts.has_css_link {
+                "HTML artifact includes linked CSS reference.".to_string()
+            } else {
+                "HTML artifact does not include linked CSS reference (separate artifact mode)."
+                    .to_string()
+            },
+            vec![PmrCoreEvidence {
+                selector: Some("link[rel~=stylesheet]".to_string()),
+                diagnostic_ref: None,
+                values: vec![("hrefs".to_string(), facts.css_link_hrefs.join(", "))],
+            }],
+            if facts.has_css_link {
+                None
+            } else {
+                Some("Enable CSS link injection packaging mode for standalone HTML artifacts.".to_string())
+            },
+        );
+
+        let review_queue_items = ctx.review_queue_items.unwrap_or(0).max(0) as usize;
+        let mut manual_debt_items = Vec::new();
+        if review_queue_items > 0 {
+            manual_debt_items.push(PmrCoreManualDebtItem {
+                id: "manual.transcription_quality.review_queue".to_string(),
+                reason: format!("{review_queue_items} review-queue item(s) require human verification."),
+                severity: "medium".to_string(),
+                category: None,
+            });
+        }
+
+        let mut categories = Vec::new();
+        for cat_def in audit_contract::pmr_category_defs_v1() {
+            let cid = cat_def.id;
+            let name = cat_def.name;
+            let weight = cat_def.weight;
+            let subset: Vec<&PmrCoreAudit> = audits.iter().filter(|a| a.category == cid).collect();
+            let scored: Vec<(f64, f64)> = subset
+                .iter()
+                .filter_map(|a| if a.scored { a.score.map(|s| (s, a.weight)) } else { None })
+                .collect();
+            let denom = scored.iter().map(|(_, w)| *w).sum::<f64>();
+            let cat_score = if scored.is_empty() {
+                100.0
+            } else {
+                let d = if denom == 0.0 { 1.0 } else { denom };
+                100.0 * (scored.iter().map(|(s, w)| s * w).sum::<f64>() / d)
+            };
+            let warn_n = subset.iter().filter(|a| a.verdict == "warn").count();
+            let fail_n = subset.iter().filter(|a| a.verdict == "fail").count();
+            let manual_n = subset.iter().filter(|a| a.verdict == "manual_needed").count();
+            let conf = Self::pmr_clamp(
+                100.0 - (10.0 * manual_n as f64) - (3.0 * warn_n as f64) - (5.0 * fail_n as f64),
+                0.0,
+                100.0,
+            );
+            categories.push(PmrCoreCategory {
+                id: cid.to_string(),
+                name: name.to_string(),
+                weight,
+                score: ((cat_score * 100.0).round()) / 100.0,
+                confidence: ((conf * 100.0).round()) / 100.0,
+                audit_count: subset.len(),
+                fail_count: fail_n,
+                warn_count: warn_n,
+            });
+        }
+
+        let cat_weight_sum = categories.iter().map(|c| c.weight).sum::<f64>();
+        let cat_weight_denom = if cat_weight_sum == 0.0 { 1.0 } else { cat_weight_sum };
+        let score = categories
+            .iter()
+            .map(|c| c.score * c.weight)
+            .sum::<f64>()
+            / cat_weight_denom;
+        let mut confidence = categories
+            .iter()
+            .map(|c| c.confidence * c.weight)
+            .sum::<f64>()
+            / cat_weight_denom;
+        if review_queue_items > 0 {
+            confidence = Self::pmr_clamp(
+                confidence - (3.0 * review_queue_items as f64).min(25.0),
+                0.0,
+                100.0,
+            );
+        }
+
+        let gate = Self::pmr_gate(&audits, profile, mode);
+        let coverage = PmrCoreCoverage {
+            evaluated_audit_count: audits.len(),
+            applicable_audit_count: audits.iter().filter(|a| a.verdict != "not_applicable").count(),
+            scored_audit_count: audits.iter().filter(|a| a.scored).count(),
+            manual_needed_count: audits.iter().filter(|a| a.verdict == "manual_needed").count(),
+            not_evaluated_audit_count: 0,
+        };
+        PmrCoreReport {
+            profile: profile.to_string(),
+            mode: gate.mode.clone(),
+            audits,
+            categories,
+            manual_debt_item_count: review_queue_items,
+            manual_debt_high_risk_count: 0,
+            manual_debt_items,
+            coverage,
+            rank: PmrCoreRank {
+                score: ((score * 100.0).round()) / 100.0,
+                confidence: ((confidence * 100.0).round()) / 100.0,
+                band: Self::pmr_band(score).to_string(),
+                raw_score: ((score * 100.0).round()) / 100.0,
+            },
+            gate,
+            facts,
         }
     }
 
@@ -2977,10 +5114,28 @@ impl FullBleedBuilder {
         self
     }
 
+    pub fn clear_document_lang(mut self) -> Self {
+        self.pdf_options.document_lang = None;
+        self
+    }
+
+    pub fn document_lang_value(&self) -> Option<&str> {
+        self.pdf_options.document_lang.as_deref()
+    }
+
     // Document title for metadata (Info + XMP).
     pub fn document_title(mut self, title: impl Into<String>) -> Self {
         self.pdf_options.document_title = Some(title.into());
         self
+    }
+
+    pub fn clear_document_title(mut self) -> Self {
+        self.pdf_options.document_title = None;
+        self
+    }
+
+    pub fn document_title_value(&self) -> Option<&str> {
+        self.pdf_options.document_title.as_deref()
     }
 
     // Toggle Unicode-aware layout measurements (rustybuzz-based).
@@ -3352,6 +5507,37 @@ mod tests {
             .windows(token.len())
             .filter(|window| *window == token)
             .count()
+    }
+
+    #[test]
+    fn tagged_pdf_preserves_html_th_scope_row() {
+        let engine = FullBleed::builder()
+            .pdf_profile(PdfProfile::Tagged)
+            .build()
+            .expect("tagged engine");
+        let html = r#"
+        <!doctype html>
+        <html>
+          <body>
+            <table>
+              <tbody>
+                <tr>
+                  <th scope="row">Name</th>
+                  <td>Jane</td>
+                </tr>
+              </tbody>
+            </table>
+          </body>
+        </html>
+        "#;
+        let css = "table, th, td { border: 1px solid #000; }";
+        let pdf = engine
+            .render_to_buffer(html, css)
+            .expect("render tagged pdf");
+        assert!(
+            count_token(&pdf, b"/Scope /Row") >= 1,
+            "expected tagged PDF to contain TH scope derived from HTML scope=row"
+        );
     }
 
     #[test]

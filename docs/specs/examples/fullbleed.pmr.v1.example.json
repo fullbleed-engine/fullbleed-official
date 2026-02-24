@@ -1,0 +1,306 @@
+{
+  "schema": "fullbleed.pmr.v1",
+  "target": {
+    "html_path": "output/keenan_coutney_marriage_cav.html",
+    "css_path": "output/keenan_coutney_marriage_cav.css",
+    "document_id": "keenan-coutney-marriage-cav",
+    "source_pdf_path": "examples/accessibility_test/keenan_coutney_marriage.pdf"
+  },
+  "profile": "cav",
+  "rank": {
+    "score": 92.0,
+    "confidence": 88.0,
+    "band": "good",
+    "raw_score": 92.0
+  },
+  "gate": {
+    "ok": true,
+    "mode": "error",
+    "error_count": 0,
+    "warn_count": 1,
+    "failed_audit_ids": []
+  },
+  "categories": [
+    {
+      "id": "document-semantics",
+      "name": "Document Semantics",
+      "weight": 20,
+      "score": 100,
+      "confidence": 100,
+      "audit_count": 3,
+      "fail_count": 0,
+      "warn_count": 0
+    },
+    {
+      "id": "reading-order-structure",
+      "name": "Reading Order & Structure",
+      "weight": 20,
+      "score": 90,
+      "confidence": 85,
+      "audit_count": 1,
+      "fail_count": 0,
+      "warn_count": 0
+    },
+    {
+      "id": "paged-layout-integrity",
+      "name": "Paged Layout Integrity",
+      "weight": 25,
+      "score": 96,
+      "confidence": 95,
+      "audit_count": 3,
+      "fail_count": 0,
+      "warn_count": 0
+    },
+    {
+      "id": "field-table-form-integrity",
+      "name": "Field/Table/Form Integrity",
+      "weight": 20,
+      "score": 94,
+      "confidence": 90,
+      "audit_count": 3,
+      "fail_count": 0,
+      "warn_count": 0
+    },
+    {
+      "id": "artifact-packaging-reproducibility",
+      "name": "Artifact Packaging & Reproducibility",
+      "weight": 15,
+      "score": 75,
+      "confidence": 100,
+      "audit_count": 3,
+      "fail_count": 0,
+      "warn_count": 1
+    }
+  ],
+  "audits": [
+    {
+      "audit_id": "pmr.doc.lang_present_valid",
+      "category": "document-semantics",
+      "weight": 3,
+      "class": "required",
+      "verification_mode": "machine",
+      "severity": "high",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "verdict": "pass",
+      "scored": true,
+      "score": 1.0,
+      "message": "HTML lang is present and valid.",
+      "evidence": [
+        {
+          "selector": "html",
+          "values": {
+            "lang": "en-US"
+          }
+        }
+      ]
+    },
+    {
+      "audit_id": "pmr.doc.title_present_nonempty",
+      "category": "document-semantics",
+      "weight": 3,
+      "class": "required",
+      "verification_mode": "machine",
+      "severity": "high",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "verdict": "pass",
+      "scored": true,
+      "score": 1.0,
+      "message": "Document title is present."
+    },
+    {
+      "audit_id": "pmr.doc.metadata_engine_persistence",
+      "category": "document-semantics",
+      "weight": 4,
+      "class": "scored",
+      "verification_mode": "machine",
+      "severity": "high",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "verdict": "pass",
+      "scored": true,
+      "score": 1.0,
+      "message": "Engine document metadata persisted into emitted HTML."
+    },
+    {
+      "audit_id": "pmr.layout.overflow_none",
+      "category": "paged-layout-integrity",
+      "weight": 6,
+      "class": "required",
+      "verification_mode": "machine",
+      "severity": "critical",
+      "stage": "post-render",
+      "source": "fullbleed",
+      "verdict": "pass",
+      "scored": true,
+      "score": 1.0,
+      "message": "No overflow placements detected.",
+      "evidence": [
+        {
+          "diagnostic_ref": "component_validation.overflow_count",
+          "values": {
+            "overflow_count": 0
+          }
+        }
+      ]
+    },
+    {
+      "audit_id": "pmr.layout.known_loss_none_critical",
+      "category": "paged-layout-integrity",
+      "weight": 5,
+      "class": "required",
+      "verification_mode": "machine",
+      "severity": "high",
+      "stage": "post-render",
+      "source": "fullbleed",
+      "verdict": "pass",
+      "scored": true,
+      "score": 1.0,
+      "message": "No critical known-loss events detected."
+    },
+    {
+      "audit_id": "pmr.layout.page_count_target",
+      "category": "paged-layout-integrity",
+      "weight": 4,
+      "class": "scored",
+      "verification_mode": "machine",
+      "severity": "high",
+      "stage": "post-render",
+      "source": "fullbleed",
+      "verdict": "pass",
+      "scored": true,
+      "score": 1.0,
+      "message": "Page-count target satisfied (1 source page / 1 render page).",
+      "evidence": [
+        {
+          "values": {
+            "source_page_count": 1,
+            "render_page_count": 1
+          }
+        }
+      ]
+    },
+    {
+      "audit_id": "pmr.forms.id_ref_integrity",
+      "category": "field-table-form-integrity",
+      "weight": 4,
+      "class": "required",
+      "verification_mode": "machine",
+      "severity": "critical",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "verdict": "pass",
+      "scored": true,
+      "score": 1.0,
+      "message": "No duplicate IDs or broken label/description references detected."
+    },
+    {
+      "audit_id": "pmr.signatures.text_semantics_present",
+      "category": "field-table-form-integrity",
+      "weight": 3,
+      "class": "scored",
+      "verification_mode": "machine",
+      "severity": "medium",
+      "stage": "pre-render",
+      "source": "a11y_contract",
+      "verdict": "pass",
+      "scored": true,
+      "score": 1.0,
+      "message": "Signature fields are represented with text semantics."
+    },
+    {
+      "audit_id": "pmr.cav.document_only_content",
+      "category": "field-table-form-integrity",
+      "weight": 3,
+      "class": "required",
+      "verification_mode": "machine",
+      "severity": "critical",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "verdict": "pass",
+      "scored": true,
+      "score": 1.0,
+      "message": "CAV deliverable body contains document content only."
+    },
+    {
+      "audit_id": "pmr.artifacts.html_emitted",
+      "category": "artifact-packaging-reproducibility",
+      "weight": 3,
+      "class": "required",
+      "verification_mode": "machine",
+      "severity": "high",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "verdict": "pass",
+      "scored": true,
+      "score": 1.0,
+      "message": "HTML artifact emitted."
+    },
+    {
+      "audit_id": "pmr.artifacts.css_emitted",
+      "category": "artifact-packaging-reproducibility",
+      "weight": 3,
+      "class": "required",
+      "verification_mode": "machine",
+      "severity": "high",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "verdict": "pass",
+      "scored": true,
+      "score": 1.0,
+      "message": "CSS artifact emitted."
+    },
+    {
+      "audit_id": "pmr.artifacts.linked_css_reference",
+      "category": "artifact-packaging-reproducibility",
+      "weight": 2,
+      "class": "opportunity",
+      "verification_mode": "machine",
+      "severity": "low",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "verdict": "warn",
+      "scored": false,
+      "message": "HTML artifact does not include a linked CSS reference (separate artifact mode).",
+      "fix_hint": "Enable CSS link injection packaging mode when standalone browser-openable HTML is required."
+    }
+  ],
+  "manual_debt": {
+    "item_count": 1,
+    "high_risk_count": 0,
+    "items": [
+      {
+        "id": "manual.transcription_quality.handwriting",
+        "reason": "Handwritten transcription confidence requires human review.",
+        "category": "field-table-form-integrity",
+        "severity": "medium"
+      }
+    ]
+  },
+  "coverage": {
+    "evaluated_audit_count": 12,
+    "applicable_audit_count": 12,
+    "scored_audit_count": 11,
+    "manual_needed_count": 0,
+    "not_evaluated_audit_count": 0
+  },
+  "tooling": {
+    "fullbleed_version": "0.5.0",
+    "report_schema_version": "1.0.0-draft",
+    "generated_at": "2026-02-24T00:00:00Z"
+  },
+  "artifacts": {
+    "html_hash": "sha256:html-example",
+    "css_hash": "sha256:css-example",
+    "css_linked": false,
+    "packaging_mode": "separate-files"
+  },
+  "baseline_diff": {
+    "score_delta": 0,
+    "confidence_delta": 0,
+    "new_failures": [],
+    "resolved_failures": []
+  }
+}
+

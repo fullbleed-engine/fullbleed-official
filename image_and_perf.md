@@ -1,0 +1,189 @@
+# Image + Perf Sprint (`image_and_perf`)
+
+## North Star
+- Engine-native finalized PDF image output must be deterministic and production-correct.
+- No regressions on stamped/templated pages.
+- Performance work cannot trade away correctness.
+
+## Current State
+- Native raster path is active.
+- Wild shakeout harness is in place at `_test/wild/run_wild_batch.py`.
+- Latest 25-doc shakeout: `pass=20`, `warn=5`, `fail=0`, `skipped_encrypted=10`, determinism sample `6/6`.
+
+## Completed Slices
+- Native image decode coverage expanded:
+  - `/ICCBased`, `/Indexed`, `/Separation` (FunctionType `2` and `0`)
+  - packed samples (`BitsPerComponent` `1..8`)
+  - `/SMask` alpha application
+- Parser resilience:
+  - inline-image fallback decode for content streams
+- Color-state correctness:
+  - resource color-space parse/merge
+  - `cs/CS/sc/scn/SC/SCN` routed through active color space
+- Regression harness:
+  - corpus manifest, downloader, comparison metrics, determinism checks, markdown/json reports
+- PDF output composition quality:
+  - `compose_overlay_with_template_catalog` now preserves template `/Link` annotations on composed pages
+  - link annotations are re-emitted with updated page pointer (`/P`) per output page
+  - covered by finalize regression test (`compose_overlay_preserves_template_link_annotations`)
+  - compose annotation mode parameter shipped:
+    - `link_only` (default)
+    - `none`
+    - `carry_widgets`
+  - exposed through Rust API, Python binding (`finalize_compose_pdf(..., annotation_mode=...)`), and CLI (`--compose-annotation-mode`)
+- Text placement and font fallback hardening for native PDF raster:
+  - fixed affine matrix composition used by `cm`/text matrix updates in `pdf_raster` (`Td`, `T*`, text advance)
+  - added embedded-font failure fallback path in `raster`:
+    - if embedded font parse/layout/outline fails, retry deterministic system-family fallback
+  - expanded system font alias/style handling:
+    - `HelveticaWorld*`, `HelveticaLTStd*`, `HelveticaNeueLTStd*`
+    - shorthand styles `-Bd`, `-It`, `-Bi`, `-Blk`
+  - validated by unit tests and wild reruns:
+    - `report_irs_p15` moved from `warn` to `pass`
+    - `report_irs_p17` no longer blank (remaining drift tracked below)
+- Native Type0/CID glyph-run rendering (engine-native, deterministic):
+  - added raster-only `DrawGlyphRun` command path from PDF parser -> raster backend
+  - parser now resolves Type0 code->glyph mapping (`CIDToGIDMap` table or identity)
+  - raster draws embedded glyph IDs directly (reduces Unicode/system fallback drift on subset fonts)
+  - spill/jit/writer paths updated for command compatibility
+  - validated with expanded unit tests and wild reruns:
+    - shakeout status unchanged (`pass=20`, `warn=5`, `fail=0`) with no determinism regressions
+    - `report_irs_p17` quality improved (`avg_psnr` ~`17.04` -> `19.90`)
+- Rotated/vertical text correctness in native raster:
+  - confirmed transformed text emit path for W9 (`Tm 0 8 -7.9999 0 ...`)
+  - fixed transformed linear matrix sign handling (`m10/m11`) to preserve PDF terms directly
+  - result: W9 page 1 vertical labels now match reference orientation and ordering
+- CID whitespace glyph-run fallback correction:
+  - identified on `invoice_azure_interior` where spacing runs rendered `%`-style artifacts
+  - root cause: no-outline CID glyph runs were treated as hard failures and retried on system fonts
+  - fix: treat valid no-outline glyph runs as successful blanks, avoiding incorrect fallback glyph substitution
+  - outcome: invoice page 1 now aligns with reference; focused wild check passes (`max_pages=1`)
+- Single-byte ToUnicode source-code parsing correction:
+  - identified on `invoice_coolblue_1` where text rendered as symbol-heavy gibberish
+  - root cause: ToUnicode parser accepted only 2-byte source code tokens; many subset TrueType maps used 1-byte (`<00>..<FF>`)
+  - fix: parse both 1-byte and 2-byte source codes in ToUnicode map ingestion
+  - outcome: coolblue invoice page now aligns with reference; focused wild check passes (`max_pages=1`)
+- WinAnsi + condensed fallback refinement for Type1 forms:
+  - identified on `form_irs_w4` minor punctuation/formatting drift
+  - root causes:
+    - single-byte WinAnsi punctuation decoded through generic fallback path
+    - condensed Helvetica families (`*Cn`) mapped to non-condensed system fonts
+  - fixes:
+    - explicit WinAnsi single-byte decode path for simple fonts without ToUnicode
+    - condensed family fallback mapping to Arial Narrow candidates
+  - outcome: measurable page-1 drift reduction on W4; remaining differences are primarily Type1/CFF fallback shape mismatch
+- Transparency-group alpha propagation fix for form XObjects:
+  - identified on `report_whitehouse_budget_fy2025` page 1 cover watermark
+  - root cause:
+    - parent `ExtGState` alpha (`/GS2`, `ca=0.119995`) applied before `Do /Fm0`
+    - nested form content sets `gs /GS0` (`ca=1`) and parser flattened form ops without preserving group-level parent alpha
+  - fix:
+    - parser now tracks active opacity and inherited opacity scale
+    - transparency-group forms (`/Group /S /Transparency`) inherit parent effective alpha as a multiplier for nested `gs` opacities
+  - outcome:
+    - White House page-1 changed ratio reduced from ~`0.11529` to `0.062509`
+- Type1C fallback text placement refinement:
+  - identified on `report_whitehouse_budget_fy2025` pages 2-3 (word-break/spacing drift)
+  - root cause:
+    - fallback text emitted as large shaped chunks using substitute-system font advances, diverging from PDF code widths
+  - fix:
+    - non-glyph-run text now emits per-code fragments positioned with PDF-derived advances
+  - outcome:
+    - White House page-2 changed ratio reduced `~0.15220 -> 0.121359`
+    - White House page-3 changed ratio reduced `~0.07504 -> 0.067575`
+
+## Working Notes
+- `2026-02-18`: Root-cause chain for IRS blank pages:
+  - initial suspicion: unresolved family alias
+  - confirmed with debug traces: fonts resolved but `no_placements` from embedded subset fonts
+  - second root cause: incorrect affine concat drove many text baselines off-page
+  - mitigation shipped: matrix fix + embedded->system fallback retry + shorthand style parse
+- Determinism preserved on shakeout reruns (`6/6` sampled docs).
+- `2026-02-18`: Implemented native Type0/CID glyph-run pipe.
+  - result: better glyph fidelity on IRS statement pages, but remaining warn docs still gated by color/profile drift and complex form layout deltas.
+- `2026-02-18`: Closed W9 vertical-text defect.
+  - root cause: transformed text was emitted but raster matrix used sign-flipped linear terms, scrambling some rotated Type1 runs
+  - fix: emit and apply transformed linear terms without extra sign inversion
+  - validation: `cargo test -q --lib` (`164` passing), focused W9 rerender, full 25-doc wild rerun unchanged aggregate (`20 pass / 5 warn / 0 fail`)
+- `2026-02-18`: Closed `invoice_azure_interior` spacing artifact defect.
+  - root cause: whitespace/no-outline CID glyph runs triggered system fallback and remapped glyph IDs
+  - fix: treat valid no-outline glyph runs as non-error in native glyph-run rasterization
+  - validation: focused invoice rerender visually matches reference; full 25-doc wild rerun unchanged aggregate (`20 pass / 5 warn / 0 fail`)
+- `2026-02-18`: Closed `invoice_coolblue_1` text decode defect.
+  - root cause: ToUnicode parser dropped 1-byte source-code mappings, forcing byte fallback decode
+  - fix: accept 1-byte and 2-byte source code tokens when building cmap map
+  - validation: focused coolblue rerender visually matches reference; full 25-doc wild rerun unchanged aggregate (`20 pass / 5 warn / 0 fail`)
+- `2026-02-18`: Improved W4 minor formatting fidelity.
+  - root cause cluster: WinAnsi punctuation decode + condensed family fallback selection
+  - fixes: WinAnsi decode path + Arial Narrow candidate routing for `*Cn` families
+  - validation: focused warn rerun keeps determinism and reduces W4 page-1 drift (to `0.133708`)
+- `2026-02-18`: Improved White House budget fidelity (pages 1-3).
+  - page 1: fixed transparency-group alpha inheritance across nested form `gs` resets
+  - pages 2-3: switched fallback text placement to per-code PDF-width-driven emission
+  - validation: focused warn rerun now `pass=4`, `warn=2`, `fail=0`; White House moved to `pass`
+- `2026-02-19`: `0.2.7` release preflight executed.
+  - metadata/version bump completed across Rust/Python/docs (`0.2.7`)
+  - release notes refreshed for `0.2.7`
+  - release gates passed:
+    - `cargo test -q --lib`
+    - `fullbleed doctor --strict --json`
+    - `fullbleed compliance --strict --json --max-audit-age-days 60`
+    - `python -m build` + `twine check`
+  - artifacts produced in `dist_release_027/`:
+    - `fullbleed-0.2.7-cp310-cp310-manylinux_2_35_x86_64.whl`
+    - `fullbleed-0.2.7-cp311-cp311-manylinux_2_35_x86_64.whl`
+    - `fullbleed-0.2.7-cp311-cp311-win_amd64.whl`
+    - `fullbleed-0.2.7.tar.gz`
+- `2026-02-21`: `0.5.0` release preflight executed.
+  - metadata/version bump completed across Rust/Python/docs (`0.5.0`)
+  - release notes refreshed for `0.5.0` with validated CSS coverage and backlog contract
+  - release gates passed:
+    - `cargo test -q --lib` (`276/276`)
+    - `cargo check -q`
+    - `fullbleed doctor --strict --json`
+    - `fullbleed compliance --strict --json --max-audit-age-days 60`
+    - `python -m build --outdir dist_release_050`
+    - `python -m twine check dist_release_050/fullbleed-0.5.0.tar.gz dist_release_050/fullbleed-0.5.0-cp311-cp311-win_amd64.whl dist_release_050/fullbleed-0.5.0-cp310-cp310-manylinux_2_35_x86_64.whl dist_release_050/fullbleed-0.5.0-cp311-cp311-manylinux_2_35_x86_64.whl`
+    - `wsl maturin build --release --features python --compatibility manylinux_2_35 --interpreter python3.10 --out dist_release_050`
+    - `wsl maturin build --release --features python --compatibility manylinux_2_35 --interpreter python3.11 --out dist_release_050`
+    - `python tools/run_css_fixture_suite.py --labels full --jobs 4 --out _css_working/tmp/fixture_full_latest.json` (`85/85`)
+    - `python tools/generate_css_parity_status.py --check --json`
+  - artifacts produced in `dist_release_050/`:
+    - `fullbleed-0.5.0-cp310-cp310-manylinux_2_35_x86_64.whl` (`7,666,577` bytes, `sha256=1925e1b9ca748f0e8fba86ae1d70f9adc000fd5e73460fa6d164289c33bb0287`)
+    - `fullbleed-0.5.0-cp311-cp311-manylinux_2_35_x86_64.whl` (`7,666,674` bytes, `sha256=329fb523952ae45a0f0565d1d7102cd6df604cff05837ad9ad22590e393b620d`)
+    - `fullbleed-0.5.0-cp311-cp311-win_amd64.whl` (`7,310,332` bytes, `sha256=025662e12ad5b08644eb8d907b946cf5deab2b39776985b41536a28a9f27931a`)
+    - `fullbleed-0.5.0.tar.gz` (`3,182,194` bytes, `sha256=5956d93cf94bc30b04d1ee96976d6f353b484020dd4666fd5b5c9efbd93c95ee`)
+    - `artifacts_0.5.0.json` manifest (`schema=fullbleed.release_artifacts.v1`)
+
+## Open Backlog (With Implementation Theory)
+- Spot/CMYK color fidelity drift on statement-class PDFs.
+  - Theory: current CMYK alternate conversion is simplified and ignores output-profile intent.
+  - Plan: parse `OutputIntent` ICC profiles and apply deterministic CMYK->sRGB mapping in raster path.
+- Compose annotation policy for non-link widgets.
+  - Theory: preserving all template widgets can unintentionally re-activate source form fields; preserving none drops interactivity.
+  - Plan: now implemented as explicit mode selection; remaining work is rollout guidance per workflow and default-policy documentation.
+- Remaining warn set (`report_berkshire_2024`, `report_irs_p17`).
+  - Theory: mixed causes:
+    - profile/spot-color drift (`berkshire`, some statement pages)
+    - remaining Type0/CID edge cases where glyph mapping tables or fallback heuristics still diverge from reference (`report_irs_p17`)
+    - complex transparency/graphics-state behavior on long-form statement PDFs
+  - Plan:
+    - add per-page operator trace and component-level diff attribution for each warn doc
+    - expand CID coverage (`CIDToGIDMap` edge cases, vertical/complex text transforms)
+    - add native Type1/CFF outline render path and tighter advance-width handling for mixed `Tf/Tj` micro-runs
+    - add regression coverage for whitespace-only CID runs to prevent fallback remap artifacts
+    - add regression coverage for single-byte ToUnicode cmap parsing (and future >2-byte source-code handling)
+    - add condensed-family fallback regression coverage (`*Cn`, `*BlkCn`) and consider synthetic weight tuning for black-condensed substitutes
+- Encrypted public forms in wild corpus are skipped.
+  - Theory: coverage blind spot in real-world dataset quality gate.
+  - Plan: add optional decrypt-capability test mode and explicit policy gating for release CI.
+- Scale shakeout from 25 to 100 PDFs.
+  - Theory: current sample catches major failures but underrepresents long-tail PDFs.
+  - Plan: expand manifest by category/size and keep deterministic nightly mini-pack.
+
+## Immediate Next Slice
+- Implement native simple-`Type1C` fallback replacement (code->glyph->outline in engine) plus deterministic output-intent-aware CMYK conversion, then rerun wild batch.
+- Exit criteria:
+  - keep `fail=0`
+  - reduce remaining warn count and Berkshire/IRS-P17 drift severity
+  - preserve determinism parity

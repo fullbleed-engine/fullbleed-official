@@ -1,0 +1,227 @@
+{
+  "schema": "fullbleed.a11y.verify.v1",
+  "target": {
+    "html_path": "output/keenan_coutney_marriage_cav.html",
+    "css_path": "output/keenan_coutney_marriage_cav.css",
+    "source_pdf_path": "examples/accessibility_test/keenan_coutney_marriage.pdf",
+    "document_id": "keenan-coutney-marriage-cav",
+    "target_hash": "sha256:example"
+  },
+  "profile": "cav",
+  "conformance_status": {
+    "status": "manual_review_required",
+    "claim_scope": "manual_required",
+    "manual_review_required": true,
+    "notes": [
+      "Machine-verifiable subset passed.",
+      "Manual review remains for transcription quality and alternate-version legal sufficiency."
+    ]
+  },
+  "gate": {
+    "ok": true,
+    "mode": "error",
+    "error_count": 0,
+    "warn_count": 0,
+    "failed_rule_ids": []
+  },
+  "summary": {
+    "pass_count": 5,
+    "fail_count": 0,
+    "warn_count": 0,
+    "manual_needed_count": 1,
+    "not_applicable_count": 0
+  },
+  "findings": [
+    {
+      "rule_id": "fb.a11y.html.lang_present_valid",
+      "applicability": "applicable",
+      "verification_mode": "machine",
+      "verdict": "pass",
+      "severity": "high",
+      "confidence": "certain",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "message": "HTML lang attribute is present and non-empty.",
+      "evidence": [
+        {
+          "selector": "html",
+          "values": {
+            "lang": "en-US"
+          }
+        }
+      ]
+    },
+    {
+      "rule_id": "fb.a11y.html.title_present_nonempty",
+      "applicability": "applicable",
+      "verification_mode": "machine",
+      "verdict": "pass",
+      "severity": "high",
+      "confidence": "certain",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "message": "Document title is present and non-empty.",
+      "evidence": [
+        {
+          "selector": "head > title",
+          "snippet": "<title>Keenan/Courtney Marriage Record CAV (Accessibility-First)</title>"
+        }
+      ]
+    },
+    {
+      "rule_id": "fb.a11y.structure.single_main",
+      "applicability": "applicable",
+      "verification_mode": "machine",
+      "verdict": "pass",
+      "severity": "medium",
+      "confidence": "certain",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "message": "Single primary content root detected."
+    },
+    {
+      "rule_id": "fb.a11y.cav.document_only_content",
+      "applicability": "applicable",
+      "verification_mode": "machine",
+      "verdict": "pass",
+      "severity": "critical",
+      "confidence": "high",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "message": "No remediation notes detected in CAV deliverable body."
+    },
+    {
+      "rule_id": "fb.a11y.signatures.text_semantics_present",
+      "applicability": "applicable",
+      "verification_mode": "machine",
+      "verdict": "pass",
+      "severity": "medium",
+      "confidence": "high",
+      "stage": "pre-render",
+      "source": "a11y_contract",
+      "message": "Signature fields include text-first semantics."
+    },
+    {
+      "rule_id": "fb.a11y.cav.manual_transcription_quality_review",
+      "applicability": "unknown",
+      "verification_mode": "manual",
+      "verdict": "manual_needed",
+      "severity": "medium",
+      "confidence": "low",
+      "stage": "adapter",
+      "source": "manual",
+      "message": "Handwritten transcription quality requires manual review."
+    }
+  ],
+  "coverage": {
+    "evaluated_rule_count": 6,
+    "applicable_rule_count": 5,
+    "machine_rule_count": 5,
+    "manual_rule_count": 1,
+    "manual_needed_count": 1,
+    "not_evaluated_rule_count": 0,
+    "rule_pack_coverage": [
+      {
+        "pack_id": "document-semantics",
+        "evaluated": 2,
+        "total": 2
+      },
+      {
+        "pack_id": "cav",
+        "evaluated": 2,
+        "total": 3
+      },
+      {
+        "pack_id": "wcag20aa.implemented_map.v1",
+        "evaluated": 6,
+        "total": 12
+      },
+      {
+        "pack_id": "section508_html.implemented_map.v1",
+        "evaluated": 7,
+        "total": 13
+      }
+    ],
+    "wcag20aa": {
+      "registry_id": "wcag20aa_registry.v1",
+      "registry_version": 1,
+      "wcag_version": "2.0",
+      "target_level": "AA",
+      "total_entries": 43,
+      "success_criteria_total": 38,
+      "conformance_requirements_total": 5,
+      "mapped_entry_count": 14,
+      "mapped_success_criteria_count": 10,
+      "mapped_conformance_requirement_count": 4,
+      "implemented_mapped_entry_count": 12,
+      "implemented_mapped_entry_evaluated_count": 6,
+      "implemented_mapped_entry_pending_count": 6,
+      "supporting_only_mapped_entry_count": 1,
+      "planned_only_mapped_entry_count": 1,
+      "unmapped_entry_count": 29,
+      "implemented_mapped_result_counts": {
+        "pass": 6,
+        "fail": 0,
+        "warn": 0,
+        "manual_needed": 0,
+        "not_applicable": 0,
+        "unknown": 0
+      }
+    },
+    "section508": {
+      "registry_id": "section508_html_registry.v1",
+      "registry_version": 1,
+      "profile_id": "section508.revised.e205.html",
+      "total_entries": 49,
+      "specific_entries_total": 6,
+      "inherited_wcag_entries_total": 43,
+      "mapped_entry_count": 20,
+      "implemented_mapped_entry_count": 13,
+      "implemented_mapped_entry_evaluated_count": 7,
+      "implemented_mapped_entry_pending_count": 6,
+      "supporting_only_mapped_entry_count": 1,
+      "planned_only_mapped_entry_count": 1,
+      "unmapped_entry_count": 29,
+      "specific_mapped_entry_count": 1,
+      "specific_implemented_mapped_entry_count": 1,
+      "specific_implemented_mapped_entry_evaluated_count": 1,
+      "specific_implemented_mapped_entry_pending_count": 0,
+      "specific_unmapped_entry_count": 5,
+      "inherited_wcag_registry_id": "wcag20aa_registry.v1",
+      "inherited_wcag_implemented_mapped_entry_count": 12,
+      "inherited_wcag_implemented_mapped_entry_evaluated_count": 6,
+      "inherited_wcag_unmapped_entry_count": 29,
+      "implemented_mapped_result_counts": {
+        "pass": 6,
+        "fail": 0,
+        "warn": 1,
+        "manual_needed": 0,
+        "not_applicable": 0,
+        "unknown": 0
+      }
+    }
+  },
+  "tooling": {
+    "fullbleed_version": "0.5.0",
+    "engine_version": "0.5.0-dev",
+    "report_schema_version": "1.0.0-draft",
+    "generated_at": "2026-02-24T00:00:00Z"
+  },
+  "artifacts": {
+    "html_hash": "sha256:html-example",
+    "css_hash": "sha256:css-example",
+    "css_linked": false,
+    "packaging_mode": "separate-files"
+  },
+  "manual_review_debt": {
+    "item_count": 1,
+    "high_risk_count": 0,
+    "items": [
+      {
+        "id": "manual.transcription_quality.handwriting",
+        "reason": "Low-quality handwritten entries need human verification.",
+        "severity": "medium"
+      }
+    ]
+  }
+}

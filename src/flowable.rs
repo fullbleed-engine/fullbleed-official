@@ -6051,10 +6051,12 @@ impl ContainerFlowable {
 
     fn filtered_background_paint(&self, paint: &BackgroundPaint) -> BackgroundPaint {
         match paint {
-            BackgroundPaint::LinearGradient { angle_deg, stops } => BackgroundPaint::LinearGradient {
-                angle_deg: *angle_deg,
-                stops: self.apply_paint_filter_stops(stops),
-            },
+            BackgroundPaint::LinearGradient { angle_deg, stops } => {
+                BackgroundPaint::LinearGradient {
+                    angle_deg: *angle_deg,
+                    stops: self.apply_paint_filter_stops(stops),
+                }
+            }
             BackgroundPaint::RadialGradient {
                 center_x_pct,
                 center_y_pct,

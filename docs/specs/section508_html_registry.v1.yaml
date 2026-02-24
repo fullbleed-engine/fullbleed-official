@@ -1,0 +1,157 @@
+{
+  "schema": "section508_html_registry.v1",
+  "version": 1,
+  "profile_id": "section508.revised.e205.html",
+  "generated_for": "accessibility_audit_epic.md Section 508 HTML/E205 coverage tracking",
+  "source_references": {
+    "applicability_conformance_guidance": "https://www.section508.gov/develop/applicability-conformance/",
+    "revised_508_art_appendix": "https://www.section508.gov/manage/laws-and-policies/architectural-and-transportation-barriers-compliance-board-electronic-and-information-technology-eit-accessibility-standards-36-cfr-part-1194-docket-no-atbc-2015-0002-rin-3014-aa37/final-rule/appendix-a-to-part-1194-section-508-standards/"
+  },
+  "scope": {
+    "description": "Section 508 Revised Standards coverage profile for FullBleed HTML deliverables (web/electronic content path), with WCAG 2.0 A/AA and conformance requirements incorporated by reference via E205.4.",
+    "delivery_targets": ["html"],
+    "includes_wcag20aa_incorporation": true,
+    "inherited_wcag_registry_id": "wcag20aa_registry.v1",
+    "inherited_wcag_entry_count": 43,
+    "total_specific_entries": 6,
+    "total_entries": 49
+  },
+  "verification_modes": ["machine", "hybrid", "manual"],
+  "applicability_values": ["always", "conditional"],
+  "mapping_status_values": ["implemented", "planned", "supporting"],
+  "mapping_coverage_values": ["partial", "supporting"],
+  "evidence_requirement_catalog": {
+    "section508_scope_decision": "Record why Section 508 applies or does not apply to the deliverable and identify the applicable content path (public-facing or official communication).",
+    "official_communication_category": "If applicable via E205.3, record the official communication category (A-I) and rationale.",
+    "nara_exception_check": "Record whether the content is maintained by NARA and whether the public-facing exception overrides the NARA exclusion.",
+    "wcag_bundle_claim_linkage": "Record linkage to the WCAG 2.0 AA coverage and claim-readiness report used as supporting evidence for E205.4.",
+    "non_web_document_exception_decision": "If the deliverable is non-web electronic content, record whether E205.4 exceptions apply.",
+    "word_substitution_policy": "If the deliverable is a non-web document, record whether the E205.4.1 word substitution convention is applied in claims/documentation.",
+    "manual_review_result": "Record human review result and rationale when machine evidence is insufficient."
+  },
+  "entries": [
+    {
+      "id": "s508.e205.2.public_facing_content_applicability",
+      "kind": "applicability_requirement",
+      "citation": "36 CFR Part 1194 Appendix A E205.2",
+      "title": "Public Facing Content Applicability Determined",
+      "applicability": "always",
+      "verification_mode": "manual",
+      "default_gate_level": "error",
+      "evidence_requirements": ["section508_scope_decision", "manual_review_result"],
+      "fullbleed_rule_mapping": [
+        {
+          "id": "fb.a11y.claim.section508.public_facing_content_applicability_seed",
+          "system": "a11y_verifier",
+          "coverage": "partial",
+          "status": "implemented",
+          "notes": "Manual-evidence seed records that a public-facing applicability decision is required; does not infer agency scope automatically."
+        }
+      ],
+      "coverage_state": "mapped",
+      "notes": "Still requires explicit human scoping decision and evidence."
+    },
+    {
+      "id": "s508.e205.3.agency_official_communications_applicability",
+      "kind": "applicability_requirement",
+      "citation": "36 CFR Part 1194 Appendix A E205.3",
+      "title": "Agency Official Communications Applicability Determined",
+      "applicability": "always",
+      "verification_mode": "manual",
+      "default_gate_level": "error",
+      "evidence_requirements": ["section508_scope_decision", "official_communication_category", "manual_review_result"],
+      "fullbleed_rule_mapping": [
+        {
+          "id": "fb.a11y.claim.section508.official_communications_applicability_seed",
+          "system": "a11y_verifier",
+          "coverage": "partial",
+          "status": "implemented",
+          "notes": "Manual-evidence seed records that official communications applicability/category determination is required."
+        }
+      ],
+      "coverage_state": "mapped"
+    },
+    {
+      "id": "s508.e205.3.nara_exception_applicability",
+      "kind": "applicability_requirement",
+      "citation": "36 CFR Part 1194 Appendix A E205.3 Exception",
+      "title": "NARA Exception Applicability Determined",
+      "applicability": "conditional",
+      "verification_mode": "manual",
+      "default_gate_level": "warn",
+      "evidence_requirements": ["nara_exception_check", "manual_review_result"],
+      "fullbleed_rule_mapping": [
+        {
+          "id": "fb.a11y.claim.section508.nara_exception_applicability_seed",
+          "system": "a11y_verifier",
+          "coverage": "partial",
+          "status": "implemented",
+          "notes": "Manual-evidence seed records that NARA exception applicability must be determined when relevant."
+        }
+      ],
+      "coverage_state": "mapped"
+    },
+    {
+      "id": "s508.e205.4.wcag20aa_incorporation",
+      "kind": "incorporation_requirement",
+      "citation": "36 CFR Part 1194 Appendix A E205.4",
+      "title": "WCAG 2.0 A/AA + Conformance Requirements Incorporated",
+      "applicability": "always",
+      "verification_mode": "hybrid",
+      "default_gate_level": "error",
+      "evidence_requirements": ["section508_scope_decision", "wcag_bundle_claim_linkage", "manual_review_result"],
+      "fullbleed_rule_mapping": [
+        {
+          "id": "fb.a11y.claim.wcag20aa_level_readiness",
+          "system": "a11y_verifier",
+          "coverage": "supporting",
+          "status": "implemented",
+          "notes": "FullBleed claim-readiness scaffold is supporting evidence only; it does not assert legal Section 508 conformance."
+        }
+      ],
+      "coverage_state": "mapped",
+      "notes": "Full compliance depends on inherited WCAG 2.0 AA criteria plus Section 508 scoping determinations."
+    },
+    {
+      "id": "s508.e205.4.non_web_document_exception_applicability",
+      "kind": "exception_applicability_requirement",
+      "citation": "36 CFR Part 1194 Appendix A E205.4 Exception",
+      "title": "Non-web Electronic Content Exception Applicability Determined",
+      "applicability": "conditional",
+      "verification_mode": "manual",
+      "default_gate_level": "warn",
+      "evidence_requirements": ["non_web_document_exception_decision", "manual_review_result"],
+      "fullbleed_rule_mapping": [
+        {
+          "id": "fb.a11y.claim.section508.non_web_document_exceptions_html_seed",
+          "system": "a11y_verifier",
+          "coverage": "partial",
+          "status": "implemented",
+          "notes": "HTML-path seed deterministically marks non-web document exception applicability as not applicable for HTML deliverables."
+        }
+      ],
+      "coverage_state": "mapped",
+      "notes": "Primarily relevant to future PDF/UA and non-web document outputs."
+    },
+    {
+      "id": "s508.e205.4.1.word_substitution_for_non_web_documents",
+      "kind": "claim_language_requirement",
+      "citation": "36 CFR Part 1194 Appendix A E205.4.1",
+      "title": "Word Substitution Convention Applied for Non-web Document Claims",
+      "applicability": "conditional",
+      "verification_mode": "manual",
+      "default_gate_level": "warn",
+      "evidence_requirements": ["word_substitution_policy", "manual_review_result"],
+      "fullbleed_rule_mapping": [
+        {
+          "id": "fb.a11y.claim.section508.non_web_document_exceptions_html_seed",
+          "system": "a11y_verifier",
+          "coverage": "partial",
+          "status": "implemented",
+          "notes": "HTML-path seed deterministically marks non-web document word-substitution claim convention as not applicable."
+        }
+      ],
+      "coverage_state": "mapped"
+    }
+  ]
+}

@@ -16,6 +16,7 @@ These docs target the `0.5.0` stable line and the current repository source layo
 - `docs/css-coverage.md`: validated CSS coverage, parity status, and active gap/backlog contract
 - `docs/engine.md`: Rust engine architecture, render flow, pagination model, diagnostics
 - `docs/python-api.md`: Python bindings, classes, methods, and usage patterns
+- `docs/ui-accessibility.md`: `fullbleed.ui` authoring, accessibility primitives, validation, signatures
 - `docs/cli.md`: command reference, JSON/machine mode, reproducibility and validation flows
 - `docs/pdf-templates.md`: Rust finalize PDF template/XObject composition policy and smoke gates
 
@@ -24,9 +25,10 @@ These docs target the `0.5.0` stable line and the current repository source layo
 1. `docs/install-non-technical.md` if you are setting up Python and Fullbleed for the first time
 2. `docs/css-coverage.md` for validated CSS coverage and known gap policy
 3. `docs/python-api.md` if you are building reports/components in Python
-4. `docs/cli.md` if you are automating builds/validation in CI
-5. `docs/pdf-templates.md` if your workflow overlays variable data onto source PDF templates
-6. `docs/engine.md` if you need to reason about behavior, constraints, or performance
+4. `docs/ui-accessibility.md` if you are building semantic/a11y-first document workflows
+5. `docs/cli.md` if you are automating builds/validation in CI
+6. `docs/pdf-templates.md` if your workflow overlays variable data onto source PDF templates
+7. `docs/engine.md` if you need to reason about behavior, constraints, or performance
 
 ## Scaffold and component workflow
 

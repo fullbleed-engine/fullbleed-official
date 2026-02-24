@@ -209,6 +209,10 @@ DEFAULT_DIRS = DEFAULT_INIT_DIRS
 
 # Sample templates
 TEMPLATES = {
+    "accessible": {
+        "description": "Accessibility-first document scaffold (fullbleed.ui.accessibility)",
+        "source_dir": "new/accessible",
+    },
     "invoice": {
         "description": "Basic invoice template",
         "source_dir": "new/invoice",

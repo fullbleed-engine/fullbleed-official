@@ -1,0 +1,432 @@
+{
+  "schema": "fullbleed.pmr.v1",
+  "target": {
+    "html_path": "C:\\dev\\workbench\\fullbleed-official\\examples\\acme_invoice\\output\\audit_sanity_check\\acme_invoice_legacy.html",
+    "css_path": "C:\\dev\\workbench\\fullbleed-official\\examples\\acme_invoice\\output\\audit_sanity_check\\acme_invoice_legacy.css"
+  },
+  "profile": "strict",
+  "rank": {
+    "score": 90.0,
+    "confidence": 94.05,
+    "band": "good",
+    "raw_score": 90.0
+  },
+  "gate": {
+    "ok": false,
+    "mode": "error",
+    "error_count": 1,
+    "warn_count": 1,
+    "failed_audit_ids": [
+      "pmr.tables.semantic_table_headers"
+    ]
+  },
+  "categories": [
+    {
+      "id": "document-semantics",
+      "name": "Document Semantics",
+      "weight": 20.0,
+      "score": 100.0,
+      "confidence": 90.0,
+      "audit_count": 3,
+      "fail_count": 0,
+      "warn_count": 0
+    },
+    {
+      "id": "reading-order-structure",
+      "name": "Reading Order & Structure",
+      "weight": 20.0,
+      "score": 100.0,
+      "confidence": 100.0,
+      "audit_count": 0,
+      "fail_count": 0,
+      "warn_count": 0
+    },
+    {
+      "id": "paged-layout-integrity",
+      "name": "Paged Layout Integrity",
+      "weight": 25.0,
+      "score": 100.0,
+      "confidence": 90.0,
+      "audit_count": 3,
+      "fail_count": 0,
+      "warn_count": 0
+    },
+    {
+      "id": "field-table-form-integrity",
+      "name": "Field/Table/Form Integrity",
+      "weight": 20.0,
+      "score": 50.0,
+      "confidence": 95.0,
+      "audit_count": 4,
+      "fail_count": 1,
+      "warn_count": 0
+    },
+    {
+      "id": "artifact-packaging-reproducibility",
+      "name": "Artifact Packaging & Reproducibility",
+      "weight": 15.0,
+      "score": 100.0,
+      "confidence": 97.0,
+      "audit_count": 3,
+      "fail_count": 0,
+      "warn_count": 1
+    }
+  ],
+  "audits": [
+    {
+      "audit_id": "pmr.doc.lang_present_valid",
+      "category": "document-semantics",
+      "weight": 3.0,
+      "class": "required",
+      "verification_mode": "machine",
+      "severity": "high",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "verdict": "pass",
+      "scored": true,
+      "score": 1.0,
+      "message": "HTML lang is present and valid.",
+      "evidence": [
+        {
+          "selector": "html",
+          "values": {
+            "lang": "en"
+          }
+        }
+      ]
+    },
+    {
+      "audit_id": "pmr.doc.title_present_nonempty",
+      "category": "document-semantics",
+      "weight": 3.0,
+      "class": "required",
+      "verification_mode": "machine",
+      "severity": "high",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "verdict": "pass",
+      "scored": true,
+      "score": 1.0,
+      "message": "Document title is present and non-empty.",
+      "evidence": [
+        {
+          "selector": "head > title",
+          "values": {
+            "title": "Acme Sample Invoice"
+          }
+        }
+      ]
+    },
+    {
+      "audit_id": "pmr.doc.metadata_engine_persistence",
+      "category": "document-semantics",
+      "weight": 4.0,
+      "class": "scored",
+      "verification_mode": "manual",
+      "severity": "high",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "verdict": "manual_needed",
+      "scored": false,
+      "message": "Expected metadata not supplied; cannot verify engine persistence."
+    },
+    {
+      "audit_id": "pmr.layout.overflow_none",
+      "category": "paged-layout-integrity",
+      "weight": 6.0,
+      "class": "required",
+      "verification_mode": "machine",
+      "severity": "critical",
+      "stage": "post-render",
+      "source": "fullbleed",
+      "verdict": "pass",
+      "scored": true,
+      "score": 1.0,
+      "message": "No overflow placements detected.",
+      "evidence": [
+        {
+          "diagnostic_ref": "component_validation.overflow_count",
+          "values": {
+            "overflow_count": "0"
+          }
+        }
+      ]
+    },
+    {
+      "audit_id": "pmr.layout.known_loss_none_critical",
+      "category": "paged-layout-integrity",
+      "weight": 5.0,
+      "class": "required",
+      "verification_mode": "machine",
+      "severity": "high",
+      "stage": "post-render",
+      "source": "fullbleed",
+      "verdict": "pass",
+      "scored": true,
+      "score": 1.0,
+      "message": "No critical known-loss events detected.",
+      "evidence": [
+        {
+          "diagnostic_ref": "component_validation.known_loss_count",
+          "values": {
+            "known_loss_count": "0"
+          }
+        }
+      ]
+    },
+    {
+      "audit_id": "pmr.layout.page_count_target",
+      "category": "paged-layout-integrity",
+      "weight": 4.0,
+      "class": "scored",
+      "verification_mode": "manual",
+      "severity": "high",
+      "stage": "post-render",
+      "source": "fullbleed",
+      "verdict": "manual_needed",
+      "scored": false,
+      "message": "Page-count target could not be evaluated."
+    },
+    {
+      "audit_id": "pmr.forms.id_ref_integrity",
+      "category": "field-table-form-integrity",
+      "weight": 4.0,
+      "class": "required",
+      "verification_mode": "machine",
+      "severity": "critical",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "verdict": "pass",
+      "scored": true,
+      "score": 1.0,
+      "message": "ID and IDREF integrity checks passed.",
+      "evidence": [
+        {
+          "values": {
+            "duplicate_id_count": "0",
+            "missing_idref_count": "0"
+          }
+        }
+      ]
+    },
+    {
+      "audit_id": "pmr.tables.semantic_table_headers",
+      "category": "field-table-form-integrity",
+      "weight": 4.0,
+      "class": "scored",
+      "verification_mode": "machine",
+      "severity": "high",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "verdict": "fail",
+      "scored": true,
+      "score": 0.0,
+      "message": "Semantic table header checks failed.",
+      "evidence": [
+        {
+          "values": {
+            "table_index": "0",
+            "has_caption": "false",
+            "th_count": "4",
+            "th_scope_count": "0"
+          }
+        }
+      ]
+    },
+    {
+      "audit_id": "pmr.signatures.text_semantics_present",
+      "category": "field-table-form-integrity",
+      "weight": 3.0,
+      "class": "scored",
+      "verification_mode": "machine",
+      "severity": "medium",
+      "stage": "pre-render",
+      "source": "fullbleed",
+      "verdict": "not_applicable",
+      "scored": false,
+      "message": "Not applicable for this profile."
+    },
+    {
+      "audit_id": "pmr.cav.document_only_content",
+      "category": "field-table-form-integrity",
+      "weight": 3.0,
+      "class": "required",
+      "verification_mode": "machine",
+      "severity": "critical",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "verdict": "not_applicable",
+      "scored": false,
+      "message": "Not a CAV profile."
+    },
+    {
+      "audit_id": "pmr.artifacts.html_emitted",
+      "category": "artifact-packaging-reproducibility",
+      "weight": 3.0,
+      "class": "required",
+      "verification_mode": "machine",
+      "severity": "high",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "verdict": "pass",
+      "scored": true,
+      "score": 1.0,
+      "message": "HTML artifact emitted."
+    },
+    {
+      "audit_id": "pmr.artifacts.css_emitted",
+      "category": "artifact-packaging-reproducibility",
+      "weight": 3.0,
+      "class": "required",
+      "verification_mode": "machine",
+      "severity": "high",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "verdict": "pass",
+      "scored": true,
+      "score": 1.0,
+      "message": "CSS artifact emitted."
+    },
+    {
+      "audit_id": "pmr.artifacts.linked_css_reference",
+      "category": "artifact-packaging-reproducibility",
+      "weight": 2.0,
+      "class": "opportunity",
+      "verification_mode": "machine",
+      "severity": "low",
+      "stage": "post-emit",
+      "source": "fullbleed",
+      "verdict": "warn",
+      "scored": false,
+      "message": "HTML artifact does not include linked CSS reference (separate artifact mode).",
+      "fix_hint": "Enable CSS link injection packaging mode for standalone HTML artifacts.",
+      "evidence": [
+        {
+          "selector": "link[rel~=stylesheet]",
+          "values": {
+            "hrefs": ""
+          }
+        }
+      ]
+    }
+  ],
+  "observability": {
+    "original_audit_count": 13,
+    "reported_audit_count": 13,
+    "dedup_event_count": 0,
+    "dedup_merged_audit_count": 0,
+    "correlated_audit_count": 4,
+    "stage_counts": {
+      "post-emit": 9,
+      "post-render": 3,
+      "pre-render": 1
+    },
+    "source_counts": {
+      "fullbleed": 13
+    },
+    "category_counts": {
+      "artifact-packaging-reproducibility": 3,
+      "document-semantics": 3,
+      "field-table-form-integrity": 4,
+      "paged-layout-integrity": 3
+    },
+    "class_counts": {
+      "opportunity": 1,
+      "required": 8,
+      "scored": 4
+    },
+    "verdict_counts": {
+      "fail": 1,
+      "manual_needed": 2,
+      "not_applicable": 2,
+      "pass": 7,
+      "warn": 1
+    },
+    "correlation_index": [
+      {
+        "audit_id": "pmr.doc.metadata_engine_persistence",
+        "category": "document-semantics",
+        "class": "scored",
+        "verdict": "manual_needed",
+        "severity": "high",
+        "stage": "post-emit",
+        "source": "fullbleed",
+        "gate_failed": false,
+        "gate_relevant": false,
+        "opportunity": false,
+        "scored": false,
+        "has_fix_hint": false
+      },
+      {
+        "audit_id": "pmr.layout.page_count_target",
+        "category": "paged-layout-integrity",
+        "class": "scored",
+        "verdict": "manual_needed",
+        "severity": "high",
+        "stage": "post-render",
+        "source": "fullbleed",
+        "gate_failed": false,
+        "gate_relevant": false,
+        "opportunity": false,
+        "scored": false,
+        "has_fix_hint": false
+      },
+      {
+        "audit_id": "pmr.tables.semantic_table_headers",
+        "category": "field-table-form-integrity",
+        "class": "scored",
+        "verdict": "fail",
+        "severity": "high",
+        "stage": "post-emit",
+        "source": "fullbleed",
+        "gate_failed": true,
+        "gate_relevant": true,
+        "opportunity": false,
+        "scored": true,
+        "has_fix_hint": false,
+        "score": 0.0
+      },
+      {
+        "audit_id": "pmr.artifacts.linked_css_reference",
+        "category": "artifact-packaging-reproducibility",
+        "class": "opportunity",
+        "verdict": "warn",
+        "severity": "low",
+        "stage": "post-emit",
+        "source": "fullbleed",
+        "gate_failed": false,
+        "gate_relevant": true,
+        "opportunity": true,
+        "scored": false,
+        "has_fix_hint": true
+      }
+    ]
+  },
+  "manual_debt": {
+    "item_count": 0,
+    "high_risk_count": 0
+  },
+  "coverage": {
+    "evaluated_audit_count": 13,
+    "applicable_audit_count": 11,
+    "scored_audit_count": 8,
+    "manual_needed_count": 2,
+    "not_evaluated_audit_count": 0
+  },
+  "tooling": {
+    "fullbleed_version": "0.5.0",
+    "report_schema_version": "1.0.0-draft",
+    "audit_contract_id": "fullbleed.audit_contract",
+    "audit_contract_version": "1",
+    "audit_contract_fingerprint": "sha256:808683071cddc973d682a2c93eccde97097aea394ce2e1d550c3dc7892cf8806",
+    "audit_registry_hash": "sha256:7b38bf284f4c086dbf64bf55a6abb964fac1611b4f1f73c2fae0f8e1c8b998af",
+    "wcag20aa_registry_hash": "sha256:6be7e74948290fe8a202fea345a0bf5a5b45535d2b64263f108d1a704f95ac69",
+    "generated_at": "2026-02-24T07:45:37.802064Z"
+  },
+  "artifacts": {
+    "html_hash": "sha256:b08765eba8861e20107c863a2662ec41620dbd67e34b84f5da2ac2c9dc6c8362",
+    "css_hash": "sha256:40910f666671538d119ce490a6443baed1e7fca7b118a82b2187d27793cc6c02",
+    "css_linked": false,
+    "packaging_mode": "separate-files"
+  }
+}

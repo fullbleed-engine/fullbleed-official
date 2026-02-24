@@ -135,9 +135,11 @@ Schema target:
 Template/project bootstrap command group:
 
 - Local templates:
+  - `fullbleed new local accessible <path>`
   - `fullbleed new local invoice <path>`
   - `fullbleed new local statement <path>`
   - Compatibility aliases are still supported:
+    - `fullbleed new accessible <path>`
     - `fullbleed new invoice <path>`
     - `fullbleed new statement <path>`
 - Remote registry:

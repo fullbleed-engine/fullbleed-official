@@ -1,0 +1,641 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fullbleed.dev/schemas/fullbleed.pmr.v1.schema.json",
+  "title": "FullBleed Paged Media Ranker Report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "target",
+    "profile",
+    "rank",
+    "gate",
+    "categories",
+    "audits",
+    "manual_debt",
+    "coverage",
+    "tooling",
+    "artifacts"
+  ],
+  "properties": {
+    "schema": {
+      "const": "fullbleed.pmr.v1"
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "html_path",
+        "css_path"
+      ],
+      "properties": {
+        "html_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "css_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "document_id": {
+          "type": "string"
+        },
+        "source_pdf_path": {
+          "type": "string"
+        }
+      }
+    },
+    "profile": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rank": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "score",
+        "confidence",
+        "band"
+      ],
+      "properties": {
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "band": {
+          "type": "string",
+          "enum": [
+            "excellent",
+            "good",
+            "watch",
+            "poor"
+          ]
+        },
+        "raw_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ok",
+        "mode",
+        "error_count",
+        "warn_count"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "off",
+            "warn",
+            "error"
+          ]
+        },
+        "error_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "warn_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed_audit_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "categories": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/categoryScore"
+      }
+    },
+    "audits": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/auditResult"
+      }
+    },
+    "observability": {
+      "$ref": "#/$defs/pmrObservability"
+    },
+    "manual_debt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item_count",
+        "high_risk_count"
+      ],
+      "properties": {
+        "item_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "high_risk_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "reason"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              },
+              "severity": {
+                "type": "string",
+                "enum": [
+                  "critical",
+                  "high",
+                  "medium",
+                  "low",
+                  "info"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evaluated_audit_count",
+        "applicable_audit_count",
+        "scored_audit_count",
+        "manual_needed_count",
+        "not_evaluated_audit_count"
+      ],
+      "properties": {
+        "evaluated_audit_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "applicable_audit_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scored_audit_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "manual_needed_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_evaluated_audit_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "tooling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fullbleed_version",
+        "report_schema_version",
+        "generated_at"
+      ],
+      "properties": {
+        "fullbleed_version": {
+          "type": "string"
+        },
+        "audit_contract_id": {
+          "type": "string"
+        },
+        "audit_contract_version": {
+          "type": "string"
+        },
+        "audit_contract_fingerprint": {
+          "type": "string"
+        },
+        "audit_registry_hash": {
+          "type": "string"
+        },
+        "wcag20aa_registry_hash": {
+          "type": "string"
+        },
+        "section508_html_registry_hash": {
+          "type": "string"
+        },
+        "report_schema_version": {
+          "type": "string"
+        },
+        "generated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "adapter_versions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "html_hash",
+        "css_hash",
+        "css_linked"
+      ],
+      "properties": {
+        "html_hash": {
+          "type": "string"
+        },
+        "css_hash": {
+          "type": "string"
+        },
+        "css_linked": {
+          "type": "boolean"
+        },
+        "packaging_mode": {
+          "type": "string"
+        }
+      }
+    },
+    "baseline_diff": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "score_delta": {
+          "type": "number"
+        },
+        "confidence_delta": {
+          "type": "number"
+        },
+        "new_failures": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "resolved_failures": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "countMap": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "pmrCorrelationIndexEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "audit_id",
+        "category",
+        "class",
+        "verdict",
+        "severity",
+        "stage",
+        "source",
+        "gate_failed",
+        "gate_relevant",
+        "opportunity",
+        "scored",
+        "has_fix_hint"
+      ],
+      "properties": {
+        "audit_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_.-]+$"
+        },
+        "category": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$"
+        },
+        "class": {
+          "type": "string"
+        },
+        "verdict": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "gate_failed": {
+          "type": "boolean"
+        },
+        "gate_relevant": {
+          "type": "boolean"
+        },
+        "opportunity": {
+          "type": "boolean"
+        },
+        "scored": {
+          "type": "boolean"
+        },
+        "has_fix_hint": {
+          "type": "boolean"
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "pmrObservability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "original_audit_count",
+        "reported_audit_count",
+        "dedup_event_count",
+        "dedup_merged_audit_count",
+        "correlated_audit_count",
+        "stage_counts",
+        "source_counts",
+        "category_counts",
+        "class_counts",
+        "verdict_counts",
+        "correlation_index"
+      ],
+      "properties": {
+        "original_audit_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reported_audit_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dedup_event_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dedup_merged_audit_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "correlated_audit_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stage_counts": {
+          "$ref": "#/$defs/countMap"
+        },
+        "source_counts": {
+          "$ref": "#/$defs/countMap"
+        },
+        "category_counts": {
+          "$ref": "#/$defs/countMap"
+        },
+        "class_counts": {
+          "$ref": "#/$defs/countMap"
+        },
+        "verdict_counts": {
+          "$ref": "#/$defs/countMap"
+        },
+        "correlation_index": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/pmrCorrelationIndexEntry"
+          }
+        }
+      }
+    },
+    "categoryScore": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "weight",
+        "score",
+        "confidence",
+        "audit_count",
+        "fail_count"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "weight": {
+          "type": "number",
+          "minimum": 0
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "audit_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fail_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "warn_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "auditResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "audit_id",
+        "category",
+        "weight",
+        "class",
+        "verification_mode",
+        "severity",
+        "stage",
+        "source",
+        "verdict",
+        "scored",
+        "message"
+      ],
+      "properties": {
+        "audit_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_.-]+$"
+        },
+        "category": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$"
+        },
+        "weight": {
+          "type": "number",
+          "minimum": 0
+        },
+        "class": {
+          "type": "string",
+          "enum": [
+            "required",
+            "scored",
+            "diagnostic",
+            "opportunity"
+          ]
+        },
+        "verification_mode": {
+          "type": "string",
+          "enum": [
+            "machine",
+            "manual",
+            "hybrid"
+          ]
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low",
+            "info"
+          ]
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "pre-render",
+            "post-emit",
+            "post-render",
+            "adapter"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "fullbleed",
+            "a11y_contract",
+            "lighthouse",
+            "axe",
+            "manual",
+            "adapter"
+          ]
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail",
+            "warn",
+            "not_applicable",
+            "manual_needed"
+          ]
+        },
+        "scored": {
+          "type": "boolean"
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fix_hint": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          }
+        },
+        "standard_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "selector": {
+          "type": "string"
+        },
+        "dom_path": {
+          "type": "string"
+        },
+        "semantic_path": {
+          "type": "string"
+        },
+        "page_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "snippet": {
+          "type": "string"
+        },
+        "diagnostic_ref": {
+          "type": "string"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}

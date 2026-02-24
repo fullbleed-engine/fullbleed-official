@@ -1,7 +1,7 @@
 use crate::canvas::{Command, Document};
 use crate::error::FullBleedError;
-use crate::font::FontRegistry;
 use crate::flowable::PaintFilterSpec;
+use crate::font::FontRegistry;
 use crate::types::{Color, MixBlendMode, Pt, Shading, ShadingStop};
 use base64::Engine;
 use rustybuzz::{Direction as HbDirection, Face as HbFace, UnicodeBuffer};
