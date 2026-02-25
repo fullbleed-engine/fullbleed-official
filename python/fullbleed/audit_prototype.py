@@ -906,7 +906,7 @@ def prototype_verify_accessibility(
     claim_evidence: dict[str, Any] | None = None,
     registry: dict[str, Any] | None = None,
     generated_at: str | None = None,
-    fullbleed_version: str = "0.5.0",
+    fullbleed_version: str = "0.6.0",
 ) -> dict[str, Any]:
     reg = registry or _registry()
     entries, _cats = _indexes(reg)
@@ -3098,7 +3098,7 @@ def prototype_verify_paged_media_rank(
     expected_title: str | None = None,
     registry: dict[str, Any] | None = None,
     generated_at: str | None = None,
-    fullbleed_version: str = "0.5.0",
+    fullbleed_version: str = "0.6.0",
 ) -> dict[str, Any]:
     reg = registry or _registry()
     entries, cats = _indexes(reg)

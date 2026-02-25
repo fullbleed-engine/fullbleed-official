@@ -27,6 +27,25 @@ Key modules:
 For the accessibility-first authoring workflow (semantic tables, field grids,
 signature semantics, and validation), see `docs/ui-accessibility.md`.
 
+## `fullbleed.accessibility` (runtime/output accessibility stack)
+
+Runtime surface for PDF/UA-targeted rendering workflows and accessibility
+artifact emission:
+
+```python
+from fullbleed.accessibility import AccessibilityEngine
+```
+
+Key behavior:
+
+- wraps `PdfEngine` with an accessibility-focused configuration surface
+- emits HTML/CSS/PDF bundles with audit artifacts (`render_bundle(...)`)
+- can emit engine verifier + PMR reports and PDF/UA seed checks
+- emits non-visual traces (reading-order / structure) for CI and manual review support
+
+This is the recommended runtime surface for accessibility-first projects created
+with `fullbleed new accessible`.
+
 ## Main classes and helpers
 
 ## `PdfEngine`

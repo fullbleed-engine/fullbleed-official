@@ -202,8 +202,8 @@
     }
   },
   "tooling": {
-    "fullbleed_version": "0.5.0",
-    "engine_version": "0.5.0-dev",
+    "fullbleed_version": "0.6.0",
+    "engine_version": "0.6.0-dev",
     "report_schema_version": "1.0.0-draft",
     "generated_at": "2026-02-24T00:00:00Z"
   },

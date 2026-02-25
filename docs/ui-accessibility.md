@@ -14,6 +14,17 @@ workflows.
 Scaffold starter:
 
 - `fullbleed new accessible <path>` creates an accessibility-first local project scaffold using these modules.
+- The scaffold renders through `fullbleed.accessibility.AccessibilityEngine` and emits verifier/PMR/PDF seed artifacts plus non-visual traces by default.
+
+## Runtime Surface (`fullbleed.accessibility`)
+
+Authoring and runtime/output are intentionally separated:
+
+- `fullbleed.ui.accessibility`: semantic authoring primitives + `A11yContract`
+- `fullbleed.accessibility`: PDF/UA-targeted runtime wrapper (`AccessibilityEngine`)
+
+Use the UI layer to author semantic HTML. Use the accessibility runtime surface
+to emit artifacts and audit/trace outputs for review and CI.
 
 ## Core Pattern
 

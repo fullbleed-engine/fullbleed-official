@@ -1240,6 +1240,8 @@ fn node_to_flowables(
                 }
                 "div" | "span" | "section" | "article" | "header" | "footer" | "aside" | "nav"
                 | "main" | "blockquote" | "dl" | "dt" | "dd" => {
+                    let dl_container_role = definition_list_container_role(info.tag.as_str());
+                    let dl_inline_text_role = definition_list_inline_text_role(info.tag.as_str());
                     if is_table_container_display(style.display) {
                         table_container_flowables(
                             node,
@@ -1299,7 +1301,11 @@ fn node_to_flowables(
                             text = format!("{before}{text}{after}");
                         }
                         if text.is_empty() {
-                            container_flowables(Vec::new(), &style)
+                            if matches!(info.tag.as_str(), "dl") {
+                                container_flowables_with_role(Vec::new(), &style, dl_container_role)
+                            } else {
+                                container_flowables(Vec::new(), &style)
+                            }
                         } else {
                             let text = apply_text_transform(&text, style.text_transform);
                             let text_style = style.to_text_style();
@@ -1318,6 +1324,11 @@ fn node_to_flowables(
                                 )
                                 .with_pagination(style.pagination)
                                 .with_font_registry(font_registry.clone());
+                            let paragraph = if let Some(role) = dl_inline_text_role {
+                                paragraph.with_tag_role(role)
+                            } else {
+                                paragraph
+                            };
                             let items = vec![LayoutItem::Block {
                                 flowable: Box::new(paragraph) as Box<dyn Flowable>,
                                 flex_grow: 0.0,
@@ -1325,23 +1336,46 @@ fn node_to_flowables(
                                 width_spec: None,
                                 order: 0,
                             }];
-                            container_flowables(items, &style)
+                            if matches!(info.tag.as_str(), "dl") {
+                                container_flowables_with_role(items, &style, dl_container_role)
+                            } else {
+                                container_flowables(items, &style)
+                            }
                         }
                     } else {
-                        let children = collect_children(
-                            node,
-                            resolver,
-                            &style,
-                            ancestors,
-                            font_registry.clone(),
-                            report.as_deref_mut(),
-                            svg_form,
-                            svg_raster_fallback,
-                            perf,
-                            doc_id,
-                        );
+                        let children = if info.tag.as_str() == "dl" {
+                            definition_list_children_flowables(
+                                node,
+                                resolver,
+                                &style,
+                                ancestors,
+                                font_registry.clone(),
+                                report.as_deref_mut(),
+                                svg_form,
+                                svg_raster_fallback,
+                                perf,
+                                doc_id,
+                            )
+                        } else {
+                            collect_children(
+                                node,
+                                resolver,
+                                &style,
+                                ancestors,
+                                font_registry.clone(),
+                                report.as_deref_mut(),
+                                svg_form,
+                                svg_raster_fallback,
+                                perf,
+                                doc_id,
+                            )
+                        };
                         let children = inject_pseudo_items(children, &before_items, &after_items);
-                        container_flowables(children, &style)
+                        if dl_container_role.is_some() {
+                            container_flowables_with_role(children, &style, dl_container_role)
+                        } else {
+                            container_flowables(children, &style)
+                        }
                     }
                 }
                 _ => {
@@ -2217,6 +2251,104 @@ fn container_flowables_with_role(
         width_spec: flex_item_basis(&style),
         order: 0,
     }]
+}
+
+fn definition_list_container_role(tag: &str) -> Option<&'static str> {
+    match tag {
+        "dl" => Some("L"),
+        "dt" => Some("Lbl"),
+        "dd" => Some("LBody"),
+        _ => None,
+    }
+}
+
+fn definition_list_inline_text_role(tag: &str) -> Option<&'static str> {
+    match tag {
+        "dt" => Some("Lbl"),
+        "dd" => Some("LBody"),
+        _ => None,
+    }
+}
+
+fn wrap_definition_list_item(children: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<LayoutItem> {
+    if children.is_empty() {
+        return Vec::new();
+    }
+    let flowables = layout_children_to_flowables(children, None);
+    let container = ContainerFlowable::new_pt(flowables, style.font_size, style.root_font_size)
+        .with_tag_role("LI");
+    vec![LayoutItem::Block {
+        flowable: Box::new(container) as Box<dyn Flowable>,
+        flex_grow: 0.0,
+        flex_shrink: 1.0,
+        width_spec: None,
+        order: 0,
+    }]
+}
+
+fn definition_list_children_flowables(
+    node: &NodeRef,
+    resolver: &StyleResolver,
+    parent_style: &ComputedStyle,
+    ancestors: &mut Vec<ElementInfo>,
+    font_registry: Option<Arc<FontRegistry>>,
+    report: Option<&mut GlyphCoverageReport>,
+    svg_form: bool,
+    svg_raster_fallback: bool,
+    perf: Option<&crate::perf::PerfLogger>,
+    doc_id: Option<usize>,
+) -> Vec<LayoutItem> {
+    let mut out: Vec<LayoutItem> = Vec::new();
+    let mut current_li: Vec<LayoutItem> = Vec::new();
+    let mut current_has_dd = false;
+    let mut report = report;
+
+    for child in node.children() {
+        let child_tag = child
+            .as_element()
+            .map(|el| el.name.local.as_ref().to_ascii_lowercase());
+
+        let is_dt = matches!(child_tag.as_deref(), Some("dt"));
+        let is_dd = matches!(child_tag.as_deref(), Some("dd"));
+
+        if is_dt && !current_li.is_empty() && current_has_dd {
+            out.extend(wrap_definition_list_item(current_li, parent_style));
+            current_li = Vec::new();
+            current_has_dd = false;
+        } else if !is_dt && !is_dd && !current_li.is_empty() {
+            out.extend(wrap_definition_list_item(current_li, parent_style));
+            current_li = Vec::new();
+            current_has_dd = false;
+        }
+
+        let child_items = node_to_flowables(
+            &child,
+            resolver,
+            parent_style,
+            ancestors,
+            font_registry.clone(),
+            report.as_deref_mut(),
+            svg_form,
+            svg_raster_fallback,
+            perf,
+            doc_id,
+        );
+
+        if is_dt || is_dd {
+            if is_dd {
+                current_has_dd = true;
+            }
+            current_li.extend(child_items);
+        } else {
+            out.extend(child_items);
+        }
+    }
+
+    if !current_li.is_empty() {
+        out.extend(wrap_definition_list_item(current_li, parent_style));
+    }
+
+    out
 }
 
 fn layout_children_to_flowables(

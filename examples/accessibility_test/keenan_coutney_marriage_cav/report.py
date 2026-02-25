@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parent
 SOURCE_PDF_PATH = ROOT.parent / "keenan_coutney_marriage.pdf"
 OUTPUT_DIR = ROOT / "output"
 CSS_PATH = ROOT / "styles" / "report.css"
+VENDOR_FONT_PATH = ROOT / "vendor" / "fonts" / "Inter-Variable.ttf"
 
 DOC_STEM = "keenan_coutney_marriage_cav"
 HTML_PATH = OUTPUT_DIR / f"{DOC_STEM}.html"
@@ -217,8 +218,19 @@ REVIEW_QUEUE: tuple[ReviewItem, ...] = (
 SOURCE_ANALYSIS_CACHE: dict[str, Any] | None = None
 
 
+def _register_vendored_font(engine: AccessibilityEngine) -> None:
+    if not hasattr(fullbleed, "AssetBundle"):
+        return
+    if not VENDOR_FONT_PATH.exists():
+        print(f"[warn] Vendored font not found: {VENDOR_FONT_PATH}")
+        return
+    bundle = fullbleed.AssetBundle()
+    bundle.add_file(str(VENDOR_FONT_PATH), "font")
+    engine.register_bundle(bundle)
+
+
 def create_engine() -> AccessibilityEngine:
-    return AccessibilityEngine(
+    engine = AccessibilityEngine(
         page_width="8.5in",
         page_height="11in",
         margin="0in",
@@ -226,6 +238,8 @@ def create_engine() -> AccessibilityEngine:
         document_title="Keenan/Courtney Marriage Record CAV (Accessibility-First)",
         strict=False,
     )
+    _register_vendored_font(engine)
+    return engine
 
 
 def _emit_preview_png(engine: fullbleed.PdfEngine, html: str, css: str, out_dir: Path, *, stem: str) -> list[str]:

@@ -7,19 +7,30 @@ from pathlib import Path
 import fullbleed
 from fullbleed.accessibility import AccessibilityEngine
 
-from fullbleed.ui import LayoutGrid, Text, el, validate_component_mount
+from fullbleed.ui import Card, Divider, LayoutGrid, List, ListItem, Row, Stack, Text, el, validate_component_mount
 from fullbleed.ui.accessibility import (
     A11yContract,
     Alert,
+    Aside,
     ColumnHeader,
     DataCell,
     Decorative,
+    Details,
+    ErrorText,
+    FieldSet,
     FigCaption,
     Figure,
     FieldGrid,
     FieldItem,
+    Heading,
+    HelpText,
+    Label,
+    Legend,
+    LiveRegion,
+    Nav,
     Region,
     RowHeader,
+    SrText,
     Section,
     SemanticTable,
     SemanticTableBody,
@@ -27,6 +38,7 @@ from fullbleed.ui.accessibility import (
     SemanticTableRow,
     SignatureBlock,
     Status,
+    Summary,
 )
 from fullbleed.ui.core import Document
 
@@ -34,6 +46,7 @@ from fullbleed.ui.core import Document
 ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = ROOT / "output"
 CSS_PATH = ROOT / "styles" / "report.css"
+VENDOR_FONT_PATH = ROOT / "vendor" / "fonts" / "Inter-Variable.ttf"
 
 HTML_PATH = OUTPUT_DIR / "accessibility_scaffold.html"
 CSS_ARTIFACT_PATH = OUTPUT_DIR / "accessibility_scaffold.css"
@@ -63,7 +76,7 @@ TRANSACTIONS: tuple[Transaction, ...] = (
 
 
 def create_engine() -> AccessibilityEngine:
-    return AccessibilityEngine(
+    engine = AccessibilityEngine(
         page_width="8.5in",
         page_height="11in",
         margin="0in",
@@ -71,6 +84,13 @@ def create_engine() -> AccessibilityEngine:
         document_title="Accessibility Scaffold",
         strict=False,
     )
+    if hasattr(fullbleed, "AssetBundle") and VENDOR_FONT_PATH.exists():
+        bundle = fullbleed.AssetBundle()
+        bundle.add_file(str(VENDOR_FONT_PATH), "font")
+        engine.register_bundle(bundle)
+    elif hasattr(fullbleed, "AssetBundle"):
+        print(f"[warn] Vendored font not found: {VENDOR_FONT_PATH}")
+    return engine
 
 
 def _emit_preview_png(engine: fullbleed.PdfEngine, html: str, css: str, out_dir: Path, *, stem: str) -> list[str]:
@@ -242,32 +262,82 @@ def _verification_seal_svg() -> object:
     bootstrap=False,
 )
 def App(_props=None) -> object:
+    nav_heading_id = "scaffold-nav-heading"
     summary_heading_id = "summary-heading"
     transactions_heading_id = "transactions-heading"
+    workflow_heading_id = "workflow-heading"
+    form_heading_id = "review-form-heading"
     signature_heading_id = "signature-heading"
+    aside_heading_id = "aside-heading"
+
+    case_input_id = "case-id"
+    case_help_id = "case-id-help"
+    case_error_id = "case-id-error"
+    reviewer_input_id = "reviewer-email"
+    reviewer_help_id = "reviewer-email-help"
+    review_notes_id = "review-notes"
+    review_notes_help_id = "review-notes-help"
 
     return el(
         "div",
         Section(
-            el(
-                "p",
-                "Accessibility-first starter using semantic fields, semantic tables, labeled regions, and text-first signature semantics.",
+            Stack(
+                el(
+                    "p",
+                    "Verbose accessibility-first starter that demonstrates authoring semantics, validation hooks, engine audits, and PDF/UA-targeted seed observability from one runnable project.",
+                    class_name="lead-copy",
+                ),
+                Status(
+                    el(
+                        "span",
+                        "Starter is configured for semantic-first authoring and audit artifact emission.",
+                        SrText(" Engine verifier, PMR, and PDF seed traces are emitted to output for review."),
+                    )
+                ),
+                Details(
+                    Summary("What this scaffold demonstrates"),
+                    List(
+                        ListItem("Landmarks (`nav`, `aside`, labeled `region`) and heading structure"),
+                        ListItem("Semantic fields (`FieldGrid`) and semantic tables (`SemanticTable*`)"),
+                        ListItem("Form labeling/help/error semantics (`FieldSet`, `Label`, `HelpText`, `ErrorText`)"),
+                        ListItem("Live status/alert regions and `Details` / `Summary` disclosures"),
+                        ListItem("Text-first signature semantics with optional visual mark"),
+                        ListItem("Engine verifier + PMR + PDF/UA seed checks + non-visual traces"),
+                    ),
+                    open=True,
+                    class_name="scaffold-details",
+                ),
             ),
             heading="Accessibility Scaffold",
             heading_level=1,
         ),
+        Heading("Document Navigation", level=2, id=nav_heading_id, class_name="section-heading"),
+        Nav(
+            List(
+                ListItem(el("a", "Account summary", href="#account-summary")),
+                ListItem(el("a", "Transactions", href="#transactions")),
+                ListItem(el("a", "Workflow status", href="#workflow-status")),
+                ListItem(el("a", "Review form semantics", href="#review-form")),
+                ListItem(el("a", "Signature evidence", href="#signature-evidence")),
+            ),
+            aria_label="Document section navigation",
+            class_name="demo-nav",
+        ),
         LayoutGrid(
             Region(
-                Text("Account Summary", tag="h2", id=summary_heading_id),
+                Heading("Account Summary", level=2, id=summary_heading_id),
                 FieldGrid(
                     FieldItem("Account", "A-1042"),
                     FieldItem("Statement period", "2026-02-01 to 2026-02-29"),
                     FieldItem("Owner", "Jane Doe"),
+                    FieldItem("Delivery target", "HTML + PDF (PDF/UA-targeted bundle)"),
+                    FieldItem("Audit contract", "Embedded engine contract fingerprinted per build"),
                 ),
+                id="account-summary",
                 labelledby=summary_heading_id,
             ),
             Region(
-                Text("Transactions", tag="h2", id=transactions_heading_id),
+                Heading("Transactions", level=2, id=transactions_heading_id),
                 SemanticTable(
                     SemanticTableHead(
                         SemanticTableRow(
@@ -290,12 +360,112 @@ def App(_props=None) -> object:
                     ),
                     caption="Transaction table",
                 ),
+                id="transactions",
                 labelledby=transactions_heading_id,
             ),
             Region(
-                Text("Signature Evidence", tag="h2", id=signature_heading_id),
-                Status("Signature capture completed and recorded."),
-                Alert("Example alert: audit verification pending final review."),
+                Heading("Workflow Status", level=2, id=workflow_heading_id),
+                Row(
+                    Card(
+                        Heading("Validation State", level=3),
+                        Status("A11yContract and component mount validation run before PDF bundle emission."),
+                        LiveRegion(
+                            "Live region example: engine audits completed successfully in the last render run.",
+                            live="polite",
+                            role="status",
+                            class_name="demo-live-region",
+                        ),
+                        class_name="workflow-card",
+                    ),
+                    Card(
+                        Heading("Operator Attention", level=3),
+                        Alert("Example alert: treat this as a demonstration of assertive announcements, not production incident policy."),
+                        Details(
+                            Summary("Implementation note"),
+                            el(
+                                "p",
+                                "Use alerts for actionable interruptions only. Prefer `Status` or `LiveRegion(live=\"polite\")` for routine progress.",
+                            ),
+                            class_name="scaffold-details",
+                        ),
+                        class_name="workflow-card",
+                    ),
+                    class_name="workflow-row",
+                ),
+                id="workflow-status",
+                labelledby=workflow_heading_id,
+            ),
+            Region(
+                Heading("Review Form Semantics", level=2, id=form_heading_id),
+                el(
+                    "p",
+                    "This section demonstrates labels, help text, error text, and field grouping semantics. Inputs are static examples for authoring validation and audit coverage.",
+                ),
+                FieldSet(
+                    Legend("Reviewer Intake"),
+                    Stack(
+                        el(
+                            "div",
+                            Label("Case ID", **{"for": case_input_id}),
+                            el(
+                                "input",
+                                id=case_input_id,
+                                type="text",
+                                value="ACCT-1042",
+                                aria_describedby=f"{case_help_id} {case_error_id}",
+                                aria_invalid="true",
+                            ),
+                            HelpText(
+                                "Use the source system identifier so audit reports and artifacts can be correlated.",
+                                id=case_help_id,
+                            ),
+                            ErrorText(
+                                "Example error text: this field was edited after source lock and requires reviewer confirmation.",
+                                id=case_error_id,
+                            ),
+                            class_name="form-row",
+                        ),
+                        el(
+                            "div",
+                            Label("Reviewer Email", **{"for": reviewer_input_id}),
+                            el(
+                                "input",
+                                id=reviewer_input_id,
+                                type="email",
+                                value="reviewer@example.org",
+                                aria_describedby=reviewer_help_id,
+                            ),
+                            HelpText(
+                                "Used for audit attribution in example workflows.",
+                                id=reviewer_help_id,
+                            ),
+                            class_name="form-row",
+                        ),
+                        el(
+                            "div",
+                            Label("Review Notes", **{"for": review_notes_id}),
+                            el(
+                                "textarea",
+                                "Demonstration text area for authoring semantics. Replace with your document workflow notes or remove entirely.",
+                                id=review_notes_id,
+                                rows="4",
+                                aria_describedby=review_notes_help_id,
+                            ),
+                            HelpText(
+                                "Optional. Keep remediation notes out of final CAV deliverables; store them in sidecars when needed.",
+                                id=review_notes_help_id,
+                            ),
+                            class_name="form-row",
+                        ),
+                        class_name="form-stack",
+                    ),
+                    class_name="review-fieldset",
+                ),
+                id="review-form",
+                labelledby=form_heading_id,
+            ),
+            Region(
+                Heading("Signature Evidence", level=2, id=signature_heading_id),
                 SignatureBlock(
                     signature_status="captured",
                     signer_name="Jane Doe",
@@ -309,8 +479,37 @@ def App(_props=None) -> object:
                     Decorative(_verification_seal_svg()),
                     FigCaption("Decorative verification seal shown for visual trust only."),
                 ),
+                Divider(),
+                Details(
+                    Summary("Signature semantics breakdown"),
+                    FieldGrid(
+                        FieldItem("Text semantics", "Primary (status, signer, timestamp, method, reference ID)"),
+                        FieldItem("Visual mark", "Supplemental for human familiarity/trust"),
+                        FieldItem("Decorative seal", "Marked decorative and excluded from assistive output"),
+                    ),
+                    class_name="scaffold-details",
+                ),
+                id="signature-evidence",
                 labelledby=signature_heading_id,
             ),
+            Aside(
+                Heading("Accessibility Primitive Index", level=2, id=aside_heading_id),
+                el(
+                    "p",
+                    "This sidebar is intentionally verbose so new projects can see concrete examples of the accessibility authoring surface.",
+                ),
+                List(
+                    ListItem("Landmarks: `Nav`, `Aside`, labeled `Region`"),
+                    ListItem("Structure: `Heading`, `Section`, `Details`, `Summary`"),
+                    ListItem("Fields: `FieldGrid`, `FieldItem`, `FieldSet`, `Legend`"),
+                    ListItem("Forms: `Label`, `HelpText`, `ErrorText`"),
+                    ListItem("Announcements: `Status`, `Alert`, `LiveRegion`"),
+                    ListItem("Media/signatures: `Figure`, `FigCaption`, `Decorative`, `SignatureBlock`"),
+                ),
+                class_name="demo-aside",
+                aria_labelledby=aside_heading_id,
+            ),
+            class_name="demo-grid",
         ),
         class_name="scaffold-root",
     )

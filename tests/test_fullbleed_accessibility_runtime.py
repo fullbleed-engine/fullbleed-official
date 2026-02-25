@@ -164,3 +164,53 @@ def test_accessibility_engine_render_bundle_emits_pdfua_seed_and_trace_artifacts
     if "pdf_structure_trace_render_path" in run_report:
         assert run_report["pdf_structure_trace_render_path"]
         assert "pdf_structure_trace_cross_check" in run_report
+
+
+def test_accessibility_engine_definition_list_text_is_tagged_in_render_trace(
+    tmp_path: Path,
+) -> None:
+    _require_pdf_engine()
+
+    if not hasattr(fullbleed.PdfEngine, "export_render_time_structure_trace"):
+        pytest.skip("render-time structure trace export is not available in this build")
+
+    from fullbleed.accessibility import AccessibilityEngine
+
+    engine = AccessibilityEngine(
+        document_lang="en-US",
+        document_title="Definition List Tagging",
+        strict=False,
+    )
+    result = engine.render_bundle(
+        body_html=(
+            '<main data-fb-role="document-root">'
+            '<h1>Record Header</h1>'
+            '<dl>'
+            '<dt>Agency</dt><dd>Department of Health</dd>'
+            '<dt>Jurisdiction</dt><dd>State of Florida</dd>'
+            '</dl>'
+            '</main>'
+        ),
+        css_text="@page { size: letter; }\nbody { color: #111; } dl { margin: 0; }",
+        out_dir=str(tmp_path),
+        stem="dl_tagging",
+        profile="strict",
+        render_preview_png=False,
+        run_verifier=False,
+        run_pmr=False,
+        run_pdf_ua_seed_verify=False,
+        emit_reading_order_trace=False,
+        emit_pdf_structure_trace=True,
+    )
+
+    structure_render = json.loads(
+        Path(result.paths["pdf_structure_trace_render_path"]).read_text(encoding="utf-8")
+    )
+    assert structure_render["extractor"] == "render_time_commands"
+    assert structure_render["summary"]["tagged_text_draw_count"] >= 5
+    assert structure_render["summary"]["untagged_text_draw_count"] == 0
+    token_counts = dict(structure_render.get("token_counts") or {})
+    assert token_counts.get("L", 0) >= 1
+    assert token_counts.get("LI", 0) >= 2
+    assert token_counts.get("Lbl", 0) >= 2
+    assert token_counts.get("LBody", 0) >= 2

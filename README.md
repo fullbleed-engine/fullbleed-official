@@ -33,6 +33,7 @@ Additional focused references are in `docs/`:
 - `docs/README.md`
 - `docs/engine.md`
 - `docs/python-api.md`
+- `docs/ui-accessibility.md`
 - `docs/cli.md`
 - `docs/pdf-templates.md`
 
@@ -70,7 +71,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-0.5.0-cp311-cp311-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-0.6.0-cp311-cp311-win_amd64.whl
 ```
 
 Platform artifact policy:
@@ -138,6 +139,7 @@ Use local starters:
 ```bash
 fullbleed new local invoice ./my-invoice
 fullbleed new local statement ./my-statement
+fullbleed new local accessible ./my-accessible-doc
 ```
 
 Discover remote starters from registry:
@@ -147,6 +149,10 @@ fullbleed new list --json
 fullbleed new search i9 --tag vdp --json
 fullbleed new remote i9-stamped-vdp ./i9-job --json
 ```
+
+`fullbleed new local accessible` is the verbose accessibility-first starter and
+demonstrates the `fullbleed.accessibility` runtime surface (engine verifier,
+PMR, PDF/UA-targeted seed checks, and non-visual trace artifacts).
 
 Optional registry override (for private/canary registries):
 

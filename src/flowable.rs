@@ -989,6 +989,22 @@ impl Paragraph {
                     cursor_x = cursor_x + w;
                     remaining = remaining.saturating_sub(run_len);
                 } else {
+                    if registry.resolve(&run.font_name).is_none() {
+                        // Without real glyph metrics, per-character placement can visibly over-space
+                        // narrow glyphs (for example, "I") when letter-spacing is enabled.
+                        // Fall back to whole-run draw to avoid pathological spacing artifacts.
+                        let run_text = run.text;
+                        let run_len = run_text.chars().count();
+                        let w = registry.measure_text_width(
+                            &run.font_name,
+                            self.style.font_size,
+                            &run_text,
+                        );
+                        canvas.draw_string(cursor_x, y, run_text);
+                        cursor_x = cursor_x + w;
+                        remaining = remaining.saturating_sub(run_len);
+                        continue;
+                    }
                     for ch in run.text.chars() {
                         let ch_str = ch.to_string();
                         canvas.draw_string(cursor_x, y, ch_str.clone());
@@ -1019,19 +1035,9 @@ impl Paragraph {
         if self.style.letter_spacing == Pt::ZERO {
             canvas.draw_string(x, y, text);
         } else {
-            let mut cursor_x = x;
-            let mut remaining = text.chars().count();
-            let char_width = (self.style.font_size * 0.6).max(Pt::from_f32(1.0));
-            for ch in text.chars() {
-                let ch_str = ch.to_string();
-                canvas.draw_string(cursor_x, y, ch_str);
-                remaining = remaining.saturating_sub(1);
-                if remaining > 0 {
-                    cursor_x = cursor_x + char_width + self.style.letter_spacing;
-                } else {
-                    cursor_x = cursor_x + char_width;
-                }
-            }
+            // No registry means no reliable glyph advances. Prefer stable whole-run rendering over
+            // synthetic per-character placement that can produce severe spacing artifacts.
+            canvas.draw_string(x, y, text);
         }
     }
 
@@ -2310,6 +2316,19 @@ impl TableCell {
                     cursor_x = cursor_x + w;
                     remaining = remaining.saturating_sub(run_len);
                 } else {
+                    if registry.resolve(&run.font_name).is_none() {
+                        let run_text = run.text;
+                        let run_len = run_text.chars().count();
+                        let w = registry.measure_text_width(
+                            &run.font_name,
+                            self.style.font_size,
+                            &run_text,
+                        );
+                        canvas.draw_string(cursor_x, y, run_text);
+                        cursor_x = cursor_x + w;
+                        remaining = remaining.saturating_sub(run_len);
+                        continue;
+                    }
                     for ch in run.text.chars() {
                         let ch_str = ch.to_string();
                         canvas.draw_string(cursor_x, y, ch_str.clone());
@@ -2340,19 +2359,7 @@ impl TableCell {
         if self.style.letter_spacing == Pt::ZERO {
             canvas.draw_string(x, y, text);
         } else {
-            let mut cursor_x = x;
-            let mut remaining = text.chars().count();
-            let char_width = (self.style.font_size * 0.6).max(Pt::from_f32(1.0));
-            for ch in text.chars() {
-                let ch_str = ch.to_string();
-                canvas.draw_string(cursor_x, y, ch_str);
-                remaining = remaining.saturating_sub(1);
-                if remaining > 0 {
-                    cursor_x = cursor_x + char_width + self.style.letter_spacing;
-                } else {
-                    cursor_x = cursor_x + char_width;
-                }
-            }
+            canvas.draw_string(x, y, text);
         }
     }
 }

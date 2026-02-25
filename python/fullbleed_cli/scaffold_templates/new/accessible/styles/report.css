@@ -2,17 +2,23 @@
 
 body {
   margin: 0;
-  font-family: Helvetica, Arial, sans-serif;
+  font-family: Inter, Helvetica, Arial, sans-serif;
   font-size: 11pt;
+  line-height: 1.35;
   color: #172233;
+  background: #fff;
 }
 
 .scaffold-root {
   display: block;
 }
 
+.lead-copy {
+  margin: 0;
+}
+
 .ui-section {
-  margin-bottom: 0.18in;
+  margin-bottom: 0.2in;
 }
 
 .ui-heading {
@@ -20,28 +26,41 @@ body {
   font-weight: 700;
 }
 
+.section-heading {
+  margin-top: 0.12in;
+}
+
 .ui-layout-grid {
   display: block;
+}
+
+.demo-grid > * {
+  margin-bottom: 10px;
 }
 
 .ui-region {
   border: 1px solid #d7e0ec;
   border-radius: 4px;
-  padding: 8px;
+  padding: 10px;
   margin-bottom: 10px;
+  background: #fbfdff;
 }
 
 .ui-field-grid {
   margin: 0;
+  display: grid;
+  grid-template-columns: minmax(1.6in, 2fr) minmax(2.5in, 3fr);
+  column-gap: 10px;
 }
 
 .ui-field-grid .ui-dt {
   font-weight: 700;
-  margin-top: 2px;
+  margin: 2px 0 0;
+  color: #334861;
 }
 
 .ui-field-grid .ui-dd {
-  margin: 0 0 4px 0;
+  margin: 2px 0 4px 0;
 }
 
 .ui-table-caption {
@@ -61,6 +80,7 @@ body {
 .ui-data-cell {
   border: 1px solid #a6b6cb;
   padding: 6px;
+  vertical-align: top;
 }
 
 .ui-col-header {
@@ -77,6 +97,7 @@ body {
   background: #edf8ee;
   border: 1px solid #bedfc2;
   padding: 6px;
+  border-radius: 4px;
 }
 
 .ui-alert {
@@ -84,6 +105,146 @@ body {
   border: 1px solid #efcca1;
   padding: 6px;
   margin-top: 6px;
+  border-radius: 4px;
+}
+
+.demo-live-region {
+  margin-top: 6px;
+  background: #eef4fc;
+  border: 1px solid #cfdcf0;
+  border-radius: 4px;
+  padding: 6px;
+}
+
+.demo-nav {
+  border: 1px solid #d7e0ec;
+  border-radius: 4px;
+  background: #f4f8fd;
+  padding: 8px 10px;
+  margin: 0 0 10px 0;
+}
+
+.demo-nav .ui-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.demo-nav a {
+  color: #163e79;
+  text-decoration: underline;
+}
+
+.demo-nav a:hover {
+  color: #0d2b56;
+}
+
+.workflow-row {
+  display: block;
+}
+
+.workflow-card {
+  border: 1px solid #d7e0ec;
+  border-radius: 4px;
+  background: #fff;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+
+.workflow-card .ui-heading {
+  margin-bottom: 6px;
+  font-size: 10.5pt;
+}
+
+.scaffold-details {
+  margin-top: 8px;
+}
+
+.ui-details {
+  border: 1px dashed #c4d1e2;
+  border-radius: 4px;
+  background: #fff;
+  padding: 6px 8px;
+}
+
+.ui-summary {
+  font-weight: 700;
+  cursor: default;
+}
+
+.ui-details .ui-list,
+.ui-details p {
+  margin-top: 6px;
+  margin-bottom: 0;
+}
+
+.review-fieldset {
+  border: 1px solid #cfdcf0;
+  border-radius: 4px;
+  background: #fff;
+  padding: 8px 10px 10px;
+}
+
+.ui-legend {
+  font-weight: 700;
+  color: #213750;
+  padding: 0 4px;
+}
+
+.form-stack {
+  display: block;
+}
+
+.form-row {
+  margin-bottom: 10px;
+}
+
+.form-row:last-child {
+  margin-bottom: 0;
+}
+
+.ui-label {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.form-row input,
+.form-row textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #a6b6cb;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font: inherit;
+  color: inherit;
+  background: #fff;
+}
+
+.ui-help-text,
+.ui-error-text {
+  margin: 4px 0 0 0;
+  font-size: 9.5pt;
+}
+
+.ui-help-text {
+  color: #4a607b;
+}
+
+.ui-error-text {
+  color: #8a1f20;
+  font-weight: 600;
+}
+
+.form-row [aria-invalid="true"] {
+  border-color: #c64546;
+  background: #fffafb;
+}
+
+.ui-divider {
+  border: 0;
+  border-top: 1px solid #d7e0ec;
+  margin: 10px 0;
 }
 
 .ui-signature-block {
@@ -91,6 +252,7 @@ body {
   border-radius: 4px;
   padding: 8px;
   margin-top: 8px;
+  background: #fff;
 }
 
 .ui-signature-mark {
@@ -107,4 +269,26 @@ body {
 .ui-figcaption {
   color: #4a607b;
   font-size: 10pt;
+}
+
+.demo-aside {
+  border-style: dashed;
+  background: #fffef9;
+}
+
+.demo-aside .ui-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.demo-aside p {
+  margin-top: 0;
+}
+
+.scaffold-root a:focus-visible,
+.scaffold-root input:focus-visible,
+.scaffold-root textarea:focus-visible,
+.scaffold-root summary:focus-visible {
+  outline: 2px solid #1d63d1;
+  outline-offset: 2px;
 }

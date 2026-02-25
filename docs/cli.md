@@ -148,6 +148,7 @@ Template/project bootstrap command group:
   - `fullbleed new remote <template_id> [path] [--version latest|<x.y.z>] [--registry <manifest-url>]`
 
 Practical notes:
+- `new local accessible` seeds a verbose accessibility-first project that renders through `fullbleed.accessibility.AccessibilityEngine` and emits engine verifier, PMR, PDF/UA seed checks, and non-visual trace artifacts by default.
 - Default registry URL can be overridden with `--registry` or `FULLBLEED_TEMPLATE_REGISTRY`.
 - `new remote --dry-run` resolves template/release metadata without downloading archives.
 - Remote install verifies archive SHA256 before extraction and blocks path traversal in zip contents.

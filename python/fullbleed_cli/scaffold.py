@@ -46,12 +46,12 @@ def _template_root():
     return resources.files(SCAFFOLD_TEMPLATE_PACKAGE)
 
 
-def _load_template_tree(relative_dir: str) -> dict[str, str]:
+def _load_template_tree(relative_dir: str) -> dict[str, str | bytes]:
     root = _template_root().joinpath(relative_dir)
     if not root.is_dir():
         raise RuntimeError(f"scaffold template directory not found: {relative_dir}")
 
-    files: dict[str, str] = {}
+    files: dict[str, str | bytes] = {}
     stack: list[tuple[object, str]] = [(root, "")]
     while stack:
         node, prefix = stack.pop()
@@ -65,7 +65,10 @@ def _load_template_tree(relative_dir: str) -> dict[str, str]:
             elif child.is_file():
                 if child.suffix.lower() in {".pyc", ".pyo"}:
                     continue
-                files[rel] = child.read_text(encoding="utf-8")
+                try:
+                    files[rel] = child.read_text(encoding="utf-8")
+                except UnicodeDecodeError:
+                    files[rel] = child.read_bytes()
     return dict(sorted(files.items()))
 
 
@@ -296,7 +299,10 @@ def cmd_init(args):
         file_path = target_dir / filename
         if not file_path.exists() or force:
             file_path.parent.mkdir(parents=True, exist_ok=True)
-            file_path.write_text(content, encoding="utf-8")
+            if isinstance(content, bytes):
+                file_path.write_bytes(content)
+            else:
+                file_path.write_text(content, encoding="utf-8")
             created_files.append(filename)
 
     try:
@@ -436,7 +442,10 @@ def cmd_new_template(args):
             raise SystemExit(1)
         
         full_path.parent.mkdir(parents=True, exist_ok=True)
-        full_path.write_text(content, encoding="utf-8")
+        if isinstance(content, bytes):
+            full_path.write_bytes(content)
+        else:
+            full_path.write_text(content, encoding="utf-8")
         created_files.append(filepath)
     
     result = {

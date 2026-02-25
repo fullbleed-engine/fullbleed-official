@@ -19,3 +19,6 @@ scafold_engine_review.md
 /examples/css_parity_canonical_100/output
 dist_release_050/artifacts_0.5.0.json
 /crates/fullbleed_audit_contract/target
+/tmp_pdfua_list_fix_check
+/examples/_accessibility_examples
+/examples/accessibility_test

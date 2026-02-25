@@ -286,7 +286,7 @@
     "not_evaluated_audit_count": 0
   },
   "tooling": {
-    "fullbleed_version": "0.5.0",
+    "fullbleed_version": "0.6.0",
     "report_schema_version": "1.0.0-draft",
     "generated_at": "2026-02-24T00:00:00Z"
   },
@@ -303,4 +303,3 @@
     "resolved_failures": []
   }
 }
-
