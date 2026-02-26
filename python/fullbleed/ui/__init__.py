@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial
 """Component-first HTML authoring helpers for FullBleed."""
 
+from . import cav
 from .core import (
     Document,
     DocumentArtifact,
@@ -42,6 +43,7 @@ from .primitives import (
 from .style import Style, StyleWarning, inch, pct, pt, px, rem, style
 
 __all__ = [
+    "cav",
     "Document",
     "DocumentArtifact",
     "Element",

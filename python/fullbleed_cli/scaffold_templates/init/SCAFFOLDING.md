@@ -53,9 +53,15 @@ Always scope selectors to the scaffold root (`[data-fb-role="document-root"]`) i
 4. Run `python report.py`.
 5. Inspect outputs in `output/`:
    - `report.pdf`
+   - `report.html`
+   - `report.css`
    - `report_page1.png`
    - `component_mount_validation.json`
    - `css_layers.json`
+
+The scaffold now emits HTML/CSS via engine artifact emitters with document-level CSS metadata defaults
+(`document_css_href`, `document_css_source_path`, `document_css_media`, `document_css_required`) so
+linked artifact output is deterministic.
 
 ## Useful Diagnostics
 

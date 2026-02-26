@@ -25,6 +25,7 @@ Authoring primitives in `report.py`:
 Runtime/output behavior:
 
 - HTML/CSS/PDF bundle emission through `AccessibilityEngine.render_bundle(...)`
+- document-level CSS metadata defaults (`document_css_href`, `document_css_source_path`, `document_css_media`, `document_css_required`)
 - engine accessibility verifier (`fullbleed.a11y.verify.v1`)
 - paged media ranker (`fullbleed.pmr.v1`)
 - PDF/UA seed verifier (`fullbleed.pdf.ua_seed_verify.v1`)

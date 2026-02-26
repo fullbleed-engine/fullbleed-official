@@ -1384,19 +1384,34 @@ def prototype_verify_accessibility(
             )
         )
 
+    body_text_l = (facts.body_text or "").lower()
+    sig_cue_present = ("signature" in body_text_l) or ("signed" in body_text_l)
     sig_pass = facts.sig_count > 0
+    sig_na = (not sig_pass) and (not sig_cue_present)
     findings.append(
         _vf(
             "fb.a11y.signatures.text_semantics_present",
-            "pass" if sig_pass else ("manual_needed" if profile in {"cav", "transactional"} else "not_applicable"),
+            (
+                "pass"
+                if sig_pass
+                else ("not_applicable" if sig_na else ("manual_needed" if profile in {"cav", "transactional"} else "not_applicable"))
+            ),
             "medium",
             "post-emit",
             "fullbleed",
-            "Signature fields include text-first semantics." if sig_pass else "Signature semantics could not be confirmed automatically.",
-            evidence=[{"values": {"signature_semantic_count": facts.sig_count}}],
-            verification_mode="machine" if sig_pass else ("manual" if profile in {"cav", "transactional"} else "machine"),
-            applicability="applicable" if profile in {"cav", "transactional"} else "not_applicable",
-            confidence="high" if sig_pass else "low",
+            (
+                "Signature fields include text-first semantics."
+                if sig_pass
+                else (
+                    "No signature-bearing content cues detected; signature semantics check not applicable."
+                    if sig_na
+                    else "Signature semantics could not be confirmed automatically."
+                )
+            ),
+            evidence=[{"values": {"signature_semantic_count": facts.sig_count, "signature_cue_text_present": sig_cue_present}}],
+            verification_mode="machine" if (sig_pass or sig_na) else ("manual" if profile in {"cav", "transactional"} else "machine"),
+            applicability="not_applicable" if (profile not in {"cav", "transactional"} or sig_na) else "applicable",
+            confidence="high" if (sig_pass or sig_na) else "low",
         )
     )
     non_interference_signal_count = (
@@ -3166,7 +3181,10 @@ def prototype_verify_paged_media_rank(
     e = E("pmr.signatures.text_semantics_present")
     if profile in {"cav", "transactional"}:
         sig_ok = facts.sig_count > 0
-        audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="pass" if sig_ok else "fail", message="Text signature semantics detected." if sig_ok else "No text signature semantics detected.", scored=e.get("scored", True), evidence=[{"values": {"signature_semantic_count": facts.sig_count}}]))
+        body_text_l = (facts.body_text or "").lower()
+        sig_cue_present = ("signature" in body_text_l) or ("signed" in body_text_l)
+        sig_na = (not sig_ok) and (not sig_cue_present)
+        audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict=("pass" if sig_ok else ("not_applicable" if sig_na else "fail")), message=("Text signature semantics detected." if sig_ok else ("No signature-bearing content cues detected; signature semantics check not applicable." if sig_na else "No text signature semantics detected.")), scored=(False if sig_na else e.get("scored", True)), evidence=[{"values": {"signature_semantic_count": facts.sig_count, "signature_cue_text_present": sig_cue_present}}]))
     else:
         audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="not_applicable", message="Not applicable for this profile.", scored=False))
     e = E("pmr.cav.document_only_content")

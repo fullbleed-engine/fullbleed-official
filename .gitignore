@@ -1,6 +1,7 @@
 /.venv
 /.venv_engine
 *.pyc
+*.pyc.*
 *.pyd
 *.pyc
 /.venv_pypi_smoke_2
@@ -22,3 +23,7 @@ dist_release_050/artifacts_0.5.0.json
 /tmp_pdfua_list_fix_check
 /examples/_accessibility_examples
 /examples/accessibility_test
+/_escambia
+/output/_tmp_init_scaffold_smoke
+/output/_tmp_new_invoice_scaffold2
+/output/_tmp_new_statement_scaffold2

@@ -14,6 +14,8 @@ from components.footer import Footer
 ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = ROOT / "output"
 PDF_PATH = OUTPUT_DIR / "report.pdf"
+HTML_PATH = OUTPUT_DIR / "report.html"
+CSS_ARTIFACT_PATH = OUTPUT_DIR / "report.css"
 PREVIEW_PNG_STEM = "report"
 PAGE_DATA_PATH = OUTPUT_DIR / "report_page_data.json"
 JIT_PATH = OUTPUT_DIR / "report.jit.jsonl"
@@ -112,6 +114,14 @@ def create_engine(*, debug: bool | None = None, debug_out: str | None = None, ji
         perf_out=str(PERF_PATH) if _env_truthy("FULLBLEED_PERF") else None,
         jit_mode=jit_mode,
     )
+    if hasattr(engine, "document_css_href"):
+        engine.document_css_href = CSS_ARTIFACT_PATH.name
+    if hasattr(engine, "document_css_source_path"):
+        engine.document_css_source_path = str(ROOT / "styles" / "report.css")
+    if hasattr(engine, "document_css_media"):
+        engine.document_css_media = "all"
+    if hasattr(engine, "document_css_required"):
+        engine.document_css_required = True
 
     engine.register_bundle(bundle)
     return engine
@@ -309,6 +319,19 @@ def main():
     print(f"[ok] Component mount validation: {COMPONENT_VALIDATION_PATH}")
 
     engine = create_engine()
+    html_css_emit_status = "ok"
+    if hasattr(engine, "emit_artifacts"):
+        engine.emit_artifacts(
+            html,
+            css,
+            str(HTML_PATH),
+            str(CSS_ARTIFACT_PATH),
+            False,
+        )
+    else:
+        html_css_emit_status = "fallback (native emitter unavailable)"
+        HTML_PATH.write_text(html, encoding="utf-8")
+        CSS_ARTIFACT_PATH.write_text(css, encoding="utf-8")
 
     if emit_page_data:
         pdf_bytes, page_data = engine.render_pdf_with_page_data(html, css)
@@ -333,6 +356,8 @@ def main():
         print(f"[ok] Preview PNG: {preview_png} ({png_status})")
     else:
         print(f"[ok] Preview PNG: {OUTPUT_DIR} ({png_status})")
+    print(f"[ok] HTML artifact: {HTML_PATH} ({html_css_emit_status})")
+    print(f"[ok] CSS artifact: {CSS_ARTIFACT_PATH} ({html_css_emit_status})")
     print(f"[ok] CSS layers: {CSS_LAYER_REPORT_PATH}")
     if emit_page_data:
         page_data_status = "ok" if PAGE_DATA_PATH.exists() else "skipped (engine returned none)"

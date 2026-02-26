@@ -1,6 +1,7 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use crate::assets::is_supported_font_path;
+use crate::jit::Transform;
 use crate::{
     A11yVerifierCoreReport, A11yVerifierEvidence, A11yVerifierFinding, Asset, AssetBundle,
     AssetKind, Color, ColorSpace, FullBleed, FullBleedBuilder, FullBleedError, GlyphCoverageReport,
@@ -372,6 +373,98 @@ fn inspect_pdf(py: Python<'_>, path: &str) -> PyResult<PyObject> {
     let dict = out.bind(py).downcast::<PyDict>()?;
     dict.set_item("ok", true)?;
     Ok(out)
+}
+
+#[pyfunction]
+fn extract_pdf_page_texts(py: Python<'_>, pdf_path: &str) -> PyResult<PyObject> {
+    let path = Path::new(pdf_path);
+    let out = PyDict::new_bound(py);
+    out.set_item("schema", "fullbleed.pdf.page_text_extract.v1")?;
+    out.set_item("schema_version", 1)?;
+    out.set_item("pdf_path", pdf_path)?;
+    out.set_item("extractor", "lopdf")?;
+    out.set_item(
+        "generated_at_unix_ms",
+        (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()) as u64,
+    )?;
+
+    let warnings = PyList::empty_bound(py);
+    let pages_out = PyList::empty_bound(py);
+    let mut ok = false;
+    let mut page_count: usize = 0;
+    let mut non_empty_pages: usize = 0;
+    let mut total_chars: usize = 0;
+
+    match LoDocument::load(path) {
+        Ok(doc) => {
+            let pages = doc.get_pages();
+            page_count = pages.len();
+            for (page_num, _id) in &pages {
+                let chunks = doc.extract_text_chunks(&[*page_num]);
+                let mut page_text = String::new();
+                let mut chunk_count: usize = 0;
+                let mut non_empty_chunk_count: usize = 0;
+                for chunk in chunks {
+                    chunk_count += 1;
+                    match chunk {
+                        Ok(text) => {
+                            let trimmed = text.trim();
+                            if trimmed.is_empty() {
+                                continue;
+                            }
+                            if !page_text.is_empty() {
+                                page_text.push('\n');
+                            }
+                            page_text.push_str(trimmed);
+                            non_empty_chunk_count += 1;
+                        }
+                        Err(err) => {
+                            let w = PyDict::new_bound(py);
+                            w.set_item("code", "PAGE_TEXT_CHUNK_ERROR")?;
+                            w.set_item("page", *page_num)?;
+                            w.set_item("message", err.to_string())?;
+                            warnings.append(w)?;
+                        }
+                    }
+                }
+
+                if !page_text.trim().is_empty() {
+                    non_empty_pages += 1;
+                    total_chars += page_text.len();
+                }
+                let page_char_count = page_text.len();
+
+                let page_row = PyDict::new_bound(py);
+                page_row.set_item("page_index", (*page_num as usize).saturating_sub(1))?;
+                page_row.set_item("page", *page_num)?;
+                page_row.set_item("text", page_text)?;
+                page_row.set_item("char_count", page_char_count)?;
+                page_row.set_item("chunk_count", chunk_count)?;
+                page_row.set_item("non_empty_chunk_count", non_empty_chunk_count)?;
+                pages_out.append(page_row)?;
+            }
+            ok = true;
+        }
+        Err(err) => {
+            let w = PyDict::new_bound(py);
+            w.set_item("code", "PDF_PARSE_ERROR")?;
+            w.set_item("message", err.to_string())?;
+            warnings.append(w)?;
+        }
+    }
+
+    let summary = PyDict::new_bound(py);
+    summary.set_item("page_count", page_count)?;
+    summary.set_item("non_empty_pages", non_empty_pages)?;
+    summary.set_item("total_chars", total_chars)?;
+    out.set_item("ok", ok)?;
+    out.set_item("pages", pages_out)?;
+    out.set_item("summary", summary)?;
+    out.set_item("warnings", warnings)?;
+    Ok(out.to_object(py))
 }
 
 fn resolve_lopdf_obj<'a>(doc: &'a LoDocument, mut obj: &'a LoObject) -> Result<&'a LoObject, lopdf::Error> {
@@ -1502,7 +1595,65 @@ fn compose_plan_to_py(
     Ok(plan.to_object(py))
 }
 
-fn build_render_time_reading_order_trace_py(py: Python<'_>, doc: &Document) -> PyResult<PyObject> {
+#[derive(Clone)]
+struct TraceTextState {
+    transform: Transform,
+    font_name: String,
+    font_size: Pt,
+}
+
+impl TraceTextState {
+    fn new() -> Self {
+        Self {
+            transform: Transform::identity(),
+            font_name: "Helvetica".to_string(),
+            font_size: Pt::from_f32(12.0),
+        }
+    }
+}
+
+fn estimate_trace_text_bbox(
+    engine: Option<&FullBleed>,
+    state: &TraceTextState,
+    x: Pt,
+    y: Pt,
+    text: &str,
+) -> (f32, f32, f32, f32) {
+    let width = if let Some(e) = engine {
+        e.measure_text_width_for_trace(&state.font_name, state.font_size, text)
+    } else {
+        let approx = text.chars().count() as f32 * 0.6;
+        Pt::from_f32(state.font_size.to_f32() * approx)
+    };
+    let height = state.font_size;
+    let x0 = x.to_f32();
+    let y0 = y.to_f32();
+    let x1 = x0 + width.to_f32();
+    let y1 = y0 + height.to_f32();
+    let corners = [
+        state.transform.apply(x0, y0),
+        state.transform.apply(x1, y0),
+        state.transform.apply(x1, y1),
+        state.transform.apply(x0, y1),
+    ];
+    let mut min_x = corners[0].0;
+    let mut min_y = corners[0].1;
+    let mut max_x = corners[0].0;
+    let mut max_y = corners[0].1;
+    for (cx, cy) in &corners[1..] {
+        min_x = min_x.min(*cx);
+        min_y = min_y.min(*cy);
+        max_x = max_x.max(*cx);
+        max_y = max_y.max(*cy);
+    }
+    (min_x, min_y, max_x, max_y)
+}
+
+fn build_render_time_reading_order_trace_py(
+    py: Python<'_>,
+    doc: &Document,
+    engine: Option<&FullBleed>,
+) -> PyResult<PyObject> {
     let out = PyDict::new_bound(py);
     out.set_item("schema", "fullbleed.pdf.reading_order_trace.v1")?;
     out.set_item("schema_version", 1)?;
@@ -1524,12 +1675,42 @@ fn build_render_time_reading_order_trace_py(py: Python<'_>, doc: &Document) -> P
         let mut tag_stack: Vec<String> = Vec::new();
         let mut artifact_depth = 0usize;
         let mut block_count = 0usize;
+        let mut state = TraceTextState::new();
+        let mut state_stack: Vec<TraceTextState> = Vec::new();
         let mut page_draw_form_count = 0usize;
         let mut page_define_form_count = 0usize;
         let mut page_artifact_excluded = 0usize;
 
         for (cmd_index, cmd) in page.commands.iter().enumerate() {
             match cmd {
+                Command::SaveState => state_stack.push(state.clone()),
+                Command::RestoreState => {
+                    state = state_stack.pop().unwrap_or_else(TraceTextState::new);
+                }
+                Command::Translate(dx, dy) => {
+                    state.transform =
+                        state
+                            .transform
+                            .mul(Transform::translate(dx.to_f32(), dy.to_f32()));
+                }
+                Command::Scale(sx, sy) => {
+                    state.transform = state.transform.mul(Transform::scale(*sx, *sy));
+                }
+                Command::Rotate(angle) => {
+                    state.transform = state.transform.mul(Transform::rotate(*angle));
+                }
+                Command::ConcatMatrix { a, b, c, d, e, f } => {
+                    state.transform = state.transform.mul(Transform::matrix(
+                        *a,
+                        *b,
+                        *c,
+                        *d,
+                        e.to_f32(),
+                        f.to_f32(),
+                    ));
+                }
+                Command::SetFontName(name) => state.font_name = name.clone(),
+                Command::SetFontSize(size) => state.font_size = *size,
                 Command::BeginTag { role, .. } => tag_stack.push(role.clone()),
                 Command::EndTag => {
                     let _ = tag_stack.pop();
@@ -1551,6 +1732,7 @@ fn build_render_time_reading_order_trace_py(py: Python<'_>, doc: &Document) -> P
                         page_artifact_excluded = page_artifact_excluded.saturating_add(1);
                         continue;
                     }
+                    let (bx0, by0, bx1, by1) = estimate_trace_text_bbox(engine, &state, *x, *y, text);
                     let row = PyDict::new_bound(py);
                     row.set_item("index", block_count)?;
                     row.set_item("command_index", cmd_index)?;
@@ -1558,6 +1740,14 @@ fn build_render_time_reading_order_trace_py(py: Python<'_>, doc: &Document) -> P
                     row.set_item("text", text.clone())?;
                     row.set_item("x", x.to_f32())?;
                     row.set_item("y", y.to_f32())?;
+                    row.set_item("w", (bx1 - bx0).max(0.0))?;
+                    row.set_item("h", (by1 - by0).max(0.0))?;
+                    let bbox = PyDict::new_bound(py);
+                    bbox.set_item("x", bx0)?;
+                    bbox.set_item("y", by0)?;
+                    bbox.set_item("w", (bx1 - bx0).max(0.0))?;
+                    bbox.set_item("h", (by1 - by0).max(0.0))?;
+                    row.set_item("bbox", bbox)?;
                     if let Some(top_role) = tag_stack.last() {
                         row.set_item("top_role", top_role.clone())?;
                     } else {
@@ -1573,6 +1763,7 @@ fn build_render_time_reading_order_trace_py(py: Python<'_>, doc: &Document) -> P
                         page_artifact_excluded = page_artifact_excluded.saturating_add(1);
                         continue;
                     }
+                    let (bx0, by0, bx1, by1) = estimate_trace_text_bbox(engine, &state, *x, *y, text);
                     let row = PyDict::new_bound(py);
                     row.set_item("index", block_count)?;
                     row.set_item("command_index", cmd_index)?;
@@ -1580,6 +1771,14 @@ fn build_render_time_reading_order_trace_py(py: Python<'_>, doc: &Document) -> P
                     row.set_item("text", text.clone())?;
                     row.set_item("x", x.to_f32())?;
                     row.set_item("y", y.to_f32())?;
+                    row.set_item("w", (bx1 - bx0).max(0.0))?;
+                    row.set_item("h", (by1 - by0).max(0.0))?;
+                    let bbox = PyDict::new_bound(py);
+                    bbox.set_item("x", bx0)?;
+                    bbox.set_item("y", by0)?;
+                    bbox.set_item("w", (bx1 - bx0).max(0.0))?;
+                    bbox.set_item("h", (by1 - by0).max(0.0))?;
+                    row.set_item("bbox", bbox)?;
                     if let Some(top_role) = tag_stack.last() {
                         row.set_item("top_role", top_role.clone())?;
                     } else {
@@ -1799,11 +1998,52 @@ fn glyph_report_to_py(py: Python<'_>, report: &GlyphCoverageReport) -> PyResult<
 struct PdfEngine {
     engine: FullBleed,
     builder: FullBleedBuilder,
+    document_css_href: Option<String>,
+    document_css_source_path: Option<String>,
+    document_css_media: Option<String>,
+    document_css_required: bool,
 }
 
 impl PdfEngine {
     fn rebuild_from_builder(&mut self) -> PyResult<()> {
         self.engine = self.builder.clone().build().map_err(to_py_err)?;
+        Ok(())
+    }
+
+    fn normalized_css_href(&self) -> Option<String> {
+        self.document_css_href
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+    }
+
+    fn normalized_css_media(&self) -> Option<String> {
+        self.document_css_media
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+    }
+
+    fn effective_css_href_for_path(&self, css_path: &str) -> Option<String> {
+        if let Some(href) = self.normalized_css_href() {
+            return Some(href);
+        }
+        Path::new(css_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+    }
+
+    fn ensure_css_required(&self, _href: Option<&str>) -> PyResult<()> {
+        if self.document_css_required && self.normalized_css_href().is_none() {
+            return Err(PyValueError::new_err(
+                "document_css_required=True but document_css_href is missing",
+            ));
+        }
         Ok(())
     }
 }
@@ -1847,6 +2087,49 @@ fn sha256_file_hex(path: &str) -> PyResult<String> {
 fn write_hash_file(path: &str, hash: &str) -> PyResult<()> {
     std::fs::write(path, hash)
         .map_err(|e| PyValueError::new_err(format!("failed to write deterministic hash file: {e}")))
+}
+
+fn html_escape_attr(raw: &str) -> String {
+    raw.replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('\'', "&#x27;")
+}
+
+fn inject_css_link(
+    html_text: &str,
+    css_href: Option<&str>,
+    css_media: Option<&str>,
+) -> (String, bool, bool) {
+    let href = css_href
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let Some(href) = href else {
+        return (html_text.to_string(), false, false);
+    };
+    if html_text.contains("rel=\"stylesheet\"") || html_text.contains("rel='stylesheet'") {
+        return (html_text.to_string(), false, true);
+    }
+    let media_attr = css_media
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| format!(" media=\"{}\"", html_escape_attr(s)))
+        .unwrap_or_default();
+    let link = format!(
+        "<link rel=\"stylesheet\" href=\"{}\"{} />",
+        html_escape_attr(&href),
+        media_attr
+    );
+    if let Some(idx) = html_text.find("</head>") {
+        let mut out = String::with_capacity(html_text.len() + link.len());
+        out.push_str(&html_text[..idx]);
+        out.push_str(&link);
+        out.push_str(&html_text[idx..]);
+        return (out, true, false);
+    }
+    (html_text.to_string(), false, false)
 }
 
 fn wcag20aa_coverage_summary_to_py(
@@ -6001,7 +6284,14 @@ impl PdfEngine {
             }
         }
         let engine = builder.clone().build().map_err(to_py_err)?;
-        Ok(Self { engine, builder })
+        Ok(Self {
+            engine,
+            builder,
+            document_css_href: None,
+            document_css_source_path: None,
+            document_css_media: Some("all".to_string()),
+            document_css_required: false,
+        })
     }
 
     fn register_bundle(&mut self, bundle: PyRef<'_, PyAssetBundle>) -> PyResult<()> {
@@ -6041,18 +6331,94 @@ impl PdfEngine {
         self.rebuild_from_builder()
     }
 
+    #[getter]
+    fn document_css_href(&self) -> Option<String> {
+        self.normalized_css_href()
+    }
+
+    #[setter(document_css_href)]
+    fn set_document_css_href(&mut self, value: Option<String>) -> PyResult<()> {
+        self.document_css_href = value
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        Ok(())
+    }
+
+    #[getter]
+    fn document_css_source_path(&self) -> Option<String> {
+        self.document_css_source_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+    }
+
+    #[setter(document_css_source_path)]
+    fn set_document_css_source_path(&mut self, value: Option<String>) -> PyResult<()> {
+        self.document_css_source_path = value
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        Ok(())
+    }
+
+    #[getter]
+    fn document_css_media(&self) -> Option<String> {
+        self.normalized_css_media()
+    }
+
+    #[setter(document_css_media)]
+    fn set_document_css_media(&mut self, value: Option<String>) -> PyResult<()> {
+        self.document_css_media = value
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        Ok(())
+    }
+
+    #[getter]
+    fn document_css_required(&self) -> bool {
+        self.document_css_required
+    }
+
+    #[setter(document_css_required)]
+    fn set_document_css_required(&mut self, value: bool) -> PyResult<()> {
+        self.document_css_required = value;
+        Ok(())
+    }
+
     fn document_metadata(&self, py: Python<'_>) -> PyResult<PyObject> {
         let out = PyDict::new_bound(py);
         out.set_item("document_lang", self.document_lang())?;
         out.set_item("document_title", self.document_title())?;
+        out.set_item("document_css_href", self.document_css_href())?;
+        out.set_item("document_css_source_path", self.document_css_source_path())?;
+        out.set_item("document_css_media", self.document_css_media())?;
+        out.set_item("document_css_required", self.document_css_required())?;
         Ok(out.to_object(py))
     }
 
     #[pyo3(signature = (html, out_path, wrap_document=true))]
     fn emit_html(&self, html: &str, out_path: &str, wrap_document: bool) -> PyResult<String> {
-        self.engine
+        let html_text = self
+            .engine
             .emit_html_artifact(html, out_path, wrap_document)
-            .map_err(to_py_err)
+            .map_err(to_py_err)?;
+        let css_href = self.normalized_css_href();
+        self.ensure_css_required(css_href.as_deref())?;
+        let (patched, injected, _preexisting) =
+            inject_css_link(&html_text, css_href.as_deref(), self.normalized_css_media().as_deref());
+        if injected {
+            std::fs::write(out_path, patched.as_bytes())
+                .map_err(|e| PyValueError::new_err(format!("failed to write html artifact: {e}")))?;
+            Ok(patched)
+        } else {
+            Ok(html_text)
+        }
     }
 
     fn emit_css(&self, css: &str, out_path: &str) -> PyResult<String> {
@@ -6075,11 +6441,27 @@ impl PdfEngine {
             .engine
             .emit_html_css_artifacts(html, css, html_path, css_path, wrap_document)
             .map_err(to_py_err)?;
+        let css_href = self.effective_css_href_for_path(css_path);
+        self.ensure_css_required(css_href.as_deref())?;
+        let css_media = self.normalized_css_media();
+        let (patched, injected, preexisting) =
+            inject_css_link(&html_text, css_href.as_deref(), css_media.as_deref());
+        let html_effective = if injected {
+            std::fs::write(html_path, patched.as_bytes())
+                .map_err(|e| PyValueError::new_err(format!("failed to write html artifact: {e}")))?;
+            patched
+        } else {
+            html_text
+        };
         let out = PyDict::new_bound(py);
         out.set_item("html_path", html_path)?;
         out.set_item("css_path", css_path)?;
-        out.set_item("html", html_text)?;
+        out.set_item("html", html_effective)?;
         out.set_item("css", css_text)?;
+        out.set_item("css_link_href", css_href)?;
+        out.set_item("css_link_media", css_media)?;
+        out.set_item("css_link_injected", injected)?;
+        out.set_item("css_link_preexisting", preexisting)?;
         Ok(out.to_object(py))
     }
 
@@ -6412,7 +6794,7 @@ impl PdfEngine {
         let doc = py
             .allow_threads(|| self.engine.render_to_document(html, css))
             .map_err(to_py_err)?;
-        build_render_time_reading_order_trace_py(py, &doc)
+        build_render_time_reading_order_trace_py(py, &doc, Some(&self.engine))
     }
 
     fn export_render_time_structure_trace(
@@ -6573,6 +6955,25 @@ impl PdfEngine {
             .map_err(to_py_err)?;
         let report_obj = glyph_report_to_py(py, &report)?;
         Ok((PyBytes::new_bound(py, &bytes).unbind(), report_obj))
+    }
+
+    #[pyo3(signature = (html, css))]
+    fn render_pdf_with_glyph_report_and_render_time_reading_order_trace(
+        &self,
+        py: Python<'_>,
+        html: &str,
+        css: &str,
+    ) -> PyResult<(Py<PyBytes>, PyObject, PyObject)> {
+        let (bytes, report, doc) = py
+            .allow_threads(|| self.engine.render_with_glyph_report_and_document(html, css))
+            .map_err(to_py_err)?;
+        let report_obj = glyph_report_to_py(py, &report)?;
+        let trace_obj = build_render_time_reading_order_trace_py(py, &doc, Some(&self.engine))?;
+        Ok((
+            PyBytes::new_bound(py, &bytes).unbind(),
+            report_obj,
+            trace_obj,
+        ))
     }
 
     #[pyo3(signature = (html, css, path, deterministic_hash=None))]
@@ -6754,6 +7155,7 @@ fn _fullbleed(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(audit_contract_wcag20aa_coverage, module)?)?;
     module.add_function(wrap_pyfunction!(audit_contract_section508_html_coverage, module)?)?;
     module.add_function(wrap_pyfunction!(audit_contrast_render_png, module)?)?;
+    module.add_function(wrap_pyfunction!(extract_pdf_page_texts, module)?)?;
     module.add_function(wrap_pyfunction!(export_pdf_reading_order_trace, module)?)?;
     module.add_function(wrap_pyfunction!(export_pdf_structure_trace, module)?)?;
     module.add_function(wrap_pyfunction!(verify_pdf_ua_seed, module)?)?;

@@ -43,6 +43,66 @@ def test_accessibility_engine_strict_mode_requires_metadata(tmp_path: Path) -> N
         )
 
 
+def test_accessibility_engine_css_metadata_emits_link_and_reports_fields(tmp_path: Path) -> None:
+    _require_pdf_engine()
+
+    from fullbleed.accessibility import AccessibilityEngine
+
+    engine = AccessibilityEngine(
+        document_lang="en-US",
+        document_title="CSS Metadata Runtime",
+        document_css_href="styles/runtime.css",
+        document_css_media="print",
+        document_css_required=True,
+        strict=False,
+    )
+    meta = engine.document_metadata()
+    assert meta["document_css_href"] == "styles/runtime.css"
+    assert meta["document_css_media"] == "print"
+    assert meta["document_css_required"] is True
+
+    out_dir = tmp_path / "css_meta_bundle"
+    result = engine.render_bundle(
+        body_html='<main data-fb-role="document-root"><h1>Title</h1><p>Hello</p></main>',
+        css_text="@page { size: letter; }\nbody { color: #111; }",
+        out_dir=str(out_dir),
+        stem="css_meta",
+        profile="strict",
+        render_preview_png=False,
+        run_verifier=False,
+        run_pmr=False,
+        run_pdf_ua_seed_verify=False,
+        emit_reading_order_trace=False,
+        emit_pdf_structure_trace=False,
+    )
+
+    html_text = Path(result.paths["html_path"]).read_text(encoding="utf-8")
+    assert 'href="styles/runtime.css"' in html_text
+    assert 'media="print"' in html_text
+
+    run_report = json.loads(Path(result.paths["run_report_path"]).read_text(encoding="utf-8"))
+    assert run_report["document_css_href"] == "styles/runtime.css"
+    assert run_report["document_css_media"] == "print"
+    assert run_report["document_css_required"] is True
+    assert run_report["css_link_href"] == "styles/runtime.css"
+    assert run_report["css_link_media"] == "print"
+
+
+def test_accessibility_engine_css_required_fails_without_href(tmp_path: Path) -> None:
+    _require_pdf_engine()
+
+    from fullbleed.accessibility import AccessibilityEngine
+
+    engine = AccessibilityEngine(
+        document_lang="en-US",
+        document_title="Missing CSS Href",
+        document_css_required=True,
+        strict=False,
+    )
+    with pytest.raises(ValueError):
+        engine.emit_html("<main><p>x</p></main>", str(tmp_path / "missing_href.html"))
+
+
 def test_accessibility_engine_render_bundle_emits_pdfua_seed_and_trace_artifacts(tmp_path: Path) -> None:
     _require_pdf_engine()
 
@@ -214,3 +274,37 @@ def test_accessibility_engine_definition_list_text_is_tagged_in_render_trace(
     assert token_counts.get("LI", 0) >= 2
     assert token_counts.get("Lbl", 0) >= 2
     assert token_counts.get("LBody", 0) >= 2
+
+
+def test_native_pdf_page_text_extraction_uses_engine_extension(tmp_path: Path) -> None:
+    _require_pdf_engine()
+    if not hasattr(fullbleed, "extract_pdf_page_texts"):
+        pytest.skip("native pdf page text extraction is not available in this build")
+
+    from fullbleed.accessibility import AccessibilityEngine
+
+    engine = AccessibilityEngine(
+        document_lang="en-US",
+        document_title="PDF Text Extract Smoke",
+        strict=False,
+    )
+    result = engine.render_bundle(
+        body_html='<main data-fb-role="document-root"><h1>Packet Title</h1><p>Alpha Beta</p></main>',
+        css_text="@page { size: letter; } body { color: #111; }",
+        out_dir=str(tmp_path),
+        stem="pdf_text_extract",
+        profile="strict",
+        render_preview_png=False,
+        run_verifier=False,
+        run_pmr=False,
+        run_pdf_ua_seed_verify=False,
+        emit_reading_order_trace=False,
+        emit_pdf_structure_trace=False,
+    )
+    report = fullbleed.extract_pdf_page_texts(result.paths["pdf_path"])
+    assert report["schema"] == "fullbleed.pdf.page_text_extract.v1"
+    assert report["extractor"] == "lopdf"
+    assert report["ok"] is True
+    assert report["summary"]["page_count"] >= 1
+    assert len(report["pages"]) >= 1
+    assert "Packet Title" in (report["pages"][0]["text"] or "")

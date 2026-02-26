@@ -1206,6 +1206,7 @@ print(payload["outputs"]["pdf"])
 - Roofing invoice parity example: `examples/roofing_invoice/README.md`
 - Iconography smoke example: `examples/iconography_test/README.md`
 - Public golden regression suite: `goldens/README.md`
+- Escambia ledger API: `_escambia/sqlite_ledger_api.md`
 
 ## License
 

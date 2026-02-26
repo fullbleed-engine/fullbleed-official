@@ -82,6 +82,10 @@ def create_engine() -> AccessibilityEngine:
         margin="0in",
         document_lang="en-US",
         document_title="Accessibility Scaffold",
+        document_css_href=CSS_ARTIFACT_PATH.name,
+        document_css_source_path=str(CSS_PATH),
+        document_css_media="all",
+        document_css_required=True,
         strict=False,
     )
     if hasattr(fullbleed, "AssetBundle") and VENDOR_FONT_PATH.exists():
@@ -260,6 +264,8 @@ def _verification_seal_svg() -> object:
     margin="0.5in",
     title="Accessibility Scaffold",
     bootstrap=False,
+    css_source_path=str(CSS_PATH),
+    css_media="all",
 )
 def App(_props=None) -> object:
     nav_heading_id = "scaffold-nav-heading"
@@ -698,6 +704,14 @@ def main() -> None:
         "html_path": str(HTML_PATH),
         "css_path": str(CSS_ARTIFACT_PATH),
         "css_source_path": str(CSS_PATH),
+        "document_css_href": bundle_run.get("document_css_href"),
+        "document_css_source_path": bundle_run.get("document_css_source_path"),
+        "document_css_media": bundle_run.get("document_css_media"),
+        "document_css_required": bundle_run.get("document_css_required"),
+        "css_link_href": bundle_run.get("css_link_href"),
+        "css_link_media": bundle_run.get("css_link_media"),
+        "css_link_injected": bundle_run.get("css_link_injected"),
+        "css_link_preexisting": bundle_run.get("css_link_preexisting"),
         "pdf_path": str(PDF_PATH),
         "pdf_bytes": bytes_written,
         "png_paths": png_paths,

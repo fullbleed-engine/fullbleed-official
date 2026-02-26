@@ -9,6 +9,44 @@ from typing import Any, Callable
 from .style import style_to_css
 
 
+def _normalize_css_href(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _normalize_css_media(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _stylesheet_link_tag(css_href: str, css_media: str | None) -> str:
+    media_attr = ""
+    media_value = _normalize_css_media(css_media)
+    if media_value:
+        media_attr = f' media="{escape(media_value, quote=True)}"'
+    return f'<link rel="stylesheet" href="{escape(css_href, quote=True)}"{media_attr} />'
+
+
+def _inject_css_link(
+    html_text: str,
+    css_href: str | None,
+    css_media: str | None,
+) -> tuple[str, bool, bool]:
+    href = _normalize_css_href(css_href)
+    if not href:
+        return html_text, False, False
+    if 'rel="stylesheet"' in html_text or "rel='stylesheet'" in html_text:
+        return html_text, False, True
+    link = _stylesheet_link_tag(href, css_media)
+    if "</head>" in html_text:
+        return html_text.replace("</head>", f"{link}</head>", 1), True, False
+    return html_text, False, False
+
+
 @dataclass
 class Element:
     tag: str
@@ -27,18 +65,71 @@ class DocumentArtifact:
     title: str
     bootstrap: bool
     lang: str = "en"
+    css_href: str | None = None
+    css_source_path: str | None = None
+    css_media: str | None = "all"
+    css_required: bool = False
 
     def to_html(self, *, a11y_mode: str | None = None) -> str:
         return compile_document(self, a11y_mode=a11y_mode)
+
+    def document_metadata(self) -> dict[str, Any]:
+        return {
+            "document_lang": (self.lang or "en").strip() or "en",
+            "document_title": self.title,
+            "document_css_href": _normalize_css_href(self.css_href),
+            "document_css_source_path": _normalize_css_href(self.css_source_path),
+            "document_css_media": _normalize_css_media(self.css_media),
+            "document_css_required": bool(self.css_required),
+        }
+
+    def _resolve_css_href(
+        self,
+        *,
+        css_href_override: str | None = None,
+        css_path_hint: str | Path | None = None,
+    ) -> str | None:
+        explicit = _normalize_css_href(css_href_override)
+        if explicit:
+            return explicit
+        from_meta = _normalize_css_href(self.css_href)
+        if from_meta:
+            return from_meta
+        if css_path_hint is None:
+            return None
+        basename = Path(css_path_hint).name.strip()
+        return basename or None
+
+    def _resolve_css_media(self, *, css_media_override: str | None = None) -> str | None:
+        explicit = _normalize_css_media(css_media_override)
+        if explicit:
+            return explicit
+        return _normalize_css_media(self.css_media)
+
+    def _ensure_css_requirements(self, css_href: str | None) -> None:
+        if bool(self.css_required) and not _normalize_css_href(css_href):
+            raise ValueError(
+                "DocumentArtifact css_required=True requires document_css_href "
+                "or an explicit css_href override."
+            )
 
     def emit_html(
         self,
         path: str | Path,
         *,
         a11y_mode: str | None = None,
+        css_href: str | None = None,
+        css_media: str | None = None,
         encoding: str = "utf-8",
     ) -> str:
+        effective_css_href = self._resolve_css_href(css_href_override=css_href)
+        self._ensure_css_requirements(effective_css_href)
         html = self.to_html(a11y_mode=a11y_mode)
+        html, _, _ = _inject_css_link(
+            html,
+            effective_css_href,
+            self._resolve_css_media(css_media_override=css_media),
+        )
         out_path = Path(path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(html, encoding=encoding)
@@ -46,13 +137,26 @@ class DocumentArtifact:
 
     def emit_css(
         self,
-        css: str,
-        path: str | Path,
+        css: str | None,
+        path: str | Path | None = None,
         *,
         encoding: str = "utf-8",
     ) -> str:
-        css_text = str(css)
-        out_path = Path(path)
+        out_path_raw = path if path is not None else self.css_source_path
+        if out_path_raw is None:
+            raise ValueError("emit_css requires a target path or document_css_source_path metadata.")
+        out_path = Path(out_path_raw)
+
+        if css is None:
+            source_path = _normalize_css_href(self.css_source_path)
+            if not source_path:
+                raise ValueError(
+                    "emit_css(css=None) requires document_css_source_path metadata to read source CSS."
+                )
+            css_text = Path(source_path).read_text(encoding=encoding)
+        else:
+            css_text = str(css)
+
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(css_text, encoding=encoding)
         return css_text
@@ -60,19 +164,41 @@ class DocumentArtifact:
     def emit_artifacts(
         self,
         *,
-        css: str,
+        css: str | None = None,
         html_path: str | Path,
-        css_path: str | Path,
+        css_path: str | Path | None = None,
+        css_href: str | None = None,
+        css_media: str | None = None,
         a11y_mode: str | None = None,
         encoding: str = "utf-8",
     ) -> dict[str, Any]:
-        html = self.emit_html(html_path, a11y_mode=a11y_mode, encoding=encoding)
+        css_out_path_raw = css_path if css_path is not None else self.css_source_path
+        if css_out_path_raw is None:
+            raise ValueError(
+                "emit_artifacts requires css_path or document_css_source_path metadata."
+            )
+        css_out_path = Path(css_out_path_raw)
+        effective_css_href = self._resolve_css_href(
+            css_href_override=css_href,
+            css_path_hint=css_out_path,
+        )
+        self._ensure_css_requirements(effective_css_href)
+
+        html = self.emit_html(
+            html_path,
+            a11y_mode=a11y_mode,
+            css_href=effective_css_href,
+            css_media=css_media,
+            encoding=encoding,
+        )
         css_text = self.emit_css(css, css_path, encoding=encoding)
         return {
             "html_path": str(Path(html_path)),
-            "css_path": str(Path(css_path)),
+            "css_path": str(css_out_path),
             "html": html,
             "css": css_text,
+            "document_css_href": effective_css_href,
+            "document_css_media": self._resolve_css_media(css_media_override=css_media),
         }
 
 
@@ -142,6 +268,10 @@ def Document(
     title: str = "fullbleed document",
     bootstrap: bool = True,
     lang: str = "en",
+    css_href: str | None = None,
+    css_source_path: str | None = None,
+    css_media: str | None = "all",
+    css_required: bool = False,
 ) -> Callable[[Callable[..., Any]], Callable[..., DocumentArtifact]]:
     """Wrap an app component into a document artifact.
 
@@ -169,6 +299,10 @@ def Document(
                 title=title,
                 bootstrap=bootstrap,
                 lang=lang,
+                css_href=css_href,
+                css_source_path=css_source_path,
+                css_media=css_media,
+                css_required=css_required,
             )
 
         wrapped.__name__ = fn.__name__
@@ -196,6 +330,10 @@ def _validate_a11y_if_requested(node_or_document: Any, a11y_mode: str | None) ->
 def compile_document(artifact: DocumentArtifact, *, a11y_mode: str | None = None) -> str:
     _validate_a11y_if_requested(artifact, a11y_mode)
     lang = (artifact.lang or "en").strip() or "en"
+    css_link = ""
+    href = _normalize_css_href(artifact.css_href)
+    if href:
+        css_link = _stylesheet_link_tag(href, artifact.css_media)
     return (
         "<!doctype html>"
         f"<html lang=\"{escape(lang, quote=True)}\">"
@@ -203,6 +341,7 @@ def compile_document(artifact: DocumentArtifact, *, a11y_mode: str | None = None
         "<meta charset=\"utf-8\" />"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />"
         f"<title>{escape(artifact.title)}</title>"
+        f"{css_link}"
         "</head>"
         "<body>"
         f"{render_node(artifact.root)}"
@@ -424,6 +563,123 @@ def _collect_debug_signals(debug_entries: list[dict[str, Any]]) -> dict[str, Any
     }
 
 
+def _trace_block_bbox(block: dict[str, Any]) -> tuple[float, float, float, float] | None:
+    bbox = block.get("bbox")
+    if isinstance(bbox, dict):
+        x = _as_float(bbox.get("x"))
+        y = _as_float(bbox.get("y"))
+        w = _as_float(bbox.get("w"))
+        h = _as_float(bbox.get("h"))
+    else:
+        x = _as_float(block.get("x"))
+        y = _as_float(block.get("y"))
+        w = _as_float(block.get("w"))
+        h = _as_float(block.get("h"))
+    if x is None or y is None or w is None or h is None:
+        return None
+    if w <= 0.0 or h <= 0.0:
+        return None
+    return (x, y, x + w, y + h)
+
+
+def _collect_render_trace_overlap_signals(render_trace: Any) -> dict[str, Any]:
+    text_overlap_count = 0
+    text_overlap_samples: list[dict[str, Any]] = []
+    trace_pages_scanned = 0
+    trace_blocks_scanned = 0
+    trace_bbox_missing_count = 0
+
+    if not isinstance(render_trace, dict):
+        return {
+            "render_time_trace_available": False,
+            "trace_pages_scanned": 0,
+            "trace_blocks_scanned": 0,
+            "trace_bbox_missing_count": 0,
+            "text_overlap_count": 0,
+            "text_overlap_samples": [],
+        }
+
+    for page in render_trace.get("pages", []) or []:
+        if not isinstance(page, dict):
+            continue
+        trace_pages_scanned += 1
+        blocks = page.get("blocks", []) or []
+        page_num = _as_int(page.get("page")) or (_as_int(page.get("page_index")) or 0) + 1
+
+        indexed: list[dict[str, Any]] = []
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            kind = str(block.get("kind", ""))
+            if kind not in {"draw_string", "draw_string_transformed"}:
+                continue
+            text = str(block.get("text", ""))
+            if not text or not text.strip():
+                continue
+            bbox = _trace_block_bbox(block)
+            if bbox is None:
+                trace_bbox_missing_count += 1
+                continue
+            indexed.append(
+                {
+                    "page": page_num,
+                    "index": _as_int(block.get("index")) or 0,
+                    "command_index": _as_int(block.get("command_index")) or 0,
+                    "text": text,
+                    "top_role": block.get("top_role"),
+                    "bbox": bbox,
+                }
+            )
+        trace_blocks_scanned += len(indexed)
+
+        for i in range(len(indexed)):
+            a = indexed[i]
+            ax0, ay0, ax1, ay1 = a["bbox"]
+            for j in range(i + 1, len(indexed)):
+                b = indexed[j]
+                bx0, by0, bx1, by1 = b["bbox"]
+                ix0 = max(ax0, bx0)
+                iy0 = max(ay0, by0)
+                ix1 = min(ax1, bx1)
+                iy1 = min(ay1, by1)
+                iw = ix1 - ix0
+                ih = iy1 - iy0
+                if iw <= 0.0 or ih <= 0.0:
+                    continue
+                # Ignore edge-touch and tiny float jitter; keep real visual collisions.
+                if iw < 1.0 or ih < 1.0 or (iw * ih) < 4.0:
+                    continue
+                text_overlap_count += 1
+                if len(text_overlap_samples) < 8:
+                    text_overlap_samples.append(
+                        {
+                            "page": page_num,
+                            "overlap_bbox": {"x": ix0, "y": iy0, "w": iw, "h": ih},
+                            "a": {
+                                "index": a["index"],
+                                "command_index": a["command_index"],
+                                "top_role": a.get("top_role"),
+                                "text": a["text"][:80],
+                            },
+                            "b": {
+                                "index": b["index"],
+                                "command_index": b["command_index"],
+                                "top_role": b.get("top_role"),
+                                "text": b["text"][:80],
+                            },
+                        }
+                    )
+
+    return {
+        "render_time_trace_available": True,
+        "trace_pages_scanned": trace_pages_scanned,
+        "trace_blocks_scanned": trace_blocks_scanned,
+        "trace_bbox_missing_count": trace_bbox_missing_count,
+        "text_overlap_count": text_overlap_count,
+        "text_overlap_samples": text_overlap_samples,
+    }
+
+
 def validate_component_mount(
     *,
     engine: Any,
@@ -438,6 +694,7 @@ def validate_component_mount(
     fail_on_css_warnings: bool = False,
     fail_on_known_loss: bool = False,
     fail_on_html_asset_warning: bool = True,
+    fail_on_text_overlap: bool = True,
 ) -> dict[str, Any]:
     html = mount_component_html(
         node_or_component,
@@ -446,11 +703,28 @@ def validate_component_mount(
         margin=margin,
         title=title,
     )
-    pdf_bytes, glyph_report = engine.render_pdf_with_glyph_report(html, css)
+    render_time_trace = None
+    render_time_trace_error: str | None = None
+    combined_render = getattr(
+        engine,
+        "render_pdf_with_glyph_report_and_render_time_reading_order_trace",
+        None,
+    )
+    if callable(combined_render):
+        pdf_bytes, glyph_report, render_time_trace = combined_render(html, css)
+    else:
+        pdf_bytes, glyph_report = engine.render_pdf_with_glyph_report(html, css)
+        export_trace = getattr(engine, "export_render_time_reading_order_trace", None)
+        if callable(export_trace):
+            try:
+                render_time_trace = export_trace(html, css)
+            except Exception as exc:  # pragma: no cover - defensive native/runtime path
+                render_time_trace_error = f"{type(exc).__name__}: {exc}"
     glyph_list = list(glyph_report or [])
 
     debug_entries = _read_jsonl(debug_log) if debug_log else []
     signals = _collect_debug_signals(debug_entries)
+    trace_signals = _collect_render_trace_overlap_signals(render_time_trace)
     overflow_count = int(signals["overflow_count"])
     overflow_samples = list(signals["overflow_samples"])
     css_warning_count = int(signals["css_warning_count"])
@@ -459,6 +733,12 @@ def validate_component_mount(
     known_loss_samples = list(signals["known_loss_samples"])
     html_asset_warning_count = int(signals["html_asset_warning_count"])
     html_asset_warning_samples = list(signals["html_asset_warning_samples"])
+    text_overlap_count = int(trace_signals["text_overlap_count"])
+    text_overlap_samples = list(trace_signals["text_overlap_samples"])
+    render_time_trace_available = bool(trace_signals["render_time_trace_available"])
+    trace_pages_scanned = int(trace_signals["trace_pages_scanned"])
+    trace_blocks_scanned = int(trace_signals["trace_blocks_scanned"])
+    trace_bbox_missing_count = int(trace_signals["trace_bbox_missing_count"])
 
     failures: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
@@ -510,6 +790,23 @@ def validate_component_mount(
             failures.append(signal)
         else:
             warnings.append(signal)
+    if text_overlap_count > 0:
+        signal = {
+            "code": "TEXT_OVERLAP",
+            "count": text_overlap_count,
+            "samples": text_overlap_samples,
+        }
+        if fail_on_text_overlap:
+            failures.append(signal)
+        else:
+            warnings.append(signal)
+    if render_time_trace_error:
+        warnings.append(
+            {
+                "code": "RENDER_TIME_TRACE_ERROR",
+                "message": render_time_trace_error,
+            }
+        )
 
     return {
         "ok": not failures,
@@ -520,6 +817,12 @@ def validate_component_mount(
         "css_miss_count": css_warning_count,
         "known_loss_count": known_loss_count,
         "html_asset_warning_count": html_asset_warning_count,
+        "text_overlap_count": text_overlap_count,
+        "render_time_trace_available": render_time_trace_available,
+        "render_time_trace_pages_scanned": trace_pages_scanned,
+        "render_time_trace_blocks_scanned": trace_blocks_scanned,
+        "render_time_trace_bbox_missing_count": trace_bbox_missing_count,
+        "render_time_trace_error": render_time_trace_error,
         "debug_log": debug_log,
         "failures": failures,
         "warnings": warnings,

@@ -1216,6 +1216,10 @@ impl FullBleed {
         FullBleedBuilder::new()
     }
 
+    pub(crate) fn measure_text_width_for_trace(&self, font_name: &str, font_size: Pt, text: &str) -> Pt {
+        self.font_registry.measure_text_width(font_name, font_size, text)
+    }
+
     fn emit_debug_summary(&self, context: &str) {
         if let Some(logger) = self.debug.as_deref() {
             logger.emit_summary(context);
@@ -2475,25 +2479,40 @@ impl FullBleed {
         }
 
         if profile.eq_ignore_ascii_case("cav") || profile.eq_ignore_ascii_case("transactional") {
+            let body_text_l = facts.body_text.to_ascii_lowercase();
+            let sig_cue_present = body_text_l.contains("signature") || body_text_l.contains("signed");
             let sig_ok = facts.signature_semantic_count > 0;
+            let sig_na = !sig_ok && !sig_cue_present;
             Self::push_a11y_finding(
                 &mut findings,
                 "fb.a11y.signatures.text_semantics_present",
-                if sig_ok { "pass" } else { "fail" },
+                if sig_ok {
+                    "pass"
+                } else if sig_na {
+                    "not_applicable"
+                } else {
+                    "fail"
+                },
                 "medium",
                 "post-emit",
                 "fullbleed",
                 if sig_ok {
                     "Signature fields include text-first semantics.".to_string()
+                } else if sig_na {
+                    "No signature-bearing content cues detected; signature semantics check not applicable."
+                        .to_string()
                 } else {
                     "No text-first signature semantics detected.".to_string()
                 },
                 vec![A11yVerifierEvidence {
                     selector: None,
-                    values: vec![(
-                        "signature_semantic_count".to_string(),
-                        facts.signature_semantic_count.to_string(),
-                    )],
+                    values: vec![
+                        (
+                            "signature_semantic_count".to_string(),
+                            facts.signature_semantic_count.to_string(),
+                        ),
+                        ("signature_cue_text_present".to_string(), sig_cue_present.to_string()),
+                    ],
                 }],
             );
         }
@@ -3024,25 +3043,40 @@ impl FullBleed {
 
         let profile_l = profile.to_ascii_lowercase();
         if profile_l == "cav" || profile_l == "transactional" {
+            let body_text_l = facts.body_text.to_ascii_lowercase();
+            let sig_cue_present = body_text_l.contains("signature") || body_text_l.contains("signed");
             let sig_ok = facts.signature_semantic_count > 0;
+            let sig_na = !sig_ok && !sig_cue_present;
             Self::pmr_push_contract_audit(
                 &mut audits,
                 "pmr.signatures.text_semantics_present",
                 "machine",
-                if sig_ok { "pass" } else { "fail" },
-                true,
+                if sig_ok {
+                    "pass"
+                } else if sig_na {
+                    "not_applicable"
+                } else {
+                    "fail"
+                },
+                !sig_na,
                 if sig_ok {
                     "Text signature semantics detected.".to_string()
+                } else if sig_na {
+                    "No signature-bearing content cues detected; signature semantics check not applicable."
+                        .to_string()
                 } else {
                     "No text signature semantics detected.".to_string()
                 },
                 vec![PmrCoreEvidence {
                     selector: None,
                     diagnostic_ref: None,
-                    values: vec![(
-                        "signature_semantic_count".to_string(),
-                        facts.signature_semantic_count.to_string(),
-                    )],
+                    values: vec![
+                        (
+                            "signature_semantic_count".to_string(),
+                            facts.signature_semantic_count.to_string(),
+                        ),
+                        ("signature_cue_text_present".to_string(), sig_cue_present.to_string()),
+                    ],
                 }],
                 None,
             );
@@ -4147,6 +4181,41 @@ impl FullBleed {
     ) -> Result<(Vec<u8>, GlyphCoverageReport), FullBleedError> {
         let (bytes, _page_data, report) = self.render_with_page_data_and_glyph_report(html, css)?;
         Ok((bytes, report))
+    }
+
+    pub fn render_to_document_with_glyph_report(
+        &self,
+        html: &str,
+        css: &str,
+    ) -> Result<(Document, GlyphCoverageReport), FullBleedError> {
+        let context = self.build_render_context(css, Some(0));
+        let mut report = GlyphCoverageReport::default();
+        let (document, _page_data) = self.render_to_document_and_page_data_with_resolver_and_report(
+            html,
+            &context.page_templates,
+            &context.resolver,
+            Some(&mut report),
+        )?;
+        self.emit_debug_summary("render_to_document_with_glyph_report");
+        Ok((document, report))
+    }
+
+    pub fn render_with_glyph_report_and_document(
+        &self,
+        html: &str,
+        css: &str,
+    ) -> Result<(Vec<u8>, GlyphCoverageReport, Document), FullBleedError> {
+        let (document, report) = self.render_to_document_with_glyph_report(html, css)?;
+        let bytes = pdf::document_to_pdf_with_metrics_and_registry_with_logs(
+            &document,
+            None,
+            Some(self.font_registry.as_ref()),
+            &self.pdf_options,
+            self.debug.clone(),
+            self.perf.clone(),
+        )?;
+        self.emit_debug_summary("render_with_glyph_report_and_document");
+        Ok((bytes, report, document))
     }
 
     pub fn render_to_writer<W: std::io::Write>(
@@ -6561,6 +6630,50 @@ mod tests {
       <div data-fb="fb.feature.green=1"></div>
       <p>Page two marker</p>
     </section>
+  </body>
+</html>
+"#;
+        let css = "@page { size: letter; margin: 0.5in; }";
+
+        let mut spec = TemplateBindingSpec::default();
+        spec.default_template_id = Some("tpl-default".to_string());
+        spec.by_feature = std::collections::BTreeMap::from([
+            ("red".to_string(), "tpl-red".to_string()),
+            ("green".to_string(), "tpl-green".to_string()),
+        ]);
+
+        let engine = FullBleed::builder()
+            .template_binding_spec(spec)
+            .build()
+            .expect("engine");
+
+        let (_pdf, _page_data, bindings) = engine
+            .render_with_page_data_and_template_bindings(html, css)
+            .expect("render");
+        let bindings = bindings.expect("expected bindings");
+        assert_eq!(bindings.len(), 2, "expected two pages");
+        assert_eq!(bindings[0].template_id, "tpl-red");
+        assert_eq!(bindings[0].source, BindingSource::Feature);
+        assert_eq!(bindings[1].template_id, "tpl-green");
+        assert_eq!(bindings[1].source, BindingSource::Feature);
+    }
+
+    #[test]
+    fn template_binding_honors_page_break_inside_transparent_div_wrapper() {
+        let html = r#"
+<!doctype html>
+<html>
+  <body>
+    <div class="ui-stack">
+      <section>
+        <div data-fb="fb.feature.red=1"></div>
+        <p>Page one marker</p>
+      </section>
+      <section style="page-break-before: always;">
+        <div data-fb="fb.feature.green=1"></div>
+        <p>Page two marker</p>
+      </section>
+    </div>
   </body>
 </html>
 "#;

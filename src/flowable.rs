@@ -5585,14 +5585,40 @@ impl ContainerFlowable {
         let child_avail_height = fixed_content_height.unwrap_or(huge_pt());
         let mut content_height: Pt = Pt::ZERO;
         let mut child_sizes: Vec<Option<Size>> = Vec::with_capacity(self.children.len());
+        let mut in_flow_pagination: Vec<Pagination> = Vec::new();
         for child in &self.children {
             if child.out_of_flow() {
                 child_sizes.push(None);
                 continue;
             }
+            in_flow_pagination.push(child.pagination());
             let size = child.wrap(content_width, child_avail_height);
             content_height = content_height + size.height;
             child_sizes.push(Some(size));
+        }
+
+        if fixed_content_height.is_none() && !in_flow_pagination.is_empty() {
+            let mut forced_breaks = 0usize;
+            for (idx, pagination) in in_flow_pagination.iter().enumerate() {
+                if idx > 0 && matches!(pagination.break_before, BreakBefore::Page) {
+                    forced_breaks += 1;
+                }
+                if idx + 1 < in_flow_pagination.len()
+                    && matches!(pagination.break_after, BreakAfter::Page)
+                {
+                    forced_breaks += 1;
+                }
+            }
+            if forced_breaks > 0 {
+                let break_unit = if avail_height >= huge_pt() {
+                    Pt::from_f32(792.0)
+                } else {
+                    avail_height.max(Pt::from_f32(1.0))
+                };
+                for _ in 0..forced_breaks {
+                    content_height = content_height + break_unit;
+                }
+            }
         }
 
         let content_height = fixed_content_height.unwrap_or(content_height);

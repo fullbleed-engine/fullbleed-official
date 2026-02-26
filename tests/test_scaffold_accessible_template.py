@@ -23,6 +23,9 @@ def test_accessible_template_tree_contains_expected_files() -> None:
     assert "fullbleed.accessibility" in files["report.py"]
     assert "AccessibilityEngine" in files["report.py"]
     assert "render_bundle(" in files["report.py"]
+    assert "document_css_href" in files["report.py"]
+    assert "document_css_source_path" in files["report.py"]
+    assert "document_css_required" in files["report.py"]
     assert "accessibility_scaffold_a11y_verify_engine.json" in files["README.md"]
     assert "accessibility_scaffold_pmr_engine.json" in files["README.md"]
 

@@ -59,13 +59,41 @@ def _sha256_file(path: Path) -> str | None:
         return None
 
 
-def _inject_css_link(html_text: str, css_href: str | None) -> str:
-    if not css_href:
-        return html_text
+def _normalize_css_href(css_href: str | None) -> str | None:
+    if css_href is None:
+        return None
+    text = str(css_href).strip()
+    return text or None
+
+
+def _normalize_css_media(css_media: str | None) -> str | None:
+    if css_media is None:
+        return None
+    text = str(css_media).strip()
+    return text or None
+
+
+def _inject_css_link(
+    html_text: str,
+    css_href: str | None,
+    css_media: str | None = None,
+) -> tuple[str, bool, bool]:
+    href = _normalize_css_href(css_href)
+    if not href:
+        return html_text, False, False
     if "rel=\"stylesheet\"" in html_text or "rel='stylesheet'" in html_text:
-        return html_text
-    link = f'<link rel="stylesheet" href="{html_mod.escape(css_href, quote=True)}" />'
-    return html_text.replace("</head>", f"{link}</head>", 1) if "</head>" in html_text else html_text
+        return html_text, False, True
+    media_attr = ""
+    media = _normalize_css_media(css_media)
+    if media:
+        media_attr = f' media="{html_mod.escape(media, quote=True)}"'
+    link = (
+        f'<link rel="stylesheet" href="{html_mod.escape(href, quote=True)}"'
+        f"{media_attr} />"
+    )
+    if "</head>" in html_text:
+        return html_text.replace("</head>", f"{link}</head>", 1), True, False
+    return html_text, False, False
 
 
 def _pdf_scan(pdf_bytes: bytes) -> dict[str, Any]:
@@ -149,6 +177,10 @@ class AccessibilityEngine:
         page_size: str = "LETTER",
         document_lang: str | None = None,
         document_title: str | None = None,
+        document_css_href: str | None = None,
+        document_css_source_path: str | None = None,
+        document_css_media: str | None = "all",
+        document_css_required: bool | None = None,
         strict: bool = False,
         emit_reports_by_default: bool = True,
         render_previews_by_default: bool = True,
@@ -167,12 +199,35 @@ class AccessibilityEngine:
         self._strict = bool(strict)
         self._emit_reports_by_default = bool(emit_reports_by_default)
         self._render_previews_by_default = bool(render_previews_by_default)
+        self._document_css_href = _normalize_css_href(document_css_href)
+        self._document_css_source_path = _normalize_css_href(document_css_source_path)
+        self._document_css_media = _normalize_css_media(document_css_media)
+        self._document_css_required = (
+            bool(document_css_required) if document_css_required is not None else self._strict
+        )
+        self._last_css_link_result: dict[str, Any] = {
+            "css_link_injected": False,
+            "css_link_preexisting": False,
+            "css_link_href": None,
+            "css_link_media": None,
+        }
         self._engine = _fullbleed.PdfEngine(
             pdf_profile="pdfua",
             document_lang=document_lang,
             document_title=document_title,
             **engine_kwargs,
         )
+        for attr, value in (
+            ("document_css_href", self._document_css_href),
+            ("document_css_source_path", self._document_css_source_path),
+            ("document_css_media", self._document_css_media),
+            ("document_css_required", self._document_css_required),
+        ):
+            if hasattr(self._engine, attr):
+                try:
+                    setattr(self._engine, attr, value)
+                except Exception:
+                    pass
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._engine, name)
@@ -197,10 +252,70 @@ class AccessibilityEngine:
     def document_title(self, value: str | None) -> None:
         self._engine.document_title = value
 
-    def document_metadata(self) -> dict[str, str | None]:
+    @property
+    def document_css_href(self) -> str | None:
+        if hasattr(self._engine, "document_css_href"):
+            return _normalize_css_href(getattr(self._engine, "document_css_href", None))
+        return _normalize_css_href(self._document_css_href)
+
+    @document_css_href.setter
+    def document_css_href(self, value: str | None) -> None:
+        self._document_css_href = _normalize_css_href(value)
+        if hasattr(self._engine, "document_css_href"):
+            self._engine.document_css_href = self._document_css_href
+
+    @property
+    def document_css_source_path(self) -> str | None:
+        if hasattr(self._engine, "document_css_source_path"):
+            return _normalize_css_href(getattr(self._engine, "document_css_source_path", None))
+        return _normalize_css_href(self._document_css_source_path)
+
+    @document_css_source_path.setter
+    def document_css_source_path(self, value: str | None) -> None:
+        self._document_css_source_path = _normalize_css_href(value)
+        if hasattr(self._engine, "document_css_source_path"):
+            self._engine.document_css_source_path = self._document_css_source_path
+
+    @property
+    def document_css_media(self) -> str | None:
+        if hasattr(self._engine, "document_css_media"):
+            return _normalize_css_media(getattr(self._engine, "document_css_media", None))
+        return _normalize_css_media(self._document_css_media)
+
+    @document_css_media.setter
+    def document_css_media(self, value: str | None) -> None:
+        self._document_css_media = _normalize_css_media(value)
+        if hasattr(self._engine, "document_css_media"):
+            self._engine.document_css_media = self._document_css_media
+
+    @property
+    def document_css_required(self) -> bool:
+        if hasattr(self._engine, "document_css_required"):
+            try:
+                return bool(getattr(self._engine, "document_css_required"))
+            except Exception:
+                return bool(self._document_css_required)
+        return bool(self._document_css_required)
+
+    @document_css_required.setter
+    def document_css_required(self, value: bool) -> None:
+        self._document_css_required = bool(value)
+        if hasattr(self._engine, "document_css_required"):
+            self._engine.document_css_required = bool(value)
+
+    def document_metadata(self) -> dict[str, Any]:
         if hasattr(self._engine, "document_metadata"):
-            return dict(self._engine.document_metadata())
-        return {"document_lang": self.document_lang, "document_title": self.document_title}
+            meta: dict[str, Any] = dict(self._engine.document_metadata())
+        else:
+            meta = {
+                "document_lang": self.document_lang,
+                "document_title": self.document_title,
+            }
+        meta["document_css_href"] = self.document_css_href
+        meta["document_css_source_path"] = self.document_css_source_path
+        meta["document_css_media"] = self.document_css_media
+        meta["document_css_required"] = bool(self.document_css_required)
+        return meta
 
     def _metadata_warnings_or_raise(self) -> list[str]:
         meta = self.document_metadata()
@@ -209,31 +324,157 @@ class AccessibilityEngine:
             for key in ("document_lang", "document_title")
             if not str(meta.get(key) or "").strip()
         ]
-        if not missing:
-            return []
-        if self._strict:
-            raise ValueError(f"AccessibilityEngine strict mode requires {', '.join(missing)}")
-        return [f"AccessibilityEngine metadata incomplete; engine defaults may apply for {', '.join(missing)}"]
+        warnings: list[str] = []
+        if missing:
+            warnings.append(
+                "AccessibilityEngine metadata incomplete; engine defaults may apply for "
+                + ", ".join(missing)
+            )
+        if bool(meta.get("document_css_required")) and not _normalize_css_href(
+            meta.get("document_css_href")
+        ):
+            warnings.append(
+                "CSS_METADATA_MISSING: document_css_required=True but document_css_href is missing."
+            )
+        source_path = _normalize_css_href(meta.get("document_css_source_path"))
+        if source_path and not Path(source_path).exists():
+            warnings.append(
+                "CSS_METADATA_SOURCE_UNREADABLE: document_css_source_path does not exist."
+            )
+        if warnings and self._strict:
+            raise ValueError("; ".join(warnings))
+        return warnings
 
-    def emit_html(self, body_html: str, out_html_path: str, *, css_href: str | None = None) -> str:
+    def _effective_css_href(
+        self,
+        *,
+        css_href: str | None = None,
+        out_css_path: str | None = None,
+    ) -> str | None:
+        explicit = _normalize_css_href(css_href)
+        if explicit:
+            return explicit
+        from_meta = _normalize_css_href(self.document_css_href)
+        if from_meta:
+            return from_meta
+        if not out_css_path:
+            return None
+        basename = Path(out_css_path).name.strip()
+        return basename or None
+
+    def _record_css_link_result(
+        self,
+        *,
+        css_link_injected: bool,
+        css_link_preexisting: bool,
+        css_link_href: str | None,
+        css_link_media: str | None,
+    ) -> None:
+        self._last_css_link_result = {
+            "css_link_injected": bool(css_link_injected),
+            "css_link_preexisting": bool(css_link_preexisting),
+            "css_link_href": _normalize_css_href(css_link_href),
+            "css_link_media": _normalize_css_media(css_link_media),
+        }
+
+    def emit_html(
+        self,
+        body_html: str,
+        out_html_path: str,
+        *,
+        css_href: str | None = None,
+        css_media: str | None = None,
+    ) -> str:
         self._metadata_warnings_or_raise()
+        effective_css_href = self._effective_css_href(css_href=css_href)
+        if self.document_css_required and not _normalize_css_href(self.document_css_href):
+            raise ValueError(
+                "CSS_METADATA_MISSING: document_css_required=True but document_css_href metadata is missing."
+            )
         html_text = str(self._engine.emit_html(body_html, out_html_path, True))
-        patched = _inject_css_link(html_text, css_href)
+        effective_css_media = _normalize_css_media(css_media) or self.document_css_media
+        patched, injected, preexisting = _inject_css_link(
+            html_text,
+            effective_css_href,
+            effective_css_media,
+        )
         if patched != html_text:
             Path(out_html_path).write_text(patched, encoding="utf-8")
             html_text = patched
+        self._record_css_link_result(
+            css_link_injected=injected,
+            css_link_preexisting=preexisting,
+            css_link_href=effective_css_href,
+            css_link_media=effective_css_media,
+        )
         return html_text
 
-    def emit_css(self, css_text: str, out_css_path: str) -> str:
-        return str(self._engine.emit_css(css_text, out_css_path))
+    def emit_css(self, css_text: str | None, out_css_path: str | None = None) -> str:
+        target = out_css_path or self.document_css_source_path
+        if not target:
+            raise ValueError(
+                "emit_css requires out_css_path or document_css_source_path metadata."
+            )
+        if css_text is None:
+            source_path = self.document_css_source_path
+            if not source_path:
+                raise ValueError(
+                    "emit_css(css_text=None) requires document_css_source_path metadata."
+                )
+            css_text = Path(source_path).read_text(encoding="utf-8")
+        return str(self._engine.emit_css(str(css_text), target))
 
-    def emit_artifacts(self, body_html: str, css_text: str, out_html_path: str, out_css_path: str) -> dict[str, str]:
+    def emit_artifacts(
+        self,
+        body_html: str,
+        css_text: str | None,
+        out_html_path: str,
+        out_css_path: str,
+        *,
+        css_href: str | None = None,
+        css_media: str | None = None,
+    ) -> dict[str, Any]:
         self._metadata_warnings_or_raise()
-        out = dict(self._engine.emit_artifacts(body_html, css_text, out_html_path, out_css_path, True))
-        patched = _inject_css_link(str(out.get("html", "")), Path(out_css_path).name)
+        if css_text is None:
+            source_path = self.document_css_source_path
+            if not source_path:
+                raise ValueError(
+                    "emit_artifacts(css_text=None) requires document_css_source_path metadata."
+                )
+            css_text = Path(source_path).read_text(encoding="utf-8")
+        effective_css_href = self._effective_css_href(css_href=css_href, out_css_path=out_css_path)
+        if self.document_css_required and not _normalize_css_href(self.document_css_href):
+            raise ValueError(
+                "CSS_METADATA_MISSING: document_css_required=True but document_css_href metadata is missing."
+            )
+        out = dict(
+            self._engine.emit_artifacts(
+                body_html,
+                str(css_text),
+                out_html_path,
+                out_css_path,
+                True,
+            )
+        )
+        effective_css_media = _normalize_css_media(css_media) or self.document_css_media
+        patched, injected, preexisting = _inject_css_link(
+            str(out.get("html", "")),
+            effective_css_href,
+            effective_css_media,
+        )
         if patched != out.get("html"):
             Path(out_html_path).write_text(patched, encoding="utf-8")
             out["html"] = patched
+        out["css_link_injected"] = bool(injected)
+        out["css_link_preexisting"] = bool(preexisting)
+        out["css_link_href"] = effective_css_href
+        out["css_link_media"] = effective_css_media
+        self._record_css_link_result(
+            css_link_injected=injected,
+            css_link_preexisting=preexisting,
+            css_link_href=effective_css_href,
+            css_link_media=effective_css_media,
+        )
         return out
 
     def verify_accessibility_artifacts(
@@ -804,6 +1045,10 @@ class AccessibilityEngine:
         emitted = self.emit_artifacts(body_html, css_text, str(html_path), str(css_path))
         html_text = str(emitted.get("html", ""))
         css_out = str(emitted.get("css", css_text))
+        css_link_href = _normalize_css_href(emitted.get("css_link_href"))
+        css_link_media = _normalize_css_media(emitted.get("css_link_media"))
+        css_link_injected = bool(emitted.get("css_link_injected", False))
+        css_link_preexisting = bool(emitted.get("css_link_preexisting", False))
         # Render from the authored fragment/body + CSS, not the emitted HTML artifact, so the
         # injected <link rel="stylesheet"> in the artifact does not create engine asset warnings.
         pdf_bytes = int(self._engine.render_pdf_to_file(body_html, css_out, str(pdf_path)))
@@ -905,6 +1150,12 @@ class AccessibilityEngine:
             "engine_pdf_profile_effective": "tagged",
             "document_lang": self.document_metadata().get("document_lang"),
             "document_title": self.document_metadata().get("document_title"),
+            "document_css_href": self.document_metadata().get("document_css_href"),
+            "document_css_source_path": self.document_metadata().get("document_css_source_path"),
+            "document_css_media": self.document_metadata().get("document_css_media"),
+            "document_css_required": bool(
+                self.document_metadata().get("document_css_required")
+            ),
             "profile": profile,
             "a11y_mode": a11y_mode,
             "ok": ok,
@@ -927,6 +1178,10 @@ class AccessibilityEngine:
             "engine_pmr_ok": pmr_ok if pmr_report else None,
             "engine_pmr_score": ((pmr_report or {}).get("rank") or {}).get("score"),
             "pdf_ua_seed_ok": seed_ok if pdf_ua_seed_report else None,
+            "css_link_href": css_link_href,
+            "css_link_media": css_link_media,
+            "css_link_injected": css_link_injected,
+            "css_link_preexisting": css_link_preexisting,
             "audit_contract_fingerprint": meta.get("contract_fingerprint"),
             "audit_registry_hash": meta.get("audit_registry_hash"),
             "wcag20aa_registry_hash": meta.get("wcag20aa_registry_hash"),
@@ -938,6 +1193,8 @@ class AccessibilityEngine:
                 "source_page_count": _coerce_int((source_analysis or {}).get("page_count")),
                 "overflow_count": _coerce_int((component_validation or {}).get("overflow_count")),
                 "known_loss_count": _coerce_int((component_validation or {}).get("known_loss_count")),
+                "css_link_injected": css_link_injected,
+                "css_link_preexisting": css_link_preexisting,
             },
             "warnings": warnings,
         }
