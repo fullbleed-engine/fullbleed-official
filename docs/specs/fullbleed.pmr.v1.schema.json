@@ -398,6 +398,7 @@
         "category_counts",
         "class_counts",
         "verdict_counts",
+        "signal_counts",
         "correlation_index"
       ],
       "properties": {
@@ -434,6 +435,9 @@
           "$ref": "#/$defs/countMap"
         },
         "verdict_counts": {
+          "$ref": "#/$defs/countMap"
+        },
+        "signal_counts": {
           "$ref": "#/$defs/countMap"
         },
         "correlation_index": {

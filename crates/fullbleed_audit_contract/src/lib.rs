@@ -77,15 +77,15 @@ pub const PMR_AUDITS_V1: [PmrAuditDef; 13] = [
 // from frozen spec artifacts at compile time; runtime never reads from repo files.
 const AUDIT_REGISTRY_V1_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/specs/fullbleed.audit_registry.v1.yaml"
+    "/specs/fullbleed.audit_registry.v1.yaml"
 ));
 const WCAG20AA_REGISTRY_V1_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/specs/wcag20aa_registry.v1.yaml"
+    "/specs/wcag20aa_registry.v1.yaml"
 ));
 const SECTION508_HTML_REGISTRY_V1_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/specs/section508_html_registry.v1.yaml"
+    "/specs/section508_html_registry.v1.yaml"
 ));
 
 #[derive(Debug, Clone)]
@@ -179,8 +179,19 @@ static AUDIT_REGISTRY_HASH: OnceLock<String> = OnceLock::new();
 static WCAG20AA_REGISTRY_HASH: OnceLock<String> = OnceLock::new();
 static SECTION508_HTML_REGISTRY_HASH: OnceLock<String> = OnceLock::new();
 static CONTRACT_FINGERPRINT: OnceLock<String> = OnceLock::new();
+static AUDIT_REGISTRY_JSON_VALUE: OnceLock<Value> = OnceLock::new();
 static WCAG20AA_REGISTRY_JSON_VALUE: OnceLock<Value> = OnceLock::new();
 static SECTION508_HTML_REGISTRY_JSON_VALUE: OnceLock<Value> = OnceLock::new();
+static A11Y_DEFAULT_GATE_LEVELS: OnceLock<BTreeMap<String, String>> = OnceLock::new();
+static A11Y_PROFILE_GATE_OVERRIDES: OnceLock<BTreeMap<String, BTreeMap<String, String>>> =
+    OnceLock::new();
+
+fn audit_registry_value() -> &'static Value {
+    AUDIT_REGISTRY_JSON_VALUE.get_or_init(|| {
+        serde_json::from_str(AUDIT_REGISTRY_V1_JSON)
+            .expect("embedded audit registry must be valid JSON-formatted YAML")
+    })
+}
 
 fn wcag20aa_registry_value() -> &'static Value {
     WCAG20AA_REGISTRY_JSON_VALUE.get_or_init(|| {
@@ -637,6 +648,74 @@ pub fn pmr_effective_gate_level(profile: &str, audit_id: &str) -> &'static str {
     pmr_profile_gate_override(profile, audit_id).unwrap_or_else(|| pmr_default_gate_level(audit_id))
 }
 
+fn a11y_default_gate_levels() -> &'static BTreeMap<String, String> {
+    A11Y_DEFAULT_GATE_LEVELS.get_or_init(|| {
+        let mut out: BTreeMap<String, String> = BTreeMap::new();
+        if let Some(entries) = audit_registry_value().get("entries").and_then(Value::as_array) {
+            for entry in entries {
+                let Some(id) = entry.get("id").and_then(Value::as_str) else {
+                    continue;
+                };
+                if !id.starts_with("fb.a11y.") {
+                    continue;
+                }
+                let level = entry
+                    .get("default_gate_level")
+                    .and_then(Value::as_str)
+                    .unwrap_or("warn")
+                    .to_ascii_lowercase();
+                out.insert(id.to_string(), level);
+            }
+        }
+        out
+    })
+}
+
+fn a11y_profile_gate_overrides() -> &'static BTreeMap<String, BTreeMap<String, String>> {
+    A11Y_PROFILE_GATE_OVERRIDES.get_or_init(|| {
+        let mut out: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+        if let Some(profiles) = audit_registry_value().get("profiles").and_then(Value::as_object) {
+            for (profile_name, profile_data) in profiles {
+                let mut per_profile: BTreeMap<String, String> = BTreeMap::new();
+                if let Some(overrides) = profile_data.get("overrides").and_then(Value::as_array) {
+                    for item in overrides {
+                        let Some(id) = item.get("id").and_then(Value::as_str) else {
+                            continue;
+                        };
+                        if !id.starts_with("fb.a11y.") {
+                            continue;
+                        }
+                        let Some(level) = item.get("level").and_then(Value::as_str) else {
+                            continue;
+                        };
+                        per_profile.insert(id.to_string(), level.to_ascii_lowercase());
+                    }
+                }
+                out.insert(profile_name.to_ascii_lowercase(), per_profile);
+            }
+        }
+        out
+    })
+}
+
+pub fn a11y_default_gate_level(rule_id: &str) -> String {
+    a11y_default_gate_levels()
+        .get(rule_id)
+        .cloned()
+        .unwrap_or_else(|| "warn".to_string())
+}
+
+pub fn a11y_profile_gate_override(profile: &str, rule_id: &str) -> Option<String> {
+    a11y_profile_gate_overrides()
+        .get(&profile.to_ascii_lowercase())
+        .and_then(|levels| levels.get(rule_id))
+        .cloned()
+}
+
+pub fn a11y_effective_gate_level(profile: &str, rule_id: &str) -> String {
+    a11y_profile_gate_override(profile, rule_id).unwrap_or_else(|| a11y_default_gate_level(rule_id))
+}
+
 pub fn metadata() -> AuditContractMetadata {
     AuditContractMetadata {
         contract_id: CONTRACT_ID,
@@ -703,6 +782,89 @@ mod tests {
         assert_eq!(
             pmr_effective_gate_level("strict", "pmr.layout.overflow_none"),
             "error"
+        );
+    }
+
+    #[test]
+    fn a11y_gate_levels_match_embedded_audit_registry() {
+        let root = parse_embedded_audit_registry();
+        let entries = root
+            .get("entries")
+            .and_then(Value::as_array)
+            .expect("entries array");
+        let profiles = root
+            .get("profiles")
+            .and_then(Value::as_object)
+            .expect("profiles object");
+
+        let mut a11y_defaults: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::new();
+        for entry in entries {
+            let Some(id) = entry.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            if !id.starts_with("fb.a11y.") {
+                continue;
+            }
+            let level = entry
+                .get("default_gate_level")
+                .and_then(Value::as_str)
+                .expect("a11y default_gate_level")
+                .to_ascii_lowercase();
+            assert_eq!(
+                a11y_default_gate_level(id),
+                level,
+                "a11y default gate level drift for {id}"
+            );
+            a11y_defaults.insert(id.to_string(), level);
+        }
+        assert!(!a11y_defaults.is_empty(), "expected non-empty a11y rule set");
+
+        for (profile_name, profile_val) in profiles {
+            let mut expected_overrides: std::collections::BTreeMap<String, String> =
+                std::collections::BTreeMap::new();
+            if let Some(overrides) = profile_val.get("overrides").and_then(Value::as_array) {
+                for item in overrides {
+                    let Some(id) = item.get("id").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    if !id.starts_with("fb.a11y.") {
+                        continue;
+                    }
+                    let level = item
+                        .get("level")
+                        .and_then(Value::as_str)
+                        .expect("a11y override level")
+                        .to_ascii_lowercase();
+                    assert_eq!(
+                        a11y_profile_gate_override(profile_name, id),
+                        Some(level.clone()),
+                        "a11y profile override drift for profile={profile_name}, rule={id}"
+                    );
+                    expected_overrides.insert(id.to_string(), level);
+                }
+            }
+            for (rule_id, default_level) in &a11y_defaults {
+                let expected = expected_overrides.get(rule_id).unwrap_or(default_level);
+                let actual = a11y_effective_gate_level(profile_name, rule_id);
+                assert_eq!(
+                    actual, *expected,
+                    "effective a11y gate level drift for profile={profile_name}, rule={rule_id}"
+                );
+            }
+        }
+
+        assert_eq!(
+            a11y_effective_gate_level("strict", "fb.a11y.signatures.text_semantics_present"),
+            "warn"
+        );
+        assert_eq!(
+            a11y_effective_gate_level("cav", "fb.a11y.cav.document_only_content"),
+            "error"
+        );
+        assert_eq!(
+            a11y_default_gate_level("fb.a11y.unknown_rule"),
+            "warn".to_string()
         );
     }
 

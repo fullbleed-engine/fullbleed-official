@@ -4,10 +4,10 @@ use crate::assets::is_supported_font_path;
 use crate::jit::Transform;
 use crate::{
     A11yVerifierCoreReport, A11yVerifierEvidence, A11yVerifierFinding, Asset, AssetBundle,
-    AssetKind, Color, ColorSpace, FullBleed, FullBleedBuilder, FullBleedError, GlyphCoverageReport,
-    JitMode, LayoutStrategy, Margins, OutputIntent, PageDataContext, PageDataValue, PdfProfile,
-    PdfVersion, PmrCoreAudit, PmrCoreContext, PmrCoreEvidence, PmrCoreReport, Pt, Size,
-    WatermarkLayer, WatermarkSemantics, WatermarkSpec, Command, Document,
+    AssetKind, Color, ColorSpace, Command, Document, FullBleed, FullBleedBuilder, FullBleedError,
+    GlyphCoverageReport, JitMode, LayoutStrategy, Margins, OutputIntent, PageDataContext,
+    PageDataValue, PdfProfile, PdfVersion, PmrCoreAudit, PmrCoreContext, PmrCoreEvidence,
+    PmrCoreReport, Pt, Size, WatermarkLayer, WatermarkSemantics, WatermarkSpec,
     composition_compatibility_issues, inspect_pdf_bytes, inspect_pdf_path,
     require_pdf_composition_compatibility,
 };
@@ -467,7 +467,10 @@ fn extract_pdf_page_texts(py: Python<'_>, pdf_path: &str) -> PyResult<PyObject> 
     Ok(out.to_object(py))
 }
 
-fn resolve_lopdf_obj<'a>(doc: &'a LoDocument, mut obj: &'a LoObject) -> Result<&'a LoObject, lopdf::Error> {
+fn resolve_lopdf_obj<'a>(
+    doc: &'a LoDocument,
+    mut obj: &'a LoObject,
+) -> Result<&'a LoObject, lopdf::Error> {
     loop {
         match obj {
             LoObject::Reference(id) => {
@@ -478,7 +481,9 @@ fn resolve_lopdf_obj<'a>(doc: &'a LoDocument, mut obj: &'a LoObject) -> Result<&
     }
 }
 
-fn read_pdf_catalog_flags(path: &Path) -> Result<(LoDocument, bool, bool, bool, bool, bool, usize), lopdf::Error> {
+fn read_pdf_catalog_flags(
+    path: &Path,
+) -> Result<(LoDocument, bool, bool, bool, bool, bool, usize), lopdf::Error> {
     let doc = LoDocument::load(path)?;
     let page_count = doc.get_pages().len();
     let mut struct_tree_root_present = false;
@@ -534,10 +539,13 @@ fn export_pdf_reading_order_trace(py: Python<'_>, pdf_path: &str) -> PyResult<Py
     out.set_item("schema_version", 1)?;
     out.set_item("seed_only", true)?;
     out.set_item("pdf_path", pdf_path)?;
-    out.set_item("generated_at_unix_ms", (std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()) as u64)?;
+    out.set_item(
+        "generated_at_unix_ms",
+        (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()) as u64,
+    )?;
 
     let warnings = PyList::empty_bound(py);
     let pages_out = PyList::empty_bound(py);
@@ -620,13 +628,17 @@ fn export_pdf_structure_trace(py: Python<'_>, pdf_path: &str) -> PyResult<PyObje
     out.set_item("seed_only", true)?;
     out.set_item("pdf_path", pdf_path)?;
     out.set_item("extractor", "lopdf")?;
-    out.set_item("generated_at_unix_ms", (std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()) as u64)?;
+    out.set_item(
+        "generated_at_unix_ms",
+        (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()) as u64,
+    )?;
     let warnings = PyList::empty_bound(py);
 
-    let bytes = std::fs::read(path).map_err(|e| PyValueError::new_err(format!("failed to read pdf: {e}")))?;
+    let bytes = std::fs::read(path)
+        .map_err(|e| PyValueError::new_err(format!("failed to read pdf: {e}")))?;
     let token_counts = PyDict::new_bound(py);
     for token in [
         "/StructTreeRoot",
@@ -642,10 +654,24 @@ fn export_pdf_structure_trace(py: Python<'_>, pdf_path: &str) -> PyResult<PyObje
         "/TD",
         "/TR",
     ] {
-        token_counts.set_item(token.trim_start_matches('/'), bytes.windows(token.len()).filter(|w| *w == token.as_bytes()).count())?;
+        token_counts.set_item(
+            token.trim_start_matches('/'),
+            bytes
+                .windows(token.len())
+                .filter(|w| *w == token.as_bytes())
+                .count(),
+        )?;
     }
     match read_pdf_catalog_flags(path) {
-        Ok((_doc, struct_tree_root_present, mark_info_present, marked_true_present, lang_token_present, title_token_present, _page_count)) => {
+        Ok((
+            _doc,
+            struct_tree_root_present,
+            mark_info_present,
+            marked_true_present,
+            lang_token_present,
+            title_token_present,
+            _page_count,
+        )) => {
             let summary = PyDict::new_bound(py);
             summary.set_item("bytes_len", bytes.len())?;
             summary.set_item("struct_tree_root_present", struct_tree_root_present)?;
@@ -719,7 +745,13 @@ fn verify_pdf_ua_seed(py: Python<'_>, pdf_path: &str, mode: &str) -> PyResult<Py
     let checks = PyList::empty_bound(py);
     let mut critical_fail_count = 0usize;
     let mut nonpass_count = 0usize;
-    let mut push_check = |id: &str, verdict: &str, severity: &str, critical: bool, message: String, evidence: Option<Bound<'_, PyDict>>| -> PyResult<()> {
+    let mut push_check = |id: &str,
+                          verdict: &str,
+                          severity: &str,
+                          critical: bool,
+                          message: String,
+                          evidence: Option<Bound<'_, PyDict>>|
+     -> PyResult<()> {
         let d = PyDict::new_bound(py);
         d.set_item("id", id)?;
         d.set_item("verdict", verdict)?;
@@ -738,20 +770,88 @@ fn verify_pdf_ua_seed(py: Python<'_>, pdf_path: &str, mode: &str) -> PyResult<Py
         checks.append(d)?;
         Ok(())
     };
-    push_check("pdf.mark_info.present", if mark_info_present { "pass" } else { "fail" }, "error", true, if mark_info_present { "PDF MarkInfo token present".into() } else { "PDF MarkInfo token not found".into() }, None)?;
-    push_check("pdf.mark_info.marked_true", if marked_true_present { "pass" } else { "fail" }, "error", true, if marked_true_present { "PDF /Marked true present".into() } else { "PDF /Marked true not found".into() }, None)?;
-    push_check("pdf.structure_root.present", if struct_tree_root_present { "pass" } else { "fail" }, "error", true, if struct_tree_root_present { "PDF StructTreeRoot present".into() } else { "PDF StructTreeRoot not found".into() }, None)?;
-    push_check("pdf.catalog.lang.present_seed", if lang_token_present { "pass" } else { "warn" }, "warn", false, if lang_token_present { "PDF /Lang present".into() } else { "PDF /Lang not found".into() }, None)?;
-    push_check("pdf.metadata.title.present_seed", if title_token_present { "pass" } else { "warn" }, "warn", false, if title_token_present { "PDF title metadata token present".into() } else { "PDF title metadata token not found".into() }, None)?;
+    push_check(
+        "pdf.mark_info.present",
+        if mark_info_present { "pass" } else { "fail" },
+        "error",
+        true,
+        if mark_info_present {
+            "PDF MarkInfo token present".into()
+        } else {
+            "PDF MarkInfo token not found".into()
+        },
+        None,
+    )?;
+    push_check(
+        "pdf.mark_info.marked_true",
+        if marked_true_present { "pass" } else { "fail" },
+        "error",
+        true,
+        if marked_true_present {
+            "PDF /Marked true present".into()
+        } else {
+            "PDF /Marked true not found".into()
+        },
+        None,
+    )?;
+    push_check(
+        "pdf.structure_root.present",
+        if struct_tree_root_present {
+            "pass"
+        } else {
+            "fail"
+        },
+        "error",
+        true,
+        if struct_tree_root_present {
+            "PDF StructTreeRoot present".into()
+        } else {
+            "PDF StructTreeRoot not found".into()
+        },
+        None,
+    )?;
+    push_check(
+        "pdf.catalog.lang.present_seed",
+        if lang_token_present { "pass" } else { "warn" },
+        "warn",
+        false,
+        if lang_token_present {
+            "PDF /Lang present".into()
+        } else {
+            "PDF /Lang not found".into()
+        },
+        None,
+    )?;
+    push_check(
+        "pdf.metadata.title.present_seed",
+        if title_token_present { "pass" } else { "warn" },
+        "warn",
+        false,
+        if title_token_present {
+            "PDF title metadata token present".into()
+        } else {
+            "PDF title metadata token not found".into()
+        },
+        None,
+    )?;
     let ro_ev = PyDict::new_bound(py);
     ro_ev.set_item("extractor", reading_dict.get_item("extractor")?)?;
     ro_ev.set_item("total_blocks", total_blocks)?;
     push_check(
         "pdf.trace.reading_order.emitted",
-        if total_blocks > 0 { "pass" } else { "manual_needed" },
+        if total_blocks > 0 {
+            "pass"
+        } else {
+            "manual_needed"
+        },
         "warn",
         false,
-        if total_blocks > 0 { "Reading-order trace contains extractable text chunks".into() } else { "Reading-order trace emitted but no text chunks extracted; manual verification required".into() },
+        if total_blocks > 0 {
+            "Reading-order trace contains extractable text chunks".into()
+        } else {
+            "Reading-order trace emitted but no text chunks extracted; manual verification required"
+                .into()
+        },
         Some(ro_ev),
     )?;
     let st_ev = PyDict::new_bound(py);
@@ -760,10 +860,18 @@ fn verify_pdf_ua_seed(py: Python<'_>, pdf_path: &str, mode: &str) -> PyResult<Py
     st_ev.set_item("marked_true_present", marked_true_present)?;
     push_check(
         "pdf.trace.structure.emitted",
-        if struct_tree_root_present { "pass" } else { "manual_needed" },
+        if struct_tree_root_present {
+            "pass"
+        } else {
+            "manual_needed"
+        },
         "warn",
         false,
-        if struct_tree_root_present { "Structure trace indicates tagged structure".into() } else { "Structure trace emitted but tagged structure not detected; manual verification required".into() },
+        if struct_tree_root_present {
+            "Structure trace indicates tagged structure".into()
+        } else {
+            "Structure trace emitted but tagged structure not detected; manual verification required".into()
+        },
         Some(st_ev),
     )?;
 
@@ -791,15 +899,21 @@ fn verify_pdf_ua_seed(py: Python<'_>, pdf_path: &str, mode: &str) -> PyResult<Py
         }
     }
     out.set_item("warnings", warnings)?;
-    out.set_item("generated_at_unix_ms", (std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()) as u64)?;
+    out.set_item(
+        "generated_at_unix_ms",
+        (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()) as u64,
+    )?;
     let meta = audit_contract::metadata();
     let tooling = PyDict::new_bound(py);
     tooling.set_item("audit_contract_id", meta.contract_id)?;
     tooling.set_item("audit_contract_version", meta.contract_version)?;
-    tooling.set_item("audit_contract_fingerprint", meta.contract_fingerprint_sha256)?;
+    tooling.set_item(
+        "audit_contract_fingerprint",
+        meta.contract_fingerprint_sha256,
+    )?;
     out.set_item("tooling", tooling)?;
     Ok(out.to_object(py))
 }
@@ -1688,10 +1802,9 @@ fn build_render_time_reading_order_trace_py(
                     state = state_stack.pop().unwrap_or_else(TraceTextState::new);
                 }
                 Command::Translate(dx, dy) => {
-                    state.transform =
-                        state
-                            .transform
-                            .mul(Transform::translate(dx.to_f32(), dy.to_f32()));
+                    state.transform = state
+                        .transform
+                        .mul(Transform::translate(dx.to_f32(), dy.to_f32()));
                 }
                 Command::Scale(sx, sy) => {
                     state.transform = state.transform.mul(Transform::scale(*sx, *sy));
@@ -1732,7 +1845,8 @@ fn build_render_time_reading_order_trace_py(
                         page_artifact_excluded = page_artifact_excluded.saturating_add(1);
                         continue;
                     }
-                    let (bx0, by0, bx1, by1) = estimate_trace_text_bbox(engine, &state, *x, *y, text);
+                    let (bx0, by0, bx1, by1) =
+                        estimate_trace_text_bbox(engine, &state, *x, *y, text);
                     let row = PyDict::new_bound(py);
                     row.set_item("index", block_count)?;
                     row.set_item("command_index", cmd_index)?;
@@ -1763,7 +1877,8 @@ fn build_render_time_reading_order_trace_py(
                         page_artifact_excluded = page_artifact_excluded.saturating_add(1);
                         continue;
                     }
-                    let (bx0, by0, bx1, by1) = estimate_trace_text_bbox(engine, &state, *x, *y, text);
+                    let (bx0, by0, bx1, by1) =
+                        estimate_trace_text_bbox(engine, &state, *x, *y, text);
                     let row = PyDict::new_bound(py);
                     row.set_item("index", block_count)?;
                     row.set_item("command_index", cmd_index)?;
@@ -1797,7 +1912,8 @@ fn build_render_time_reading_order_trace_py(
         if block_count > 0 {
             non_empty_pages = non_empty_pages.saturating_add(1);
         }
-        artifact_text_blocks_excluded = artifact_text_blocks_excluded.saturating_add(page_artifact_excluded);
+        artifact_text_blocks_excluded =
+            artifact_text_blocks_excluded.saturating_add(page_artifact_excluded);
         draw_form_count_total = draw_form_count_total.saturating_add(page_draw_form_count);
         define_form_count_total = define_form_count_total.saturating_add(page_define_form_count);
 
@@ -1825,7 +1941,10 @@ fn build_render_time_reading_order_trace_py(
     summary.set_item("page_count", doc.pages.len())?;
     summary.set_item("total_blocks", total_blocks)?;
     summary.set_item("non_empty_pages", non_empty_pages)?;
-    summary.set_item("artifact_text_blocks_excluded", artifact_text_blocks_excluded)?;
+    summary.set_item(
+        "artifact_text_blocks_excluded",
+        artifact_text_blocks_excluded,
+    )?;
     summary.set_item("untagged_text_blocks", untagged_text_blocks)?;
     summary.set_item("draw_form_count_total", draw_form_count_total)?;
     summary.set_item("define_form_count_total", define_form_count_total)?;
@@ -1876,7 +1995,13 @@ fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyRes
 
         for (cmd_index, cmd) in page.commands.iter().enumerate() {
             match cmd {
-                Command::BeginTag { role, mcid, alt, scope, .. } => {
+                Command::BeginTag {
+                    role,
+                    mcid,
+                    alt,
+                    scope,
+                    ..
+                } => {
                     begin_tag_count = begin_tag_count.saturating_add(1);
                     page_begin_tags = page_begin_tags.saturating_add(1);
                     let role_key = role.clone();
@@ -1964,7 +2089,10 @@ fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyRes
     summary.set_item("artifact_text_draw_count", artifact_text_draw_count)?;
     summary.set_item("tagged_pages", tagged_pages)?;
     summary.set_item("tag_balance_underflow_count", tag_balance_underflow)?;
-    summary.set_item("tag_balance_ok", tag_balance_underflow == 0 && end_tag_count <= begin_tag_count)?;
+    summary.set_item(
+        "tag_balance_ok",
+        tag_balance_underflow == 0 && end_tag_count <= begin_tag_count,
+    )?;
 
     out.set_item("ok", true)?;
     out.set_item("summary", summary)?;
@@ -2204,7 +2332,10 @@ fn section508_html_coverage_summary_to_py(
     out.set_item("profile_id", summary.profile_id.clone())?;
     out.set_item("total_entries", summary.total_entries)?;
     out.set_item("specific_entries_total", summary.specific_entries_total)?;
-    out.set_item("inherited_wcag_entries_total", summary.inherited_wcag_entries_total)?;
+    out.set_item(
+        "inherited_wcag_entries_total",
+        summary.inherited_wcag_entries_total,
+    )?;
     out.set_item("mapped_entry_count", summary.mapped_entry_count)?;
     out.set_item(
         "implemented_mapped_entry_count",
@@ -2227,7 +2358,10 @@ fn section508_html_coverage_summary_to_py(
         summary.planned_only_mapped_entry_count,
     )?;
     out.set_item("unmapped_entry_count", summary.unmapped_entry_count)?;
-    out.set_item("specific_mapped_entry_count", summary.specific_mapped_entry_count)?;
+    out.set_item(
+        "specific_mapped_entry_count",
+        summary.specific_mapped_entry_count,
+    )?;
     out.set_item(
         "specific_implemented_mapped_entry_count",
         summary.specific_implemented_mapped_entry_count,
@@ -2240,7 +2374,10 @@ fn section508_html_coverage_summary_to_py(
         "specific_implemented_mapped_entry_pending_count",
         summary.specific_implemented_mapped_entry_pending_count,
     )?;
-    out.set_item("specific_unmapped_entry_count", summary.specific_unmapped_entry_count)?;
+    out.set_item(
+        "specific_unmapped_entry_count",
+        summary.specific_unmapped_entry_count,
+    )?;
     out.set_item(
         "inherited_wcag_registry_id",
         summary.inherited_wcag_registry_id.clone(),
@@ -2280,17 +2417,26 @@ fn audit_contract_metadata(py: Python<'_>) -> PyResult<PyObject> {
     let out = PyDict::new_bound(py);
     out.set_item("contract_id", meta.contract_id)?;
     out.set_item("contract_version", meta.contract_version)?;
-    out.set_item("contract_fingerprint", format!("sha256:{}", meta.contract_fingerprint_sha256))?;
+    out.set_item(
+        "contract_fingerprint",
+        format!("sha256:{}", meta.contract_fingerprint_sha256),
+    )?;
     let registries = PyList::empty_bound(py);
 
     let reg_audit = PyDict::new_bound(py);
     reg_audit.set_item("id", meta.audit_registry_id)?;
-    reg_audit.set_item("hash", format!("sha256:{}", meta.audit_registry_hash_sha256))?;
+    reg_audit.set_item(
+        "hash",
+        format!("sha256:{}", meta.audit_registry_hash_sha256),
+    )?;
     registries.append(reg_audit)?;
 
     let reg_wcag = PyDict::new_bound(py);
     reg_wcag.set_item("id", meta.wcag20aa_registry_id)?;
-    reg_wcag.set_item("hash", format!("sha256:{}", meta.wcag20aa_registry_hash_sha256))?;
+    reg_wcag.set_item(
+        "hash",
+        format!("sha256:{}", meta.wcag20aa_registry_hash_sha256),
+    )?;
     registries.append(reg_wcag)?;
 
     let reg_s508 = PyDict::new_bound(py);
@@ -2313,16 +2459,19 @@ fn audit_contract_registry(name: &str) -> PyResult<String> {
 }
 
 #[pyfunction]
-fn audit_contract_wcag20aa_coverage(py: Python<'_>, findings: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+fn audit_contract_wcag20aa_coverage(
+    py: Python<'_>,
+    findings: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
     let mut owned_pairs: Vec<(String, String)> = Vec::new();
     let iter = findings.iter().map_err(|_| {
         PyValueError::new_err("findings must be an iterable of mappings with rule_id/verdict")
     })?;
     for item in iter {
         let item = item?;
-        let dict = item.downcast::<PyDict>().map_err(|_| {
-            PyValueError::new_err("findings entries must be dict-like mappings")
-        })?;
+        let dict = item
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("findings entries must be dict-like mappings"))?;
         let rule_id = dict
             .get_item("rule_id")?
             .and_then(|v| v.extract::<String>().ok())
@@ -2355,9 +2504,9 @@ fn audit_contract_section508_html_coverage(
     })?;
     for item in iter {
         let item = item?;
-        let dict = item.downcast::<PyDict>().map_err(|_| {
-            PyValueError::new_err("findings entries must be dict-like mappings")
-        })?;
+        let dict = item
+            .downcast::<PyDict>()
+            .map_err(|_| PyValueError::new_err("findings entries must be dict-like mappings"))?;
         let rule_id = dict
             .get_item("rule_id")?
             .and_then(|v| v.extract::<String>().ok())
@@ -2403,7 +2552,9 @@ fn _srgb_u8_to_linear(v: u8) -> f64 {
 }
 
 fn _relative_luminance(r: u8, g: u8, b: u8) -> f64 {
-    (0.2126 * _srgb_u8_to_linear(r)) + (0.7152 * _srgb_u8_to_linear(g)) + (0.0722 * _srgb_u8_to_linear(b))
+    (0.2126 * _srgb_u8_to_linear(r))
+        + (0.7152 * _srgb_u8_to_linear(g))
+        + (0.0722 * _srgb_u8_to_linear(b))
 }
 
 fn _percentile(sorted: &[f64], q: f64) -> f64 {
@@ -2479,9 +2630,8 @@ fn analyze_render_contrast_seed_png(path: &str) -> Result<RenderContrastSeedAnal
     let mut ink_sorted = ink;
     ink_sorted.sort_by(|a, b| a.total_cmp(b));
     let foreground_luminance = _percentile(&ink_sorted, 0.05);
-    let contrast_ratio =
-        ((background_luminance.max(foreground_luminance)) + 0.05)
-            / ((background_luminance.min(foreground_luminance)) + 0.05);
+    let contrast_ratio = ((background_luminance.max(foreground_luminance)) + 0.05)
+        / ((background_luminance.min(foreground_luminance)) + 0.05);
     let (verdict, confidence, message) = if contrast_ratio >= 4.5 {
         (
             "pass",
@@ -2515,7 +2665,10 @@ fn analyze_render_contrast_seed_png(path: &str) -> Result<RenderContrastSeedAnal
     })
 }
 
-fn render_contrast_seed_analysis_to_py(py: Python<'_>, a: &RenderContrastSeedAnalysis) -> PyResult<PyObject> {
+fn render_contrast_seed_analysis_to_py(
+    py: Python<'_>,
+    a: &RenderContrastSeedAnalysis,
+) -> PyResult<PyObject> {
     let out = PyDict::new_bound(py);
     out.set_item("schema", "fullbleed.contrast.render_seed.v1")?;
     out.set_item("width", a.width)?;
@@ -2919,30 +3072,27 @@ fn a11y_claim_evidence_flags_from_py(
             claim_evidence,
             &["wcag20", "prerecorded_captions_basis_recorded"],
         ),
-        wcag20_prerecorded_audio_description_or_media_alternative_scope_declared:
-            py_dict_bool_path(
-                claim_evidence,
-                &[
-                    "wcag20",
-                    "prerecorded_audio_description_or_media_alternative_scope_declared",
-                ],
-            ),
-        wcag20_prerecorded_audio_description_or_media_alternative_assessed:
-            py_dict_bool_path(
-                claim_evidence,
-                &[
-                    "wcag20",
-                    "prerecorded_audio_description_or_media_alternative_assessed",
-                ],
-            ),
-        wcag20_prerecorded_audio_description_or_media_alternative_basis_recorded:
-            py_dict_bool_path(
-                claim_evidence,
-                &[
-                    "wcag20",
-                    "prerecorded_audio_description_or_media_alternative_basis_recorded",
-                ],
-            ),
+        wcag20_prerecorded_audio_description_or_media_alternative_scope_declared: py_dict_bool_path(
+            claim_evidence,
+            &[
+                "wcag20",
+                "prerecorded_audio_description_or_media_alternative_scope_declared",
+            ],
+        ),
+        wcag20_prerecorded_audio_description_or_media_alternative_assessed: py_dict_bool_path(
+            claim_evidence,
+            &[
+                "wcag20",
+                "prerecorded_audio_description_or_media_alternative_assessed",
+            ],
+        ),
+        wcag20_prerecorded_audio_description_or_media_alternative_basis_recorded: py_dict_bool_path(
+            claim_evidence,
+            &[
+                "wcag20",
+                "prerecorded_audio_description_or_media_alternative_basis_recorded",
+            ],
+        ),
         wcag20_live_captions_scope_declared: py_dict_bool_path(
             claim_evidence,
             &["wcag20", "live_captions_scope_declared"],
@@ -2991,14 +3141,20 @@ fn a11y_claim_evidence_flags_from_py(
             claim_evidence,
             &["wcag20", "consistent_navigation_basis_recorded"],
         ),
-        section508_scope_declared: py_dict_bool_path(claim_evidence, &["section508", "scope_declared"]),
+        section508_scope_declared: py_dict_bool_path(
+            claim_evidence,
+            &["section508", "scope_declared"],
+        ),
         section508_public_facing_determination_recorded: py_dict_bool_path(
             claim_evidence,
             &["section508", "public_facing_determination_recorded"],
         ),
         section508_official_communications_determination_recorded: py_dict_bool_path(
             claim_evidence,
-            &["section508", "official_communications_determination_recorded"],
+            &[
+                "section508",
+                "official_communications_determination_recorded",
+            ],
         ),
         section508_nara_exception_determination_recorded: py_dict_bool_path(
             claim_evidence,
@@ -3076,7 +3232,13 @@ fn a11y_bridge_findings_from_contract_report(
             .get_item("message")?
             .and_then(|v| v.extract::<String>().ok())
             .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| if code.is_empty() { "A11y diagnostic".to_string() } else { code.clone() });
+            .unwrap_or_else(|| {
+                if code.is_empty() {
+                    "A11y diagnostic".to_string()
+                } else {
+                    code.clone()
+                }
+            });
         let path = d
             .get_item("path")?
             .and_then(|v| v.extract::<String>().ok())
@@ -3097,10 +3259,7 @@ fn a11y_bridge_findings_from_contract_report(
                 } else {
                     Some(path.clone())
                 },
-                values: vec![
-                    ("code".to_string(), code),
-                    ("dom_path".to_string(), path),
-                ],
+                values: vec![("code".to_string(), code), ("dom_path".to_string(), path)],
             }],
         });
     }
@@ -3197,11 +3356,7 @@ fn a11y_dedup_and_correlate_findings(
         if pre.is_empty() {
             continue;
         }
-        let non_pre: Vec<usize> = idxs
-            .iter()
-            .copied()
-            .filter(|i| !pre.contains(i))
-            .collect();
+        let non_pre: Vec<usize> = idxs.iter().copied().filter(|i| !pre.contains(i)).collect();
         if non_pre.len() != 1 {
             continue;
         }
@@ -3276,18 +3431,12 @@ fn a11y_dedup_and_correlate_findings(
                 f.evidence.clone()
             };
             for ev in evs.iter_mut() {
-                ev.values.push((
-                    "correlated_origin_stage".to_string(),
-                    f.stage.clone(),
-                ));
-                ev.values.push((
-                    "correlated_origin_source".to_string(),
-                    f.source.clone(),
-                ));
-                ev.values.push((
-                    "correlated_origin_verdict".to_string(),
-                    f.verdict.clone(),
-                ));
+                ev.values
+                    .push(("correlated_origin_stage".to_string(), f.stage.clone()));
+                ev.values
+                    .push(("correlated_origin_source".to_string(), f.source.clone()));
+                ev.values
+                    .push(("correlated_origin_verdict".to_string(), f.verdict.clone()));
                 ev.values.push((
                     "correlated_primary".to_string(),
                     if *gidx == idx { "true" } else { "false" }.to_string(),
@@ -3299,8 +3448,9 @@ fn a11y_dedup_and_correlate_findings(
             }
             merged_evidence.extend(evs);
         }
-        let (group_stage_counts, group_source_counts) =
-            a11y_findings_count_by_stage_source(&group.iter().map(|(_, f)| (*f).clone()).collect::<Vec<_>>());
+        let (group_stage_counts, group_source_counts) = a11y_findings_count_by_stage_source(
+            &group.iter().map(|(_, f)| (*f).clone()).collect::<Vec<_>>(),
+        );
         let mut summary_values = vec![
             ("correlation_role".to_string(), "summary".to_string()),
             (
@@ -3370,11 +3520,7 @@ fn build_a11y_verify_report_py(
 ) -> PyResult<PyObject> {
     let mode_norm = {
         let m = mode.trim().to_ascii_lowercase();
-        if m.is_empty() {
-            "error".to_string()
-        } else {
-            m
-        }
+        if m.is_empty() { "error".to_string() } else { m }
     };
     if !matches!(mode_norm.as_str(), "off" | "warn" | "error") {
         return Err(PyValueError::new_err(format!(
@@ -3426,8 +3572,7 @@ fn build_a11y_verify_report_py(
     let keyboard_target_count = core.facts.link_count + core.facts.form_control_count;
     let keyboard_custom_click_target_count = core.facts.custom_click_handler_count;
     let keyboard_pointer_only_signal_count = core.facts.pointer_only_click_handler_count;
-    let keyboard_applicable =
-        keyboard_target_count > 0 || keyboard_custom_click_target_count > 0;
+    let keyboard_applicable = keyboard_target_count > 0 || keyboard_custom_click_target_count > 0;
     let keyboard_claim_evidence_satisfied =
         claim_flags.wcag20_keyboard_assessed && claim_flags.wcag20_keyboard_basis_recorded;
     adapter_findings.push(A11yVerifierFinding {
@@ -3520,8 +3665,8 @@ fn build_a11y_verify_report_py(
         }],
     });
 
-    let keyboard_trap_claim_evidence_satisfied =
-        claim_flags.wcag20_keyboard_trap_assessed && claim_flags.wcag20_keyboard_trap_basis_recorded;
+    let keyboard_trap_claim_evidence_satisfied = claim_flags.wcag20_keyboard_trap_assessed
+        && claim_flags.wcag20_keyboard_trap_basis_recorded;
     adapter_findings.push(A11yVerifierFinding {
         rule_id: "fb.a11y.keyboard.no_trap_seed".to_string(),
         applicability: if keyboard_target_count == 0 {
@@ -3554,8 +3699,7 @@ fn build_a11y_verify_report_py(
             "No interactive links or form controls detected; no-keyboard-trap seed not applicable."
                 .to_string()
         } else if keyboard_trap_claim_evidence_satisfied {
-            "No-keyboard-trap review evidence is recorded for interactive components."
-                .to_string()
+            "No-keyboard-trap review evidence is recorded for interactive components.".to_string()
         } else {
             "Interactive components detected; no-keyboard-trap review requires manual evidence."
                 .to_string()
@@ -3744,11 +3888,9 @@ fn build_a11y_verify_report_py(
         message: if on_input_target_count == 0 {
             "No form controls detected; on-input behavior seed not applicable.".to_string()
         } else if on_input_claim_evidence_satisfied {
-            "On-input behavior review evidence is recorded for detected form controls."
-                .to_string()
+            "On-input behavior review evidence is recorded for detected form controls.".to_string()
         } else {
-            "Form controls detected; on-input behavior review requires manual evidence."
-                .to_string()
+            "Form controls detected; on-input behavior review requires manual evidence.".to_string()
         },
         evidence: vec![A11yVerifierEvidence {
             selector: None,
@@ -3805,8 +3947,7 @@ fn build_a11y_verify_report_py(
             "No interactive links or form controls detected; on-focus behavior seed not applicable."
                 .to_string()
         } else if on_focus_claim_evidence_satisfied {
-            "On-focus behavior review evidence is recorded for interactive components."
-                .to_string()
+            "On-focus behavior review evidence is recorded for interactive components.".to_string()
         } else {
             "Interactive components detected; on-focus behavior review requires manual evidence."
                 .to_string()
@@ -3837,9 +3978,8 @@ fn build_a11y_verify_report_py(
     });
 
     let timing_adjustable_scope_declared = claim_flags.wcag20_timing_adjustable_scope_declared;
-    let timing_adjustable_claim_evidence_satisfied =
-        claim_flags.wcag20_timing_adjustable_assessed
-            && claim_flags.wcag20_timing_adjustable_basis_recorded;
+    let timing_adjustable_claim_evidence_satisfied = claim_flags.wcag20_timing_adjustable_assessed
+        && claim_flags.wcag20_timing_adjustable_basis_recorded;
     adapter_findings.push(A11yVerifierFinding {
         rule_id: "fb.a11y.timing.adjustable_seed".to_string(),
         applicability: if timing_adjustable_scope_declared {
@@ -3907,7 +4047,8 @@ fn build_a11y_verify_report_py(
     let pause_stop_hide_scope_declared = claim_flags.wcag20_pause_stop_hide_scope_declared;
     let pause_stop_hide_claim_evidence_satisfied = claim_flags.wcag20_pause_stop_hide_assessed
         && claim_flags.wcag20_pause_stop_hide_basis_recorded;
-    let pause_stop_hide_signal_count = core.facts.autoplay_media_count + core.facts.blink_marquee_count;
+    let pause_stop_hide_signal_count =
+        core.facts.autoplay_media_count + core.facts.blink_marquee_count;
     adapter_findings.push(A11yVerifierFinding {
         rule_id: "fb.a11y.timing.pause_stop_hide_seed".to_string(),
         applicability: if pause_stop_hide_scope_declared {
@@ -4115,8 +4256,8 @@ fn build_a11y_verify_report_py(
     });
 
     let use_of_color_scope_declared = claim_flags.wcag20_use_of_color_scope_declared;
-    let use_of_color_claim_evidence_satisfied = claim_flags.wcag20_use_of_color_assessed
-        && claim_flags.wcag20_use_of_color_basis_recorded;
+    let use_of_color_claim_evidence_satisfied =
+        claim_flags.wcag20_use_of_color_assessed && claim_flags.wcag20_use_of_color_basis_recorded;
     adapter_findings.push(A11yVerifierFinding {
         rule_id: "fb.a11y.color.use_of_color_seed".to_string(),
         applicability: if use_of_color_scope_declared {
@@ -4176,8 +4317,8 @@ fn build_a11y_verify_report_py(
     });
 
     let resize_text_scope_declared = claim_flags.wcag20_resize_text_scope_declared;
-    let resize_text_claim_evidence_satisfied = claim_flags.wcag20_resize_text_assessed
-        && claim_flags.wcag20_resize_text_basis_recorded;
+    let resize_text_claim_evidence_satisfied =
+        claim_flags.wcag20_resize_text_assessed && claim_flags.wcag20_resize_text_basis_recorded;
     adapter_findings.push(A11yVerifierFinding {
         rule_id: "fb.a11y.text.resize_seed".to_string(),
         applicability: if resize_text_scope_declared {
@@ -4309,9 +4450,9 @@ fn build_a11y_verify_report_py(
 
     let prerecorded_av_alternative_scope_declared =
         claim_flags.wcag20_prerecorded_av_alternative_scope_declared;
-    let prerecorded_av_alternative_claim_evidence_satisfied =
-        claim_flags.wcag20_prerecorded_av_alternative_assessed
-            && claim_flags.wcag20_prerecorded_av_alternative_basis_recorded;
+    let prerecorded_av_alternative_claim_evidence_satisfied = claim_flags
+        .wcag20_prerecorded_av_alternative_assessed
+        && claim_flags.wcag20_prerecorded_av_alternative_basis_recorded;
     adapter_findings.push(A11yVerifierFinding {
         rule_id: "fb.a11y.media.prerecorded_audio_video_alternative_seed".to_string(),
         applicability: if prerecorded_av_alternative_scope_declared {
@@ -4380,9 +4521,9 @@ fn build_a11y_verify_report_py(
 
     let prerecorded_captions_scope_declared =
         claim_flags.wcag20_prerecorded_captions_scope_declared;
-    let prerecorded_captions_claim_evidence_satisfied =
-        claim_flags.wcag20_prerecorded_captions_assessed
-            && claim_flags.wcag20_prerecorded_captions_basis_recorded;
+    let prerecorded_captions_claim_evidence_satisfied = claim_flags
+        .wcag20_prerecorded_captions_assessed
+        && claim_flags.wcag20_prerecorded_captions_basis_recorded;
     adapter_findings.push(A11yVerifierFinding {
         rule_id: "fb.a11y.media.prerecorded_captions_seed".to_string(),
         applicability: if prerecorded_captions_scope_declared {
@@ -4449,12 +4590,11 @@ fn build_a11y_verify_report_py(
         }],
     });
 
-    let prerecorded_ad_or_media_alt_scope_declared = claim_flags
-        .wcag20_prerecorded_audio_description_or_media_alternative_scope_declared;
+    let prerecorded_ad_or_media_alt_scope_declared =
+        claim_flags.wcag20_prerecorded_audio_description_or_media_alternative_scope_declared;
     let prerecorded_ad_or_media_alt_claim_evidence_satisfied = claim_flags
         .wcag20_prerecorded_audio_description_or_media_alternative_assessed
-        && claim_flags
-            .wcag20_prerecorded_audio_description_or_media_alternative_basis_recorded;
+        && claim_flags.wcag20_prerecorded_audio_description_or_media_alternative_basis_recorded;
     adapter_findings.push(A11yVerifierFinding {
         rule_id: "fb.a11y.media.prerecorded_audio_description_or_media_alternative_seed"
             .to_string(),
@@ -4526,8 +4666,8 @@ fn build_a11y_verify_report_py(
     });
 
     let live_captions_scope_declared = claim_flags.wcag20_live_captions_scope_declared;
-    let live_captions_claim_evidence_satisfied =
-        claim_flags.wcag20_live_captions_assessed && claim_flags.wcag20_live_captions_basis_recorded;
+    let live_captions_claim_evidence_satisfied = claim_flags.wcag20_live_captions_assessed
+        && claim_flags.wcag20_live_captions_basis_recorded;
     adapter_findings.push(A11yVerifierFinding {
         rule_id: "fb.a11y.media.live_captions_seed".to_string(),
         applicability: if live_captions_scope_declared {
@@ -4592,9 +4732,9 @@ fn build_a11y_verify_report_py(
 
     let prerecorded_audio_description_scope_declared =
         claim_flags.wcag20_prerecorded_audio_description_scope_declared;
-    let prerecorded_audio_description_claim_evidence_satisfied =
-        claim_flags.wcag20_prerecorded_audio_description_assessed
-            && claim_flags.wcag20_prerecorded_audio_description_basis_recorded;
+    let prerecorded_audio_description_claim_evidence_satisfied = claim_flags
+        .wcag20_prerecorded_audio_description_assessed
+        && claim_flags.wcag20_prerecorded_audio_description_basis_recorded;
     adapter_findings.push(A11yVerifierFinding {
         rule_id: "fb.a11y.media.prerecorded_audio_description_seed".to_string(),
         applicability: if prerecorded_audio_description_scope_declared {
@@ -4662,7 +4802,8 @@ fn build_a11y_verify_report_py(
     });
 
     let meaningful_sequence_scope_declared = claim_flags.wcag20_meaningful_sequence_scope_declared;
-    let meaningful_sequence_claim_evidence_satisfied = claim_flags.wcag20_meaningful_sequence_assessed
+    let meaningful_sequence_claim_evidence_satisfied = claim_flags
+        .wcag20_meaningful_sequence_assessed
         && claim_flags.wcag20_meaningful_sequence_basis_recorded;
     adapter_findings.push(A11yVerifierFinding {
         rule_id: "fb.a11y.sequence.meaningful_sequence_seed".to_string(),
@@ -4795,9 +4936,9 @@ fn build_a11y_verify_report_py(
 
     let consistent_navigation_scope_declared =
         claim_flags.wcag20_consistent_navigation_scope_declared;
-    let consistent_navigation_claim_evidence_satisfied =
-        claim_flags.wcag20_consistent_navigation_assessed
-            && claim_flags.wcag20_consistent_navigation_basis_recorded;
+    let consistent_navigation_claim_evidence_satisfied = claim_flags
+        .wcag20_consistent_navigation_assessed
+        && claim_flags.wcag20_consistent_navigation_basis_recorded;
     adapter_findings.push(A11yVerifierFinding {
         rule_id: "fb.a11y.navigation.consistent_navigation_seed".to_string(),
         applicability: if consistent_navigation_scope_declared {
@@ -4941,8 +5082,8 @@ fn build_a11y_verify_report_py(
         }],
     });
 
-    let s508_public_scope_evidence =
-        claim_flags.section508_scope_declared && claim_flags.section508_public_facing_determination_recorded;
+    let s508_public_scope_evidence = claim_flags.section508_scope_declared
+        && claim_flags.section508_public_facing_determination_recorded;
     adapter_findings.push(A11yVerifierFinding {
         rule_id: "fb.a11y.claim.section508.public_facing_content_applicability_seed".to_string(),
         applicability: "applicable".to_string(),
@@ -5011,8 +5152,7 @@ fn build_a11y_verify_report_py(
         }],
     });
 
-    let s508_nara_scope_evidence =
-        claim_flags.section508_nara_exception_determination_recorded;
+    let s508_nara_scope_evidence = claim_flags.section508_nara_exception_determination_recorded;
     adapter_findings.push(A11yVerifierFinding {
         rule_id: "fb.a11y.claim.section508.nara_exception_applicability_seed".to_string(),
         applicability: "applicable".to_string(),
@@ -5061,10 +5201,11 @@ fn build_a11y_verify_report_py(
         }],
     });
 
-    let consistent_identification_target_count = core.facts.link_count + core.facts.form_control_count;
-    let consistent_identification_claim_evidence_satisfied =
-        claim_flags.wcag20_consistent_identification_assessed
-            && claim_flags.wcag20_consistent_identification_basis_recorded;
+    let consistent_identification_target_count =
+        core.facts.link_count + core.facts.form_control_count;
+    let consistent_identification_claim_evidence_satisfied = claim_flags
+        .wcag20_consistent_identification_assessed
+        && claim_flags.wcag20_consistent_identification_basis_recorded;
     adapter_findings.push(A11yVerifierFinding {
         rule_id: "fb.a11y.identification.consistent_identification_seed".to_string(),
         applicability: if consistent_identification_target_count == 0 {
@@ -5228,7 +5369,10 @@ fn build_a11y_verify_report_py(
                             "opaque_pixel_count".to_string(),
                             analysis.opaque_pixel_count.to_string(),
                         ),
-                        ("ink_pixel_count".to_string(), analysis.ink_pixel_count.to_string()),
+                        (
+                            "ink_pixel_count".to_string(),
+                            analysis.ink_pixel_count.to_string(),
+                        ),
                         (
                             "background_luminance".to_string(),
                             format!("{:.6}", analysis.background_luminance),
@@ -5276,10 +5420,7 @@ fn build_a11y_verify_report_py(
 
     // Compute claim-readiness status from the pre-claim finding set, then append a scaffold finding
     // so wcag20.conf.level can be tracked as an evaluated implemented mapping.
-    let claim_machine_blocker_count = all_findings
-        .iter()
-        .filter(|f| f.verdict == "fail")
-        .count();
+    let claim_machine_blocker_count = all_findings.iter().filter(|f| f.verdict == "fail").count();
     let wcag_pairs_pre: Vec<(&str, &str)> = all_findings
         .iter()
         .map(|f| (f.rule_id.as_str(), f.verdict.as_str()))
@@ -5294,8 +5435,10 @@ fn build_a11y_verify_report_py(
     } else {
         "manual_evidence_required"
     };
-    let claim_verdict = if matches!(claim_status, "blocked_machine_failures" | "blocked_coverage_gaps")
-    {
+    let claim_verdict = if matches!(
+        claim_status,
+        "blocked_machine_failures" | "blocked_coverage_gaps"
+    ) {
         "warn"
     } else {
         "manual_needed"
@@ -5332,7 +5475,8 @@ fn build_a11y_verify_report_py(
     };
     all_findings.push(claim_finding.clone());
 
-    let (reported_findings, observability_summary) = a11y_dedup_and_correlate_findings(all_findings);
+    let (reported_findings, observability_summary) =
+        a11y_dedup_and_correlate_findings(all_findings);
 
     let findings_py = PyList::empty_bound(py);
     let mut pass_count = 0usize;
@@ -5340,15 +5484,11 @@ fn build_a11y_verify_report_py(
     let mut warn_count = 0usize;
     let mut manual_needed_count = 0usize;
     let mut not_applicable_count = 0usize;
-    let mut failed_rule_ids: Vec<String> = Vec::new();
     for finding in &reported_findings {
         findings_py.append(a11y_core_finding_to_py(py, finding)?)?;
         match finding.verdict.as_str() {
             "pass" => pass_count += 1,
-            "fail" => {
-                fail_count += 1;
-                failed_rule_ids.push(finding.rule_id.clone());
-            }
+            "fail" => fail_count += 1,
             "warn" => warn_count += 1,
             "manual_needed" => manual_needed_count += 1,
             "not_applicable" => not_applicable_count += 1,
@@ -5356,14 +5496,34 @@ fn build_a11y_verify_report_py(
         }
     }
 
-    let error_count = if mode_norm == "error" { fail_count } else { 0 };
-    let gate_warn_count = if mode_norm == "off" {
-        0
-    } else if mode_norm == "warn" {
-        fail_count + warn_count
-    } else {
-        warn_count
-    };
+    let mut error_count = 0usize;
+    let mut gate_warn_count = 0usize;
+    let mut failed_rule_ids: Vec<String> = Vec::new();
+    for finding in &reported_findings {
+        let verdict = finding.verdict.as_str();
+        if verdict != "fail" && verdict != "warn" {
+            continue;
+        }
+        let gate_level = audit_contract::a11y_effective_gate_level(
+            core.profile.as_str(),
+            finding.rule_id.as_str(),
+        );
+        if mode_norm == "off" || gate_level == "off" {
+            continue;
+        }
+        if mode_norm == "warn" {
+            gate_warn_count += 1;
+            continue;
+        }
+        if verdict == "warn" {
+            gate_warn_count += 1;
+        } else if gate_level == "error" {
+            error_count += 1;
+            failed_rule_ids.push(finding.rule_id.clone());
+        } else {
+            gate_warn_count += 1;
+        }
+    }
 
     let manual_required = manual_needed_count > 0;
     let conformance_status_text = if fail_count > 0 {
@@ -5380,7 +5540,10 @@ fn build_a11y_verify_report_py(
     let target = PyDict::new_bound(py);
     target.set_item("html_path", html_path)?;
     target.set_item("css_path", css_path)?;
-    target.set_item("target_hash", format!("sha256:{}", sha256_file_hex(html_path)?))?;
+    target.set_item(
+        "target_hash",
+        format!("sha256:{}", sha256_file_hex(html_path)?),
+    )?;
     report.set_item("target", target)?;
 
     report.set_item("profile", core.profile.clone())?;
@@ -5421,8 +5584,14 @@ fn build_a11y_verify_report_py(
     report.set_item("findings", &findings_py)?;
 
     let observability = PyDict::new_bound(py);
-    observability.set_item("original_finding_count", observability_summary.original_finding_count)?;
-    observability.set_item("reported_finding_count", observability_summary.reported_finding_count)?;
+    observability.set_item(
+        "original_finding_count",
+        observability_summary.original_finding_count,
+    )?;
+    observability.set_item(
+        "reported_finding_count",
+        observability_summary.reported_finding_count,
+    )?;
     observability.set_item("dedup_event_count", observability_summary.dedup_event_count)?;
     observability.set_item(
         "dedup_merged_finding_count",
@@ -5452,6 +5621,21 @@ fn build_a11y_verify_report_py(
         original_source_counts_py.set_item(k, *v)?;
     }
     observability.set_item("original_source_counts", original_source_counts_py)?;
+    let signal_counts_py = PyDict::new_bound(py);
+    signal_counts_py.set_item(
+        "figure_alt_over_budget_count",
+        core.facts.figure_alt_over_budget_count,
+    )?;
+    signal_counts_py.set_item(
+        "figure_caption_redundancy_count",
+        core.facts.figure_caption_redundancy_count,
+    )?;
+    signal_counts_py.set_item("dl_fragmentation_count", core.facts.dl_fragmentation_count)?;
+    signal_counts_py.set_item(
+        "redundant_aria_count",
+        core.facts.redundant_role_native_count + core.facts.redundant_state_native_count,
+    )?;
+    observability.set_item("signal_counts", signal_counts_py)?;
     let correlation_index_py = PyList::empty_bound(py);
     for item in &observability_summary.correlation_index {
         let row = PyDict::new_bound(py);
@@ -5567,13 +5751,11 @@ fn build_a11y_verify_report_py(
         wcag_claim_notes.append("WCAG target registry still contains unmapped entries.")?;
     }
     if wcag_summary.implemented_mapped_entry_pending_count > 0 {
-        wcag_claim_notes.append(
-            "Implemented mapped WCAG entries remain unevaluated in this report.",
-        )?;
+        wcag_claim_notes
+            .append("Implemented mapped WCAG entries remain unevaluated in this report.")?;
     }
-    wcag_claim_notes.append(
-        "Manual claim evidence is required for WCAG conformance assertions.",
-    )?;
+    wcag_claim_notes
+        .append("Manual claim evidence is required for WCAG conformance assertions.")?;
     wcag_claim.set_item("notes", wcag_claim_notes)?;
     report.set_item("wcag20aa_claim_readiness", wcag_claim)?;
 
@@ -5598,7 +5780,10 @@ fn build_a11y_verify_report_py(
     )?;
     tooling.set_item(
         "section508_html_registry_hash",
-        format!("sha256:{}", contract_meta.section508_html_registry_hash_sha256),
+        format!(
+            "sha256:{}",
+            contract_meta.section508_html_registry_hash_sha256
+        ),
     )?;
     let dt = py.import_bound("datetime")?;
     let tz = dt.getattr("timezone")?.getattr("utc")?;
@@ -5608,12 +5793,19 @@ fn build_a11y_verify_report_py(
     report.set_item("tooling", tooling)?;
 
     let artifacts = PyDict::new_bound(py);
-    artifacts.set_item("html_hash", format!("sha256:{}", sha256_file_hex(html_path)?))?;
+    artifacts.set_item(
+        "html_hash",
+        format!("sha256:{}", sha256_file_hex(html_path)?),
+    )?;
     artifacts.set_item("css_hash", format!("sha256:{}", sha256_file_hex(css_path)?))?;
     artifacts.set_item("css_linked", core.facts.has_css_link)?;
     artifacts.set_item(
         "packaging_mode",
-        if core.facts.has_css_link { "linked-css" } else { "separate-files" },
+        if core.facts.has_css_link {
+            "linked-css"
+        } else {
+            "separate-files"
+        },
     )?;
     report.set_item("artifacts", artifacts)?;
 
@@ -5799,6 +5991,21 @@ fn build_pmr_report_py(
         verdict_counts_py.set_item(k, *v)?;
     }
     observability.set_item("verdict_counts", verdict_counts_py)?;
+    let signal_counts_py = PyDict::new_bound(py);
+    signal_counts_py.set_item(
+        "figure_alt_over_budget_count",
+        core.facts.figure_alt_over_budget_count,
+    )?;
+    signal_counts_py.set_item(
+        "figure_caption_redundancy_count",
+        core.facts.figure_caption_redundancy_count,
+    )?;
+    signal_counts_py.set_item("dl_fragmentation_count", core.facts.dl_fragmentation_count)?;
+    signal_counts_py.set_item(
+        "redundant_aria_count",
+        core.facts.redundant_role_native_count + core.facts.redundant_state_native_count,
+    )?;
+    observability.set_item("signal_counts", signal_counts_py)?;
     observability.set_item("correlation_index", correlation_index)?;
     report.set_item("observability", observability)?;
 
@@ -5823,7 +6030,10 @@ fn build_pmr_report_py(
 
     let coverage = PyDict::new_bound(py);
     coverage.set_item("evaluated_audit_count", core.coverage.evaluated_audit_count)?;
-    coverage.set_item("applicable_audit_count", core.coverage.applicable_audit_count)?;
+    coverage.set_item(
+        "applicable_audit_count",
+        core.coverage.applicable_audit_count,
+    )?;
     coverage.set_item("scored_audit_count", core.coverage.scored_audit_count)?;
     coverage.set_item("manual_needed_count", core.coverage.manual_needed_count)?;
     coverage.set_item(
@@ -5852,7 +6062,10 @@ fn build_pmr_report_py(
     )?;
     tooling.set_item(
         "section508_html_registry_hash",
-        format!("sha256:{}", contract_meta.section508_html_registry_hash_sha256),
+        format!(
+            "sha256:{}",
+            contract_meta.section508_html_registry_hash_sha256
+        ),
     )?;
     let dt = py.import_bound("datetime")?;
     let tz = dt.getattr("timezone")?.getattr("utc")?;
@@ -5862,7 +6075,10 @@ fn build_pmr_report_py(
     report.set_item("tooling", tooling)?;
 
     let artifacts = PyDict::new_bound(py);
-    artifacts.set_item("html_hash", format!("sha256:{}", sha256_file_hex(html_path)?))?;
+    artifacts.set_item(
+        "html_hash",
+        format!("sha256:{}", sha256_file_hex(html_path)?),
+    )?;
     artifacts.set_item("css_hash", format!("sha256:{}", sha256_file_hex(css_path)?))?;
     artifacts.set_item("css_linked", core.facts.has_css_link)?;
     artifacts.set_item(
@@ -6410,11 +6626,15 @@ impl PdfEngine {
             .map_err(to_py_err)?;
         let css_href = self.normalized_css_href();
         self.ensure_css_required(css_href.as_deref())?;
-        let (patched, injected, _preexisting) =
-            inject_css_link(&html_text, css_href.as_deref(), self.normalized_css_media().as_deref());
+        let (patched, injected, _preexisting) = inject_css_link(
+            &html_text,
+            css_href.as_deref(),
+            self.normalized_css_media().as_deref(),
+        );
         if injected {
-            std::fs::write(out_path, patched.as_bytes())
-                .map_err(|e| PyValueError::new_err(format!("failed to write html artifact: {e}")))?;
+            std::fs::write(out_path, patched.as_bytes()).map_err(|e| {
+                PyValueError::new_err(format!("failed to write html artifact: {e}"))
+            })?;
             Ok(patched)
         } else {
             Ok(html_text)
@@ -6447,8 +6667,9 @@ impl PdfEngine {
         let (patched, injected, preexisting) =
             inject_css_link(&html_text, css_href.as_deref(), css_media.as_deref());
         let html_effective = if injected {
-            std::fs::write(html_path, patched.as_bytes())
-                .map_err(|e| PyValueError::new_err(format!("failed to write html artifact: {e}")))?;
+            std::fs::write(html_path, patched.as_bytes()).map_err(|e| {
+                PyValueError::new_err(format!("failed to write html artifact: {e}"))
+            })?;
             patched
         } else {
             html_text
@@ -6489,10 +6710,12 @@ impl PdfEngine {
             .as_nanos();
         let html_path = tmp_dir.join(format!("fullbleed_a11y_verify_{pid}_{ts}.html"));
         let css_path = tmp_dir.join(format!("fullbleed_a11y_verify_{pid}_{ts}.css"));
-        std::fs::write(&html_path, html)
-            .map_err(|e| PyValueError::new_err(format!("failed to write temp html for verification: {e}")))?;
-        std::fs::write(&css_path, css)
-            .map_err(|e| PyValueError::new_err(format!("failed to write temp css for verification: {e}")))?;
+        std::fs::write(&html_path, html).map_err(|e| {
+            PyValueError::new_err(format!("failed to write temp html for verification: {e}"))
+        })?;
+        std::fs::write(&css_path, css).map_err(|e| {
+            PyValueError::new_err(format!("failed to write temp css for verification: {e}"))
+        })?;
         let report = build_a11y_verify_report_py(
             py,
             &core,
@@ -6521,11 +6744,15 @@ impl PdfEngine {
         claim_evidence: Option<PyObject>,
     ) -> PyResult<PyObject> {
         let html = std::fs::read_to_string(html_path).map_err(|e| {
-            PyValueError::new_err(format!("failed to read html artifact for accessibility verification: {e}"))
+            PyValueError::new_err(format!(
+                "failed to read html artifact for accessibility verification: {e}"
+            ))
         })?;
         // Ensure CSS file is readable/existing even though current core checks are HTML-focused.
         let _css = std::fs::read_to_string(css_path).map_err(|e| {
-            PyValueError::new_err(format!("failed to read css artifact for accessibility verification: {e}"))
+            PyValueError::new_err(format!(
+                "failed to read css artifact for accessibility verification: {e}"
+            ))
         })?;
         let core = self.engine.verify_accessibility_html_core(&html, profile);
         build_a11y_verify_report_py(
@@ -6572,10 +6799,16 @@ impl PdfEngine {
             .as_nanos();
         let html_path = tmp_dir.join(format!("fullbleed_pmr_{pid}_{ts}.html"));
         let css_path = tmp_dir.join(format!("fullbleed_pmr_{pid}_{ts}.css"));
-        std::fs::write(&html_path, html)
-            .map_err(|e| PyValueError::new_err(format!("failed to write temp html for PMR verification: {e}")))?;
-        std::fs::write(&css_path, css)
-            .map_err(|e| PyValueError::new_err(format!("failed to write temp css for PMR verification: {e}")))?;
+        std::fs::write(&html_path, html).map_err(|e| {
+            PyValueError::new_err(format!(
+                "failed to write temp html for PMR verification: {e}"
+            ))
+        })?;
+        std::fs::write(&css_path, css).map_err(|e| {
+            PyValueError::new_err(format!(
+                "failed to write temp css for PMR verification: {e}"
+            ))
+        })?;
         let ctx = PmrCoreContext {
             overflow_count,
             known_loss_count,
@@ -6623,10 +6856,16 @@ impl PdfEngine {
         render_page_count: Option<i64>,
         review_queue_items: Option<i64>,
     ) -> PyResult<PyObject> {
-        let html = std::fs::read_to_string(html_path)
-            .map_err(|e| PyValueError::new_err(format!("failed to read html artifact for PMR verification: {e}")))?;
-        let css = std::fs::read_to_string(css_path)
-            .map_err(|e| PyValueError::new_err(format!("failed to read css artifact for PMR verification: {e}")))?;
+        let html = std::fs::read_to_string(html_path).map_err(|e| {
+            PyValueError::new_err(format!(
+                "failed to read html artifact for PMR verification: {e}"
+            ))
+        })?;
+        let css = std::fs::read_to_string(css_path).map_err(|e| {
+            PyValueError::new_err(format!(
+                "failed to read css artifact for PMR verification: {e}"
+            ))
+        })?;
         let ctx = PmrCoreContext {
             overflow_count,
             known_loss_count,
@@ -7153,7 +7392,10 @@ fn _fullbleed(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(audit_contract_metadata, module)?)?;
     module.add_function(wrap_pyfunction!(audit_contract_registry, module)?)?;
     module.add_function(wrap_pyfunction!(audit_contract_wcag20aa_coverage, module)?)?;
-    module.add_function(wrap_pyfunction!(audit_contract_section508_html_coverage, module)?)?;
+    module.add_function(wrap_pyfunction!(
+        audit_contract_section508_html_coverage,
+        module
+    )?)?;
     module.add_function(wrap_pyfunction!(audit_contrast_render_png, module)?)?;
     module.add_function(wrap_pyfunction!(extract_pdf_page_texts, module)?)?;
     module.add_function(wrap_pyfunction!(export_pdf_reading_order_trace, module)?)?;

@@ -3,9 +3,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html.parser import HTMLParser
+from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +52,15 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _runtime_fullbleed_version(explicit: str | None = None) -> str:
+    if explicit:
+        return str(explicit)
+    try:
+        return pkg_version("fullbleed")
+    except PackageNotFoundError:
+        return "unknown"
+
+
 def _i(value: Any, default: int = 0) -> int:
     try:
         return int(value)
@@ -63,6 +74,69 @@ def _clamp(v: float, lo: float, hi: float) -> float:
 
 def _idrefs(value: str | None) -> list[str]:
     return [t for t in str(value or "").split() if t.strip()]
+
+
+def _normalize_text(value: str | None) -> str:
+    return " ".join(str(value or "").split()).strip()
+
+
+def _tokenize_text(value: str | None) -> set[str]:
+    text = _normalize_text(value).lower()
+    if not text:
+        return set()
+    return set(re.findall(r"[a-z0-9]+", text))
+
+
+def _text_similarity(a: str | None, b: str | None) -> float:
+    ta = _tokenize_text(a)
+    tb = _tokenize_text(b)
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / float(len(ta | tb))
+
+
+def _dl_fragmentation_metrics(html: str) -> tuple[int, int, int]:
+    blocks: list[dict[str, int]] = []
+    for match in re.finditer(r"<dl\b[^>]*>(.*?)</dl>", html, flags=re.IGNORECASE | re.DOTALL):
+        block = str(match.group(1) or "")
+        dt_count = len(re.findall(r"<dt\b", block, flags=re.IGNORECASE))
+        dd_count = len(re.findall(r"<dd\b", block, flags=re.IGNORECASE))
+        blocks.append(
+            {
+                "start": int(match.start()),
+                "end": int(match.end()),
+                "pair_count": min(dt_count, dd_count),
+            }
+        )
+    if not blocks:
+        return (0, 0, 0)
+    if len(blocks) == 1:
+        return (1, 0, 0)
+    fragmentation_count = 0
+    group_consistency_count = 0
+    run_total = 1
+    run_tiny = 1 if blocks[0]["pair_count"] <= 2 else 0
+    for i in range(1, len(blocks)):
+        prev = blocks[i - 1]
+        cur = blocks[i]
+        between = html[prev["end"] : cur["start"]]
+        adjacent = not between.strip()
+        if adjacent:
+            run_total += 1
+            if cur["pair_count"] <= 2:
+                run_tiny += 1
+        else:
+            if run_total >= 2:
+                fragmentation_count += run_total - 1
+                if run_tiny == run_total:
+                    group_consistency_count += run_total - 1
+            run_total = 1
+            run_tiny = 1 if cur["pair_count"] <= 2 else 0
+    if run_total >= 2:
+        fragmentation_count += run_total - 1
+        if run_tiny == run_total:
+            group_consistency_count += run_total - 1
+    return (len(blocks), fragmentation_count, group_consistency_count)
 
 
 def _lang_ok(lang: str | None) -> bool:
@@ -108,6 +182,19 @@ class HtmlFacts:
     image_missing_alt_count: int
     image_title_only_count: int
     image_semantic_conflict_count: int
+    figure_informative_count: int
+    figure_alt_length_budget: int
+    figure_alt_over_budget_count: int
+    figure_max_alt_len: int
+    figure_caption_redundancy_threshold: float
+    figure_caption_redundancy_count: int
+    figure_max_caption_similarity: float
+    figure_missing_effective_text_count: int
+    dl_block_count: int
+    dl_fragmentation_count: int
+    dl_group_consistency_count: int
+    redundant_role_native_count: int
+    redundant_state_native_count: int
     form_control_count: int
     unlabeled_form_control_count: int
     invalid_form_control_count: int
@@ -158,6 +245,17 @@ class _P(HTMLParser):
         self.image_missing_alt_count = 0
         self.image_title_only_count = 0
         self.image_semantic_conflict_count = 0
+        self.figure_alt_length_budget = 150
+        self.figure_caption_redundancy_threshold = 0.8
+        self.figure_informative_count = 0
+        self.figure_alt_over_budget_count = 0
+        self.figure_max_alt_len = 0
+        self.figure_caption_redundancy_count = 0
+        self.figure_max_caption_similarity = 0.0
+        self.figure_missing_effective_text_count = 0
+        self.redundant_role_native_count = 0
+        self.redundant_state_native_count = 0
+        self.figure_stack: list[dict[str, Any]] = []
         self.label_for_targets: set[str] = set()
         self._label_depth = 0
         self._form_controls: list[dict[str, Any]] = []
@@ -193,6 +291,32 @@ class _P(HTMLParser):
             self.in_body = False
         elif t in {"script", "style"}:
             self.in_script_style = False
+        elif t == "figcaption" and self.figure_stack:
+            fig = self.figure_stack[-1]
+            if fig["figcaption_depth"] > 0:
+                fig["figcaption_depth"] -= 1
+        elif t == "figure" and self.figure_stack:
+            fig = self.figure_stack.pop()
+            informative_image_count = int(fig.get("informative_image_count") or 0)
+            if informative_image_count > 0:
+                self.figure_informative_count += 1
+                caption_text = _normalize_text("".join(fig.get("figcaption_chunks") or []))
+                alt_texts = [t for t in fig.get("alt_texts", []) if t]
+                max_alt_len = int(fig.get("max_alt_len") or 0)
+                self.figure_max_alt_len = max(self.figure_max_alt_len, max_alt_len)
+                if max_alt_len > self.figure_alt_length_budget:
+                    self.figure_alt_over_budget_count += 1
+                effective_name_present = bool(fig.get("effective_name_present"))
+                if not (effective_name_present or caption_text):
+                    self.figure_missing_effective_text_count += 1
+                if alt_texts and caption_text:
+                    alt_text = max(alt_texts, key=len)
+                    similarity = _text_similarity(alt_text, caption_text)
+                    self.figure_max_caption_similarity = max(
+                        self.figure_max_caption_similarity, similarity
+                    )
+                    if similarity >= self.figure_caption_redundancy_threshold:
+                        self.figure_caption_redundancy_count += 1
         elif t == "table" and self.table_stack:
             self.tables.append(self.table_stack.pop())
         elif t == "label" and self._label_depth > 0:
@@ -224,6 +348,10 @@ class _P(HTMLParser):
             self.title_chunks.append(data)
         if self.in_body and not self.in_script_style:
             self.body_chunks.append(data)
+        if self.figure_stack and not self.in_script_style:
+            fig = self.figure_stack[-1]
+            if fig.get("figcaption_depth", 0) > 0:
+                fig["figcaption_chunks"].append(data)
         if self._text_capture_stack and not self.in_script_style:
             for item in self._text_capture_stack:
                 item["chunks"].append(data)
@@ -248,6 +376,19 @@ class _P(HTMLParser):
                 self.script_element_count += 1
         elif t == "main":
             self.main_count += 1
+        elif t == "figure":
+            self.figure_stack.append(
+                {
+                    "informative_image_count": 0,
+                    "effective_name_present": False,
+                    "alt_texts": [],
+                    "max_alt_len": 0,
+                    "figcaption_depth": 0,
+                    "figcaption_chunks": [],
+                }
+            )
+        elif t == "figcaption" and self.figure_stack:
+            self.figure_stack[-1]["figcaption_depth"] += 1
         elif t in {"iframe", "embed", "object", "frame"}:
             self.embedded_active_content_count += 1
         elif t in {"blink", "marquee"}:
@@ -280,6 +421,38 @@ class _P(HTMLParser):
             except Exception:
                 self.invalid_tabindex_count += 1
         role = attrs.get("role", "").strip().lower()
+        role_tokens = [tok for tok in role.split() if tok]
+        expected_native_role = {
+            "nav": "navigation",
+            "main": "main",
+            "aside": "complementary",
+            "form": "form",
+            "table": "table",
+            "ul": "list",
+            "ol": "list",
+            "li": "listitem",
+            "button": "button",
+            "img": "img",
+        }.get(t)
+        if t == "a" and attrs.get("href", "").strip():
+            expected_native_role = "link"
+        if expected_native_role and expected_native_role in role_tokens:
+            self.redundant_role_native_count += 1
+
+        if "disabled" in attrs and _trueish(attrs.get("aria-disabled")):
+            self.redundant_state_native_count += 1
+        if "required" in attrs and _trueish(attrs.get("aria-required")):
+            self.redundant_state_native_count += 1
+        if "readonly" in attrs and _trueish(attrs.get("aria-readonly")):
+            self.redundant_state_native_count += 1
+        if t == "input":
+            input_type = attrs.get("type", "").strip().lower()
+            if input_type in {"checkbox", "radio"} and "checked" in attrs and _trueish(
+                attrs.get("aria-checked")
+            ):
+                self.redundant_state_native_count += 1
+        if t == "option" and "selected" in attrs and _trueish(attrs.get("aria-selected")):
+            self.redundant_state_native_count += 1
         is_native_keyboard_interactive = (
             (t == "a" and bool(attrs.get("href", "").strip()))
             or t in {"button", "select", "textarea", "summary"}
@@ -340,6 +513,16 @@ class _P(HTMLParser):
                     self.image_title_only_count += 1
                 else:
                     self.image_missing_alt_count += 1
+            if self.figure_stack:
+                fig = self.figure_stack[-1]
+                if not decorative:
+                    fig["informative_image_count"] += 1
+                    if has_informative_name:
+                        fig["effective_name_present"] = True
+                alt_text = _normalize_text(alt_value) if alt_value is not None else ""
+                if alt_text:
+                    fig["alt_texts"].append(alt_text)
+                    fig["max_alt_len"] = max(int(fig.get("max_alt_len") or 0), len(alt_text))
         if t in {"input", "select", "textarea"}:
             input_type = attrs.get("type", "").strip().lower()
             if not (t == "input" and input_type == "hidden"):
@@ -410,6 +593,9 @@ def parse_html_facts(html: str) -> HtmlFacts:
         errormessage_ok = any(tok in ids for tok in _idrefs(str(ctl.get("aria_errormessage") or "")))
         if not (describedby_ok or errormessage_ok):
             unidentified_error_controls += 1
+    dl_block_count, dl_fragmentation_count, dl_group_consistency_count = _dl_fragmentation_metrics(
+        html
+    )
     return HtmlFacts(
         html_lang=p.html_lang,
         title="".join(p.title_chunks).strip(),
@@ -431,6 +617,19 @@ def parse_html_facts(html: str) -> HtmlFacts:
         image_missing_alt_count=p.image_missing_alt_count,
         image_title_only_count=p.image_title_only_count,
         image_semantic_conflict_count=p.image_semantic_conflict_count,
+        figure_informative_count=p.figure_informative_count,
+        figure_alt_length_budget=p.figure_alt_length_budget,
+        figure_alt_over_budget_count=p.figure_alt_over_budget_count,
+        figure_max_alt_len=p.figure_max_alt_len,
+        figure_caption_redundancy_threshold=p.figure_caption_redundancy_threshold,
+        figure_caption_redundancy_count=p.figure_caption_redundancy_count,
+        figure_max_caption_similarity=p.figure_max_caption_similarity,
+        figure_missing_effective_text_count=p.figure_missing_effective_text_count,
+        dl_block_count=dl_block_count,
+        dl_fragmentation_count=dl_fragmentation_count,
+        dl_group_consistency_count=dl_group_consistency_count,
+        redundant_role_native_count=p.redundant_role_native_count,
+        redundant_state_native_count=p.redundant_state_native_count,
         form_control_count=len(p._form_controls),
         unlabeled_form_control_count=unlabeled_controls,
         invalid_form_control_count=invalid_controls,
@@ -463,8 +662,11 @@ def _indexes(registry: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], dict[
 
 def _profile_override_levels(registry: dict[str, Any], profile: str) -> dict[str, str]:
     out: dict[str, str] = {}
-    for item in registry.get("profiles", {}).get(profile, {}).get("overrides", []):
-        out[str(item["id"])] = str(item["level"])
+    profiles = registry.get("profiles", {})
+    profile_key = str(profile or "").strip().lower()
+    profile_cfg = profiles.get(profile) or profiles.get(profile_key) or {}
+    for item in profile_cfg.get("overrides", []):
+        out[str(item["id"])] = str(item["level"]).lower()
     return out
 
 
@@ -906,8 +1108,9 @@ def prototype_verify_accessibility(
     claim_evidence: dict[str, Any] | None = None,
     registry: dict[str, Any] | None = None,
     generated_at: str | None = None,
-    fullbleed_version: str = "0.6.5",
+    fullbleed_version: str | None = None,
 ) -> dict[str, Any]:
+    runtime_fullbleed_version = _runtime_fullbleed_version(fullbleed_version)
     reg = registry or _registry()
     entries, _cats = _indexes(reg)
     overrides = _profile_override_levels(reg, profile)
@@ -1082,6 +1285,204 @@ def prototype_verify_accessibility(
                 confidence="high",
             )
         )
+    if facts.figure_informative_count == 0:
+        findings.append(
+            _vf(
+                "fb.a11y.figure.alt_length_budget_seed",
+                "not_applicable",
+                "low",
+                "post-emit",
+                "fullbleed",
+                "No informative figures detected; figure alt-length budget rule not applicable.",
+                evidence=[
+                    {
+                        "values": {
+                            "figure_informative_count": facts.figure_informative_count,
+                            "figure_alt_length_budget": facts.figure_alt_length_budget,
+                            "figure_alt_over_budget_count": facts.figure_alt_over_budget_count,
+                            "figure_max_alt_len": facts.figure_max_alt_len,
+                        }
+                    }
+                ],
+                applicability="not_applicable",
+                verification_mode="machine",
+                confidence="high",
+            )
+        )
+        findings.append(
+            _vf(
+                "fb.a11y.figure.caption_redundancy_seed",
+                "not_applicable",
+                "low",
+                "post-emit",
+                "fullbleed",
+                "No informative figures detected; figure caption-redundancy rule not applicable.",
+                evidence=[
+                    {
+                        "values": {
+                            "figure_informative_count": facts.figure_informative_count,
+                            "figure_caption_redundancy_threshold": facts.figure_caption_redundancy_threshold,
+                            "figure_caption_redundancy_count": facts.figure_caption_redundancy_count,
+                            "figure_max_caption_similarity": round(facts.figure_max_caption_similarity, 3),
+                        }
+                    }
+                ],
+                applicability="not_applicable",
+                verification_mode="machine",
+                confidence="high",
+            )
+        )
+        findings.append(
+            _vf(
+                "fb.a11y.figure.missing_effective_text_seed",
+                "not_applicable",
+                "low",
+                "post-emit",
+                "fullbleed",
+                "No informative figures detected; missing-effective-figure-text rule not applicable.",
+                evidence=[
+                    {
+                        "values": {
+                            "figure_informative_count": facts.figure_informative_count,
+                            "figure_missing_effective_text_count": facts.figure_missing_effective_text_count,
+                        }
+                    }
+                ],
+                applicability="not_applicable",
+                verification_mode="machine",
+                confidence="high",
+            )
+        )
+    else:
+        over_budget = facts.figure_alt_over_budget_count > 0
+        findings.append(
+            _vf(
+                "fb.a11y.figure.alt_length_budget_seed",
+                "warn" if over_budget else "pass",
+                "medium",
+                "post-emit",
+                "fullbleed",
+                (
+                    "Figure alternative text exceeds recommended length budget."
+                    if over_budget
+                    else "Informative figure alternative text lengths are within the recommended budget."
+                ),
+                evidence=[
+                    {
+                        "values": {
+                            "figure_informative_count": facts.figure_informative_count,
+                            "figure_alt_length_budget": facts.figure_alt_length_budget,
+                            "figure_alt_over_budget_count": facts.figure_alt_over_budget_count,
+                            "figure_max_alt_len": facts.figure_max_alt_len,
+                        }
+                    }
+                ],
+                verification_mode="machine",
+                confidence="high",
+            )
+        )
+        caption_redundant = facts.figure_caption_redundancy_count > 0
+        findings.append(
+            _vf(
+                "fb.a11y.figure.caption_redundancy_seed",
+                "warn" if caption_redundant else "pass",
+                "medium",
+                "post-emit",
+                "fullbleed",
+                (
+                    "Figure alt and figcaption content appear near-duplicate; announce-once optimization recommended."
+                    if caption_redundant
+                    else "Figure alt and figcaption content are sufficiently distinct."
+                ),
+                evidence=[
+                    {
+                        "values": {
+                            "figure_informative_count": facts.figure_informative_count,
+                            "figure_caption_redundancy_threshold": facts.figure_caption_redundancy_threshold,
+                            "figure_caption_redundancy_count": facts.figure_caption_redundancy_count,
+                            "figure_max_caption_similarity": round(facts.figure_max_caption_similarity, 3),
+                        }
+                    }
+                ],
+                verification_mode="machine",
+                confidence="high",
+            )
+        )
+        missing_effective = facts.figure_missing_effective_text_count > 0
+        findings.append(
+            _vf(
+                "fb.a11y.figure.missing_effective_text_seed",
+                "fail" if missing_effective else "pass",
+                "high",
+                "post-emit",
+                "fullbleed",
+                (
+                    "Informative figure(s) missing effective text alternatives (alt/ARIA/caption)."
+                    if missing_effective
+                    else "Informative figures expose effective text alternatives (alt/ARIA/caption)."
+                ),
+                evidence=[
+                    {
+                        "values": {
+                            "figure_informative_count": facts.figure_informative_count,
+                            "figure_missing_effective_text_count": facts.figure_missing_effective_text_count,
+                        }
+                    }
+                ],
+                verification_mode="machine",
+                confidence="high",
+            )
+        )
+    dl_fragmented = facts.dl_fragmentation_count > 0
+    findings.append(
+        _vf(
+            "fb.a11y.dl.fragmentation_seed",
+            "warn" if dl_fragmented else "pass",
+            "medium",
+            "post-emit",
+            "fullbleed",
+            (
+                "Adjacent description-list siblings detected; consolidate into a single logical list where possible."
+                if dl_fragmented
+                else "No adjacent description-list fragmentation detected."
+            ),
+            evidence=[
+                {
+                    "values": {
+                        "dl_block_count": facts.dl_block_count,
+                        "dl_fragmentation_count": facts.dl_fragmentation_count,
+                    }
+                }
+            ],
+            verification_mode="machine",
+            confidence="high",
+        )
+    )
+    dl_inconsistent = facts.dl_group_consistency_count > 0
+    findings.append(
+        _vf(
+            "fb.a11y.dl.group_consistency_seed",
+            "warn" if dl_inconsistent else "pass",
+            "medium",
+            "post-emit",
+            "fullbleed",
+            (
+                "Repeated tiny description-list groups detected with similar structure; unify group semantics."
+                if dl_inconsistent
+                else "Description-list grouping consistency looks stable."
+            ),
+            evidence=[
+                {
+                    "values": {
+                        "dl_block_count": facts.dl_block_count,
+                        "dl_group_consistency_count": facts.dl_group_consistency_count,
+                    }
+                }
+            ],
+            verification_mode="machine",
+            confidence="high",
+        )
+    )
     if facts.form_control_count == 0:
         findings.append(
             _vf(
@@ -1364,6 +1765,52 @@ def prototype_verify_accessibility(
             findings.append(_vf("fb.a11y.aria.reference_target_exists", "fail", "critical", "post-emit", "fullbleed", f"{attr} references missing id {target!r}.", evidence=[{"values": {"attr": attr, "target_id": target}}]))
     else:
         findings.append(_vf("fb.a11y.aria.reference_target_exists", "pass", "critical", "post-emit", "fullbleed", "No broken ARIA ID references detected."))
+    findings.append(
+        _vf(
+            "fb.a11y.aria.redundant_role_native_seed",
+            "warn" if facts.redundant_role_native_count > 0 else "pass",
+            "medium",
+            "post-emit",
+            "fullbleed",
+            (
+                "Explicit roles duplicate native semantics on one or more elements."
+                if facts.redundant_role_native_count > 0
+                else "No obvious redundant explicit-role/native-semantic duplication detected."
+            ),
+            evidence=[
+                {
+                    "values": {
+                        "redundant_role_native_count": facts.redundant_role_native_count,
+                    }
+                }
+            ],
+            verification_mode="machine",
+            confidence="high",
+        )
+    )
+    findings.append(
+        _vf(
+            "fb.a11y.aria.redundant_state_native_seed",
+            "warn" if facts.redundant_state_native_count > 0 else "pass",
+            "medium",
+            "post-emit",
+            "fullbleed",
+            (
+                "ARIA state/property duplicates equivalent native HTML state on one or more elements."
+                if facts.redundant_state_native_count > 0
+                else "No obvious redundant ARIA state/native-state duplication detected."
+            ),
+            evidence=[
+                {
+                    "values": {
+                        "redundant_state_native_count": facts.redundant_state_native_count,
+                    }
+                }
+            ],
+            verification_mode="machine",
+            confidence="high",
+        )
+    )
 
     for diag in (a11y_report or {}).get("diagnostics", []) or []:
         rid = _diag_map(diag.get("code"))
@@ -1394,7 +1841,7 @@ def prototype_verify_accessibility(
             (
                 "pass"
                 if sig_pass
-                else ("not_applicable" if sig_na else ("manual_needed" if profile in {"cav", "transactional"} else "not_applicable"))
+                else ("not_applicable" if sig_na else ("fail" if profile in {"cav", "transactional"} else "not_applicable"))
             ),
             "medium",
             "post-emit",
@@ -1405,13 +1852,13 @@ def prototype_verify_accessibility(
                 else (
                     "No signature-bearing content cues detected; signature semantics check not applicable."
                     if sig_na
-                    else "Signature semantics could not be confirmed automatically."
+                    else "No text-first signature semantics detected."
                 )
             ),
             evidence=[{"values": {"signature_semantic_count": facts.sig_count, "signature_cue_text_present": sig_cue_present}}],
-            verification_mode="machine" if (sig_pass or sig_na) else ("manual" if profile in {"cav", "transactional"} else "machine"),
+            verification_mode="machine",
             applicability="not_applicable" if (profile not in {"cav", "transactional"} or sig_na) else "applicable",
-            confidence="high" if (sig_pass or sig_na) else "low",
+            confidence="high",
         )
     )
     non_interference_signal_count = (
@@ -2973,6 +3420,14 @@ def prototype_verify_accessibility(
         )
     )
     findings, observability = _dedup_and_correlate_findings(findings)
+    observability["signal_counts"] = {
+        "figure_alt_over_budget_count": facts.figure_alt_over_budget_count,
+        "figure_caption_redundancy_count": facts.figure_caption_redundancy_count,
+        "dl_fragmentation_count": facts.dl_fragmentation_count,
+        "redundant_aria_count": (
+            facts.redundant_role_native_count + facts.redundant_state_native_count
+        ),
+    }
     gate = _gate(findings, id_key="rule_id", mode=mode, entries=entries, overrides=overrides)
     counts = {k: 0 for k in ("pass", "fail", "warn", "manual_needed", "not_applicable")}
     for f in findings:
@@ -3034,7 +3489,7 @@ def prototype_verify_accessibility(
             "section508": section508_coverage,
         },
         "wcag20aa_claim_readiness": wcag20aa_claim_readiness,
-        "tooling": {"fullbleed_version": fullbleed_version, "report_schema_version": "1.0.0-draft", "generated_at": generated_at or _now()},
+        "tooling": {"fullbleed_version": runtime_fullbleed_version, "report_schema_version": "1.0.0-draft", "generated_at": generated_at or _now()},
         "artifacts": {
             "html_hash": _sha(html_p),
             "css_hash": _sha(css_p),
@@ -3113,8 +3568,9 @@ def prototype_verify_paged_media_rank(
     expected_title: str | None = None,
     registry: dict[str, Any] | None = None,
     generated_at: str | None = None,
-    fullbleed_version: str = "0.6.5",
+    fullbleed_version: str | None = None,
 ) -> dict[str, Any]:
+    runtime_fullbleed_version = _runtime_fullbleed_version(fullbleed_version)
     reg = registry or _registry()
     entries, cats = _indexes(reg)
     overrides = _profile_override_levels(reg, profile)
@@ -3259,6 +3715,14 @@ def prototype_verify_paged_media_rank(
         "category_counts": _count_by_key(audits, "category"),
         "class_counts": _count_by_key(audits, "class"),
         "verdict_counts": _count_by_key(audits, "verdict"),
+        "signal_counts": {
+            "figure_alt_over_budget_count": facts.figure_alt_over_budget_count,
+            "figure_caption_redundancy_count": facts.figure_caption_redundancy_count,
+            "dl_fragmentation_count": facts.dl_fragmentation_count,
+            "redundant_aria_count": (
+                facts.redundant_role_native_count + facts.redundant_state_native_count
+            ),
+        },
         "correlation_index": correlation_index,
     }
     return {
@@ -3278,7 +3742,7 @@ def prototype_verify_paged_media_rank(
             "manual_needed_count": sum(1 for a in audits if a["verdict"] == "manual_needed"),
             "not_evaluated_audit_count": 0,
         },
-        "tooling": {"fullbleed_version": fullbleed_version, "report_schema_version": "1.0.0-draft", "generated_at": generated_at or _now()},
+        "tooling": {"fullbleed_version": runtime_fullbleed_version, "report_schema_version": "1.0.0-draft", "generated_at": generated_at or _now()},
         "artifacts": {"html_hash": _sha(html_p), "css_hash": _sha(css_p), "css_linked": facts.has_css_link, "packaging_mode": "linked-css" if facts.has_css_link else "separate-files"},
     }
 

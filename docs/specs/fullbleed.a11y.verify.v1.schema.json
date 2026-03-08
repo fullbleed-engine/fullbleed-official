@@ -531,7 +531,8 @@
         "dedup_merged_finding_count",
         "correlated_finding_count",
         "stage_counts",
-        "source_counts"
+        "source_counts",
+        "signal_counts"
       ],
       "properties": {
         "original_finding_count": {
@@ -558,6 +559,9 @@
           "$ref": "#/$defs/countMap"
         },
         "source_counts": {
+          "$ref": "#/$defs/countMap"
+        },
+        "signal_counts": {
           "$ref": "#/$defs/countMap"
         },
         "original_stage_counts": {

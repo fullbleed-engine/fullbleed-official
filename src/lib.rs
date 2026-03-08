@@ -50,13 +50,13 @@ pub use flowable::{
     TextStyle,
 };
 use font::FontRegistry;
-use fullbleed_audit_contract as audit_contract;
 pub use frame::{AddResult, Frame};
+use fullbleed_audit_contract as audit_contract;
 pub use glyph_report::{GlyphCoverageReport, MissingGlyph};
 use image::GenericImageView;
+pub use jit::JitMode;
 use kuchiki::NodeData;
 use kuchiki::traits::TendrilSink;
-pub use jit::JitMode;
 pub use metrics::{DocumentMetrics, PageMetrics};
 pub use page_data::{PageDataContext, PageDataOp, PageDataValue, PaginatedContextSpec};
 pub use page_template::{FrameSpec, PageTemplate};
@@ -192,6 +192,19 @@ pub struct A11yVerifierFacts {
     pub image_missing_alt_count: usize,
     pub image_title_only_count: usize,
     pub image_semantic_conflict_count: usize,
+    pub figure_informative_count: usize,
+    pub figure_alt_length_budget: usize,
+    pub figure_alt_over_budget_count: usize,
+    pub figure_max_alt_len: usize,
+    pub figure_caption_redundancy_threshold: f64,
+    pub figure_caption_redundancy_count: usize,
+    pub figure_max_caption_similarity: f64,
+    pub figure_missing_effective_text_count: usize,
+    pub dl_block_count: usize,
+    pub dl_fragmentation_count: usize,
+    pub dl_group_consistency_count: usize,
+    pub redundant_role_native_count: usize,
+    pub redundant_state_native_count: usize,
     pub form_control_count: usize,
     pub unlabeled_form_control_count: usize,
     pub invalid_form_control_count: usize,
@@ -1216,8 +1229,14 @@ impl FullBleed {
         FullBleedBuilder::new()
     }
 
-    pub(crate) fn measure_text_width_for_trace(&self, font_name: &str, font_size: Pt, text: &str) -> Pt {
-        self.font_registry.measure_text_width(font_name, font_size, text)
+    pub(crate) fn measure_text_width_for_trace(
+        &self,
+        font_name: &str,
+        font_size: Pt,
+        text: &str,
+    ) -> Pt {
+        self.font_registry
+            .measure_text_width(font_name, font_size, text)
     }
 
     fn emit_debug_summary(&self, context: &str) {
@@ -1413,7 +1432,8 @@ impl FullBleed {
             main_count = nodes.count();
         }
 
-        let mut ids_seen: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+        let mut ids_seen: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
         let mut duplicate_ids: Vec<String> = Vec::new();
         let mut idrefs: Vec<(String, String)> = Vec::new();
         let mut css_link_hrefs: Vec<String> = Vec::new();
@@ -1426,7 +1446,21 @@ impl FullBleed {
         let mut image_missing_alt_count = 0usize;
         let mut image_title_only_count = 0usize;
         let mut image_semantic_conflict_count = 0usize;
-        let mut label_for_targets: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let figure_alt_length_budget = 150usize;
+        let figure_caption_redundancy_threshold = 0.8f64;
+        let mut figure_informative_count = 0usize;
+        let mut figure_alt_over_budget_count = 0usize;
+        let mut figure_max_alt_len = 0usize;
+        let mut figure_caption_redundancy_count = 0usize;
+        let mut figure_max_caption_similarity = 0.0f64;
+        let mut figure_missing_effective_text_count = 0usize;
+        let mut dl_block_count = 0usize;
+        let mut dl_fragmentation_count = 0usize;
+        let mut dl_group_consistency_count = 0usize;
+        let mut redundant_role_native_count = 0usize;
+        let mut redundant_state_native_count = 0usize;
+        let mut label_for_targets: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
         let mut form_controls: Vec<(String, bool, bool, bool, String, String, bool)> = Vec::new(); // (id, in_label, aria_label_nonempty, aria_labelledby_nonempty, aria_describedby, aria_errormessage, invalid_state)
         let mut tabindex_attr_count = 0usize;
         let mut positive_tabindex_count = 0usize;
@@ -1553,11 +1587,115 @@ impl FullBleed {
                     .get("role")
                     .map(|v| v.trim().to_ascii_lowercase())
                     .unwrap_or_default();
+                let role_tokens: std::collections::BTreeSet<&str> =
+                    role.split_whitespace().collect();
+                let expected_native_role = match tag_name.as_deref() {
+                    Some("nav") => Some("navigation"),
+                    Some("main") => Some("main"),
+                    Some("aside") => Some("complementary"),
+                    Some("form") => Some("form"),
+                    Some("table") => Some("table"),
+                    Some("ul" | "ol") => Some("list"),
+                    Some("li") => Some("listitem"),
+                    Some("button") => Some("button"),
+                    Some("img") => Some("img"),
+                    Some("a") => {
+                        if attrs
+                            .get("href")
+                            .map(|v| !v.trim().is_empty())
+                            .unwrap_or(false)
+                        {
+                            Some("link")
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(native_role) = expected_native_role {
+                    if role_tokens.contains(native_role) {
+                        redundant_role_native_count += 1;
+                    }
+                }
+                if attrs.get("disabled").is_some()
+                    && attrs
+                        .get("aria-disabled")
+                        .map(|v| {
+                            matches!(
+                                v.trim().to_ascii_lowercase().as_str(),
+                                "1" | "true" | "yes" | "on"
+                            )
+                        })
+                        .unwrap_or(false)
+                {
+                    redundant_state_native_count += 1;
+                }
+                if attrs.get("required").is_some()
+                    && attrs
+                        .get("aria-required")
+                        .map(|v| {
+                            matches!(
+                                v.trim().to_ascii_lowercase().as_str(),
+                                "1" | "true" | "yes" | "on"
+                            )
+                        })
+                        .unwrap_or(false)
+                {
+                    redundant_state_native_count += 1;
+                }
+                if attrs.get("readonly").is_some()
+                    && attrs
+                        .get("aria-readonly")
+                        .map(|v| {
+                            matches!(
+                                v.trim().to_ascii_lowercase().as_str(),
+                                "1" | "true" | "yes" | "on"
+                            )
+                        })
+                        .unwrap_or(false)
+                {
+                    redundant_state_native_count += 1;
+                }
+                if tag_name.as_deref() == Some("input") {
+                    let is_checkbox_or_radio = attrs
+                        .get("type")
+                        .map(|v| {
+                            matches!(v.trim().to_ascii_lowercase().as_str(), "checkbox" | "radio")
+                        })
+                        .unwrap_or(false);
+                    if is_checkbox_or_radio
+                        && attrs.get("checked").is_some()
+                        && attrs
+                            .get("aria-checked")
+                            .map(|v| {
+                                matches!(
+                                    v.trim().to_ascii_lowercase().as_str(),
+                                    "1" | "true" | "yes" | "on"
+                                )
+                            })
+                            .unwrap_or(false)
+                    {
+                        redundant_state_native_count += 1;
+                    }
+                }
+                if tag_name.as_deref() == Some("option")
+                    && attrs.get("selected").is_some()
+                    && attrs
+                        .get("aria-selected")
+                        .map(|v| {
+                            matches!(
+                                v.trim().to_ascii_lowercase().as_str(),
+                                "1" | "true" | "yes" | "on"
+                            )
+                        })
+                        .unwrap_or(false)
+                {
+                    redundant_state_native_count += 1;
+                }
                 let has_onclick = attrs.get("onclick").is_some();
-                let has_keyboard_handler =
-                    attrs.get("onkeydown").is_some()
-                        || attrs.get("onkeyup").is_some()
-                        || attrs.get("onkeypress").is_some();
+                let has_keyboard_handler = attrs.get("onkeydown").is_some()
+                    || attrs.get("onkeyup").is_some()
+                    || attrs.get("onkeypress").is_some();
                 let has_tabindex_attr = attrs.get("tabindex").is_some();
                 let is_native_keyboard_interactive = match tag_name.as_deref() {
                     Some("a") => attrs
@@ -1621,15 +1759,15 @@ impl FullBleed {
                     let aria_labelledby = attrs.get("aria-labelledby");
                     let alt_value = attrs.get("alt");
                     let title_value = attrs.get("title");
-                    let has_informative_name = aria_label
-                        .map(|v| !v.trim().is_empty())
-                        .unwrap_or(false)
-                        || aria_labelledby
-                            .map(|v| v.split_whitespace().any(|tok| !tok.trim().is_empty()))
-                            .unwrap_or(false)
-                        || alt_value.map(|v| !v.trim().is_empty()).unwrap_or(false);
+                    let has_informative_name =
+                        aria_label.map(|v| !v.trim().is_empty()).unwrap_or(false)
+                            || aria_labelledby
+                                .map(|v| v.split_whitespace().any(|tok| !tok.trim().is_empty()))
+                                .unwrap_or(false)
+                            || alt_value.map(|v| !v.trim().is_empty()).unwrap_or(false);
                     let alt_empty = alt_value.map(|v| v.is_empty()).unwrap_or(false);
-                    let decorative = explicit_decorative || aria_hidden || role_decorative || alt_empty;
+                    let decorative =
+                        explicit_decorative || aria_hidden || role_decorative || alt_empty;
                     if decorative && has_informative_name {
                         image_semantic_conflict_count += 1;
                     } else if !decorative && !has_informative_name {
@@ -1768,7 +1906,9 @@ impl FullBleed {
             }
         }
         let mut unlabeled_form_control_count = 0usize;
-        for (ctl_id, in_label, aria_label_nonempty, aria_labelledby_nonempty, _, _, _) in &form_controls {
+        for (ctl_id, in_label, aria_label_nonempty, aria_labelledby_nonempty, _, _, _) in
+            &form_controls
+        {
             if *aria_label_nonempty || *aria_labelledby_nonempty || *in_label {
                 continue;
             }
@@ -1832,6 +1972,147 @@ impl FullBleed {
             }
         }
 
+        if let Ok(figure_nodes) = document.select("figure") {
+            for figure in figure_nodes {
+                let figure_node = figure.as_node();
+                let caption_text = if let Ok(captions) = figure_node.select("figcaption") {
+                    let caption_joined = captions
+                        .map(|cap| cap.as_node().text_contents())
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    Self::a11y_normalize_text(&caption_joined)
+                } else {
+                    String::new()
+                };
+
+                let mut informative_image_count = 0usize;
+                let mut effective_name_present = false;
+                let mut alt_texts: Vec<String> = Vec::new();
+                let mut local_max_alt_len = 0usize;
+
+                if let Ok(images) = figure_node.select("img, svg") {
+                    for image in images {
+                        let attrs = image.attributes.borrow();
+                        let role_decorative = attrs
+                            .get("role")
+                            .map(|v| {
+                                let v = v.trim().to_ascii_lowercase();
+                                v == "presentation" || v == "none"
+                            })
+                            .unwrap_or(false);
+                        let aria_hidden = attrs
+                            .get("aria-hidden")
+                            .map(|v| {
+                                matches!(
+                                    v.trim().to_ascii_lowercase().as_str(),
+                                    "1" | "true" | "yes" | "on"
+                                )
+                            })
+                            .unwrap_or(false);
+                        let explicit_decorative = attrs
+                            .get("data-fb-a11y-decorative")
+                            .map(|v| {
+                                matches!(
+                                    v.trim().to_ascii_lowercase().as_str(),
+                                    "1" | "true" | "yes" | "on"
+                                )
+                            })
+                            .unwrap_or(false);
+                        let aria_label = attrs.get("aria-label");
+                        let aria_labelledby = attrs.get("aria-labelledby");
+                        let alt_value = attrs.get("alt");
+                        let has_informative_name =
+                            aria_label.map(|v| !v.trim().is_empty()).unwrap_or(false)
+                                || aria_labelledby
+                                    .map(|v| v.split_whitespace().any(|tok| !tok.trim().is_empty()))
+                                    .unwrap_or(false)
+                                || alt_value.map(|v| !v.trim().is_empty()).unwrap_or(false);
+                        let alt_empty = alt_value.map(|v| v.is_empty()).unwrap_or(false);
+                        let decorative =
+                            explicit_decorative || aria_hidden || role_decorative || alt_empty;
+                        if decorative {
+                            continue;
+                        }
+                        informative_image_count += 1;
+                        if has_informative_name {
+                            effective_name_present = true;
+                        }
+                        if let Some(alt) = alt_value {
+                            let alt_norm = Self::a11y_normalize_text(alt);
+                            if !alt_norm.is_empty() {
+                                local_max_alt_len = local_max_alt_len.max(alt_norm.chars().count());
+                                alt_texts.push(alt_norm);
+                            }
+                        }
+                    }
+                }
+
+                if informative_image_count == 0 {
+                    continue;
+                }
+
+                figure_informative_count += 1;
+                figure_max_alt_len = figure_max_alt_len.max(local_max_alt_len);
+                if local_max_alt_len > figure_alt_length_budget {
+                    figure_alt_over_budget_count += 1;
+                }
+                if !effective_name_present && caption_text.is_empty() {
+                    figure_missing_effective_text_count += 1;
+                }
+                if !alt_texts.is_empty() && !caption_text.is_empty() {
+                    let longest_alt = alt_texts
+                        .iter()
+                        .max_by_key(|txt| txt.chars().count())
+                        .cloned()
+                        .unwrap_or_default();
+                    let similarity = Self::a11y_text_similarity(&longest_alt, &caption_text);
+                    figure_max_caption_similarity = figure_max_caption_similarity.max(similarity);
+                    if similarity >= figure_caption_redundancy_threshold {
+                        figure_caption_redundancy_count += 1;
+                    }
+                }
+            }
+        }
+
+        if let Ok(parent_nodes) = document.select("*") {
+            for parent in parent_nodes {
+                let mut run_total = 0usize;
+                let mut run_tiny = 0usize;
+                for child in parent.as_node().children() {
+                    let is_dl = if let NodeData::Element(el) = child.data() {
+                        el.name.local.as_ref().eq_ignore_ascii_case("dl")
+                    } else {
+                        false
+                    };
+                    if is_dl {
+                        dl_block_count += 1;
+                        run_total += 1;
+                        let dt_count = child.select("dt").ok().map(|it| it.count()).unwrap_or(0);
+                        let dd_count = child.select("dd").ok().map(|it| it.count()).unwrap_or(0);
+                        if dt_count.min(dd_count) <= 2 {
+                            run_tiny += 1;
+                        }
+                    } else if run_total >= 2 {
+                        dl_fragmentation_count += run_total - 1;
+                        if run_tiny == run_total {
+                            dl_group_consistency_count += run_total - 1;
+                        }
+                        run_total = 0;
+                        run_tiny = 0;
+                    } else {
+                        run_total = 0;
+                        run_tiny = 0;
+                    }
+                }
+                if run_total >= 2 {
+                    dl_fragmentation_count += run_total - 1;
+                    if run_tiny == run_total {
+                        dl_group_consistency_count += run_total - 1;
+                    }
+                }
+            }
+        }
+
         A11yVerifierFacts {
             html_lang,
             title,
@@ -1852,6 +2133,19 @@ impl FullBleed {
             image_missing_alt_count,
             image_title_only_count,
             image_semantic_conflict_count,
+            figure_informative_count,
+            figure_alt_length_budget,
+            figure_alt_over_budget_count,
+            figure_max_alt_len,
+            figure_caption_redundancy_threshold,
+            figure_caption_redundancy_count,
+            figure_max_caption_similarity,
+            figure_missing_effective_text_count,
+            dl_block_count,
+            dl_fragmentation_count,
+            dl_group_consistency_count,
+            redundant_role_native_count,
+            redundant_state_native_count,
             form_control_count: form_controls.len(),
             unlabeled_form_control_count,
             invalid_form_control_count,
@@ -1899,7 +2193,11 @@ impl FullBleed {
         });
     }
 
-    pub fn verify_accessibility_html_core(&self, html: &str, profile: &str) -> A11yVerifierCoreReport {
+    pub fn verify_accessibility_html_core(
+        &self,
+        html: &str,
+        profile: &str,
+    ) -> A11yVerifierCoreReport {
         let facts = self.verify_accessibility_html_facts(html);
         let mut findings: Vec<A11yVerifierFinding> = Vec::new();
 
@@ -1924,7 +2222,10 @@ impl FullBleed {
             },
             vec![A11yVerifierEvidence {
                 selector: Some("html".to_string()),
-                values: vec![("lang".to_string(), facts.html_lang.clone().unwrap_or_default())],
+                values: vec![(
+                    "lang".to_string(),
+                    facts.html_lang.clone().unwrap_or_default(),
+                )],
             }],
         );
 
@@ -1966,11 +2267,9 @@ impl FullBleed {
                 stage: "post-emit".to_string(),
                 source: "fullbleed".to_string(),
                 message: if part_lang_fail {
-                    "Invalid or empty inline language-of-parts declarations detected."
-                        .to_string()
+                    "Invalid or empty inline language-of-parts declarations detected.".to_string()
                 } else {
-                    "Inline language-of-parts declarations are syntactically valid."
-                        .to_string()
+                    "Inline language-of-parts declarations are syntactically valid.".to_string()
                 },
                 evidence: vec![A11yVerifierEvidence {
                     selector: None,
@@ -2030,7 +2329,8 @@ impl FullBleed {
         );
 
         let hl_fail =
-            (facts.empty_heading_count + facts.empty_label_count + facts.empty_aria_label_count) > 0;
+            (facts.empty_heading_count + facts.empty_label_count + facts.empty_aria_label_count)
+                > 0;
         let hl_warn = facts.unlabeled_region_count > 0;
         findings.push(A11yVerifierFinding {
             rule_id: "fb.a11y.headings_labels.present_nonempty".to_string(),
@@ -2045,12 +2345,7 @@ impl FullBleed {
             }
             .to_string(),
             severity: if hl_fail { "high" } else { "medium" }.to_string(),
-            confidence: if hl_fail || hl_warn {
-                "high"
-            } else {
-                "medium"
-            }
-            .to_string(),
+            confidence: if hl_fail || hl_warn { "high" } else { "medium" }.to_string(),
             stage: "post-emit".to_string(),
             source: "fullbleed".to_string(),
             message: if hl_fail {
@@ -2147,6 +2442,264 @@ impl FullBleed {
             });
         }
 
+        if facts.figure_informative_count == 0 {
+            findings.push(A11yVerifierFinding {
+                rule_id: "fb.a11y.figure.alt_length_budget_seed".to_string(),
+                applicability: "not_applicable".to_string(),
+                verification_mode: "machine".to_string(),
+                verdict: "not_applicable".to_string(),
+                severity: "low".to_string(),
+                confidence: "high".to_string(),
+                stage: "post-emit".to_string(),
+                source: "fullbleed".to_string(),
+                message:
+                    "No informative figures detected; figure alt-length budget rule not applicable."
+                        .to_string(),
+                evidence: vec![A11yVerifierEvidence {
+                    selector: None,
+                    values: vec![
+                        (
+                            "figure_informative_count".to_string(),
+                            facts.figure_informative_count.to_string(),
+                        ),
+                        (
+                            "figure_alt_length_budget".to_string(),
+                            facts.figure_alt_length_budget.to_string(),
+                        ),
+                        (
+                            "figure_alt_over_budget_count".to_string(),
+                            facts.figure_alt_over_budget_count.to_string(),
+                        ),
+                        (
+                            "figure_max_alt_len".to_string(),
+                            facts.figure_max_alt_len.to_string(),
+                        ),
+                    ],
+                }],
+            });
+            findings.push(A11yVerifierFinding {
+                rule_id: "fb.a11y.figure.caption_redundancy_seed".to_string(),
+                applicability: "not_applicable".to_string(),
+                verification_mode: "machine".to_string(),
+                verdict: "not_applicable".to_string(),
+                severity: "low".to_string(),
+                confidence: "high".to_string(),
+                stage: "post-emit".to_string(),
+                source: "fullbleed".to_string(),
+                message: "No informative figures detected; figure caption-redundancy rule not applicable."
+                    .to_string(),
+                evidence: vec![A11yVerifierEvidence {
+                    selector: None,
+                    values: vec![
+                        (
+                            "figure_informative_count".to_string(),
+                            facts.figure_informative_count.to_string(),
+                        ),
+                        (
+                            "figure_caption_redundancy_threshold".to_string(),
+                            facts.figure_caption_redundancy_threshold.to_string(),
+                        ),
+                        (
+                            "figure_caption_redundancy_count".to_string(),
+                            facts.figure_caption_redundancy_count.to_string(),
+                        ),
+                        (
+                            "figure_max_caption_similarity".to_string(),
+                            format!("{:.3}", facts.figure_max_caption_similarity),
+                        ),
+                    ],
+                }],
+            });
+            findings.push(A11yVerifierFinding {
+                rule_id: "fb.a11y.figure.missing_effective_text_seed".to_string(),
+                applicability: "not_applicable".to_string(),
+                verification_mode: "machine".to_string(),
+                verdict: "not_applicable".to_string(),
+                severity: "low".to_string(),
+                confidence: "high".to_string(),
+                stage: "post-emit".to_string(),
+                source: "fullbleed".to_string(),
+                message: "No informative figures detected; missing-effective-figure-text rule not applicable."
+                    .to_string(),
+                evidence: vec![A11yVerifierEvidence {
+                    selector: None,
+                    values: vec![
+                        (
+                            "figure_informative_count".to_string(),
+                            facts.figure_informative_count.to_string(),
+                        ),
+                        (
+                            "figure_missing_effective_text_count".to_string(),
+                            facts.figure_missing_effective_text_count.to_string(),
+                        ),
+                    ],
+                }],
+            });
+        } else {
+            let over_budget = facts.figure_alt_over_budget_count > 0;
+            findings.push(A11yVerifierFinding {
+                rule_id: "fb.a11y.figure.alt_length_budget_seed".to_string(),
+                applicability: "applicable".to_string(),
+                verification_mode: "machine".to_string(),
+                verdict: if over_budget { "warn" } else { "pass" }.to_string(),
+                severity: "medium".to_string(),
+                confidence: "high".to_string(),
+                stage: "post-emit".to_string(),
+                source: "fullbleed".to_string(),
+                message: if over_budget {
+                    "Figure alternative text exceeds recommended length budget.".to_string()
+                } else {
+                    "Informative figure alternative text lengths are within the recommended budget."
+                        .to_string()
+                },
+                evidence: vec![A11yVerifierEvidence {
+                    selector: None,
+                    values: vec![
+                        (
+                            "figure_informative_count".to_string(),
+                            facts.figure_informative_count.to_string(),
+                        ),
+                        (
+                            "figure_alt_length_budget".to_string(),
+                            facts.figure_alt_length_budget.to_string(),
+                        ),
+                        (
+                            "figure_alt_over_budget_count".to_string(),
+                            facts.figure_alt_over_budget_count.to_string(),
+                        ),
+                        (
+                            "figure_max_alt_len".to_string(),
+                            facts.figure_max_alt_len.to_string(),
+                        ),
+                    ],
+                }],
+            });
+            let caption_redundant = facts.figure_caption_redundancy_count > 0;
+            findings.push(A11yVerifierFinding {
+                rule_id: "fb.a11y.figure.caption_redundancy_seed".to_string(),
+                applicability: "applicable".to_string(),
+                verification_mode: "machine".to_string(),
+                verdict: if caption_redundant { "warn" } else { "pass" }.to_string(),
+                severity: "medium".to_string(),
+                confidence: "high".to_string(),
+                stage: "post-emit".to_string(),
+                source: "fullbleed".to_string(),
+                message: if caption_redundant {
+                    "Figure alt and figcaption content appear near-duplicate; announce-once optimization recommended."
+                        .to_string()
+                } else {
+                    "Figure alt and figcaption content are sufficiently distinct.".to_string()
+                },
+                evidence: vec![A11yVerifierEvidence {
+                    selector: None,
+                    values: vec![
+                        (
+                            "figure_informative_count".to_string(),
+                            facts.figure_informative_count.to_string(),
+                        ),
+                        (
+                            "figure_caption_redundancy_threshold".to_string(),
+                            facts.figure_caption_redundancy_threshold.to_string(),
+                        ),
+                        (
+                            "figure_caption_redundancy_count".to_string(),
+                            facts.figure_caption_redundancy_count.to_string(),
+                        ),
+                        (
+                            "figure_max_caption_similarity".to_string(),
+                            format!("{:.3}", facts.figure_max_caption_similarity),
+                        ),
+                    ],
+                }],
+            });
+            let missing_effective = facts.figure_missing_effective_text_count > 0;
+            findings.push(A11yVerifierFinding {
+                rule_id: "fb.a11y.figure.missing_effective_text_seed".to_string(),
+                applicability: "applicable".to_string(),
+                verification_mode: "machine".to_string(),
+                verdict: if missing_effective { "fail" } else { "pass" }.to_string(),
+                severity: "high".to_string(),
+                confidence: "high".to_string(),
+                stage: "post-emit".to_string(),
+                source: "fullbleed".to_string(),
+                message: if missing_effective {
+                    "Informative figure(s) missing effective text alternatives (alt/ARIA/caption)."
+                        .to_string()
+                } else {
+                    "Informative figures expose effective text alternatives (alt/ARIA/caption)."
+                        .to_string()
+                },
+                evidence: vec![A11yVerifierEvidence {
+                    selector: None,
+                    values: vec![
+                        (
+                            "figure_informative_count".to_string(),
+                            facts.figure_informative_count.to_string(),
+                        ),
+                        (
+                            "figure_missing_effective_text_count".to_string(),
+                            facts.figure_missing_effective_text_count.to_string(),
+                        ),
+                    ],
+                }],
+            });
+        }
+
+        let dl_fragmented = facts.dl_fragmentation_count > 0;
+        findings.push(A11yVerifierFinding {
+            rule_id: "fb.a11y.dl.fragmentation_seed".to_string(),
+            applicability: "applicable".to_string(),
+            verification_mode: "machine".to_string(),
+            verdict: if dl_fragmented { "warn" } else { "pass" }.to_string(),
+            severity: "medium".to_string(),
+            confidence: "high".to_string(),
+            stage: "post-emit".to_string(),
+            source: "fullbleed".to_string(),
+            message: if dl_fragmented {
+                "Adjacent description-list siblings detected; consolidate into a single logical list where possible."
+                    .to_string()
+            } else {
+                "No adjacent description-list fragmentation detected.".to_string()
+            },
+            evidence: vec![A11yVerifierEvidence {
+                selector: None,
+                values: vec![
+                    ("dl_block_count".to_string(), facts.dl_block_count.to_string()),
+                    (
+                        "dl_fragmentation_count".to_string(),
+                        facts.dl_fragmentation_count.to_string(),
+                    ),
+                ],
+            }],
+        });
+        let dl_inconsistent = facts.dl_group_consistency_count > 0;
+        findings.push(A11yVerifierFinding {
+            rule_id: "fb.a11y.dl.group_consistency_seed".to_string(),
+            applicability: "applicable".to_string(),
+            verification_mode: "machine".to_string(),
+            verdict: if dl_inconsistent { "warn" } else { "pass" }.to_string(),
+            severity: "medium".to_string(),
+            confidence: "high".to_string(),
+            stage: "post-emit".to_string(),
+            source: "fullbleed".to_string(),
+            message: if dl_inconsistent {
+                "Repeated tiny description-list groups detected with similar structure; unify group semantics."
+                    .to_string()
+            } else {
+                "Description-list grouping consistency looks stable.".to_string()
+            },
+            evidence: vec![A11yVerifierEvidence {
+                selector: None,
+                values: vec![
+                    ("dl_block_count".to_string(), facts.dl_block_count.to_string()),
+                    (
+                        "dl_group_consistency_count".to_string(),
+                        facts.dl_group_consistency_count.to_string(),
+                    ),
+                ],
+            }],
+        });
+
         if facts.form_control_count == 0 {
             findings.push(A11yVerifierFinding {
                 rule_id: "fb.a11y.forms.labels_or_instructions_present".to_string(),
@@ -2180,7 +2733,10 @@ impl FullBleed {
                 evidence: vec![A11yVerifierEvidence {
                     selector: None,
                     values: vec![
-                        ("form_control_count".to_string(), facts.form_control_count.to_string()),
+                        (
+                            "form_control_count".to_string(),
+                            facts.form_control_count.to_string(),
+                        ),
                         (
                             "unlabeled_form_control_count".to_string(),
                             facts.unlabeled_form_control_count.to_string(),
@@ -2478,9 +3034,61 @@ impl FullBleed {
             }
         }
 
+        Self::push_a11y_finding(
+            &mut findings,
+            "fb.a11y.aria.redundant_role_native_seed",
+            if facts.redundant_role_native_count > 0 {
+                "warn"
+            } else {
+                "pass"
+            },
+            "medium",
+            "post-emit",
+            "fullbleed",
+            if facts.redundant_role_native_count > 0 {
+                "Explicit roles duplicate native semantics on one or more elements.".to_string()
+            } else {
+                "No obvious redundant explicit-role/native-semantic duplication detected."
+                    .to_string()
+            },
+            vec![A11yVerifierEvidence {
+                selector: None,
+                values: vec![(
+                    "redundant_role_native_count".to_string(),
+                    facts.redundant_role_native_count.to_string(),
+                )],
+            }],
+        );
+        Self::push_a11y_finding(
+            &mut findings,
+            "fb.a11y.aria.redundant_state_native_seed",
+            if facts.redundant_state_native_count > 0 {
+                "warn"
+            } else {
+                "pass"
+            },
+            "medium",
+            "post-emit",
+            "fullbleed",
+            if facts.redundant_state_native_count > 0 {
+                "ARIA state/property duplicates equivalent native HTML state on one or more elements."
+                    .to_string()
+            } else {
+                "No obvious redundant ARIA state/native-state duplication detected.".to_string()
+            },
+            vec![A11yVerifierEvidence {
+                selector: None,
+                values: vec![(
+                    "redundant_state_native_count".to_string(),
+                    facts.redundant_state_native_count.to_string(),
+                )],
+            }],
+        );
+
         if profile.eq_ignore_ascii_case("cav") || profile.eq_ignore_ascii_case("transactional") {
             let body_text_l = facts.body_text.to_ascii_lowercase();
-            let sig_cue_present = body_text_l.contains("signature") || body_text_l.contains("signed");
+            let sig_cue_present =
+                body_text_l.contains("signature") || body_text_l.contains("signed");
             let sig_ok = facts.signature_semantic_count > 0;
             let sig_na = !sig_ok && !sig_cue_present;
             Self::push_a11y_finding(
@@ -2511,7 +3119,10 @@ impl FullBleed {
                             "signature_semantic_count".to_string(),
                             facts.signature_semantic_count.to_string(),
                         ),
-                        ("signature_cue_text_present".to_string(), sig_cue_present.to_string()),
+                        (
+                            "signature_cue_text_present".to_string(),
+                            sig_cue_present.to_string(),
+                        ),
                     ],
                 }],
             );
@@ -2734,6 +3345,41 @@ impl FullBleed {
         .collect()
     }
 
+    fn a11y_normalize_text(value: &str) -> String {
+        value.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    fn a11y_text_tokens(value: &str) -> std::collections::BTreeSet<String> {
+        let mut tokens: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut current = String::new();
+        for ch in value.chars().flat_map(|c| c.to_lowercase()) {
+            if ch.is_ascii_alphanumeric() {
+                current.push(ch);
+            } else if !current.is_empty() {
+                tokens.insert(std::mem::take(&mut current));
+            }
+        }
+        if !current.is_empty() {
+            tokens.insert(current);
+        }
+        tokens
+    }
+
+    fn a11y_text_similarity(a: &str, b: &str) -> f64 {
+        let ta = Self::a11y_text_tokens(a);
+        let tb = Self::a11y_text_tokens(b);
+        if ta.is_empty() || tb.is_empty() {
+            return 0.0;
+        }
+        let intersection = ta.intersection(&tb).count() as f64;
+        let union = ta.union(&tb).count() as f64;
+        if union <= 0.0 {
+            0.0
+        } else {
+            intersection / union
+        }
+    }
+
     fn a11y_lang_value_is_valid(lang: &str) -> bool {
         let lang = lang.trim();
         !lang.is_empty()
@@ -2825,7 +3471,10 @@ impl FullBleed {
             vec![PmrCoreEvidence {
                 selector: Some("html".to_string()),
                 diagnostic_ref: None,
-                values: vec![("lang".to_string(), facts.html_lang.clone().unwrap_or_default())],
+                values: vec![(
+                    "lang".to_string(),
+                    facts.html_lang.clone().unwrap_or_default(),
+                )],
             }],
             None,
         );
@@ -2978,7 +3627,10 @@ impl FullBleed {
                 selector: None,
                 diagnostic_ref: None,
                 values: vec![
-                    ("duplicate_id_count".to_string(), facts.duplicate_ids.len().to_string()),
+                    (
+                        "duplicate_id_count".to_string(),
+                        facts.duplicate_ids.len().to_string(),
+                    ),
                     (
                         "missing_idref_count".to_string(),
                         facts.missing_idrefs.len().to_string(),
@@ -3044,7 +3696,8 @@ impl FullBleed {
         let profile_l = profile.to_ascii_lowercase();
         if profile_l == "cav" || profile_l == "transactional" {
             let body_text_l = facts.body_text.to_ascii_lowercase();
-            let sig_cue_present = body_text_l.contains("signature") || body_text_l.contains("signed");
+            let sig_cue_present =
+                body_text_l.contains("signature") || body_text_l.contains("signed");
             let sig_ok = facts.signature_semantic_count > 0;
             let sig_na = !sig_ok && !sig_cue_present;
             Self::pmr_push_contract_audit(
@@ -3075,7 +3728,10 @@ impl FullBleed {
                             "signature_semantic_count".to_string(),
                             facts.signature_semantic_count.to_string(),
                         ),
-                        ("signature_cue_text_present".to_string(), sig_cue_present.to_string()),
+                        (
+                            "signature_cue_text_present".to_string(),
+                            sig_cue_present.to_string(),
+                        ),
                     ],
                 }],
                 None,
@@ -3131,7 +3787,10 @@ impl FullBleed {
             );
         }
 
-        let html_ok = ctx.html_artifact_bytes.map(|n| n > 0).unwrap_or(!html.is_empty());
+        let html_ok = ctx
+            .html_artifact_bytes
+            .map(|n| n > 0)
+            .unwrap_or(!html.is_empty());
         Self::pmr_push_contract_audit(
             &mut audits,
             "pmr.artifacts.html_emitted",
@@ -3147,10 +3806,7 @@ impl FullBleed {
             None,
         );
 
-        let css_ok = ctx
-            .css_artifact_bytes
-            .map(|n| n > 0)
-            .unwrap_or(true);
+        let css_ok = ctx.css_artifact_bytes.map(|n| n > 0).unwrap_or(true);
         Self::pmr_push_contract_audit(
             &mut audits,
             "pmr.artifacts.css_emitted",
@@ -3186,7 +3842,10 @@ impl FullBleed {
             if facts.has_css_link {
                 None
             } else {
-                Some("Enable CSS link injection packaging mode for standalone HTML artifacts.".to_string())
+                Some(
+                    "Enable CSS link injection packaging mode for standalone HTML artifacts."
+                        .to_string(),
+                )
             },
         );
 
@@ -3195,7 +3854,9 @@ impl FullBleed {
         if review_queue_items > 0 {
             manual_debt_items.push(PmrCoreManualDebtItem {
                 id: "manual.transcription_quality.review_queue".to_string(),
-                reason: format!("{review_queue_items} review-queue item(s) require human verification."),
+                reason: format!(
+                    "{review_queue_items} review-queue item(s) require human verification."
+                ),
                 severity: "medium".to_string(),
                 category: None,
             });
@@ -3209,7 +3870,13 @@ impl FullBleed {
             let subset: Vec<&PmrCoreAudit> = audits.iter().filter(|a| a.category == cid).collect();
             let scored: Vec<(f64, f64)> = subset
                 .iter()
-                .filter_map(|a| if a.scored { a.score.map(|s| (s, a.weight)) } else { None })
+                .filter_map(|a| {
+                    if a.scored {
+                        a.score.map(|s| (s, a.weight))
+                    } else {
+                        None
+                    }
+                })
                 .collect();
             let denom = scored.iter().map(|(_, w)| *w).sum::<f64>();
             let cat_score = if scored.is_empty() {
@@ -3220,7 +3887,10 @@ impl FullBleed {
             };
             let warn_n = subset.iter().filter(|a| a.verdict == "warn").count();
             let fail_n = subset.iter().filter(|a| a.verdict == "fail").count();
-            let manual_n = subset.iter().filter(|a| a.verdict == "manual_needed").count();
+            let manual_n = subset
+                .iter()
+                .filter(|a| a.verdict == "manual_needed")
+                .count();
             let conf = Self::pmr_clamp(
                 100.0 - (10.0 * manual_n as f64) - (3.0 * warn_n as f64) - (5.0 * fail_n as f64),
                 0.0,
@@ -3239,12 +3909,12 @@ impl FullBleed {
         }
 
         let cat_weight_sum = categories.iter().map(|c| c.weight).sum::<f64>();
-        let cat_weight_denom = if cat_weight_sum == 0.0 { 1.0 } else { cat_weight_sum };
-        let score = categories
-            .iter()
-            .map(|c| c.score * c.weight)
-            .sum::<f64>()
-            / cat_weight_denom;
+        let cat_weight_denom = if cat_weight_sum == 0.0 {
+            1.0
+        } else {
+            cat_weight_sum
+        };
+        let score = categories.iter().map(|c| c.score * c.weight).sum::<f64>() / cat_weight_denom;
         let mut confidence = categories
             .iter()
             .map(|c| c.confidence * c.weight)
@@ -3261,9 +3931,15 @@ impl FullBleed {
         let gate = Self::pmr_gate(&audits, profile, mode);
         let coverage = PmrCoreCoverage {
             evaluated_audit_count: audits.len(),
-            applicable_audit_count: audits.iter().filter(|a| a.verdict != "not_applicable").count(),
+            applicable_audit_count: audits
+                .iter()
+                .filter(|a| a.verdict != "not_applicable")
+                .count(),
             scored_audit_count: audits.iter().filter(|a| a.scored).count(),
-            manual_needed_count: audits.iter().filter(|a| a.verdict == "manual_needed").count(),
+            manual_needed_count: audits
+                .iter()
+                .filter(|a| a.verdict == "manual_needed")
+                .count(),
             not_evaluated_audit_count: 0,
         };
         PmrCoreReport {
@@ -4190,12 +4866,13 @@ impl FullBleed {
     ) -> Result<(Document, GlyphCoverageReport), FullBleedError> {
         let context = self.build_render_context(css, Some(0));
         let mut report = GlyphCoverageReport::default();
-        let (document, _page_data) = self.render_to_document_and_page_data_with_resolver_and_report(
-            html,
-            &context.page_templates,
-            &context.resolver,
-            Some(&mut report),
-        )?;
+        let (document, _page_data) = self
+            .render_to_document_and_page_data_with_resolver_and_report(
+                html,
+                &context.page_templates,
+                &context.resolver,
+                Some(&mut report),
+            )?;
         self.emit_debug_summary("render_to_document_with_glyph_report");
         Ok((document, report))
     }

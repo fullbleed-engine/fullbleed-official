@@ -134,6 +134,24 @@
       "default_gate_level": "error"
     },
     {
+      "id": "fb.a11y.aria.redundant_role_native_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.aria.redundant_state_native_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
       "id": "fb.a11y.tables.semantic_headers",
       "kind": "rule",
       "system": "a11y_verifier",
@@ -150,6 +168,51 @@
       "verification_mode": "machine",
       "severity": "high",
       "default_gate_level": "error"
+    },
+    {
+      "id": "fb.a11y.figure.alt_length_budget_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.figure.caption_redundancy_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.figure.missing_effective_text_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "high",
+      "default_gate_level": "error"
+    },
+    {
+      "id": "fb.a11y.dl.fragmentation_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "medium",
+      "default_gate_level": "warn"
+    },
+    {
+      "id": "fb.a11y.dl.group_consistency_seed",
+      "kind": "rule",
+      "system": "a11y_verifier",
+      "stage": "post-emit",
+      "verification_mode": "machine",
+      "severity": "medium",
+      "default_gate_level": "warn"
     },
     {
       "id": "fb.a11y.forms.labels_or_instructions_present",

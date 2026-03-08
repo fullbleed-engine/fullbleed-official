@@ -141,6 +141,44 @@ def test_pdf_engine_verify_accessibility_artifacts_fails_fast_for_ids_and_idrefs
     )
 
 
+def test_engine_verifier_signature_semantics_fail_is_warn_level_gate(
+    tmp_path: Path,
+) -> None:
+    _require_pdf_engine()
+
+    html = _write(
+        tmp_path / "sig.html",
+        (
+            "<!doctype html><html lang='en-US'><head><title>Sig</title></head><body>"
+            "<main><p>Signature of Declarant</p></main>"
+            "</body></html>"
+        ),
+    )
+    css = _write(tmp_path / "sig.css", "body{}")
+
+    engine = fullbleed.PdfEngine(document_lang="en-US", document_title="Sig")
+    report = engine.verify_accessibility_artifacts(
+        str(html),
+        str(css),
+        profile="cav",
+        mode="error",
+    )
+
+    sig_rows = [
+        f
+        for f in report["findings"]
+        if f["rule_id"] == "fb.a11y.signatures.text_semantics_present"
+    ]
+    assert sig_rows
+    assert any(f["verdict"] == "fail" for f in sig_rows)
+    assert report["gate"]["ok"] is True
+    assert report["gate"]["error_count"] == 0
+    assert "fb.a11y.signatures.text_semantics_present" not in set(
+        report["gate"]["failed_rule_ids"]
+    )
+    assert report["gate"]["warn_count"] >= 1
+
+
 def test_engine_verifier_matches_prototype_for_shared_core_rules(tmp_path: Path) -> None:
     _require_pdf_engine()
 
@@ -293,6 +331,118 @@ def test_engine_verifier_flags_image_missing_alt_and_title_only(tmp_path: Path) 
         and f["evidence"][0]["values"]["image_title_only_count"] == "1"
         for f in matches
     )
+
+
+def test_engine_verifier_emits_figure_alt_budget_redundancy_and_effective_text_rules(
+    tmp_path: Path,
+) -> None:
+    _require_pdf_engine()
+
+    long_alt = (
+        "Scanned warranty deed certification block showing county certificate text, "
+        "signatures, notary references, and recording stamp details for Escambia County Florida."
+    )
+    html = _write(
+        tmp_path / "figure-rules.html",
+        (
+            "<!doctype html><html lang='en-US'><head><title>Figure Rules</title></head><body>"
+            "<main>"
+            f"<figure><img src='a.png' alt='{long_alt}'><figcaption>{long_alt}</figcaption></figure>"
+            "<figure><img src='b.png'></figure>"
+            "</main>"
+            "</body></html>"
+        ),
+    )
+    css = _write(tmp_path / "figure-rules.css", "body{}")
+
+    engine = fullbleed.PdfEngine(document_lang="en-US", document_title="Figure Rules")
+    report = engine.verify_accessibility_artifacts(str(html), str(css), mode="error")
+
+    by_rule = {f["rule_id"]: f for f in report["findings"]}
+    alt_budget = by_rule["fb.a11y.figure.alt_length_budget_seed"]
+    caption_dupe = by_rule["fb.a11y.figure.caption_redundancy_seed"]
+    missing_effective = by_rule["fb.a11y.figure.missing_effective_text_seed"]
+
+    assert alt_budget["verdict"] == "warn"
+    assert caption_dupe["verdict"] == "warn"
+    assert missing_effective["verdict"] == "fail"
+
+    alt_values = alt_budget["evidence"][0]["values"]
+    assert alt_values["figure_informative_count"] == "2"
+    assert alt_values["figure_alt_length_budget"] == "150"
+    assert alt_values["figure_alt_over_budget_count"] == "1"
+
+    dupe_values = caption_dupe["evidence"][0]["values"]
+    assert dupe_values["figure_caption_redundancy_count"] == "1"
+    assert float(dupe_values["figure_max_caption_similarity"]) >= 0.8
+
+    missing_values = missing_effective["evidence"][0]["values"]
+    assert missing_values["figure_missing_effective_text_count"] == "1"
+
+
+def test_engine_verifier_emits_dl_fragmentation_and_group_consistency_rules(
+    tmp_path: Path,
+) -> None:
+    _require_pdf_engine()
+
+    html = _write(
+        tmp_path / "dl-rules.html",
+        (
+            "<!doctype html><html lang='en-US'><head><title>DL Rules</title></head><body>"
+            "<main><section>"
+            "<dl><dt>Label A</dt><dd>Value A</dd></dl>"
+            "<dl><dt>Label B</dt><dd>Value B</dd></dl>"
+            "</section></main>"
+            "</body></html>"
+        ),
+    )
+    css = _write(tmp_path / "dl-rules.css", "body{}")
+
+    engine = fullbleed.PdfEngine(document_lang="en-US", document_title="DL Rules")
+    report = engine.verify_accessibility_artifacts(str(html), str(css), mode="error")
+
+    by_rule = {f["rule_id"]: f for f in report["findings"]}
+    fragmented = by_rule["fb.a11y.dl.fragmentation_seed"]
+    grouped = by_rule["fb.a11y.dl.group_consistency_seed"]
+
+    assert fragmented["verdict"] == "warn"
+    assert grouped["verdict"] == "warn"
+    assert fragmented["evidence"][0]["values"]["dl_block_count"] == "2"
+    assert fragmented["evidence"][0]["values"]["dl_fragmentation_count"] == "1"
+    assert grouped["evidence"][0]["values"]["dl_group_consistency_count"] == "1"
+    assert report["observability"]["signal_counts"]["dl_fragmentation_count"] == 1
+
+
+def test_engine_verifier_emits_redundant_aria_native_rules(tmp_path: Path) -> None:
+    _require_pdf_engine()
+
+    html = _write(
+        tmp_path / "aria-native-rules.html",
+        (
+            "<!doctype html><html lang='en-US'><head><title>ARIA Native Rules</title></head><body>"
+            "<main>"
+            "<nav role='navigation'>Primary</nav>"
+            "<button role='button'>Save</button>"
+            "<input required aria-required='true'>"
+            "<button disabled aria-disabled='true'>Disabled</button>"
+            "</main>"
+            "</body></html>"
+        ),
+    )
+    css = _write(tmp_path / "aria-native-rules.css", "body{}")
+
+    engine = fullbleed.PdfEngine(document_lang="en-US", document_title="ARIA Native Rules")
+    report = engine.verify_accessibility_artifacts(str(html), str(css), mode="error")
+
+    by_rule = {f["rule_id"]: f for f in report["findings"]}
+    role_row = by_rule["fb.a11y.aria.redundant_role_native_seed"]
+    state_row = by_rule["fb.a11y.aria.redundant_state_native_seed"]
+
+    assert role_row["verdict"] == "warn"
+    assert state_row["verdict"] == "warn"
+    assert int(role_row["evidence"][0]["values"]["redundant_role_native_count"]) >= 1
+    assert int(state_row["evidence"][0]["values"]["redundant_state_native_count"]) >= 1
+    assert report["observability"]["signal_counts"]["redundant_aria_count"] >= 2
 
 
 def test_engine_verifier_flags_unlabeled_form_controls(tmp_path: Path) -> None:
