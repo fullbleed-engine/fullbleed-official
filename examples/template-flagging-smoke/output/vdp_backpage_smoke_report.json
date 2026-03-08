@@ -45,7 +45,7 @@
       {
         "name": "tpl-4",
         "kind": "pdf",
-        "bytes": 773,
+        "bytes": 799,
         "trusted": false,
         "source": "C:\\dev\\workbench\\fullbleed-official\\examples\\template-flagging-smoke\\output\\vdp_back_blank_template.pdf",
         "pdf_version": "1.7",
@@ -95,7 +95,7 @@
       {
         "name": "tpl-4",
         "kind": "pdf",
-        "bytes": 773,
+        "bytes": 799,
         "trusted": false,
         "source": "C:\\dev\\workbench\\fullbleed-official\\examples\\template-flagging-smoke\\output\\vdp_back_blank_template.pdf",
         "pdf_version": "1.7",
@@ -112,7 +112,8 @@
   "composed_pdf": "C:\\dev\\workbench\\fullbleed-official\\examples\\template-flagging-smoke\\output\\vdp_composed_10x2.pdf",
   "compose": {
     "ok": true,
-    "pages_written": 20
+    "pages_written": 20,
+    "annotation_mode": "link_only"
   },
   "checks": [
     {

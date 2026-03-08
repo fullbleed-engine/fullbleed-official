@@ -20,7 +20,8 @@
     "composed_pdf": "C:\\dev\\workbench\\fullbleed-official\\examples\\template-flagging-smoke\\output\\composed_raw.pdf",
     "compose": {
       "ok": true,
-      "pages_written": 10
+      "pages_written": 10,
+      "annotation_mode": "link_only"
     },
     "validation": {
       "ok": true,
@@ -94,7 +95,8 @@
     "composed_pdf": "C:\\dev\\workbench\\fullbleed-official\\examples\\template-flagging-smoke\\output\\composed_el.pdf",
     "compose": {
       "ok": true,
-      "pages_written": 10
+      "pages_written": 10,
+      "annotation_mode": "link_only"
     },
     "validation": {
       "ok": true,
