@@ -52,6 +52,32 @@ def _first_not_none(*values: Any) -> Any:
     return None
 
 
+def _coerce_pagination_trace_summary(summary: dict[str, Any] | None) -> dict[str, int] | None:
+    if not isinstance(summary, dict):
+        return None
+    keys = (
+        "page_count",
+        "event_count",
+        "transition_count",
+        "page_transition_count",
+        "frame_transition_count",
+        "placement_count",
+        "split_count",
+        "overflow_event_count",
+        "recoverable_overflow_count",
+        "fatal_overflow_count",
+        "low_coverage_page_count",
+        "flowable_overlap_count",
+        "text_overlap_count",
+    )
+    out: dict[str, int] = {}
+    for key in keys:
+        value = _coerce_int(summary.get(key))
+        if value is not None:
+            out[key] = value
+    return out or None
+
+
 def _sha256_file(path: Path) -> str | None:
     try:
         return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
@@ -487,6 +513,7 @@ class AccessibilityEngine:
         a11y_report: dict[str, Any] | None = None,
         claim_evidence: dict[str, Any] | None = None,
         render_preview_png_path: str | None = None,
+        pagination_trace_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return dict(
             self._engine.verify_accessibility_artifacts(
@@ -497,6 +524,9 @@ class AccessibilityEngine:
                 render_preview_png_path=render_preview_png_path,
                 a11y_report=a11y_report,
                 claim_evidence=claim_evidence,
+                pagination_trace_summary=_coerce_pagination_trace_summary(
+                    pagination_trace_summary
+                ),
             )
         )
 
@@ -508,6 +538,7 @@ class AccessibilityEngine:
         run_report: dict[str, Any] | None = None,
         source_analysis: dict[str, Any] | None = None,
         render_page_count: int | None = None,
+        pagination_trace_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         component_validation = component_validation or {}
         parity_report = parity_report or {}
@@ -516,15 +547,20 @@ class AccessibilityEngine:
         parity_cov = parity_report.get("coverage") or {}
         parity_src = parity_report.get("source_characteristics") or {}
         run_metrics = run_report.get("metrics") or {}
+        pagination_summary = _coerce_pagination_trace_summary(
+            pagination_trace_summary or run_report.get("pagination_trace_summary")
+        )
         return {
             "overflow_count": _coerce_int(component_validation.get("overflow_count")),
             "known_loss_count": _coerce_int(component_validation.get("known_loss_count")),
+            "pagination_trace_summary": pagination_summary,
             "source_page_count": _first_not_none(
                 _coerce_int(source_analysis.get("page_count")),
                 _coerce_int(parity_src.get("page_count")),
                 _coerce_int(run_metrics.get("source_page_count")),
             ),
             "render_page_count": _first_not_none(
+                _coerce_int((pagination_summary or {}).get("page_count")),
                 render_page_count,
                 _coerce_int(run_metrics.get("render_page_count")),
             ),
@@ -546,6 +582,7 @@ class AccessibilityEngine:
         run_report: dict[str, Any] | None = None,
         source_analysis: dict[str, Any] | None = None,
         render_page_count: int | None = None,
+        pagination_trace_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         kwargs = self._derive_pmr_kwargs(
             component_validation=component_validation,
@@ -553,6 +590,7 @@ class AccessibilityEngine:
             run_report=run_report,
             source_analysis=source_analysis,
             render_page_count=render_page_count,
+            pagination_trace_summary=pagination_trace_summary,
         )
         return dict(
             self._engine.verify_paged_media_rank_artifacts(
@@ -1040,6 +1078,9 @@ class AccessibilityEngine:
         structure_path = out_dir_path / f"{stem}_pdf_structure_trace.json"
         reading_render_path = out_dir_path / f"{stem}_reading_order_trace_render.json"
         structure_render_path = out_dir_path / f"{stem}_pdf_structure_trace_render.json"
+        font_resolution_path = out_dir_path / f"{stem}_font_resolution_trace.json"
+        asset_resolution_path = out_dir_path / f"{stem}_asset_resolution_trace.json"
+        pagination_trace_path = out_dir_path / f"{stem}_pagination_trace.json"
         run_report_path = out_dir_path / f"{stem}_run_report.json"
 
         emitted = self.emit_artifacts(body_html, css_text, str(html_path), str(css_path))
@@ -1061,6 +1102,53 @@ class AccessibilityEngine:
         structure_trace: dict[str, Any] | None = None
         reading_trace_render: dict[str, Any] | None = None
         structure_trace_render: dict[str, Any] | None = None
+        font_resolution_trace: dict[str, Any] | None = None
+        asset_resolution_trace: dict[str, Any] | None = None
+        pagination_trace: dict[str, Any] | None = None
+        page_count_divergence: dict[str, Any] | None = None
+
+        if hasattr(self._engine, "export_render_time_pagination_trace"):
+            try:
+                pagination_trace = dict(
+                    self._engine.export_render_time_pagination_trace(body_html, css_out)
+                )
+                _dump_json(pagination_trace_path, pagination_trace)
+                summary = pagination_trace.get("summary") or {}
+                overflow_event_count = int(summary.get("overflow_event_count") or 0)
+                flowable_overlap_count = int(summary.get("flowable_overlap_count") or 0)
+                text_overlap_count = int(summary.get("text_overlap_count") or 0)
+                low_coverage_page_count = int(summary.get("low_coverage_page_count") or 0)
+                if overflow_event_count > 0:
+                    message = (
+                        f"pagination trace reports {overflow_event_count} overflow event(s)."
+                    )
+                    if self._strict:
+                        raise ValueError(message)
+                    warnings.append(message)
+                if flowable_overlap_count > 0:
+                    message = (
+                        f"pagination trace reports {flowable_overlap_count} flowable overlap event(s)."
+                    )
+                    if self._strict:
+                        raise ValueError(message)
+                    warnings.append(message)
+                if text_overlap_count > 0:
+                    message = (
+                        f"pagination trace reports {text_overlap_count} text overlap event(s)."
+                    )
+                    if self._strict:
+                        raise ValueError(message)
+                    warnings.append(message)
+                if low_coverage_page_count > 0:
+                    warnings.append(
+                        f"pagination trace reports {low_coverage_page_count} low-coverage page diagnostic(s)."
+                    )
+            except ValueError:
+                raise
+            except Exception as exc:
+                warnings.append(
+                    f"pagination trace unavailable: {type(exc).__name__}: {exc}"
+                )
 
         if run_verifier and hasattr(self._engine, "verify_accessibility_artifacts"):
             contrast_png = png_paths[0] if png_paths else None
@@ -1073,6 +1161,7 @@ class AccessibilityEngine:
                     render_preview_png_path=contrast_png,
                     a11y_report=a11y_report,
                     claim_evidence=claim_evidence,
+                    pagination_trace_summary=(pagination_trace or {}).get("summary"),
                 )
             except TypeError:
                 warnings.append("Engine verifier compatibility fallback used (missing newer verifier hooks).")
@@ -1091,7 +1180,8 @@ class AccessibilityEngine:
                     component_validation=component_validation,
                     parity_report=parity_report,
                     source_analysis=source_analysis,
-                    render_page_count=len(png_paths),
+                    render_page_count=(len(png_paths) if png_paths else None),
+                    pagination_trace_summary=(pagination_trace or {}).get("summary"),
                 )
             except TypeError:
                 warnings.append("Engine PMR compatibility fallback used (sidecar-derived counts not applied).")
@@ -1122,6 +1212,84 @@ class AccessibilityEngine:
                 warnings.append(
                     f"render-time structure trace unavailable: {type(exc).__name__}: {exc}"
                 )
+        if hasattr(self._engine, "export_render_time_font_resolution_trace"):
+            try:
+                font_resolution_trace = dict(
+                    self._engine.export_render_time_font_resolution_trace(body_html, css_out)
+                )
+                _dump_json(font_resolution_path, font_resolution_trace)
+                summary = font_resolution_trace.get("summary") or {}
+                pdf_viewer_fallback_count = int(summary.get("pdf_viewer_fallback_count") or 0)
+                raster_system_fallback_count = int(
+                    summary.get("raster_system_fallback_count") or 0
+                )
+                unresolved_target_count = int(summary.get("unresolved_target_count") or 0)
+                if pdf_viewer_fallback_count > 0:
+                    warnings.append(
+                        f"font resolution trace reports {pdf_viewer_fallback_count} PDF viewer fallback font request(s)."
+                    )
+                if raster_system_fallback_count > 0:
+                    warnings.append(
+                        f"font resolution trace reports {raster_system_fallback_count} host-dependent raster fallback font request(s)."
+                    )
+                if unresolved_target_count > 0:
+                    warnings.append(
+                        f"font resolution trace reports {unresolved_target_count} unresolved raster font request(s)."
+                    )
+            except Exception as exc:
+                warnings.append(
+                    f"font resolution trace unavailable: {type(exc).__name__}: {exc}"
+                )
+        if hasattr(self._engine, "export_render_time_asset_resolution_trace"):
+            try:
+                asset_resolution_trace = dict(
+                    self._engine.export_render_time_asset_resolution_trace(body_html, css_out)
+                )
+                _dump_json(asset_resolution_path, asset_resolution_trace)
+                summary = asset_resolution_trace.get("summary") or {}
+                unresolved_count = int(summary.get("unresolved_count") or 0)
+                unsupported_count = int(summary.get("unsupported_count") or 0)
+                if unresolved_count > 0:
+                    message = (
+                        f"asset resolution trace reports {unresolved_count} unresolved image source(s)."
+                    )
+                    if self._strict:
+                        raise ValueError(message)
+                    warnings.append(message)
+                if unsupported_count > 0:
+                    message = (
+                        f"asset resolution trace reports {unsupported_count} unsupported image payload(s)."
+                    )
+                    if self._strict:
+                        raise ValueError(message)
+                    warnings.append(message)
+            except ValueError:
+                raise
+            except Exception as exc:
+                warnings.append(
+                    f"asset resolution trace unavailable: {type(exc).__name__}: {exc}"
+                )
+        source_page_count = _coerce_int((source_analysis or {}).get("page_count"))
+        render_page_count = _coerce_int(
+            ((pagination_trace or {}).get("summary") or {}).get("page_count")
+        )
+        if render_page_count is None:
+            render_page_count = len(png_paths) if png_paths else None
+        if source_page_count is not None and render_page_count is not None:
+            delta = int(render_page_count) - int(source_page_count)
+            page_count_divergence = {
+                "source_page_count": int(source_page_count),
+                "render_page_count": int(render_page_count),
+                "delta": delta,
+                "matches": delta == 0,
+            }
+            if delta != 0:
+                message = (
+                    f"page count divergence detected: source={source_page_count}, render={render_page_count}."
+                )
+                if self._strict:
+                    raise ValueError(message)
+                warnings.append(message)
 
         if emit_reading_order_trace:
             reading_trace = self.export_reading_order_trace(str(pdf_path), out_path=str(reading_path))
@@ -1171,6 +1339,15 @@ class AccessibilityEngine:
             "pdf_structure_trace_render_path": str(structure_render_path)
             if structure_trace_render
             else None,
+            "font_resolution_trace_path": str(font_resolution_path)
+            if font_resolution_trace
+            else None,
+            "asset_resolution_trace_path": str(asset_resolution_path)
+            if asset_resolution_trace
+            else None,
+            "pagination_trace_path": str(pagination_trace_path)
+            if pagination_trace
+            else None,
             "render_preview_png_paths": png_paths,
             "engine_a11y_verify_path": str(a11y_path) if verifier_report else None,
             "engine_pmr_path": str(pmr_path) if pmr_report else None,
@@ -1178,6 +1355,10 @@ class AccessibilityEngine:
             "engine_pmr_ok": pmr_ok if pmr_report else None,
             "engine_pmr_score": ((pmr_report or {}).get("rank") or {}).get("score"),
             "pdf_ua_seed_ok": seed_ok if pdf_ua_seed_report else None,
+            "font_resolution_summary": (font_resolution_trace or {}).get("summary"),
+            "asset_resolution_summary": (asset_resolution_trace or {}).get("summary"),
+            "pagination_trace_summary": (pagination_trace or {}).get("summary"),
+            "page_count_divergence": page_count_divergence,
             "css_link_href": css_link_href,
             "css_link_media": css_link_media,
             "css_link_injected": css_link_injected,
@@ -1187,10 +1368,35 @@ class AccessibilityEngine:
             "wcag20aa_registry_hash": meta.get("wcag20aa_registry_hash"),
             "section508_html_registry_hash": meta.get("section508_html_registry_hash"),
             "pdf_sha256": _sha256_file(pdf_path),
+            "deliverables": {
+                "html_path": html_path.name,
+                "css_path": css_path.name,
+                "pdf_path": pdf_path.name,
+                "run_report_path": run_report_path.name,
+                "pdf_ua_seed_verify_path": pdf_ua_seed_path.name if pdf_ua_seed_report else None,
+                "reading_order_trace_path": reading_path.name if reading_trace else None,
+                "pdf_structure_trace_path": structure_path.name if structure_trace else None,
+                "reading_order_trace_render_path": (
+                    reading_render_path.name if reading_trace_render else None
+                ),
+                "pdf_structure_trace_render_path": (
+                    structure_render_path.name if structure_trace_render else None
+                ),
+                "font_resolution_trace_path": (
+                    font_resolution_path.name if font_resolution_trace else None
+                ),
+                "asset_resolution_trace_path": (
+                    asset_resolution_path.name if asset_resolution_trace else None
+                ),
+                "pagination_trace_path": (
+                    pagination_trace_path.name if pagination_trace else None
+                ),
+                "render_preview_pngs": [Path(p).name for p in png_paths],
+            },
             "metrics": {
                 "pdf_bytes": pdf_bytes,
-                "render_page_count": len(png_paths),
-                "source_page_count": _coerce_int((source_analysis or {}).get("page_count")),
+                "render_page_count": render_page_count if render_page_count is not None else len(png_paths),
+                "source_page_count": source_page_count,
                 "overflow_count": _coerce_int((component_validation or {}).get("overflow_count")),
                 "known_loss_count": _coerce_int((component_validation or {}).get("known_loss_count")),
                 "css_link_injected": css_link_injected,
@@ -1240,6 +1446,12 @@ class AccessibilityEngine:
             paths["reading_order_trace_render_path"] = str(reading_render_path)
         if structure_trace_render:
             paths["pdf_structure_trace_render_path"] = str(structure_render_path)
+        if font_resolution_trace:
+            paths["font_resolution_trace_path"] = str(font_resolution_path)
+        if asset_resolution_trace:
+            paths["asset_resolution_trace_path"] = str(asset_resolution_path)
+        if pagination_trace:
+            paths["pagination_trace_path"] = str(pagination_trace_path)
 
         return AccessibilityRunResult(
             ok=ok,
@@ -1252,6 +1464,9 @@ class AccessibilityEngine:
             pdf_structure_trace=structure_trace,
             reading_order_trace_render=reading_trace_render,
             pdf_structure_trace_render=structure_trace_render,
+            font_resolution_trace=font_resolution_trace,
+            asset_resolution_trace=asset_resolution_trace,
+            pagination_trace=pagination_trace,
             run_report=run_report,
             contract_fingerprint=meta.get("contract_fingerprint"),
             warnings=warnings,

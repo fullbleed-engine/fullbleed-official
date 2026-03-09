@@ -1,22 +1,24 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
-use crate::assets::is_supported_font_path;
+use crate::assets::{is_supported_font_path, resolve_image_asset};
+use crate::canvas::{META_FLOWABLE_BBOX_KEY, META_PAGINATION_EVENT_KEY};
 use crate::jit::Transform;
 use crate::{
     A11yVerifierCoreReport, A11yVerifierEvidence, A11yVerifierFinding, Asset, AssetBundle,
     AssetKind, Color, ColorSpace, Command, Document, FullBleed, FullBleedBuilder, FullBleedError,
     GlyphCoverageReport, JitMode, LayoutStrategy, Margins, OutputIntent, PageDataContext,
-    PageDataValue, PdfProfile, PdfVersion, PmrCoreAudit, PmrCoreContext, PmrCoreEvidence,
-    PmrCoreReport, Pt, Size, WatermarkLayer, WatermarkSemantics, WatermarkSpec,
+    PageDataValue, PaginationTraceSummary, PdfProfile, PdfVersion, PmrCoreAudit, PmrCoreContext,
+    PmrCoreEvidence, PmrCoreReport, Pt, Size, WatermarkLayer, WatermarkSemantics, WatermarkSpec,
     composition_compatibility_issues, inspect_pdf_bytes, inspect_pdf_path,
     require_pdf_composition_compatibility,
 };
 use base64::Engine;
 use fullbleed_audit_contract as audit_contract;
+use kuchiki::traits::TendrilSink;
 use lopdf::{Document as LoDocument, Object as LoObject};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict, PyList, PyModule};
+use pyo3::types::{PyAny, PyBytes, PyDict, PyList, PyModule};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::Read;
@@ -1763,6 +1765,1135 @@ fn estimate_trace_text_bbox(
     (min_x, min_y, max_x, max_y)
 }
 
+#[derive(Clone)]
+struct TraceTextBlockRow {
+    index: usize,
+    command_index: usize,
+    kind: &'static str,
+    text: String,
+    bbox: (f32, f32, f32, f32),
+    top_role: Option<String>,
+    tag_path: Vec<String>,
+}
+
+#[derive(Default)]
+struct TracePageTextCollection {
+    blocks: Vec<TraceTextBlockRow>,
+    artifact_text_blocks_excluded: usize,
+    draw_form_count: usize,
+    define_form_count: usize,
+    untagged_text_blocks: usize,
+}
+
+#[derive(Clone)]
+struct TraceTextOverlapSample {
+    overlap_bbox: (f32, f32, f32, f32),
+    a_index: usize,
+    a_command_index: usize,
+    a_top_role: Option<String>,
+    a_text: String,
+    b_index: usize,
+    b_command_index: usize,
+    b_top_role: Option<String>,
+    b_text: String,
+}
+
+fn collect_render_time_text_blocks_for_page(
+    page: &crate::canvas::Page,
+    engine: Option<&FullBleed>,
+) -> TracePageTextCollection {
+    let mut out = TracePageTextCollection::default();
+    let mut tag_stack: Vec<String> = Vec::new();
+    let mut artifact_depth = 0usize;
+    let mut state = TraceTextState::new();
+    let mut state_stack: Vec<TraceTextState> = Vec::new();
+
+    for (cmd_index, cmd) in page.commands.iter().enumerate() {
+        match cmd {
+            Command::SaveState => state_stack.push(state.clone()),
+            Command::RestoreState => {
+                state = state_stack.pop().unwrap_or_else(TraceTextState::new);
+            }
+            Command::Translate(dx, dy) => {
+                state.transform = state
+                    .transform
+                    .mul(Transform::translate(dx.to_f32(), dy.to_f32()));
+            }
+            Command::Scale(sx, sy) => {
+                state.transform = state.transform.mul(Transform::scale(*sx, *sy));
+            }
+            Command::Rotate(angle) => {
+                state.transform = state.transform.mul(Transform::rotate(*angle));
+            }
+            Command::ConcatMatrix { a, b, c, d, e, f } => {
+                state.transform =
+                    state
+                        .transform
+                        .mul(Transform::matrix(*a, *b, *c, *d, e.to_f32(), f.to_f32()));
+            }
+            Command::SetFontName(name) => state.font_name = name.clone(),
+            Command::SetFontSize(size) => state.font_size = *size,
+            Command::BeginTag { role, .. } => tag_stack.push(role.clone()),
+            Command::EndTag => {
+                let _ = tag_stack.pop();
+            }
+            Command::BeginArtifact { .. } => artifact_depth = artifact_depth.saturating_add(1),
+            Command::EndMarkedContent => {
+                if artifact_depth > 0 {
+                    artifact_depth -= 1;
+                }
+            }
+            Command::DefineForm { .. } => {
+                out.define_form_count = out.define_form_count.saturating_add(1);
+            }
+            Command::DrawForm { .. } => {
+                out.draw_form_count = out.draw_form_count.saturating_add(1);
+            }
+            Command::DrawString { x, y, text } => {
+                if artifact_depth > 0 {
+                    out.artifact_text_blocks_excluded =
+                        out.artifact_text_blocks_excluded.saturating_add(1);
+                    continue;
+                }
+                let bbox = estimate_trace_text_bbox(engine, &state, *x, *y, text);
+                if tag_stack.last().is_none() {
+                    out.untagged_text_blocks = out.untagged_text_blocks.saturating_add(1);
+                }
+                out.blocks.push(TraceTextBlockRow {
+                    index: out.blocks.len(),
+                    command_index: cmd_index,
+                    kind: "draw_string",
+                    text: text.clone(),
+                    bbox,
+                    top_role: tag_stack.last().cloned(),
+                    tag_path: tag_stack.clone(),
+                });
+            }
+            Command::DrawStringTransformed { x, y, text, .. } => {
+                if artifact_depth > 0 {
+                    out.artifact_text_blocks_excluded =
+                        out.artifact_text_blocks_excluded.saturating_add(1);
+                    continue;
+                }
+                let bbox = estimate_trace_text_bbox(engine, &state, *x, *y, text);
+                if tag_stack.last().is_none() {
+                    out.untagged_text_blocks = out.untagged_text_blocks.saturating_add(1);
+                }
+                out.blocks.push(TraceTextBlockRow {
+                    index: out.blocks.len(),
+                    command_index: cmd_index,
+                    kind: "draw_string_transformed",
+                    text: text.clone(),
+                    bbox,
+                    top_role: tag_stack.last().cloned(),
+                    tag_path: tag_stack.clone(),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    out
+}
+
+fn collect_text_overlap_samples(
+    blocks: &[TraceTextBlockRow],
+    max_samples: usize,
+) -> (usize, Vec<TraceTextOverlapSample>) {
+    let mut count = 0usize;
+    let mut samples = Vec::new();
+    for i in 0..blocks.len() {
+        let a = &blocks[i];
+        let (ax0, ay0, ax1, ay1) = a.bbox;
+        for b in blocks.iter().skip(i + 1) {
+            let (bx0, by0, bx1, by1) = b.bbox;
+            let ix0 = ax0.max(bx0);
+            let iy0 = ay0.max(by0);
+            let ix1 = ax1.min(bx1);
+            let iy1 = ay1.min(by1);
+            let iw = ix1 - ix0;
+            let ih = iy1 - iy0;
+            if iw <= 0.0 || ih <= 0.0 {
+                continue;
+            }
+            if iw < 1.0 || ih < 1.0 || (iw * ih) < 4.0 {
+                continue;
+            }
+            count = count.saturating_add(1);
+            if samples.len() < max_samples {
+                samples.push(TraceTextOverlapSample {
+                    overlap_bbox: (ix0, iy0, iw, ih),
+                    a_index: a.index,
+                    a_command_index: a.command_index,
+                    a_top_role: a.top_role.clone(),
+                    a_text: trace_text_sample(&a.text),
+                    b_index: b.index,
+                    b_command_index: b.command_index,
+                    b_top_role: b.top_role.clone(),
+                    b_text: trace_text_sample(&b.text),
+                });
+            }
+        }
+    }
+    (count, samples)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct RenderTimeFontUsageKey {
+    requested_name: String,
+    resolved_name: String,
+    fallback_reason: Option<String>,
+}
+
+#[derive(Default, Clone)]
+struct RenderTimeFontUsage {
+    text_draw_count: usize,
+    transformed_text_draw_count: usize,
+    glyph_run_count: usize,
+    sample_text: Option<String>,
+}
+
+fn normalized_font_name(name: &str) -> String {
+    name.trim().trim_matches('"').trim_matches('\'').to_string()
+}
+
+fn is_base14_font_name(name: &str) -> bool {
+    let normalized = normalized_font_name(name).to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "courier"
+            | "courier-bold"
+            | "courier-oblique"
+            | "courier-boldoblique"
+            | "helvetica"
+            | "helvetica-bold"
+            | "helvetica-oblique"
+            | "helvetica-boldoblique"
+            | "times-roman"
+            | "times-bold"
+            | "times-italic"
+            | "times-bolditalic"
+            | "symbol"
+            | "zapfdingbats"
+    )
+}
+
+fn trace_text_sample(text: &str) -> String {
+    const MAX_CHARS: usize = 48;
+    let mut out = String::new();
+    for (idx, ch) in text.chars().enumerate() {
+        if idx >= MAX_CHARS {
+            out.push_str("...");
+            break;
+        }
+        if ch.is_control() {
+            out.push(' ');
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+fn record_font_usage_sample(entry: &mut RenderTimeFontUsage, sample: Option<&str>) {
+    if entry.sample_text.is_some() {
+        return;
+    }
+    let Some(sample) = sample else {
+        return;
+    };
+    let sample = sample.trim();
+    if sample.is_empty() {
+        return;
+    }
+    entry.sample_text = Some(trace_text_sample(sample));
+}
+
+fn collect_form_definitions(commands: &[Command], definitions: &mut HashMap<String, Vec<Command>>) {
+    for cmd in commands {
+        if let Command::DefineForm {
+            resource_id,
+            commands: form_commands,
+            ..
+        } = cmd
+        {
+            definitions
+                .entry(resource_id.clone())
+                .or_insert_with(|| form_commands.clone());
+            collect_form_definitions(form_commands, definitions);
+        }
+    }
+}
+
+fn collect_font_usage_in_commands(
+    commands: &[Command],
+    form_definitions: &HashMap<String, Vec<Command>>,
+    current_font: &mut String,
+    pending_requested_name: &mut Option<String>,
+    pending_fallback_reason: &mut Option<String>,
+    usage: &mut BTreeMap<RenderTimeFontUsageKey, RenderTimeFontUsage>,
+    active_forms: &mut BTreeSet<String>,
+) {
+    for cmd in commands {
+        match cmd {
+            Command::SetFontName(name) => *current_font = name.clone(),
+            Command::Meta { key, value } => {
+                if key == "font.requested_name" {
+                    *pending_requested_name = Some(value.clone());
+                } else if key == "font.fallback_reason" {
+                    *pending_fallback_reason = Some(value.clone());
+                }
+            }
+            Command::DrawString { text, .. } => {
+                let usage_key = RenderTimeFontUsageKey {
+                    requested_name: pending_requested_name
+                        .take()
+                        .unwrap_or_else(|| current_font.clone()),
+                    resolved_name: current_font.clone(),
+                    fallback_reason: pending_fallback_reason.take(),
+                };
+                let entry = usage.entry(usage_key).or_default();
+                entry.text_draw_count = entry.text_draw_count.saturating_add(1);
+                record_font_usage_sample(entry, Some(text));
+            }
+            Command::DrawStringTransformed { text, .. } => {
+                let usage_key = RenderTimeFontUsageKey {
+                    requested_name: pending_requested_name
+                        .take()
+                        .unwrap_or_else(|| current_font.clone()),
+                    resolved_name: current_font.clone(),
+                    fallback_reason: pending_fallback_reason.take(),
+                };
+                let entry = usage.entry(usage_key).or_default();
+                entry.transformed_text_draw_count =
+                    entry.transformed_text_draw_count.saturating_add(1);
+                record_font_usage_sample(entry, Some(text));
+            }
+            Command::DrawGlyphRun { .. } => {
+                let usage_key = RenderTimeFontUsageKey {
+                    requested_name: pending_requested_name
+                        .take()
+                        .unwrap_or_else(|| current_font.clone()),
+                    resolved_name: current_font.clone(),
+                    fallback_reason: pending_fallback_reason.take(),
+                };
+                let entry = usage.entry(usage_key).or_default();
+                entry.glyph_run_count = entry.glyph_run_count.saturating_add(1);
+            }
+            Command::DrawForm { resource_id, .. } => {
+                if !active_forms.insert(resource_id.clone()) {
+                    continue;
+                }
+                if let Some(form_commands) = form_definitions.get(resource_id) {
+                    let mut nested_font = current_font.clone();
+                    let mut nested_requested_name = pending_requested_name.clone();
+                    let mut nested_fallback_reason = pending_fallback_reason.clone();
+                    collect_font_usage_in_commands(
+                        form_commands,
+                        form_definitions,
+                        &mut nested_font,
+                        &mut nested_requested_name,
+                        &mut nested_fallback_reason,
+                        usage,
+                        active_forms,
+                    );
+                }
+                active_forms.remove(resource_id);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_render_time_font_usage(
+    doc: &Document,
+) -> BTreeMap<RenderTimeFontUsageKey, RenderTimeFontUsage> {
+    let mut usage: BTreeMap<RenderTimeFontUsageKey, RenderTimeFontUsage> = BTreeMap::new();
+    for page in &doc.pages {
+        let mut form_definitions: HashMap<String, Vec<Command>> = HashMap::new();
+        collect_form_definitions(&page.commands, &mut form_definitions);
+        let mut current_font = "Helvetica".to_string();
+        let mut pending_requested_name = None;
+        let mut pending_fallback_reason = None;
+        let mut active_forms = BTreeSet::new();
+        collect_font_usage_in_commands(
+            &page.commands,
+            &form_definitions,
+            &mut current_font,
+            &mut pending_requested_name,
+            &mut pending_fallback_reason,
+            &mut usage,
+            &mut active_forms,
+        );
+    }
+    usage
+}
+
+fn build_pdf_font_target_py(
+    py: Python<'_>,
+    engine: &FullBleed,
+    requested_name: &str,
+    resolved_name: &str,
+) -> PyResult<(PyObject, bool, bool)> {
+    let out = PyDict::new_bound(py);
+    let normalized_requested = normalized_font_name(requested_name);
+    let normalized_resolved = normalized_font_name(resolved_name);
+    if let Some(trace) = engine.resolve_registered_font_trace(&normalized_resolved) {
+        out.set_item("target", "pdf")?;
+        out.set_item("outcome", "registered")?;
+        out.set_item("source", trace.source_kind.as_str())?;
+        out.set_item("deterministic", true)?;
+        out.set_item("requested_name", normalized_requested)?;
+        out.set_item("resolved_name", trace.resolved_name)?;
+        out.set_item("resolved_file_name", trace.source_file_name)?;
+        out.set_item("program_kind", trace.program_kind.as_str())?;
+        let debug = PyDict::new_bound(py);
+        debug.set_item("source_identifier", trace.source_identifier)?;
+        out.set_item("debug", debug)?;
+        return Ok((out.to_object(py), true, false));
+    }
+    if is_base14_font_name(&normalized_resolved) {
+        out.set_item("target", "pdf")?;
+        out.set_item(
+            "outcome",
+            if normalized_requested != normalized_resolved {
+                "base14_fallback"
+            } else {
+                "base14"
+            },
+        )?;
+        out.set_item("source", "base14")?;
+        out.set_item("deterministic", true)?;
+        out.set_item("requested_name", normalized_requested)?;
+        out.set_item("resolved_name", normalized_resolved)?;
+        out.set_item("resolved_file_name", py.None())?;
+        out.set_item("program_kind", py.None())?;
+        return Ok((out.to_object(py), true, false));
+    }
+
+    out.set_item("target", "pdf")?;
+    out.set_item("outcome", "viewer_fallback")?;
+    out.set_item("source", "pdf_viewer")?;
+    out.set_item("deterministic", false)?;
+    out.set_item("requested_name", normalized_requested)?;
+    out.set_item("resolved_name", normalized_resolved)?;
+    out.set_item("resolved_file_name", py.None())?;
+    out.set_item("program_kind", py.None())?;
+    out.set_item(
+        "warning",
+        "Non-base14 font is not registered; PDF output will rely on viewer substitution.",
+    )?;
+    Ok((out.to_object(py), false, true))
+}
+
+fn build_raster_font_target_py(
+    py: Python<'_>,
+    engine: &FullBleed,
+    requested_name: &str,
+    resolved_name: &str,
+) -> PyResult<(PyObject, bool, bool, bool)> {
+    let out = PyDict::new_bound(py);
+    let normalized_requested = normalized_font_name(requested_name);
+    let normalized_resolved = normalized_font_name(resolved_name);
+    if let Some(trace) = engine.resolve_registered_font_trace(&normalized_resolved) {
+        out.set_item("target", "raster_preview")?;
+        out.set_item("outcome", "registered")?;
+        out.set_item("source", trace.source_kind.as_str())?;
+        out.set_item("deterministic", true)?;
+        out.set_item("requested_name", normalized_requested)?;
+        out.set_item("resolved_name", trace.resolved_name)?;
+        out.set_item("resolved_file_name", trace.source_file_name)?;
+        out.set_item("program_kind", trace.program_kind.as_str())?;
+        let debug = PyDict::new_bound(py);
+        debug.set_item("source_identifier", trace.source_identifier)?;
+        out.set_item("debug", debug)?;
+        return Ok((out.to_object(py), true, false, false));
+    }
+    if let Some(trace) = crate::raster::inspect_system_font_resolution(&normalized_resolved) {
+        out.set_item("target", "raster_preview")?;
+        out.set_item("outcome", "system_fallback")?;
+        out.set_item("source", "system")?;
+        out.set_item("deterministic", false)?;
+        out.set_item("requested_name", normalized_requested)?;
+        out.set_item("resolved_name", normalized_resolved)?;
+        out.set_item("matched_family", trace.matched_family)?;
+        out.set_item("resolved_file_name", trace.resolved_file_name)?;
+        out.set_item(
+            "candidate_file_names",
+            PyList::new_bound(py, trace.candidate_file_names),
+        )?;
+        let debug = PyDict::new_bound(py);
+        debug.set_item(
+            "resolved_path",
+            trace.resolved_path.to_string_lossy().to_string(),
+        )?;
+        out.set_item("debug", debug)?;
+        out.set_item(
+            "warning",
+            "Raster preview is using a host system font fallback; output may drift across machines.",
+        )?;
+        return Ok((out.to_object(py), false, true, false));
+    }
+
+    out.set_item("target", "raster_preview")?;
+    out.set_item("outcome", "unresolved")?;
+    out.set_item("source", "unresolved")?;
+    out.set_item("deterministic", false)?;
+    out.set_item("requested_name", normalized_requested)?;
+    out.set_item("resolved_name", normalized_resolved)?;
+    out.set_item("resolved_file_name", py.None())?;
+    out.set_item("program_kind", py.None())?;
+    out.set_item(
+        "warning",
+        "Raster preview could not resolve a font for this logical family.",
+    )?;
+    Ok((out.to_object(py), false, false, true))
+}
+
+fn build_render_time_font_resolution_trace_py(
+    py: Python<'_>,
+    doc: &Document,
+    engine: &FullBleed,
+) -> PyResult<PyObject> {
+    let out = PyDict::new_bound(py);
+    out.set_item("schema", "fullbleed.font_resolution_trace.v1")?;
+    out.set_item("schema_version", 1)?;
+    out.set_item("extractor", "render_time_commands")?;
+    out.set_item("source", "engine_render_time")?;
+
+    let usage = collect_render_time_font_usage(doc);
+    let fonts_out = PyList::empty_bound(py);
+    let warnings = PyList::empty_bound(py);
+    let mut deterministic_font_count = 0usize;
+    let mut nondeterministic_font_count = 0usize;
+    let mut pdf_viewer_fallback_count = 0usize;
+    let mut raster_system_fallback_count = 0usize;
+    let mut unresolved_target_count = 0usize;
+
+    for (usage_key, stats) in usage {
+        let row = PyDict::new_bound(py);
+        row.set_item("requested_name", usage_key.requested_name.clone())?;
+        row.set_item("resolved_name", usage_key.resolved_name.clone())?;
+        row.set_item("fallback_reason", usage_key.fallback_reason.clone())?;
+        row.set_item("text_draw_count", stats.text_draw_count)?;
+        row.set_item(
+            "transformed_text_draw_count",
+            stats.transformed_text_draw_count,
+        )?;
+        row.set_item("glyph_run_count", stats.glyph_run_count)?;
+        row.set_item("sample_text", stats.sample_text)?;
+
+        let (pdf_target, pdf_deterministic, pdf_viewer_fallback) = build_pdf_font_target_py(
+            py,
+            engine,
+            &usage_key.requested_name,
+            &usage_key.resolved_name,
+        )?;
+        let (raster_target, raster_deterministic, raster_system_fallback, raster_unresolved) =
+            build_raster_font_target_py(
+                py,
+                engine,
+                &usage_key.requested_name,
+                &usage_key.resolved_name,
+            )?;
+        row.set_item("pdf_target", pdf_target)?;
+        row.set_item("raster_target", raster_target)?;
+
+        let deterministic = pdf_deterministic && raster_deterministic;
+        row.set_item("deterministic", deterministic)?;
+        if deterministic {
+            deterministic_font_count = deterministic_font_count.saturating_add(1);
+        } else {
+            nondeterministic_font_count = nondeterministic_font_count.saturating_add(1);
+        }
+        if pdf_viewer_fallback {
+            pdf_viewer_fallback_count = pdf_viewer_fallback_count.saturating_add(1);
+        }
+        if raster_system_fallback {
+            raster_system_fallback_count = raster_system_fallback_count.saturating_add(1);
+        }
+        if raster_unresolved {
+            unresolved_target_count = unresolved_target_count.saturating_add(1);
+        }
+        fonts_out.append(row)?;
+    }
+
+    if pdf_viewer_fallback_count > 0 {
+        warnings.append(format!(
+            "pdf viewer fallback detected for {} font request(s)",
+            pdf_viewer_fallback_count
+        ))?;
+    }
+    if raster_system_fallback_count > 0 {
+        warnings.append(format!(
+            "host system raster fallback detected for {} font request(s)",
+            raster_system_fallback_count
+        ))?;
+    }
+    if unresolved_target_count > 0 {
+        warnings.append(format!(
+            "unresolved raster font target detected for {} font request(s)",
+            unresolved_target_count
+        ))?;
+    }
+
+    let summary = PyDict::new_bound(py);
+    summary.set_item("font_count", fonts_out.len())?;
+    summary.set_item("deterministic_font_count", deterministic_font_count)?;
+    summary.set_item("nondeterministic_font_count", nondeterministic_font_count)?;
+    summary.set_item("pdf_viewer_fallback_count", pdf_viewer_fallback_count)?;
+    summary.set_item("raster_system_fallback_count", raster_system_fallback_count)?;
+    summary.set_item("unresolved_target_count", unresolved_target_count)?;
+    out.set_item("summary", summary)?;
+    out.set_item("fonts", fonts_out)?;
+    out.set_item("warnings", warnings)?;
+    Ok(out.to_object(py))
+}
+
+fn build_render_time_asset_resolution_trace_py(
+    py: Python<'_>,
+    html: &str,
+    engine: &FullBleed,
+) -> PyResult<PyObject> {
+    let out = PyDict::new_bound(py);
+    out.set_item("schema", "fullbleed.asset_resolution_trace.v1")?;
+    out.set_item("schema_version", 1)?;
+    out.set_item("extractor", "html_image_sources")?;
+    out.set_item("source", "engine_render_time")?;
+
+    let document = kuchiki::parse_html().one(html);
+    let mut references: BTreeMap<String, usize> = BTreeMap::new();
+    if let Ok(images) = document.select("img[src]") {
+        for image in images {
+            let attrs = image.attributes.borrow();
+            if let Some(src) = attrs.get("src") {
+                *references.entry(src.to_string()).or_insert(0usize) += 1;
+            }
+        }
+    }
+
+    let assets_out = PyList::empty_bound(py);
+    let warnings = PyList::empty_bound(py);
+    let mut resolved_count = 0usize;
+    let mut unresolved_count = 0usize;
+    let mut raster_image_count = 0usize;
+    let mut vector_svg_count = 0usize;
+    let mut rasterized_svg_count = 0usize;
+    let mut unsupported_count = 0usize;
+    let mut bundle_resolved_count = 0usize;
+    let mut file_uri_resolved_count = 0usize;
+    let mut local_path_resolved_count = 0usize;
+    let mut data_uri_resolved_count = 0usize;
+
+    for (src, reference_count) in &references {
+        let resolved = resolve_image_asset(Some(engine.asset_bundle_ref()), src);
+        let row = PyDict::new_bound(py);
+        let mut effective_outcome = resolved.trace.render_outcome.clone();
+        if resolved.trace.success && resolved.trace.content_kind == "svg" {
+            if let Ok(xml) = String::from_utf8(resolved.bytes.clone()) {
+                if engine.svg_raster_fallback_enabled()
+                    && crate::svg::svg_needs_raster_fallback(&xml)
+                {
+                    effective_outcome = "rasterized_svg".to_string();
+                } else {
+                    effective_outcome = "vector_svg".to_string();
+                }
+            }
+        }
+        row.set_item("source_uri", resolved.trace.source_uri.clone())?;
+        row.set_item(
+            "normalized_uri",
+            resolved.trace.normalized_uri.clone().unwrap_or_default(),
+        )?;
+        row.set_item("resolver", resolved.trace.resolver.clone())?;
+        row.set_item("success", resolved.trace.success)?;
+        row.set_item("mime", resolved.trace.mime.clone())?;
+        row.set_item("content_kind", resolved.trace.content_kind.clone())?;
+        row.set_item("render_outcome", effective_outcome.clone())?;
+        row.set_item("asset_name", resolved.trace.asset_name.clone())?;
+        row.set_item("message", resolved.trace.message.clone())?;
+        row.set_item("reference_count", *reference_count)?;
+        assets_out.append(row)?;
+
+        if resolved.trace.success {
+            resolved_count = resolved_count.saturating_add(1);
+            match resolved.trace.resolver.as_str() {
+                "bundle" => bundle_resolved_count = bundle_resolved_count.saturating_add(1),
+                "file_uri" => file_uri_resolved_count = file_uri_resolved_count.saturating_add(1),
+                "local_path" => {
+                    local_path_resolved_count = local_path_resolved_count.saturating_add(1)
+                }
+                "data_uri" => data_uri_resolved_count = data_uri_resolved_count.saturating_add(1),
+                _ => {}
+            }
+            match effective_outcome.as_str() {
+                "raster_image" => raster_image_count = raster_image_count.saturating_add(1),
+                "vector_svg" => vector_svg_count = vector_svg_count.saturating_add(1),
+                "rasterized_svg" => rasterized_svg_count = rasterized_svg_count.saturating_add(1),
+                _ => unsupported_count = unsupported_count.saturating_add(1),
+            }
+        } else {
+            unresolved_count = unresolved_count.saturating_add(1);
+            warnings.append(format!(
+                "unresolved image source: {}",
+                resolved.trace.source_uri
+            ))?;
+        }
+        if effective_outcome == "unsupported" {
+            warnings.append(format!(
+                "unsupported image payload for source: {}",
+                resolved.trace.source_uri
+            ))?;
+        }
+    }
+
+    let summary = PyDict::new_bound(py);
+    summary.set_item(
+        "image_reference_count",
+        references.values().copied().sum::<usize>(),
+    )?;
+    summary.set_item("unique_image_source_count", references.len())?;
+    summary.set_item("resolved_count", resolved_count)?;
+    summary.set_item("unresolved_count", unresolved_count)?;
+    summary.set_item("unsupported_count", unsupported_count)?;
+    summary.set_item("raster_image_count", raster_image_count)?;
+    summary.set_item("vector_svg_count", vector_svg_count)?;
+    summary.set_item("rasterized_svg_count", rasterized_svg_count)?;
+    summary.set_item("bundle_resolved_count", bundle_resolved_count)?;
+    summary.set_item("file_uri_resolved_count", file_uri_resolved_count)?;
+    summary.set_item("local_path_resolved_count", local_path_resolved_count)?;
+    summary.set_item("data_uri_resolved_count", data_uri_resolved_count)?;
+    out.set_item("summary", summary)?;
+    out.set_item("assets", assets_out)?;
+    out.set_item("warnings", warnings)?;
+    Ok(out.to_object(py))
+}
+
+fn parse_trace_fields(raw: &str) -> HashMap<&str, &str> {
+    let mut out = HashMap::new();
+    for chunk in raw.split('|') {
+        if let Some((key, value)) = chunk.split_once('=') {
+            out.insert(key, value);
+        }
+    }
+    out
+}
+
+fn trace_i64(fields: &HashMap<&str, &str>, key: &str) -> Option<i64> {
+    fields.get(key).and_then(|value| value.parse::<i64>().ok())
+}
+
+fn trace_usize(fields: &HashMap<&str, &str>, key: &str) -> Option<usize> {
+    trace_i64(fields, key).and_then(|value| usize::try_from(value).ok())
+}
+
+fn trace_optional_usize(fields: &HashMap<&str, &str>, key: &str) -> Option<usize> {
+    trace_i64(fields, key).and_then(|value| {
+        if value < 0 {
+            None
+        } else {
+            usize::try_from(value).ok()
+        }
+    })
+}
+
+fn trace_flag(fields: &HashMap<&str, &str>, key: &str) -> bool {
+    matches!(fields.get(key).copied(), Some("1"))
+}
+
+fn milli_to_f32(value: i64) -> f32 {
+    (value as f64 / 1000.0) as f32
+}
+
+fn parse_bbox_meta(raw: &str) -> Option<(f32, f32, f32, f32)> {
+    let mut parts = raw.split(',');
+    let x = parts.next()?.parse::<i64>().ok()?;
+    let y = parts.next()?.parse::<i64>().ok()?;
+    let w = parts.next()?.parse::<i64>().ok()?;
+    let h = parts.next()?.parse::<i64>().ok()?;
+    Some((
+        milli_to_f32(x),
+        milli_to_f32(y),
+        milli_to_f32(w),
+        milli_to_f32(h),
+    ))
+}
+
+fn is_visible_command(cmd: &Command) -> bool {
+    matches!(
+        cmd,
+        Command::DrawString { .. }
+            | Command::DrawStringTransformed { .. }
+            | Command::DrawGlyphRun { .. }
+            | Command::DrawImage { .. }
+            | Command::DrawForm { .. }
+            | Command::ApplyBackdropFilter { .. }
+            | Command::ShadingFill(_)
+            | Command::Fill
+            | Command::FillEvenOdd
+            | Command::Stroke
+            | Command::FillStroke
+            | Command::FillStrokeEvenOdd
+    )
+}
+
+fn count_rect_overlaps(rects: &[(f32, f32, f32, f32)]) -> usize {
+    let mut count = 0usize;
+    for i in 0..rects.len() {
+        let (ax, ay, aw, ah) = rects[i];
+        if aw <= 0.0 || ah <= 0.0 {
+            continue;
+        }
+        let ax1 = ax + aw;
+        let ay1 = ay + ah;
+        for &(bx, by, bw, bh) in rects.iter().skip(i + 1) {
+            if bw <= 0.0 || bh <= 0.0 {
+                continue;
+            }
+            let bx1 = bx + bw;
+            let by1 = by + bh;
+            let iw = ax1.min(bx1) - ax.max(bx);
+            let ih = ay1.min(by1) - ay.max(by);
+            if iw >= 1.0 && ih >= 1.0 && (iw * ih) >= 4.0 {
+                count = count.saturating_add(1);
+            }
+        }
+    }
+    count
+}
+
+fn build_render_time_pagination_trace_py(
+    py: Python<'_>,
+    doc: &Document,
+    engine: &FullBleed,
+) -> PyResult<PyObject> {
+    let out = PyDict::new_bound(py);
+    out.set_item("schema", "fullbleed.pagination_trace.v1")?;
+    out.set_item("schema_version", 1)?;
+    out.set_item("extractor", "render_time_layout")?;
+    out.set_item("source", "engine_doc_template")?;
+
+    let events_out = PyList::empty_bound(py);
+    let pages_out = PyList::empty_bound(py);
+    let warnings = PyList::empty_bound(py);
+    let page_size = PyDict::new_bound(py);
+    page_size.set_item("width", doc.page_size.width.to_f32())?;
+    page_size.set_item("height", doc.page_size.height.to_f32())?;
+
+    let page_area = f64::from(doc.page_size.width.to_f32().max(0.0))
+        * f64::from(doc.page_size.height.to_f32().max(0.0));
+
+    let mut event_count = 0usize;
+    let mut transition_count = 0usize;
+    let mut page_transition_count = 0usize;
+    let mut frame_transition_count = 0usize;
+    let mut placement_count = 0usize;
+    let mut split_count = 0usize;
+    let mut overflow_event_count = 0usize;
+    let mut recoverable_overflow_count = 0usize;
+    let mut fatal_overflow_count = 0usize;
+    let mut flowable_overlap_count = 0usize;
+    let mut low_coverage_page_count = 0usize;
+    let mut text_overlap_count = 0usize;
+    let text_overlap_samples_out = PyList::empty_bound(py);
+
+    for (page_index, page) in doc.pages.iter().enumerate() {
+        let mut template_name: Option<String> = None;
+        let mut visible_command_count = 0usize;
+        let mut layout_event_count = 0usize;
+        let mut page_event_count = 0usize;
+        let mut flowable_bboxes: Vec<(f32, f32, f32, f32)> = Vec::new();
+        let text_collection = collect_render_time_text_blocks_for_page(page, Some(engine));
+
+        for cmd in &page.commands {
+            if is_visible_command(cmd) {
+                visible_command_count = visible_command_count.saturating_add(1);
+            }
+            match cmd {
+                Command::Meta { key, value } if key == crate::META_PAGE_TEMPLATE_KEY => {
+                    template_name = Some(value.clone());
+                }
+                Command::Meta { key, value } if key == META_FLOWABLE_BBOX_KEY => {
+                    if let Some(bbox) = parse_bbox_meta(value) {
+                        flowable_bboxes.push(bbox);
+                    }
+                }
+                Command::Meta { key, value } if key == META_PAGINATION_EVENT_KEY => {
+                    let fields = parse_trace_fields(value);
+                    let event_type = fields.get("event").copied().unwrap_or("unknown");
+                    let row = PyDict::new_bound(py);
+                    row.set_item("event_index", event_count)?;
+                    row.set_item("event_type", event_type)?;
+                    row.set_item("page_index", page_index)?;
+                    row.set_item("page", page_index + 1)?;
+
+                    if event_type == "layout" {
+                        layout_event_count = layout_event_count.saturating_add(1);
+                        row.set_item("source_order", trace_usize(&fields, "source_order"))?;
+                        row.set_item("segment_index", trace_usize(&fields, "segment_index"))?;
+                        row.set_item(
+                            "flowable_name",
+                            fields.get("flowable").copied().unwrap_or("unknown"),
+                        )?;
+                        row.set_item("frame_index", trace_usize(&fields, "frame_index"))?;
+                        row.set_item("is_last_frame", trace_flag(&fields, "is_last_frame"))?;
+                        row.set_item(
+                            "placed_on_page_before",
+                            trace_flag(&fields, "placed_on_page_before"),
+                        )?;
+                        let result = fields.get("result").copied().unwrap_or("unknown");
+                        let reason = fields.get("reason").copied().unwrap_or("unknown");
+                        let overflow_severity =
+                            fields.get("overflow_severity").copied().unwrap_or("none");
+                        row.set_item("result", result)?;
+                        row.set_item("reason", reason)?;
+                        row.set_item("overflow_severity", overflow_severity)?;
+
+                        let available_before = PyDict::new_bound(py);
+                        available_before
+                            .set_item("width", trace_i64(&fields, "avail_w").map(milli_to_f32))?;
+                        available_before
+                            .set_item("height", trace_i64(&fields, "avail_h").map(milli_to_f32))?;
+                        available_before.set_item(
+                            "cursor_y",
+                            trace_i64(&fields, "cursor_y_before").map(milli_to_f32),
+                        )?;
+                        row.set_item("available_before", available_before)?;
+
+                        let frame_rect = PyDict::new_bound(py);
+                        frame_rect
+                            .set_item("x", trace_i64(&fields, "frame_x").map(milli_to_f32))?;
+                        frame_rect
+                            .set_item("y", trace_i64(&fields, "frame_y").map(milli_to_f32))?;
+                        frame_rect
+                            .set_item("w", trace_i64(&fields, "frame_w").map(milli_to_f32))?;
+                        frame_rect
+                            .set_item("h", trace_i64(&fields, "frame_h").map(milli_to_f32))?;
+                        row.set_item("frame_rect", frame_rect)?;
+
+                        let wrapped_size = PyDict::new_bound(py);
+                        wrapped_size
+                            .set_item("width", trace_i64(&fields, "wrapped_w").map(milli_to_f32))?;
+                        wrapped_size.set_item(
+                            "height",
+                            trace_i64(&fields, "wrapped_h").map(milli_to_f32),
+                        )?;
+                        row.set_item("wrapped_size", wrapped_size)?;
+
+                        let placed_w = trace_i64(&fields, "placed_w").unwrap_or(0);
+                        let placed_h = trace_i64(&fields, "placed_h").unwrap_or(0);
+                        if placed_w > 0 && placed_h > 0 {
+                            let placed_rect = PyDict::new_bound(py);
+                            placed_rect
+                                .set_item("x", trace_i64(&fields, "placed_x").map(milli_to_f32))?;
+                            placed_rect
+                                .set_item("y", trace_i64(&fields, "placed_y").map(milli_to_f32))?;
+                            placed_rect.set_item("w", Some(milli_to_f32(placed_w)))?;
+                            placed_rect.set_item("h", Some(milli_to_f32(placed_h)))?;
+                            row.set_item("placed_rect", placed_rect)?;
+                        } else {
+                            row.set_item("placed_rect", py.None())?;
+                        }
+
+                        match result {
+                            "placed" => {
+                                placement_count = placement_count.saturating_add(1);
+                            }
+                            "split" => {
+                                split_count = split_count.saturating_add(1);
+                            }
+                            "overflow" => {
+                                overflow_event_count = overflow_event_count.saturating_add(1);
+                                if overflow_severity == "fatal_unplaceable" {
+                                    fatal_overflow_count = fatal_overflow_count.saturating_add(1);
+                                } else {
+                                    recoverable_overflow_count =
+                                        recoverable_overflow_count.saturating_add(1);
+                                }
+                            }
+                            _ => {}
+                        }
+                    } else if event_type == "transition" {
+                        transition_count = transition_count.saturating_add(1);
+                        let from_page = trace_usize(&fields, "from_page").unwrap_or(page_index + 1);
+                        let to_page = trace_usize(&fields, "to_page").unwrap_or(page_index + 1);
+                        row.set_item("from_page", from_page)?;
+                        row.set_item("to_page", to_page)?;
+                        row.set_item("from_frame_index", trace_usize(&fields, "from_frame_index"))?;
+                        row.set_item("to_frame_index", trace_usize(&fields, "to_frame_index"))?;
+                        row.set_item(
+                            "flowable_name",
+                            fields.get("flowable").copied().unwrap_or("unknown"),
+                        )?;
+                        row.set_item(
+                            "source_order",
+                            trace_optional_usize(&fields, "source_order"),
+                        )?;
+                        row.set_item(
+                            "segment_index",
+                            trace_optional_usize(&fields, "segment_index"),
+                        )?;
+                        row.set_item("reason", fields.get("reason").copied().unwrap_or("unknown"))?;
+                        if from_page != to_page {
+                            page_transition_count = page_transition_count.saturating_add(1);
+                        } else {
+                            frame_transition_count = frame_transition_count.saturating_add(1);
+                        }
+                    }
+
+                    events_out.append(row)?;
+                    event_count = event_count.saturating_add(1);
+                    page_event_count = page_event_count.saturating_add(1);
+                }
+                _ => {}
+            }
+        }
+
+        let overlap_count = count_rect_overlaps(&flowable_bboxes);
+        flowable_overlap_count = flowable_overlap_count.saturating_add(overlap_count);
+        let (page_text_overlap_count, page_text_overlap_samples) =
+            collect_text_overlap_samples(&text_collection.blocks, 4);
+        text_overlap_count = text_overlap_count.saturating_add(page_text_overlap_count);
+        for sample in page_text_overlap_samples
+            .iter()
+            .take(8usize.saturating_sub(text_overlap_samples_out.len()))
+        {
+            let row = PyDict::new_bound(py);
+            row.set_item("page", page_index + 1)?;
+            let overlap_bbox = PyDict::new_bound(py);
+            overlap_bbox.set_item("x", sample.overlap_bbox.0)?;
+            overlap_bbox.set_item("y", sample.overlap_bbox.1)?;
+            overlap_bbox.set_item("w", sample.overlap_bbox.2)?;
+            overlap_bbox.set_item("h", sample.overlap_bbox.3)?;
+            row.set_item("overlap_bbox", overlap_bbox)?;
+            let a = PyDict::new_bound(py);
+            a.set_item("index", sample.a_index)?;
+            a.set_item("command_index", sample.a_command_index)?;
+            a.set_item("top_role", sample.a_top_role.clone())?;
+            a.set_item("text", sample.a_text.clone())?;
+            row.set_item("a", a)?;
+            let b = PyDict::new_bound(py);
+            b.set_item("index", sample.b_index)?;
+            b.set_item("command_index", sample.b_command_index)?;
+            b.set_item("top_role", sample.b_top_role.clone())?;
+            b.set_item("text", sample.b_text.clone())?;
+            row.set_item("b", b)?;
+            text_overlap_samples_out.append(row)?;
+        }
+
+        let occupied_area: f64 = flowable_bboxes
+            .iter()
+            .map(|(_, _, width, height)| {
+                f64::from((*width).max(0.0)) * f64::from((*height).max(0.0))
+            })
+            .sum();
+        let occupied_area_ratio = if page_area > 0.0 {
+            (occupied_area / page_area).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let low_coverage = visible_command_count == 0
+            || (!flowable_bboxes.is_empty() && occupied_area_ratio < 0.0005f64);
+        if low_coverage {
+            low_coverage_page_count = low_coverage_page_count.saturating_add(1);
+            let warning = PyDict::new_bound(py);
+            warning.set_item("code", "LOW_COVERAGE_PAGE")?;
+            warning.set_item("page", page_index + 1)?;
+            warning.set_item("visible_command_count", visible_command_count)?;
+            warning.set_item("flowable_bbox_count", flowable_bboxes.len())?;
+            warning.set_item("occupied_area_ratio", occupied_area_ratio)?;
+            warnings.append(warning)?;
+        }
+        if overlap_count > 0 {
+            let warning = PyDict::new_bound(py);
+            warning.set_item("code", "FLOWABLE_OVERPRINT")?;
+            warning.set_item("page", page_index + 1)?;
+            warning.set_item("overlap_count", overlap_count)?;
+            warnings.append(warning)?;
+        }
+        if page_text_overlap_count > 0 {
+            let warning = PyDict::new_bound(py);
+            warning.set_item("code", "TEXT_OVERLAP")?;
+            warning.set_item("page", page_index + 1)?;
+            warning.set_item("overlap_count", page_text_overlap_count)?;
+            warnings.append(warning)?;
+        }
+
+        let page_row = PyDict::new_bound(py);
+        page_row.set_item("page_index", page_index)?;
+        page_row.set_item("page", page_index + 1)?;
+        page_row.set_item("width", doc.page_size.width.to_f32())?;
+        page_row.set_item("height", doc.page_size.height.to_f32())?;
+        page_row.set_item("template_name", template_name)?;
+        page_row.set_item("layout_event_count", layout_event_count)?;
+        page_row.set_item("event_count", page_event_count)?;
+        page_row.set_item("visible_command_count", visible_command_count)?;
+        page_row.set_item("flowable_bbox_count", flowable_bboxes.len())?;
+        page_row.set_item("flowable_overlap_count", overlap_count)?;
+        page_row.set_item("text_block_count", text_collection.blocks.len())?;
+        page_row.set_item("text_overlap_count", page_text_overlap_count)?;
+        let page_samples = PyList::empty_bound(py);
+        for sample in &page_text_overlap_samples {
+            let row = PyDict::new_bound(py);
+            row.set_item("page", page_index + 1)?;
+            let overlap_bbox = PyDict::new_bound(py);
+            overlap_bbox.set_item("x", sample.overlap_bbox.0)?;
+            overlap_bbox.set_item("y", sample.overlap_bbox.1)?;
+            overlap_bbox.set_item("w", sample.overlap_bbox.2)?;
+            overlap_bbox.set_item("h", sample.overlap_bbox.3)?;
+            row.set_item("overlap_bbox", overlap_bbox)?;
+            let a = PyDict::new_bound(py);
+            a.set_item("index", sample.a_index)?;
+            a.set_item("command_index", sample.a_command_index)?;
+            a.set_item("top_role", sample.a_top_role.clone())?;
+            a.set_item("text", sample.a_text.clone())?;
+            row.set_item("a", a)?;
+            let b = PyDict::new_bound(py);
+            b.set_item("index", sample.b_index)?;
+            b.set_item("command_index", sample.b_command_index)?;
+            b.set_item("top_role", sample.b_top_role.clone())?;
+            b.set_item("text", sample.b_text.clone())?;
+            row.set_item("b", b)?;
+            page_samples.append(row)?;
+        }
+        page_row.set_item("text_overlap_samples", page_samples)?;
+        page_row.set_item("occupied_area_ratio", occupied_area_ratio)?;
+        page_row.set_item("low_coverage", low_coverage)?;
+        pages_out.append(page_row)?;
+    }
+
+    let summary = PyDict::new_bound(py);
+    summary.set_item("page_count", doc.pages.len())?;
+    summary.set_item("event_count", event_count)?;
+    summary.set_item("transition_count", transition_count)?;
+    summary.set_item("page_transition_count", page_transition_count)?;
+    summary.set_item("frame_transition_count", frame_transition_count)?;
+    summary.set_item("placement_count", placement_count)?;
+    summary.set_item("split_count", split_count)?;
+    summary.set_item("overflow_event_count", overflow_event_count)?;
+    summary.set_item("recoverable_overflow_count", recoverable_overflow_count)?;
+    summary.set_item("fatal_overflow_count", fatal_overflow_count)?;
+    summary.set_item("low_coverage_page_count", low_coverage_page_count)?;
+    summary.set_item("flowable_overlap_count", flowable_overlap_count)?;
+    summary.set_item("text_overlap_count", text_overlap_count)?;
+
+    out.set_item("ok", true)?;
+    out.set_item("page_size", page_size)?;
+    out.set_item("pages", pages_out)?;
+    out.set_item("events", events_out)?;
+    out.set_item("text_overlap_samples", text_overlap_samples_out)?;
+    out.set_item("summary", summary)?;
+    out.set_item("warnings", warnings)?;
+    out.set_item(
+        "generated_at_unix_ms",
+        (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()) as u64,
+    )?;
+    Ok(out.to_object(py))
+}
+
 fn build_render_time_reading_order_trace_py(
     py: Python<'_>,
     doc: &Document,
@@ -1786,126 +2917,37 @@ fn build_render_time_reading_order_trace_py(
 
     for (page_index, page) in doc.pages.iter().enumerate() {
         let blocks = PyList::empty_bound(py);
-        let mut tag_stack: Vec<String> = Vec::new();
-        let mut artifact_depth = 0usize;
-        let mut block_count = 0usize;
-        let mut state = TraceTextState::new();
-        let mut state_stack: Vec<TraceTextState> = Vec::new();
-        let mut page_draw_form_count = 0usize;
-        let mut page_define_form_count = 0usize;
-        let mut page_artifact_excluded = 0usize;
+        let text_collection = collect_render_time_text_blocks_for_page(page, engine);
+        let block_count = text_collection.blocks.len();
+        let page_draw_form_count = text_collection.draw_form_count;
+        let page_define_form_count = text_collection.define_form_count;
+        let page_artifact_excluded = text_collection.artifact_text_blocks_excluded;
+        untagged_text_blocks =
+            untagged_text_blocks.saturating_add(text_collection.untagged_text_blocks);
 
-        for (cmd_index, cmd) in page.commands.iter().enumerate() {
-            match cmd {
-                Command::SaveState => state_stack.push(state.clone()),
-                Command::RestoreState => {
-                    state = state_stack.pop().unwrap_or_else(TraceTextState::new);
-                }
-                Command::Translate(dx, dy) => {
-                    state.transform = state
-                        .transform
-                        .mul(Transform::translate(dx.to_f32(), dy.to_f32()));
-                }
-                Command::Scale(sx, sy) => {
-                    state.transform = state.transform.mul(Transform::scale(*sx, *sy));
-                }
-                Command::Rotate(angle) => {
-                    state.transform = state.transform.mul(Transform::rotate(*angle));
-                }
-                Command::ConcatMatrix { a, b, c, d, e, f } => {
-                    state.transform = state.transform.mul(Transform::matrix(
-                        *a,
-                        *b,
-                        *c,
-                        *d,
-                        e.to_f32(),
-                        f.to_f32(),
-                    ));
-                }
-                Command::SetFontName(name) => state.font_name = name.clone(),
-                Command::SetFontSize(size) => state.font_size = *size,
-                Command::BeginTag { role, .. } => tag_stack.push(role.clone()),
-                Command::EndTag => {
-                    let _ = tag_stack.pop();
-                }
-                Command::BeginArtifact { .. } => artifact_depth = artifact_depth.saturating_add(1),
-                Command::EndMarkedContent => {
-                    if artifact_depth > 0 {
-                        artifact_depth -= 1;
-                    }
-                }
-                Command::DefineForm { .. } => {
-                    page_define_form_count = page_define_form_count.saturating_add(1);
-                }
-                Command::DrawForm { .. } => {
-                    page_draw_form_count = page_draw_form_count.saturating_add(1);
-                }
-                Command::DrawString { x, y, text } => {
-                    if artifact_depth > 0 {
-                        page_artifact_excluded = page_artifact_excluded.saturating_add(1);
-                        continue;
-                    }
-                    let (bx0, by0, bx1, by1) =
-                        estimate_trace_text_bbox(engine, &state, *x, *y, text);
-                    let row = PyDict::new_bound(py);
-                    row.set_item("index", block_count)?;
-                    row.set_item("command_index", cmd_index)?;
-                    row.set_item("kind", "draw_string")?;
-                    row.set_item("text", text.clone())?;
-                    row.set_item("x", x.to_f32())?;
-                    row.set_item("y", y.to_f32())?;
-                    row.set_item("w", (bx1 - bx0).max(0.0))?;
-                    row.set_item("h", (by1 - by0).max(0.0))?;
-                    let bbox = PyDict::new_bound(py);
-                    bbox.set_item("x", bx0)?;
-                    bbox.set_item("y", by0)?;
-                    bbox.set_item("w", (bx1 - bx0).max(0.0))?;
-                    bbox.set_item("h", (by1 - by0).max(0.0))?;
-                    row.set_item("bbox", bbox)?;
-                    if let Some(top_role) = tag_stack.last() {
-                        row.set_item("top_role", top_role.clone())?;
-                    } else {
-                        row.set_item("top_role", py.None())?;
-                        untagged_text_blocks = untagged_text_blocks.saturating_add(1);
-                    }
-                    row.set_item("tag_path", PyList::new_bound(py, &tag_stack))?;
-                    blocks.append(row)?;
-                    block_count = block_count.saturating_add(1);
-                }
-                Command::DrawStringTransformed { x, y, text, .. } => {
-                    if artifact_depth > 0 {
-                        page_artifact_excluded = page_artifact_excluded.saturating_add(1);
-                        continue;
-                    }
-                    let (bx0, by0, bx1, by1) =
-                        estimate_trace_text_bbox(engine, &state, *x, *y, text);
-                    let row = PyDict::new_bound(py);
-                    row.set_item("index", block_count)?;
-                    row.set_item("command_index", cmd_index)?;
-                    row.set_item("kind", "draw_string_transformed")?;
-                    row.set_item("text", text.clone())?;
-                    row.set_item("x", x.to_f32())?;
-                    row.set_item("y", y.to_f32())?;
-                    row.set_item("w", (bx1 - bx0).max(0.0))?;
-                    row.set_item("h", (by1 - by0).max(0.0))?;
-                    let bbox = PyDict::new_bound(py);
-                    bbox.set_item("x", bx0)?;
-                    bbox.set_item("y", by0)?;
-                    bbox.set_item("w", (bx1 - bx0).max(0.0))?;
-                    bbox.set_item("h", (by1 - by0).max(0.0))?;
-                    row.set_item("bbox", bbox)?;
-                    if let Some(top_role) = tag_stack.last() {
-                        row.set_item("top_role", top_role.clone())?;
-                    } else {
-                        row.set_item("top_role", py.None())?;
-                        untagged_text_blocks = untagged_text_blocks.saturating_add(1);
-                    }
-                    row.set_item("tag_path", PyList::new_bound(py, &tag_stack))?;
-                    blocks.append(row)?;
-                    block_count = block_count.saturating_add(1);
-                }
-                _ => {}
+        for block in &text_collection.blocks {
+            let row = PyDict::new_bound(py);
+            row.set_item("index", block.index)?;
+            row.set_item("command_index", block.command_index)?;
+            row.set_item("kind", block.kind)?;
+            row.set_item("text", block.text.clone())?;
+            row.set_item("x", block.bbox.0)?;
+            row.set_item("y", block.bbox.1)?;
+            row.set_item("w", (block.bbox.2 - block.bbox.0).max(0.0))?;
+            row.set_item("h", (block.bbox.3 - block.bbox.1).max(0.0))?;
+            let bbox = PyDict::new_bound(py);
+            bbox.set_item("x", block.bbox.0)?;
+            bbox.set_item("y", block.bbox.1)?;
+            bbox.set_item("w", (block.bbox.2 - block.bbox.0).max(0.0))?;
+            bbox.set_item("h", (block.bbox.3 - block.bbox.1).max(0.0))?;
+            row.set_item("bbox", bbox)?;
+            if let Some(top_role) = &block.top_role {
+                row.set_item("top_role", top_role.clone())?;
+            } else {
+                row.set_item("top_role", py.None())?;
             }
+            row.set_item("tag_path", PyList::new_bound(py, &block.tag_path))?;
+            blocks.append(row)?;
         }
 
         total_blocks = total_blocks.saturating_add(block_count);
@@ -3508,6 +4550,89 @@ fn a11y_dedup_and_correlate_findings(
     (reported, obs)
 }
 
+fn py_dict_optional_i64(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<i64>> {
+    match dict.get_item(key)? {
+        Some(value) if !value.is_none() => Ok(Some(value.extract::<i64>()?)),
+        _ => Ok(None),
+    }
+}
+
+fn pagination_trace_summary_from_py(
+    value: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Option<PaginationTraceSummary>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_none() {
+        return Ok(None);
+    }
+    let dict = value.downcast::<PyDict>().map_err(|_| {
+        PyValueError::new_err("pagination_trace_summary must be a dict when supplied")
+    })?;
+    Ok(Some(PaginationTraceSummary {
+        page_count: py_dict_optional_i64(dict, "page_count")?,
+        event_count: py_dict_optional_i64(dict, "event_count")?,
+        transition_count: py_dict_optional_i64(dict, "transition_count")?,
+        page_transition_count: py_dict_optional_i64(dict, "page_transition_count")?,
+        frame_transition_count: py_dict_optional_i64(dict, "frame_transition_count")?,
+        placement_count: py_dict_optional_i64(dict, "placement_count")?,
+        split_count: py_dict_optional_i64(dict, "split_count")?,
+        overflow_event_count: py_dict_optional_i64(dict, "overflow_event_count")?,
+        recoverable_overflow_count: py_dict_optional_i64(dict, "recoverable_overflow_count")?,
+        fatal_overflow_count: py_dict_optional_i64(dict, "fatal_overflow_count")?,
+        low_coverage_page_count: py_dict_optional_i64(dict, "low_coverage_page_count")?,
+        flowable_overlap_count: py_dict_optional_i64(dict, "flowable_overlap_count")?,
+        text_overlap_count: py_dict_optional_i64(dict, "text_overlap_count")?,
+    }))
+}
+
+fn pagination_trace_summary_to_py<'py>(
+    py: Python<'py>,
+    summary: &PaginationTraceSummary,
+) -> PyResult<Bound<'py, PyDict>> {
+    let out = PyDict::new_bound(py);
+    if let Some(value) = summary.page_count {
+        out.set_item("page_count", value)?;
+    }
+    if let Some(value) = summary.event_count {
+        out.set_item("event_count", value)?;
+    }
+    if let Some(value) = summary.transition_count {
+        out.set_item("transition_count", value)?;
+    }
+    if let Some(value) = summary.page_transition_count {
+        out.set_item("page_transition_count", value)?;
+    }
+    if let Some(value) = summary.frame_transition_count {
+        out.set_item("frame_transition_count", value)?;
+    }
+    if let Some(value) = summary.placement_count {
+        out.set_item("placement_count", value)?;
+    }
+    if let Some(value) = summary.split_count {
+        out.set_item("split_count", value)?;
+    }
+    if let Some(value) = summary.overflow_event_count {
+        out.set_item("overflow_event_count", value)?;
+    }
+    if let Some(value) = summary.recoverable_overflow_count {
+        out.set_item("recoverable_overflow_count", value)?;
+    }
+    if let Some(value) = summary.fatal_overflow_count {
+        out.set_item("fatal_overflow_count", value)?;
+    }
+    if let Some(value) = summary.low_coverage_page_count {
+        out.set_item("low_coverage_page_count", value)?;
+    }
+    if let Some(value) = summary.flowable_overlap_count {
+        out.set_item("flowable_overlap_count", value)?;
+    }
+    if let Some(value) = summary.text_overlap_count {
+        out.set_item("text_overlap_count", value)?;
+    }
+    Ok(out)
+}
+
 fn build_a11y_verify_report_py(
     py: Python<'_>,
     core: &A11yVerifierCoreReport,
@@ -3517,6 +4642,7 @@ fn build_a11y_verify_report_py(
     render_preview_png_path: Option<&str>,
     a11y_report: Option<&Bound<'_, PyAny>>,
     claim_evidence: Option<&Bound<'_, PyAny>>,
+    pagination_trace_summary: Option<&PaginationTraceSummary>,
 ) -> PyResult<PyObject> {
     let mode_norm = {
         let m = mode.trim().to_ascii_lowercase();
@@ -5545,6 +6671,12 @@ fn build_a11y_verify_report_py(
         format!("sha256:{}", sha256_file_hex(html_path)?),
     )?;
     report.set_item("target", target)?;
+    if let Some(summary) = pagination_trace_summary {
+        report.set_item(
+            "pagination_trace_summary",
+            pagination_trace_summary_to_py(py, summary)?,
+        )?;
+    }
 
     report.set_item("profile", core.profile.clone())?;
 
@@ -5635,6 +6767,26 @@ fn build_a11y_verify_report_py(
         "redundant_aria_count",
         core.facts.redundant_role_native_count + core.facts.redundant_state_native_count,
     )?;
+    if let Some(summary) = pagination_trace_summary {
+        if let Some(value) = summary.page_count {
+            signal_counts_py.set_item("pagination_page_count", value)?;
+        }
+        if let Some(value) = summary.overflow_event_count {
+            signal_counts_py.set_item("pagination_overflow_event_count", value)?;
+        }
+        if let Some(value) = summary.low_coverage_page_count {
+            signal_counts_py.set_item("pagination_low_coverage_page_count", value)?;
+        }
+        if let Some(value) = summary.flowable_overlap_count {
+            signal_counts_py.set_item("pagination_flowable_overlap_count", value)?;
+        }
+        if let Some(value) = summary.text_overlap_count {
+            signal_counts_py.set_item("pagination_text_overlap_count", value)?;
+        }
+        if let Some(value) = summary.transition_count {
+            signal_counts_py.set_item("pagination_transition_count", value)?;
+        }
+    }
     observability.set_item("signal_counts", signal_counts_py)?;
     let correlation_index_py = PyList::empty_bound(py);
     for item in &observability_summary.correlation_index {
@@ -5864,6 +7016,7 @@ fn build_pmr_report_py(
     core: &PmrCoreReport,
     html_path: &str,
     css_path: &str,
+    pagination_trace_summary: Option<&PaginationTraceSummary>,
 ) -> PyResult<PyObject> {
     let report = PyDict::new_bound(py);
     report.set_item("schema", "fullbleed.pmr.v1")?;
@@ -5872,6 +7025,12 @@ fn build_pmr_report_py(
     target.set_item("html_path", html_path)?;
     target.set_item("css_path", css_path)?;
     report.set_item("target", target)?;
+    if let Some(summary) = pagination_trace_summary {
+        report.set_item(
+            "pagination_trace_summary",
+            pagination_trace_summary_to_py(py, summary)?,
+        )?;
+    }
 
     report.set_item("profile", core.profile.clone())?;
 
@@ -6005,6 +7164,26 @@ fn build_pmr_report_py(
         "redundant_aria_count",
         core.facts.redundant_role_native_count + core.facts.redundant_state_native_count,
     )?;
+    if let Some(summary) = pagination_trace_summary {
+        if let Some(value) = summary.page_count {
+            signal_counts_py.set_item("pagination_page_count", value)?;
+        }
+        if let Some(value) = summary.overflow_event_count {
+            signal_counts_py.set_item("pagination_overflow_event_count", value)?;
+        }
+        if let Some(value) = summary.low_coverage_page_count {
+            signal_counts_py.set_item("pagination_low_coverage_page_count", value)?;
+        }
+        if let Some(value) = summary.flowable_overlap_count {
+            signal_counts_py.set_item("pagination_flowable_overlap_count", value)?;
+        }
+        if let Some(value) = summary.text_overlap_count {
+            signal_counts_py.set_item("pagination_text_overlap_count", value)?;
+        }
+        if let Some(value) = summary.transition_count {
+            signal_counts_py.set_item("pagination_transition_count", value)?;
+        }
+    }
     observability.set_item("signal_counts", signal_counts_py)?;
     observability.set_item("correlation_index", correlation_index)?;
     report.set_item("observability", observability)?;
@@ -6686,7 +7865,7 @@ impl PdfEngine {
         Ok(out.to_object(py))
     }
 
-    #[pyo3(signature = (html, css="", profile="strict", mode="error", render_preview_png_path=None, a11y_report=None, claim_evidence=None))]
+    #[pyo3(signature = (html, css="", profile="strict", mode="error", render_preview_png_path=None, a11y_report=None, claim_evidence=None, pagination_trace_summary=None))]
     fn verify_accessibility_html(
         &self,
         py: Python<'_>,
@@ -6697,8 +7876,12 @@ impl PdfEngine {
         render_preview_png_path: Option<&str>,
         a11y_report: Option<PyObject>,
         claim_evidence: Option<PyObject>,
+        pagination_trace_summary: Option<PyObject>,
     ) -> PyResult<PyObject> {
         let core = self.engine.verify_accessibility_html_core(html, profile);
+        let pagination_trace_summary = pagination_trace_summary_from_py(
+            pagination_trace_summary.as_ref().map(|v| v.bind(py)),
+        )?;
 
         // For in-memory HTML verification we emit a schema-shaped report without artifact hashes/paths.
         // Reuse the file-based path with temporary files to keep the report shape stable for now.
@@ -6725,13 +7908,14 @@ impl PdfEngine {
             render_preview_png_path,
             a11y_report.as_ref().map(|v| v.bind(py)),
             claim_evidence.as_ref().map(|v| v.bind(py)),
+            pagination_trace_summary.as_ref(),
         );
         let _ = std::fs::remove_file(&html_path);
         let _ = std::fs::remove_file(&css_path);
         report
     }
 
-    #[pyo3(signature = (html_path, css_path, profile="strict", mode="error", render_preview_png_path=None, a11y_report=None, claim_evidence=None))]
+    #[pyo3(signature = (html_path, css_path, profile="strict", mode="error", render_preview_png_path=None, a11y_report=None, claim_evidence=None, pagination_trace_summary=None))]
     fn verify_accessibility_artifacts(
         &self,
         py: Python<'_>,
@@ -6742,6 +7926,7 @@ impl PdfEngine {
         render_preview_png_path: Option<&str>,
         a11y_report: Option<PyObject>,
         claim_evidence: Option<PyObject>,
+        pagination_trace_summary: Option<PyObject>,
     ) -> PyResult<PyObject> {
         let html = std::fs::read_to_string(html_path).map_err(|e| {
             PyValueError::new_err(format!(
@@ -6754,6 +7939,9 @@ impl PdfEngine {
                 "failed to read css artifact for accessibility verification: {e}"
             ))
         })?;
+        let pagination_trace_summary = pagination_trace_summary_from_py(
+            pagination_trace_summary.as_ref().map(|v| v.bind(py)),
+        )?;
         let core = self.engine.verify_accessibility_html_core(&html, profile);
         build_a11y_verify_report_py(
             py,
@@ -6764,6 +7952,7 @@ impl PdfEngine {
             render_preview_png_path,
             a11y_report.as_ref().map(|v| v.bind(py)),
             claim_evidence.as_ref().map(|v| v.bind(py)),
+            pagination_trace_summary.as_ref(),
         )
     }
 
@@ -6776,7 +7965,8 @@ impl PdfEngine {
         known_loss_count=None,
         source_page_count=None,
         render_page_count=None,
-        review_queue_items=None
+        review_queue_items=None,
+        pagination_trace_summary=None
     ))]
     fn verify_paged_media_rank_html(
         &self,
@@ -6790,6 +7980,7 @@ impl PdfEngine {
         source_page_count: Option<i64>,
         render_page_count: Option<i64>,
         review_queue_items: Option<i64>,
+        pagination_trace_summary: Option<PyObject>,
     ) -> PyResult<PyObject> {
         let tmp_dir = std::env::temp_dir();
         let pid = std::process::id();
@@ -6809,9 +8000,13 @@ impl PdfEngine {
                 "failed to write temp css for PMR verification: {e}"
             ))
         })?;
+        let pagination_trace_summary = pagination_trace_summary_from_py(
+            pagination_trace_summary.as_ref().map(|v| v.bind(py)),
+        )?;
         let ctx = PmrCoreContext {
             overflow_count,
             known_loss_count,
+            pagination_summary: pagination_trace_summary.clone(),
             source_page_count,
             render_page_count,
             review_queue_items,
@@ -6826,6 +8021,7 @@ impl PdfEngine {
             &core,
             &html_path.to_string_lossy(),
             &css_path.to_string_lossy(),
+            pagination_trace_summary.as_ref(),
         );
         let _ = std::fs::remove_file(&html_path);
         let _ = std::fs::remove_file(&css_path);
@@ -6841,7 +8037,8 @@ impl PdfEngine {
         known_loss_count=None,
         source_page_count=None,
         render_page_count=None,
-        review_queue_items=None
+        review_queue_items=None,
+        pagination_trace_summary=None
     ))]
     fn verify_paged_media_rank_artifacts(
         &self,
@@ -6855,6 +8052,7 @@ impl PdfEngine {
         source_page_count: Option<i64>,
         render_page_count: Option<i64>,
         review_queue_items: Option<i64>,
+        pagination_trace_summary: Option<PyObject>,
     ) -> PyResult<PyObject> {
         let html = std::fs::read_to_string(html_path).map_err(|e| {
             PyValueError::new_err(format!(
@@ -6866,9 +8064,13 @@ impl PdfEngine {
                 "failed to read css artifact for PMR verification: {e}"
             ))
         })?;
+        let pagination_trace_summary = pagination_trace_summary_from_py(
+            pagination_trace_summary.as_ref().map(|v| v.bind(py)),
+        )?;
         let ctx = PmrCoreContext {
             overflow_count,
             known_loss_count,
+            pagination_summary: pagination_trace_summary.clone(),
             source_page_count,
             render_page_count,
             review_queue_items,
@@ -6878,7 +8080,13 @@ impl PdfEngine {
         let core = self
             .engine
             .verify_paged_media_rank_html_core(&html, profile, mode, &ctx);
-        build_pmr_report_py(py, &core, html_path, css_path)
+        build_pmr_report_py(
+            py,
+            &core,
+            html_path,
+            css_path,
+            pagination_trace_summary.as_ref(),
+        )
     }
 
     #[pyo3(signature = (html, css, deterministic_hash=None))]
@@ -7046,6 +8254,42 @@ impl PdfEngine {
             .allow_threads(|| self.engine.render_to_document(html, css))
             .map_err(to_py_err)?;
         build_render_time_structure_trace_py(py, &doc)
+    }
+
+    fn export_render_time_font_resolution_trace(
+        &self,
+        py: Python<'_>,
+        html: &str,
+        css: &str,
+    ) -> PyResult<PyObject> {
+        let doc = py
+            .allow_threads(|| self.engine.render_to_document(html, css))
+            .map_err(to_py_err)?;
+        build_render_time_font_resolution_trace_py(py, &doc, &self.engine)
+    }
+
+    fn export_render_time_asset_resolution_trace(
+        &self,
+        py: Python<'_>,
+        html: &str,
+        css: &str,
+    ) -> PyResult<PyObject> {
+        let _ = py
+            .allow_threads(|| self.engine.render_to_document(html, css))
+            .map_err(to_py_err)?;
+        build_render_time_asset_resolution_trace_py(py, html, &self.engine)
+    }
+
+    fn export_render_time_pagination_trace(
+        &self,
+        py: Python<'_>,
+        html: &str,
+        css: &str,
+    ) -> PyResult<PyObject> {
+        let doc = py
+            .allow_threads(|| self.engine.render_to_document(html, css))
+            .map_err(to_py_err)?;
+        build_render_time_pagination_trace_py(py, &doc, &self.engine)
     }
 
     fn render_pdf_with_page_data_and_template_bindings(

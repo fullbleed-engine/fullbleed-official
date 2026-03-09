@@ -1,3 +1,4 @@
+use crate::assets::{AssetBundle, load_svg_xml_from_image_source, renderable_image_source};
 use crate::flowable::{
     AbsolutePositionedFlowable, AlignContent, AlignItems, BorderRadiusSpec, BorderSpec, CalcLength,
     ContainerFlowable, EdgeSizes, FlexDirection, FlexFlowable, ImageFlowable,
@@ -14,10 +15,8 @@ use crate::style::{
 };
 use crate::types::Pt;
 use crate::{BreakAfter, BreakBefore, BreakInside, Flowable};
-use base64::Engine;
 use kuchiki::traits::TendrilSink;
 use kuchiki::{NodeData, NodeRef};
-use std::path::Path;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -288,6 +287,7 @@ pub fn html_to_story_with_resolver_and_fonts_and_report(
     html: &str,
     resolver: &StyleResolver,
     font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<Arc<AssetBundle>>,
     report: Option<&mut GlyphCoverageReport>,
     svg_form: bool,
     svg_raster_fallback: bool,
@@ -361,6 +361,7 @@ pub fn html_to_story_with_resolver_and_fonts_and_report(
             &body_style,
             &mut ancestors,
             font_registry.clone(),
+            asset_bundle.clone(),
             report.as_deref_mut(),
             svg_form,
             svg_raster_fallback,
@@ -385,6 +386,7 @@ pub fn html_to_story_with_resolver_and_fonts_and_report(
             &root_style,
             &mut ancestors,
             font_registry.clone(),
+            asset_bundle.clone(),
             report.as_deref_mut(),
             svg_form,
             svg_raster_fallback,
@@ -464,6 +466,7 @@ fn collect_children(
     parent_style: &ComputedStyle,
     ancestors: &mut Vec<ElementInfo>,
     font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<Arc<AssetBundle>>,
     report: Option<&mut GlyphCoverageReport>,
     svg_form: bool,
     svg_raster_fallback: bool,
@@ -479,6 +482,7 @@ fn collect_children(
             parent_style,
             ancestors,
             font_registry.clone(),
+            asset_bundle.clone(),
             report.as_deref_mut(),
             svg_form,
             svg_raster_fallback,
@@ -495,6 +499,7 @@ fn node_to_flowables(
     parent_style: &ComputedStyle,
     ancestors: &mut Vec<ElementInfo>,
     font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<Arc<AssetBundle>>,
     report: Option<&mut GlyphCoverageReport>,
     svg_form: bool,
     svg_raster_fallback: bool,
@@ -666,6 +671,7 @@ fn node_to_flowables(
                     &style,
                     ancestors,
                     font_registry.clone(),
+                    asset_bundle.clone(),
                     report.as_deref_mut(),
                     svg_form,
                     svg_raster_fallback,
@@ -764,6 +770,7 @@ fn node_to_flowables(
                             &style,
                             ancestors,
                             font_registry.clone(),
+                            asset_bundle.clone(),
                             report.as_deref_mut(),
                             svg_form,
                             svg_raster_fallback,
@@ -897,7 +904,8 @@ fn node_to_flowables(
                         .or_else(|| attrs.get("title"))
                         .map(|s| s.to_string());
                     let width_spec = flex_item_basis(&style);
-                    if let Some(xml) = load_svg_xml_from_image_source(src) {
+                    if let Some(xml) = load_svg_xml_from_image_source(asset_bundle.as_deref(), src)
+                    {
                         if svg_raster_fallback && crate::svg::svg_needs_raster_fallback(&xml) {
                             if let Some(data_uri) =
                                 crate::svg::rasterize_svg_to_data_uri(&xml, width, height)
@@ -960,7 +968,9 @@ fn node_to_flowables(
                             }]
                         }
                     } else {
-                        let image = ImageFlowable::new_pt(width, height, src)
+                        let image_source = renderable_image_source(asset_bundle.as_deref(), src)
+                            .unwrap_or_else(|| src.to_string());
+                        let image = ImageFlowable::new_pt(width, height, image_source)
                             .with_pagination(style.pagination)
                             .with_tag_role("Figure")
                             .with_alt(alt);
@@ -1125,6 +1135,7 @@ fn node_to_flowables(
                         resolver,
                         ancestors,
                         font_registry.clone(),
+                        asset_bundle.clone(),
                         report.as_deref_mut(),
                         svg_form,
                         svg_raster_fallback,
@@ -1196,6 +1207,7 @@ fn node_to_flowables(
                         &style,
                         ancestors,
                         font_registry.clone(),
+                        asset_bundle.clone(),
                         report.as_deref_mut(),
                         svg_form,
                         svg_raster_fallback,
@@ -1249,6 +1261,7 @@ fn node_to_flowables(
                             &style,
                             ancestors,
                             font_registry.clone(),
+                            asset_bundle.clone(),
                             report.as_deref_mut(),
                             svg_form,
                             svg_raster_fallback,
@@ -1268,6 +1281,7 @@ fn node_to_flowables(
                             &style,
                             ancestors,
                             font_registry.clone(),
+                            asset_bundle.clone(),
                             report.as_deref_mut(),
                             svg_form,
                             svg_raster_fallback,
@@ -1350,6 +1364,7 @@ fn node_to_flowables(
                                 &style,
                                 ancestors,
                                 font_registry.clone(),
+                                asset_bundle.clone(),
                                 report.as_deref_mut(),
                                 svg_form,
                                 svg_raster_fallback,
@@ -1363,6 +1378,7 @@ fn node_to_flowables(
                                 &style,
                                 ancestors,
                                 font_registry.clone(),
+                                asset_bundle.clone(),
                                 report.as_deref_mut(),
                                 svg_form,
                                 svg_raster_fallback,
@@ -1386,6 +1402,7 @@ fn node_to_flowables(
                             &style,
                             ancestors,
                             font_registry.clone(),
+                            asset_bundle.clone(),
                             report.as_deref_mut(),
                             svg_form,
                             svg_raster_fallback,
@@ -1399,6 +1416,7 @@ fn node_to_flowables(
                             &style,
                             ancestors,
                             font_registry.clone(),
+                            asset_bundle.clone(),
                             report.as_deref_mut(),
                             svg_form,
                             svg_raster_fallback,
@@ -1820,6 +1838,7 @@ fn node_has_renderable_content(node: &NodeRef) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
 
     fn approx_eq_pt(value: Pt, expected: f32) -> bool {
         (value.to_f32() - expected).abs() <= 0.01
@@ -1991,7 +2010,7 @@ mod tests {
         let xml = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 4'><rect width='4' height='4' fill='#000'/></svg>";
         let payload = base64::engine::general_purpose::STANDARD.encode(xml.as_bytes());
         let uri = format!("data:image/svg+xml;base64,{payload}");
-        let decoded = load_svg_xml_from_image_source(&uri).expect("svg xml from data uri");
+        let decoded = load_svg_xml_from_image_source(None, &uri).expect("svg xml from data uri");
         assert!(
             decoded.contains("<svg") && decoded.contains("<rect"),
             "expected decoded inline SVG xml, got: {decoded}"
@@ -2003,7 +2022,7 @@ mod tests {
         let payload = base64::engine::general_purpose::STANDARD.encode([0u8, 1u8, 2u8]);
         let uri = format!("data:image/png;base64,{payload}");
         assert!(
-            load_svg_xml_from_image_source(&uri).is_none(),
+            load_svg_xml_from_image_source(None, &uri).is_none(),
             "png data uri must stay on raster image path"
         );
     }
@@ -2015,6 +2034,7 @@ fn list_flowables(
     parent_style: &ComputedStyle,
     ancestors: &[ElementInfo],
     font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<Arc<AssetBundle>>,
     report: Option<&mut GlyphCoverageReport>,
     svg_form: bool,
     svg_raster_fallback: bool,
@@ -2064,6 +2084,7 @@ fn list_flowables(
                     &style,
                     &mut li_ancestors,
                     font_registry.clone(),
+                    asset_bundle.clone(),
                     report.as_deref_mut(),
                     svg_form,
                     svg_raster_fallback,
@@ -2292,6 +2313,7 @@ fn definition_list_children_flowables(
     parent_style: &ComputedStyle,
     ancestors: &mut Vec<ElementInfo>,
     font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<Arc<AssetBundle>>,
     report: Option<&mut GlyphCoverageReport>,
     svg_form: bool,
     svg_raster_fallback: bool,
@@ -2327,6 +2349,7 @@ fn definition_list_children_flowables(
             parent_style,
             ancestors,
             font_registry.clone(),
+            asset_bundle.clone(),
             report.as_deref_mut(),
             svg_form,
             svg_raster_fallback,
@@ -2468,6 +2491,7 @@ fn flex_container_flowables(
     style: &ComputedStyle,
     ancestors: &mut Vec<ElementInfo>,
     font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<Arc<AssetBundle>>,
     report: Option<&mut GlyphCoverageReport>,
     svg_form: bool,
     svg_raster_fallback: bool,
@@ -2525,6 +2549,7 @@ fn flex_container_flowables(
             style,
             ancestors,
             font_registry.clone(),
+            asset_bundle.clone(),
             report.as_deref_mut(),
             svg_form,
             svg_raster_fallback,
@@ -2770,6 +2795,7 @@ fn table_container_flowables(
     style: &ComputedStyle,
     ancestors: &[ElementInfo],
     font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<Arc<AssetBundle>>,
     report: Option<&mut GlyphCoverageReport>,
     svg_form: bool,
     svg_raster_fallback: bool,
@@ -2808,6 +2834,7 @@ fn table_container_flowables(
             resolver,
             ancestors,
             font_registry.clone(),
+            asset_bundle.clone(),
             report.as_deref_mut(),
             svg_form,
             svg_raster_fallback,
@@ -2824,6 +2851,7 @@ fn table_container_flowables(
                 resolver,
                 ancestors,
                 font_registry.clone(),
+                asset_bundle.clone(),
                 report.as_deref_mut(),
                 svg_form,
                 svg_raster_fallback,
@@ -2862,6 +2890,7 @@ fn table_container_flowables(
                     resolver,
                     ancestors,
                     font_registry.clone(),
+                    asset_bundle.clone(),
                     report.as_deref_mut(),
                     svg_form,
                     svg_raster_fallback,
@@ -2900,6 +2929,7 @@ fn table_container_flowables(
             style,
             &mut child_ancestors,
             font_registry.clone(),
+            asset_bundle.clone(),
             report.as_deref_mut(),
             svg_form,
             svg_raster_fallback,
@@ -2915,6 +2945,7 @@ fn table_container_flowables(
         resolver,
         ancestors,
         font_registry.clone(),
+        asset_bundle.clone(),
         report.as_deref_mut(),
         svg_form,
         svg_raster_fallback,
@@ -2971,6 +3002,7 @@ fn table_row_flowable_from_node(
     resolver: &StyleResolver,
     ancestors: &[ElementInfo],
     font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<Arc<AssetBundle>>,
     report: Option<&mut GlyphCoverageReport>,
     svg_form: bool,
     svg_raster_fallback: bool,
@@ -3006,6 +3038,7 @@ fn table_row_flowable_from_node(
         resolver,
         ancestors,
         font_registry,
+        asset_bundle,
         report,
         svg_form,
         svg_raster_fallback,
@@ -3020,6 +3053,7 @@ fn table_row_flowable_from_cells(
     resolver: &StyleResolver,
     ancestors: &[ElementInfo],
     font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<Arc<AssetBundle>>,
     report: Option<&mut GlyphCoverageReport>,
     svg_form: bool,
     svg_raster_fallback: bool,
@@ -3047,6 +3081,7 @@ fn table_row_flowable_from_cells(
             row_style,
             &mut cell_ancestors,
             font_registry.clone(),
+            asset_bundle.clone(),
             report.as_deref_mut(),
             svg_form,
             svg_raster_fallback,
@@ -3233,6 +3268,7 @@ fn table_flowable(
     resolver: &StyleResolver,
     ancestors: &mut Vec<ElementInfo>,
     font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<Arc<AssetBundle>>,
     report: Option<&mut GlyphCoverageReport>,
     svg_form: bool,
     svg_raster_fallback: bool,
@@ -3640,6 +3676,7 @@ fn table_flowable(
                     cell_style,
                     ancestors,
                     font_registry.clone(),
+                    asset_bundle.clone(),
                     report.as_deref_mut(),
                     svg_form,
                     svg_raster_fallback,
@@ -3987,86 +4024,6 @@ fn html_th_scope_to_pdf_scope(value: Option<&str>) -> Option<String> {
         _ => raw.to_string(),
     };
     Some(mapped)
-}
-
-fn parse_data_uri_bytes(uri: &str) -> Option<(String, Vec<u8>)> {
-    if !uri.starts_with("data:") {
-        return None;
-    }
-    let (header, payload) = uri.split_once(',')?;
-    let mime = header
-        .trim_start_matches("data:")
-        .split(';')
-        .next()
-        .filter(|v| !v.is_empty())
-        .unwrap_or("application/octet-stream")
-        .to_ascii_lowercase();
-    let data = if header.contains(";base64") {
-        base64::engine::general_purpose::STANDARD
-            .decode(payload.as_bytes())
-            .ok()?
-    } else {
-        decode_percent_encoded_bytes(payload)?
-    };
-    Some((mime, data))
-}
-
-fn decode_percent_encoded_bytes(input: &str) -> Option<Vec<u8>> {
-    let bytes = input.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0usize;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'%' => {
-                if i + 2 >= bytes.len() {
-                    return None;
-                }
-                let hi = hex_nibble(bytes[i + 1])?;
-                let lo = hex_nibble(bytes[i + 2])?;
-                out.push((hi << 4) | lo);
-                i += 3;
-            }
-            b => {
-                out.push(b);
-                i += 1;
-            }
-        }
-    }
-    Some(out)
-}
-
-fn hex_nibble(ch: u8) -> Option<u8> {
-    match ch {
-        b'0'..=b'9' => Some(ch - b'0'),
-        b'a'..=b'f' => Some(ch - b'a' + 10),
-        b'A'..=b'F' => Some(ch - b'A' + 10),
-        _ => None,
-    }
-}
-
-fn load_svg_xml_from_image_source(source: &str) -> Option<String> {
-    let source = source.trim();
-    if source.is_empty() {
-        return None;
-    }
-
-    if let Some((mime, data)) = parse_data_uri_bytes(source) {
-        if !mime.contains("svg") {
-            return None;
-        }
-        let xml = String::from_utf8(data).ok()?;
-        return Some(xml.trim_start_matches('\u{feff}').to_string());
-    }
-
-    let path_text = source.strip_prefix("file://").unwrap_or(source);
-    let path_text = path_text.split('#').next().unwrap_or(path_text);
-    let path_text = path_text.split('?').next().unwrap_or(path_text);
-    if !path_text.to_ascii_lowercase().ends_with(".svg") {
-        return None;
-    }
-    let path = Path::new(path_text);
-    let xml = std::fs::read_to_string(path).ok()?;
-    Some(xml.trim_start_matches('\u{feff}').to_string())
 }
 
 fn resolve_non_auto_css_dimension(

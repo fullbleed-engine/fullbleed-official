@@ -16,6 +16,9 @@ class AccessibilityRunResult:
     pdf_structure_trace: dict[str, Any] | None = None
     reading_order_trace_render: dict[str, Any] | None = None
     pdf_structure_trace_render: dict[str, Any] | None = None
+    font_resolution_trace: dict[str, Any] | None = None
+    asset_resolution_trace: dict[str, Any] | None = None
+    pagination_trace: dict[str, Any] | None = None
     run_report: dict[str, Any] = field(default_factory=dict)
     contract_fingerprint: str | None = None
     warnings: list[str] = field(default_factory=list)
@@ -32,6 +35,9 @@ class AccessibilityRunResult:
             "pdf_structure_trace": self.pdf_structure_trace,
             "reading_order_trace_render": self.reading_order_trace_render,
             "pdf_structure_trace_render": self.pdf_structure_trace_render,
+            "font_resolution_trace": self.font_resolution_trace,
+            "asset_resolution_trace": self.asset_resolution_trace,
+            "pagination_trace": self.pagination_trace,
             "run_report": self.run_report,
             "contract_fingerprint": self.contract_fingerprint,
             "warnings": list(self.warnings),

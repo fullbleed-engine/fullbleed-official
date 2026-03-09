@@ -1,15 +1,114 @@
-use crate::canvas::{Canvas, Document};
+use crate::canvas::{Canvas, Document, META_PAGINATION_EVENT_KEY};
 use crate::debug::{DebugLogger, json_escape};
 use crate::doc_context::DocContext;
 use crate::error::FullBleedError;
 use crate::flowable::{BreakAfter, BreakBefore, Flowable};
-use crate::frame::AddResult;
+use crate::frame::{AddResult, AddTrace};
 use crate::metrics::{DocumentMetrics, PageMetrics};
 use crate::page_template::PageTemplate;
 use crate::types::Pt;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
+
+fn bool_to_flag(value: bool) -> u8 {
+    if value { 1 } else { 0 }
+}
+
+fn emit_pagination_layout_event(
+    canvas: &mut Canvas,
+    source_order: usize,
+    segment_index: usize,
+    flowable_name: &str,
+    frame_index: usize,
+    is_last_frame: bool,
+    placed_on_page_before: bool,
+    trace: AddTrace,
+    overflow_severity: Option<&str>,
+) {
+    let placed = trace.placed_rect.unwrap_or(crate::types::Rect {
+        x: Pt::ZERO,
+        y: Pt::ZERO,
+        width: Pt::ZERO,
+        height: Pt::ZERO,
+    });
+    let value = format!(
+        "event=layout|source_order={}|segment_index={}|flowable={}|frame_index={}|is_last_frame={}|placed_on_page_before={}|result={}|reason={}|overflow_severity={}|cursor_y_before={}|avail_w={}|avail_h={}|frame_x={}|frame_y={}|frame_w={}|frame_h={}|wrapped_w={}|wrapped_h={}|placed_x={}|placed_y={}|placed_w={}|placed_h={}",
+        source_order,
+        segment_index,
+        flowable_name,
+        frame_index,
+        bool_to_flag(is_last_frame),
+        bool_to_flag(placed_on_page_before),
+        trace.disposition.as_str(),
+        trace.reason,
+        overflow_severity.unwrap_or("none"),
+        trace.cursor_y_before.to_milli_i64(),
+        trace.avail_width.to_milli_i64(),
+        trace.avail_height.to_milli_i64(),
+        trace.frame_rect.x.to_milli_i64(),
+        trace.frame_rect.y.to_milli_i64(),
+        trace.frame_rect.width.to_milli_i64(),
+        trace.frame_rect.height.to_milli_i64(),
+        trace.wrapped_size.width.to_milli_i64(),
+        trace.wrapped_size.height.to_milli_i64(),
+        placed.x.to_milli_i64(),
+        placed.y.to_milli_i64(),
+        placed.width.to_milli_i64(),
+        placed.height.to_milli_i64(),
+    );
+    canvas.meta(META_PAGINATION_EVENT_KEY, value);
+}
+
+fn emit_pagination_transition_event(
+    canvas: &mut Canvas,
+    debug: Option<&DebugLogger>,
+    debug_doc_id: Option<usize>,
+    from_page: usize,
+    to_page: usize,
+    from_frame_index: usize,
+    to_frame_index: usize,
+    reason: &str,
+    flowable_name: Option<&str>,
+    source_order: Option<usize>,
+    segment_index: Option<usize>,
+) {
+    let flowable = flowable_name.unwrap_or("unknown");
+    let source_order = source_order
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "-1".to_string());
+    let segment_index = segment_index
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "-1".to_string());
+    let value = format!(
+        "event=transition|from_page={}|to_page={}|from_frame_index={}|to_frame_index={}|reason={}|flowable={}|source_order={}|segment_index={}",
+        from_page,
+        to_page,
+        from_frame_index,
+        to_frame_index,
+        reason,
+        flowable,
+        source_order,
+        segment_index,
+    );
+    canvas.meta(META_PAGINATION_EVENT_KEY, value);
+
+    let Some(logger) = debug else {
+        return;
+    };
+    let doc_id = debug_doc_id
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| "null".to_string());
+    let name_json = flowable_name
+        .map(|name| format!("\"{}\"", json_escape(name)))
+        .unwrap_or_else(|| "null".to_string());
+    let json = format!(
+        "{{\"type\":\"jit.page_break\",\"doc_id\":{},\"code\":\"PAGE_BREAK_TRIGGER\",\"reason\":\"{}\",\"from_page\":{},\"to_page\":{},\"frame_index\":{},\"flowable\":{}}}",
+        doc_id, reason, from_page, to_page, from_frame_index, name_json
+    );
+    logger.log_json(&json);
+    logger.increment("jit.page_break.trigger", 1);
+}
 
 pub struct DocTemplate {
     page_templates: Vec<PageTemplate>,
@@ -49,27 +148,6 @@ impl DocTemplate {
 
         let debug = self.debug.clone();
         let debug_doc_id = self.debug_doc_id;
-        let log_page_break = |from_page: usize,
-                              to_page: usize,
-                              reason: &str,
-                              flowable_name: Option<&str>,
-                              frame_index: usize| {
-            let Some(logger) = debug.as_deref() else {
-                return;
-            };
-            let doc_id = debug_doc_id
-                .map(|id| id.to_string())
-                .unwrap_or_else(|| "null".to_string());
-            let name_json = flowable_name
-                .map(|name| format!("\"{}\"", json_escape(name)))
-                .unwrap_or_else(|| "null".to_string());
-            let json = format!(
-                "{{\"type\":\"jit.page_break\",\"doc_id\":{},\"code\":\"PAGE_BREAK_TRIGGER\",\"reason\":\"{}\",\"from_page\":{},\"to_page\":{},\"frame_index\":{},\"flowable\":{}}}",
-                doc_id, reason, from_page, to_page, frame_index, name_json
-            );
-            logger.log_json(&json);
-            logger.increment("jit.page_break.trigger", 1);
-        };
 
         fn select_template<'a>(
             page_templates: &'a [PageTemplate],
@@ -94,6 +172,7 @@ impl DocTemplate {
         let mut metrics = DocumentMetrics::default();
         let mut page_start = Instant::now();
         let mut page_flowables = 0usize;
+        let mut source_order = 0usize;
 
         let draw_fixed_overlays =
             |canvas: &mut Canvas, overlays: &[Box<dyn Flowable>], page_flowables: &mut usize| {
@@ -190,6 +269,9 @@ impl DocTemplate {
 
         while let Some(flowable) = story.pop_front() {
             let mut current = flowable;
+            let current_source_order = source_order;
+            source_order = source_order.saturating_add(1);
+            let mut segment_index = 0usize;
             let mut suppress_break_before = false;
             loop {
                 let current_name = current.debug_name().to_string();
@@ -198,12 +280,18 @@ impl DocTemplate {
                     && matches!(pagination.break_before, BreakBefore::Page)
                     && (placed_on_page || frame_index > 0)
                 {
-                    log_page_break(
+                    emit_pagination_transition_event(
+                        &mut canvas,
+                        debug.as_deref(),
+                        debug_doc_id,
                         page_number,
                         page_number + 1,
+                        frame_index,
+                        0,
                         "break_before_page",
                         Some(&current_name),
-                        frame_index,
+                        Some(current_source_order),
+                        Some(segment_index),
                     );
                     finish_page(
                         &mut canvas,
@@ -230,12 +318,18 @@ impl DocTemplate {
                 }
 
                 if frame_index >= frames.len() {
-                    log_page_break(
+                    emit_pagination_transition_event(
+                        &mut canvas,
+                        debug.as_deref(),
+                        debug_doc_id,
                         page_number,
                         page_number + 1,
+                        frame_index.saturating_sub(1),
+                        0,
                         "frame_exhausted",
                         Some(&current_name),
-                        frame_index,
+                        Some(current_source_order),
+                        Some(segment_index),
                     );
                     finish_page(
                         &mut canvas,
@@ -287,16 +381,33 @@ impl DocTemplate {
 
                 let frame = &mut frames[frame_index];
                 match frame.add(current, &mut canvas) {
-                    AddResult::Placed => {
+                    AddResult::Placed(trace) => {
+                        emit_pagination_layout_event(
+                            &mut canvas,
+                            current_source_order,
+                            segment_index,
+                            &current_name,
+                            frame_index,
+                            is_last_frame,
+                            placed_on_page,
+                            trace,
+                            None,
+                        );
                         placed_on_page = true;
                         page_flowables += 1;
                         if matches!(pagination.break_after, BreakAfter::Page) {
-                            log_page_break(
+                            emit_pagination_transition_event(
+                                &mut canvas,
+                                debug.as_deref(),
+                                debug_doc_id,
                                 page_number,
                                 page_number + 1,
+                                frame_index,
+                                0,
                                 "break_after_page",
                                 Some(&current_name),
-                                frame_index,
+                                Some(current_source_order),
+                                Some(segment_index),
                             );
                             finish_page(
                                 &mut canvas,
@@ -330,27 +441,69 @@ impl DocTemplate {
                         }
                         break;
                     }
-                    AddResult::Split(remaining) => {
-                        placed_on_page = true;
-                        page_flowables += 1;
-                        log_page_break(
+                    AddResult::Split(remaining, trace) => {
+                        emit_pagination_layout_event(
+                            &mut canvas,
+                            current_source_order,
+                            segment_index,
+                            &current_name,
+                            frame_index,
+                            is_last_frame,
+                            placed_on_page,
+                            trace,
+                            None,
+                        );
+                        emit_pagination_transition_event(
+                            &mut canvas,
+                            debug.as_deref(),
+                            debug_doc_id,
                             page_number,
                             page_number + usize::from(is_last_frame),
+                            frame_index,
+                            if is_last_frame { 0 } else { frame_index + 1 },
                             "flowable_split",
                             Some(&current_name),
-                            frame_index,
+                            Some(current_source_order),
+                            Some(segment_index),
                         );
+                        placed_on_page = true;
+                        page_flowables += 1;
                         suppress_break_before = true;
                         current = remaining;
+                        segment_index = segment_index.saturating_add(1);
                         frame_index += 1;
                     }
-                    AddResult::Overflow(remaining) => {
-                        log_page_break(
+                    AddResult::Overflow(remaining, trace) => {
+                        let overflow_severity = if !placed_on_page && is_last_frame {
+                            "fatal_unplaceable"
+                        } else if is_last_frame {
+                            "page_advance"
+                        } else {
+                            "frame_advance"
+                        };
+                        emit_pagination_layout_event(
+                            &mut canvas,
+                            current_source_order,
+                            segment_index,
+                            &current_name,
+                            frame_index,
+                            is_last_frame,
+                            placed_on_page,
+                            trace,
+                            Some(overflow_severity),
+                        );
+                        emit_pagination_transition_event(
+                            &mut canvas,
+                            debug.as_deref(),
+                            debug_doc_id,
                             page_number,
                             page_number + usize::from(is_last_frame),
+                            frame_index,
+                            if is_last_frame { 0 } else { frame_index + 1 },
                             "frame_overflow",
                             Some(&current_name),
-                            frame_index,
+                            Some(current_source_order),
+                            Some(segment_index),
                         );
                         if !placed_on_page && is_last_frame {
                             let details = debug_details.unwrap_or_else(|| "unknown".to_string());

@@ -1,10 +1,10 @@
 {
   "schema": "fullbleed.css_fixture_suite.v1",
-  "ok": false,
+  "ok": true,
   "summary": {
     "fixtures_total": 85,
-    "fixtures_passed": 12,
-    "fixtures_failed": 73,
+    "fixtures_passed": 85,
+    "fixtures_failed": 0,
     "jobs": 1,
     "selected_labels": []
   },
@@ -23,10 +23,8 @@
         "paint"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -154,7 +152,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_background_conic_gradient_supported_quadrants_10231_1772949081086093877.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_background_conic_gradient_supported_quadrants_10266_1772952633777553500.jsonl"
           }
         }
       },
@@ -165,12 +163,12 @@
         "image_sha256": [
           "5bcb5be7dfd957cd22c8cde0778d8373d9de97ab783357fcc699fa10903157c9"
         ],
-        "stability_hash_expected": "453e2a57c48a0abd00e625e40b6f8c93024d1d48de8d7bec304b9bd956fc2aac",
-        "stability_hash_actual": "e9a3a1473bd7745010fa79755231ce2a3e26f1a01ac4d0ea431ca591a5b6ac6b",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "dc39e56beaefd5ad22d3d092c04b67757b004f55f34d5213393f35533de05228",
+        "stability_hash_actual": "dc39e56beaefd5ad22d3d092c04b67757b004f55f34d5213393f35533de05228",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "borders_left_color_override",
@@ -392,7 +390,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_borders_left_color_override_10231_1772949081890001917.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_borders_left_color_override_10266_1772952634891581178.jsonl"
           }
         }
       },
@@ -403,8 +401,8 @@
         "image_sha256": [
           "7e3881aa8f1d99164c74ceb759ce52d2a19d92ff084e4b4e9ba30f57adc5bc36"
         ],
-        "stability_hash_expected": "ffab5113985e4ff7ffb9f0eb101672ac0b452c7515c4259072220272e98d2866",
-        "stability_hash_actual": "ffab5113985e4ff7ffb9f0eb101672ac0b452c7515c4259072220272e98d2866",
+        "stability_hash_expected": "ee6bdc99d7241c1e786fb55523ade19a88a9bb01eddf1dc384a68357e898b1f3",
+        "stability_hash_actual": "ee6bdc99d7241c1e786fb55523ade19a88a9bb01eddf1dc384a68357e898b1f3",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -687,7 +685,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_borders_uniform_frame_paint_matrix_10231_1772949082492593893.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_borders_uniform_frame_paint_matrix_10266_1772952635802361815.jsonl"
           }
         }
       },
@@ -698,8 +696,8 @@
         "image_sha256": [
           "76644141263a198ace241915eb5ebf2f7466eb2ad4f777abab3c1f91ff5e2902"
         ],
-        "stability_hash_expected": "273fe95b51d7489b27461cf8720119f0d582c6fa29d7563e1be266248849159f",
-        "stability_hash_actual": "273fe95b51d7489b27461cf8720119f0d582c6fa29d7563e1be266248849159f",
+        "stability_hash_expected": "d74c548767e31205fdde0621bd8839579b17691204679182ff5b39683a8e633f",
+        "stability_hash_actual": "d74c548767e31205fdde0621bd8839579b17691204679182ff5b39683a8e633f",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -718,10 +716,8 @@
         "paint"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -849,7 +845,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_box_shadow_negative_spread_offset_paints_shrunk_shadow_10231_1772949083114742317.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_box_shadow_negative_spread_offset_paints_shrunk_shadow_10266_1772952636726231748.jsonl"
           }
         }
       },
@@ -860,12 +856,12 @@
         "image_sha256": [
           "29fd1a9ad9b2498f163813fc78bcbf7d9513c95188668b27ed87b25024728ba2"
         ],
-        "stability_hash_expected": "218765d88e20649e731bfc0560be455c52a2426973f9ee81b02422f1f6b6d38f",
-        "stability_hash_actual": "f16c0ff0d56c3c9c477e7809d19c3620b758efeff2280e6549faff6501fdcb1e",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "5a5e3025a4c8442fe88fe28d257d844aeed37167893c054e0a9aaa04944709a7",
+        "stability_hash_actual": "5a5e3025a4c8442fe88fe28d257d844aeed37167893c054e0a9aaa04944709a7",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "custom_property_calc_var_additive_mixed_lengths",
@@ -882,10 +878,8 @@
         "var-resolution"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -1060,7 +1054,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_custom_property_calc_var_additive_mixed_lengths_10231_1772949083745482305.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_custom_property_calc_var_additive_mixed_lengths_10266_1772952637718865518.jsonl"
           }
         }
       },
@@ -1071,12 +1065,12 @@
         "image_sha256": [
           "3dc4a8bb919e692717c57c0c4ce15b9dc5c1406f4ba3a1f7c5ab432e61faf001"
         ],
-        "stability_hash_expected": "c912fb29b30d035b6156f1e9db54c15e188603b7f5b4712258b0a15bb515df45",
-        "stability_hash_actual": "8c5ce9aaf8e1293b2a2b449cedc4d9abb27d91d4af88478be74ba8d51fa19c62",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "c04e58f90a630b9cbdd634d6494948cce92ed9887203968de61e7e47a53a834f",
+        "stability_hash_actual": "c04e58f90a630b9cbdd634d6494948cce92ed9887203968de61e7e47a53a834f",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "custom_property_calc_var_percent_width",
@@ -1092,10 +1086,8 @@
         "var-resolution"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -1205,7 +1197,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_custom_property_calc_var_percent_width_10231_1772949084465643690.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_custom_property_calc_var_percent_width_10266_1772952638579883831.jsonl"
           }
         }
       },
@@ -1216,12 +1208,12 @@
         "image_sha256": [
           "7ff570391953f0b50e217276b8f5389d735e9eb105666ee16e49fcb3882c23b2"
         ],
-        "stability_hash_expected": "01109ac8c428cec5f31f0ee17b90b92bfd2deaa395e8f07b7c832a869fdab6bf",
-        "stability_hash_actual": "70c6646181adb682d3a4a606cea22ea2a55283d703c3428c33934f32828f0654",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "ced9e89a9f4ba55ffbfeec39cb11d30e93a4de60bdd786e3afba2cce4011b4ef",
+        "stability_hash_actual": "ced9e89a9f4ba55ffbfeec39cb11d30e93a4de60bdd786e3afba2cce4011b4ef",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "custom_property_fallback_chain",
@@ -1237,10 +1229,8 @@
         "nested-fallback"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -1331,7 +1321,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_custom_property_fallback_chain_10231_1772949084739067279.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_custom_property_fallback_chain_10266_1772952638941495352.jsonl"
           }
         }
       },
@@ -1342,12 +1332,12 @@
         "image_sha256": [
           "7dad76861efc0b86406f07251fdaae0d7d9b9099cb99d2c594cd176089559fb2"
         ],
-        "stability_hash_expected": "099e9cb338035db65f7ca088ae66f6308ff1d192493d9979139ace56938275d1",
-        "stability_hash_actual": "12aed5f7461e48a76602b61ac7af92fad3c85bb2ce99e32d83d4f6dac713ede1",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
+        "stability_hash_actual": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "custom_property_length_chain_fallback",
@@ -1363,10 +1353,8 @@
         "var-fallback"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -1541,7 +1529,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_custom_property_length_chain_fallback_10231_1772949085056281754.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_custom_property_length_chain_fallback_10266_1772952639430421893.jsonl"
           }
         }
       },
@@ -1552,12 +1540,12 @@
         "image_sha256": [
           "42d5335ae46abdcc85c2473118a31999c7167b81a7e715696084c28599237447"
         ],
-        "stability_hash_expected": "aab13998cd319268a7a430e8deda6f7a6db55327e4312b06358ca9d92c361611",
-        "stability_hash_actual": "5f68c7fd41300bca4f35aa876dbcb56faf2a5023f59866abd3f932d3c9f76b5a",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "4501533968752d8316b0adea6fc1c0efa788cfc29522d4b2f3b054e5bd1ae02d",
+        "stability_hash_actual": "4501533968752d8316b0adea6fc1c0efa788cfc29522d4b2f3b054e5bd1ae02d",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "custom_property_math_min_max_clamp_lengths",
@@ -1575,10 +1563,8 @@
         "var-chain"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -1818,7 +1804,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_custom_property_math_min_max_clamp_lengths_10231_1772949085501861449.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_custom_property_math_min_max_clamp_lengths_10266_1772952640034251737.jsonl"
           }
         }
       },
@@ -1829,12 +1815,12 @@
         "image_sha256": [
           "ea0970301573d6f3321db34a773713f3f3e0030642d7ce625724e8984705ac83"
         ],
-        "stability_hash_expected": "1fa349f6c4db9f77b59ab7fa50ad7eb684e11d38e6350976aea4a666dd23101b",
-        "stability_hash_actual": "46eaa86b3757cc66745a3e3f36b7c2f3689aaf4988e503d7cb08ff9d6515b76b",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "2692f3d7976c83633c1812281eca3ff29a68e721eb161c7502b13acf0bf9e4f0",
+        "stability_hash_actual": "2692f3d7976c83633c1812281eca3ff29a68e721eb161c7502b13acf0bf9e4f0",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "diagnostics_conic_gradient_fallback_no_color",
@@ -1851,10 +1837,8 @@
         "diagnostics"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -1964,7 +1948,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_diagnostics_conic_gradient_fallback_no_color_10231_1772949086470071857.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_diagnostics_conic_gradient_fallback_no_color_10266_1772952641401446737.jsonl"
           }
         }
       },
@@ -1975,12 +1959,12 @@
         "image_sha256": [
           "2ca8c0b7a1d8186e714a698cd208857170cd0c97a5e7a97dfd1dee1661cf913a"
         ],
-        "stability_hash_expected": "15fa2373dafe896e7278c51d0c408270ebc45dcf94bbf0b715de2f8b23cb4d93",
-        "stability_hash_actual": "c7c661e572ac60f5f7b98ca091a3a15286a5f6b2c0f79e17dd662b8ddfd2d8a2",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "2421e9620493c542b8a7ad632cc7eae1e55a42d7bdaecc676f60fce5541d6e1b",
+        "stability_hash_actual": "2421e9620493c542b8a7ad632cc7eae1e55a42d7bdaecc676f60fce5541d6e1b",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "diagnostics_conic_gradient_fallback_with_color",
@@ -1997,10 +1981,8 @@
         "diagnostics"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -2090,7 +2072,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_diagnostics_conic_gradient_fallback_with_color_10231_1772949086772707653.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_diagnostics_conic_gradient_fallback_with_color_10266_1772952641873036240.jsonl"
           }
         }
       },
@@ -2101,12 +2083,12 @@
         "image_sha256": [
           "6978a65b8dedb8830d1cb3f595f1687f76bd3873bc34eb82f285d625539e71f9"
         ],
-        "stability_hash_expected": "3cebaf9bddbaeca462f085b1876778401e3fadf1aa8bff24498ff33a03160d1b",
-        "stability_hash_actual": "66c227c98d5a5d1aa3f981b037f3f1abeb5af386e2dc3f3850d01360fa54a83b",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "ab97e9788967f246329b952679412d119d81f0c1025ccbf1f74a435fc8b26642",
+        "stability_hash_actual": "ab97e9788967f246329b952679412d119d81f0c1025ccbf1f74a435fc8b26642",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "diagnostics_filters_effects_fallback",
@@ -2124,10 +2106,8 @@
         "diagnostics"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -2217,7 +2197,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_diagnostics_filters_effects_fallback_10231_1772949086925451360.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_diagnostics_filters_effects_fallback_10266_1772952642115656894.jsonl"
           }
         }
       },
@@ -2228,12 +2208,12 @@
         "image_sha256": [
           "dd669157eae7a30fe19af623d6dc887581e540db8890763cbf2f7afa6633fa12"
         ],
-        "stability_hash_expected": "fd5706af4a44a948b8572e07189bdc7a5d0c33039414400a0363f91d746df9d5",
-        "stability_hash_actual": "c658b70b8277c8953795035f5ffe79db9ddf9c109c8145f3f4d86c35aaec3be2",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2",
+        "stability_hash_actual": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "diagnostics_multicol_single_column_fallback",
@@ -2249,10 +2229,8 @@
         "diagnostics"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -2342,7 +2320,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_diagnostics_multicol_single_column_fallback_10231_1772949087107287241.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_diagnostics_multicol_single_column_fallback_10266_1772952642423291295.jsonl"
           }
         }
       },
@@ -2353,12 +2331,12 @@
         "image_sha256": [
           "dd669157eae7a30fe19af623d6dc887581e540db8890763cbf2f7afa6633fa12"
         ],
-        "stability_hash_expected": "99a9674b962d46d60ff461b0525d2414bfd52e3655ed2dcda6a4dd702775e033",
-        "stability_hash_actual": "7619ed1244a25c40a6de9f8dc87502b492618e2239891bd558e24bae1ab87b98",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2",
+        "stability_hash_actual": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "diagnostics_unsupported_media_and_no_effect",
@@ -2374,10 +2352,8 @@
         "known-loss"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -2496,7 +2472,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_diagnostics_unsupported_media_and_no_effect_10231_1772949087262193011.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_diagnostics_unsupported_media_and_no_effect_10266_1772952642671151997.jsonl"
           }
         }
       },
@@ -2507,12 +2483,12 @@
         "image_sha256": [
           "7dad76861efc0b86406f07251fdaae0d7d9b9099cb99d2c594cd176089559fb2"
         ],
-        "stability_hash_expected": "31980b157c923268718a4b2e6829e55c05833a4d447c193f23670105d3076586",
-        "stability_hash_actual": "6e4e6bdbe18672c33518e70cf785d8b6b023872b774433d9f6d285c26e0d1055",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
+        "stability_hash_actual": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "flex_align_content_flex_end_wrap",
@@ -2527,10 +2503,8 @@
         "flex-wrap-layout"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -2773,7 +2747,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_flex_align_content_flex_end_wrap_10231_1772949087557455794.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_flex_align_content_flex_end_wrap_10266_1772952643145417079.jsonl"
           }
         }
       },
@@ -2784,12 +2758,12 @@
         "image_sha256": [
           "6f15d4186e4542b2ef30129a15ec7db3f355ba3c37805e00ed63e958e769ca5c"
         ],
-        "stability_hash_expected": "671aa0037d8c6375613d9c54f1ce6bff3023890fcf41a657aca232ed7e060c4b",
-        "stability_hash_actual": "466a5f481bb05d05c82a0dc42a04b94f548c998d9f5451e6109a65b2223b08bf",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "5d641a7e1d6a285858f1d15a442a79de691521ebd268cde9c1004413e0a8cb36",
+        "stability_hash_actual": "5d641a7e1d6a285858f1d15a442a79de691521ebd268cde9c1004413e0a8cb36",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "flex_align_self_item_override",
@@ -2804,10 +2778,8 @@
         "align-self"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -3039,7 +3011,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_flex_align_self_item_override_10231_1772949088579608508.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_flex_align_self_item_override_10266_1772952644463373409.jsonl"
           }
         }
       },
@@ -3050,12 +3022,12 @@
         "image_sha256": [
           "341676b1ed01ecaf1423be0204fb7197a0c8040075a5ae3d4e92191aa004205c"
         ],
-        "stability_hash_expected": "3da2faa3308a8f2cb758db42c55b19e45ade76566b47c7b48cd256a8c8918b17",
-        "stability_hash_actual": "085bd3a7eaabcc9de3da2d1e61b37a01bc37cd6401b4fe4cd6f975574be3baab",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "458010f30b7f18e8073574a760d8281e794858eca8b80aabf2d05f3591948aa8",
+        "stability_hash_actual": "458010f30b7f18e8073574a760d8281e794858eca8b80aabf2d05f3591948aa8",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "flex_flow_row_wrap_layout",
@@ -3070,10 +3042,8 @@
         "flex-wrap-layout"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -3286,7 +3256,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_flex_flow_row_wrap_layout_10231_1772949088987544522.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_flex_flow_row_wrap_layout_10266_1772952645069840275.jsonl"
           }
         }
       },
@@ -3297,12 +3267,12 @@
         "image_sha256": [
           "3abf8f1eda3d13904300cb4b1b771ddde21d34de96dd6692078bb6075a417d3f"
         ],
-        "stability_hash_expected": "0cf0a20e842e34511c1216c4f340a7a84ce7ea54e3a83b7b60aa82321280050d",
-        "stability_hash_actual": "6c3b3f6688f91164f0f7c7b5fe251e87fe59b5f20dd303356c08d29fbc5e53f8",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "5a88c3edb8979365e6c191fc018fada7bd89c6e8172982613f9388cfc4a7cf0d",
+        "stability_hash_actual": "5a88c3edb8979365e6c191fc018fada7bd89c6e8172982613f9388cfc4a7cf0d",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "flex_place_content_flex_end_center_wrap",
@@ -3318,10 +3288,8 @@
         "justify-content"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -3602,7 +3570,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_flex_place_content_flex_end_center_wrap_10231_1772949089887927568.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_flex_place_content_flex_end_center_wrap_10266_1772952646135954953.jsonl"
           }
         }
       },
@@ -3613,12 +3581,12 @@
         "image_sha256": [
           "30c586acb69b3e202f5670997890cf62fc0f44b103a02122313df4cc0707c61a"
         ],
-        "stability_hash_expected": "eb585b744b40d37c59b2b7b3abf3960f9f7a38360c58e4cb142347f27ee70ffa",
-        "stability_hash_actual": "07cda0e390413ec16b342679e30c1dc3b774b6c53e979e3c2c7063b5578eb606",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "7a0c959c4eaee689ce32d6f625debd435b7d2eeac6ece4b54f1c74f18f6c5112",
+        "stability_hash_actual": "7a0c959c4eaee689ce32d6f625debd435b7d2eeac6ece4b54f1c74f18f6c5112",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "flex_place_items_container_alignment",
@@ -3633,10 +3601,8 @@
         "align-items"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -3822,7 +3788,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_flex_place_items_container_alignment_10231_1772949090909161841.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_flex_place_items_container_alignment_10266_1772952647480932188.jsonl"
           }
         }
       },
@@ -3833,12 +3799,12 @@
         "image_sha256": [
           "450368dcb26fe4fc47d9c4eff32bb42dd8450f21e0e217239490766a0509fd09"
         ],
-        "stability_hash_expected": "4c58f8855bf44f18d19876b95ac3a0284a1ff0fb03c3b2a90506f21379aeb72d",
-        "stability_hash_actual": "2a85383e83e6ae8626f8e547f9772e6a89f1d3e7d5f2a77df275e47c22effbc4",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "bf8b6da2fd5cce5eba124a99b2e313187f35f45284387a0ef6d3dc70eac50234",
+        "stability_hash_actual": "bf8b6da2fd5cce5eba124a99b2e313187f35f45284387a0ef6d3dc70eac50234",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "flex_place_self_item_override",
@@ -3853,10 +3819,8 @@
         "align-self"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -4088,7 +4052,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_flex_place_self_item_override_10231_1772949091187793777.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_flex_place_self_item_override_10266_1772952647990486514.jsonl"
           }
         }
       },
@@ -4099,12 +4063,12 @@
         "image_sha256": [
           "341676b1ed01ecaf1423be0204fb7197a0c8040075a5ae3d4e92191aa004205c"
         ],
-        "stability_hash_expected": "3da2faa3308a8f2cb758db42c55b19e45ade76566b47c7b48cd256a8c8918b17",
-        "stability_hash_actual": "085bd3a7eaabcc9de3da2d1e61b37a01bc37cd6401b4fe4cd6f975574be3baab",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "458010f30b7f18e8073574a760d8281e794858eca8b80aabf2d05f3591948aa8",
+        "stability_hash_actual": "458010f30b7f18e8073574a760d8281e794858eca8b80aabf2d05f3591948aa8",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "flex_two_column_distribution",
@@ -4120,10 +4084,8 @@
         "layout-distribution"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -4268,7 +4230,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_flex_two_column_distribution_10231_1772949091586078674.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_flex_two_column_distribution_10266_1772952648637967882.jsonl"
           }
         }
       },
@@ -4279,12 +4241,12 @@
         "image_sha256": [
           "2301286dadfc140a135116f6138fa7af7d8d4e8ca4a84aa083fd120dcb8bfc38"
         ],
-        "stability_hash_expected": "7126c5bc8faabe1e3dd95b2afb27d27daa2b6b46fae636dc0302cc39d30c3ce2",
-        "stability_hash_actual": "ae2e68fabb6f5aab8d0fa6853173c2701273d2f8e6e2ab070091a0e765eb856f",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "e183beba4721fff5794ec13d27c053c6f2bb2bb1f03c3fc8f0f52c047c175d41",
+        "stability_hash_actual": "e183beba4721fff5794ec13d27c053c6f2bb2bb1f03c3fc8f0f52c047c175d41",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "fragmentation_break_inside_avoid_block",
@@ -4299,10 +4261,8 @@
         "pagination"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -4451,7 +4411,7 @@
               "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_fragmentation_break_inside_avoid_block_10231_1772949092051823995.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_fragmentation_break_inside_avoid_block_10266_1772952649384384031.jsonl"
           }
         }
       },
@@ -4463,12 +4423,12 @@
           "97aae1c861697fcbb8e38ecb0159eeaa58e1c5dc17402b89e96704663cc11f87",
           "4d6eed928d1732f6361d8aed0a25c00db8625351db97675d9000da387be779ab"
         ],
-        "stability_hash_expected": "313a168fa68aaeca63ac736ed5015f0c85b338e0e43b0ef23972c0615d5071da",
-        "stability_hash_actual": "b773c26db0e15a8060395bec8a2d6e0ca59d53bb4771df1e9c29028b532c30a7",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "321a01269ce6f2fa9cf63f20c3ff85e087d40f676f65a3d8df1401a8203a81b6",
+        "stability_hash_actual": "321a01269ce6f2fa9cf63f20c3ff85e087d40f676f65a3d8df1401a8203a81b6",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "fragmentation_long_paragraph",
@@ -4483,10 +4443,8 @@
         "widows-orphans"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -4558,7 +4516,7 @@
               "jit.page_break.trigger": 24
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_fragmentation_long_paragraph_10231_1772949092506656523.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_fragmentation_long_paragraph_10266_1772952650002588581.jsonl"
           }
         }
       },
@@ -4573,12 +4531,12 @@
           "2ca8c0b7a1d8186e714a698cd208857170cd0c97a5e7a97dfd1dee1661cf913a",
           "2ca8c0b7a1d8186e714a698cd208857170cd0c97a5e7a97dfd1dee1661cf913a"
         ],
-        "stability_hash_expected": "c0d7fc2d24df43df820928d8ac66b148a34510fdad0acf9db9a009fea3954587",
-        "stability_hash_actual": "8a06debca23144d33769a128ca7b74f7677bd17d2339eb7a71593d4ac97e4355",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "5b014d5a0a149b502a3639136c5600ca10a20e27dc1d829c902d143734364524",
+        "stability_hash_actual": "5b014d5a0a149b502a3639136c5600ca10a20e27dc1d829c902d143734364524",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "gap_row_column_var_resolution",
@@ -4595,10 +4553,8 @@
         "compute-assertions"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -4754,7 +4710,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_gap_row_column_var_resolution_10231_1772949092708355087.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_gap_row_column_var_resolution_10266_1772952650280928588.jsonl"
           }
         }
       },
@@ -4765,12 +4721,12 @@
         "image_sha256": [
           "82855fdf05d0b71bc981a8ddbf74b19b5bbc0052567c0e922bebd70fab928d27"
         ],
-        "stability_hash_expected": "eed25c8684cfd69f842fd1bc07aa29bd589edca4f0f1b4a23d86be9cce275abb",
-        "stability_hash_actual": "b9f938687b783c5a5b1c24c71836528288470702f6114ecd9b7103723ca8acda",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "ea9dabec024fbe1d451002524e8364ccb95d90dc8e8d19c9c90a50cc8dc7faa1",
+        "stability_hash_actual": "ea9dabec024fbe1d451002524e8364ccb95d90dc8e8d19c9c90a50cc8dc7faa1",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "grid_conflicting_explicit_slots_fall_forward",
@@ -4786,10 +4742,8 @@
         "grid-item-placement"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -4919,7 +4873,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_grid_conflicting_explicit_slots_fall_forward_10231_1772949092946827117.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_grid_conflicting_explicit_slots_fall_forward_10266_1772952650652516129.jsonl"
           }
         }
       },
@@ -4930,12 +4884,12 @@
         "image_sha256": [
           "374196fa2576f80c5b8ddd0149cad617cace108a97a06513a14c6cf1b92dcacf"
         ],
-        "stability_hash_expected": "471421c8d9b80817ad27231e3dd73d72c4580065de4c9b098abe3c60fc41c91a",
-        "stability_hash_actual": "eb43c01d7fa73849303d627edda0ad08d4fb96cc7451657f7c866ea64f5dc57c",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "e2f7c012dfb1ed97957ce749d0fee555c3cd8f15899ca6b6f6a913c460971def",
+        "stability_hash_actual": "e2f7c012dfb1ed97957ce749d0fee555c3cd8f15899ca6b6f6a913c460971def",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "grid_explicit_row_column_starts",
@@ -4951,10 +4905,8 @@
         "grid-item-placement"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -5160,7 +5112,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_grid_explicit_row_column_starts_10231_1772949093498849075.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_grid_explicit_row_column_starts_10266_1772952651381010104.jsonl"
           }
         }
       },
@@ -5171,12 +5123,12 @@
         "image_sha256": [
           "aed008fab95d394378bf45ac0ed92513dd13acd36a0c6e20185b54f91ae4f562"
         ],
-        "stability_hash_expected": "fa5914105b767be1ab407432bdc04d682eecbd245a72565886e6da2456e616d8",
-        "stability_hash_actual": "8dcab6094c1d5e2a344bd5f60651774496d1ae4294a68b75db3b28a3d2bbfef5",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "5b4dd6b669a62960e67cc5f6a7f840d6ea55bb3acc739b5e2a8ed940da178f24",
+        "stability_hash_actual": "5b4dd6b669a62960e67cc5f6a7f840d6ea55bb3acc739b5e2a8ed940da178f24",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "grid_rows_only_column_derivation",
@@ -5191,10 +5143,8 @@
         "grid-layout-baseline"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -5400,7 +5350,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_grid_rows_only_column_derivation_10231_1772949094315211296.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_grid_rows_only_column_derivation_10266_1772952652645345052.jsonl"
           }
         }
       },
@@ -5411,12 +5361,12 @@
         "image_sha256": [
           "3abf8f1eda3d13904300cb4b1b771ddde21d34de96dd6692078bb6075a417d3f"
         ],
-        "stability_hash_expected": "0cf0a20e842e34511c1216c4f340a7a84ce7ea54e3a83b7b60aa82321280050d",
-        "stability_hash_actual": "6c3b3f6688f91164f0f7c7b5fe251e87fe59b5f20dd303356c08d29fbc5e53f8",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "07200ceb08a48fced099525df1f4b9046d5c3d4f78cacc7a1b49752c7bf88171",
+        "stability_hash_actual": "07200ceb08a48fced099525df1f4b9046d5c3d4f78cacc7a1b49752c7bf88171",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "grid_template_rows_columns_matrix",
@@ -5432,10 +5382,8 @@
         "grid-layout-baseline"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -5660,7 +5608,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_grid_template_rows_columns_matrix_10231_1772949095200861325.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_grid_template_rows_columns_matrix_10266_1772952653882628063.jsonl"
           }
         }
       },
@@ -5671,12 +5619,12 @@
         "image_sha256": [
           "3abf8f1eda3d13904300cb4b1b771ddde21d34de96dd6692078bb6075a417d3f"
         ],
-        "stability_hash_expected": "0cf0a20e842e34511c1216c4f340a7a84ce7ea54e3a83b7b60aa82321280050d",
-        "stability_hash_actual": "6c3b3f6688f91164f0f7c7b5fe251e87fe59b5f20dd303356c08d29fbc5e53f8",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "3d332c2dbcb47021f7496812fe529a109c434757f919f494519353dec137d5c0",
+        "stability_hash_actual": "3d332c2dbcb47021f7496812fe529a109c434757f919f494519353dec137d5c0",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "inheritance_unset_noninherited_resets",
@@ -5691,10 +5639,8 @@
         "non-inherited-reset"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -5850,7 +5796,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_inheritance_unset_noninherited_resets_10231_1772949096289134902.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_inheritance_unset_noninherited_resets_10266_1772952655363407855.jsonl"
           }
         }
       },
@@ -5861,12 +5807,12 @@
         "image_sha256": [
           "aa0ad86e577f988773c33b9702afce12bad93b0b9a462fa5383fca39d281d008"
         ],
-        "stability_hash_expected": "53a76679879a49b0bafd1a7c1c9c7149b62e58a6b2a3fa688e95d25a8423a191",
-        "stability_hash_actual": "a1995be46ca94d5473cc768906803be3411c7a57c3d7423be764dab799f34c66",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "fa297792afc5abcb15d6ba42cc454817010084af2f42920655884a2c26e60f85",
+        "stability_hash_actual": "fa297792afc5abcb15d6ba42cc454817010084af2f42920655884a2c26e60f85",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "inset_left_var_resolution",
@@ -5882,10 +5828,8 @@
         "compute-assertions"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -5994,7 +5938,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_inset_left_var_resolution_10231_1772949096597286992.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_inset_left_var_resolution_10266_1772952655851443626.jsonl"
           }
         }
       },
@@ -6005,12 +5949,12 @@
         "image_sha256": [
           "011bc4f6ab1e091bcb816a2d28a1ecf2ae34255f6484729ce77224a8f3c894f9"
         ],
-        "stability_hash_expected": "ef184637968d59c574725f4457defff3794db58a7482cef5828a9f9eaae125c9",
-        "stability_hash_actual": "0254d80f2f48345521b851e7965d7d8696b7ae7eb29c387a33968af6aa069fe4",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "43ac4eb5215ed2b375bcb688b3d85c45fd648e03596b0c2eb5d3ef9e8588ee36",
+        "stability_hash_actual": "43ac4eb5215ed2b375bcb688b3d85c45fd648e03596b0c2eb5d3ef9e8588ee36",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "logical_inline_block_size_min_max",
@@ -6267,7 +6211,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_logical_inline_block_size_min_max_10231_1772949096633527798.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_logical_inline_block_size_min_max_10266_1772952655916501982.jsonl"
           }
         }
       },
@@ -6278,8 +6222,8 @@
         "image_sha256": [
           "5f8842aab75b831e1a67bfc2c0adbbcffc927f5f419454759dcbccf4084c1207"
         ],
-        "stability_hash_expected": "b8d14e6ad10d1dd35989803be69e9dc26d8d5dc8982a067695680521733efa6a",
-        "stability_hash_actual": "b8d14e6ad10d1dd35989803be69e9dc26d8d5dc8982a067695680521733efa6a",
+        "stability_hash_expected": "d2c3dcad69997de9f67b2324488016b4e96fe8ad40ca94d7eed9184840d2382d",
+        "stability_hash_actual": "d2c3dcad69997de9f67b2324488016b4e96fe8ad40ca94d7eed9184840d2382d",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -6439,7 +6383,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_logical_inset_horizontal_tb_ltr_10231_1772949097431118833.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_logical_inset_horizontal_tb_ltr_10266_1772952657161804775.jsonl"
           }
         }
       },
@@ -6450,8 +6394,8 @@
         "image_sha256": [
           "088150b9838263245d13569c35a35e98c07df072b3165e1b879fcf27742ee969"
         ],
-        "stability_hash_expected": "9cdaef714ab236a16532f177cab54a32b41f9f5a52bce2c4ceacf57210d51cb8",
-        "stability_hash_actual": "9cdaef714ab236a16532f177cab54a32b41f9f5a52bce2c4ceacf57210d51cb8",
+        "stability_hash_expected": "bbe1391a86b90611b730db48a46d4cc41a92d0473d882847f5e8eade20337938",
+        "stability_hash_actual": "bbe1391a86b90611b730db48a46d4cc41a92d0473d882847f5e8eade20337938",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -6610,7 +6554,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_logical_margin_padding_horizontal_tb_ltr_10231_1772949097920029793.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_logical_margin_padding_horizontal_tb_ltr_10266_1772952657648949438.jsonl"
           }
         }
       },
@@ -6621,8 +6565,8 @@
         "image_sha256": [
           "2516a87bafb6067f03ed79f60f7149f279d5ecbd85ac2dc03d18a203827c4bbf"
         ],
-        "stability_hash_expected": "b1ce4e097e2a2be228dbf56698fdc7bd453c1485c54c5a4c736cd34debcf1cad",
-        "stability_hash_actual": "b1ce4e097e2a2be228dbf56698fdc7bd453c1485c54c5a4c736cd34debcf1cad",
+        "stability_hash_expected": "3752423858a003e6fef7cfd263328f2281ed6264ca1d0188b8beff3792fcf161",
+        "stability_hash_actual": "3752423858a003e6fef7cfd263328f2281ed6264ca1d0188b8beff3792fcf161",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -6837,7 +6781,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_overflow_hidden_clips_absolute_child_10231_1772949098465908246.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_overflow_hidden_clips_absolute_child_10266_1772952658334683213.jsonl"
           }
         }
       },
@@ -6848,8 +6792,8 @@
         "image_sha256": [
           "c991b54eaad0e8ac5ba41c65c26df3038cd5e411be0238e58d030fcde0aefdfd"
         ],
-        "stability_hash_expected": "9806a9fdc1fe12490ca9e70cb4525a1aeff6c822e5c7a1713c4e86e21d090a38",
-        "stability_hash_actual": "9806a9fdc1fe12490ca9e70cb4525a1aeff6c822e5c7a1713c4e86e21d090a38",
+        "stability_hash_expected": "5eddd23d6ad0798a14e4de3b5f56f6582de0d6321c12ddc81f7e0d1949e8213d",
+        "stability_hash_actual": "5eddd23d6ad0798a14e4de3b5f56f6582de0d6321c12ddc81f7e0d1949e8213d",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -7064,7 +7008,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_overflow_visible_allows_absolute_bleed_10231_1772949099036064397.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_overflow_visible_allows_absolute_bleed_10266_1772952659250782094.jsonl"
           }
         }
       },
@@ -7075,8 +7019,8 @@
         "image_sha256": [
           "6e2424093331cbff757ac8f7e28896985d059826fceaa220dd0044e49617759b"
         ],
-        "stability_hash_expected": "c53bac964a4fe5250a30821cd0291492d5f773a655c0afd167c6ba4417e0ad0b",
-        "stability_hash_actual": "c53bac964a4fe5250a30821cd0291492d5f773a655c0afd167c6ba4417e0ad0b",
+        "stability_hash_expected": "58d085a89002cf07bad8f458c910773b41d3f6deea4dfb9ecbf38ebe6f5b47d2",
+        "stability_hash_actual": "58d085a89002cf07bad8f458c910773b41d3f6deea4dfb9ecbf38ebe6f5b47d2",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -7095,10 +7039,8 @@
         "pagination"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -7229,7 +7171,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_paged_break_before_forced_block_10231_1772949099692045459.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_paged_break_before_forced_block_10266_1772952660323413652.jsonl"
           }
         }
       },
@@ -7241,12 +7183,12 @@
           "30aaf3ed9c77c10cf0ccaf68e128bc6cc7bbed38630686923121a4dc059faa00",
           "c2ee8346ef5094edb63c8d00c18b35b8975e46e41b88b338d249d575419f08fd"
         ],
-        "stability_hash_expected": "dd7a3dfa5f28c50b9c2008a7ed7b8ec36ce735d8577d0c172632b9b824c1256e",
-        "stability_hash_actual": "3bff1627cb554b677c3369784da11fa00e9209101174f7395c917b92de8ce8e7",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "62e83d5eba30e961bf14d7c59af0d59b6cf6361601e0a10e64c1bc0e360004e4",
+        "stability_hash_actual": "62e83d5eba30e961bf14d7c59af0d59b6cf6361601e0a10e64c1bc0e360004e4",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_absolute_auto_inset_static_position_fallback",
@@ -7261,10 +7203,8 @@
         "static-position"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -7450,7 +7390,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_auto_inset_static_position_fallback_10231_1772949100284094313.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_auto_inset_static_position_fallback_10266_1772952661318738740.jsonl"
           }
         }
       },
@@ -7461,12 +7401,12 @@
         "image_sha256": [
           "07e384725820f97435b09d8c85a777a2807b6a5f8a8d4bca23515971bd3d3362"
         ],
-        "stability_hash_expected": "bdc7f06e6830d3b0f184991bb3ca39178db8cac050f01be2f87c1d2a77393073",
-        "stability_hash_actual": "02bbc1df57f7b9590c28cea7c6ec727cba16b9bb82a0dd9b58b34e97fbd2e4da",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "127eb88ea4c41c5f7072b8a2b6883fe9258ad0fa543b3fe342935e797c6f9710",
+        "stability_hash_actual": "127eb88ea4c41c5f7072b8a2b6883fe9258ad0fa543b3fe342935e797c6f9710",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_absolute_empty_box_background",
@@ -7650,7 +7590,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_empty_box_background_10231_1772949100586555052.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_empty_box_background_10266_1772952661747777548.jsonl"
           }
         }
       },
@@ -7661,8 +7601,8 @@
         "image_sha256": [
           "06ce991bcb046fa8927e7c06951b47108e19a6cabf13ce2e22aabe871a4fb85c"
         ],
-        "stability_hash_expected": "f54955187ecbed45afce15650fd4c9947dafcad323a219a70a2f6d52c63bc031",
-        "stability_hash_actual": "f54955187ecbed45afce15650fd4c9947dafcad323a219a70a2f6d52c63bc031",
+        "stability_hash_expected": "e8b51986b327124ecdb28d381321d8d593aba0e465b8460ad7953610e82d147d",
+        "stability_hash_actual": "e8b51986b327124ecdb28d381321d8d593aba0e465b8460ad7953610e82d147d",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -7682,10 +7622,8 @@
         "overflow"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -7909,7 +7847,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_explicit_width_overflow_no_clamp_10231_1772949100944235190.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_explicit_width_overflow_no_clamp_10266_1772952662187740422.jsonl"
           }
         }
       },
@@ -7920,12 +7858,12 @@
         "image_sha256": [
           "a1579fd91e2ce9c6c3512ab2321b4ac02732c0bd72bc5c106364f53c06b8f4c1"
         ],
-        "stability_hash_expected": "299dd2b3e84998779563f33f146c77075b8c4e76f6dea8731a4366ab8e6ef417",
-        "stability_hash_actual": "fb3181f85ad5e8bc131e0a6e38c7b977b121a998abc6d33ed8f8a0f4c8349d16",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "86fdf392c8800a33dee46183c4d83a622590d51e727ec9d562b9343266fc75b7",
+        "stability_hash_actual": "86fdf392c8800a33dee46183c4d83a622590d51e727ec9d562b9343266fc75b7",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_absolute_initial_containing_block_from_static_parent",
@@ -8127,7 +8065,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_initial_containing_block_from_static_parent_10231_1772949101251795090.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_initial_containing_block_from_static_parent_10266_1772952662630049604.jsonl"
           }
         }
       },
@@ -8138,8 +8076,8 @@
         "image_sha256": [
           "d75d47738f2bdb0274b256a7da564591f1cd68d728a17863eb33bafcbd981ac6"
         ],
-        "stability_hash_expected": "ece31850cb73b7b833849eee24fec92546edda90247a91abf3b103c468232ad4",
-        "stability_hash_actual": "ece31850cb73b7b833849eee24fec92546edda90247a91abf3b103c468232ad4",
+        "stability_hash_expected": "a3acde17715191d23dabb69a269222b5e944db63c24e77285416480a09a63f17",
+        "stability_hash_actual": "a3acde17715191d23dabb69a269222b5e944db63c24e77285416480a09a63f17",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -8159,10 +8097,8 @@
         "width"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -8329,7 +8265,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_left_right_width_precedence_10231_1772949101612509414.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_left_right_width_precedence_10266_1772952663106831256.jsonl"
           }
         }
       },
@@ -8340,12 +8276,12 @@
         "image_sha256": [
           "415edccab3cd22621dce410eb7269e1c2b82a57c764cbcf1bc09c1ba1890bbe9"
         ],
-        "stability_hash_expected": "898db1d9d69bf7233c426ebdeda00d2ff4f4a90ba1e0444d20694527a4ad8545",
-        "stability_hash_actual": "4289c450d48e99ac6af955b297596667ffc3d80c34cc5a5832b8fc995d820d95",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "8aaf52ace27b691578f22a53b6b0875457ad68e9505c4a0d114488161fe35e21",
+        "stability_hash_actual": "8aaf52ace27b691578f22a53b6b0875457ad68e9505c4a0d114488161fe35e21",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_absolute_nearest_positioned_ancestor",
@@ -8548,7 +8484,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_nearest_positioned_ancestor_10231_1772949101985463657.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_nearest_positioned_ancestor_10266_1772952663560456816.jsonl"
           }
         }
       },
@@ -8559,8 +8495,8 @@
         "image_sha256": [
           "a2001025d8019aa754788ae01d7cc50265b791fadc497a39dc4a55b2ecd3d1d2"
         ],
-        "stability_hash_expected": "4a87c213af7c8ac28f1a380b85d6eb484f20dea0fbfa94ce537daa6b0ac89391",
-        "stability_hash_actual": "4a87c213af7c8ac28f1a380b85d6eb484f20dea0fbfa94ce537daa6b0ac89391",
+        "stability_hash_expected": "e31a62462ac1ad4c31ff4b54330a76f79f40252c6c6b5a4a8048325d6051f19e",
+        "stability_hash_actual": "e31a62462ac1ad4c31ff4b54330a76f79f40252c6c6b5a4a8048325d6051f19e",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -8767,7 +8703,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_percent_nearest_positioned_ancestor_10231_1772949102267950075.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_percent_nearest_positioned_ancestor_10266_1772952663924910389.jsonl"
           }
         }
       },
@@ -8778,8 +8714,8 @@
         "image_sha256": [
           "ad4744585c7632326df4439f63e1b1586d318a2061f9edd37dc1794d9185cbd8"
         ],
-        "stability_hash_expected": "527ede3dc5d9e542c886c8919758d105917afff034131d80a68775d8fc4e1fd2",
-        "stability_hash_actual": "527ede3dc5d9e542c886c8919758d105917afff034131d80a68775d8fc4e1fd2",
+        "stability_hash_expected": "885ef0e990f9fea54e34ec18cdede507ae1d66e0ef8dc8c2eb216518296f55d1",
+        "stability_hash_actual": "885ef0e990f9fea54e34ec18cdede507ae1d66e0ef8dc8c2eb216518296f55d1",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -8799,10 +8735,8 @@
         "fragmentation"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -8951,7 +8885,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_root_negative_page_one_only_10231_1772949102523613959.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_root_negative_page_one_only_10266_1772952664299796734.jsonl"
           }
         }
       },
@@ -8963,12 +8897,12 @@
           "f44dc25f04b06879e9e992107226fabd5c9b9d35aaa907cf4aa9891f021aa335",
           "2ca8c0b7a1d8186e714a698cd208857170cd0c97a5e7a97dfd1dee1661cf913a"
         ],
-        "stability_hash_expected": "9839c8b03d40c65b0d43f296b5317560f1ba2a7e305e44cbff57621765709ea5",
-        "stability_hash_actual": "1b1bcec7cf7e2638d02d7ba60304909755c02c47afc2e6c114afc1ee8f3290f4",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "49e946670c492c239f5617321430fa8d8739caa7b2e24c857820592d8bea0a5d",
+        "stability_hash_actual": "49e946670c492c239f5617321430fa8d8739caa7b2e24c857820592d8bea0a5d",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_absolute_root_page_one_only",
@@ -8983,10 +8917,8 @@
         "fragmentation"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -9154,7 +9086,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_root_page_one_only_10231_1772949103179868238.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_root_page_one_only_10266_1772952665281003630.jsonl"
           }
         }
       },
@@ -9166,12 +9098,12 @@
           "9c258abbab424fd6013576d9a48d995cdb5c12dd646df6993a623298e6ed1965",
           "6978a65b8dedb8830d1cb3f595f1687f76bd3873bc34eb82f285d625539e71f9"
         ],
-        "stability_hash_expected": "16b8100d929364455517d0d75b0a2f319d5a34f239b39062eef5ced1419392b0",
-        "stability_hash_actual": "710e888ccb6dce67e0bf0fe9d390c1816bb4737b21cb3cc5454665015f1dabb7",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "4e1a0d95ca9c4766e39533f7c445e10dd90d1932a510658e00e7b67ad12c3901",
+        "stability_hash_actual": "4e1a0d95ca9c4766e39533f7c445e10dd90d1932a510658e00e7b67ad12c3901",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_absolute_root_source_order_zindex",
@@ -9188,10 +9120,8 @@
         "source-order"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -9366,7 +9296,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_root_source_order_zindex_10231_1772949104058292519.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_root_source_order_zindex_10266_1772952666394154164.jsonl"
           }
         }
       },
@@ -9377,12 +9307,12 @@
         "image_sha256": [
           "c23d87516bc3e9dc0d0785409199783bc3657186ea0e31c4be6d204ba1f0dcc9"
         ],
-        "stability_hash_expected": "6c79eba441ace14974cb56585888d977eba612a8e74268d9eb910e4637791eea",
-        "stability_hash_actual": "a7bbd18beeabe362aa50bbff8d236a5d29d0e6375c7f42a01676219451de36c2",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "404befeff2e1c8b4d21df18662cf14a586fe37c325f5286534882a80f98c290d",
+        "stability_hash_actual": "404befeff2e1c8b4d21df18662cf14a586fe37c325f5286534882a80f98c290d",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_absolute_root_specificity_zindex_id_wins",
@@ -9402,10 +9332,8 @@
         "source-order"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -9580,7 +9508,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_root_specificity_zindex_id_wins_10231_1772949104873609015.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_root_specificity_zindex_id_wins_10266_1772952667383183588.jsonl"
           }
         }
       },
@@ -9591,12 +9519,12 @@
         "image_sha256": [
           "c23d87516bc3e9dc0d0785409199783bc3657186ea0e31c4be6d204ba1f0dcc9"
         ],
-        "stability_hash_expected": "6c79eba441ace14974cb56585888d977eba612a8e74268d9eb910e4637791eea",
-        "stability_hash_actual": "a7bbd18beeabe362aa50bbff8d236a5d29d0e6375c7f42a01676219451de36c2",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "404befeff2e1c8b4d21df18662cf14a586fe37c325f5286534882a80f98c290d",
+        "stability_hash_actual": "404befeff2e1c8b4d21df18662cf14a586fe37c325f5286534882a80f98c290d",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_absolute_root_zindex_overlay",
@@ -9611,10 +9539,8 @@
         "z-index"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -9789,7 +9715,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_root_zindex_overlay_10231_1772949105704840332.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_root_zindex_overlay_10266_1772952668322662379.jsonl"
           }
         }
       },
@@ -9800,12 +9726,12 @@
         "image_sha256": [
           "cfe6867d318fffa3117a8d29112251f7f218e883d6e72cba906d168d46a362aa"
         ],
-        "stability_hash_expected": "9c14707dcc93b3c250b5a4c2463e3fee5dfd1d96b864a4cfd7d2d3dcbf601912",
-        "stability_hash_actual": "859b436b6db747f22da0d8fdd1ec1ebeca4e4cbd8f15c938a3a363a8bf487d69",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "0b2f8b19d78f2dcae5c40e5c7c43479244ef5f483dbf9eed3e22a3d0047e3024",
+        "stability_hash_actual": "0b2f8b19d78f2dcae5c40e5c7c43479244ef5f483dbf9eed3e22a3d0047e3024",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_absolute_top_bottom_height_precedence",
@@ -9821,10 +9747,8 @@
         "height"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -9991,7 +9915,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_top_bottom_height_precedence_10231_1772949106505677518.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_top_bottom_height_precedence_10266_1772952669303969706.jsonl"
           }
         }
       },
@@ -10002,12 +9926,12 @@
         "image_sha256": [
           "f25c308f2b7b0aefffdc060bd931a7d322a79837062571d7a2a268431e3e267e"
         ],
-        "stability_hash_expected": "338c4c649de8905939562b0d539ad43ec70446c79f986a85893dab5e83af602a",
-        "stability_hash_actual": "d3940100e4485edb1b9097f799ac74c697691b2244438727d8022a23d9b58e1a",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "444ca97cb8167d5caf2b7308e7f7b0fa17dfea13d00c4be6572368a8d3db737b",
+        "stability_hash_actual": "444ca97cb8167d5caf2b7308e7f7b0fa17dfea13d00c4be6572368a8d3db737b",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_absolute_transform_establishes_containing_block",
@@ -10210,7 +10134,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_transform_establishes_containing_block_10231_1772949106918357743.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_absolute_transform_establishes_containing_block_10266_1772952669810423605.jsonl"
           }
         }
       },
@@ -10221,8 +10145,8 @@
         "image_sha256": [
           "26c085bc21af56f807919dc5296e812bdafdaf86eb6201e83cea4397f643f2ce"
         ],
-        "stability_hash_expected": "ac6fe174fbb44cbf4c706719361ffc6a730172f0f49f3c5353880f351884e649",
-        "stability_hash_actual": "ac6fe174fbb44cbf4c706719361ffc6a730172f0f49f3c5353880f351884e649",
+        "stability_hash_expected": "3f6fdf2924957b0646ebcfaadbeabcaec207791c9c6d370cd361f39c5500955a",
+        "stability_hash_actual": "3f6fdf2924957b0646ebcfaadbeabcaec207791c9c6d370cd361f39c5500955a",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -10242,10 +10166,8 @@
         "fragmentation"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -10375,7 +10297,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_fixed_negative_zindex_under_content_10231_1772949107314639044.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_fixed_negative_zindex_under_content_10266_1772952670298873641.jsonl"
           }
         }
       },
@@ -10387,12 +10309,12 @@
           "dd669157eae7a30fe19af623d6dc887581e540db8890763cbf2f7afa6633fa12",
           "6978a65b8dedb8830d1cb3f595f1687f76bd3873bc34eb82f285d625539e71f9"
         ],
-        "stability_hash_expected": "48e9d351e8da59f3aecef747add389d0cffdfacdf9869f7accf766076a4a6b13",
-        "stability_hash_actual": "d6faed6cf7e20953e1aab0f7125dee2d41456c9df3aebd122445f28c5334cc0e",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "32a72e35dadb80704da87e19a16d8487ca2850973ee60da6e99a4e6c4c4959dd",
+        "stability_hash_actual": "32a72e35dadb80704da87e19a16d8487ca2850973ee60da6e99a4e6c4c4959dd",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_fixed_repeats_each_page",
@@ -10407,10 +10329,8 @@
         "fragmentation"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -10578,7 +10498,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_fixed_repeats_each_page_10231_1772949108064206527.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_fixed_repeats_each_page_10266_1772952671386382942.jsonl"
           }
         }
       },
@@ -10590,12 +10510,12 @@
           "9c258abbab424fd6013576d9a48d995cdb5c12dd646df6993a623298e6ed1965",
           "69344b4fab452bcd7e106e22abd403c68f7278dab348234adb695d6e33746cca"
         ],
-        "stability_hash_expected": "877c90fcfd725e516fd0cfc257f52b5a1cbe736768f035e8ba00b1ce9fea0f08",
-        "stability_hash_actual": "f06d4160bec3b1d0fe69d94fc760b3df1db92f2a70a42531361c528f4a74842b",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "1c0acea57e5ac9c9a59ac28681c0ae72b470d58ee8f08ca61c7d4c329cf178aa",
+        "stability_hash_actual": "1c0acea57e5ac9c9a59ac28681c0ae72b470d58ee8f08ca61c7d4c329cf178aa",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_fixed_zindex_front_ordering",
@@ -10610,10 +10530,8 @@
         "z-index"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -10788,7 +10706,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_fixed_zindex_front_ordering_10231_1772949109074979438.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_fixed_zindex_front_ordering_10266_1772952672584047964.jsonl"
           }
         }
       },
@@ -10799,12 +10717,12 @@
         "image_sha256": [
           "cfe6867d318fffa3117a8d29112251f7f218e883d6e72cba906d168d46a362aa"
         ],
-        "stability_hash_expected": "9c14707dcc93b3c250b5a4c2463e3fee5dfd1d96b864a4cfd7d2d3dcbf601912",
-        "stability_hash_actual": "859b436b6db747f22da0d8fdd1ec1ebeca4e4cbd8f15c938a3a363a8bf487d69",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "0b2f8b19d78f2dcae5c40e5c7c43479244ef5f483dbf9eed3e22a3d0047e3024",
+        "stability_hash_actual": "0b2f8b19d78f2dcae5c40e5c7c43479244ef5f483dbf9eed3e22a3d0047e3024",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_relative_calc_bottom_containing_height",
@@ -10821,10 +10739,8 @@
         "percentages"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -10953,7 +10869,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_relative_calc_bottom_containing_height_10231_1772949109779964956.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_relative_calc_bottom_containing_height_10266_1772952673539099599.jsonl"
           }
         }
       },
@@ -10964,12 +10880,12 @@
         "image_sha256": [
           "16a094ca9e05d1b63578dd563913040488d09f4ed9de2a97d6b02e5708ca14c9"
         ],
-        "stability_hash_expected": "43683e1c7eb6d3c3b3490e81f694ed0d1b3f0a9db36728187fb24a65f2619ceb",
-        "stability_hash_actual": "a759a3541c5b66cdb6898a0fc17a7447cdc30fbd8967f436f6413ac360a59da5",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "a050a21d03ffa13c380c0339558306ca9bdc3af3768a8527ef2a7c5da00a2d12",
+        "stability_hash_actual": "a050a21d03ffa13c380c0339558306ca9bdc3af3768a8527ef2a7c5da00a2d12",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_relative_calc_left_containing_width",
@@ -10986,10 +10902,8 @@
         "percentages"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -11118,7 +11032,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_relative_calc_left_containing_width_10231_1772949110199539262.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_relative_calc_left_containing_width_10266_1772952674041441761.jsonl"
           }
         }
       },
@@ -11129,12 +11043,12 @@
         "image_sha256": [
           "0642969163498f327cf0c3fd3d6b8111b76b6f5f33ad2700bfa8606dfc617241"
         ],
-        "stability_hash_expected": "ce0da3e4295f7940e942ddc52e0295c7a5bfc2bf9d977d9db0262a5d378e3dc6",
-        "stability_hash_actual": "48c6868f87dafeebece643a0d093438bbd15fb57ac9dab74c403047f22be1837",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "40ccfac0282fc3eef3275c341c9e6c603c727d918598e01f2a56fe7b9c44e7b0",
+        "stability_hash_actual": "40ccfac0282fc3eef3275c341c9e6c603c727d918598e01f2a56fe7b9c44e7b0",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_relative_calc_right_containing_width",
@@ -11151,10 +11065,8 @@
         "percentages"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -11283,7 +11195,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_relative_calc_right_containing_width_10231_1772949110295683392.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_relative_calc_right_containing_width_10266_1772952674172564188.jsonl"
           }
         }
       },
@@ -11294,12 +11206,12 @@
         "image_sha256": [
           "2386b6a6b54737d562d58bf5d20add121746d23376636569bcefde3c1f6ea1a8"
         ],
-        "stability_hash_expected": "501c2e4383edf1ed594a690f499376bc471a963241be5a0a28722d97770bbef4",
-        "stability_hash_actual": "d2943eaa6873325c04b3dade45e7c2afaf82892139ceb7697161c89c97cfa393",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "9ca46894205f00f2d5625b54a4a1d66ca51f507e10a8ca0213ce9a617239bded",
+        "stability_hash_actual": "9ca46894205f00f2d5625b54a4a1d66ca51f507e10a8ca0213ce9a617239bded",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_relative_inset_shorthand_uniform",
@@ -11315,10 +11227,8 @@
         "shorthand"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -11466,7 +11376,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_relative_inset_shorthand_uniform_10231_1772949110398732599.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_relative_inset_shorthand_uniform_10266_1772952674365583688.jsonl"
           }
         }
       },
@@ -11477,12 +11387,12 @@
         "image_sha256": [
           "afdbc45d7f398d0ce75dec88494c6b85a91ea1c49140b561de1e3c4fcc641907"
         ],
-        "stability_hash_expected": "8833c30274c1dcf700b87385a869203b9dfd6feb11864cc268a56a7620d2aad7",
-        "stability_hash_actual": "3bcfa74411cfdaf018e2154fe0b1e43cc5ea96a99dc65d849c4e50329633da49",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "b44c6116bd6eb4191edc682f16adfded41dc55c1187eed836f756ba749197ee6",
+        "stability_hash_actual": "b44c6116bd6eb4191edc682f16adfded41dc55c1187eed836f756ba749197ee6",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_relative_left_right_precedence",
@@ -11498,10 +11408,8 @@
         "right"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -11687,7 +11595,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_relative_left_right_precedence_10231_1772949110585470368.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_relative_left_right_precedence_10266_1772952674638810103.jsonl"
           }
         }
       },
@@ -11698,12 +11606,12 @@
         "image_sha256": [
           "6fba8b91457106212bf7bbadc93a5e0aa3a8647270332e241efe675fe92994c6"
         ],
-        "stability_hash_expected": "3f28616c1ae71c2f1dad83daf142fb8e65c0b60f274db5b58e059df9b799cbb0",
-        "stability_hash_actual": "f1d0cc5a1a3513aa6ca0341d7050aa76f5a9e776b0cbd484bf70e8b116055f5a",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "f95ca53970154026e559f41df870ac469ecd53a835cca8120739b881b736874e",
+        "stability_hash_actual": "f95ca53970154026e559f41df870ac469ecd53a835cca8120739b881b736874e",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_relative_offset_preserves_flow_slot",
@@ -11719,10 +11627,8 @@
         "top"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -11927,7 +11833,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_relative_offset_preserves_flow_slot_10231_1772949110861823603.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_relative_offset_preserves_flow_slot_10266_1772952675014350845.jsonl"
           }
         }
       },
@@ -11938,12 +11844,12 @@
         "image_sha256": [
           "33dc5d889bcc336e765118808b8f3abbd30ba4a69d6de2f5b44e8b6d101b78fa"
         ],
-        "stability_hash_expected": "c6bea22d619062125e572d62bf0ec098a339f313ec45923c5572302c9d4c3f81",
-        "stability_hash_actual": "410d81e45ab991522fe45f61a3f332570b30256d8cc700746624a2fe3fb76d4f",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "08bd30e1bdaeeb1b4630a416425de346eef12e35c9de47a8125836e442eb1855",
+        "stability_hash_actual": "08bd30e1bdaeeb1b4630a416425de346eef12e35c9de47a8125836e442eb1855",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_relative_percent_left_containing_width",
@@ -11959,10 +11865,8 @@
         "percentages"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -12091,7 +11995,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_relative_percent_left_containing_width_10231_1772949111180856300.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_relative_percent_left_containing_width_10266_1772952675434333090.jsonl"
           }
         }
       },
@@ -12102,12 +12006,12 @@
         "image_sha256": [
           "89d806a015f416a790a05ba8bc1f6c0ebceff67911e7b6c1f9e72f7206d54016"
         ],
-        "stability_hash_expected": "d2fac79e4fc5b84ccc44d6b2af6898638c685da0732ed8574e7a298f71a81731",
-        "stability_hash_actual": "912b595eb91203964aeae17f33cc2ee207760885d08db64fb3272fb237c1af81",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "8fd842ed6f144e3461b4d48b788708428941b1ea6b2e0083a86e60490e52c5bc",
+        "stability_hash_actual": "8fd842ed6f144e3461b4d48b788708428941b1ea6b2e0083a86e60490e52c5bc",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_relative_percent_top_containing_height",
@@ -12123,10 +12027,8 @@
         "percentages"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -12255,7 +12157,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_relative_percent_top_containing_height_10231_1772949111315614158.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_relative_percent_top_containing_height_10266_1772952675571428541.jsonl"
           }
         }
       },
@@ -12266,12 +12168,12 @@
         "image_sha256": [
           "457dc3815a08e6e68baaa5f636437670f781a260b67972f8967b2d9820c24ca7"
         ],
-        "stability_hash_expected": "885908bb1516f0d7675e5837ed36549ee0bd0e3461ff37fb72e82898937beeb0",
-        "stability_hash_actual": "a6aaf691292387c3a583584b11265c0a024e28b88144c160c09657175306236c",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "cbf520d5cbd5e732e75eb3465ca6480703aef8cccbc30a19f39380aab0f2b9fd",
+        "stability_hash_actual": "cbf520d5cbd5e732e75eb3465ca6480703aef8cccbc30a19f39380aab0f2b9fd",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_relative_right_bottom_offsets",
@@ -12287,10 +12189,8 @@
         "bottom"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -12476,7 +12376,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_relative_right_bottom_offsets_10231_1772949111695608954.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_relative_right_bottom_offsets_10266_1772952676062644462.jsonl"
           }
         }
       },
@@ -12487,12 +12387,12 @@
         "image_sha256": [
           "cca684d297ed50679253b90e31e67b824d5090f0081878057d934716600a17e9"
         ],
-        "stability_hash_expected": "6d8344443452972255e63e16d28d91eb7424630df34f79cb3c7d448094ae3473",
-        "stability_hash_actual": "a624e49c678392686783541f422c98720ef14ba160d8757b09ce98c5b8407253",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "87c602153ef4f089ae7971e69821ee01e595e52a66d73aedc59d656490c38c2f",
+        "stability_hash_actual": "87c602153ef4f089ae7971e69821ee01e595e52a66d73aedc59d656490c38c2f",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "position_relative_top_bottom_precedence",
@@ -12508,10 +12408,8 @@
         "bottom"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -12678,7 +12576,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_position_relative_top_bottom_precedence_10231_1772949112114274316.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_position_relative_top_bottom_precedence_10266_1772952676591561451.jsonl"
           }
         }
       },
@@ -12689,12 +12587,12 @@
         "image_sha256": [
           "3ee3707d2bb3519282f07169f790a0747c879ea505b8e10887cff42e7d71a5b7"
         ],
-        "stability_hash_expected": "4aa83a8569e5b21fcf9e5c5799869d60b60abb6c59385f41e25a6ea844983609",
-        "stability_hash_actual": "1d688011203eee155afc1ff71fc34489b7d97acc7d7aa52a938cf46e61d22f24",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "7386ca604177d6047ce3a7b1a343db8c435101d6566e8cd23d955280458745f1",
+        "stability_hash_actual": "7386ca604177d6047ce3a7b1a343db8c435101d6566e8cd23d955280458745f1",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "selectors_attribute_variants",
@@ -12712,10 +12610,8 @@
         "attribute-prefix"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -12952,7 +12848,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_selectors_attribute_variants_10231_1772949112505903655.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_selectors_attribute_variants_10266_1772952677092535464.jsonl"
           }
         }
       },
@@ -12963,12 +12859,12 @@
         "image_sha256": [
           "8398c6226da6b8c3d089d8d2312995152f7294017f3ca10c7702f18d0bc5c20c"
         ],
-        "stability_hash_expected": "c211bc3cb7723bb1d826dcb166b5d75bfdd4b9c65219c200a98658860696b339",
-        "stability_hash_actual": "c4ad9dd10054027644f40cd5d90cdc9697a5cc8bf738425407b38a1358f347a9",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "62b81eda398b5297ed06428120cceee6dc8b77b2f20e55e62660ecec94d438a4",
+        "stability_hash_actual": "62b81eda398b5297ed06428120cceee6dc8b77b2f20e55e62660ecec94d438a4",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "selectors_sibling_combinators",
@@ -12984,10 +12880,8 @@
         "source-order"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -13224,7 +13118,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_selectors_sibling_combinators_10231_1772949113554204342.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_selectors_sibling_combinators_10266_1772952678296873827.jsonl"
           }
         }
       },
@@ -13235,12 +13129,12 @@
         "image_sha256": [
           "bd9840a1310dc1f1082c7446da805034c48d93529fb6981e170114f86eff2549"
         ],
-        "stability_hash_expected": "8e98760c8233b014f8dd93f240525547cf217b4e1f45d0cebb4c4f62f305da50",
-        "stability_hash_actual": "c145b3d906375de90d63a837223a740123acebc6cf95c0aa6133eabc60fd3393",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "47640035467eff10a7db43ebb4bec405056360e7a648c1a51134135e136b4956",
+        "stability_hash_actual": "47640035467eff10a7db43ebb4bec405056360e7a648c1a51134135e136b4956",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "selectors_specificity_id_wins",
@@ -13257,10 +13151,8 @@
         "class-selector"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -13351,7 +13243,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_selectors_specificity_id_wins_10231_1772949114615688502.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_selectors_specificity_id_wins_10266_1772952679450908436.jsonl"
           }
         }
       },
@@ -13362,12 +13254,12 @@
         "image_sha256": [
           "6978a65b8dedb8830d1cb3f595f1687f76bd3873bc34eb82f285d625539e71f9"
         ],
-        "stability_hash_expected": "3b7419de29beb8e8ac095b4c009e00e0d06cedc39792eec666bf38eb9f0f2b08",
-        "stability_hash_actual": "419f92adfcc80c53e7f476586ead94284716f242dbfa5148bf46b15209738bd8",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "350ca6827921c18bb29dd1f5d145be2090094e869d3d1e44163b2bf723cef7be",
+        "stability_hash_actual": "350ca6827921c18bb29dd1f5d145be2090094e869d3d1e44163b2bf723cef7be",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "selectors_structural_pseudos",
@@ -13384,10 +13276,8 @@
         "not-pseudo"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -13624,7 +13514,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_selectors_structural_pseudos_10231_1772949114993733979.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_selectors_structural_pseudos_10266_1772952679911948235.jsonl"
           }
         }
       },
@@ -13635,12 +13525,12 @@
         "image_sha256": [
           "32fb64db5fcec4d94dbcb037665ccde6cb09ae9651f922441b5949b1f249b9d0"
         ],
-        "stability_hash_expected": "d9ecfbd656a5a1db28d37976ee6a1bde78cc0b549a4a0f430864ef73974af73c",
-        "stability_hash_actual": "3db741fcdade84f33f4c83054b301e1167e2b9e7ff565ba01742bbfd7ceae18b",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "d094d4af6008616158842acfe301b7a8d2ded13521cb3041e051d619a7c9bf82",
+        "stability_hash_actual": "d094d4af6008616158842acfe301b7a8d2ded13521cb3041e051d619a7c9bf82",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "solid_red_block",
@@ -13657,10 +13547,8 @@
         "text-rendering"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -13751,7 +13639,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_solid_red_block_10231_1772949116251964385.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_solid_red_block_10266_1772952681062623006.jsonl"
           }
         }
       },
@@ -13762,12 +13650,12 @@
         "image_sha256": [
           "7dad76861efc0b86406f07251fdaae0d7d9b9099cb99d2c594cd176089559fb2"
         ],
-        "stability_hash_expected": "eebef07159dd75edc1c3afb7f6926efbdd5b6daf453b1866e403947d0ddbcc8d",
-        "stability_hash_actual": "fcfcfa7b295ac565a8eba6a4fa25feb473159daa5e440a894e0074b556a2413f",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
+        "stability_hash_actual": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "table_header_repeat_across_pages",
@@ -13783,10 +13671,8 @@
         "pagination"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -13935,7 +13821,7 @@
               "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_table_header_repeat_across_pages_10231_1772949116742879067.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_table_header_repeat_across_pages_10266_1772952681527662059.jsonl"
           }
         }
       },
@@ -13947,12 +13833,12 @@
           "ba207be1c4fbd20dcfacce116c9200d241c469e5eaef86793edba77ee973304a",
           "86f217bf639d61498db400e2092c2981f0bbb03e8093db80e684df3ee6bc86fc"
         ],
-        "stability_hash_expected": "ac5b3b1dbc8cbaad359b3b1dbcb32c6e5184a662682e508ec09f3fd42e03199f",
-        "stability_hash_actual": "7a9bb4b332a6609d86abf4df4f5463e460243249f62969594b96b2e12fde9e2e",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "94cca2c21d9073df81b584f454b631261d008e269eb2067d42865b92d00199d6",
+        "stability_hash_actual": "94cca2c21d9073df81b584f454b631261d008e269eb2067d42865b92d00199d6",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "transform_individual_compose_with_transform",
@@ -13968,10 +13854,8 @@
         "compute-assertions"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -14119,7 +14003,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_transform_individual_compose_with_transform_10231_1772949117328136736.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_transform_individual_compose_with_transform_10266_1772952682163272558.jsonl"
           }
         }
       },
@@ -14130,12 +14014,12 @@
         "image_sha256": [
           "e2d365b87d6694ffb9b85cf01afdd268ac93cd8d82adddb3ccabab8da1c1853f"
         ],
-        "stability_hash_expected": "df2a84c78d92f4c74e917cd2b0bfe139129732a73aed148b40a451d76cffc086",
-        "stability_hash_actual": "633f878a8018c19ec067939ba5db3593c61f694d0e0c5797ef6090f8da1d3014",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "aecdaf40522b05696cb480fd328d045b20789e4150771272f2e07277e61c0e37",
+        "stability_hash_actual": "aecdaf40522b05696cb480fd328d045b20789e4150771272f2e07277e61c0e37",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "transform_matrix_block_affine",
@@ -14151,10 +14035,8 @@
         "compute-assertions"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -14302,7 +14184,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_transform_matrix_block_affine_10231_1772949117495067250.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_transform_matrix_block_affine_10266_1772952682357890788.jsonl"
           }
         }
       },
@@ -14313,12 +14195,12 @@
         "image_sha256": [
           "c894f9119cf9e5f60104d0513447de2eb126e7f0a13e1a82363b1060ddac4933"
         ],
-        "stability_hash_expected": "aee2100a310209770bcc829b59bd6c4956dbd5b7421033f21472469cb05049fa",
-        "stability_hash_actual": "1377e903096e1064bff650a7826923dce932488378fd0124722aa3127d34fda5",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "880c6961294074685074def2c226ccf2248500652bb8751592622fe2e9c35820",
+        "stability_hash_actual": "880c6961294074685074def2c226ccf2248500652bb8751592622fe2e9c35820",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "transform_origin_left_scale_anchor",
@@ -14334,10 +14216,8 @@
         "compute-assertions"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -14466,7 +14346,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_transform_origin_left_scale_anchor_10231_1772949117684606362.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_transform_origin_left_scale_anchor_10266_1772952682548857599.jsonl"
           }
         }
       },
@@ -14477,12 +14357,12 @@
         "image_sha256": [
           "3ef00a6cd93857bcaa31f53a48722ec19fd96ffb57207451f009b822216e0268"
         ],
-        "stability_hash_expected": "4d467b0f70a9861f7494fb9046db7d981244b3dd40680a340aa44367c27a90f1",
-        "stability_hash_actual": "8abe42043de78b8128bbbfc9dca6e820f5a88eeea5449a81c91e4b62db9234fa",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "9ae820e906e8480d592591e503f35b709296582dc3e4e7115cfa869fc097f03e",
+        "stability_hash_actual": "9ae820e906e8480d592591e503f35b709296582dc3e4e7115cfa869fc097f03e",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "transform_rotate_block_centered",
@@ -14498,10 +14378,8 @@
         "compute-assertions"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -14630,7 +14508,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_transform_rotate_block_centered_10231_1772949117853356066.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_transform_rotate_block_centered_10266_1772952682748889205.jsonl"
           }
         }
       },
@@ -14641,12 +14519,12 @@
         "image_sha256": [
           "72ab8d3d2db5141496b75eefbffebdc00cbbc7a3d1b7ee236c6e681aabd74736"
         ],
-        "stability_hash_expected": "bd00108b9b1ccc34fd77f65134e443df9e305d521f4ed2cea0977156774365bd",
-        "stability_hash_actual": "20c2f7e66cd176749966a0a54fb65a636382a465aa378285ae4eee972f5ce48f",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "9ddbae61cc8e504e17e928e785092473fc986da9fa07fe8ab7d8223fbfa5f68d",
+        "stability_hash_actual": "9ddbae61cc8e504e17e928e785092473fc986da9fa07fe8ab7d8223fbfa5f68d",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "transform_rotate_var_fallback_missing",
@@ -14663,10 +14541,8 @@
         "compute-assertions"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -14795,7 +14671,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_transform_rotate_var_fallback_missing_10231_1772949118075906836.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_transform_rotate_var_fallback_missing_10266_1772952682979890988.jsonl"
           }
         }
       },
@@ -14806,12 +14682,12 @@
         "image_sha256": [
           "72ab8d3d2db5141496b75eefbffebdc00cbbc7a3d1b7ee236c6e681aabd74736"
         ],
-        "stability_hash_expected": "9e0974843bb91803d9886d185066639a57644672225001bdf2f537ecc86f4755",
-        "stability_hash_actual": "de194a825ec4c4ee08ee84eaeb8e96d88695ce006b3fa2c17edb8500c39d2cad",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "9ddbae61cc8e504e17e928e785092473fc986da9fa07fe8ab7d8223fbfa5f68d",
+        "stability_hash_actual": "9ddbae61cc8e504e17e928e785092473fc986da9fa07fe8ab7d8223fbfa5f68d",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "transform_rotate_var_reference_custom_angle",
@@ -14828,10 +14704,8 @@
         "compute-assertions"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -14960,7 +14834,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_transform_rotate_var_reference_custom_angle_10231_1772949118299216454.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_transform_rotate_var_reference_custom_angle_10266_1772952683259579642.jsonl"
           }
         }
       },
@@ -14971,12 +14845,12 @@
         "image_sha256": [
           "e4ed2bef7fd766bc567ffda46ce9cdfa58c95994f568905facad6f0cf8d13188"
         ],
-        "stability_hash_expected": "edee78bba70da8da54f80f0c4c9f3eaba182d40232a1ea795d71d713c2cd28a0",
-        "stability_hash_actual": "e326c560180f60f2ff8b2c1bcc0079a80fd2f952190bf349158957b93ca9e6e3",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "be5e4356562bfe63686edff1fd4d2afd14d3f89316a65a97320ef651c9deefa9",
+        "stability_hash_actual": "be5e4356562bfe63686edff1fd4d2afd14d3f89316a65a97320ef651c9deefa9",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "transform_scale_block_centered",
@@ -14992,10 +14866,8 @@
         "compute-assertions"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -15124,7 +14996,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_transform_scale_block_centered_10231_1772949118534313155.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_transform_scale_block_centered_10266_1772952683513436122.jsonl"
           }
         }
       },
@@ -15135,12 +15007,12 @@
         "image_sha256": [
           "ed7c9c5d70a86b6b9b8ec08da0e84cb041b56abb0a95fca3cbc25aae86fd13d9"
         ],
-        "stability_hash_expected": "1328c992dacf4357184723f2bf9b6896e8a559413a90aa4ef8cc439b778acd5e",
-        "stability_hash_actual": "76f1ea0b147c93f9cf3995cdc572bf9ae974450a5bf9cccf7c02f0abf5370585",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "95e06b4ec9dc15d33a3af532cc3b6ae2391dd2b88586b4a9331a53922c70cc9e",
+        "stability_hash_actual": "95e06b4ec9dc15d33a3af532cc3b6ae2391dd2b88586b4a9331a53922c70cc9e",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "transform_scale_var_reference_custom_pair",
@@ -15156,10 +15028,8 @@
         "compute-assertions"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -15288,7 +15158,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_transform_scale_var_reference_custom_pair_10231_1772949118694817607.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_transform_scale_var_reference_custom_pair_10266_1772952683632880277.jsonl"
           }
         }
       },
@@ -15299,12 +15169,12 @@
         "image_sha256": [
           "ed7c9c5d70a86b6b9b8ec08da0e84cb041b56abb0a95fca3cbc25aae86fd13d9"
         ],
-        "stability_hash_expected": "e633923deaac3e6cd41c36787c4ffeaa55660b1e43981b8dd180416aecc1a3b0",
-        "stability_hash_actual": "e3d530f93ad33840c0a1a00ed52c9ad9874861cf636bad60a3899ceab806099e",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "95e06b4ec9dc15d33a3af532cc3b6ae2391dd2b88586b4a9331a53922c70cc9e",
+        "stability_hash_actual": "95e06b4ec9dc15d33a3af532cc3b6ae2391dd2b88586b4a9331a53922c70cc9e",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "transform_skewx_block_left_origin",
@@ -15320,10 +15190,8 @@
         "compute-assertions"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -15509,7 +15377,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_transform_skewx_block_left_origin_10231_1772949118813382269.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_transform_skewx_block_left_origin_10266_1772952683753655695.jsonl"
           }
         }
       },
@@ -15520,12 +15388,12 @@
         "image_sha256": [
           "954dabfc0ca0081b0598a2c542e7821bd24a614a25496d3acb3ec7e727fcd207"
         ],
-        "stability_hash_expected": "fac7e94136eedab6026c801a21a6fc33c40cdddf7e93cb3360d29a051477e9fa",
-        "stability_hash_actual": "603eee3b02d00085891fa5b965548c56d60bc2dffba3f5f23aa303125aa115d9",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "19a381102da8c90b99ec093a18e0d4d7a82235496c3ea5f5202f6f6466ec7cd6",
+        "stability_hash_actual": "19a381102da8c90b99ec093a18e0d4d7a82235496c3ea5f5202f6f6466ec7cd6",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "transform_translate_block_offsets",
@@ -15541,10 +15409,8 @@
         "compute-assertions"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -15673,7 +15539,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_transform_translate_block_offsets_10231_1772949119281509809.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_transform_translate_block_offsets_10266_1772952684217258161.jsonl"
           }
         }
       },
@@ -15684,12 +15550,12 @@
         "image_sha256": [
           "2f451247d08988f8a84793554df989a15e4c4f5363d402802766a7b992f6e731"
         ],
-        "stability_hash_expected": "f63ea58649498e190813b583e0181df56c0f55b4b003f3a8f2ad6ab55c26e1ff",
-        "stability_hash_actual": "70a5e0496d7629ef2665aadc6c9e7c6ef7bbffbb5c94f2d9ac4b489c49591900",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
+        "stability_hash_actual": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "transform_translate_var_reference_custom_pair",
@@ -15706,10 +15572,8 @@
         "compute-assertions"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -15838,7 +15702,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_transform_translate_var_reference_custom_pair_10231_1772949119408206331.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_transform_translate_var_reference_custom_pair_10266_1772952684348327044.jsonl"
           }
         }
       },
@@ -15849,12 +15713,12 @@
         "image_sha256": [
           "2f451247d08988f8a84793554df989a15e4c4f5363d402802766a7b992f6e731"
         ],
-        "stability_hash_expected": "ee537c68910fe113af9405bc7d490e704f441802087a2f2e443d647a86008a56",
-        "stability_hash_actual": "5374115987bfb4564d7a3d4849b278aa898ffec3b16ae49b0307ca0f75404b65",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
+        "stability_hash_actual": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "transform_var_cycle_fallback_translate",
@@ -15871,10 +15735,8 @@
         "compute-assertions"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -16003,7 +15865,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_transform_var_cycle_fallback_translate_10231_1772949119540991750.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_transform_var_cycle_fallback_translate_10266_1772952684473723637.jsonl"
           }
         }
       },
@@ -16014,12 +15876,12 @@
         "image_sha256": [
           "2f451247d08988f8a84793554df989a15e4c4f5363d402802766a7b992f6e731"
         ],
-        "stability_hash_expected": "a1bba29c2a24f120ecb165a87070f10cc430406b95ac3c3f93a63b0b09522984",
-        "stability_hash_actual": "d7a378c5a671ebb68f3f3316c41b914138378e8a08d7cc9fd7a02e7aee25a632",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
+        "stability_hash_actual": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "transform_var_reference_custom_list",
@@ -16035,10 +15897,8 @@
         "compute-assertions"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -16186,7 +16046,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_transform_var_reference_custom_list_10231_1772949119662434666.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_transform_var_reference_custom_list_10266_1772952684608430751.jsonl"
           }
         }
       },
@@ -16197,12 +16057,12 @@
         "image_sha256": [
           "2f451247d08988f8a84793554df989a15e4c4f5363d402802766a7b992f6e731"
         ],
-        "stability_hash_expected": "651070a213c867d9280b4a262b232ca9319d42f149a41df5bf50b269dc5771b6",
-        "stability_hash_actual": "db11b8a431c1ebe76b8139495018f6035c27eef7c29f913fb8d836f2c7163b9e",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "b354b55cfc75148a3ae8cd366d17ab5943672a1dd51395a8a2d6d897bd0eb752",
+        "stability_hash_actual": "b354b55cfc75148a3ae8cd366d17ab5943672a1dd51395a8a2d6d897bd0eb752",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "two_page_break_colors",
@@ -16218,10 +16078,8 @@
         "multi-page-flow"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -16359,7 +16217,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_two_page_break_colors_10231_1772949119855928659.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_two_page_break_colors_10266_1772952684788257645.jsonl"
           }
         }
       },
@@ -16371,12 +16229,12 @@
           "7dad76861efc0b86406f07251fdaae0d7d9b9099cb99d2c594cd176089559fb2",
           "6978a65b8dedb8830d1cb3f595f1687f76bd3873bc34eb82f285d625539e71f9"
         ],
-        "stability_hash_expected": "491e78a3e79f1007aa7fdbd964191acf114e7e34e80afe4c5a715eb6faf8e964",
-        "stability_hash_actual": "cfa913d0cb15caae88d36aae16f99d34ec96d285ab395a9275912e9d51dbd321",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "bc29dde98105c22445e93abe6d2134a9084e059437e45fe4757bfea267324a0e",
+        "stability_hash_actual": "bc29dde98105c22445e93abe6d2134a9084e059437e45fe4757bfea267324a0e",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "units_calc_width_resolution",
@@ -16391,10 +16249,8 @@
         "width-resolution"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -16504,7 +16360,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_units_calc_width_resolution_10231_1772949120803769394.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_units_calc_width_resolution_10266_1772952685727215909.jsonl"
           }
         }
       },
@@ -16515,12 +16371,12 @@
         "image_sha256": [
           "feef74d4f028bcd90ba4a3a601d7ba379fb7dbcd4351b097f00027102e6045dc"
         ],
-        "stability_hash_expected": "5b8dc027acf9c8cd1f1d25445c38c6ce56c60db8139d3842edeb5faf4873a709",
-        "stability_hash_actual": "d1b784aa6e2182c9fd44511c9b1b79f35daa3c4e006693cb8542e7493c33d985",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "6ef14544be6597b2a799033f2ebd110d46a2ea845c10aea00898384669cfb76e",
+        "stability_hash_actual": "6ef14544be6597b2a799033f2ebd110d46a2ea845c10aea00898384669cfb76e",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     },
     {
       "id": "units_min_max_clamp_widths",
@@ -16537,10 +16393,8 @@
         "width-resolution"
       ],
       "expected_warnings": [],
-      "actual_warnings": [
-        "stability_hash_mismatch"
-      ],
-      "warnings_ok": false,
+      "actual_warnings": [],
+      "warnings_ok": true,
       "stages": {
         "parser": {
           "ok": true,
@@ -16780,7 +16634,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "/tmp/fullbleed_css_fixture_units_min_max_clamp_widths_10231_1772949121004517953.jsonl"
+            "log_path": "/tmp/fullbleed_css_fixture_units_min_max_clamp_widths_10266_1772952685908440187.jsonl"
           }
         }
       },
@@ -16791,12 +16645,12 @@
         "image_sha256": [
           "ea0970301573d6f3321db34a773713f3f3e0030642d7ce625724e8984705ac83"
         ],
-        "stability_hash_expected": "1fa349f6c4db9f77b59ab7fa50ad7eb684e11d38e6350976aea4a666dd23101b",
-        "stability_hash_actual": "46eaa86b3757cc66745a3e3f36b7c2f3689aaf4988e503d7cb08ff9d6515b76b",
-        "stability_hash_ok": false,
+        "stability_hash_expected": "2692f3d7976c83633c1812281eca3ff29a68e721eb161c7502b13acf0bf9e4f0",
+        "stability_hash_actual": "2692f3d7976c83633c1812281eca3ff29a68e721eb161c7502b13acf0bf9e4f0",
+        "stability_hash_ok": true,
         "emitted": null
       },
-      "ok": false
+      "ok": true
     }
   ]
 }

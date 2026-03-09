@@ -87,7 +87,12 @@ def test_prototype_bundle_outputs_validate_against_schemas(tmp_path: Path, jsons
         "metrics": {
             "source_page_count": 1,
             "render_page_count": 1,
-        }
+        },
+        "pagination_trace_summary": {
+            "page_count": 1,
+            "overflow_event_count": 0,
+            "transition_count": 0,
+        },
     }
     a11y_path = _write(tmp_path / "a11y.json", json.dumps(a11y_report))
     comp_path = _write(tmp_path / "comp.json", json.dumps(component_validation))
@@ -118,6 +123,8 @@ def test_prototype_bundle_outputs_validate_against_schemas(tmp_path: Path, jsons
     assert verifier["observability"]["reported_finding_count"] == len(verifier["findings"])
     assert verifier["observability"]["stage_counts"]["post-emit"] >= 1
     assert verifier["observability"]["correlation_index"] == []
+    assert verifier["pagination_trace_summary"]["page_count"] == 1
+    assert verifier["observability"]["signal_counts"]["pagination_page_count"] == 1
     assert verifier["wcag20aa_claim_readiness"]["target"] == "wcag20aa"
     assert verifier["wcag20aa_claim_readiness"]["claim_ready"] is False
     assert any(
@@ -137,6 +144,8 @@ def test_prototype_bundle_outputs_validate_against_schemas(tmp_path: Path, jsons
     assert pmr["artifacts"]["css_linked"] is True
     assert pmr["observability"]["reported_audit_count"] == len(pmr["audits"])
     assert pmr["observability"]["correlation_index"] == []
+    assert pmr["pagination_trace_summary"]["page_count"] == 1
+    assert pmr["observability"]["signal_counts"]["pagination_page_count"] == 1
 
 
 def test_prototype_cav_regressions_fail_fast(tmp_path: Path) -> None:

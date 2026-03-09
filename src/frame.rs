@@ -1,11 +1,40 @@
 use crate::canvas::Canvas;
 use crate::flowable::{BreakInside, Flowable};
-use crate::types::{Pt, Rect};
+use crate::types::{Pt, Rect, Size};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddDisposition {
+    Placed,
+    Split,
+    Overflow,
+}
+
+impl AddDisposition {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AddDisposition::Placed => "placed",
+            AddDisposition::Split => "split",
+            AddDisposition::Overflow => "overflow",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AddTrace {
+    pub disposition: AddDisposition,
+    pub reason: &'static str,
+    pub avail_width: Pt,
+    pub avail_height: Pt,
+    pub frame_rect: Rect,
+    pub cursor_y_before: Pt,
+    pub wrapped_size: Size,
+    pub placed_rect: Option<Rect>,
+}
 
 pub enum AddResult {
-    Placed,
-    Split(Box<dyn Flowable>),
-    Overflow(Box<dyn Flowable>),
+    Placed(AddTrace),
+    Split(Box<dyn Flowable>, AddTrace),
+    Overflow(Box<dyn Flowable>, AddTrace),
 }
 
 pub struct Frame {
@@ -36,8 +65,24 @@ impl Frame {
     pub fn add(&mut self, flowable: Box<dyn Flowable>, canvas: &mut Canvas) -> AddResult {
         let avail_width = self.rect.width;
         let avail_height = self.remaining_height();
+        let cursor_y_before = self.cursor_y;
         if avail_height <= Pt::ZERO {
-            return AddResult::Overflow(flowable);
+            return AddResult::Overflow(
+                flowable,
+                AddTrace {
+                    disposition: AddDisposition::Overflow,
+                    reason: "no_remaining_height",
+                    avail_width,
+                    avail_height,
+                    frame_rect: self.rect,
+                    cursor_y_before,
+                    wrapped_size: Size {
+                        width: Pt::ZERO,
+                        height: Pt::ZERO,
+                    },
+                    placed_rect: None,
+                },
+            );
         }
 
         let pagination = flowable.pagination();
@@ -52,7 +97,19 @@ impl Frame {
         {
             let can_move = !self.is_empty();
             if can_move {
-                return AddResult::Overflow(flowable);
+                return AddResult::Overflow(
+                    flowable,
+                    AddTrace {
+                        disposition: AddDisposition::Overflow,
+                        reason: "avoid_page_move",
+                        avail_width,
+                        avail_height,
+                        frame_rect: self.rect,
+                        cursor_y_before,
+                        wrapped_size: size,
+                        placed_rect: None,
+                    },
+                );
             }
         }
 
@@ -72,7 +129,16 @@ impl Frame {
             );
             canvas.record_flowable_bounds(rect);
             self.cursor_y = self.cursor_y + size.height;
-            return AddResult::Placed;
+            return AddResult::Placed(AddTrace {
+                disposition: AddDisposition::Placed,
+                reason: "fits_in_remaining_height",
+                avail_width,
+                avail_height,
+                frame_rect: self.rect,
+                cursor_y_before,
+                wrapped_size: size,
+                placed_rect: Some(rect),
+            });
         }
 
         if let Some((first, second)) = flowable.split(avail_width, avail_height) {
@@ -93,7 +159,19 @@ impl Frame {
                 );
                 canvas.record_flowable_bounds(rect);
                 self.cursor_y = self.cursor_y + first_size.height;
-                return AddResult::Split(second);
+                return AddResult::Split(
+                    second,
+                    AddTrace {
+                        disposition: AddDisposition::Split,
+                        reason: "split_to_fit",
+                        avail_width,
+                        avail_height,
+                        frame_rect: self.rect,
+                        cursor_y_before,
+                        wrapped_size: size,
+                        placed_rect: Some(rect),
+                    },
+                );
             }
         }
 
@@ -116,9 +194,30 @@ impl Frame {
             );
             canvas.record_flowable_bounds(rect);
             self.cursor_y = self.rect.height;
-            return AddResult::Placed;
+            return AddResult::Placed(AddTrace {
+                disposition: AddDisposition::Placed,
+                reason: "forced_unsplittable_full_frame",
+                avail_width,
+                avail_height,
+                frame_rect: self.rect,
+                cursor_y_before,
+                wrapped_size: size,
+                placed_rect: Some(rect),
+            });
         }
 
-        AddResult::Overflow(flowable)
+        AddResult::Overflow(
+            flowable,
+            AddTrace {
+                disposition: AddDisposition::Overflow,
+                reason: "unsplittable_overflow",
+                avail_width,
+                avail_height,
+                frame_rect: self.rect,
+                cursor_y_before,
+                wrapped_size: size,
+                placed_rect: None,
+            },
+        )
     }
 }

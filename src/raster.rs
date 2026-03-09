@@ -1398,7 +1398,26 @@ fn layout_text_glyphs_unshaped(
     out
 }
 
-static SYSTEM_FONT_CACHE: OnceLock<Mutex<HashMap<String, Option<Arc<Vec<u8>>>>>> = OnceLock::new();
+#[derive(Clone, Debug)]
+struct SystemFontCacheEntry {
+    bytes: Arc<Vec<u8>>,
+    #[cfg_attr(not(feature = "python"), allow(dead_code))]
+    path: std::path::PathBuf,
+    #[cfg_attr(not(feature = "python"), allow(dead_code))]
+    candidate_file_names: Vec<String>,
+}
+
+#[cfg(feature = "python")]
+#[derive(Clone, Debug)]
+pub(crate) struct SystemFontResolutionTrace {
+    pub(crate) matched_family: String,
+    pub(crate) resolved_path: std::path::PathBuf,
+    pub(crate) resolved_file_name: String,
+    pub(crate) candidate_file_names: Vec<String>,
+}
+
+static SYSTEM_FONT_CACHE: OnceLock<Mutex<HashMap<String, Option<SystemFontCacheEntry>>>> =
+    OnceLock::new();
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FontStyleVariant {
@@ -1409,6 +1428,53 @@ enum FontStyleVariant {
 }
 
 fn resolve_system_font_bytes(font_name: &str) -> Option<Arc<Vec<u8>>> {
+    resolve_system_font_match(font_name).map(|entry| entry.bytes)
+}
+
+#[cfg(feature = "python")]
+pub(crate) fn inspect_system_font_resolution(font_name: &str) -> Option<SystemFontResolutionTrace> {
+    let families = font_family_candidates(font_name);
+    for family in families {
+        let key = normalize_font_family(&family);
+        if key.is_empty() {
+            continue;
+        }
+        let cache = SYSTEM_FONT_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        if let Ok(cache_guard) = cache.lock() {
+            if let Some(Some(entry)) = cache_guard.get(&key) {
+                return Some(build_system_font_resolution_trace(&family, entry));
+            }
+        }
+        if let Some(entry) = load_system_font_from_candidates(&family) {
+            if let Ok(mut cache_guard) = cache.lock() {
+                cache_guard.insert(key, Some(entry.clone()));
+            }
+            return Some(build_system_font_resolution_trace(&family, &entry));
+        }
+    }
+    None
+}
+
+#[cfg(feature = "python")]
+fn build_system_font_resolution_trace(
+    matched_family: &str,
+    entry: &SystemFontCacheEntry,
+) -> SystemFontResolutionTrace {
+    let resolved_file_name = entry
+        .path
+        .file_name()
+        .and_then(|v| v.to_str())
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| entry.path.to_string_lossy().to_string());
+    SystemFontResolutionTrace {
+        matched_family: matched_family.to_string(),
+        resolved_path: entry.path.clone(),
+        resolved_file_name,
+        candidate_file_names: entry.candidate_file_names.clone(),
+    }
+}
+
+fn resolve_system_font_match(font_name: &str) -> Option<SystemFontCacheEntry> {
     let families = font_family_candidates(font_name);
     let cache = SYSTEM_FONT_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
 
@@ -1420,8 +1486,8 @@ fn resolve_system_font_bytes(font_name: &str) -> Option<Arc<Vec<u8>>> {
 
         if let Ok(cache_guard) = cache.lock() {
             if let Some(entry) = cache_guard.get(&key) {
-                if let Some(bytes) = entry {
-                    return Some(bytes.clone());
+                if let Some(entry) = entry {
+                    return Some(entry.clone());
                 }
                 continue;
             }
@@ -1431,15 +1497,15 @@ fn resolve_system_font_bytes(font_name: &str) -> Option<Arc<Vec<u8>>> {
         if let Ok(mut cache_guard) = cache.lock() {
             cache_guard.insert(key, loaded.clone());
         }
-        if let Some(bytes) = loaded {
-            return Some(bytes);
+        if let Some(entry) = loaded {
+            return Some(entry);
         }
     }
 
     None
 }
 
-fn load_system_font_from_candidates(font_name: &str) -> Option<Arc<Vec<u8>>> {
+fn load_system_font_from_candidates(font_name: &str) -> Option<SystemFontCacheEntry> {
     let mut candidates = system_font_file_candidates(font_name);
     if candidates.is_empty() {
         // Heuristic fallback: synthesize likely file names from normalized family + style.
@@ -1479,7 +1545,11 @@ fn load_system_font_from_candidates(font_name: &str) -> Option<Arc<Vec<u8>>> {
                 continue;
             };
             if ttf_parser::Face::parse(&bytes, 0).is_ok() {
-                return Some(Arc::new(bytes));
+                return Some(SystemFontCacheEntry {
+                    bytes: Arc::new(bytes),
+                    path,
+                    candidate_file_names: candidates.clone(),
+                });
             }
         }
     }

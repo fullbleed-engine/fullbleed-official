@@ -821,6 +821,35 @@ fn is_base14_name(name: &str) -> bool {
     )
 }
 
+fn emit_font_resolution_meta(
+    canvas: &mut Canvas,
+    registry: &FontRegistry,
+    style: &TextStyle,
+    resolved_name: &str,
+    primary_resolved: &str,
+) {
+    let requested_name = style.font_name.as_ref();
+    if requested_name == resolved_name && resolved_name == primary_resolved {
+        return;
+    }
+    canvas.meta("font.requested_name", requested_name.to_string());
+    let reason = if requested_name != primary_resolved
+        && registry.resolve(requested_name).is_none()
+        && !is_base14_name(requested_name)
+    {
+        if resolved_name != primary_resolved {
+            "unregistered_primary_glyph_fallback"
+        } else {
+            "unregistered_primary_fallback"
+        }
+    } else if resolved_name != primary_resolved {
+        "glyph_fallback"
+    } else {
+        "variant_resolution"
+    };
+    canvas.meta("font.fallback_reason", reason);
+}
+
 #[derive(Debug, Clone)]
 pub struct Paragraph {
     text: String,
@@ -976,6 +1005,13 @@ impl Paragraph {
             let mut cursor_x = x;
             let mut remaining = text.chars().count();
             for run in runs {
+                emit_font_resolution_meta(
+                    canvas,
+                    registry,
+                    &self.style,
+                    &run.font_name,
+                    primary.as_ref(),
+                );
                 canvas.set_font_name(&run.font_name);
                 if self.style.letter_spacing == Pt::ZERO {
                     let run_text = run.text;
@@ -2303,6 +2339,13 @@ impl TableCell {
             let mut cursor_x = x;
             let mut remaining = text.chars().count();
             for run in runs {
+                emit_font_resolution_meta(
+                    canvas,
+                    registry,
+                    &self.style,
+                    &run.font_name,
+                    primary.as_ref(),
+                );
                 canvas.set_font_name(&run.font_name);
                 if self.style.letter_spacing == Pt::ZERO {
                     let run_text = run.text;

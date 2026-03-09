@@ -207,9 +207,120 @@ def test_validate_component_mount_fails_on_text_overlap_from_render_trace() -> N
     report = validate_component_mount(
         engine=FakeEngine(),
         node_or_component=el("div", "x"),
+        fail_on_overflow=True,
     )
 
+    assert report["schema"] == "fullbleed.component_mount_validation.v2"
+    assert report["schema_version"] == 2
     assert report["ok"] is False
     assert report["text_overlap_count"] == 1
     assert report["render_time_trace_available"] is True
+    assert report["render_time_trace_error_present"] is False
+    assert "debug_log" not in report
+    assert "render_time_trace_error" not in report
+    assert report["debug"]["debug_log_supplied"] is False
+    assert report["debug"]["render_time_trace_error"] is None
     assert any(f["code"] == "TEXT_OVERLAP" for f in report["failures"])
+
+
+def test_validate_component_mount_reports_asset_resolution_failures() -> None:
+    class FakeEngine:
+        def render_pdf_with_glyph_report(self, html: str, css: str) -> tuple[bytes, list[object]]:
+            return (b"%PDF-FAKE", [])
+
+        def export_render_time_asset_resolution_trace(self, html: str, css: str) -> dict[str, object]:
+            return {
+                "schema": "fullbleed.asset_resolution_trace.v1",
+                "summary": {
+                    "image_reference_count": 1,
+                    "unresolved_count": 1,
+                    "unsupported_count": 0,
+                },
+                "warnings": ["unresolved image source: missing-image.png"],
+            }
+
+    report = validate_component_mount(
+        engine=FakeEngine(),
+        node_or_component=el("img", src="missing-image.png", alt="Missing image"),
+    )
+
+    assert report["ok"] is False
+    assert report["asset_reference_count"] == 1
+    assert report["asset_unresolved_count"] == 1
+    assert report["asset_unsupported_count"] == 0
+    assert any(f["code"] == "ASSET_RESOLUTION" for f in report["failures"])
+    assert report["debug"]["asset_resolution_trace_error"] is None
+
+
+def test_validate_component_mount_uses_native_pagination_trace_for_overflow_and_overprint() -> None:
+    class FakeEngine:
+        def render_pdf_with_glyph_report(self, html: str, css: str) -> tuple[bytes, list[object]]:
+            return (b"%PDF-FAKE", [])
+
+        def export_render_time_pagination_trace(self, html: str, css: str) -> dict[str, object]:
+            return {
+                "schema": "fullbleed.pagination_trace.v1",
+                "summary": {
+                    "event_count": 2,
+                    "overflow_event_count": 1,
+                    "flowable_overlap_count": 1,
+                    "text_overlap_count": 1,
+                    "low_coverage_page_count": 0,
+                },
+                "events": [
+                    {
+                        "event_type": "layout",
+                        "page": 1,
+                        "result": "overflow",
+                        "flowable_name": "Paragraph",
+                        "frame_index": 0,
+                        "reason": "frame_overflow",
+                        "overflow_severity": "frame_advance",
+                    }
+                ],
+                "pages": [
+                    {
+                        "page": 1,
+                        "flowable_overlap_count": 1,
+                        "text_overlap_count": 1,
+                        "text_overlap_samples": [
+                            {
+                                "page": 1,
+                                "overlap_bbox": {"x": 12, "y": 14, "w": 20, "h": 8},
+                                "a": {
+                                    "index": 0,
+                                    "command_index": 10,
+                                    "top_role": "P",
+                                    "text": "left",
+                                },
+                                "b": {
+                                    "index": 1,
+                                    "command_index": 11,
+                                    "top_role": "P",
+                                    "text": "right",
+                                },
+                            }
+                        ],
+                        "occupied_area_ratio": 0.8,
+                        "low_coverage": False,
+                    }
+                ],
+            }
+
+    report = validate_component_mount(
+        engine=FakeEngine(),
+        node_or_component=el("div", "x"),
+        fail_on_overflow=True,
+    )
+
+    assert report["ok"] is False
+    assert report["overflow_count"] == 1
+    assert report["flowable_overlap_count"] == 1
+    assert report["text_overlap_count"] == 1
+    assert report["pagination_trace_available"] is True
+    assert report["pagination_trace_event_count"] == 2
+    assert report["pagination_trace_error_present"] is False
+    assert any(f["code"] == "OVERFLOW" for f in report["failures"])
+    assert any(f["code"] == "TEXT_OVERLAP" for f in report["failures"])
+    assert any(f["code"] == "FLOWABLE_OVERPRINT" for f in report["failures"])
+    assert report["debug"]["pagination_trace_error"] is None

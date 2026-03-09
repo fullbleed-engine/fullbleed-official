@@ -74,6 +74,51 @@ def test_pdf_engine_verify_paged_media_rank_artifacts_emits_schema_valid_report(
     assert any(a["audit_id"] == "pmr.layout.page_count_target" and a["verdict"] == "pass" for a in report["audits"])
 
 
+def test_pdf_engine_verify_paged_media_rank_artifacts_prefers_pagination_trace_summary(
+    tmp_path: Path,
+) -> None:
+    _require_pdf_engine()
+
+    html = _write(
+        tmp_path / "doc.html",
+        "<!doctype html><html lang='en-US'><head><title>PMR Pagination</title></head><body><main><p>Hello</p></main></body></html>",
+    )
+    css = _write(tmp_path / "doc.css", "body{font-family:Helvetica}")
+
+    engine = fullbleed.PdfEngine(document_lang="en-US", document_title="PMR Pagination")
+    report = engine.verify_paged_media_rank_artifacts(
+        str(html),
+        str(css),
+        profile="cav",
+        mode="error",
+        overflow_count=0,
+        known_loss_count=0,
+        source_page_count=1,
+        render_page_count=1,
+        review_queue_items=0,
+        pagination_trace_summary={
+            "page_count": 2,
+            "overflow_event_count": 3,
+            "flowable_overlap_count": 1,
+            "text_overlap_count": 2,
+            "transition_count": 1,
+        },
+    )
+
+    assert report["pagination_trace_summary"]["overflow_event_count"] == 3
+    assert report["observability"]["signal_counts"]["pagination_overflow_event_count"] == 3
+    assert report["observability"]["signal_counts"]["pagination_page_count"] == 2
+    audits = {audit["audit_id"]: audit for audit in report["audits"]}
+    assert audits["pmr.layout.overflow_none"]["verdict"] == "fail"
+    assert audits["pmr.layout.overflow_none"]["evidence"][0]["diagnostic_ref"] == (
+        "pagination_trace_summary.overflow_event_count"
+    )
+    assert audits["pmr.layout.page_count_target"]["verdict"] == "fail"
+    assert audits["pmr.layout.page_count_target"]["evidence"][0]["diagnostic_ref"] == (
+        "pagination_trace_summary.page_count"
+    )
+
+
 def test_pdf_engine_verify_paged_media_rank_cav_fail_fast_regressions(tmp_path: Path) -> None:
     _require_pdf_engine()
 
@@ -135,6 +180,7 @@ def test_engine_pmr_matches_prototype_for_seeded_audit_verdicts(tmp_path: Path) 
         source_page_count=1,
         render_page_count=1,
         review_queue_items=2,
+        pagination_trace_summary={"page_count": 1, "overflow_event_count": 0},
     )
     proto_report = prototype_verify_paged_media_rank(
         html_path=html,
@@ -144,6 +190,7 @@ def test_engine_pmr_matches_prototype_for_seeded_audit_verdicts(tmp_path: Path) 
         component_validation={"overflow_count": 0, "known_loss_count": 0},
         parity_report={"coverage": {"review_queue_items": 2}, "source_characteristics": {"page_count": 1}},
         run_report={"metrics": {"source_page_count": 1, "render_page_count": 1}},
+        pagination_trace_summary={"page_count": 1, "overflow_event_count": 0},
         expected_lang="en-US",
         expected_title="Parity PMR",
         generated_at="2026-02-24T00:00:00Z",

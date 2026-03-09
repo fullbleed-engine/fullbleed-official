@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import stat
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -219,12 +220,18 @@ def _run_case(case: GoldenCase, *, python_exec: str) -> dict[str, Any]:
 def _copy_png_baselines(case_id: str, png_entries: list[dict[str, Any]]) -> None:
     case_dir = EXPECTED_PNG_ROOT / case_id
     if case_dir.exists():
-        shutil.rmtree(case_dir)
+        shutil.rmtree(case_dir, onerror=_rmtree_force_writeable)
     case_dir.mkdir(parents=True, exist_ok=True)
     for entry in png_entries:
         src = ROOT / entry["path"]
         dst = case_dir / entry["name"]
         shutil.copyfile(src, dst)
+
+
+def _rmtree_force_writeable(func: Any, path: str, exc_info: Any) -> None:
+    del exc_info
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
 
 
 def _selected_cases(case_ids: list[str] | None) -> list[GoldenCase]:

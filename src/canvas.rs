@@ -1,6 +1,9 @@
 use crate::flowable::PaintFilterSpec;
 use crate::types::{Color, MixBlendMode, Pt, Rect, Shading, Size};
 
+pub const META_FLOWABLE_BBOX_KEY: &str = "__fb_bbox";
+pub const META_PAGINATION_EVENT_KEY: &str = "__fb_pagination_event";
+
 #[derive(Debug, Clone)]
 pub enum Command {
     SaveState,
@@ -273,7 +276,7 @@ impl Canvas {
             rect.height.to_milli_i64()
         );
         self.current.commands.push(Command::Meta {
-            key: "__fb_bbox".to_string(),
+            key: META_FLOWABLE_BBOX_KEY.to_string(),
             value,
         });
     }

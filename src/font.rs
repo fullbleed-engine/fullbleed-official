@@ -65,18 +65,67 @@ pub(crate) struct FontRun {
     pub text: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RegisteredFontSourceKind {
+    Directory,
+    File,
+    BundleAsset,
+    Bytes,
+}
+
+impl RegisteredFontSourceKind {
+    #[cfg(feature = "python")]
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Directory => "directory",
+            Self::File => "file",
+            Self::BundleAsset => "bundle",
+            Self::Bytes => "bytes",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(not(feature = "python"), allow(dead_code))]
+pub(crate) struct RegisteredFontSourceInfo {
+    pub(crate) kind: RegisteredFontSourceKind,
+    pub(crate) identifier: String,
+}
+
 #[derive(Debug)]
 pub(crate) struct RegisteredFont {
     pub(crate) name: String,
     pub(crate) data: Vec<u8>,
     pub(crate) metrics: FontMetrics,
     pub(crate) program_kind: FontProgramKind,
+    #[cfg_attr(not(feature = "python"), allow(dead_code))]
+    pub(crate) source: RegisteredFontSourceInfo,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FontProgramKind {
     TrueType,
     OpenTypeCff,
+}
+
+impl FontProgramKind {
+    #[cfg(feature = "python")]
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::TrueType => "truetype",
+            Self::OpenTypeCff => "opentype_cff",
+        }
+    }
+}
+
+#[cfg(feature = "python")]
+#[derive(Debug, Clone)]
+pub(crate) struct RegisteredFontTrace {
+    pub(crate) resolved_name: String,
+    pub(crate) source_kind: RegisteredFontSourceKind,
+    pub(crate) source_identifier: String,
+    pub(crate) source_file_name: Option<String>,
+    pub(crate) program_kind: FontProgramKind,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -128,13 +177,17 @@ impl FontRegistry {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_file() {
-                self.register_file(path);
+                self.register_file_with_source(path.as_path(), RegisteredFontSourceKind::Directory);
             }
         }
     }
 
     pub(crate) fn register_file(&mut self, path: impl AsRef<Path>) {
         let path = path.as_ref();
+        self.register_file_with_source(path, RegisteredFontSourceKind::File);
+    }
+
+    fn register_file_with_source(&mut self, path: &Path, source_kind: RegisteredFontSourceKind) {
         let Some(ext) = path.extension().and_then(|v| v.to_str()) else {
             return;
         };
@@ -157,6 +210,10 @@ impl FontRegistry {
             data,
             metrics,
             program_kind,
+            source: RegisteredFontSourceInfo {
+                kind: source_kind,
+                identifier: path.to_string_lossy().to_string(),
+            },
         });
 
         let mut all_aliases = Vec::new();
@@ -176,6 +233,27 @@ impl FontRegistry {
         data: Vec<u8>,
         source_name: Option<&str>,
     ) -> Result<String, FullBleedError> {
+        self.register_bytes_with_source_kind(data, source_name, RegisteredFontSourceKind::Bytes)
+    }
+
+    pub(crate) fn register_bundle_font_bytes(
+        &mut self,
+        data: Vec<u8>,
+        source_name: Option<&str>,
+    ) -> Result<String, FullBleedError> {
+        self.register_bytes_with_source_kind(
+            data,
+            source_name,
+            RegisteredFontSourceKind::BundleAsset,
+        )
+    }
+
+    fn register_bytes_with_source_kind(
+        &mut self,
+        data: Vec<u8>,
+        source_name: Option<&str>,
+        source_kind: RegisteredFontSourceKind,
+    ) -> Result<String, FullBleedError> {
         let source = source_name.unwrap_or("EmbeddedFont");
         let Ok(face) = ttf_parser::Face::parse(&data, 0) else {
             return Err(FullBleedError::Asset(format!(
@@ -191,6 +269,10 @@ impl FontRegistry {
             data,
             metrics,
             program_kind,
+            source: RegisteredFontSourceInfo {
+                kind: source_kind,
+                identifier: source.to_string(),
+            },
         });
 
         let mut all_aliases = Vec::new();
@@ -212,6 +294,31 @@ impl FontRegistry {
         self.lookup
             .get(&key)
             .and_then(|index| self.fonts.get(*index))
+    }
+
+    #[cfg(feature = "python")]
+    pub(crate) fn resolve_trace(&self, name: &str) -> Option<RegisteredFontTrace> {
+        let font = self.resolve(name)?;
+        let source_path = Path::new(&font.source.identifier);
+        let source_file_name = source_path
+            .file_name()
+            .and_then(|v| v.to_str())
+            .map(|v| v.to_string())
+            .or_else(|| {
+                let trimmed = font.source.identifier.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            });
+        Some(RegisteredFontTrace {
+            resolved_name: font.name.clone(),
+            source_kind: font.source.kind,
+            source_identifier: font.source.identifier.clone(),
+            source_file_name,
+            program_kind: font.program_kind,
+        })
     }
 
     pub(crate) fn measure_text_width(&self, name: &str, font_size: Pt, text: &str) -> Pt {

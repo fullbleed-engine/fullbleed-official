@@ -58,19 +58,136 @@ pub const PMR_CATEGORIES_V1: [PmrCategoryDef; 5] = [
 ];
 
 pub const PMR_AUDITS_V1: [PmrAuditDef; 13] = [
-    PmrAuditDef { id: "pmr.doc.lang_present_valid", category: "document-semantics", weight: 3.0, class_name: "required", verification_mode: "machine", severity: "high", stage: "post-emit", scored: true },
-    PmrAuditDef { id: "pmr.doc.title_present_nonempty", category: "document-semantics", weight: 3.0, class_name: "required", verification_mode: "machine", severity: "high", stage: "post-emit", scored: true },
-    PmrAuditDef { id: "pmr.doc.metadata_engine_persistence", category: "document-semantics", weight: 4.0, class_name: "scored", verification_mode: "machine", severity: "high", stage: "post-emit", scored: true },
-    PmrAuditDef { id: "pmr.layout.overflow_none", category: "paged-layout-integrity", weight: 6.0, class_name: "required", verification_mode: "machine", severity: "critical", stage: "post-render", scored: true },
-    PmrAuditDef { id: "pmr.layout.known_loss_none_critical", category: "paged-layout-integrity", weight: 5.0, class_name: "required", verification_mode: "machine", severity: "high", stage: "post-render", scored: true },
-    PmrAuditDef { id: "pmr.layout.page_count_target", category: "paged-layout-integrity", weight: 4.0, class_name: "scored", verification_mode: "machine", severity: "high", stage: "post-render", scored: true },
-    PmrAuditDef { id: "pmr.forms.id_ref_integrity", category: "field-table-form-integrity", weight: 4.0, class_name: "required", verification_mode: "machine", severity: "critical", stage: "post-emit", scored: true },
-    PmrAuditDef { id: "pmr.tables.semantic_table_headers", category: "field-table-form-integrity", weight: 4.0, class_name: "scored", verification_mode: "machine", severity: "high", stage: "post-emit", scored: true },
-    PmrAuditDef { id: "pmr.signatures.text_semantics_present", category: "field-table-form-integrity", weight: 3.0, class_name: "scored", verification_mode: "machine", severity: "medium", stage: "pre-render", scored: true },
-    PmrAuditDef { id: "pmr.cav.document_only_content", category: "field-table-form-integrity", weight: 3.0, class_name: "required", verification_mode: "machine", severity: "critical", stage: "post-emit", scored: true },
-    PmrAuditDef { id: "pmr.artifacts.html_emitted", category: "artifact-packaging-reproducibility", weight: 3.0, class_name: "required", verification_mode: "machine", severity: "high", stage: "post-emit", scored: true },
-    PmrAuditDef { id: "pmr.artifacts.css_emitted", category: "artifact-packaging-reproducibility", weight: 3.0, class_name: "required", verification_mode: "machine", severity: "high", stage: "post-emit", scored: true },
-    PmrAuditDef { id: "pmr.artifacts.linked_css_reference", category: "artifact-packaging-reproducibility", weight: 2.0, class_name: "opportunity", verification_mode: "machine", severity: "low", stage: "post-emit", scored: false },
+    PmrAuditDef {
+        id: "pmr.doc.lang_present_valid",
+        category: "document-semantics",
+        weight: 3.0,
+        class_name: "required",
+        verification_mode: "machine",
+        severity: "high",
+        stage: "post-emit",
+        scored: true,
+    },
+    PmrAuditDef {
+        id: "pmr.doc.title_present_nonempty",
+        category: "document-semantics",
+        weight: 3.0,
+        class_name: "required",
+        verification_mode: "machine",
+        severity: "high",
+        stage: "post-emit",
+        scored: true,
+    },
+    PmrAuditDef {
+        id: "pmr.doc.metadata_engine_persistence",
+        category: "document-semantics",
+        weight: 4.0,
+        class_name: "scored",
+        verification_mode: "machine",
+        severity: "high",
+        stage: "post-emit",
+        scored: true,
+    },
+    PmrAuditDef {
+        id: "pmr.layout.overflow_none",
+        category: "paged-layout-integrity",
+        weight: 6.0,
+        class_name: "required",
+        verification_mode: "machine",
+        severity: "critical",
+        stage: "post-render",
+        scored: true,
+    },
+    PmrAuditDef {
+        id: "pmr.layout.known_loss_none_critical",
+        category: "paged-layout-integrity",
+        weight: 5.0,
+        class_name: "required",
+        verification_mode: "machine",
+        severity: "high",
+        stage: "post-render",
+        scored: true,
+    },
+    PmrAuditDef {
+        id: "pmr.layout.page_count_target",
+        category: "paged-layout-integrity",
+        weight: 4.0,
+        class_name: "scored",
+        verification_mode: "machine",
+        severity: "high",
+        stage: "post-render",
+        scored: true,
+    },
+    PmrAuditDef {
+        id: "pmr.forms.id_ref_integrity",
+        category: "field-table-form-integrity",
+        weight: 4.0,
+        class_name: "required",
+        verification_mode: "machine",
+        severity: "critical",
+        stage: "post-emit",
+        scored: true,
+    },
+    PmrAuditDef {
+        id: "pmr.tables.semantic_table_headers",
+        category: "field-table-form-integrity",
+        weight: 4.0,
+        class_name: "scored",
+        verification_mode: "machine",
+        severity: "high",
+        stage: "post-emit",
+        scored: true,
+    },
+    PmrAuditDef {
+        id: "pmr.signatures.text_semantics_present",
+        category: "field-table-form-integrity",
+        weight: 3.0,
+        class_name: "scored",
+        verification_mode: "machine",
+        severity: "medium",
+        stage: "pre-render",
+        scored: true,
+    },
+    PmrAuditDef {
+        id: "pmr.cav.document_only_content",
+        category: "field-table-form-integrity",
+        weight: 3.0,
+        class_name: "required",
+        verification_mode: "machine",
+        severity: "critical",
+        stage: "post-emit",
+        scored: true,
+    },
+    PmrAuditDef {
+        id: "pmr.artifacts.html_emitted",
+        category: "artifact-packaging-reproducibility",
+        weight: 3.0,
+        class_name: "required",
+        verification_mode: "machine",
+        severity: "high",
+        stage: "post-emit",
+        scored: true,
+    },
+    PmrAuditDef {
+        id: "pmr.artifacts.css_emitted",
+        category: "artifact-packaging-reproducibility",
+        weight: 3.0,
+        class_name: "required",
+        verification_mode: "machine",
+        severity: "high",
+        stage: "post-emit",
+        scored: true,
+    },
+    PmrAuditDef {
+        id: "pmr.artifacts.linked_css_reference",
+        category: "artifact-packaging-reproducibility",
+        weight: 2.0,
+        class_name: "opportunity",
+        verification_mode: "machine",
+        severity: "low",
+        stage: "post-emit",
+        scored: false,
+    },
 ];
 
 // Runtime authority is compiled into the binary. These payloads are currently sourced
@@ -246,7 +363,10 @@ pub fn wcag20aa_registry_v1_hash_sha256() -> String {
 }
 
 pub fn section508_html_registry_v1_hash_sha256() -> String {
-    hash_memoized(&SECTION508_HTML_REGISTRY_HASH, SECTION508_HTML_REGISTRY_V1_JSON)
+    hash_memoized(
+        &SECTION508_HTML_REGISTRY_HASH,
+        SECTION508_HTML_REGISTRY_V1_JSON,
+    )
 }
 
 pub fn contract_fingerprint_sha256() -> String {
@@ -315,7 +435,8 @@ where
     }
 
     fn entry_mappings<'a>(entry: &'a Value) -> Vec<&'a Value> {
-        entry.get("fullbleed_rule_mapping")
+        entry
+            .get("fullbleed_rule_mapping")
             .and_then(Value::as_array)
             .map(|arr| arr.iter().filter(|v| v.is_object()).collect())
             .unwrap_or_default()
@@ -414,10 +535,7 @@ where
             .and_then(Value::as_str)
             .unwrap_or(WCAG20AA_REGISTRY_ID)
             .to_string(),
-        registry_version: root
-            .get("version")
-            .and_then(Value::as_u64)
-            .unwrap_or(1) as usize,
+        registry_version: root.get("version").and_then(Value::as_u64).unwrap_or(1) as usize,
         wcag_version: root
             .get("wcag_version")
             .and_then(Value::as_str)
@@ -479,7 +597,8 @@ where
     }
 
     fn entry_mappings<'a>(entry: &'a Value) -> Vec<&'a Value> {
-        entry.get("fullbleed_rule_mapping")
+        entry
+            .get("fullbleed_rule_mapping")
             .and_then(Value::as_array)
             .map(|arr| arr.iter().filter(|v| v.is_object()).collect())
             .unwrap_or_default()
@@ -579,10 +698,7 @@ where
             .and_then(Value::as_str)
             .unwrap_or(SECTION508_HTML_REGISTRY_ID)
             .to_string(),
-        registry_version: root
-            .get("version")
-            .and_then(Value::as_u64)
-            .unwrap_or(1) as usize,
+        registry_version: root.get("version").and_then(Value::as_u64).unwrap_or(1) as usize,
         profile_id: root
             .get("profile_id")
             .and_then(Value::as_str)
@@ -595,7 +711,8 @@ where
         implemented_mapped_entry_count,
         implemented_mapped_entry_evaluated_count,
         implemented_mapped_entry_pending_count,
-        supporting_only_mapped_entry_count: supporting_only_count + wcag.supporting_only_mapped_entry_count,
+        supporting_only_mapped_entry_count: supporting_only_count
+            + wcag.supporting_only_mapped_entry_count,
         planned_only_mapped_entry_count: planned_only_count + wcag.planned_only_mapped_entry_count,
         unmapped_entry_count: total_entries.saturating_sub(mapped_entry_count),
         specific_mapped_entry_count: mapped_entries.len(),
@@ -651,7 +768,10 @@ pub fn pmr_effective_gate_level(profile: &str, audit_id: &str) -> &'static str {
 fn a11y_default_gate_levels() -> &'static BTreeMap<String, String> {
     A11Y_DEFAULT_GATE_LEVELS.get_or_init(|| {
         let mut out: BTreeMap<String, String> = BTreeMap::new();
-        if let Some(entries) = audit_registry_value().get("entries").and_then(Value::as_array) {
+        if let Some(entries) = audit_registry_value()
+            .get("entries")
+            .and_then(Value::as_array)
+        {
             for entry in entries {
                 let Some(id) = entry.get("id").and_then(Value::as_str) else {
                     continue;
@@ -674,7 +794,10 @@ fn a11y_default_gate_levels() -> &'static BTreeMap<String, String> {
 fn a11y_profile_gate_overrides() -> &'static BTreeMap<String, BTreeMap<String, String>> {
     A11Y_PROFILE_GATE_OVERRIDES.get_or_init(|| {
         let mut out: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
-        if let Some(profiles) = audit_registry_value().get("profiles").and_then(Value::as_object) {
+        if let Some(profiles) = audit_registry_value()
+            .get("profiles")
+            .and_then(Value::as_object)
+        {
             for (profile_name, profile_data) in profiles {
                 let mut per_profile: BTreeMap<String, String> = BTreeMap::new();
                 if let Some(overrides) = profile_data.get("overrides").and_then(Value::as_array) {
@@ -736,7 +859,8 @@ mod tests {
     use serde_json::Value;
 
     fn parse_embedded_audit_registry() -> Value {
-        serde_json::from_str(AUDIT_REGISTRY_V1_JSON).expect("embedded audit registry JSON should parse")
+        serde_json::from_str(AUDIT_REGISTRY_V1_JSON)
+            .expect("embedded audit registry JSON should parse")
     }
 
     #[test]
@@ -749,13 +873,21 @@ mod tests {
 
     #[test]
     fn registry_lookup_returns_known_payloads() {
-        assert!(registry_json(AUDIT_REGISTRY_ID).unwrap().contains("\"schema\": \"fullbleed.audit_registry.v1\""));
-        assert!(registry_json(WCAG20AA_REGISTRY_ID)
-            .unwrap()
-            .contains("\"schema\": \"wcag20aa_registry.v1\""));
-        assert!(registry_json(SECTION508_HTML_REGISTRY_ID)
-            .unwrap()
-            .contains("\"schema\": \"section508_html_registry.v1\""));
+        assert!(
+            registry_json(AUDIT_REGISTRY_ID)
+                .unwrap()
+                .contains("\"schema\": \"fullbleed.audit_registry.v1\"")
+        );
+        assert!(
+            registry_json(WCAG20AA_REGISTRY_ID)
+                .unwrap()
+                .contains("\"schema\": \"wcag20aa_registry.v1\"")
+        );
+        assert!(
+            registry_json(SECTION508_HTML_REGISTRY_ID)
+                .unwrap()
+                .contains("\"schema\": \"section508_html_registry.v1\"")
+        );
         assert!(registry_json("unknown").is_none());
     }
 
@@ -818,7 +950,10 @@ mod tests {
             );
             a11y_defaults.insert(id.to_string(), level);
         }
-        assert!(!a11y_defaults.is_empty(), "expected non-empty a11y rule set");
+        assert!(
+            !a11y_defaults.is_empty(),
+            "expected non-empty a11y rule set"
+        );
 
         for (profile_name, profile_val) in profiles {
             let mut expected_overrides: std::collections::BTreeMap<String, String> =
@@ -881,7 +1016,10 @@ mod tests {
             let expected = &pmr_category_defs_v1()[idx];
             assert_eq!(cat.get("id").and_then(Value::as_str), Some(expected.id));
             assert_eq!(cat.get("name").and_then(Value::as_str), Some(expected.name));
-            let weight = cat.get("weight").and_then(Value::as_f64).expect("category weight");
+            let weight = cat
+                .get("weight")
+                .and_then(Value::as_f64)
+                .expect("category weight");
             assert!((weight - expected.weight).abs() < f64::EPSILON);
         }
 
@@ -897,7 +1035,8 @@ mod tests {
             .filter(|e| e.get("system").and_then(Value::as_str) == Some("pmr"))
             .map(|e| {
                 let id = e.get("id").and_then(Value::as_str).expect("entry id");
-                let def = pmr_audit_def(id).unwrap_or_else(|| panic!("missing PMR audit def for {id}"));
+                let def =
+                    pmr_audit_def(id).unwrap_or_else(|| panic!("missing PMR audit def for {id}"));
                 if let Some(category) = e.get("category").and_then(Value::as_str) {
                     assert!(
                         category_ids.contains(category),
@@ -906,7 +1045,10 @@ mod tests {
                     assert_eq!(category, def.category, "category drift for {id}");
                 }
                 let weight = e.get("weight").and_then(Value::as_f64).expect("weight");
-                assert!((weight - def.weight).abs() < f64::EPSILON, "weight drift for {id}");
+                assert!(
+                    (weight - def.weight).abs() < f64::EPSILON,
+                    "weight drift for {id}"
+                );
                 assert_eq!(
                     e.get("class").and_then(Value::as_str),
                     Some(def.class_name),
@@ -944,7 +1086,11 @@ mod tests {
                 id
             })
             .collect();
-        assert_eq!(pmr_entry_ids.len(), pmr_audit_defs_v1().len(), "pmr audit def set size drift");
+        assert_eq!(
+            pmr_entry_ids.len(),
+            pmr_audit_defs_v1().len(),
+            "pmr audit def set size drift"
+        );
 
         let profiles = root
             .get("profiles")
@@ -1035,7 +1181,8 @@ mod tests {
 
     #[test]
     fn section508_html_coverage_summary_matches_registry_scope_totals() {
-        let summary = section508_html_coverage_from_rule_verdicts(std::iter::empty::<(&str, &str)>());
+        let summary =
+            section508_html_coverage_from_rule_verdicts(std::iter::empty::<(&str, &str)>());
         assert_eq!(summary.registry_id, "section508_html_registry.v1");
         assert_eq!(summary.registry_version, 1);
         assert_eq!(summary.profile_id, "section508.revised.e205.html");
@@ -1057,7 +1204,10 @@ mod tests {
             ("fb.a11y.html.title_present_nonempty", "pass"),
             ("fb.a11y.claim.wcag20aa_level_readiness", "warn"),
         ]);
-        assert!(summary.implemented_mapped_entry_count >= summary.inherited_wcag_implemented_mapped_entry_count);
+        assert!(
+            summary.implemented_mapped_entry_count
+                >= summary.inherited_wcag_implemented_mapped_entry_count
+        );
         assert!(summary.specific_implemented_mapped_entry_count >= 1);
         assert!(summary.implemented_mapped_result_counts.warn >= 1);
         assert_eq!(

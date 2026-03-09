@@ -57,6 +57,15 @@ def _artifact_hash(pdf_bytes: bytes, image_bytes: List[bytes]) -> str:
     )
 
 
+def _stability_hash(payload: Dict[str, Any]) -> str:
+    return _stable_json_hash(
+        {
+            "schema": "fullbleed.css_fixture_stability_digest.v3",
+            **payload,
+        }
+    )
+
+
 def _sanitize_fixture_id(value: str) -> str:
     cleaned = "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "_" for ch in value)
     return cleaned or "fixture"
@@ -806,7 +815,33 @@ def _run_fixture(
 
     pdf_sha = _sha256_bytes(pdf_bytes) if pdf_bytes else None
     img_sha = [_sha256_bytes(img) for img in image_bytes]
-    stability_actual = _artifact_hash(pdf_bytes, image_bytes) if pdf_bytes else None
+    stability_payload = {
+        "parser_ok": parser_ok,
+        "compute": {
+            "ok": compute_ok,
+            "glyph_report_count": len(glyph_report),
+            "page_data_present": page_data is not None,
+            "assertions": compute_assertions_details,
+        },
+        "layout": {
+            "ok": layout_ok,
+            "page_count": len(image_bytes),
+            "dpi": dpi,
+            "assertions": layout_assertions_details,
+        },
+        "paint": {
+            "ok": paint_ok,
+            "checks": paint_checks,
+        },
+        "diagnostics": {
+            "ok": diagnostics_ok,
+            "enabled": run_debug,
+            "summary_counts_total": diagnostics_details.get("summary_counts_total", {}),
+            "summary_context_count": diagnostics_details.get("summary_context_count", 0),
+        },
+        "warnings": sorted(warnings),
+    }
+    stability_actual = _stability_hash(stability_payload) if pdf_bytes else None
     stability_ok = (
         True
         if (update_stability or not stability_expected or not stability_actual)

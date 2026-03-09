@@ -415,6 +415,8 @@ def validate_component_mount(
             warnings.append(signal)
 
     return {
+        "schema": "fullbleed.component_mount_validation.v2",
+        "schema_version": 2,
         "ok": not failures,
         "bytes_written": len(pdf_bytes),
         "missing_glyph_count": len(glyph_list),
@@ -423,7 +425,9 @@ def validate_component_mount(
         "css_miss_count": css_warning_count,
         "known_loss_count": known_loss_count,
         "html_asset_warning_count": html_asset_warning_count,
-        "debug_log": debug_log,
         "failures": failures,
         "warnings": warnings,
+        "debug": {
+            "debug_log_supplied": bool(debug_log),
+        },
     }

@@ -22,6 +22,9 @@
     "target": {
       "$ref": "#/$defs/target"
     },
+    "pagination_trace_summary": {
+      "$ref": "#/$defs/paginationTraceSummary"
+    },
     "profile": {
       "type": "string",
       "minLength": 1
@@ -519,6 +522,25 @@
       "additionalProperties": {
         "type": "integer",
         "minimum": 0
+      }
+    },
+    "paginationTraceSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "page_count": { "type": "integer", "minimum": 0 },
+        "event_count": { "type": "integer", "minimum": 0 },
+        "transition_count": { "type": "integer", "minimum": 0 },
+        "page_transition_count": { "type": "integer", "minimum": 0 },
+        "frame_transition_count": { "type": "integer", "minimum": 0 },
+        "placement_count": { "type": "integer", "minimum": 0 },
+        "split_count": { "type": "integer", "minimum": 0 },
+        "overflow_event_count": { "type": "integer", "minimum": 0 },
+        "recoverable_overflow_count": { "type": "integer", "minimum": 0 },
+        "fatal_overflow_count": { "type": "integer", "minimum": 0 },
+        "low_coverage_page_count": { "type": "integer", "minimum": 0 },
+        "flowable_overlap_count": { "type": "integer", "minimum": 0 },
+        "text_overlap_count": { "type": "integer", "minimum": 0 }
       }
     },
     "observability": {

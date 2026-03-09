@@ -680,6 +680,87 @@ def _collect_render_trace_overlap_signals(render_trace: Any) -> dict[str, Any]:
     }
 
 
+def _collect_pagination_trace_signals(pagination_trace: Any) -> dict[str, Any]:
+    if not isinstance(pagination_trace, dict):
+        return {
+            "pagination_trace_available": False,
+            "event_count": 0,
+            "overflow_count": 0,
+            "overflow_samples": [],
+            "flowable_overlap_count": 0,
+            "flowable_overlap_samples": [],
+            "text_overlap_count": 0,
+            "text_overlap_samples": [],
+            "low_coverage_page_count": 0,
+            "low_coverage_page_samples": [],
+        }
+
+    summary = dict(pagination_trace.get("summary") or {})
+    events = list(pagination_trace.get("events") or [])
+    pages = list(pagination_trace.get("pages") or [])
+    overflow_samples: list[dict[str, Any]] = []
+    flowable_overlap_samples: list[dict[str, Any]] = []
+    text_overlap_samples: list[dict[str, Any]] = []
+    low_coverage_page_samples: list[dict[str, Any]] = []
+
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        if event.get("event_type") != "layout" or event.get("result") != "overflow":
+            continue
+        if len(overflow_samples) >= 5:
+            break
+        overflow_samples.append(
+            {
+                "page": event.get("page"),
+                "flowable_name": event.get("flowable_name"),
+                "frame_index": event.get("frame_index"),
+                "reason": event.get("reason"),
+                "overflow_severity": event.get("overflow_severity"),
+            }
+        )
+
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        if int(page.get("flowable_overlap_count") or 0) > 0 and len(flowable_overlap_samples) < 5:
+            flowable_overlap_samples.append(
+                {
+                    "page": page.get("page"),
+                    "overlap_count": page.get("flowable_overlap_count"),
+                    "occupied_area_ratio": page.get("occupied_area_ratio"),
+                }
+            )
+        if int(page.get("text_overlap_count") or 0) > 0 and len(text_overlap_samples) < 8:
+            for sample in list(page.get("text_overlap_samples") or []):
+                if len(text_overlap_samples) >= 8:
+                    break
+                if isinstance(sample, dict):
+                    text_overlap_samples.append(sample)
+        if bool(page.get("low_coverage")) and len(low_coverage_page_samples) < 5:
+            low_coverage_page_samples.append(
+                {
+                    "page": page.get("page"),
+                    "visible_command_count": page.get("visible_command_count"),
+                    "flowable_bbox_count": page.get("flowable_bbox_count"),
+                    "occupied_area_ratio": page.get("occupied_area_ratio"),
+                }
+            )
+
+    return {
+        "pagination_trace_available": True,
+        "event_count": int(summary.get("event_count") or 0),
+        "overflow_count": int(summary.get("overflow_event_count") or 0),
+        "overflow_samples": overflow_samples,
+        "flowable_overlap_count": int(summary.get("flowable_overlap_count") or 0),
+        "flowable_overlap_samples": flowable_overlap_samples,
+        "text_overlap_count": int(summary.get("text_overlap_count") or 0),
+        "text_overlap_samples": text_overlap_samples,
+        "low_coverage_page_count": int(summary.get("low_coverage_page_count") or 0),
+        "low_coverage_page_samples": low_coverage_page_samples,
+    }
+
+
 def validate_component_mount(
     *,
     engine: Any,
@@ -694,7 +775,9 @@ def validate_component_mount(
     fail_on_css_warnings: bool = False,
     fail_on_known_loss: bool = False,
     fail_on_html_asset_warning: bool = True,
+    fail_on_asset_resolution: bool = True,
     fail_on_text_overlap: bool = True,
+    fail_on_flowable_overlap: bool = True,
 ) -> dict[str, Any]:
     html = mount_component_html(
         node_or_component,
@@ -705,6 +788,10 @@ def validate_component_mount(
     )
     render_time_trace = None
     render_time_trace_error: str | None = None
+    asset_resolution_trace = None
+    asset_resolution_trace_error: str | None = None
+    pagination_trace = None
+    pagination_trace_error: str | None = None
     combined_render = getattr(
         engine,
         "render_pdf_with_glyph_report_and_render_time_reading_order_trace",
@@ -720,11 +807,24 @@ def validate_component_mount(
                 render_time_trace = export_trace(html, css)
             except Exception as exc:  # pragma: no cover - defensive native/runtime path
                 render_time_trace_error = f"{type(exc).__name__}: {exc}"
+    export_asset_trace = getattr(engine, "export_render_time_asset_resolution_trace", None)
+    if callable(export_asset_trace):
+        try:
+            asset_resolution_trace = export_asset_trace(html, css)
+        except Exception as exc:  # pragma: no cover - defensive native/runtime path
+            asset_resolution_trace_error = f"{type(exc).__name__}: {exc}"
+    export_pagination_trace = getattr(engine, "export_render_time_pagination_trace", None)
+    if callable(export_pagination_trace):
+        try:
+            pagination_trace = export_pagination_trace(html, css)
+        except Exception as exc:  # pragma: no cover - defensive native/runtime path
+            pagination_trace_error = f"{type(exc).__name__}: {exc}"
     glyph_list = list(glyph_report or [])
 
     debug_entries = _read_jsonl(debug_log) if debug_log else []
     signals = _collect_debug_signals(debug_entries)
     trace_signals = _collect_render_trace_overlap_signals(render_time_trace)
+    pagination_signals = _collect_pagination_trace_signals(pagination_trace)
     overflow_count = int(signals["overflow_count"])
     overflow_samples = list(signals["overflow_samples"])
     css_warning_count = int(signals["css_warning_count"])
@@ -733,12 +833,33 @@ def validate_component_mount(
     known_loss_samples = list(signals["known_loss_samples"])
     html_asset_warning_count = int(signals["html_asset_warning_count"])
     html_asset_warning_samples = list(signals["html_asset_warning_samples"])
-    text_overlap_count = int(trace_signals["text_overlap_count"])
-    text_overlap_samples = list(trace_signals["text_overlap_samples"])
+    pagination_overflow_count = int(pagination_signals["overflow_count"])
+    pagination_overflow_samples = list(pagination_signals["overflow_samples"])
+    flowable_overlap_count = int(pagination_signals["flowable_overlap_count"])
+    flowable_overlap_samples = list(pagination_signals["flowable_overlap_samples"])
+    pagination_text_overlap_count = int(pagination_signals["text_overlap_count"])
+    pagination_text_overlap_samples = list(pagination_signals["text_overlap_samples"])
+    low_coverage_page_count = int(pagination_signals["low_coverage_page_count"])
+    low_coverage_page_samples = list(pagination_signals["low_coverage_page_samples"])
+    pagination_trace_available = bool(pagination_signals["pagination_trace_available"])
+    pagination_trace_event_count = int(pagination_signals["event_count"])
     render_time_trace_available = bool(trace_signals["render_time_trace_available"])
     trace_pages_scanned = int(trace_signals["trace_pages_scanned"])
     trace_blocks_scanned = int(trace_signals["trace_blocks_scanned"])
     trace_bbox_missing_count = int(trace_signals["trace_bbox_missing_count"])
+    asset_summary = dict((asset_resolution_trace or {}).get("summary") or {})
+    asset_unresolved_count = int(asset_summary.get("unresolved_count") or 0)
+    asset_unsupported_count = int(asset_summary.get("unsupported_count") or 0)
+    asset_reference_count = int(asset_summary.get("image_reference_count") or 0)
+    if pagination_overflow_count > overflow_count:
+        overflow_count = pagination_overflow_count
+        overflow_samples = pagination_overflow_samples
+    if pagination_trace_available:
+        text_overlap_count = pagination_text_overlap_count
+        text_overlap_samples = pagination_text_overlap_samples
+    else:
+        text_overlap_count = int(trace_signals["text_overlap_count"])
+        text_overlap_samples = list(trace_signals["text_overlap_samples"])
 
     failures: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
@@ -790,6 +911,17 @@ def validate_component_mount(
             failures.append(signal)
         else:
             warnings.append(signal)
+    if asset_unresolved_count > 0 or asset_unsupported_count > 0:
+        signal = {
+            "code": "ASSET_RESOLUTION",
+            "count": asset_unresolved_count + asset_unsupported_count,
+            "summary": asset_summary,
+            "warnings": list((asset_resolution_trace or {}).get("warnings") or []),
+        }
+        if fail_on_asset_resolution:
+            failures.append(signal)
+        else:
+            warnings.append(signal)
     if text_overlap_count > 0:
         signal = {
             "code": "TEXT_OVERLAP",
@@ -800,6 +932,24 @@ def validate_component_mount(
             failures.append(signal)
         else:
             warnings.append(signal)
+    if flowable_overlap_count > 0:
+        signal = {
+            "code": "FLOWABLE_OVERPRINT",
+            "count": flowable_overlap_count,
+            "samples": flowable_overlap_samples,
+        }
+        if fail_on_flowable_overlap:
+            failures.append(signal)
+        else:
+            warnings.append(signal)
+    if low_coverage_page_count > 0:
+        warnings.append(
+            {
+                "code": "LOW_COVERAGE_PAGE",
+                "count": low_coverage_page_count,
+                "samples": low_coverage_page_samples,
+            }
+        )
     if render_time_trace_error:
         warnings.append(
             {
@@ -807,8 +957,24 @@ def validate_component_mount(
                 "message": render_time_trace_error,
             }
         )
+    if asset_resolution_trace_error:
+        warnings.append(
+            {
+                "code": "ASSET_RESOLUTION_TRACE_ERROR",
+                "message": asset_resolution_trace_error,
+            }
+        )
+    if pagination_trace_error:
+        warnings.append(
+            {
+                "code": "PAGINATION_TRACE_ERROR",
+                "message": pagination_trace_error,
+            }
+        )
 
     return {
+        "schema": "fullbleed.component_mount_validation.v2",
+        "schema_version": 2,
         "ok": not failures,
         "bytes_written": len(pdf_bytes),
         "missing_glyph_count": len(glyph_list),
@@ -817,13 +983,26 @@ def validate_component_mount(
         "css_miss_count": css_warning_count,
         "known_loss_count": known_loss_count,
         "html_asset_warning_count": html_asset_warning_count,
+        "asset_reference_count": asset_reference_count,
+        "asset_unresolved_count": asset_unresolved_count,
+        "asset_unsupported_count": asset_unsupported_count,
         "text_overlap_count": text_overlap_count,
+        "flowable_overlap_count": flowable_overlap_count,
+        "low_coverage_page_count": low_coverage_page_count,
+        "pagination_trace_available": pagination_trace_available,
+        "pagination_trace_event_count": pagination_trace_event_count,
+        "pagination_trace_error_present": pagination_trace_error is not None,
         "render_time_trace_available": render_time_trace_available,
         "render_time_trace_pages_scanned": trace_pages_scanned,
         "render_time_trace_blocks_scanned": trace_blocks_scanned,
         "render_time_trace_bbox_missing_count": trace_bbox_missing_count,
-        "render_time_trace_error": render_time_trace_error,
-        "debug_log": debug_log,
+        "render_time_trace_error_present": render_time_trace_error is not None,
         "failures": failures,
         "warnings": warnings,
+        "debug": {
+            "debug_log_supplied": bool(debug_log),
+            "render_time_trace_error": render_time_trace_error,
+            "asset_resolution_trace_error": asset_resolution_trace_error,
+            "pagination_trace_error": pagination_trace_error,
+        },
     }

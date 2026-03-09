@@ -68,6 +68,39 @@ def _i(value: Any, default: int = 0) -> int:
         return default
 
 
+def _pagination_trace_summary(summary: dict[str, Any] | None) -> dict[str, int] | None:
+    if not isinstance(summary, dict):
+        return None
+    keys = (
+        "page_count",
+        "event_count",
+        "transition_count",
+        "page_transition_count",
+        "frame_transition_count",
+        "placement_count",
+        "split_count",
+        "overflow_event_count",
+        "recoverable_overflow_count",
+        "fatal_overflow_count",
+        "low_coverage_page_count",
+        "flowable_overlap_count",
+        "text_overlap_count",
+    )
+    out: dict[str, int] = {}
+    for key in keys:
+        try:
+            value = summary.get(key)
+        except Exception:
+            value = None
+        if value is None:
+            continue
+        try:
+            out[key] = int(value)
+        except Exception:
+            continue
+    return out or None
+
+
 def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
@@ -1102,10 +1135,12 @@ def prototype_verify_accessibility(
     mode: str = "error",
     a11y_report: dict[str, Any] | None = None,
     parity_report: dict[str, Any] | None = None,
+    run_report: dict[str, Any] | None = None,
     expected_lang: str | None = None,
     expected_title: str | None = None,
     render_preview_png_path: str | Path | None = None,
     claim_evidence: dict[str, Any] | None = None,
+    pagination_trace_summary: dict[str, Any] | None = None,
     registry: dict[str, Any] | None = None,
     generated_at: str | None = None,
     fullbleed_version: str | None = None,
@@ -1118,6 +1153,9 @@ def prototype_verify_accessibility(
     css_p = Path(css_path)
     facts = parse_html_facts(html_p.read_text(encoding="utf-8"))
     css_text = css_p.read_text(encoding="utf-8")
+    pagination_summary = _pagination_trace_summary(
+        pagination_trace_summary or (run_report or {}).get("pagination_trace_summary")
+    )
     findings: list[dict[str, Any]] = []
 
     lang_pass = _lang_ok(facts.html_lang) and (expected_lang is None or facts.html_lang == expected_lang)
@@ -3428,6 +3466,19 @@ def prototype_verify_accessibility(
             facts.redundant_role_native_count + facts.redundant_state_native_count
         ),
     }
+    if pagination_summary:
+        if "page_count" in pagination_summary:
+            observability["signal_counts"]["pagination_page_count"] = pagination_summary["page_count"]
+        if "overflow_event_count" in pagination_summary:
+            observability["signal_counts"]["pagination_overflow_event_count"] = pagination_summary["overflow_event_count"]
+        if "low_coverage_page_count" in pagination_summary:
+            observability["signal_counts"]["pagination_low_coverage_page_count"] = pagination_summary["low_coverage_page_count"]
+        if "flowable_overlap_count" in pagination_summary:
+            observability["signal_counts"]["pagination_flowable_overlap_count"] = pagination_summary["flowable_overlap_count"]
+        if "text_overlap_count" in pagination_summary:
+            observability["signal_counts"]["pagination_text_overlap_count"] = pagination_summary["text_overlap_count"]
+        if "transition_count" in pagination_summary:
+            observability["signal_counts"]["pagination_transition_count"] = pagination_summary["transition_count"]
     gate = _gate(findings, id_key="rule_id", mode=mode, entries=entries, overrides=overrides)
     counts = {k: 0 for k in ("pass", "fail", "warn", "manual_needed", "not_applicable")}
     for f in findings:
@@ -3446,7 +3497,7 @@ def prototype_verify_accessibility(
         wcag20aa_coverage=wcag20aa_coverage,
         manual_review_debt_count=manual["item_count"],
     )
-    return {
+    report = {
         "schema": "fullbleed.a11y.verify.v1",
         "target": {"html_path": str(html_p), "css_path": str(css_p), "target_hash": _sha(html_p)},
         "profile": profile,
@@ -3498,6 +3549,9 @@ def prototype_verify_accessibility(
         },
         "manual_review_debt": manual,
     }
+    if pagination_summary:
+        report["pagination_trace_summary"] = pagination_summary
+    return report
 
 
 def _pmr_score(verdict: str) -> float | None:
@@ -3564,6 +3618,7 @@ def prototype_verify_paged_media_rank(
     component_validation: dict[str, Any] | None = None,
     parity_report: dict[str, Any] | None = None,
     run_report: dict[str, Any] | None = None,
+    pagination_trace_summary: dict[str, Any] | None = None,
     expected_lang: str | None = None,
     expected_title: str | None = None,
     registry: dict[str, Any] | None = None,
@@ -3578,6 +3633,9 @@ def prototype_verify_paged_media_rank(
     css_p = Path(css_path)
     facts = parse_html_facts(html_p.read_text(encoding="utf-8"))
     comp = component_validation or {}
+    pagination_summary = _pagination_trace_summary(
+        pagination_trace_summary or (run_report or {}).get("pagination_trace_summary")
+    )
     audits: list[dict[str, Any]] = []
 
     def E(aid: str) -> dict[str, Any]:
@@ -3598,8 +3656,17 @@ def prototype_verify_paged_media_rank(
 
     # Paged layout integrity
     e = E("pmr.layout.overflow_none")
-    overflow = _i(comp.get("overflow_count"), 0)
-    audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="pass" if overflow == 0 else "fail", message="No overflow placements detected." if overflow == 0 else f"Overflow placements detected ({overflow}).", scored=e.get("scored", True), evidence=[{"diagnostic_ref": "component_validation.overflow_count", "values": {"overflow_count": overflow}}]))
+    pagination_overflow = None if not pagination_summary else pagination_summary.get("overflow_event_count")
+    overflow = _i(
+        pagination_overflow if pagination_overflow is not None else comp.get("overflow_count"),
+        0,
+    )
+    overflow_values = {"overflow_count": overflow}
+    if pagination_overflow is not None:
+        overflow_values["pagination_overflow_event_count"] = pagination_overflow
+    if comp.get("overflow_count") is not None:
+        overflow_values["component_validation_overflow_count"] = _i(comp.get("overflow_count"), 0)
+    audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="pass" if overflow == 0 else "fail", message="No overflow placements detected." if overflow == 0 else f"Overflow placements detected ({overflow}).", scored=e.get("scored", True), evidence=[{"diagnostic_ref": "pagination_trace_summary.overflow_event_count" if pagination_overflow is not None else "component_validation.overflow_count", "values": overflow_values}]))
     e = E("pmr.layout.known_loss_none_critical")
     known_loss = _i(comp.get("known_loss_count"), 0)
     audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="pass" if known_loss == 0 else "fail", message="No critical known-loss events detected." if known_loss == 0 else f"Known-loss events detected ({known_loss}).", scored=e.get("scored", True), evidence=[{"diagnostic_ref": "component_validation.known_loss_count", "values": {"known_loss_count": known_loss}}]))
@@ -3612,11 +3679,16 @@ def prototype_verify_paged_media_rank(
         rnd_pages = m.get("render_page_count")
     if src_pages is None and parity_report:
         src_pages = parity_report.get("source_characteristics", {}).get("page_count")
+    if pagination_summary and pagination_summary.get("page_count") is not None:
+        rnd_pages = pagination_summary.get("page_count")
     if src_pages is None or rnd_pages is None:
         audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode="manual", severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="manual_needed", message="Page-count target could not be evaluated.", scored=False))
     else:
         pp = _i(src_pages) == _i(rnd_pages)
-        audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="pass" if pp else "fail", message="Page-count target satisfied." if pp else f"Page-count parity mismatch (source={src_pages}, render={rnd_pages}).", scored=e.get("scored", True), evidence=[{"values": {"source_page_count": src_pages, "render_page_count": rnd_pages}}]))
+        page_count_values = {"source_page_count": src_pages, "render_page_count": rnd_pages}
+        if pagination_summary and pagination_summary.get("page_count") is not None:
+            page_count_values["pagination_trace_page_count"] = pagination_summary["page_count"]
+        audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="pass" if pp else "fail", message="Page-count target satisfied." if pp else f"Page-count parity mismatch (source={src_pages}, render={rnd_pages}).", scored=e.get("scored", True), evidence=[{"diagnostic_ref": "pagination_trace_summary.page_count" if pagination_summary and pagination_summary.get("page_count") is not None else None, "values": page_count_values}]))
 
     # Field/table/form integrity
     e = E("pmr.forms.id_ref_integrity")
@@ -3725,7 +3797,20 @@ def prototype_verify_paged_media_rank(
         },
         "correlation_index": correlation_index,
     }
-    return {
+    if pagination_summary:
+        if "page_count" in pagination_summary:
+            observability["signal_counts"]["pagination_page_count"] = pagination_summary["page_count"]
+        if "overflow_event_count" in pagination_summary:
+            observability["signal_counts"]["pagination_overflow_event_count"] = pagination_summary["overflow_event_count"]
+        if "low_coverage_page_count" in pagination_summary:
+            observability["signal_counts"]["pagination_low_coverage_page_count"] = pagination_summary["low_coverage_page_count"]
+        if "flowable_overlap_count" in pagination_summary:
+            observability["signal_counts"]["pagination_flowable_overlap_count"] = pagination_summary["flowable_overlap_count"]
+        if "text_overlap_count" in pagination_summary:
+            observability["signal_counts"]["pagination_text_overlap_count"] = pagination_summary["text_overlap_count"]
+        if "transition_count" in pagination_summary:
+            observability["signal_counts"]["pagination_transition_count"] = pagination_summary["transition_count"]
+    report = {
         "schema": "fullbleed.pmr.v1",
         "target": {"html_path": str(html_p), "css_path": str(css_p)},
         "profile": profile,
@@ -3745,6 +3830,9 @@ def prototype_verify_paged_media_rank(
         "tooling": {"fullbleed_version": runtime_fullbleed_version, "report_schema_version": "1.0.0-draft", "generated_at": generated_at or _now()},
         "artifacts": {"html_hash": _sha(html_p), "css_hash": _sha(css_p), "css_linked": facts.has_css_link, "packaging_mode": "linked-css" if facts.has_css_link else "separate-files"},
     }
+    if pagination_summary:
+        report["pagination_trace_summary"] = pagination_summary
+    return report
 
 
 def run_prototype_bundle(
@@ -3779,6 +3867,7 @@ def run_prototype_bundle(
         mode=mode,
         a11y_report=a11y_report,
         parity_report=parity_report,
+        run_report=run_report,
         expected_lang=expected_lang,
         expected_title=expected_title,
         render_preview_png_path=render_preview_png_path,

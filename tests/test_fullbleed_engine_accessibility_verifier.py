@@ -108,6 +108,44 @@ def test_pdf_engine_verify_accessibility_artifacts_emits_schema_valid_report(
     assert report["tooling"]["section508_html_registry_hash"].startswith("sha256:")
 
 
+def test_pdf_engine_verify_accessibility_artifacts_surfaces_pagination_trace_summary(
+    tmp_path: Path,
+) -> None:
+    _require_pdf_engine()
+
+    html = _write(
+        tmp_path / "doc.html",
+        (
+            "<!doctype html><html lang='en-US'><head><title>Verifier Pagination</title></head>"
+            "<body><main id='root'><p>Hello</p></main></body></html>"
+        ),
+    )
+    css = _write(tmp_path / "doc.css", "body{font-family:Helvetica}")
+
+    engine = fullbleed.PdfEngine(document_lang="en-US", document_title="Verifier Pagination")
+    report = engine.verify_accessibility_artifacts(
+        str(html),
+        str(css),
+        profile="strict",
+        mode="error",
+        pagination_trace_summary={
+            "page_count": 1,
+            "overflow_event_count": 2,
+            "flowable_overlap_count": 1,
+            "text_overlap_count": 3,
+            "transition_count": 4,
+        },
+    )
+
+    assert report["pagination_trace_summary"]["overflow_event_count"] == 2
+    signals = report["observability"]["signal_counts"]
+    assert signals["pagination_page_count"] == 1
+    assert signals["pagination_overflow_event_count"] == 2
+    assert signals["pagination_flowable_overlap_count"] == 1
+    assert signals["pagination_text_overlap_count"] == 3
+    assert signals["pagination_transition_count"] == 4
+
+
 def test_pdf_engine_verify_accessibility_artifacts_fails_fast_for_ids_and_idrefs(
     tmp_path: Path,
 ) -> None:

@@ -1,4 +1,6 @@
 {
+  "schema": "fullbleed.component_mount_validation.v2",
+  "schema_version": 2,
   "ok": true,
   "bytes_written": 882692,
   "missing_glyph_count": 0,
@@ -7,7 +9,9 @@
   "css_miss_count": 0,
   "known_loss_count": 0,
   "html_asset_warning_count": 0,
-  "debug_log": "C:\\Users\\keena\\AppData\\Local\\Temp\\invoice_mount_bud1m914.jit.jsonl",
   "failures": [],
-  "warnings": []
+  "warnings": [],
+  "debug": {
+    "debug_log_supplied": true
+  }
 }

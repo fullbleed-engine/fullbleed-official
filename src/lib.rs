@@ -29,7 +29,6 @@ mod svg;
 mod types;
 
 pub use assets::{Asset, AssetBundle, AssetKind};
-use base64::Engine;
 pub use canvas::{Canvas, Command, Document, Page};
 use debug::DebugLogger;
 pub use doc_context::DocContext;
@@ -50,6 +49,8 @@ pub use flowable::{
     TextStyle,
 };
 use font::FontRegistry;
+#[cfg(feature = "python")]
+use font::RegisteredFontTrace;
 pub use frame::{AddResult, Frame};
 use fullbleed_audit_contract as audit_contract;
 pub use glyph_report::{GlyphCoverageReport, MissingGlyph};
@@ -95,6 +96,7 @@ pub struct FullBleed {
     template_binding_spec: Option<TemplateBindingSpec>,
     watermark: Option<WatermarkSpec>,
     asset_css: String,
+    asset_bundle: Arc<AssetBundle>,
 }
 
 #[derive(Clone)]
@@ -234,6 +236,23 @@ pub struct A11yVerifierCoreReport {
     pub facts: A11yVerifierFacts,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct PaginationTraceSummary {
+    pub page_count: Option<i64>,
+    pub event_count: Option<i64>,
+    pub transition_count: Option<i64>,
+    pub page_transition_count: Option<i64>,
+    pub frame_transition_count: Option<i64>,
+    pub placement_count: Option<i64>,
+    pub split_count: Option<i64>,
+    pub overflow_event_count: Option<i64>,
+    pub recoverable_overflow_count: Option<i64>,
+    pub fatal_overflow_count: Option<i64>,
+    pub low_coverage_page_count: Option<i64>,
+    pub flowable_overlap_count: Option<i64>,
+    pub text_overlap_count: Option<i64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct PmrCoreEvidence {
     pub selector: Option<String>,
@@ -309,6 +328,7 @@ pub struct PmrCoreCoverage {
 pub struct PmrCoreContext {
     pub overflow_count: Option<i64>,
     pub known_loss_count: Option<i64>,
+    pub pagination_summary: Option<PaginationTraceSummary>,
     pub source_page_count: Option<i64>,
     pub render_page_count: Option<i64>,
     pub review_queue_items: Option<i64>,
@@ -662,6 +682,7 @@ fn render_html_snippet_to_commands(
     width: Pt,
     height: Pt,
     font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<Arc<AssetBundle>>,
     report: Option<&mut GlyphCoverageReport>,
     svg_form: bool,
     svg_raster_fallback: bool,
@@ -682,6 +703,7 @@ fn render_html_snippet_to_commands(
         &html,
         resolver,
         font_registry,
+        asset_bundle,
         report,
         svg_form,
         svg_raster_fallback,
@@ -699,9 +721,9 @@ fn render_html_snippet_to_commands(
 
     for flowable in story {
         match frame.add(flowable, &mut canvas) {
-            AddResult::Placed => {}
-            AddResult::Split(_remaining) => break,
-            AddResult::Overflow(_remaining) => break,
+            AddResult::Placed(_) => {}
+            AddResult::Split(_remaining, _) => break,
+            AddResult::Overflow(_remaining, _) => break,
         }
     }
 
@@ -753,6 +775,7 @@ fn apply_page_header_html(
     resolver: &style::StyleResolver,
     page_data: Option<&PageDataContext>,
     font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<Arc<AssetBundle>>,
     report: Option<&mut GlyphCoverageReport>,
     svg_form: bool,
     svg_raster_fallback: bool,
@@ -801,6 +824,7 @@ fn apply_page_header_html(
                     spec.width,
                     spec.height,
                     font_registry.clone(),
+                    asset_bundle.clone(),
                     None,
                     svg_form,
                     svg_raster_fallback,
@@ -844,6 +868,7 @@ fn apply_page_header_html(
                         spec.width,
                         spec.height,
                         font_registry.clone(),
+                        asset_bundle.clone(),
                         None,
                         svg_form,
                         svg_raster_fallback,
@@ -860,6 +885,7 @@ fn apply_page_header_html(
                 spec.width,
                 spec.height,
                 font_registry.clone(),
+                asset_bundle.clone(),
                 report.as_deref_mut(),
                 svg_form,
                 svg_raster_fallback,
@@ -945,26 +971,17 @@ fn apply_page_footer(
     }
 }
 
-fn watermark_image_bytes(source: &str) -> Option<Vec<u8>> {
-    if source.starts_with("data:") {
-        let parts: Vec<&str> = source.splitn(2, ',').collect();
-        if parts.len() != 2 {
-            return None;
-        }
-        let header = parts[0];
-        let data_part = parts[1];
-        if header.contains("base64") {
-            return base64::engine::general_purpose::STANDARD
-                .decode(data_part)
-                .ok();
-        }
-        return Some(data_part.as_bytes().to_vec());
-    }
-    std::fs::read(source).ok()
+fn watermark_image_bytes(bundle: Option<&AssetBundle>, source: &str) -> Option<Vec<u8>> {
+    let resolved = assets::resolve_image_asset(bundle, source);
+    resolved.trace.success.then_some(resolved.bytes)
 }
 
-fn watermark_image_size(source: &str, page_size: Size) -> Option<Size> {
-    let bytes = watermark_image_bytes(source)?;
+fn watermark_image_size(
+    bundle: Option<&AssetBundle>,
+    source: &str,
+    page_size: Size,
+) -> Option<Size> {
+    let bytes = watermark_image_bytes(bundle, source)?;
     let decoded = image::load_from_memory(&bytes).ok()?;
     let (w, h) = decoded.dimensions();
     if w == 0 || h == 0 {
@@ -995,6 +1012,7 @@ fn build_watermark_commands(
     page_data: Option<&PageDataContext>,
     resolver: &style::StyleResolver,
     font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<Arc<AssetBundle>>,
     report: Option<&mut GlyphCoverageReport>,
     svg_form: bool,
     svg_raster_fallback: bool,
@@ -1076,6 +1094,7 @@ fn build_watermark_commands(
                 width,
                 height,
                 font_registry,
+                asset_bundle.clone(),
                 report.as_deref_mut(),
                 svg_form,
                 svg_raster_fallback,
@@ -1111,10 +1130,13 @@ fn build_watermark_commands(
             commands.push(Command::RestoreState);
         }
         WatermarkKind::Image(path) => {
-            let size = watermark_image_size(path, page_size).unwrap_or(Size {
-                width: page_size.width.mul_ratio(1, 3),
-                height: page_size.height.mul_ratio(1, 3),
-            });
+            let resolved_path = assets::renderable_image_source(asset_bundle.as_deref(), path)
+                .unwrap_or_else(|| path.clone());
+            let size =
+                watermark_image_size(asset_bundle.as_deref(), path, page_size).unwrap_or(Size {
+                    width: page_size.width.mul_ratio(1, 3),
+                    height: page_size.height.mul_ratio(1, 3),
+                });
             commands.push(Command::SaveState);
             commands.push(Command::SetOpacity {
                 fill: spec.opacity,
@@ -1136,7 +1158,7 @@ fn build_watermark_commands(
                 y: compensated_y,
                 width: size.width,
                 height: size.height,
-                resource_id: path.clone(),
+                resource_id: resolved_path,
             });
             commands.push(Command::RestoreState);
         }
@@ -1163,6 +1185,7 @@ fn build_watermark_document(
     page_data: Option<&PageDataContext>,
     mut report: Option<&mut GlyphCoverageReport>,
     font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<Arc<AssetBundle>>,
     svg_form: bool,
     svg_raster_fallback: bool,
 ) -> Document {
@@ -1188,6 +1211,7 @@ fn build_watermark_document(
             page_data,
             resolver,
             font_registry.clone(),
+            asset_bundle.clone(),
             report.as_deref_mut(),
             svg_form,
             svg_raster_fallback,
@@ -1229,6 +1253,7 @@ impl FullBleed {
         FullBleedBuilder::new()
     }
 
+    #[cfg(feature = "python")]
     pub(crate) fn measure_text_width_for_trace(
         &self,
         font_name: &str,
@@ -1237,6 +1262,24 @@ impl FullBleed {
     ) -> Pt {
         self.font_registry
             .measure_text_width(font_name, font_size, text)
+    }
+
+    #[cfg(feature = "python")]
+    pub(crate) fn resolve_registered_font_trace(
+        &self,
+        font_name: &str,
+    ) -> Option<RegisteredFontTrace> {
+        self.font_registry.resolve_trace(font_name)
+    }
+
+    #[cfg(feature = "python")]
+    pub(crate) fn asset_bundle_ref(&self) -> &AssetBundle {
+        self.asset_bundle.as_ref()
+    }
+
+    #[cfg(feature = "python")]
+    pub(crate) fn svg_raster_fallback_enabled(&self) -> bool {
+        self.svg_raster_fallback
     }
 
     fn emit_debug_summary(&self, context: &str) {
@@ -3532,7 +3575,10 @@ impl FullBleed {
             );
         }
 
-        let overflow = ctx.overflow_count.unwrap_or(0);
+        let pagination_summary = ctx.pagination_summary.as_ref();
+        let pagination_overflow =
+            pagination_summary.and_then(|summary| summary.overflow_event_count);
+        let overflow = pagination_overflow.or(ctx.overflow_count).unwrap_or(0);
         Self::pmr_push_contract_audit(
             &mut audits,
             "pmr.layout.overflow_none",
@@ -3546,8 +3592,30 @@ impl FullBleed {
             },
             vec![PmrCoreEvidence {
                 selector: None,
-                diagnostic_ref: Some("component_validation.overflow_count".to_string()),
-                values: vec![("overflow_count".to_string(), overflow.to_string())],
+                diagnostic_ref: Some(
+                    if pagination_overflow.is_some() {
+                        "pagination_trace_summary.overflow_event_count"
+                    } else {
+                        "component_validation.overflow_count"
+                    }
+                    .to_string(),
+                ),
+                values: {
+                    let mut values = vec![("overflow_count".to_string(), overflow.to_string())];
+                    if let Some(count) = pagination_overflow {
+                        values.push((
+                            "pagination_overflow_event_count".to_string(),
+                            count.to_string(),
+                        ));
+                    }
+                    if let Some(count) = ctx.overflow_count {
+                        values.push((
+                            "component_validation_overflow_count".to_string(),
+                            count.to_string(),
+                        ));
+                    }
+                    values
+                },
             }],
             None,
         );
@@ -3572,7 +3640,10 @@ impl FullBleed {
             None,
         );
 
-        match (ctx.source_page_count, ctx.render_page_count) {
+        let render_page_count = pagination_summary
+            .and_then(|summary| summary.page_count)
+            .or(ctx.render_page_count);
+        match (ctx.source_page_count, render_page_count) {
             (Some(src), Some(rnd)) => {
                 let ok = src == rnd;
                 Self::pmr_push_contract_audit(
@@ -3588,11 +3659,30 @@ impl FullBleed {
                     },
                     vec![PmrCoreEvidence {
                         selector: None,
-                        diagnostic_ref: None,
-                        values: vec![
-                            ("source_page_count".to_string(), src.to_string()),
-                            ("render_page_count".to_string(), rnd.to_string()),
-                        ],
+                        diagnostic_ref: pagination_summary
+                            .and_then(|summary| summary.page_count)
+                            .map(|_| "pagination_trace_summary.page_count".to_string()),
+                        values: {
+                            let mut values = vec![
+                                ("source_page_count".to_string(), src.to_string()),
+                                ("render_page_count".to_string(), rnd.to_string()),
+                            ];
+                            if let Some(count) =
+                                pagination_summary.and_then(|summary| summary.page_count)
+                            {
+                                values.push((
+                                    "pagination_trace_page_count".to_string(),
+                                    count.to_string(),
+                                ));
+                            }
+                            if let Some(count) = ctx.render_page_count {
+                                values.push((
+                                    "runtime_render_page_count".to_string(),
+                                    count.to_string(),
+                                ));
+                            }
+                            values
+                        },
                     }],
                     None,
                 );
@@ -4052,6 +4142,7 @@ impl FullBleed {
                 html,
                 resolver,
                 Some(self.font_registry.clone()),
+                Some(self.asset_bundle.clone()),
                 pass_report_ref.as_deref_mut(),
                 self.svg_form_xobjects,
                 self.svg_raster_fallback,
@@ -4271,6 +4362,7 @@ impl FullBleed {
                     page_data,
                     report.as_deref_mut(),
                     Some(self.font_registry.clone()),
+                    Some(self.asset_bundle.clone()),
                     self.svg_form_xobjects,
                     self.svg_raster_fallback,
                 );
@@ -4294,6 +4386,7 @@ impl FullBleed {
                 resolver,
                 page_data,
                 Some(self.font_registry.clone()),
+                Some(self.asset_bundle.clone()),
                 report.as_deref_mut(),
                 self.svg_form_xobjects,
                 self.svg_raster_fallback,
@@ -4333,6 +4426,7 @@ impl FullBleed {
                     page_data,
                     report.as_deref_mut(),
                     Some(self.font_registry.clone()),
+                    Some(self.asset_bundle.clone()),
                     self.svg_form_xobjects,
                     self.svg_raster_fallback,
                 ))
@@ -6061,7 +6155,7 @@ impl FullBleedBuilder {
             registry.register_file(file);
         }
         for asset in self.asset_bundle.font_assets() {
-            registry.register_bytes(asset.data.clone(), Some(&asset.name))?;
+            registry.register_bundle_font_bytes(asset.data.clone(), Some(&asset.name))?;
         }
         let asset_css = self.asset_bundle.css_text();
         let debug = if let Some(path) = self.debug_path {
@@ -6100,6 +6194,7 @@ impl FullBleedBuilder {
             template_binding_spec: self.template_binding_spec,
             watermark: self.watermark,
             asset_css,
+            asset_bundle: Arc::new(self.asset_bundle),
         })
     }
 }
@@ -6437,6 +6532,7 @@ mod tests {
             &resolver,
             None,
             None,
+            None,
             false,
             false,
         );
@@ -6460,7 +6556,9 @@ mod tests {
         let base = empty_document(3);
         let spec = WatermarkSpec::text("CONFIDENTIAL");
         let resolver = style::StyleResolver::new("");
-        let wm = build_watermark_document(&base, &spec, &resolver, None, None, None, false, false);
+        let wm = build_watermark_document(
+            &base, &spec, &resolver, None, None, None, None, false, false,
+        );
 
         assert_eq!(wm.pages.len(), 3);
         for page in &wm.pages {
@@ -6476,7 +6574,9 @@ mod tests {
         let image_source = "examples/img/full_bleed-logo_small.png".to_string();
         let spec = WatermarkSpec::image(image_source.clone());
         let resolver = style::StyleResolver::new("");
-        let wm = build_watermark_document(&base, &spec, &resolver, None, None, None, false, false);
+        let wm = build_watermark_document(
+            &base, &spec, &resolver, None, None, None, None, false, false,
+        );
 
         assert_eq!(wm.pages.len(), 4);
         for page in &wm.pages {
@@ -6495,7 +6595,7 @@ mod tests {
         let resolver = style::StyleResolver::new("");
         let page_size = Size::a4();
         let commands = build_watermark_commands(
-            &spec, page_size, 1, 1, None, &resolver, None, None, false, false,
+            &spec, page_size, 1, 1, None, &resolver, None, None, None, false, false,
         );
 
         let draw = commands.iter().find_map(|cmd| match cmd {
@@ -6513,7 +6613,7 @@ mod tests {
         let resolver = style::StyleResolver::new("");
         let page_size = Size::a4();
         let commands = build_watermark_commands(
-            &spec, page_size, 1, 1, None, &resolver, None, None, false, false,
+            &spec, page_size, 1, 1, None, &resolver, None, None, None, false, false,
         );
 
         let draw = commands.iter().find_map(|cmd| match cmd {
@@ -7120,11 +7220,11 @@ mod tests {
 
         for _ in 0..10 {
             let result = frame.add(Box::new(Spacer::new_pt(Pt::from_f32(5.0))), &mut canvas);
-            assert!(matches!(result, AddResult::Placed));
+            assert!(matches!(result, AddResult::Placed(_)));
         }
 
         let result = frame.add(Box::new(Spacer::new_pt(Pt::from_f32(5.0))), &mut canvas);
-        assert!(matches!(result, AddResult::Overflow(_)));
+        assert!(matches!(result, AddResult::Overflow(_, _)));
     }
 
     #[test]
@@ -7149,7 +7249,7 @@ mod tests {
             height: Pt::from_f32(200.0),
         });
         let second = match frame1.add(Box::new(table), &mut canvas) {
-            AddResult::Split(rest) => rest,
+            AddResult::Split(rest, _) => rest,
             other => panic!(
                 "expected split, got variant {:?}",
                 std::mem::discriminant(&other)
@@ -7159,7 +7259,10 @@ mod tests {
         canvas.show_page();
         let mut frame2 = Frame::new(frame_rect);
         let result2 = frame2.add(second, &mut canvas);
-        assert!(matches!(result2, AddResult::Placed | AddResult::Split(_)));
+        assert!(matches!(
+            result2,
+            AddResult::Placed(_) | AddResult::Split(_, _)
+        ));
 
         let doc = canvas.finish();
         assert!(doc.pages.len() >= 2);
@@ -7189,7 +7292,7 @@ mod tests {
             height: Pt::from_f32(200.0),
         });
         let second = match frame1.add(Box::new(table), &mut canvas) {
-            AddResult::Split(rest) => rest,
+            AddResult::Split(rest, _) => rest,
             other => panic!(
                 "expected split, got variant {:?}",
                 std::mem::discriminant(&other)
@@ -7199,7 +7302,10 @@ mod tests {
         canvas.show_page();
         let mut frame2 = Frame::new(frame_rect);
         let result2 = frame2.add(second, &mut canvas);
-        assert!(matches!(result2, AddResult::Placed | AddResult::Split(_)));
+        assert!(matches!(
+            result2,
+            AddResult::Placed(_) | AddResult::Split(_, _)
+        ));
 
         let doc = canvas.finish();
         assert!(doc.pages.len() >= 2);
@@ -7244,7 +7350,7 @@ mod tests {
             height: Pt::from_f32(60.0),
         });
         let result = frame.add(Box::new(table), &mut canvas);
-        assert!(matches!(result, AddResult::Placed));
+        assert!(matches!(result, AddResult::Placed(_)));
 
         let doc = canvas.finish();
         let page = &doc.pages[0];
