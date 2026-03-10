@@ -25,6 +25,9 @@
     "pagination_trace_summary": {
       "$ref": "#/$defs/paginationTraceSummary"
     },
+    "diagnostic_signals": {
+      "$ref": "#/$defs/diagnosticSignals"
+    },
     "profile": {
       "type": "string",
       "minLength": 1
@@ -400,6 +403,13 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "reason_codes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
@@ -541,6 +551,23 @@
         "low_coverage_page_count": { "type": "integer", "minimum": 0 },
         "flowable_overlap_count": { "type": "integer", "minimum": 0 },
         "text_overlap_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "diagnosticSignals": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "page_count_mismatch": { "type": "boolean" },
+        "layout_collapse_detected": { "type": "boolean" },
+        "pagination_overflow_detected": { "type": "boolean" },
+        "token_fragmentation_detected": { "type": "boolean" },
+        "typography_wrap_drift_detected": { "type": "boolean" },
+        "semantic_table_alignment_drift": { "type": "boolean" },
+        "low_coverage_page_count": { "type": "integer", "minimum": 0 },
+        "token_fragmentation_block_count": { "type": "integer", "minimum": 0 },
+        "wrap_drift_block_count": { "type": "integer", "minimum": 0 },
+        "semantic_table_row_risk_count": { "type": "integer", "minimum": 0 },
+        "fragmented_table_cell_count": { "type": "integer", "minimum": 0 }
       }
     },
     "observability": {

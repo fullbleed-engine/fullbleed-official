@@ -146,6 +146,66 @@ def test_pdf_engine_verify_accessibility_artifacts_surfaces_pagination_trace_sum
     assert signals["pagination_transition_count"] == 4
 
 
+def test_pdf_engine_verify_accessibility_artifacts_surfaces_diagnostic_reason_codes(
+    tmp_path: Path,
+) -> None:
+    _require_pdf_engine()
+
+    html = _write(
+        tmp_path / "doc.html",
+        (
+            "<!doctype html><html lang='en-US'><head><title>Verifier Diagnostics</title></head>"
+            "<body><main id='root'><p>Hello</p></main></body></html>"
+        ),
+    )
+    css = _write(tmp_path / "doc.css", "body{font-family:Helvetica}")
+
+    engine = fullbleed.PdfEngine(
+        document_lang="en-US", document_title="Verifier Diagnostics"
+    )
+    report = engine.verify_accessibility_artifacts(
+        str(html),
+        str(css),
+        profile="strict",
+        mode="error",
+        pagination_trace_summary={
+            "page_count": 2,
+            "overflow_event_count": 1,
+            "low_coverage_page_count": 1,
+        },
+        diagnostic_signals={
+            "page_count_mismatch": True,
+            "layout_collapse_detected": True,
+            "pagination_overflow_detected": True,
+            "token_fragmentation_detected": True,
+            "typography_wrap_drift_detected": True,
+            "semantic_table_alignment_drift": True,
+            "low_coverage_page_count": 1,
+            "token_fragmentation_block_count": 2,
+            "wrap_drift_block_count": 3,
+            "semantic_table_row_risk_count": 4,
+            "fragmented_table_cell_count": 5,
+        },
+    )
+
+    assert report["diagnostic_signals"]["page_count_mismatch"] is True
+    assert report["diagnostic_signals"]["token_fragmentation_block_count"] == 2
+    assert set(report["gate"]["reason_codes"]) == {
+        "page_count_mismatch",
+        "layout_collapse_detected",
+        "pagination_overflow_detected",
+        "token_fragmentation_detected",
+        "typography_wrap_drift_detected",
+        "semantic_table_alignment_drift",
+    }
+    signals = report["observability"]["signal_counts"]
+    assert signals["diagnostic_low_coverage_page_count"] == 1
+    assert signals["diagnostic_token_fragmentation_block_count"] == 2
+    assert signals["diagnostic_wrap_drift_block_count"] == 3
+    assert signals["diagnostic_semantic_table_row_risk_count"] == 4
+    assert signals["diagnostic_fragmented_table_cell_count"] == 5
+
+
 def test_pdf_engine_verify_accessibility_artifacts_fails_fast_for_ids_and_idrefs(
     tmp_path: Path,
 ) -> None:

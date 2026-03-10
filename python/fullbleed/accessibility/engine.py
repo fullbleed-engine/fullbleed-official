@@ -78,6 +78,36 @@ def _coerce_pagination_trace_summary(summary: dict[str, Any] | None) -> dict[str
     return out or None
 
 
+def _coerce_diagnostic_signals(signals: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(signals, dict):
+        return None
+    bool_keys = (
+        "page_count_mismatch",
+        "layout_collapse_detected",
+        "pagination_overflow_detected",
+        "token_fragmentation_detected",
+        "typography_wrap_drift_detected",
+        "semantic_table_alignment_drift",
+    )
+    int_keys = (
+        "low_coverage_page_count",
+        "token_fragmentation_block_count",
+        "wrap_drift_block_count",
+        "semantic_table_row_risk_count",
+        "fragmented_table_cell_count",
+    )
+    out: dict[str, Any] = {}
+    for key in bool_keys:
+        value = signals.get(key)
+        if isinstance(value, bool):
+            out[key] = value
+    for key in int_keys:
+        value = _coerce_int(signals.get(key))
+        if value is not None:
+            out[key] = value
+    return out or None
+
+
 def _sha256_file(path: Path) -> str | None:
     try:
         return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
@@ -514,6 +544,7 @@ class AccessibilityEngine:
         claim_evidence: dict[str, Any] | None = None,
         render_preview_png_path: str | None = None,
         pagination_trace_summary: dict[str, Any] | None = None,
+        diagnostic_signals: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return dict(
             self._engine.verify_accessibility_artifacts(
@@ -527,6 +558,7 @@ class AccessibilityEngine:
                 pagination_trace_summary=_coerce_pagination_trace_summary(
                     pagination_trace_summary
                 ),
+                diagnostic_signals=_coerce_diagnostic_signals(diagnostic_signals),
             )
         )
 
@@ -539,6 +571,7 @@ class AccessibilityEngine:
         source_analysis: dict[str, Any] | None = None,
         render_page_count: int | None = None,
         pagination_trace_summary: dict[str, Any] | None = None,
+        diagnostic_signals: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         component_validation = component_validation or {}
         parity_report = parity_report or {}
@@ -568,6 +601,7 @@ class AccessibilityEngine:
                 _coerce_int(parity_cov.get("review_queue_items")),
                 _coerce_int(run_metrics.get("review_queue_items")),
             ),
+            "diagnostic_signals": _coerce_diagnostic_signals(diagnostic_signals),
         }
 
     def verify_pmr_artifacts(
@@ -583,6 +617,7 @@ class AccessibilityEngine:
         source_analysis: dict[str, Any] | None = None,
         render_page_count: int | None = None,
         pagination_trace_summary: dict[str, Any] | None = None,
+        diagnostic_signals: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         kwargs = self._derive_pmr_kwargs(
             component_validation=component_validation,
@@ -591,12 +626,47 @@ class AccessibilityEngine:
             source_analysis=source_analysis,
             render_page_count=render_page_count,
             pagination_trace_summary=pagination_trace_summary,
+            diagnostic_signals=diagnostic_signals,
         )
         return dict(
             self._engine.verify_paged_media_rank_artifacts(
                 html_path, css_path, profile=profile, mode=mode, **kwargs
             )
         )
+
+    def export_render_time_typography_drift_trace(
+        self,
+        html: str,
+        css: str,
+        *,
+        out_path: str | None = None,
+    ) -> dict[str, Any]:
+        if not hasattr(self._engine, "export_render_time_typography_drift_trace"):
+            raise AttributeError(
+                "PdfEngine.export_render_time_typography_drift_trace is unavailable"
+            )
+        trace = dict(self._engine.export_render_time_typography_drift_trace(html, css))
+        if out_path:
+            _dump_json(Path(out_path), trace)
+        return trace
+
+    def export_render_time_region_text_alignment_trace(
+        self,
+        html: str,
+        css: str,
+        *,
+        out_path: str | None = None,
+    ) -> dict[str, Any]:
+        if not hasattr(self._engine, "export_render_time_region_text_alignment_trace"):
+            raise AttributeError(
+                "PdfEngine.export_render_time_region_text_alignment_trace is unavailable"
+            )
+        trace = dict(
+            self._engine.export_render_time_region_text_alignment_trace(html, css)
+        )
+        if out_path:
+            _dump_json(Path(out_path), trace)
+        return trace
 
     def export_reading_order_trace(self, pdf_path: str, *, out_path: str | None = None) -> dict[str, Any]:
         if hasattr(_fullbleed, "export_pdf_reading_order_trace"):
@@ -1081,6 +1151,10 @@ class AccessibilityEngine:
         font_resolution_path = out_dir_path / f"{stem}_font_resolution_trace.json"
         asset_resolution_path = out_dir_path / f"{stem}_asset_resolution_trace.json"
         pagination_trace_path = out_dir_path / f"{stem}_pagination_trace.json"
+        typography_drift_path = out_dir_path / f"{stem}_typography_drift_trace.json"
+        region_text_alignment_path = (
+            out_dir_path / f"{stem}_region_text_alignment_trace.json"
+        )
         run_report_path = out_dir_path / f"{stem}_run_report.json"
 
         emitted = self.emit_artifacts(body_html, css_text, str(html_path), str(css_path))
@@ -1105,7 +1179,10 @@ class AccessibilityEngine:
         font_resolution_trace: dict[str, Any] | None = None
         asset_resolution_trace: dict[str, Any] | None = None
         pagination_trace: dict[str, Any] | None = None
+        typography_drift_trace: dict[str, Any] | None = None
+        region_text_alignment_trace: dict[str, Any] | None = None
         page_count_divergence: dict[str, Any] | None = None
+        diagnostic_signals: dict[str, Any] | None = None
 
         if hasattr(self._engine, "export_render_time_pagination_trace"):
             try:
@@ -1150,45 +1227,67 @@ class AccessibilityEngine:
                     f"pagination trace unavailable: {type(exc).__name__}: {exc}"
                 )
 
-        if run_verifier and hasattr(self._engine, "verify_accessibility_artifacts"):
-            contrast_png = png_paths[0] if png_paths else None
+        if hasattr(self._engine, "export_render_time_typography_drift_trace"):
             try:
-                verifier_report = self.verify_accessibility_artifacts(
-                    str(html_path),
-                    str(css_path),
-                    profile=profile,
-                    mode="error",
-                    render_preview_png_path=contrast_png,
-                    a11y_report=a11y_report,
-                    claim_evidence=claim_evidence,
-                    pagination_trace_summary=(pagination_trace or {}).get("summary"),
+                typography_drift_trace = self.export_render_time_typography_drift_trace(
+                    body_html,
+                    css_out,
+                    out_path=str(typography_drift_path),
                 )
-            except TypeError:
-                warnings.append("Engine verifier compatibility fallback used (missing newer verifier hooks).")
-                verifier_report = dict(
-                    self._engine.verify_accessibility_artifacts(str(html_path), str(css_path), profile=profile, mode="error")
+                summary = typography_drift_trace.get("summary") or {}
+                token_fragmentation_block_count = int(
+                    summary.get("token_fragmentation_block_count") or 0
                 )
-            _dump_json(a11y_path, verifier_report)
+                wrap_drift_block_count = int(summary.get("wrap_drift_block_count") or 0)
+                suspicious_char_width_block_count = int(
+                    summary.get("suspicious_char_width_block_count") or 0
+                )
+                if token_fragmentation_block_count > 0:
+                    warnings.append(
+                        "typography drift trace reports "
+                        f"{token_fragmentation_block_count} token fragmentation block(s)."
+                    )
+                if wrap_drift_block_count > 0:
+                    warnings.append(
+                        f"typography drift trace reports {wrap_drift_block_count} wrap drift block(s)."
+                    )
+                if suspicious_char_width_block_count > 0:
+                    warnings.append(
+                        "typography drift trace reports "
+                        f"{suspicious_char_width_block_count} suspicious char-width block(s)."
+                    )
+            except Exception as exc:
+                warnings.append(
+                    f"typography drift trace unavailable: {type(exc).__name__}: {exc}"
+                )
 
-        if run_pmr and hasattr(self._engine, "verify_paged_media_rank_artifacts"):
+        if hasattr(self._engine, "export_render_time_region_text_alignment_trace"):
             try:
-                pmr_report = self.verify_pmr_artifacts(
-                    str(html_path),
-                    str(css_path),
-                    profile=profile,
-                    mode="error",
-                    component_validation=component_validation,
-                    parity_report=parity_report,
-                    source_analysis=source_analysis,
-                    render_page_count=(len(png_paths) if png_paths else None),
-                    pagination_trace_summary=(pagination_trace or {}).get("summary"),
+                region_text_alignment_trace = (
+                    self.export_render_time_region_text_alignment_trace(
+                        body_html,
+                        css_out,
+                        out_path=str(region_text_alignment_path),
+                    )
                 )
-            except TypeError:
-                warnings.append("Engine PMR compatibility fallback used (sidecar-derived counts not applied).")
-                pmr_report = dict(
-                    self._engine.verify_paged_media_rank_artifacts(str(html_path), str(css_path), profile=profile, mode="error")
+                summary = region_text_alignment_trace.get("summary") or {}
+                dense_row_risk_count = int(summary.get("dense_row_risk_count") or 0)
+                fragmented_cell_count = int(summary.get("fragmented_cell_count") or 0)
+                if dense_row_risk_count > 0:
+                    warnings.append(
+                        "region text alignment trace reports "
+                        f"{dense_row_risk_count} dense row risk(s)."
+                    )
+                if fragmented_cell_count > 0:
+                    warnings.append(
+                        "region text alignment trace reports "
+                        f"{fragmented_cell_count} fragmented cell risk(s)."
+                    )
+            except Exception as exc:
+                warnings.append(
+                    "region text alignment trace unavailable: "
+                    f"{type(exc).__name__}: {exc}"
                 )
-            _dump_json(pmr_path, pmr_report)
 
         if emit_reading_order_trace and hasattr(self._engine, "export_render_time_reading_order_trace"):
             try:
@@ -1291,10 +1390,108 @@ class AccessibilityEngine:
                     raise ValueError(message)
                 warnings.append(message)
 
+        pagination_summary = (pagination_trace or {}).get("summary") or {}
+        typography_summary = (typography_drift_trace or {}).get("summary") or {}
+        region_alignment_summary = (
+            (region_text_alignment_trace or {}).get("summary") or {}
+        )
+        low_coverage_page_count = int(pagination_summary.get("low_coverage_page_count") or 0)
+        overflow_event_count = int(pagination_summary.get("overflow_event_count") or 0)
+        flowable_overlap_count = int(pagination_summary.get("flowable_overlap_count") or 0)
+        text_overlap_count = int(pagination_summary.get("text_overlap_count") or 0)
+        token_fragmentation_block_count = int(
+            typography_summary.get("token_fragmentation_block_count") or 0
+        )
+        wrap_drift_block_count = int(typography_summary.get("wrap_drift_block_count") or 0)
+        semantic_table_row_risk_count = int(
+            region_alignment_summary.get("dense_row_risk_count") or 0
+        )
+        fragmented_table_cell_count = int(
+            region_alignment_summary.get("fragmented_cell_count") or 0
+        )
+        diagnostic_signals = _coerce_diagnostic_signals(
+            {
+                "page_count_mismatch": bool(
+                    page_count_divergence and not page_count_divergence.get("matches", True)
+                ),
+                "layout_collapse_detected": low_coverage_page_count > 0,
+                "pagination_overflow_detected": (
+                    overflow_event_count > 0
+                    or flowable_overlap_count > 0
+                    or text_overlap_count > 0
+                ),
+                "token_fragmentation_detected": token_fragmentation_block_count > 0,
+                "typography_wrap_drift_detected": wrap_drift_block_count > 0,
+                "semantic_table_alignment_drift": (
+                    semantic_table_row_risk_count > 0
+                    or fragmented_table_cell_count > 0
+                ),
+                "low_coverage_page_count": low_coverage_page_count,
+                "token_fragmentation_block_count": token_fragmentation_block_count,
+                "wrap_drift_block_count": wrap_drift_block_count,
+                "semantic_table_row_risk_count": semantic_table_row_risk_count,
+                "fragmented_table_cell_count": fragmented_table_cell_count,
+            }
+        )
+
+        if run_verifier and hasattr(self._engine, "verify_accessibility_artifacts"):
+            contrast_png = png_paths[0] if png_paths else None
+            try:
+                verifier_report = self.verify_accessibility_artifacts(
+                    str(html_path),
+                    str(css_path),
+                    profile=profile,
+                    mode="error",
+                    render_preview_png_path=contrast_png,
+                    a11y_report=a11y_report,
+                    claim_evidence=claim_evidence,
+                    pagination_trace_summary=pagination_summary,
+                    diagnostic_signals=diagnostic_signals,
+                )
+            except TypeError:
+                warnings.append(
+                    "Engine verifier compatibility fallback used (missing newer verifier hooks)."
+                )
+                verifier_report = dict(
+                    self._engine.verify_accessibility_artifacts(
+                        str(html_path), str(css_path), profile=profile, mode="error"
+                    )
+                )
+            _dump_json(a11y_path, verifier_report)
+
+        if run_pmr and hasattr(self._engine, "verify_paged_media_rank_artifacts"):
+            try:
+                pmr_report = self.verify_pmr_artifacts(
+                    str(html_path),
+                    str(css_path),
+                    profile=profile,
+                    mode="error",
+                    component_validation=component_validation,
+                    parity_report=parity_report,
+                    source_analysis=source_analysis,
+                    render_page_count=(len(png_paths) if png_paths else None),
+                    pagination_trace_summary=pagination_summary,
+                    diagnostic_signals=diagnostic_signals,
+                )
+            except TypeError:
+                warnings.append(
+                    "Engine PMR compatibility fallback used (sidecar-derived counts not applied)."
+                )
+                pmr_report = dict(
+                    self._engine.verify_paged_media_rank_artifacts(
+                        str(html_path), str(css_path), profile=profile, mode="error"
+                    )
+                )
+            _dump_json(pmr_path, pmr_report)
+
         if emit_reading_order_trace:
-            reading_trace = self.export_reading_order_trace(str(pdf_path), out_path=str(reading_path))
+            reading_trace = self.export_reading_order_trace(
+                str(pdf_path), out_path=str(reading_path)
+            )
         if emit_pdf_structure_trace:
-            structure_trace = self.export_pdf_structure_trace(str(pdf_path), out_path=str(structure_path))
+            structure_trace = self.export_pdf_structure_trace(
+                str(pdf_path), out_path=str(structure_path)
+            )
         if run_pdf_ua_seed_verify:
             pdf_ua_seed_report = self._build_pdf_ua_seed_report(
                 str(pdf_path),
@@ -1348,6 +1545,12 @@ class AccessibilityEngine:
             "pagination_trace_path": str(pagination_trace_path)
             if pagination_trace
             else None,
+            "typography_drift_trace_path": str(typography_drift_path)
+            if typography_drift_trace
+            else None,
+            "region_text_alignment_trace_path": str(region_text_alignment_path)
+            if region_text_alignment_trace
+            else None,
             "render_preview_png_paths": png_paths,
             "engine_a11y_verify_path": str(a11y_path) if verifier_report else None,
             "engine_pmr_path": str(pmr_path) if pmr_report else None,
@@ -1357,8 +1560,11 @@ class AccessibilityEngine:
             "pdf_ua_seed_ok": seed_ok if pdf_ua_seed_report else None,
             "font_resolution_summary": (font_resolution_trace or {}).get("summary"),
             "asset_resolution_summary": (asset_resolution_trace or {}).get("summary"),
-            "pagination_trace_summary": (pagination_trace or {}).get("summary"),
+            "pagination_trace_summary": pagination_summary or None,
+            "typography_drift_summary": typography_summary or None,
+            "region_text_alignment_summary": region_alignment_summary or None,
             "page_count_divergence": page_count_divergence,
+            "diagnostic_signals": diagnostic_signals,
             "css_link_href": css_link_href,
             "css_link_media": css_link_media,
             "css_link_injected": css_link_injected,
@@ -1391,14 +1597,28 @@ class AccessibilityEngine:
                 "pagination_trace_path": (
                     pagination_trace_path.name if pagination_trace else None
                 ),
+                "typography_drift_trace_path": (
+                    typography_drift_path.name if typography_drift_trace else None
+                ),
+                "region_text_alignment_trace_path": (
+                    region_text_alignment_path.name
+                    if region_text_alignment_trace
+                    else None
+                ),
                 "render_preview_pngs": [Path(p).name for p in png_paths],
             },
             "metrics": {
                 "pdf_bytes": pdf_bytes,
-                "render_page_count": render_page_count if render_page_count is not None else len(png_paths),
+                "render_page_count": render_page_count
+                if render_page_count is not None
+                else len(png_paths),
                 "source_page_count": source_page_count,
-                "overflow_count": _coerce_int((component_validation or {}).get("overflow_count")),
-                "known_loss_count": _coerce_int((component_validation or {}).get("known_loss_count")),
+                "overflow_count": _coerce_int(
+                    (component_validation or {}).get("overflow_count")
+                ),
+                "known_loss_count": _coerce_int(
+                    (component_validation or {}).get("known_loss_count")
+                ),
                 "css_link_injected": css_link_injected,
                 "css_link_preexisting": css_link_preexisting,
             },
@@ -1452,6 +1672,10 @@ class AccessibilityEngine:
             paths["asset_resolution_trace_path"] = str(asset_resolution_path)
         if pagination_trace:
             paths["pagination_trace_path"] = str(pagination_trace_path)
+        if typography_drift_trace:
+            paths["typography_drift_trace_path"] = str(typography_drift_path)
+        if region_text_alignment_trace:
+            paths["region_text_alignment_trace_path"] = str(region_text_alignment_path)
 
         return AccessibilityRunResult(
             ok=ok,
@@ -1467,6 +1691,8 @@ class AccessibilityEngine:
             font_resolution_trace=font_resolution_trace,
             asset_resolution_trace=asset_resolution_trace,
             pagination_trace=pagination_trace,
+            typography_drift_trace=typography_drift_trace,
+            region_text_alignment_trace=region_text_alignment_trace,
             run_report=run_report,
             contract_fingerprint=meta.get("contract_fingerprint"),
             warnings=warnings,

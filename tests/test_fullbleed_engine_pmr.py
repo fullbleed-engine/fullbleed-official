@@ -119,6 +119,66 @@ def test_pdf_engine_verify_paged_media_rank_artifacts_prefers_pagination_trace_s
     )
 
 
+def test_pdf_engine_verify_paged_media_rank_artifacts_surfaces_diagnostic_reason_codes(
+    tmp_path: Path,
+) -> None:
+    _require_pdf_engine()
+
+    html = _write(
+        tmp_path / "doc.html",
+        "<!doctype html><html lang='en-US'><head><title>PMR Diagnostics</title></head><body><main><p>Hello</p></main></body></html>",
+    )
+    css = _write(tmp_path / "doc.css", "body{font-family:Helvetica}")
+
+    engine = fullbleed.PdfEngine(document_lang="en-US", document_title="PMR Diagnostics")
+    report = engine.verify_paged_media_rank_artifacts(
+        str(html),
+        str(css),
+        profile="cav",
+        mode="error",
+        overflow_count=0,
+        known_loss_count=0,
+        source_page_count=1,
+        render_page_count=1,
+        review_queue_items=0,
+        pagination_trace_summary={
+            "page_count": 2,
+            "overflow_event_count": 1,
+            "low_coverage_page_count": 1,
+        },
+        diagnostic_signals={
+            "page_count_mismatch": True,
+            "layout_collapse_detected": True,
+            "pagination_overflow_detected": True,
+            "token_fragmentation_detected": True,
+            "typography_wrap_drift_detected": True,
+            "semantic_table_alignment_drift": True,
+            "low_coverage_page_count": 1,
+            "token_fragmentation_block_count": 2,
+            "wrap_drift_block_count": 3,
+            "semantic_table_row_risk_count": 4,
+            "fragmented_table_cell_count": 5,
+        },
+    )
+
+    assert report["diagnostic_signals"]["page_count_mismatch"] is True
+    assert report["diagnostic_signals"]["semantic_table_row_risk_count"] == 4
+    assert set(report["gate"]["reason_codes"]) == {
+        "page_count_mismatch",
+        "layout_collapse_detected",
+        "pagination_overflow_detected",
+        "token_fragmentation_detected",
+        "typography_wrap_drift_detected",
+        "semantic_table_alignment_drift",
+    }
+    signals = report["observability"]["signal_counts"]
+    assert signals["diagnostic_low_coverage_page_count"] == 1
+    assert signals["diagnostic_token_fragmentation_block_count"] == 2
+    assert signals["diagnostic_wrap_drift_block_count"] == 3
+    assert signals["diagnostic_semantic_table_row_risk_count"] == 4
+    assert signals["diagnostic_fragmented_table_cell_count"] == 5
+
+
 def test_pdf_engine_verify_paged_media_rank_cav_fail_fast_regressions(tmp_path: Path) -> None:
     _require_pdf_engine()
 

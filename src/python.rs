@@ -1772,6 +1772,10 @@ struct TraceTextBlockRow {
     kind: &'static str,
     text: String,
     bbox: (f32, f32, f32, f32),
+    requested_font_name: Option<String>,
+    resolved_font_name: String,
+    fallback_reason: Option<String>,
+    font_size: f32,
     top_role: Option<String>,
     tag_path: Vec<String>,
 }
@@ -1807,6 +1811,8 @@ fn collect_render_time_text_blocks_for_page(
     let mut artifact_depth = 0usize;
     let mut state = TraceTextState::new();
     let mut state_stack: Vec<TraceTextState> = Vec::new();
+    let mut pending_requested_font_name: Option<String> = None;
+    let mut pending_fallback_reason: Option<String> = None;
 
     for (cmd_index, cmd) in page.commands.iter().enumerate() {
         match cmd {
@@ -1833,6 +1839,12 @@ fn collect_render_time_text_blocks_for_page(
             }
             Command::SetFontName(name) => state.font_name = name.clone(),
             Command::SetFontSize(size) => state.font_size = *size,
+            Command::Meta { key, value } if key == "font.requested_name" => {
+                pending_requested_font_name = Some(value.clone());
+            }
+            Command::Meta { key, value } if key == "font.fallback_reason" => {
+                pending_fallback_reason = Some(value.clone());
+            }
             Command::BeginTag { role, .. } => tag_stack.push(role.clone()),
             Command::EndTag => {
                 let _ = tag_stack.pop();
@@ -1865,6 +1877,10 @@ fn collect_render_time_text_blocks_for_page(
                     kind: "draw_string",
                     text: text.clone(),
                     bbox,
+                    requested_font_name: pending_requested_font_name.take(),
+                    resolved_font_name: state.font_name.clone(),
+                    fallback_reason: pending_fallback_reason.take(),
+                    font_size: state.font_size.to_f32(),
                     top_role: tag_stack.last().cloned(),
                     tag_path: tag_stack.clone(),
                 });
@@ -1885,6 +1901,10 @@ fn collect_render_time_text_blocks_for_page(
                     kind: "draw_string_transformed",
                     text: text.clone(),
                     bbox,
+                    requested_font_name: pending_requested_font_name.take(),
+                    resolved_font_name: state.font_name.clone(),
+                    fallback_reason: pending_fallback_reason.take(),
+                    font_size: state.font_size.to_f32(),
                     top_role: tag_stack.last().cloned(),
                     tag_path: tag_stack.clone(),
                 });
@@ -1936,6 +1956,448 @@ fn collect_text_overlap_samples(
         }
     }
     (count, samples)
+}
+
+fn trace_text_token_stats(text: &str) -> (usize, usize, usize, usize, usize, usize, usize) {
+    let mut token_count = 0usize;
+    let mut single_char_token_count = 0usize;
+    let mut max_token_len = 0usize;
+    let mut char_count = 0usize;
+    let mut alpha_char_count = 0usize;
+    let mut whitespace_char_count = 0usize;
+    let mut uppercase_alpha_count = 0usize;
+    for ch in text.chars() {
+        if ch.is_control() {
+            continue;
+        }
+        char_count = char_count.saturating_add(1);
+        if ch.is_whitespace() {
+            whitespace_char_count = whitespace_char_count.saturating_add(1);
+        }
+        if ch.is_alphabetic() {
+            alpha_char_count = alpha_char_count.saturating_add(1);
+            if ch.is_uppercase() {
+                uppercase_alpha_count = uppercase_alpha_count.saturating_add(1);
+            }
+        }
+    }
+    for token in text.split_whitespace() {
+        let token_len = token.chars().count();
+        if token_len == 0 {
+            continue;
+        }
+        token_count = token_count.saturating_add(1);
+        max_token_len = max_token_len.max(token_len);
+        if token_len == 1 {
+            single_char_token_count = single_char_token_count.saturating_add(1);
+        }
+    }
+    (
+        token_count,
+        single_char_token_count,
+        max_token_len,
+        char_count,
+        alpha_char_count,
+        whitespace_char_count,
+        uppercase_alpha_count,
+    )
+}
+
+fn bbox_width(bbox: (f32, f32, f32, f32)) -> f32 {
+    (bbox.2 - bbox.0).max(0.0)
+}
+
+fn bbox_height(bbox: (f32, f32, f32, f32)) -> f32 {
+    (bbox.3 - bbox.1).max(0.0)
+}
+
+fn union_bbox(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> (f32, f32, f32, f32) {
+    (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3))
+}
+
+fn build_render_time_typography_drift_trace_py(
+    py: Python<'_>,
+    doc: &Document,
+    engine: &FullBleed,
+) -> PyResult<PyObject> {
+    let out = PyDict::new_bound(py);
+    out.set_item("schema", "fullbleed.typography_drift_trace.v1")?;
+    out.set_item("schema_version", 1)?;
+    out.set_item("extractor", "render_time_commands")?;
+    out.set_item("source", "engine_render_time")?;
+
+    let page_width = doc.page_size.width.to_f32().max(1.0);
+    let pages_out = PyList::empty_bound(py);
+    let warnings = PyList::empty_bound(py);
+
+    let mut block_count = 0usize;
+    let mut flagged_block_count = 0usize;
+    let mut fallback_sensitive_block_count = 0usize;
+    let mut token_fragmentation_block_count = 0usize;
+    let mut wrap_drift_block_count = 0usize;
+    let mut short_label_lockup_block_count = 0usize;
+    let mut suspicious_char_width_block_count = 0usize;
+
+    for (page_index, page) in doc.pages.iter().enumerate() {
+        let text_collection = collect_render_time_text_blocks_for_page(page, Some(engine));
+        let flagged_blocks = PyList::empty_bound(py);
+        let mut page_flagged_count = 0usize;
+
+        for block in &text_collection.blocks {
+            block_count = block_count.saturating_add(1);
+            let (
+                token_count,
+                single_char_token_count,
+                max_token_len,
+                char_count,
+                alpha_char_count,
+                whitespace_char_count,
+                uppercase_alpha_count,
+            ) = trace_text_token_stats(&block.text);
+            let box_width = bbox_width(block.bbox);
+            let avg_char_width = if alpha_char_count > 0 {
+                box_width / alpha_char_count as f32
+            } else if char_count > 0 {
+                box_width / char_count as f32
+            } else {
+                0.0
+            };
+            let char_width_ratio = if block.font_size > 0.0 {
+                avg_char_width / block.font_size.max(1.0)
+            } else {
+                0.0
+            };
+            let uppercase_ratio = if alpha_char_count > 0 {
+                uppercase_alpha_count as f32 / alpha_char_count as f32
+            } else {
+                0.0
+            };
+            let whitespace_ratio = if char_count > 0 {
+                whitespace_char_count as f32 / char_count as f32
+            } else {
+                0.0
+            };
+            let token_fragmentation_risk =
+                token_count >= 4 && single_char_token_count.saturating_mul(2) >= token_count;
+            let wrap_drift_risk =
+                token_count >= 8 && max_token_len >= 6 && (box_width / page_width) >= 0.72;
+            let fallback_sensitive =
+                block.fallback_reason.is_some() || block.requested_font_name.is_some();
+            let short_label_lockup_risk = char_count <= 42
+                && token_count > 0
+                && token_count <= 6
+                && uppercase_ratio >= 0.45
+                && fallback_sensitive;
+            let suspicious_char_width_risk =
+                alpha_char_count >= 3 && (char_width_ratio < 0.18 || char_width_ratio > 0.95);
+
+            if fallback_sensitive {
+                fallback_sensitive_block_count = fallback_sensitive_block_count.saturating_add(1);
+            }
+            if token_fragmentation_risk {
+                token_fragmentation_block_count = token_fragmentation_block_count.saturating_add(1);
+            }
+            if wrap_drift_risk {
+                wrap_drift_block_count = wrap_drift_block_count.saturating_add(1);
+            }
+            if short_label_lockup_risk {
+                short_label_lockup_block_count = short_label_lockup_block_count.saturating_add(1);
+            }
+            if suspicious_char_width_risk {
+                suspicious_char_width_block_count =
+                    suspicious_char_width_block_count.saturating_add(1);
+            }
+
+            if !(token_fragmentation_risk
+                || wrap_drift_risk
+                || short_label_lockup_risk
+                || suspicious_char_width_risk
+                || fallback_sensitive)
+            {
+                continue;
+            }
+
+            flagged_block_count = flagged_block_count.saturating_add(1);
+            page_flagged_count = page_flagged_count.saturating_add(1);
+            let row = PyDict::new_bound(py);
+            row.set_item("page", page_index + 1)?;
+            row.set_item("index", block.index)?;
+            row.set_item("command_index", block.command_index)?;
+            row.set_item("kind", block.kind)?;
+            row.set_item("text", trace_text_sample(&block.text))?;
+            let bbox = PyDict::new_bound(py);
+            bbox.set_item("x", block.bbox.0)?;
+            bbox.set_item("y", block.bbox.1)?;
+            bbox.set_item("w", bbox_width(block.bbox))?;
+            bbox.set_item("h", bbox_height(block.bbox))?;
+            row.set_item("bbox", bbox)?;
+            row.set_item("font_size", block.font_size)?;
+            row.set_item("resolved_font_name", block.resolved_font_name.clone())?;
+            row.set_item("requested_font_name", block.requested_font_name.clone())?;
+            row.set_item("fallback_reason", block.fallback_reason.clone())?;
+            row.set_item("token_count", token_count)?;
+            row.set_item("single_char_token_count", single_char_token_count)?;
+            row.set_item("char_count", char_count)?;
+            row.set_item("alpha_char_count", alpha_char_count)?;
+            row.set_item("uppercase_ratio", uppercase_ratio)?;
+            row.set_item("whitespace_ratio", whitespace_ratio)?;
+            row.set_item("avg_char_width", avg_char_width)?;
+            row.set_item("char_width_ratio", char_width_ratio)?;
+            let risk_codes = PyList::empty_bound(py);
+            if fallback_sensitive {
+                risk_codes.append("fallback_sensitive")?;
+            }
+            if token_fragmentation_risk {
+                risk_codes.append("token_fragmentation")?;
+            }
+            if wrap_drift_risk {
+                risk_codes.append("wrap_drift_risk")?;
+            }
+            if short_label_lockup_risk {
+                risk_codes.append("short_label_lockup_risk")?;
+            }
+            if suspicious_char_width_risk {
+                risk_codes.append("suspicious_char_width")?;
+            }
+            row.set_item("risk_codes", risk_codes)?;
+            flagged_blocks.append(row)?;
+        }
+
+        let page_row = PyDict::new_bound(py);
+        page_row.set_item("page_index", page_index)?;
+        page_row.set_item("page", page_index + 1)?;
+        page_row.set_item("block_count", text_collection.blocks.len())?;
+        page_row.set_item("flagged_block_count", page_flagged_count)?;
+        page_row.set_item("flagged_blocks", flagged_blocks)?;
+        pages_out.append(page_row)?;
+    }
+
+    if token_fragmentation_block_count > 0 {
+        let row = PyDict::new_bound(py);
+        row.set_item("code", "TOKEN_FRAGMENTATION_DETECTED")?;
+        row.set_item("count", token_fragmentation_block_count)?;
+        warnings.append(row)?;
+    }
+    if wrap_drift_block_count > 0 {
+        let row = PyDict::new_bound(py);
+        row.set_item("code", "TYPOGRAPHY_WRAP_DRIFT_DETECTED")?;
+        row.set_item("count", wrap_drift_block_count)?;
+        warnings.append(row)?;
+    }
+
+    let summary = PyDict::new_bound(py);
+    summary.set_item("page_count", doc.pages.len())?;
+    summary.set_item("block_count", block_count)?;
+    summary.set_item("flagged_block_count", flagged_block_count)?;
+    summary.set_item(
+        "fallback_sensitive_block_count",
+        fallback_sensitive_block_count,
+    )?;
+    summary.set_item(
+        "token_fragmentation_block_count",
+        token_fragmentation_block_count,
+    )?;
+    summary.set_item("wrap_drift_block_count", wrap_drift_block_count)?;
+    summary.set_item(
+        "short_label_lockup_block_count",
+        short_label_lockup_block_count,
+    )?;
+    summary.set_item(
+        "suspicious_char_width_block_count",
+        suspicious_char_width_block_count,
+    )?;
+
+    out.set_item("pages", pages_out)?;
+    out.set_item("summary", summary)?;
+    out.set_item("warnings", warnings)?;
+    out.set_item(
+        "generated_at_unix_ms",
+        (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()) as u64,
+    )?;
+    Ok(out.to_object(py))
+}
+
+fn build_render_time_region_text_alignment_trace_py(
+    py: Python<'_>,
+    doc: &Document,
+    engine: &FullBleed,
+) -> PyResult<PyObject> {
+    let out = PyDict::new_bound(py);
+    out.set_item("schema", "fullbleed.region_text_alignment_trace.v1")?;
+    out.set_item("schema_version", 1)?;
+    out.set_item("extractor", "render_time_commands")?;
+    out.set_item("source", "engine_render_time")?;
+
+    let pages_out = PyList::empty_bound(py);
+    let warnings = PyList::empty_bound(py);
+
+    let mut table_like_page_count = 0usize;
+    let mut row_count = 0usize;
+    let mut dense_row_risk_count = 0usize;
+    let mut fragmented_cell_count = 0usize;
+    let mut dense_region_candidate_page_count = 0usize;
+
+    for (page_index, page) in doc.pages.iter().enumerate() {
+        let text_collection = collect_render_time_text_blocks_for_page(page, Some(engine));
+        let mut table_blocks: Vec<&TraceTextBlockRow> = text_collection
+            .blocks
+            .iter()
+            .filter(|block| {
+                matches!(block.top_role.as_deref(), Some("TH") | Some("TD"))
+                    || block
+                        .tag_path
+                        .iter()
+                        .any(|role| matches!(role.as_str(), "TABLE" | "TR" | "TH" | "TD"))
+            })
+            .collect();
+        table_blocks.sort_by(|left, right| {
+            let ly = left.bbox.1;
+            let ry = right.bbox.1;
+            ly.partial_cmp(&ry)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    left.bbox
+                        .0
+                        .partial_cmp(&right.bbox.0)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+        });
+
+        let page_rows = PyList::empty_bound(py);
+        let dense_regions = PyList::empty_bound(py);
+        if !table_blocks.is_empty() {
+            table_like_page_count = table_like_page_count.saturating_add(1);
+            let mut clustered_rows: Vec<Vec<&TraceTextBlockRow>> = Vec::new();
+            for block in table_blocks {
+                let center_y = (block.bbox.1 + block.bbox.3) * 0.5;
+                if let Some(last_row) = clustered_rows.last_mut() {
+                    let last_center_y = last_row
+                        .iter()
+                        .map(|row_block| (row_block.bbox.1 + row_block.bbox.3) * 0.5)
+                        .sum::<f32>()
+                        / last_row.len() as f32;
+                    let tolerance = 6.0f32.max(block.font_size * 0.8);
+                    if (center_y - last_center_y).abs() <= tolerance {
+                        last_row.push(block);
+                        continue;
+                    }
+                }
+                clustered_rows.push(vec![block]);
+            }
+
+            for (row_index, row_blocks) in clustered_rows.iter_mut().enumerate() {
+                row_blocks.sort_by(|left, right| {
+                    left.bbox
+                        .0
+                        .partial_cmp(&right.bbox.0)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                row_count = row_count.saturating_add(1);
+                let mut row_bbox = row_blocks[0].bbox;
+                let cells = PyList::empty_bound(py);
+                let mut row_char_count = 0usize;
+                let mut row_token_count = 0usize;
+                let mut row_fragmented_cells = 0usize;
+                for block in row_blocks.iter() {
+                    row_bbox = union_bbox(row_bbox, block.bbox);
+                    let (token_count, single_char_token_count, _, char_count, ..) =
+                        trace_text_token_stats(&block.text);
+                    row_char_count = row_char_count.saturating_add(char_count);
+                    row_token_count = row_token_count.saturating_add(token_count);
+                    let cell_fragmented = token_count >= 4
+                        && single_char_token_count.saturating_mul(2) >= token_count;
+                    if cell_fragmented {
+                        fragmented_cell_count = fragmented_cell_count.saturating_add(1);
+                        row_fragmented_cells = row_fragmented_cells.saturating_add(1);
+                    }
+                    let cell = PyDict::new_bound(py);
+                    cell.set_item("text", trace_text_sample(&block.text))?;
+                    cell.set_item("kind", block.kind)?;
+                    cell.set_item("top_role", block.top_role.clone())?;
+                    let bbox = PyDict::new_bound(py);
+                    bbox.set_item("x", block.bbox.0)?;
+                    bbox.set_item("y", block.bbox.1)?;
+                    bbox.set_item("w", bbox_width(block.bbox))?;
+                    bbox.set_item("h", bbox_height(block.bbox))?;
+                    cell.set_item("bbox", bbox)?;
+                    cell.set_item("token_count", token_count)?;
+                    cell.set_item("char_count", char_count)?;
+                    cell.set_item("fragmentation_risk", cell_fragmented)?;
+                    cells.append(cell)?;
+                }
+                let dense_row_risk =
+                    row_blocks.len() >= 6 || row_char_count >= 80 || row_token_count >= 18;
+                if dense_row_risk {
+                    dense_row_risk_count = dense_row_risk_count.saturating_add(1);
+                }
+                let row = PyDict::new_bound(py);
+                row.set_item("row_index", row_index)?;
+                row.set_item("page", page_index + 1)?;
+                let bbox = PyDict::new_bound(py);
+                bbox.set_item("x", row_bbox.0)?;
+                bbox.set_item("y", row_bbox.1)?;
+                bbox.set_item("w", bbox_width(row_bbox))?;
+                bbox.set_item("h", bbox_height(row_bbox))?;
+                row.set_item("bbox", bbox)?;
+                row.set_item("cell_count", row_blocks.len())?;
+                row.set_item("char_count", row_char_count)?;
+                row.set_item("token_count", row_token_count)?;
+                row.set_item("dense_row_risk", dense_row_risk)?;
+                row.set_item("fragmented_cell_count", row_fragmented_cells)?;
+                row.set_item("cells", cells)?;
+                page_rows.append(row)?;
+            }
+        } else if text_collection.blocks.len() >= 24 {
+            dense_region_candidate_page_count = dense_region_candidate_page_count.saturating_add(1);
+            let row = PyDict::new_bound(py);
+            row.set_item("page", page_index + 1)?;
+            row.set_item("text_block_count", text_collection.blocks.len())?;
+            row.set_item("kind", "dense_text_page")?;
+            dense_regions.append(row)?;
+        }
+
+        let page_row = PyDict::new_bound(py);
+        page_row.set_item("page_index", page_index)?;
+        page_row.set_item("page", page_index + 1)?;
+        page_row.set_item("text_block_count", text_collection.blocks.len())?;
+        page_row.set_item("table_row_count", page_rows.len())?;
+        page_row.set_item("table_rows", page_rows)?;
+        page_row.set_item("dense_region_candidates", dense_regions)?;
+        pages_out.append(page_row)?;
+    }
+
+    if dense_row_risk_count > 0 {
+        let row = PyDict::new_bound(py);
+        row.set_item("code", "SEMANTIC_TABLE_ALIGNMENT_DRIFT")?;
+        row.set_item("count", dense_row_risk_count)?;
+        warnings.append(row)?;
+    }
+
+    let summary = PyDict::new_bound(py);
+    summary.set_item("page_count", doc.pages.len())?;
+    summary.set_item("table_like_page_count", table_like_page_count)?;
+    summary.set_item("row_count", row_count)?;
+    summary.set_item("dense_row_risk_count", dense_row_risk_count)?;
+    summary.set_item("fragmented_cell_count", fragmented_cell_count)?;
+    summary.set_item(
+        "dense_region_candidate_page_count",
+        dense_region_candidate_page_count,
+    )?;
+
+    out.set_item("pages", pages_out)?;
+    out.set_item("summary", summary)?;
+    out.set_item("warnings", warnings)?;
+    out.set_item(
+        "generated_at_unix_ms",
+        (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()) as u64,
+    )?;
+    Ok(out.to_object(py))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -2575,6 +3037,7 @@ fn build_render_time_pagination_trace_py(
 
     let events_out = PyList::empty_bound(py);
     let pages_out = PyList::empty_bound(py);
+    let page_break_attribution_out = PyList::empty_bound(py);
     let warnings = PyList::empty_bound(py);
     let page_size = PyDict::new_bound(py);
     page_size.set_item("width", doc.page_size.width.to_f32())?;
@@ -2596,6 +3059,11 @@ fn build_render_time_pagination_trace_py(
     let mut low_coverage_page_count = 0usize;
     let mut text_overlap_count = 0usize;
     let text_overlap_samples_out = PyList::empty_bound(py);
+    let mut break_trigger_counts: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+    let mut flowable_issue_counts: std::collections::BTreeMap<String, usize> =
+        std::collections::BTreeMap::new();
+    let collapse_pages_out = PyList::empty_bound(py);
 
     for (page_index, page) in doc.pages.iter().enumerate() {
         let mut template_name: Option<String> = None;
@@ -2603,6 +3071,10 @@ fn build_render_time_pagination_trace_py(
         let mut layout_event_count = 0usize;
         let mut page_event_count = 0usize;
         let mut flowable_bboxes: Vec<(f32, f32, f32, f32)> = Vec::new();
+        let mut page_transition_reasons: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
+        let mut page_issue_flowables: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
         let text_collection = collect_render_time_text_blocks_for_page(page, Some(engine));
 
         for cmd in &page.commands {
@@ -2645,6 +3117,11 @@ fn build_render_time_pagination_trace_py(
                         let reason = fields.get("reason").copied().unwrap_or("unknown");
                         let overflow_severity =
                             fields.get("overflow_severity").copied().unwrap_or("none");
+                        let flowable_name = fields
+                            .get("flowable")
+                            .copied()
+                            .unwrap_or("unknown")
+                            .to_string();
                         row.set_item("result", result)?;
                         row.set_item("reason", reason)?;
                         row.set_item("overflow_severity", overflow_severity)?;
@@ -2701,9 +3178,17 @@ fn build_render_time_pagination_trace_py(
                             }
                             "split" => {
                                 split_count = split_count.saturating_add(1);
+                                *page_issue_flowables
+                                    .entry(flowable_name.clone())
+                                    .or_insert(0) += 1;
+                                *flowable_issue_counts.entry(flowable_name).or_insert(0) += 1;
                             }
                             "overflow" => {
                                 overflow_event_count = overflow_event_count.saturating_add(1);
+                                *page_issue_flowables
+                                    .entry(flowable_name.clone())
+                                    .or_insert(0) += 1;
+                                *flowable_issue_counts.entry(flowable_name).or_insert(0) += 1;
                                 if overflow_severity == "fatal_unplaceable" {
                                     fatal_overflow_count = fatal_overflow_count.saturating_add(1);
                                 } else {
@@ -2717,14 +3202,17 @@ fn build_render_time_pagination_trace_py(
                         transition_count = transition_count.saturating_add(1);
                         let from_page = trace_usize(&fields, "from_page").unwrap_or(page_index + 1);
                         let to_page = trace_usize(&fields, "to_page").unwrap_or(page_index + 1);
+                        let reason = fields.get("reason").copied().unwrap_or("unknown");
+                        let flowable_name = fields
+                            .get("flowable")
+                            .copied()
+                            .unwrap_or("unknown")
+                            .to_string();
                         row.set_item("from_page", from_page)?;
                         row.set_item("to_page", to_page)?;
                         row.set_item("from_frame_index", trace_usize(&fields, "from_frame_index"))?;
                         row.set_item("to_frame_index", trace_usize(&fields, "to_frame_index"))?;
-                        row.set_item(
-                            "flowable_name",
-                            fields.get("flowable").copied().unwrap_or("unknown"),
-                        )?;
+                        row.set_item("flowable_name", flowable_name.clone())?;
                         row.set_item(
                             "source_order",
                             trace_optional_usize(&fields, "source_order"),
@@ -2733,9 +3221,42 @@ fn build_render_time_pagination_trace_py(
                             "segment_index",
                             trace_optional_usize(&fields, "segment_index"),
                         )?;
-                        row.set_item("reason", fields.get("reason").copied().unwrap_or("unknown"))?;
+                        row.set_item("reason", reason)?;
                         if from_page != to_page {
                             page_transition_count = page_transition_count.saturating_add(1);
+                            *break_trigger_counts.entry(reason.to_string()).or_insert(0) += 1;
+                            *page_transition_reasons
+                                .entry(reason.to_string())
+                                .or_insert(0) += 1;
+                            *page_issue_flowables
+                                .entry(flowable_name.clone())
+                                .or_insert(0) += 1;
+                            *flowable_issue_counts
+                                .entry(flowable_name.clone())
+                                .or_insert(0) += 1;
+                            let attribution = PyDict::new_bound(py);
+                            attribution.set_item("page", page_index + 1)?;
+                            attribution.set_item("from_page", from_page)?;
+                            attribution.set_item("to_page", to_page)?;
+                            attribution.set_item("reason", reason)?;
+                            attribution.set_item("flowable_name", flowable_name)?;
+                            attribution.set_item(
+                                "source_order",
+                                trace_optional_usize(&fields, "source_order"),
+                            )?;
+                            attribution.set_item(
+                                "segment_index",
+                                trace_optional_usize(&fields, "segment_index"),
+                            )?;
+                            attribution.set_item(
+                                "from_frame_index",
+                                trace_usize(&fields, "from_frame_index"),
+                            )?;
+                            attribution.set_item(
+                                "to_frame_index",
+                                trace_usize(&fields, "to_frame_index"),
+                            )?;
+                            page_break_attribution_out.append(attribution)?;
                         } else {
                             frame_transition_count = frame_transition_count.saturating_add(1);
                         }
@@ -2859,6 +3380,55 @@ fn build_render_time_pagination_trace_py(
         page_row.set_item("text_overlap_samples", page_samples)?;
         page_row.set_item("occupied_area_ratio", occupied_area_ratio)?;
         page_row.set_item("low_coverage", low_coverage)?;
+        let transition_reason_rows = PyList::empty_bound(py);
+        for (reason, count) in &page_transition_reasons {
+            let row = PyDict::new_bound(py);
+            row.set_item("reason", reason.clone())?;
+            row.set_item("count", *count)?;
+            transition_reason_rows.append(row)?;
+        }
+        page_row.set_item("transition_reasons", &transition_reason_rows)?;
+        let issue_flowable_rows = PyList::empty_bound(py);
+        for (flowable_name, count) in page_issue_flowables.iter().take(5) {
+            let row = PyDict::new_bound(py);
+            row.set_item("flowable_name", flowable_name.clone())?;
+            row.set_item("count", *count)?;
+            issue_flowable_rows.append(row)?;
+        }
+        page_row.set_item("suspect_flowables", &issue_flowable_rows)?;
+
+        let suspect_cause_codes = PyList::empty_bound(py);
+        if low_coverage && occupied_area_ratio < 0.0005f64 {
+            suspect_cause_codes.append("content_collapsed_into_small_region")?;
+        }
+        if low_coverage && visible_command_count > 0 {
+            suspect_cause_codes.append("root_or_wrapper_sizing_mismatch")?;
+        }
+        if page_transition_reasons.contains_key("frame_overflow") {
+            suspect_cause_codes.append("overflow_clipping_or_unbreakable_flowable")?;
+        }
+        if overlap_count > 0 {
+            suspect_cause_codes.append("absolute_or_out_of_flow_overlap")?;
+        }
+        if page_text_overlap_count > 0 {
+            suspect_cause_codes.append("text_collision")?;
+        }
+        page_row.set_item("suspect_cause_codes", suspect_cause_codes.clone())?;
+        if low_coverage
+            || !page_transition_reasons.is_empty()
+            || overlap_count > 0
+            || page_text_overlap_count > 0
+        {
+            let collapse_row = PyDict::new_bound(py);
+            collapse_row.set_item("page", page_index + 1)?;
+            collapse_row.set_item("occupied_area_ratio", occupied_area_ratio)?;
+            collapse_row.set_item("visible_command_count", visible_command_count)?;
+            collapse_row.set_item("flowable_bbox_count", flowable_bboxes.len())?;
+            collapse_row.set_item("transition_reasons", transition_reason_rows.clone())?;
+            collapse_row.set_item("suspect_flowables", issue_flowable_rows.clone())?;
+            collapse_row.set_item("suspect_cause_codes", suspect_cause_codes)?;
+            collapse_pages_out.append(collapse_row)?;
+        }
         pages_out.append(page_row)?;
     }
 
@@ -2876,13 +3446,36 @@ fn build_render_time_pagination_trace_py(
     summary.set_item("low_coverage_page_count", low_coverage_page_count)?;
     summary.set_item("flowable_overlap_count", flowable_overlap_count)?;
     summary.set_item("text_overlap_count", text_overlap_count)?;
+    summary.set_item("layout_collapse_detected", low_coverage_page_count > 0)?;
 
     out.set_item("ok", true)?;
     out.set_item("page_size", page_size)?;
     out.set_item("pages", pages_out)?;
     out.set_item("events", events_out)?;
+    out.set_item("page_break_attribution", page_break_attribution_out)?;
     out.set_item("text_overlap_samples", text_overlap_samples_out)?;
     out.set_item("summary", summary)?;
+    let break_trigger_rows = PyList::empty_bound(py);
+    for (reason, count) in &break_trigger_counts {
+        let row = PyDict::new_bound(py);
+        row.set_item("reason", reason.clone())?;
+        row.set_item("count", *count)?;
+        break_trigger_rows.append(row)?;
+    }
+    let issue_flowable_rows = PyList::empty_bound(py);
+    for (flowable_name, count) in flowable_issue_counts.iter().take(8) {
+        let row = PyDict::new_bound(py);
+        row.set_item("flowable_name", flowable_name.clone())?;
+        row.set_item("count", *count)?;
+        issue_flowable_rows.append(row)?;
+    }
+    let collapse_diag = PyDict::new_bound(py);
+    collapse_diag.set_item("detected", low_coverage_page_count > 0)?;
+    collapse_diag.set_item("page_count", collapse_pages_out.len())?;
+    collapse_diag.set_item("pages", collapse_pages_out)?;
+    out.set_item("layout_collapse_diagnostics", collapse_diag)?;
+    out.set_item("dominant_break_triggers", break_trigger_rows)?;
+    out.set_item("suspect_flowables", issue_flowable_rows)?;
     out.set_item("warnings", warnings)?;
     out.set_item(
         "generated_at_unix_ms",
@@ -4557,6 +5150,28 @@ fn py_dict_optional_i64(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<
     }
 }
 
+fn py_dict_optional_bool(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<bool>> {
+    match dict.get_item(key)? {
+        Some(value) if !value.is_none() => Ok(Some(value.extract::<bool>()?)),
+        _ => Ok(None),
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct DiagnosticSignals {
+    page_count_mismatch: Option<bool>,
+    layout_collapse_detected: Option<bool>,
+    pagination_overflow_detected: Option<bool>,
+    token_fragmentation_detected: Option<bool>,
+    typography_wrap_drift_detected: Option<bool>,
+    semantic_table_alignment_drift: Option<bool>,
+    low_coverage_page_count: Option<i64>,
+    token_fragmentation_block_count: Option<i64>,
+    wrap_drift_block_count: Option<i64>,
+    semantic_table_row_risk_count: Option<i64>,
+    fragmented_table_cell_count: Option<i64>,
+}
+
 fn pagination_trace_summary_from_py(
     value: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<Option<PaginationTraceSummary>> {
@@ -4633,6 +5248,83 @@ fn pagination_trace_summary_to_py<'py>(
     Ok(out)
 }
 
+fn diagnostic_signals_from_py(
+    value: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Option<DiagnosticSignals>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_none() {
+        return Ok(None);
+    }
+    let dict = value
+        .downcast::<PyDict>()
+        .map_err(|_| PyValueError::new_err("diagnostic_signals must be a dict when supplied"))?;
+    Ok(Some(DiagnosticSignals {
+        page_count_mismatch: py_dict_optional_bool(dict, "page_count_mismatch")?,
+        layout_collapse_detected: py_dict_optional_bool(dict, "layout_collapse_detected")?,
+        pagination_overflow_detected: py_dict_optional_bool(dict, "pagination_overflow_detected")?,
+        token_fragmentation_detected: py_dict_optional_bool(dict, "token_fragmentation_detected")?,
+        typography_wrap_drift_detected: py_dict_optional_bool(
+            dict,
+            "typography_wrap_drift_detected",
+        )?,
+        semantic_table_alignment_drift: py_dict_optional_bool(
+            dict,
+            "semantic_table_alignment_drift",
+        )?,
+        low_coverage_page_count: py_dict_optional_i64(dict, "low_coverage_page_count")?,
+        token_fragmentation_block_count: py_dict_optional_i64(
+            dict,
+            "token_fragmentation_block_count",
+        )?,
+        wrap_drift_block_count: py_dict_optional_i64(dict, "wrap_drift_block_count")?,
+        semantic_table_row_risk_count: py_dict_optional_i64(dict, "semantic_table_row_risk_count")?,
+        fragmented_table_cell_count: py_dict_optional_i64(dict, "fragmented_table_cell_count")?,
+    }))
+}
+
+fn diagnostic_signals_to_py<'py>(
+    py: Python<'py>,
+    signals: &DiagnosticSignals,
+) -> PyResult<Bound<'py, PyDict>> {
+    let out = PyDict::new_bound(py);
+    if let Some(value) = signals.page_count_mismatch {
+        out.set_item("page_count_mismatch", value)?;
+    }
+    if let Some(value) = signals.layout_collapse_detected {
+        out.set_item("layout_collapse_detected", value)?;
+    }
+    if let Some(value) = signals.pagination_overflow_detected {
+        out.set_item("pagination_overflow_detected", value)?;
+    }
+    if let Some(value) = signals.token_fragmentation_detected {
+        out.set_item("token_fragmentation_detected", value)?;
+    }
+    if let Some(value) = signals.typography_wrap_drift_detected {
+        out.set_item("typography_wrap_drift_detected", value)?;
+    }
+    if let Some(value) = signals.semantic_table_alignment_drift {
+        out.set_item("semantic_table_alignment_drift", value)?;
+    }
+    if let Some(value) = signals.low_coverage_page_count {
+        out.set_item("low_coverage_page_count", value)?;
+    }
+    if let Some(value) = signals.token_fragmentation_block_count {
+        out.set_item("token_fragmentation_block_count", value)?;
+    }
+    if let Some(value) = signals.wrap_drift_block_count {
+        out.set_item("wrap_drift_block_count", value)?;
+    }
+    if let Some(value) = signals.semantic_table_row_risk_count {
+        out.set_item("semantic_table_row_risk_count", value)?;
+    }
+    if let Some(value) = signals.fragmented_table_cell_count {
+        out.set_item("fragmented_table_cell_count", value)?;
+    }
+    Ok(out)
+}
+
 fn build_a11y_verify_report_py(
     py: Python<'_>,
     core: &A11yVerifierCoreReport,
@@ -4643,6 +5335,7 @@ fn build_a11y_verify_report_py(
     a11y_report: Option<&Bound<'_, PyAny>>,
     claim_evidence: Option<&Bound<'_, PyAny>>,
     pagination_trace_summary: Option<&PaginationTraceSummary>,
+    diagnostic_signals: Option<&DiagnosticSignals>,
 ) -> PyResult<PyObject> {
     let mode_norm = {
         let m = mode.trim().to_ascii_lowercase();
@@ -6677,6 +7370,9 @@ fn build_a11y_verify_report_py(
             pagination_trace_summary_to_py(py, summary)?,
         )?;
     }
+    if let Some(signals) = diagnostic_signals {
+        report.set_item("diagnostic_signals", diagnostic_signals_to_py(py, signals)?)?;
+    }
 
     report.set_item("profile", core.profile.clone())?;
 
@@ -6703,6 +7399,38 @@ fn build_a11y_verify_report_py(
         failed_list.append(rid.clone())?;
     }
     gate.set_item("failed_rule_ids", failed_list)?;
+    let reason_codes = PyList::empty_bound(py);
+    if let Some(signals) = diagnostic_signals {
+        if signals.page_count_mismatch.unwrap_or(false) {
+            reason_codes.append("page_count_mismatch")?;
+        }
+        if signals.layout_collapse_detected.unwrap_or(false)
+            || pagination_trace_summary
+                .and_then(|summary| summary.low_coverage_page_count)
+                .unwrap_or(0)
+                > 0
+        {
+            reason_codes.append("layout_collapse_detected")?;
+        }
+        if signals.pagination_overflow_detected.unwrap_or(false)
+            || pagination_trace_summary
+                .and_then(|summary| summary.overflow_event_count)
+                .unwrap_or(0)
+                > 0
+        {
+            reason_codes.append("pagination_overflow_detected")?;
+        }
+        if signals.token_fragmentation_detected.unwrap_or(false) {
+            reason_codes.append("token_fragmentation_detected")?;
+        }
+        if signals.typography_wrap_drift_detected.unwrap_or(false) {
+            reason_codes.append("typography_wrap_drift_detected")?;
+        }
+        if signals.semantic_table_alignment_drift.unwrap_or(false) {
+            reason_codes.append("semantic_table_alignment_drift")?;
+        }
+    }
+    gate.set_item("reason_codes", reason_codes)?;
     report.set_item("gate", gate)?;
 
     let summary = PyDict::new_bound(py);
@@ -6785,6 +7513,23 @@ fn build_a11y_verify_report_py(
         }
         if let Some(value) = summary.transition_count {
             signal_counts_py.set_item("pagination_transition_count", value)?;
+        }
+    }
+    if let Some(signals) = diagnostic_signals {
+        if let Some(value) = signals.low_coverage_page_count {
+            signal_counts_py.set_item("diagnostic_low_coverage_page_count", value)?;
+        }
+        if let Some(value) = signals.token_fragmentation_block_count {
+            signal_counts_py.set_item("diagnostic_token_fragmentation_block_count", value)?;
+        }
+        if let Some(value) = signals.wrap_drift_block_count {
+            signal_counts_py.set_item("diagnostic_wrap_drift_block_count", value)?;
+        }
+        if let Some(value) = signals.semantic_table_row_risk_count {
+            signal_counts_py.set_item("diagnostic_semantic_table_row_risk_count", value)?;
+        }
+        if let Some(value) = signals.fragmented_table_cell_count {
+            signal_counts_py.set_item("diagnostic_fragmented_table_cell_count", value)?;
         }
     }
     observability.set_item("signal_counts", signal_counts_py)?;
@@ -7017,6 +7762,7 @@ fn build_pmr_report_py(
     html_path: &str,
     css_path: &str,
     pagination_trace_summary: Option<&PaginationTraceSummary>,
+    diagnostic_signals: Option<&DiagnosticSignals>,
 ) -> PyResult<PyObject> {
     let report = PyDict::new_bound(py);
     report.set_item("schema", "fullbleed.pmr.v1")?;
@@ -7030,6 +7776,9 @@ fn build_pmr_report_py(
             "pagination_trace_summary",
             pagination_trace_summary_to_py(py, summary)?,
         )?;
+    }
+    if let Some(signals) = diagnostic_signals {
+        report.set_item("diagnostic_signals", diagnostic_signals_to_py(py, signals)?)?;
     }
 
     report.set_item("profile", core.profile.clone())?;
@@ -7051,6 +7800,38 @@ fn build_pmr_report_py(
         failed.append(aid.clone())?;
     }
     gate.set_item("failed_audit_ids", failed)?;
+    let reason_codes = PyList::empty_bound(py);
+    if let Some(signals) = diagnostic_signals {
+        if signals.page_count_mismatch.unwrap_or(false) {
+            reason_codes.append("page_count_mismatch")?;
+        }
+        if signals.layout_collapse_detected.unwrap_or(false)
+            || pagination_trace_summary
+                .and_then(|summary| summary.low_coverage_page_count)
+                .unwrap_or(0)
+                > 0
+        {
+            reason_codes.append("layout_collapse_detected")?;
+        }
+        if signals.pagination_overflow_detected.unwrap_or(false)
+            || pagination_trace_summary
+                .and_then(|summary| summary.overflow_event_count)
+                .unwrap_or(0)
+                > 0
+        {
+            reason_codes.append("pagination_overflow_detected")?;
+        }
+        if signals.token_fragmentation_detected.unwrap_or(false) {
+            reason_codes.append("token_fragmentation_detected")?;
+        }
+        if signals.typography_wrap_drift_detected.unwrap_or(false) {
+            reason_codes.append("typography_wrap_drift_detected")?;
+        }
+        if signals.semantic_table_alignment_drift.unwrap_or(false) {
+            reason_codes.append("semantic_table_alignment_drift")?;
+        }
+    }
+    gate.set_item("reason_codes", reason_codes)?;
     report.set_item("gate", gate)?;
 
     let categories = PyList::empty_bound(py);
@@ -7182,6 +7963,23 @@ fn build_pmr_report_py(
         }
         if let Some(value) = summary.transition_count {
             signal_counts_py.set_item("pagination_transition_count", value)?;
+        }
+    }
+    if let Some(signals) = diagnostic_signals {
+        if let Some(value) = signals.low_coverage_page_count {
+            signal_counts_py.set_item("diagnostic_low_coverage_page_count", value)?;
+        }
+        if let Some(value) = signals.token_fragmentation_block_count {
+            signal_counts_py.set_item("diagnostic_token_fragmentation_block_count", value)?;
+        }
+        if let Some(value) = signals.wrap_drift_block_count {
+            signal_counts_py.set_item("diagnostic_wrap_drift_block_count", value)?;
+        }
+        if let Some(value) = signals.semantic_table_row_risk_count {
+            signal_counts_py.set_item("diagnostic_semantic_table_row_risk_count", value)?;
+        }
+        if let Some(value) = signals.fragmented_table_cell_count {
+            signal_counts_py.set_item("diagnostic_fragmented_table_cell_count", value)?;
         }
     }
     observability.set_item("signal_counts", signal_counts_py)?;
@@ -7865,7 +8663,7 @@ impl PdfEngine {
         Ok(out.to_object(py))
     }
 
-    #[pyo3(signature = (html, css="", profile="strict", mode="error", render_preview_png_path=None, a11y_report=None, claim_evidence=None, pagination_trace_summary=None))]
+    #[pyo3(signature = (html, css="", profile="strict", mode="error", render_preview_png_path=None, a11y_report=None, claim_evidence=None, pagination_trace_summary=None, diagnostic_signals=None))]
     fn verify_accessibility_html(
         &self,
         py: Python<'_>,
@@ -7877,11 +8675,14 @@ impl PdfEngine {
         a11y_report: Option<PyObject>,
         claim_evidence: Option<PyObject>,
         pagination_trace_summary: Option<PyObject>,
+        diagnostic_signals: Option<PyObject>,
     ) -> PyResult<PyObject> {
         let core = self.engine.verify_accessibility_html_core(html, profile);
         let pagination_trace_summary = pagination_trace_summary_from_py(
             pagination_trace_summary.as_ref().map(|v| v.bind(py)),
         )?;
+        let diagnostic_signals =
+            diagnostic_signals_from_py(diagnostic_signals.as_ref().map(|v| v.bind(py)))?;
 
         // For in-memory HTML verification we emit a schema-shaped report without artifact hashes/paths.
         // Reuse the file-based path with temporary files to keep the report shape stable for now.
@@ -7909,13 +8710,14 @@ impl PdfEngine {
             a11y_report.as_ref().map(|v| v.bind(py)),
             claim_evidence.as_ref().map(|v| v.bind(py)),
             pagination_trace_summary.as_ref(),
+            diagnostic_signals.as_ref(),
         );
         let _ = std::fs::remove_file(&html_path);
         let _ = std::fs::remove_file(&css_path);
         report
     }
 
-    #[pyo3(signature = (html_path, css_path, profile="strict", mode="error", render_preview_png_path=None, a11y_report=None, claim_evidence=None, pagination_trace_summary=None))]
+    #[pyo3(signature = (html_path, css_path, profile="strict", mode="error", render_preview_png_path=None, a11y_report=None, claim_evidence=None, pagination_trace_summary=None, diagnostic_signals=None))]
     fn verify_accessibility_artifacts(
         &self,
         py: Python<'_>,
@@ -7927,6 +8729,7 @@ impl PdfEngine {
         a11y_report: Option<PyObject>,
         claim_evidence: Option<PyObject>,
         pagination_trace_summary: Option<PyObject>,
+        diagnostic_signals: Option<PyObject>,
     ) -> PyResult<PyObject> {
         let html = std::fs::read_to_string(html_path).map_err(|e| {
             PyValueError::new_err(format!(
@@ -7942,6 +8745,8 @@ impl PdfEngine {
         let pagination_trace_summary = pagination_trace_summary_from_py(
             pagination_trace_summary.as_ref().map(|v| v.bind(py)),
         )?;
+        let diagnostic_signals =
+            diagnostic_signals_from_py(diagnostic_signals.as_ref().map(|v| v.bind(py)))?;
         let core = self.engine.verify_accessibility_html_core(&html, profile);
         build_a11y_verify_report_py(
             py,
@@ -7953,6 +8758,7 @@ impl PdfEngine {
             a11y_report.as_ref().map(|v| v.bind(py)),
             claim_evidence.as_ref().map(|v| v.bind(py)),
             pagination_trace_summary.as_ref(),
+            diagnostic_signals.as_ref(),
         )
     }
 
@@ -7966,7 +8772,8 @@ impl PdfEngine {
         source_page_count=None,
         render_page_count=None,
         review_queue_items=None,
-        pagination_trace_summary=None
+        pagination_trace_summary=None,
+        diagnostic_signals=None
     ))]
     fn verify_paged_media_rank_html(
         &self,
@@ -7981,6 +8788,7 @@ impl PdfEngine {
         render_page_count: Option<i64>,
         review_queue_items: Option<i64>,
         pagination_trace_summary: Option<PyObject>,
+        diagnostic_signals: Option<PyObject>,
     ) -> PyResult<PyObject> {
         let tmp_dir = std::env::temp_dir();
         let pid = std::process::id();
@@ -8003,6 +8811,8 @@ impl PdfEngine {
         let pagination_trace_summary = pagination_trace_summary_from_py(
             pagination_trace_summary.as_ref().map(|v| v.bind(py)),
         )?;
+        let diagnostic_signals =
+            diagnostic_signals_from_py(diagnostic_signals.as_ref().map(|v| v.bind(py)))?;
         let ctx = PmrCoreContext {
             overflow_count,
             known_loss_count,
@@ -8022,6 +8832,7 @@ impl PdfEngine {
             &html_path.to_string_lossy(),
             &css_path.to_string_lossy(),
             pagination_trace_summary.as_ref(),
+            diagnostic_signals.as_ref(),
         );
         let _ = std::fs::remove_file(&html_path);
         let _ = std::fs::remove_file(&css_path);
@@ -8038,7 +8849,8 @@ impl PdfEngine {
         source_page_count=None,
         render_page_count=None,
         review_queue_items=None,
-        pagination_trace_summary=None
+        pagination_trace_summary=None,
+        diagnostic_signals=None
     ))]
     fn verify_paged_media_rank_artifacts(
         &self,
@@ -8053,6 +8865,7 @@ impl PdfEngine {
         render_page_count: Option<i64>,
         review_queue_items: Option<i64>,
         pagination_trace_summary: Option<PyObject>,
+        diagnostic_signals: Option<PyObject>,
     ) -> PyResult<PyObject> {
         let html = std::fs::read_to_string(html_path).map_err(|e| {
             PyValueError::new_err(format!(
@@ -8067,6 +8880,8 @@ impl PdfEngine {
         let pagination_trace_summary = pagination_trace_summary_from_py(
             pagination_trace_summary.as_ref().map(|v| v.bind(py)),
         )?;
+        let diagnostic_signals =
+            diagnostic_signals_from_py(diagnostic_signals.as_ref().map(|v| v.bind(py)))?;
         let ctx = PmrCoreContext {
             overflow_count,
             known_loss_count,
@@ -8086,6 +8901,7 @@ impl PdfEngine {
             html_path,
             css_path,
             pagination_trace_summary.as_ref(),
+            diagnostic_signals.as_ref(),
         )
     }
 
@@ -8290,6 +9106,30 @@ impl PdfEngine {
             .allow_threads(|| self.engine.render_to_document(html, css))
             .map_err(to_py_err)?;
         build_render_time_pagination_trace_py(py, &doc, &self.engine)
+    }
+
+    fn export_render_time_typography_drift_trace(
+        &self,
+        py: Python<'_>,
+        html: &str,
+        css: &str,
+    ) -> PyResult<PyObject> {
+        let doc = py
+            .allow_threads(|| self.engine.render_to_document(html, css))
+            .map_err(to_py_err)?;
+        build_render_time_typography_drift_trace_py(py, &doc, &self.engine)
+    }
+
+    fn export_render_time_region_text_alignment_trace(
+        &self,
+        py: Python<'_>,
+        html: &str,
+        css: &str,
+    ) -> PyResult<PyObject> {
+        let doc = py
+            .allow_threads(|| self.engine.render_to_document(html, css))
+            .map_err(to_py_err)?;
+        build_render_time_region_text_alignment_trace_py(py, &doc, &self.engine)
     }
 
     fn render_pdf_with_page_data_and_template_bindings(

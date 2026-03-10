@@ -19,6 +19,8 @@ class AccessibilityRunResult:
     font_resolution_trace: dict[str, Any] | None = None
     asset_resolution_trace: dict[str, Any] | None = None
     pagination_trace: dict[str, Any] | None = None
+    typography_drift_trace: dict[str, Any] | None = None
+    region_text_alignment_trace: dict[str, Any] | None = None
     run_report: dict[str, Any] = field(default_factory=dict)
     contract_fingerprint: str | None = None
     warnings: list[str] = field(default_factory=list)
@@ -38,6 +40,8 @@ class AccessibilityRunResult:
             "font_resolution_trace": self.font_resolution_trace,
             "asset_resolution_trace": self.asset_resolution_trace,
             "pagination_trace": self.pagination_trace,
+            "typography_drift_trace": self.typography_drift_trace,
+            "region_text_alignment_trace": self.region_text_alignment_trace,
             "run_report": self.run_report,
             "contract_fingerprint": self.contract_fingerprint,
             "warnings": list(self.warnings),

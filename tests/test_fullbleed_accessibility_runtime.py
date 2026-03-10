@@ -148,6 +148,10 @@ def test_accessibility_engine_render_bundle_emits_pdfua_seed_and_trace_artifacts
         assert "font_resolution_trace_path" in result.paths
     if hasattr(fullbleed.PdfEngine, "export_render_time_pagination_trace"):
         assert "pagination_trace_path" in result.paths
+    if hasattr(fullbleed.PdfEngine, "export_render_time_typography_drift_trace"):
+        assert "typography_drift_trace_path" in result.paths
+    if hasattr(fullbleed.PdfEngine, "export_render_time_region_text_alignment_trace"):
+        assert "region_text_alignment_trace_path" in result.paths
 
     html_text = Path(result.paths["html_path"]).read_text(encoding="utf-8")
     assert 'rel="stylesheet"' in html_text
@@ -235,6 +239,20 @@ def test_accessibility_engine_render_bundle_emits_pdfua_seed_and_trace_artifacts
         assert pagination_trace["schema"] == "fullbleed.pagination_trace.v1"
         assert pagination_trace["schema_version"] == 1
         assert pagination_trace["summary"]["page_count"] >= 1
+    if "typography_drift_trace_path" in result.paths:
+        typography_trace = json.loads(
+            Path(result.paths["typography_drift_trace_path"]).read_text(encoding="utf-8")
+        )
+        assert typography_trace["schema"] == "fullbleed.typography_drift_trace.v1"
+        assert typography_trace["schema_version"] == 1
+        assert typography_trace["summary"]["block_count"] >= 1
+    if "region_text_alignment_trace_path" in result.paths:
+        region_trace = json.loads(
+            Path(result.paths["region_text_alignment_trace_path"]).read_text(encoding="utf-8")
+        )
+        assert region_trace["schema"] == "fullbleed.region_text_alignment_trace.v1"
+        assert region_trace["schema_version"] == 1
+        assert "summary" in region_trace
 
     run_report = json.loads(Path(result.paths["run_report_path"]).read_text(encoding="utf-8"))
     assert run_report["pdf_ua_targeted"] is True
@@ -271,6 +289,23 @@ def test_accessibility_engine_render_bundle_emits_pdfua_seed_and_trace_artifacts
             verifier_report["observability"]["signal_counts"]["pagination_page_count"] >= 1
         )
         assert pmr_report["observability"]["signal_counts"]["pagination_page_count"] >= 1
+        assert verifier_report["diagnostic_signals"]["page_count_mismatch"] is False
+        assert pmr_report["diagnostic_signals"]["page_count_mismatch"] is False
+        assert isinstance(verifier_report["gate"]["reason_codes"], list)
+        assert isinstance(pmr_report["gate"]["reason_codes"], list)
+    if "typography_drift_trace_path" in result.paths:
+        assert run_report["typography_drift_trace_path"]
+        assert run_report["deliverables"]["typography_drift_trace_path"] == (
+            "bundle_smoke_typography_drift_trace.json"
+        )
+        assert run_report["typography_drift_summary"]["block_count"] >= 1
+    if "region_text_alignment_trace_path" in result.paths:
+        assert run_report["region_text_alignment_trace_path"]
+        assert run_report["deliverables"]["region_text_alignment_trace_path"] == (
+            "bundle_smoke_region_text_alignment_trace.json"
+        )
+        assert "region_text_alignment_summary" in run_report
+    assert run_report["diagnostic_signals"]["page_count_mismatch"] is False
     if "reading_order_trace_render_path" in run_report:
         assert run_report["reading_order_trace_render_path"]
         assert "reading_order_trace_cross_check" in run_report
