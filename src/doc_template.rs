@@ -7,6 +7,7 @@ use crate::frame::{AddResult, AddTrace};
 use crate::metrics::{DocumentMetrics, PageMetrics};
 use crate::page_template::PageTemplate;
 use crate::types::Pt;
+use base64::Engine;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
@@ -15,11 +16,43 @@ fn bool_to_flag(value: bool) -> u8 {
     if value { 1 } else { 0 }
 }
 
+fn trace_b64(value: &str) -> String {
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(value.as_bytes())
+}
+
+fn owner_trace_fields(owner_meta: &[(String, String)]) -> String {
+    let get = |key: &str| {
+        owner_meta
+            .iter()
+            .find_map(|(candidate, value)| (candidate == key).then(|| value.as_str()))
+    };
+    let mut fields: Vec<String> = Vec::new();
+    for (field, key) in [
+        ("owner_selector_b64", "fb.owner.selector"),
+        ("owner_dom_path_b64", "fb.owner.dom_path"),
+        ("owner_role_b64", "fb.owner.role"),
+        ("owner_component_b64", "fb.owner.component"),
+        ("owner_tag_b64", "fb.owner.tag"),
+        ("owner_id_b64", "fb.owner.id"),
+        ("owner_classes_b64", "fb.owner.classes"),
+    ] {
+        if let Some(value) = get(key) {
+            fields.push(format!("{field}={}", trace_b64(value)));
+        }
+    }
+    if fields.is_empty() {
+        String::new()
+    } else {
+        format!("|{}", fields.join("|"))
+    }
+}
+
 fn emit_pagination_layout_event(
     canvas: &mut Canvas,
     source_order: usize,
     segment_index: usize,
     flowable_name: &str,
+    owner_meta: &[(String, String)],
     frame_index: usize,
     is_last_frame: bool,
     placed_on_page_before: bool,
@@ -33,7 +66,7 @@ fn emit_pagination_layout_event(
         height: Pt::ZERO,
     });
     let value = format!(
-        "event=layout|source_order={}|segment_index={}|flowable={}|frame_index={}|is_last_frame={}|placed_on_page_before={}|result={}|reason={}|overflow_severity={}|cursor_y_before={}|avail_w={}|avail_h={}|frame_x={}|frame_y={}|frame_w={}|frame_h={}|wrapped_w={}|wrapped_h={}|placed_x={}|placed_y={}|placed_w={}|placed_h={}",
+        "event=layout|source_order={}|segment_index={}|flowable={}|frame_index={}|is_last_frame={}|placed_on_page_before={}|result={}|reason={}|overflow_severity={}|cursor_y_before={}|avail_w={}|avail_h={}|frame_x={}|frame_y={}|frame_w={}|frame_h={}|wrapped_w={}|wrapped_h={}|placed_x={}|placed_y={}|placed_w={}|placed_h={}{}",
         source_order,
         segment_index,
         flowable_name,
@@ -56,6 +89,7 @@ fn emit_pagination_layout_event(
         placed.y.to_milli_i64(),
         placed.width.to_milli_i64(),
         placed.height.to_milli_i64(),
+        owner_trace_fields(owner_meta),
     );
     canvas.meta(META_PAGINATION_EVENT_KEY, value);
 }
@@ -70,6 +104,7 @@ fn emit_pagination_transition_event(
     to_frame_index: usize,
     reason: &str,
     flowable_name: Option<&str>,
+    owner_meta: &[(String, String)],
     source_order: Option<usize>,
     segment_index: Option<usize>,
 ) {
@@ -81,7 +116,7 @@ fn emit_pagination_transition_event(
         .map(|value| value.to_string())
         .unwrap_or_else(|| "-1".to_string());
     let value = format!(
-        "event=transition|from_page={}|to_page={}|from_frame_index={}|to_frame_index={}|reason={}|flowable={}|source_order={}|segment_index={}",
+        "event=transition|from_page={}|to_page={}|from_frame_index={}|to_frame_index={}|reason={}|flowable={}|source_order={}|segment_index={}{}",
         from_page,
         to_page,
         from_frame_index,
@@ -90,6 +125,7 @@ fn emit_pagination_transition_event(
         flowable,
         source_order,
         segment_index,
+        owner_trace_fields(owner_meta),
     );
     canvas.meta(META_PAGINATION_EVENT_KEY, value);
 
@@ -275,6 +311,7 @@ impl DocTemplate {
             let mut suppress_break_before = false;
             loop {
                 let current_name = current.debug_name().to_string();
+                let current_owner_meta = current.diagnostic_metadata();
                 let pagination = current.pagination();
                 if !suppress_break_before
                     && matches!(pagination.break_before, BreakBefore::Page)
@@ -290,6 +327,7 @@ impl DocTemplate {
                         0,
                         "break_before_page",
                         Some(&current_name),
+                        &current_owner_meta,
                         Some(current_source_order),
                         Some(segment_index),
                     );
@@ -328,6 +366,7 @@ impl DocTemplate {
                         0,
                         "frame_exhausted",
                         Some(&current_name),
+                        &current_owner_meta,
                         Some(current_source_order),
                         Some(segment_index),
                     );
@@ -387,6 +426,7 @@ impl DocTemplate {
                             current_source_order,
                             segment_index,
                             &current_name,
+                            &current_owner_meta,
                             frame_index,
                             is_last_frame,
                             placed_on_page,
@@ -406,6 +446,7 @@ impl DocTemplate {
                                 0,
                                 "break_after_page",
                                 Some(&current_name),
+                                &current_owner_meta,
                                 Some(current_source_order),
                                 Some(segment_index),
                             );
@@ -447,6 +488,7 @@ impl DocTemplate {
                             current_source_order,
                             segment_index,
                             &current_name,
+                            &current_owner_meta,
                             frame_index,
                             is_last_frame,
                             placed_on_page,
@@ -463,6 +505,7 @@ impl DocTemplate {
                             if is_last_frame { 0 } else { frame_index + 1 },
                             "flowable_split",
                             Some(&current_name),
+                            &current_owner_meta,
                             Some(current_source_order),
                             Some(segment_index),
                         );
@@ -486,6 +529,7 @@ impl DocTemplate {
                             current_source_order,
                             segment_index,
                             &current_name,
+                            &current_owner_meta,
                             frame_index,
                             is_last_frame,
                             placed_on_page,
@@ -502,6 +546,7 @@ impl DocTemplate {
                             if is_last_frame { 0 } else { frame_index + 1 },
                             "frame_overflow",
                             Some(&current_name),
+                            &current_owner_meta,
                             Some(current_source_order),
                             Some(segment_index),
                         );

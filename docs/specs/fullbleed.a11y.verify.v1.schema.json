@@ -111,8 +111,17 @@
         "$ref": "#/$defs/finding"
       }
     },
+    "blocking_issue_summary": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/blockingIssue"
+      }
+    },
     "observability": {
       "$ref": "#/$defs/observability"
+    },
+    "layout_diagnostics": {
+      "$ref": "#/$defs/layoutDiagnosticsSummary"
     },
     "coverage": {
       "type": "object",
@@ -738,6 +747,236 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        }
+      }
+    },
+    "ownerContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "selector": {
+          "type": "string"
+        },
+        "dom_path": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "component": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "classes": {
+          "type": "string"
+        }
+      }
+    },
+    "blockingIssue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule_id",
+        "verdict",
+        "severity",
+        "message",
+        "stage",
+        "source",
+        "gate_failed"
+      ],
+      "properties": {
+        "rule_id": {
+          "type": "string"
+        },
+        "verdict": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "gate_failed": {
+          "type": "boolean"
+        },
+        "selector": {
+          "type": "string"
+        },
+        "dom_path": {
+          "type": "string"
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "failure_kind": {
+          "type": "string"
+        },
+        "observed_value": {
+          "type": "string"
+        },
+        "expected_value": {
+          "type": "string"
+        },
+        "remediation_hint": {
+          "type": "string"
+        }
+      }
+    },
+    "layoutDiagnosticsPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "page"
+      ],
+      "properties": {
+        "page": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "type": "string"
+        },
+        "low_coverage": {
+          "type": "boolean"
+        },
+        "occupied_area_ratio": {
+          "type": "number",
+          "minimum": 0
+        },
+        "visible_command_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "flowable_bbox_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dominant_owner": {
+          "$ref": "#/$defs/ownerContext"
+        },
+        "dominant_owner_label": {
+          "type": "string"
+        },
+        "dominant_owner_source": {
+          "type": "string"
+        },
+        "suspect_cause_codes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "owner_candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "owner": {
+                "$ref": "#/$defs/ownerContext"
+              },
+              "label": {
+                "type": "string"
+              },
+              "score": {
+                "type": "number"
+              },
+              "source": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "layoutDiagnosticsSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "detected",
+        "page_count",
+        "pages",
+        "page_ownership",
+        "page_break_attribution",
+        "dominant_break_triggers"
+      ],
+      "properties": {
+        "detected": {
+          "type": "boolean"
+        },
+        "page_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/layoutDiagnosticsPage"
+          }
+        },
+        "page_ownership": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/layoutDiagnosticsPage"
+          }
+        },
+        "page_break_attribution": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "from_page": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "to_page": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "reason": {
+                "type": "string"
+              },
+              "flowable_name": {
+                "type": "string"
+              },
+              "owner": {
+                "$ref": "#/$defs/ownerContext"
+              },
+              "owner_label": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "dominant_break_triggers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
           }
         }
       }

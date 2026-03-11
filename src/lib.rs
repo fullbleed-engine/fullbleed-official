@@ -2244,13 +2244,31 @@ impl FullBleed {
         let facts = self.verify_accessibility_html_facts(html);
         let mut findings: Vec<A11yVerifierFinding> = Vec::new();
 
-        let mut lang_ok = false;
-        if let Some(lang) = &facts.html_lang {
-            lang_ok = Self::a11y_lang_value_is_valid(lang);
-            if let Some(expected) = self.document_lang() {
-                lang_ok = lang_ok && lang == expected;
-            }
-        }
+        let observed_lang = facts.html_lang.clone().unwrap_or_default();
+        let expected_lang = self.document_lang().map(|value| value.to_string());
+        let lang_value_valid = facts
+            .html_lang
+            .as_deref()
+            .map(Self::a11y_lang_value_is_valid)
+            .unwrap_or(false);
+        let lang_ok = lang_value_valid
+            && expected_lang
+                .as_deref()
+                .map(|expected| facts.html_lang.as_deref() == Some(expected))
+                .unwrap_or(true);
+        let lang_failure_kind = if facts.html_lang.is_none() {
+            "missing"
+        } else if !lang_value_valid {
+            "invalid"
+        } else if expected_lang
+            .as_deref()
+            .map(|expected| facts.html_lang.as_deref() != Some(expected))
+            .unwrap_or(false)
+        {
+            "metadata_mismatch"
+        } else {
+            "none"
+        };
         Self::push_a11y_finding(
             &mut findings,
             "fb.a11y.html.lang_present_valid",
@@ -2260,15 +2278,31 @@ impl FullBleed {
             "fullbleed",
             if lang_ok {
                 "HTML lang attribute is present and valid.".to_string()
+            } else if lang_failure_kind == "metadata_mismatch" {
+                format!(
+                    "HTML lang attribute is present and valid in the emitted DOM, but engine metadata persistence mismatched (observed DOM={}, expected metadata={}).",
+                    observed_lang,
+                    expected_lang.clone().unwrap_or_default()
+                )
+            } else if lang_failure_kind == "invalid" {
+                "HTML lang attribute is present but invalid.".to_string()
             } else {
-                "HTML lang missing/invalid or metadata mismatch.".to_string()
+                "HTML lang attribute is missing.".to_string()
             },
             vec![A11yVerifierEvidence {
                 selector: Some("html".to_string()),
-                values: vec![(
-                    "lang".to_string(),
-                    facts.html_lang.clone().unwrap_or_default(),
-                )],
+                values: vec![
+                    ("lang".to_string(), observed_lang),
+                    (
+                        "observed_lang".to_string(),
+                        facts.html_lang.clone().unwrap_or_default(),
+                    ),
+                    (
+                        "expected_document_lang".to_string(),
+                        expected_lang.unwrap_or_default(),
+                    ),
+                    ("failure_kind".to_string(), lang_failure_kind.to_string()),
+                ],
             }],
         );
 
@@ -2330,10 +2364,24 @@ impl FullBleed {
             });
         }
 
-        let mut title_ok = !facts.title.trim().is_empty();
-        if let Some(expected) = self.document_title() {
-            title_ok = title_ok && facts.title == expected;
-        }
+        let expected_title = self.document_title().map(|value| value.to_string());
+        let title_present = !facts.title.trim().is_empty();
+        let title_ok = title_present
+            && expected_title
+                .as_deref()
+                .map(|expected| facts.title == expected)
+                .unwrap_or(true);
+        let title_failure_kind = if !title_present {
+            "missing"
+        } else if expected_title
+            .as_deref()
+            .map(|expected| facts.title != expected)
+            .unwrap_or(false)
+        {
+            "metadata_mismatch"
+        } else {
+            "none"
+        };
         Self::push_a11y_finding(
             &mut findings,
             "fb.a11y.html.title_present_nonempty",
@@ -2343,12 +2391,26 @@ impl FullBleed {
             "fullbleed",
             if title_ok {
                 "Document title is present and non-empty.".to_string()
+            } else if title_failure_kind == "metadata_mismatch" {
+                format!(
+                    "Document title is present in the emitted DOM, but engine metadata persistence mismatched (observed DOM={}, expected metadata={}).",
+                    facts.title,
+                    expected_title.clone().unwrap_or_default()
+                )
             } else {
-                "Document title missing/empty or metadata mismatch.".to_string()
+                "Document title is missing or empty.".to_string()
             },
             vec![A11yVerifierEvidence {
                 selector: Some("head > title".to_string()),
-                values: vec![("title".to_string(), facts.title.clone())],
+                values: vec![
+                    ("title".to_string(), facts.title.clone()),
+                    ("observed_title".to_string(), facts.title.clone()),
+                    (
+                        "expected_document_title".to_string(),
+                        expected_title.unwrap_or_default(),
+                    ),
+                    ("failure_kind".to_string(), title_failure_kind.to_string()),
+                ],
             }],
         );
 
@@ -3491,15 +3553,31 @@ impl FullBleed {
         let facts = self.verify_accessibility_html_facts(html);
         let mut audits: Vec<PmrCoreAudit> = Vec::new();
 
-        let lang_pass = facts
+        let observed_lang = facts.html_lang.clone().unwrap_or_default();
+        let expected_lang = self.document_lang().map(|value| value.to_string());
+        let lang_value_valid = facts
             .html_lang
             .as_deref()
             .map(Self::lang_is_valid)
-            .unwrap_or(false)
-            && self
-                .document_lang()
+            .unwrap_or(false);
+        let lang_pass = lang_value_valid
+            && expected_lang
+                .as_deref()
                 .map(|expected| facts.html_lang.as_deref() == Some(expected))
                 .unwrap_or(true);
+        let lang_failure_kind = if facts.html_lang.is_none() {
+            "missing"
+        } else if !lang_value_valid {
+            "invalid"
+        } else if expected_lang
+            .as_deref()
+            .map(|expected| facts.html_lang.as_deref() != Some(expected))
+            .unwrap_or(false)
+        {
+            "metadata_mismatch"
+        } else {
+            "none"
+        };
         Self::pmr_push_contract_audit(
             &mut audits,
             "pmr.doc.lang_present_valid",
@@ -3508,25 +3586,54 @@ impl FullBleed {
             true,
             if lang_pass {
                 "HTML lang is present and valid.".to_string()
+            } else if lang_failure_kind == "metadata_mismatch" {
+                format!(
+                    "HTML lang is present and valid in the emitted DOM, but engine metadata persistence mismatched (observed DOM={}, expected metadata={}).",
+                    observed_lang,
+                    expected_lang.clone().unwrap_or_default()
+                )
+            } else if lang_failure_kind == "invalid" {
+                "HTML lang attribute is present but invalid.".to_string()
             } else {
-                "HTML lang missing/invalid or metadata mismatch.".to_string()
+                "HTML lang attribute is missing.".to_string()
             },
             vec![PmrCoreEvidence {
                 selector: Some("html".to_string()),
                 diagnostic_ref: None,
-                values: vec![(
-                    "lang".to_string(),
-                    facts.html_lang.clone().unwrap_or_default(),
-                )],
+                values: vec![
+                    ("lang".to_string(), observed_lang),
+                    (
+                        "observed_lang".to_string(),
+                        facts.html_lang.clone().unwrap_or_default(),
+                    ),
+                    (
+                        "expected_document_lang".to_string(),
+                        expected_lang.unwrap_or_default(),
+                    ),
+                    ("failure_kind".to_string(), lang_failure_kind.to_string()),
+                ],
             }],
             None,
         );
 
-        let title_pass = !facts.title.trim().is_empty()
-            && self
-                .document_title()
+        let expected_title = self.document_title().map(|value| value.to_string());
+        let title_present = !facts.title.trim().is_empty();
+        let title_pass = title_present
+            && expected_title
+                .as_deref()
                 .map(|expected| facts.title == expected)
                 .unwrap_or(true);
+        let title_failure_kind = if !title_present {
+            "missing"
+        } else if expected_title
+            .as_deref()
+            .map(|expected| facts.title != expected)
+            .unwrap_or(false)
+        {
+            "metadata_mismatch"
+        } else {
+            "none"
+        };
         Self::pmr_push_contract_audit(
             &mut audits,
             "pmr.doc.title_present_nonempty",
@@ -3535,13 +3642,27 @@ impl FullBleed {
             true,
             if title_pass {
                 "Document title is present and non-empty.".to_string()
+            } else if title_failure_kind == "metadata_mismatch" {
+                format!(
+                    "Document title is present in the emitted DOM, but engine metadata persistence mismatched (observed DOM={}, expected metadata={}).",
+                    facts.title,
+                    expected_title.clone().unwrap_or_default()
+                )
             } else {
-                "Document title missing/empty or metadata mismatch.".to_string()
+                "Document title is missing or empty.".to_string()
             },
             vec![PmrCoreEvidence {
                 selector: Some("head > title".to_string()),
                 diagnostic_ref: None,
-                values: vec![("title".to_string(), facts.title.clone())],
+                values: vec![
+                    ("title".to_string(), facts.title.clone()),
+                    ("observed_title".to_string(), facts.title.clone()),
+                    (
+                        "expected_document_title".to_string(),
+                        expected_title.unwrap_or_default(),
+                    ),
+                    ("failure_kind".to_string(), title_failure_kind.to_string()),
+                ],
             }],
             None,
         );

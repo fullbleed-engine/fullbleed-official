@@ -108,6 +108,178 @@ def _coerce_diagnostic_signals(signals: dict[str, Any] | None) -> dict[str, Any]
     return out or None
 
 
+def _coerce_float(value: Any) -> float | None:
+    try:
+        return None if value is None else float(value)
+    except Exception:
+        return None
+
+
+def _coerce_owner(owner: Any) -> dict[str, str] | None:
+    if not isinstance(owner, dict):
+        return None
+    keys = ("selector", "dom_path", "role", "component", "tag", "id", "classes")
+    out = {
+        key: str(owner.get(key)).strip()
+        for key in keys
+        if isinstance(owner.get(key), str) and str(owner.get(key)).strip()
+    }
+    return out or None
+
+
+def _derive_layout_diagnostics(
+    pagination_trace: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(pagination_trace, dict):
+        return None
+
+    collapse_diag = pagination_trace.get("layout_collapse_diagnostics") or {}
+    collapse_pages = collapse_diag.get("pages") or []
+    pages = pagination_trace.get("pages") or []
+    break_rows = pagination_trace.get("page_break_attribution") or []
+    dominant_break_triggers = pagination_trace.get("dominant_break_triggers") or []
+
+    page_rows: list[dict[str, Any]] = []
+    for row in collapse_pages:
+        if not isinstance(row, dict):
+            continue
+        page_entry: dict[str, Any] = {
+            "page": _coerce_int(row.get("page")),
+            "kind": "collapsed_or_anomalous",
+            "dominant_owner": _coerce_owner(row.get("dominant_owner")),
+            "dominant_owner_label": (
+                str(row.get("dominant_owner_label")).strip()
+                if isinstance(row.get("dominant_owner_label"), str)
+                and str(row.get("dominant_owner_label")).strip()
+                else None
+            ),
+            "dominant_owner_source": (
+                str(row.get("dominant_owner_source")).strip()
+                if isinstance(row.get("dominant_owner_source"), str)
+                and str(row.get("dominant_owner_source")).strip()
+                else None
+            ),
+            "occupied_area_ratio": _coerce_float(row.get("occupied_area_ratio")),
+            "visible_command_count": _coerce_int(row.get("visible_command_count")),
+            "flowable_bbox_count": _coerce_int(row.get("flowable_bbox_count")),
+            "suspect_cause_codes": [
+                str(value)
+                for value in (row.get("suspect_cause_codes") or [])
+                if isinstance(value, str) and value.strip()
+            ],
+        }
+        owner_candidates: list[dict[str, Any]] = []
+        for candidate in row.get("owner_candidates") or []:
+            if not isinstance(candidate, dict):
+                continue
+            candidate_row = {
+                "owner": _coerce_owner(candidate.get("owner")),
+                "label": (
+                    str(candidate.get("label")).strip()
+                    if isinstance(candidate.get("label"), str)
+                    and str(candidate.get("label")).strip()
+                    else None
+                ),
+                "score": _coerce_float(candidate.get("score")),
+                "source": (
+                    str(candidate.get("source")).strip()
+                    if isinstance(candidate.get("source"), str)
+                    and str(candidate.get("source")).strip()
+                    else None
+                ),
+            }
+            if any(value is not None for value in candidate_row.values()):
+                owner_candidates.append(candidate_row)
+        if owner_candidates:
+            page_entry["owner_candidates"] = owner_candidates[:5]
+        page_rows.append(page_entry)
+
+    page_ownership: list[dict[str, Any]] = []
+    for row in pages:
+        if not isinstance(row, dict):
+            continue
+        owner = _coerce_owner(row.get("dominant_owner"))
+        owner_label = (
+            str(row.get("dominant_owner_label")).strip()
+            if isinstance(row.get("dominant_owner_label"), str)
+            and str(row.get("dominant_owner_label")).strip()
+            else None
+        )
+        if owner is None and owner_label is None and not row.get("low_coverage"):
+            continue
+        page_ownership.append(
+            {
+                "page": _coerce_int(row.get("page")),
+                "low_coverage": bool(row.get("low_coverage")),
+                "occupied_area_ratio": _coerce_float(row.get("occupied_area_ratio")),
+                "dominant_owner": owner,
+                "dominant_owner_label": owner_label,
+                "dominant_owner_source": (
+                    str(row.get("dominant_owner_source")).strip()
+                    if isinstance(row.get("dominant_owner_source"), str)
+                    and str(row.get("dominant_owner_source")).strip()
+                    else None
+                ),
+                "suspect_cause_codes": [
+                    str(value)
+                    for value in (row.get("suspect_cause_codes") or [])
+                    if isinstance(value, str) and value.strip()
+                ],
+            }
+        )
+
+    attribution_rows: list[dict[str, Any]] = []
+    for row in break_rows:
+        if not isinstance(row, dict):
+            continue
+        attribution_rows.append(
+            {
+                "from_page": _coerce_int(row.get("from_page")),
+                "to_page": _coerce_int(row.get("to_page")),
+                "reason": (
+                    str(row.get("reason")).strip()
+                    if isinstance(row.get("reason"), str)
+                    and str(row.get("reason")).strip()
+                    else None
+                ),
+                "flowable_name": (
+                    str(row.get("flowable_name")).strip()
+                    if isinstance(row.get("flowable_name"), str)
+                    and str(row.get("flowable_name")).strip()
+                    else None
+                ),
+                "owner": _coerce_owner(row.get("owner")),
+                "owner_label": (
+                    str(row.get("owner_label")).strip()
+                    if isinstance(row.get("owner_label"), str)
+                    and str(row.get("owner_label")).strip()
+                    else None
+                ),
+            }
+        )
+
+    trigger_rows = [
+        {
+            "reason": str(row.get("reason")).strip(),
+            "count": _coerce_int(row.get("count")),
+        }
+        for row in dominant_break_triggers
+        if isinstance(row, dict)
+        and isinstance(row.get("reason"), str)
+        and str(row.get("reason")).strip()
+    ]
+
+    out = {
+        "detected": bool(collapse_diag.get("detected")),
+        "page_count": _coerce_int(collapse_diag.get("page_count")) or len(page_rows),
+        "pages": page_rows,
+        "page_ownership": page_ownership,
+        "page_break_attribution": attribution_rows,
+        "dominant_break_triggers": trigger_rows,
+    }
+    return out if out["pages"] or out["page_ownership"] or out["page_break_attribution"] else None
+
+
 def _sha256_file(path: Path) -> str | None:
     try:
         return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
@@ -544,9 +716,10 @@ class AccessibilityEngine:
         claim_evidence: dict[str, Any] | None = None,
         render_preview_png_path: str | None = None,
         pagination_trace_summary: dict[str, Any] | None = None,
+        pagination_trace: dict[str, Any] | None = None,
         diagnostic_signals: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return dict(
+        report = dict(
             self._engine.verify_accessibility_artifacts(
                 html_path,
                 css_path,
@@ -561,6 +734,10 @@ class AccessibilityEngine:
                 diagnostic_signals=_coerce_diagnostic_signals(diagnostic_signals),
             )
         )
+        layout_diagnostics = _derive_layout_diagnostics(pagination_trace)
+        if layout_diagnostics is not None:
+            report["layout_diagnostics"] = layout_diagnostics
+        return report
 
     def _derive_pmr_kwargs(
         self,
@@ -617,6 +794,7 @@ class AccessibilityEngine:
         source_analysis: dict[str, Any] | None = None,
         render_page_count: int | None = None,
         pagination_trace_summary: dict[str, Any] | None = None,
+        pagination_trace: dict[str, Any] | None = None,
         diagnostic_signals: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         kwargs = self._derive_pmr_kwargs(
@@ -628,11 +806,15 @@ class AccessibilityEngine:
             pagination_trace_summary=pagination_trace_summary,
             diagnostic_signals=diagnostic_signals,
         )
-        return dict(
+        report = dict(
             self._engine.verify_paged_media_rank_artifacts(
                 html_path, css_path, profile=profile, mode=mode, **kwargs
             )
         )
+        layout_diagnostics = _derive_layout_diagnostics(pagination_trace)
+        if layout_diagnostics is not None:
+            report["layout_diagnostics"] = layout_diagnostics
+        return report
 
     def export_render_time_typography_drift_trace(
         self,
@@ -1446,6 +1628,7 @@ class AccessibilityEngine:
                     a11y_report=a11y_report,
                     claim_evidence=claim_evidence,
                     pagination_trace_summary=pagination_summary,
+                    pagination_trace=pagination_trace,
                     diagnostic_signals=diagnostic_signals,
                 )
             except TypeError:
@@ -1471,6 +1654,7 @@ class AccessibilityEngine:
                     source_analysis=source_analysis,
                     render_page_count=(len(png_paths) if png_paths else None),
                     pagination_trace_summary=pagination_summary,
+                    pagination_trace=pagination_trace,
                     diagnostic_signals=diagnostic_signals,
                 )
             except TypeError:
@@ -1561,10 +1745,12 @@ class AccessibilityEngine:
             "font_resolution_summary": (font_resolution_trace or {}).get("summary"),
             "asset_resolution_summary": (asset_resolution_trace or {}).get("summary"),
             "pagination_trace_summary": pagination_summary or None,
+            "layout_collapse_summary": _derive_layout_diagnostics(pagination_trace),
             "typography_drift_summary": typography_summary or None,
             "region_text_alignment_summary": region_alignment_summary or None,
             "page_count_divergence": page_count_divergence,
             "diagnostic_signals": diagnostic_signals,
+            "a11y_issue_summary": (verifier_report or {}).get("blocking_issue_summary"),
             "css_link_href": css_link_href,
             "css_link_media": css_link_media,
             "css_link_injected": css_link_injected,

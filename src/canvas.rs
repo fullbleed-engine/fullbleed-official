@@ -3,6 +3,8 @@ use crate::types::{Color, MixBlendMode, Pt, Rect, Shading, Size};
 
 pub const META_FLOWABLE_BBOX_KEY: &str = "__fb_bbox";
 pub const META_PAGINATION_EVENT_KEY: &str = "__fb_pagination_event";
+pub const META_DIAGNOSTIC_SCOPE_BEGIN_KEY: &str = "__fb_diag_scope_begin";
+pub const META_DIAGNOSTIC_SCOPE_END_KEY: &str = "__fb_diag_scope_end";
 
 #[derive(Debug, Clone)]
 pub enum Command {

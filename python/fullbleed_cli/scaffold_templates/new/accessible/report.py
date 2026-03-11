@@ -46,7 +46,10 @@ from fullbleed.ui.core import Document
 ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = ROOT / "output"
 CSS_PATH = ROOT / "styles" / "report.css"
+BOOTSTRAP_CSS_PATH = ROOT / "vendor" / "css" / "bootstrap.min.css"
 VENDOR_FONT_PATH = ROOT / "vendor" / "fonts" / "Inter-Variable.ttf"
+VENDOR_ICON_PATH = ROOT / "vendor" / "icons" / "bootstrap-icons.svg"
+BOOTSTRAP_ENABLED = True
 
 HTML_PATH = OUTPUT_DIR / "accessibility_scaffold.html"
 CSS_ARTIFACT_PATH = OUTPUT_DIR / "accessibility_scaffold.css"
@@ -75,6 +78,18 @@ TRANSACTIONS: tuple[Transaction, ...] = (
 )
 
 
+def load_css() -> str:
+    css_parts: list[str] = []
+    if BOOTSTRAP_ENABLED:
+        if not BOOTSTRAP_CSS_PATH.exists():
+            raise RuntimeError(
+                f"Bootstrap is enabled for this scaffold but the vendored stylesheet is missing: {BOOTSTRAP_CSS_PATH}"
+            )
+        css_parts.append(BOOTSTRAP_CSS_PATH.read_text(encoding="utf-8"))
+    css_parts.append(CSS_PATH.read_text(encoding="utf-8"))
+    return "\n\n".join(css_parts)
+
+
 def create_engine() -> AccessibilityEngine:
     engine = AccessibilityEngine(
         page_width="8.5in",
@@ -88,12 +103,23 @@ def create_engine() -> AccessibilityEngine:
         document_css_required=True,
         strict=False,
     )
-    if hasattr(fullbleed, "AssetBundle") and VENDOR_FONT_PATH.exists():
+    if hasattr(fullbleed, "AssetBundle"):
         bundle = fullbleed.AssetBundle()
-        bundle.add_file(str(VENDOR_FONT_PATH), "font")
+        if BOOTSTRAP_ENABLED and BOOTSTRAP_CSS_PATH.exists():
+            bundle.add_file(str(BOOTSTRAP_CSS_PATH), "css", name="bootstrap")
+        elif BOOTSTRAP_ENABLED:
+            raise RuntimeError(
+                f"Bootstrap is enabled for this scaffold but the vendored stylesheet is missing: {BOOTSTRAP_CSS_PATH}"
+            )
+        if VENDOR_FONT_PATH.exists():
+            bundle.add_file(str(VENDOR_FONT_PATH), "font")
+        else:
+            print(f"[warn] Vendored font not found: {VENDOR_FONT_PATH}")
+        if VENDOR_ICON_PATH.exists():
+            bundle.add_file(str(VENDOR_ICON_PATH), "svg", name="bootstrap-icons")
+        else:
+            print(f"[warn] Vendored icon bundle not found: {VENDOR_ICON_PATH}")
         engine.register_bundle(bundle)
-    elif hasattr(fullbleed, "AssetBundle"):
-        print(f"[warn] Vendored font not found: {VENDOR_FONT_PATH}")
     return engine
 
 
@@ -263,7 +289,7 @@ def _verification_seal_svg() -> object:
     page="LETTER",
     margin="0.5in",
     title="Accessibility Scaffold",
-    bootstrap=False,
+    bootstrap=BOOTSTRAP_ENABLED,
     css_source_path=str(CSS_PATH),
     css_media="all",
 )
@@ -613,7 +639,7 @@ def _build_claim_evidence_payload() -> dict:
 
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    css = CSS_PATH.read_text(encoding="utf-8")
+    css = load_css()
 
     engine = create_engine()
     artifact = App()
@@ -708,6 +734,9 @@ def main() -> None:
         "document_css_source_path": bundle_run.get("document_css_source_path"),
         "document_css_media": bundle_run.get("document_css_media"),
         "document_css_required": bundle_run.get("document_css_required"),
+        "bootstrap_enabled": BOOTSTRAP_ENABLED,
+        "bootstrap_css_path": str(BOOTSTRAP_CSS_PATH) if BOOTSTRAP_ENABLED else None,
+        "bootstrap_icon_path": str(VENDOR_ICON_PATH),
         "css_link_href": bundle_run.get("css_link_href"),
         "css_link_media": bundle_run.get("css_link_media"),
         "css_link_injected": bundle_run.get("css_link_injected"),

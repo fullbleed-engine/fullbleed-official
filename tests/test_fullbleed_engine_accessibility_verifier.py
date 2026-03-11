@@ -206,6 +206,51 @@ def test_pdf_engine_verify_accessibility_artifacts_surfaces_diagnostic_reason_co
     assert signals["diagnostic_fragmented_table_cell_count"] == 5
 
 
+def test_pdf_engine_verify_accessibility_artifacts_promotes_blocking_issue_summary(
+    tmp_path: Path,
+) -> None:
+    _require_pdf_engine()
+
+    html = _write(
+        tmp_path / "doc.html",
+        (
+            "<!doctype html><html lang='en'><head><title>DOM Title</title></head>"
+            "<body><main id='root'><div id='alpha' aria-labelledby='missing-label'>Hello</div></main></body></html>"
+        ),
+    )
+    css = _write(tmp_path / "doc.css", "body{font-family:Helvetica}")
+
+    engine = fullbleed.PdfEngine(document_lang="en-US", document_title="Engine Title")
+    report = engine.verify_accessibility_artifacts(
+        str(html),
+        str(css),
+        profile="strict",
+        mode="error",
+    )
+
+    summary = report["blocking_issue_summary"]
+    assert any(
+        row["rule_id"] == "fb.a11y.html.lang_present_valid"
+        and row["failure_kind"] == "metadata_mismatch"
+        and row["observed_value"] == "en"
+        and row["expected_value"] == "en-US"
+        and "metadata" in row["remediation_hint"].lower()
+        for row in summary
+    )
+    assert any(
+        row["rule_id"] == "fb.a11y.html.title_present_nonempty"
+        and row["failure_kind"] == "metadata_mismatch"
+        and row["observed_value"] == "DOM Title"
+        and row["expected_value"] == "Engine Title"
+        for row in summary
+    )
+    assert any(
+        row["rule_id"] == "fb.a11y.aria.reference_target_exists"
+        and row["gate_failed"] is True
+        for row in summary
+    )
+
+
 def test_pdf_engine_verify_accessibility_artifacts_fails_fast_for_ids_and_idrefs(
     tmp_path: Path,
 ) -> None:

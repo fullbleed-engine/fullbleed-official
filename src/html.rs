@@ -460,6 +460,115 @@ fn parse_data_fb(raw: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+fn selector_fragment(info: &ElementInfo) -> String {
+    let mut out = info.tag.clone();
+    if let Some(id) = &info.id {
+        out.push('#');
+        out.push_str(id);
+    }
+    for class_name in info.classes.iter().take(3) {
+        out.push('.');
+        out.push_str(class_name);
+    }
+    out.push_str(&format!(":nth-of-type({})", info.child_index));
+    out
+}
+
+fn dom_path_for_node(ancestors: &[ElementInfo], info: &ElementInfo) -> String {
+    let mut parts: Vec<String> = ancestors
+        .iter()
+        .filter(|ancestor| !ancestor.tag.is_empty())
+        .map(selector_fragment)
+        .collect();
+    parts.push(selector_fragment(info));
+    parts.join(" > ")
+}
+
+fn authored_owner_metadata(
+    info: &ElementInfo,
+    ancestors: &[ElementInfo],
+    explicit_meta: &[(String, String)],
+    style: &ComputedStyle,
+) -> Vec<(String, String)> {
+    let should_attach = !explicit_meta.is_empty()
+        || info.id.is_some()
+        || !info.classes.is_empty()
+        || info.attrs.contains_key("data-fb-role")
+        || info.attrs.contains_key("data-fb-component")
+        || matches!(
+            info.tag.as_str(),
+            "main"
+                | "section"
+                | "article"
+                | "nav"
+                | "aside"
+                | "header"
+                | "footer"
+                | "form"
+                | "table"
+                | "thead"
+                | "tbody"
+                | "tfoot"
+                | "tr"
+                | "td"
+                | "th"
+                | "dl"
+                | "figure"
+        )
+        || matches!(style.position, PositionMode::Absolute | PositionMode::Fixed);
+    if !should_attach {
+        return explicit_meta.to_vec();
+    }
+
+    let mut out = explicit_meta.to_vec();
+    let upsert = |rows: &mut Vec<(String, String)>, key: &str, value: Option<String>| {
+        let Some(value) = value.map(|value| value.trim().to_string()) else {
+            return;
+        };
+        if value.is_empty() {
+            return;
+        }
+        if let Some(existing) = rows.iter_mut().find(|(k, _)| k == key) {
+            existing.1 = value;
+        } else {
+            rows.push((key.to_string(), value));
+        }
+    };
+
+    upsert(&mut out, "fb.owner.tag", Some(info.tag.clone()));
+    upsert(&mut out, "fb.owner.selector", Some(selector_fragment(info)));
+    upsert(
+        &mut out,
+        "fb.owner.dom_path",
+        Some(dom_path_for_node(ancestors, info)),
+    );
+    upsert(&mut out, "fb.owner.id", info.id.clone());
+    if !info.classes.is_empty() {
+        upsert(&mut out, "fb.owner.classes", Some(info.classes.join(" ")));
+    }
+    upsert(
+        &mut out,
+        "fb.owner.role",
+        info.attrs.get("data-fb-role").cloned(),
+    );
+    upsert(
+        &mut out,
+        "fb.owner.page",
+        info.attrs.get("data-fb-page").cloned(),
+    );
+
+    let component = out
+        .iter()
+        .find_map(|(key, value)| match key.as_str() {
+            "component" | "fb.component" | "fb.owner.component" => Some(value.clone()),
+            _ => None,
+        })
+        .or_else(|| info.attrs.get("data-fb-component").cloned());
+    upsert(&mut out, "fb.owner.component", component);
+
+    out
+}
+
 fn collect_children(
     node: &NodeRef,
     resolver: &StyleResolver,
@@ -584,7 +693,7 @@ fn node_to_flowables(
                 .borrow()
                 .get("style")
                 .map(|s| s.to_string());
-            let node_meta = element
+            let explicit_node_meta = element
                 .attributes
                 .borrow()
                 .get("data-fb")
@@ -632,6 +741,7 @@ fn node_to_flowables(
             if info.classes.iter().any(|c| c == "keep-together") {
                 style.pagination.break_inside = BreakInside::Avoid;
             }
+            let node_meta = authored_owner_metadata(&info, ancestors, &explicit_node_meta, &style);
 
             if matches!(style.display, DisplayMode::None) {
                 return Vec::new();

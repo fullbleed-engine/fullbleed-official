@@ -293,6 +293,16 @@ def test_accessibility_engine_render_bundle_emits_pdfua_seed_and_trace_artifacts
         assert pmr_report["diagnostic_signals"]["page_count_mismatch"] is False
         assert isinstance(verifier_report["gate"]["reason_codes"], list)
         assert isinstance(pmr_report["gate"]["reason_codes"], list)
+        assert verifier_report["layout_diagnostics"]["page_ownership"]
+        assert pmr_report["layout_diagnostics"]["page_ownership"]
+        assert run_report["layout_collapse_summary"]["page_ownership"]
+        assert (
+            verifier_report["layout_diagnostics"]["page_ownership"][0][
+                "dominant_owner_label"
+            ]
+            .startswith("main")
+        )
+        assert run_report["a11y_issue_summary"] == verifier_report["blocking_issue_summary"]
     if "typography_drift_trace_path" in result.paths:
         assert run_report["typography_drift_trace_path"]
         assert run_report["deliverables"]["typography_drift_trace_path"] == (
@@ -510,6 +520,54 @@ def test_accessibility_engine_strict_mode_fails_on_page_count_divergence(
             emit_reading_order_trace=False,
             emit_pdf_structure_trace=False,
         )
+
+
+def test_accessibility_engine_render_bundle_promotes_page_break_owner_diagnostics(
+    tmp_path: Path,
+) -> None:
+    _require_pdf_engine()
+    if not hasattr(fullbleed.PdfEngine, "export_render_time_pagination_trace"):
+        pytest.skip("pagination trace export is not available in this build")
+
+    from fullbleed.accessibility import AccessibilityEngine
+
+    engine = AccessibilityEngine(
+        document_lang="en-US",
+        document_title="Ownership Diagnostics",
+        strict=False,
+    )
+    result = engine.render_bundle(
+        body_html=(
+            '<main data-fb-role="document-root">'
+            '<section data-fb-component="intro"><h1>Intro</h1><p>Alpha</p></section>'
+            '<section data-fb-component="appendix" style="page-break-before: always;">'
+            "<h2>Appendix</h2><p>Bravo</p></section>"
+            "</main>"
+        ),
+        css_text="@page { size: letter; }\nbody { color: #111; }",
+        out_dir=str(tmp_path / "ownership_bundle"),
+        stem="ownership_bundle",
+        render_preview_png=False,
+        run_verifier=True,
+        run_pmr=True,
+        run_pdf_ua_seed_verify=False,
+        emit_reading_order_trace=False,
+        emit_pdf_structure_trace=False,
+    )
+
+    verifier_report = json.loads(
+        Path(result.paths["engine_a11y_verify_path"]).read_text(encoding="utf-8")
+    )
+    pmr_report = json.loads(Path(result.paths["engine_pmr_path"]).read_text(encoding="utf-8"))
+
+    assert any(
+        row["dominant_owner_label"] == "appendix"
+        for row in verifier_report["layout_diagnostics"]["page_ownership"]
+    )
+    assert any(
+        row["dominant_owner_label"] == "appendix"
+        for row in pmr_report["layout_diagnostics"]["page_ownership"]
+    )
 
 
 def test_accessibility_engine_definition_list_text_is_tagged_in_render_trace(

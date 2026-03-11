@@ -9,6 +9,7 @@ It uses:
 - `fullbleed.ui.accessibility` for semantic authoring primitives
 - `fullbleed.accessibility.AccessibilityEngine` for PDF/UA-targeted bundle output
 - engine-native verifier + PMR + PDF seed checks + non-visual trace artifacts
+- vendored Bootstrap 5 + Inter + Bootstrap Icons so the scaffold is ready for parity work without a separate asset-install step
 
 ## What This Scaffold Demonstrates
 
@@ -25,6 +26,7 @@ Authoring primitives in `report.py`:
 Runtime/output behavior:
 
 - HTML/CSS/PDF bundle emission through `AccessibilityEngine.render_bundle(...)`
+- Bootstrap is active by default in this scaffold (`BOOTSTRAP_ENABLED = True` in `report.py`)
 - document-level CSS metadata defaults (`document_css_href`, `document_css_source_path`, `document_css_media`, `document_css_required`)
 - engine accessibility verifier (`fullbleed.a11y.verify.v1`)
 - paged media ranker (`fullbleed.pmr.v1`)
@@ -44,6 +46,7 @@ Core deliverables:
 - `output/accessibility_scaffold.pdf`
 - `output/accessibility_scaffold.html`
 - `output/accessibility_scaffold.css`
+- `assets.lock.json`
 
 Authoring validation:
 
@@ -85,10 +88,25 @@ Run summary:
 - You can set `strict=True` in `create_engine()` when testing fail-fast behavior.
 - Authoring validation (`artifact.to_html(a11y_mode="raise")`) is already strict in this template.
 
-## Font Vendoring
+## Bootstrap And Vendored Assets
 
-This scaffold vendors `Inter` in `vendor/fonts/Inter-Variable.ttf` and registers it
-with an `AssetBundle` in `create_engine()`.
+This scaffold provisions and uses:
+
+- `vendor/css/bootstrap.min.css`
+- `vendor/fonts/Inter-Variable.ttf`
+- `vendor/icons/bootstrap-icons.svg`
+- `assets.lock.json`
+
+`report.py` makes the bootstrap path explicit:
+
+- `BOOTSTRAP_ENABLED = True`
+- `load_css()` prepends the vendored Bootstrap CSS before the authored `styles/report.css`
+- `create_engine()` registers the same vendored assets with an `AssetBundle`
+
+If you do not want Bootstrap in a derived scaffold, set `BOOTSTRAP_ENABLED = False`
+and remove any Bootstrap utility classes you add during authoring.
+
+## Font Vendoring
 
 Do not rely on fallback core-font metrics for production templates. Fallbacks are
 useful safety nets, but vendored fonts produce more stable spacing and better

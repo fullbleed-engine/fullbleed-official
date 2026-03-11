@@ -179,6 +179,48 @@ def test_pdf_engine_verify_paged_media_rank_artifacts_surfaces_diagnostic_reason
     assert signals["diagnostic_fragmented_table_cell_count"] == 5
 
 
+def test_pdf_engine_verify_paged_media_rank_artifacts_promotes_metadata_mismatch_summary(
+    tmp_path: Path,
+) -> None:
+    _require_pdf_engine()
+
+    html = _write(
+        tmp_path / "doc.html",
+        "<!doctype html><html lang='en'><head><title>DOM Title</title></head><body><main><p>Hello</p></main></body></html>",
+    )
+    css = _write(tmp_path / "doc.css", "body{font-family:Helvetica}")
+
+    engine = fullbleed.PdfEngine(document_lang="en-US", document_title="Engine Title")
+    report = engine.verify_paged_media_rank_artifacts(
+        str(html),
+        str(css),
+        profile="cav",
+        mode="error",
+        overflow_count=0,
+        known_loss_count=0,
+        source_page_count=1,
+        render_page_count=1,
+        review_queue_items=0,
+    )
+
+    summary = report["blocking_audit_summary"]
+    assert any(
+        row["audit_id"] == "pmr.doc.lang_present_valid"
+        and row["failure_kind"] == "metadata_mismatch"
+        and row["observed_value"] == "en"
+        and row["expected_value"] == "en-US"
+        and "metadata" in row["remediation_hint"].lower()
+        for row in summary
+    )
+    assert any(
+        row["audit_id"] == "pmr.doc.title_present_nonempty"
+        and row["failure_kind"] == "metadata_mismatch"
+        and row["observed_value"] == "DOM Title"
+        and row["expected_value"] == "Engine Title"
+        for row in summary
+    )
+
+
 def test_pdf_engine_verify_paged_media_rank_cav_fail_fast_regressions(tmp_path: Path) -> None:
     _require_pdf_engine()
 

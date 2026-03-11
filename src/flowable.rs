@@ -1,4 +1,4 @@
-use crate::canvas::Canvas;
+use crate::canvas::{Canvas, META_DIAGNOSTIC_SCOPE_BEGIN_KEY, META_DIAGNOSTIC_SCOPE_END_KEY};
 use crate::font::FontRegistry;
 use crate::perf::PerfLogger;
 use crate::svg;
@@ -557,6 +557,10 @@ pub trait Flowable: FlowableClone + Send + Sync {
 
     fn debug_name(&self) -> &'static str {
         std::any::type_name::<Self>()
+    }
+
+    fn diagnostic_metadata(&self) -> Vec<(String, String)> {
+        Vec::new()
     }
 }
 
@@ -6808,10 +6812,12 @@ impl Flowable for MetaFlowable {
     }
 
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt) {
+        canvas.meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "flowable");
         for (k, v) in self.metadata.iter() {
             canvas.meta(k.clone(), v.clone());
         }
         self.child.draw(canvas, x, y, avail_width, avail_height);
+        canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "flowable");
     }
 
     fn intrinsic_width(&self) -> Option<Pt> {
@@ -6832,6 +6838,18 @@ impl Flowable for MetaFlowable {
 
     fn is_fixed_positioned(&self) -> bool {
         self.child.is_fixed_positioned()
+    }
+
+    fn diagnostic_metadata(&self) -> Vec<(String, String)> {
+        let mut out = self.child.diagnostic_metadata();
+        for (key, value) in self.metadata.iter() {
+            if let Some(existing) = out.iter_mut().find(|(k, _)| k == key) {
+                existing.1 = value.clone();
+            } else {
+                out.push((key.clone(), value.clone()));
+            }
+        }
+        out
     }
 }
 

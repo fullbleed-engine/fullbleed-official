@@ -72,12 +72,17 @@ def _load_template_tree(relative_dir: str) -> dict[str, str | bytes]:
     return dict(sorted(files.items()))
 
 
-def _build_default_init_files(
+def _build_default_init_files():
+    """Return default init files with locked builtin asset metadata."""
+    init_files = _load_template_tree("init")
+    return init_files
+
+
+def _build_default_assets_lock_text(
     bootstrap_sha256: str,
     init_font_sha256: str,
     init_icon_sha256: str,
-):
-    """Return default init files with locked builtin asset metadata."""
+) -> str:
     assets_lock = {
         "schema": 1,
         "packages": [
@@ -116,10 +121,7 @@ def _build_default_init_files(
             },
         ],
     }
-
-    init_files = _load_template_tree("init")
-    init_files["assets.lock.json"] = json.dumps(assets_lock, ensure_ascii=True, indent=2) + "\n"
-    return init_files
+    return json.dumps(assets_lock, ensure_ascii=True, indent=2) + "\n"
 
 
 def _builtin_seed_info(asset_ref: str, source_rel_path: str, label: str):
@@ -202,6 +204,21 @@ def _emit_init_template_error(exc, is_json):
         sys.stderr.write(f"[error] {message}\n")
 
 
+def _emit_template_asset_error(template_name: str, exc, is_json: bool):
+    """Emit a consistent template-scaffold asset provisioning error."""
+    message = f"Failed to provision {template_name} template assets: {exc}"
+    if is_json:
+        result = {
+            "schema": "fullbleed.error.v1",
+            "ok": False,
+            "code": "TEMPLATE_ASSET_UNAVAILABLE",
+            "message": message,
+        }
+        sys.stdout.write(json.dumps(result, ensure_ascii=True) + "\n")
+    else:
+        sys.stderr.write(f"[error] {message}\n")
+
+
 DEFAULT_INIT_DIRS = ["components", "styles", "output", "vendor"]
 DEFAULT_VENDOR_CSS_DIR = "vendor/css"
 DEFAULT_VENDOR_FONT_DIR = "vendor/fonts"
@@ -255,19 +272,14 @@ def cmd_init(args):
         raise SystemExit(1)
 
     try:
-        from .assets import _license_filename, _write_license_notice
-        bootstrap, bootstrap_source_path, bootstrap_sha256 = _bootstrap_seed_info()
-        init_font_source_path, init_font_sha256 = _init_font_seed_info()
-        init_icon_source_path, init_icon_sha256 = _init_icon_seed_info()
+        _bootstrap_seed_info()
+        _init_font_seed_info()
+        _init_icon_seed_info()
     except Exception as exc:
         _emit_init_asset_error(exc, is_json=is_json)
         raise SystemExit(1)
     try:
-        init_files = _build_default_init_files(
-            bootstrap_sha256=bootstrap_sha256,
-            init_font_sha256=init_font_sha256,
-            init_icon_sha256=init_icon_sha256,
-        )
+        init_files = _build_default_init_files()
     except Exception as exc:
         _emit_init_template_error(exc, is_json=is_json)
         raise SystemExit(1)
@@ -306,59 +318,11 @@ def cmd_init(args):
             created_files.append(filename)
 
     try:
-        bootstrap_dest_path = target_dir / DEFAULT_BOOTSTRAP_REL_PATH
-        if not bootstrap_dest_path.exists() or force:
-            shutil.copy2(bootstrap_source_path, bootstrap_dest_path)
-            created_files.append(DEFAULT_BOOTSTRAP_REL_PATH)
-
-        bootstrap_license_name = _license_filename(bootstrap["name"])
-        bootstrap_license_path = vendor_css_dir / bootstrap_license_name
-        if not bootstrap_license_path.exists() or force:
-            written_license = _write_license_notice(
-                dest_dir=vendor_css_dir,
-                package_name=bootstrap["name"],
-                version=bootstrap["version"],
-                license_name=bootstrap.get("license", "MIT"),
-                license_url=bootstrap.get("license_url", DEFAULT_BOOTSTRAP_LICENSE_URL),
-            )
-            if written_license:
-                created_files.append(DEFAULT_BOOTSTRAP_LICENSE_FILE)
-
-        init_font_dest_path = target_dir / DEFAULT_INIT_FONT_REL_PATH
-        if not init_font_dest_path.exists() or force:
-            shutil.copy2(init_font_source_path, init_font_dest_path)
-            created_files.append(DEFAULT_INIT_FONT_REL_PATH)
-
-        init_font_license_name = _license_filename(DEFAULT_INIT_FONT_NAME)
-        init_font_license_path = vendor_font_dir / init_font_license_name
-        if not init_font_license_path.exists() or force:
-            written_init_font_license = _write_license_notice(
-                dest_dir=vendor_font_dir,
-                package_name=DEFAULT_INIT_FONT_NAME,
-                version=DEFAULT_INIT_FONT_VERSION,
-                license_name=DEFAULT_INIT_FONT_LICENSE,
-                license_url=DEFAULT_INIT_FONT_LICENSE_URL,
-            )
-            if written_init_font_license:
-                created_files.append(DEFAULT_INIT_FONT_LICENSE_FILE)
-
-        init_icon_dest_path = target_dir / DEFAULT_INIT_ICON_REL_PATH
-        if not init_icon_dest_path.exists() or force:
-            shutil.copy2(init_icon_source_path, init_icon_dest_path)
-            created_files.append(DEFAULT_INIT_ICON_REL_PATH)
-
-        init_icon_license_name = _license_filename(DEFAULT_INIT_ICON_NAME)
-        init_icon_license_path = vendor_icon_dir / init_icon_license_name
-        if not init_icon_license_path.exists() or force:
-            written_init_icon_license = _write_license_notice(
-                dest_dir=vendor_icon_dir,
-                package_name=DEFAULT_INIT_ICON_NAME,
-                version=DEFAULT_INIT_ICON_VERSION,
-                license_name=DEFAULT_INIT_ICON_LICENSE,
-                license_url=DEFAULT_INIT_ICON_LICENSE_URL,
-            )
-            if written_init_icon_license:
-                created_files.append(DEFAULT_INIT_ICON_LICENSE_FILE)
+        _provision_default_vendored_assets(
+            target_dir,
+            created_files=created_files,
+            force=force,
+        )
     except Exception as exc:
         _emit_init_asset_error(exc, is_json=is_json)
         raise SystemExit(1)
@@ -384,6 +348,91 @@ def cmd_init(args):
         sys.stdout.write("    3. Tune component styles in components/styles/*.css and composition styles/report.css\n")
         sys.stdout.write("    4. Run: python report.py\n")
         sys.stdout.write("    5. Optional diagnostics: set FULLBLEED_DEBUG=1, FULLBLEED_PERF=1, FULLBLEED_EMIT_PAGE_DATA=1, FULLBLEED_IMAGE_DPI=144\n")
+
+
+def _provision_default_vendored_assets(
+    target_dir: Path,
+    *,
+    created_files: list[str],
+    force: bool,
+) -> None:
+    """Provision the canonical vendored asset set used by scaffolded projects."""
+    from .assets import _license_filename, _write_license_notice
+
+    bootstrap, bootstrap_source_path, bootstrap_sha256 = _bootstrap_seed_info()
+    init_font_source_path, init_font_sha256 = _init_font_seed_info()
+    init_icon_source_path, init_icon_sha256 = _init_icon_seed_info()
+
+    vendor_css_dir = target_dir / DEFAULT_VENDOR_CSS_DIR
+    vendor_font_dir = target_dir / DEFAULT_VENDOR_FONT_DIR
+    vendor_icon_dir = target_dir / DEFAULT_VENDOR_ICON_DIR
+    vendor_css_dir.mkdir(parents=True, exist_ok=True)
+    vendor_font_dir.mkdir(parents=True, exist_ok=True)
+    vendor_icon_dir.mkdir(parents=True, exist_ok=True)
+
+    lock_text = _build_default_assets_lock_text(
+        bootstrap_sha256=bootstrap_sha256,
+        init_font_sha256=init_font_sha256,
+        init_icon_sha256=init_icon_sha256,
+    )
+    lock_path = target_dir / "assets.lock.json"
+    if not lock_path.exists() or force:
+        lock_path.write_text(lock_text, encoding="utf-8")
+        created_files.append("assets.lock.json")
+
+    bootstrap_dest_path = target_dir / DEFAULT_BOOTSTRAP_REL_PATH
+    if not bootstrap_dest_path.exists() or force:
+        shutil.copy2(bootstrap_source_path, bootstrap_dest_path)
+        created_files.append(DEFAULT_BOOTSTRAP_REL_PATH)
+
+    bootstrap_license_name = _license_filename(bootstrap["name"])
+    bootstrap_license_path = vendor_css_dir / bootstrap_license_name
+    if not bootstrap_license_path.exists() or force:
+        written_license = _write_license_notice(
+            dest_dir=vendor_css_dir,
+            package_name=bootstrap["name"],
+            version=bootstrap["version"],
+            license_name=bootstrap.get("license", "MIT"),
+            license_url=bootstrap.get("license_url", DEFAULT_BOOTSTRAP_LICENSE_URL),
+        )
+        if written_license:
+            created_files.append(DEFAULT_BOOTSTRAP_LICENSE_FILE)
+
+    init_font_dest_path = target_dir / DEFAULT_INIT_FONT_REL_PATH
+    if not init_font_dest_path.exists() or force:
+        shutil.copy2(init_font_source_path, init_font_dest_path)
+        created_files.append(DEFAULT_INIT_FONT_REL_PATH)
+
+    init_font_license_name = _license_filename(DEFAULT_INIT_FONT_NAME)
+    init_font_license_path = vendor_font_dir / init_font_license_name
+    if not init_font_license_path.exists() or force:
+        written_init_font_license = _write_license_notice(
+            dest_dir=vendor_font_dir,
+            package_name=DEFAULT_INIT_FONT_NAME,
+            version=DEFAULT_INIT_FONT_VERSION,
+            license_name=DEFAULT_INIT_FONT_LICENSE,
+            license_url=DEFAULT_INIT_FONT_LICENSE_URL,
+        )
+        if written_init_font_license:
+            created_files.append(DEFAULT_INIT_FONT_LICENSE_FILE)
+
+    init_icon_dest_path = target_dir / DEFAULT_INIT_ICON_REL_PATH
+    if not init_icon_dest_path.exists() or force:
+        shutil.copy2(init_icon_source_path, init_icon_dest_path)
+        created_files.append(DEFAULT_INIT_ICON_REL_PATH)
+
+    init_icon_license_name = _license_filename(DEFAULT_INIT_ICON_NAME)
+    init_icon_license_path = vendor_icon_dir / init_icon_license_name
+    if not init_icon_license_path.exists() or force:
+        written_init_icon_license = _write_license_notice(
+            dest_dir=vendor_icon_dir,
+            package_name=DEFAULT_INIT_ICON_NAME,
+            version=DEFAULT_INIT_ICON_VERSION,
+            license_name=DEFAULT_INIT_ICON_LICENSE,
+            license_url=DEFAULT_INIT_ICON_LICENSE_URL,
+        )
+        if written_init_icon_license:
+            created_files.append(DEFAULT_INIT_ICON_LICENSE_FILE)
 
 
 def cmd_new_template(args):
@@ -425,6 +474,7 @@ def cmd_new_template(args):
         raise SystemExit(1)
 
     created_files = []
+    bootstrap_enabled = False
     
     for filepath, content in template_files.items():
         full_path = target_dir / filepath
@@ -447,11 +497,25 @@ def cmd_new_template(args):
         else:
             full_path.write_text(content, encoding="utf-8")
         created_files.append(filepath)
+
+    if template_name == "accessible":
+        try:
+            _provision_default_vendored_assets(
+                target_dir,
+                created_files=created_files,
+                force=force,
+            )
+        except Exception as exc:
+            _emit_template_asset_error(template_name, exc, is_json=getattr(args, "json", False))
+            raise SystemExit(1)
+        bootstrap_enabled = True
+    created_files = list(dict.fromkeys(created_files))
     
     result = {
         "template": template_name,
         "description": template["description"],
         "created_files": created_files,
+        "bootstrap_enabled": bootstrap_enabled,
     }
     
     if getattr(args, "json", False):

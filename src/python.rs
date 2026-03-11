@@ -1,7 +1,10 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use crate::assets::{is_supported_font_path, resolve_image_asset};
-use crate::canvas::{META_FLOWABLE_BBOX_KEY, META_PAGINATION_EVENT_KEY};
+use crate::canvas::{
+    META_DIAGNOSTIC_SCOPE_BEGIN_KEY, META_DIAGNOSTIC_SCOPE_END_KEY, META_FLOWABLE_BBOX_KEY,
+    META_PAGINATION_EVENT_KEY,
+};
 use crate::jit::Transform;
 use crate::{
     A11yVerifierCoreReport, A11yVerifierEvidence, A11yVerifierFinding, Asset, AssetBundle,
@@ -1778,6 +1781,7 @@ struct TraceTextBlockRow {
     font_size: f32,
     top_role: Option<String>,
     tag_path: Vec<String>,
+    owner: TraceOwnerContext,
 }
 
 #[derive(Default)]
@@ -1802,6 +1806,101 @@ struct TraceTextOverlapSample {
     b_text: String,
 }
 
+#[derive(Debug, Clone, Default)]
+struct TraceOwnerContext {
+    selector: Option<String>,
+    dom_path: Option<String>,
+    role: Option<String>,
+    component: Option<String>,
+    tag: Option<String>,
+    id: Option<String>,
+    classes: Option<String>,
+}
+
+impl TraceOwnerContext {
+    fn apply_meta(&mut self, key: &str, value: &str) {
+        let value = value.trim();
+        let value = (!value.is_empty()).then(|| value.to_string());
+        match key {
+            "fb.owner.selector" => self.selector = value,
+            "fb.owner.dom_path" => self.dom_path = value,
+            "fb.owner.role" => self.role = value,
+            "fb.owner.component" => self.component = value,
+            "fb.owner.tag" => self.tag = value,
+            "fb.owner.id" => self.id = value,
+            "fb.owner.classes" => self.classes = value,
+            _ => {}
+        }
+    }
+
+    fn has_identity(&self) -> bool {
+        self.selector.is_some()
+            || self.dom_path.is_some()
+            || self.role.is_some()
+            || self.component.is_some()
+            || self.tag.is_some()
+            || self.id.is_some()
+    }
+
+    fn label(&self) -> Option<String> {
+        self.component
+            .clone()
+            .or_else(|| self.selector.clone())
+            .or_else(|| self.dom_path.clone())
+            .or_else(|| self.role.clone())
+            .or_else(|| self.tag.clone())
+    }
+
+    fn stable_key(&self) -> Option<String> {
+        self.selector
+            .clone()
+            .or_else(|| self.dom_path.clone())
+            .or_else(|| self.component.clone())
+            .or_else(|| self.role.clone())
+            .or_else(|| self.id.clone())
+            .or_else(|| self.tag.clone())
+    }
+}
+
+fn trace_owner_to_py(py: Python<'_>, owner: &TraceOwnerContext) -> PyResult<PyObject> {
+    if !owner.has_identity() {
+        return Ok(py.None());
+    }
+    let out = PyDict::new_bound(py);
+    out.set_item("selector", owner.selector.clone())?;
+    out.set_item("dom_path", owner.dom_path.clone())?;
+    out.set_item("role", owner.role.clone())?;
+    out.set_item("component", owner.component.clone())?;
+    out.set_item("tag", owner.tag.clone())?;
+    out.set_item("id", owner.id.clone())?;
+    out.set_item("classes", owner.classes.clone())?;
+    out.set_item("label", owner.label())?;
+    Ok(out.to_object(py))
+}
+
+fn accumulate_owner_score(
+    scores: &mut BTreeMap<String, (TraceOwnerContext, f64)>,
+    owner: &TraceOwnerContext,
+    delta: f64,
+) {
+    let Some(key) = owner.stable_key() else {
+        return;
+    };
+    let entry = scores.entry(key).or_insert_with(|| (owner.clone(), 0.0));
+    entry.1 += delta.max(0.0);
+}
+
+fn accumulate_owner_hint(
+    scores: &mut BTreeMap<String, (TraceOwnerContext, usize)>,
+    owner: &TraceOwnerContext,
+) {
+    let Some(key) = owner.stable_key() else {
+        return;
+    };
+    let entry = scores.entry(key).or_insert_with(|| (owner.clone(), 0usize));
+    entry.1 = entry.1.saturating_add(1);
+}
+
 fn collect_render_time_text_blocks_for_page(
     page: &crate::canvas::Page,
     engine: Option<&FullBleed>,
@@ -1813,6 +1912,8 @@ fn collect_render_time_text_blocks_for_page(
     let mut state_stack: Vec<TraceTextState> = Vec::new();
     let mut pending_requested_font_name: Option<String> = None;
     let mut pending_fallback_reason: Option<String> = None;
+    let mut current_owner = TraceOwnerContext::default();
+    let mut owner_stack: Vec<TraceOwnerContext> = Vec::new();
 
     for (cmd_index, cmd) in page.commands.iter().enumerate() {
         match cmd {
@@ -1844,6 +1945,15 @@ fn collect_render_time_text_blocks_for_page(
             }
             Command::Meta { key, value } if key == "font.fallback_reason" => {
                 pending_fallback_reason = Some(value.clone());
+            }
+            Command::Meta { key, .. } if key == META_DIAGNOSTIC_SCOPE_BEGIN_KEY => {
+                owner_stack.push(current_owner.clone());
+            }
+            Command::Meta { key, .. } if key == META_DIAGNOSTIC_SCOPE_END_KEY => {
+                current_owner = owner_stack.pop().unwrap_or_default();
+            }
+            Command::Meta { key, value } => {
+                current_owner.apply_meta(key, value);
             }
             Command::BeginTag { role, .. } => tag_stack.push(role.clone()),
             Command::EndTag => {
@@ -1883,6 +1993,7 @@ fn collect_render_time_text_blocks_for_page(
                     font_size: state.font_size.to_f32(),
                     top_role: tag_stack.last().cloned(),
                     tag_path: tag_stack.clone(),
+                    owner: current_owner.clone(),
                 });
             }
             Command::DrawStringTransformed { x, y, text, .. } => {
@@ -1907,6 +2018,7 @@ fn collect_render_time_text_blocks_for_page(
                     font_size: state.font_size.to_f32(),
                     top_role: tag_stack.last().cloned(),
                     tag_path: tag_stack.clone(),
+                    owner: current_owner.clone(),
                 });
             }
             _ => {}
@@ -2135,6 +2247,7 @@ fn build_render_time_typography_drift_trace_py(
             row.set_item("resolved_font_name", block.resolved_font_name.clone())?;
             row.set_item("requested_font_name", block.requested_font_name.clone())?;
             row.set_item("fallback_reason", block.fallback_reason.clone())?;
+            row.set_item("owner", trace_owner_to_py(py, &block.owner)?)?;
             row.set_item("token_count", token_count)?;
             row.set_item("single_char_token_count", single_char_token_count)?;
             row.set_item("char_count", char_count)?;
@@ -2317,6 +2430,7 @@ fn build_render_time_region_text_alignment_trace_py(
                     cell.set_item("text", trace_text_sample(&block.text))?;
                     cell.set_item("kind", block.kind)?;
                     cell.set_item("top_role", block.top_role.clone())?;
+                    cell.set_item("owner", trace_owner_to_py(py, &block.owner)?)?;
                     let bbox = PyDict::new_bound(py);
                     bbox.set_item("x", block.bbox.0)?;
                     bbox.set_item("y", block.bbox.1)?;
@@ -2941,6 +3055,26 @@ fn parse_trace_fields(raw: &str) -> HashMap<&str, &str> {
     out
 }
 
+fn trace_b64_string(fields: &HashMap<&str, &str>, key: &str) -> Option<String> {
+    let raw = *fields.get(key)?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(raw)
+        .ok()?;
+    String::from_utf8(bytes).ok()
+}
+
+fn owner_from_trace_fields(fields: &HashMap<&str, &str>) -> TraceOwnerContext {
+    TraceOwnerContext {
+        selector: trace_b64_string(fields, "owner_selector_b64"),
+        dom_path: trace_b64_string(fields, "owner_dom_path_b64"),
+        role: trace_b64_string(fields, "owner_role_b64"),
+        component: trace_b64_string(fields, "owner_component_b64"),
+        tag: trace_b64_string(fields, "owner_tag_b64"),
+        id: trace_b64_string(fields, "owner_id_b64"),
+        classes: trace_b64_string(fields, "owner_classes_b64"),
+    }
+}
+
 fn trace_i64(fields: &HashMap<&str, &str>, key: &str) -> Option<i64> {
     fields.get(key).and_then(|value| value.parse::<i64>().ok())
 }
@@ -3063,6 +3197,10 @@ fn build_render_time_pagination_trace_py(
         std::collections::BTreeMap::new();
     let mut flowable_issue_counts: std::collections::BTreeMap<String, usize> =
         std::collections::BTreeMap::new();
+    let mut page_transition_owner_hints: BTreeMap<
+        usize,
+        BTreeMap<String, (TraceOwnerContext, usize)>,
+    > = BTreeMap::new();
     let collapse_pages_out = PyList::empty_bound(py);
 
     for (page_index, page) in doc.pages.iter().enumerate() {
@@ -3071,6 +3209,9 @@ fn build_render_time_pagination_trace_py(
         let mut layout_event_count = 0usize;
         let mut page_event_count = 0usize;
         let mut flowable_bboxes: Vec<(f32, f32, f32, f32)> = Vec::new();
+        let mut current_owner = TraceOwnerContext::default();
+        let mut owner_stack: Vec<TraceOwnerContext> = Vec::new();
+        let mut page_owner_scores: BTreeMap<String, (TraceOwnerContext, f64)> = BTreeMap::new();
         let mut page_transition_reasons: std::collections::BTreeMap<String, usize> =
             std::collections::BTreeMap::new();
         let mut page_issue_flowables: std::collections::BTreeMap<String, usize> =
@@ -3085,19 +3226,34 @@ fn build_render_time_pagination_trace_py(
                 Command::Meta { key, value } if key == crate::META_PAGE_TEMPLATE_KEY => {
                     template_name = Some(value.clone());
                 }
+                Command::Meta { key, .. } if key == META_DIAGNOSTIC_SCOPE_BEGIN_KEY => {
+                    owner_stack.push(current_owner.clone());
+                }
+                Command::Meta { key, .. } if key == META_DIAGNOSTIC_SCOPE_END_KEY => {
+                    current_owner = owner_stack.pop().unwrap_or_default();
+                }
                 Command::Meta { key, value } if key == META_FLOWABLE_BBOX_KEY => {
                     if let Some(bbox) = parse_bbox_meta(value) {
+                        let area = f64::from(bbox.2.max(0.0)) * f64::from(bbox.3.max(0.0));
+                        accumulate_owner_score(
+                            &mut page_owner_scores,
+                            &current_owner,
+                            area.max(1.0),
+                        );
                         flowable_bboxes.push(bbox);
                     }
                 }
                 Command::Meta { key, value } if key == META_PAGINATION_EVENT_KEY => {
                     let fields = parse_trace_fields(value);
+                    let owner = owner_from_trace_fields(&fields);
                     let event_type = fields.get("event").copied().unwrap_or("unknown");
                     let row = PyDict::new_bound(py);
                     row.set_item("event_index", event_count)?;
                     row.set_item("event_type", event_type)?;
                     row.set_item("page_index", page_index)?;
                     row.set_item("page", page_index + 1)?;
+                    row.set_item("owner", trace_owner_to_py(py, &owner)?)?;
+                    row.set_item("owner_label", owner.label())?;
 
                     if event_type == "layout" {
                         layout_event_count = layout_event_count.saturating_add(1);
@@ -3234,12 +3390,18 @@ fn build_render_time_pagination_trace_py(
                             *flowable_issue_counts
                                 .entry(flowable_name.clone())
                                 .or_insert(0) += 1;
+                            accumulate_owner_hint(
+                                page_transition_owner_hints.entry(to_page).or_default(),
+                                &owner,
+                            );
                             let attribution = PyDict::new_bound(py);
                             attribution.set_item("page", page_index + 1)?;
                             attribution.set_item("from_page", from_page)?;
                             attribution.set_item("to_page", to_page)?;
                             attribution.set_item("reason", reason)?;
                             attribution.set_item("flowable_name", flowable_name)?;
+                            attribution.set_item("owner", trace_owner_to_py(py, &owner)?)?;
+                            attribution.set_item("owner_label", owner.label())?;
                             attribution.set_item(
                                 "source_order",
                                 trace_optional_usize(&fields, "source_order"),
@@ -3266,6 +3428,9 @@ fn build_render_time_pagination_trace_py(
                     event_count = event_count.saturating_add(1);
                     page_event_count = page_event_count.saturating_add(1);
                 }
+                Command::Meta { key, value } => {
+                    current_owner.apply_meta(key, value);
+                }
                 _ => {}
             }
         }
@@ -3275,6 +3440,17 @@ fn build_render_time_pagination_trace_py(
         let (page_text_overlap_count, page_text_overlap_samples) =
             collect_text_overlap_samples(&text_collection.blocks, 4);
         text_overlap_count = text_overlap_count.saturating_add(page_text_overlap_count);
+        for block in &text_collection.blocks {
+            let width = (block.bbox.2 - block.bbox.0).max(0.0);
+            let height = (block.bbox.3 - block.bbox.1).max(0.0);
+            let area = f64::from(width) * f64::from(height);
+            let score = if area > 0.0 {
+                area
+            } else {
+                block.text.trim().chars().count().max(1) as f64
+            };
+            accumulate_owner_score(&mut page_owner_scores, &block.owner, score.max(1.0));
+        }
         for sample in page_text_overlap_samples
             .iter()
             .take(8usize.saturating_sub(text_overlap_samples_out.len()))
@@ -3340,6 +3516,22 @@ fn build_render_time_pagination_trace_py(
             warnings.append(warning)?;
         }
 
+        let dominant_owner_entry = page_owner_scores
+            .values()
+            .max_by(|left, right| {
+                left.1
+                    .partial_cmp(&right.1)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(owner, score)| (owner.clone(), *score, "content_bbox"));
+        let transition_hint_entry = page_transition_owner_hints
+            .get(&(page_index + 1))
+            .and_then(|scores| scores.values().max_by_key(|(_, count)| *count))
+            .map(|(owner, count)| (owner.clone(), *count as f64, "page_transition_hint"));
+        let (dominant_owner, dominant_owner_score, dominant_owner_source) = dominant_owner_entry
+            .or(transition_hint_entry)
+            .unwrap_or((TraceOwnerContext::default(), 0.0, "none"));
+
         let page_row = PyDict::new_bound(py);
         page_row.set_item("page_index", page_index)?;
         page_row.set_item("page", page_index + 1)?;
@@ -3380,6 +3572,10 @@ fn build_render_time_pagination_trace_py(
         page_row.set_item("text_overlap_samples", page_samples)?;
         page_row.set_item("occupied_area_ratio", occupied_area_ratio)?;
         page_row.set_item("low_coverage", low_coverage)?;
+        page_row.set_item("dominant_owner", trace_owner_to_py(py, &dominant_owner)?)?;
+        page_row.set_item("dominant_owner_label", dominant_owner.label())?;
+        page_row.set_item("dominant_owner_score", dominant_owner_score)?;
+        page_row.set_item("dominant_owner_source", dominant_owner_source)?;
         let transition_reason_rows = PyList::empty_bound(py);
         for (reason, count) in &page_transition_reasons {
             let row = PyDict::new_bound(py);
@@ -3396,6 +3592,42 @@ fn build_render_time_pagination_trace_py(
             issue_flowable_rows.append(row)?;
         }
         page_row.set_item("suspect_flowables", &issue_flowable_rows)?;
+        let owner_candidates = PyList::empty_bound(py);
+        let mut owner_candidate_rows: Vec<(TraceOwnerContext, f64)> = page_owner_scores
+            .values()
+            .map(|(owner, score)| (owner.clone(), *score))
+            .collect();
+        owner_candidate_rows.sort_by(|left, right| {
+            right
+                .1
+                .partial_cmp(&left.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        for (owner, score) in owner_candidate_rows.into_iter().take(5) {
+            let row = PyDict::new_bound(py);
+            row.set_item("owner", trace_owner_to_py(py, &owner)?)?;
+            row.set_item("label", owner.label())?;
+            row.set_item("score", score)?;
+            owner_candidates.append(row)?;
+        }
+        if owner_candidates.len() == 0 {
+            if let Some(hints) = page_transition_owner_hints.get(&(page_index + 1)) {
+                let mut hint_rows: Vec<(TraceOwnerContext, usize)> = hints
+                    .values()
+                    .map(|(owner, count)| (owner.clone(), *count))
+                    .collect();
+                hint_rows.sort_by(|left, right| right.1.cmp(&left.1));
+                for (owner, count) in hint_rows.into_iter().take(5) {
+                    let row = PyDict::new_bound(py);
+                    row.set_item("owner", trace_owner_to_py(py, &owner)?)?;
+                    row.set_item("label", owner.label())?;
+                    row.set_item("score", count as f64)?;
+                    row.set_item("source", "page_transition_hint")?;
+                    owner_candidates.append(row)?;
+                }
+            }
+        }
+        page_row.set_item("owner_candidates", owner_candidates.clone())?;
 
         let suspect_cause_codes = PyList::empty_bound(py);
         if low_coverage && occupied_area_ratio < 0.0005f64 {
@@ -3426,6 +3658,10 @@ fn build_render_time_pagination_trace_py(
             collapse_row.set_item("flowable_bbox_count", flowable_bboxes.len())?;
             collapse_row.set_item("transition_reasons", transition_reason_rows.clone())?;
             collapse_row.set_item("suspect_flowables", issue_flowable_rows.clone())?;
+            collapse_row.set_item("dominant_owner", trace_owner_to_py(py, &dominant_owner)?)?;
+            collapse_row.set_item("dominant_owner_label", dominant_owner.label())?;
+            collapse_row.set_item("dominant_owner_source", dominant_owner_source)?;
+            collapse_row.set_item("owner_candidates", owner_candidates)?;
             collapse_row.set_item("suspect_cause_codes", suspect_cause_codes)?;
             collapse_pages_out.append(collapse_row)?;
         }
@@ -3540,6 +3776,7 @@ fn build_render_time_reading_order_trace_py(
                 row.set_item("top_role", py.None())?;
             }
             row.set_item("tag_path", PyList::new_bound(py, &block.tag_path))?;
+            row.set_item("owner", trace_owner_to_py(py, &block.owner)?)?;
             blocks.append(row)?;
         }
 
@@ -5321,6 +5558,263 @@ fn diagnostic_signals_to_py<'py>(
     }
     if let Some(value) = signals.fragmented_table_cell_count {
         out.set_item("fragmented_table_cell_count", value)?;
+    }
+    Ok(out)
+}
+
+fn a11y_finding_evidence_selector(finding: &A11yVerifierFinding) -> Option<String> {
+    finding
+        .evidence
+        .iter()
+        .find_map(|evidence| evidence.selector.clone())
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn a11y_finding_evidence_value(finding: &A11yVerifierFinding, key: &str) -> Option<String> {
+    finding
+        .evidence
+        .iter()
+        .flat_map(|evidence| evidence.values.iter())
+        .find_map(|(candidate_key, candidate_value)| {
+            if candidate_key == key && !candidate_value.trim().is_empty() {
+                Some(candidate_value.clone())
+            } else {
+                None
+            }
+        })
+}
+
+fn a11y_finding_remediation_hint(finding: &A11yVerifierFinding) -> Option<&'static str> {
+    match finding.rule_id.as_str() {
+        "fb.a11y.html.lang_present_valid" | "fb.a11y.html.title_present_nonempty" => {
+            if a11y_finding_evidence_value(finding, "failure_kind").as_deref()
+                == Some("metadata_mismatch")
+            {
+                Some(
+                    "Set document metadata on the Document/PdfEngine path instead of mutating only emitted HTML.",
+                )
+            } else {
+                None
+            }
+        }
+        "fb.a11y.ids.duplicate_id" => {
+            Some("Make IDs unique and update any aria-labelledby/aria-describedby references.")
+        }
+        "fb.a11y.aria.reference_target_exists" => {
+            Some("Ensure every ARIA id reference resolves to an emitted element ID.")
+        }
+        _ => None,
+    }
+}
+
+fn build_a11y_blocking_issue_summary_py<'py>(
+    py: Python<'py>,
+    findings: &[A11yVerifierFinding],
+    failed_rule_ids: &[String],
+) -> PyResult<Bound<'py, PyList>> {
+    let out = PyList::empty_bound(py);
+    let failed_rule_ids: std::collections::BTreeSet<&str> =
+        failed_rule_ids.iter().map(|value| value.as_str()).collect();
+    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut candidates: Vec<&A11yVerifierFinding> = findings
+        .iter()
+        .filter(|finding| {
+            failed_rule_ids.contains(finding.rule_id.as_str())
+                || matches!(finding.verdict.as_str(), "fail" | "warn" | "manual_needed")
+        })
+        .collect();
+    candidates.sort_by(|left, right| {
+        a11y_verdict_rank(right.verdict.as_str())
+            .cmp(&a11y_verdict_rank(left.verdict.as_str()))
+            .then_with(|| {
+                a11y_severity_rank(right.severity.as_str())
+                    .cmp(&a11y_severity_rank(left.severity.as_str()))
+            })
+            .then_with(|| left.rule_id.cmp(&right.rule_id))
+    });
+
+    for finding in candidates.into_iter().take(20) {
+        let selector = a11y_finding_evidence_selector(finding);
+        let dom_path = a11y_finding_evidence_value(finding, "dom_path");
+        let page = a11y_finding_evidence_value(finding, "page")
+            .and_then(|value| value.parse::<usize>().ok());
+        let failure_kind = a11y_finding_evidence_value(finding, "failure_kind");
+        let dedup_key = format!(
+            "{}|{}|{}|{}",
+            finding.rule_id,
+            selector.clone().unwrap_or_default(),
+            dom_path.clone().unwrap_or_default(),
+            page.map(|value| value.to_string()).unwrap_or_default()
+        );
+        if !seen.insert(dedup_key) {
+            continue;
+        }
+
+        let row = PyDict::new_bound(py);
+        row.set_item("rule_id", finding.rule_id.clone())?;
+        row.set_item("verdict", finding.verdict.clone())?;
+        row.set_item("severity", finding.severity.clone())?;
+        row.set_item("message", finding.message.clone())?;
+        row.set_item("stage", finding.stage.clone())?;
+        row.set_item("source", finding.source.clone())?;
+        row.set_item(
+            "gate_failed",
+            failed_rule_ids.contains(finding.rule_id.as_str()),
+        )?;
+        if let Some(value) = selector {
+            row.set_item("selector", value)?;
+        }
+        if let Some(value) = dom_path {
+            row.set_item("dom_path", value)?;
+        }
+        if let Some(value) = page {
+            row.set_item("page", value)?;
+        }
+        if let Some(value) = failure_kind {
+            row.set_item("failure_kind", value)?;
+        }
+        if let Some(value) = a11y_finding_evidence_value(finding, "observed_lang")
+            .or_else(|| a11y_finding_evidence_value(finding, "observed_title"))
+        {
+            row.set_item("observed_value", value)?;
+        }
+        if let Some(value) = a11y_finding_evidence_value(finding, "expected_document_lang")
+            .or_else(|| a11y_finding_evidence_value(finding, "expected_document_title"))
+        {
+            row.set_item("expected_value", value)?;
+        }
+        if let Some(hint) = a11y_finding_remediation_hint(finding) {
+            row.set_item("remediation_hint", hint)?;
+        }
+        out.append(row)?;
+    }
+    Ok(out)
+}
+
+fn pmr_audit_evidence_selector(audit: &PmrCoreAudit) -> Option<String> {
+    audit
+        .evidence
+        .iter()
+        .find_map(|evidence| evidence.selector.clone())
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn pmr_audit_evidence_value(audit: &PmrCoreAudit, key: &str) -> Option<String> {
+    audit
+        .evidence
+        .iter()
+        .flat_map(|evidence| evidence.values.iter())
+        .find_map(|(candidate_key, candidate_value)| {
+            if candidate_key == key && !candidate_value.trim().is_empty() {
+                Some(candidate_value.clone())
+            } else {
+                None
+            }
+        })
+}
+
+fn pmr_audit_remediation_hint(audit: &PmrCoreAudit) -> Option<&'static str> {
+    match audit.audit_id.as_str() {
+        "pmr.doc.lang_present_valid" | "pmr.doc.title_present_nonempty" => {
+            if pmr_audit_evidence_value(audit, "failure_kind").as_deref()
+                == Some("metadata_mismatch")
+            {
+                Some(
+                    "Set document metadata on the Document/PdfEngine path instead of patching only emitted HTML.",
+                )
+            } else {
+                None
+            }
+        }
+        "pmr.layout.page_count_target" => Some(
+            "Inspect pagination trace ownership and page-break attribution to find the first overflowing authored region.",
+        ),
+        _ => None,
+    }
+}
+
+fn build_pmr_blocking_audit_summary_py<'py>(
+    py: Python<'py>,
+    audits: &[PmrCoreAudit],
+    failed_audit_ids: &[String],
+) -> PyResult<Bound<'py, PyList>> {
+    let out = PyList::empty_bound(py);
+    let failed_audit_ids: std::collections::BTreeSet<&str> = failed_audit_ids
+        .iter()
+        .map(|value| value.as_str())
+        .collect();
+    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut candidates: Vec<&PmrCoreAudit> = audits
+        .iter()
+        .filter(|audit| {
+            failed_audit_ids.contains(audit.audit_id.as_str())
+                || matches!(audit.verdict.as_str(), "fail" | "warn" | "manual_needed")
+        })
+        .collect();
+    candidates.sort_by(|left, right| {
+        a11y_verdict_rank(right.verdict.as_str())
+            .cmp(&a11y_verdict_rank(left.verdict.as_str()))
+            .then_with(|| {
+                a11y_severity_rank(right.severity.as_str())
+                    .cmp(&a11y_severity_rank(left.severity.as_str()))
+            })
+            .then_with(|| left.audit_id.cmp(&right.audit_id))
+    });
+
+    for audit in candidates.into_iter().take(20) {
+        let selector = pmr_audit_evidence_selector(audit);
+        let diagnostic_ref = audit
+            .evidence
+            .iter()
+            .find_map(|evidence| evidence.diagnostic_ref.clone())
+            .filter(|value| !value.trim().is_empty());
+        let failure_kind = pmr_audit_evidence_value(audit, "failure_kind");
+        let dedup_key = format!(
+            "{}|{}|{}",
+            audit.audit_id,
+            selector.clone().unwrap_or_default(),
+            diagnostic_ref.clone().unwrap_or_default()
+        );
+        if !seen.insert(dedup_key) {
+            continue;
+        }
+
+        let row = PyDict::new_bound(py);
+        row.set_item("audit_id", audit.audit_id.clone())?;
+        row.set_item("category", audit.category.clone())?;
+        row.set_item("class", audit.class_name.clone())?;
+        row.set_item("verdict", audit.verdict.clone())?;
+        row.set_item("severity", audit.severity.clone())?;
+        row.set_item("message", audit.message.clone())?;
+        row.set_item("stage", audit.stage.clone())?;
+        row.set_item("source", audit.source.clone())?;
+        row.set_item(
+            "gate_failed",
+            failed_audit_ids.contains(audit.audit_id.as_str()),
+        )?;
+        if let Some(value) = selector {
+            row.set_item("selector", value)?;
+        }
+        if let Some(value) = diagnostic_ref {
+            row.set_item("diagnostic_ref", value)?;
+        }
+        if let Some(value) = failure_kind {
+            row.set_item("failure_kind", value)?;
+        }
+        if let Some(value) = pmr_audit_evidence_value(audit, "observed_lang")
+            .or_else(|| pmr_audit_evidence_value(audit, "observed_title"))
+        {
+            row.set_item("observed_value", value)?;
+        }
+        if let Some(value) = pmr_audit_evidence_value(audit, "expected_document_lang")
+            .or_else(|| pmr_audit_evidence_value(audit, "expected_document_title"))
+        {
+            row.set_item("expected_value", value)?;
+        }
+        if let Some(hint) = pmr_audit_remediation_hint(audit) {
+            row.set_item("remediation_hint", hint)?;
+        }
+        out.append(row)?;
     }
     Ok(out)
 }
@@ -7442,6 +7936,10 @@ fn build_a11y_verify_report_py(
     report.set_item("summary", summary)?;
 
     report.set_item("findings", &findings_py)?;
+    report.set_item(
+        "blocking_issue_summary",
+        build_a11y_blocking_issue_summary_py(py, &reported_findings, &failed_rule_ids)?,
+    )?;
 
     let observability = PyDict::new_bound(py);
     observability.set_item(
@@ -7899,6 +8397,10 @@ fn build_pmr_report_py(
         }
     }
     report.set_item("audits", audits)?;
+    report.set_item(
+        "blocking_audit_summary",
+        build_pmr_blocking_audit_summary_py(py, &core.audits, &core.gate.failed_audit_ids)?,
+    )?;
 
     let observability = PyDict::new_bound(py);
     observability.set_item("original_audit_count", core.audits.len())?;
