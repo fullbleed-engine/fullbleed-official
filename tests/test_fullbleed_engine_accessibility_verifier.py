@@ -179,10 +179,14 @@ def test_pdf_engine_verify_accessibility_artifacts_surfaces_diagnostic_reason_co
             "pagination_overflow_detected": True,
             "token_fragmentation_detected": True,
             "typography_wrap_drift_detected": True,
+            "typography_spacing_drift_detected": True,
+            "sparse_page_header_omission_detected": True,
             "semantic_table_alignment_drift": True,
             "low_coverage_page_count": 1,
             "token_fragmentation_block_count": 2,
             "wrap_drift_block_count": 3,
+            "suspicious_char_width_block_count": 6,
+            "missing_header_cell_count": 8,
             "semantic_table_row_risk_count": 4,
             "fragmented_table_cell_count": 5,
         },
@@ -196,12 +200,21 @@ def test_pdf_engine_verify_accessibility_artifacts_surfaces_diagnostic_reason_co
         "pagination_overflow_detected",
         "token_fragmentation_detected",
         "typography_wrap_drift_detected",
+        "typography_spacing_drift_detected",
+        "sparse_page_header_omission_detected",
         "semantic_table_alignment_drift",
     }
+    assert report["gate"]["ok"] is False
+    assert "fb.a11y.layout.page_count_guard" in report["gate"]["failed_rule_ids"]
+    assert "fb.a11y.layout.collapse_guard" in report["gate"]["failed_rule_ids"]
+    assert "fb.a11y.typography.spacing_guard" in report["gate"]["failed_rule_ids"]
+    assert "fb.a11y.visual.sparse_page_header_guard" in report["gate"]["failed_rule_ids"]
     signals = report["observability"]["signal_counts"]
     assert signals["diagnostic_low_coverage_page_count"] == 1
     assert signals["diagnostic_token_fragmentation_block_count"] == 2
     assert signals["diagnostic_wrap_drift_block_count"] == 3
+    assert signals["diagnostic_suspicious_char_width_block_count"] == 6
+    assert signals["diagnostic_missing_header_cell_count"] == 8
     assert signals["diagnostic_semantic_table_row_risk_count"] == 4
     assert signals["diagnostic_fragmented_table_cell_count"] == 5
 
@@ -1290,3 +1303,37 @@ def test_engine_verifier_warns_on_low_render_contrast_seed(tmp_path: Path) -> No
         f["evidence"][0]["values"]["render_preview_png_path"] == str(png_path)
         for f in rows
     )
+
+
+def test_engine_sparse_page_visual_pair_detects_header_omission(
+    tmp_path: Path,
+) -> None:
+    _require_pdf_engine()
+
+    engine = fullbleed.PdfEngine(
+        document_lang="en-US",
+        document_title="Sparse Pair",
+    )
+    source_html = (
+        "<!doctype html><html lang='en-US'><head><title>Source</title></head><body>"
+        "<main class='page'><div class='banner'></div><p class='copy'>Case log entry 001</p></main>"
+        "</body></html>"
+    )
+    render_html = (
+        "<!doctype html><html lang='en-US'><head><title>Render</title></head><body>"
+        "<main class='page'><p class='copy'>Case log entry 001</p></main></body></html>"
+    )
+    css_text = (
+        "body{margin:0;background:#fff}"
+        ".page{padding:18px 24px;font:18px Helvetica, Arial, sans-serif;color:#111}"
+        ".banner{height:88px;background:#111;margin-bottom:22px}"
+        ".copy{margin:0}"
+    )
+    source_png = _render_preview_png(engine, source_html, css_text, tmp_path, stem="source_sparse")
+    render_png = _render_preview_png(engine, render_html, css_text, tmp_path, stem="render_sparse")
+
+    report = fullbleed.audit_sparse_page_visual_pair(str(source_png), str(render_png))
+    assert report["sparse_source_page"] is True
+    assert report["header_omission_detected"] is True
+    assert report["verdict"] == "fail"
+    assert report["missing_header_cell_count"] >= 4

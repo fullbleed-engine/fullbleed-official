@@ -152,10 +152,14 @@ def test_pdf_engine_verify_paged_media_rank_artifacts_surfaces_diagnostic_reason
             "pagination_overflow_detected": True,
             "token_fragmentation_detected": True,
             "typography_wrap_drift_detected": True,
+            "typography_spacing_drift_detected": True,
+            "sparse_page_header_omission_detected": True,
             "semantic_table_alignment_drift": True,
             "low_coverage_page_count": 1,
             "token_fragmentation_block_count": 2,
             "wrap_drift_block_count": 3,
+            "suspicious_char_width_block_count": 6,
+            "missing_header_cell_count": 8,
             "semantic_table_row_risk_count": 4,
             "fragmented_table_cell_count": 5,
         },
@@ -169,12 +173,24 @@ def test_pdf_engine_verify_paged_media_rank_artifacts_surfaces_diagnostic_reason
         "pagination_overflow_detected",
         "token_fragmentation_detected",
         "typography_wrap_drift_detected",
+        "typography_spacing_drift_detected",
+        "sparse_page_header_omission_detected",
         "semantic_table_alignment_drift",
     }
+    assert report["gate"]["ok"] is False
+    assert (
+        "pmr.layout.page_count_guard" in report["gate"]["failed_audit_ids"]
+        or "pmr.layout.page_count_target" in report["gate"]["failed_audit_ids"]
+    )
+    assert "pmr.layout.collapse_guard" in report["gate"]["failed_audit_ids"]
+    assert "pmr.typography.spacing_guard" in report["gate"]["failed_audit_ids"]
+    assert "pmr.visual.sparse_page_header_guard" in report["gate"]["failed_audit_ids"]
     signals = report["observability"]["signal_counts"]
     assert signals["diagnostic_low_coverage_page_count"] == 1
     assert signals["diagnostic_token_fragmentation_block_count"] == 2
     assert signals["diagnostic_wrap_drift_block_count"] == 3
+    assert signals["diagnostic_suspicious_char_width_block_count"] == 6
+    assert signals["diagnostic_missing_header_cell_count"] == 8
     assert signals["diagnostic_semantic_table_row_risk_count"] == 4
     assert signals["diagnostic_fragmented_table_cell_count"] == 5
 

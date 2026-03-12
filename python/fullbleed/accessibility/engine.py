@@ -31,6 +31,8 @@ _TOKENS = (
 _RE_MARKED_TRUE = re.compile(rb"/Marked\s+true\b")
 _RE_LANG = re.compile(rb"/Lang\s*(\((?:\\.|[^\\)])*\)|<[^>]*>)")
 _RE_TITLE = re.compile(rb"/Title\b")
+_RE_HTML_LANG = re.compile(r"<html\b[^>]*\blang\s*=\s*(['\"])(.*?)\1", re.IGNORECASE | re.DOTALL)
+_RE_HTML_TITLE = re.compile(r"<title\b[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
 
 def _dump_json(path: Path, payload: dict[str, Any]) -> None:
@@ -87,12 +89,16 @@ def _coerce_diagnostic_signals(signals: dict[str, Any] | None) -> dict[str, Any]
         "pagination_overflow_detected",
         "token_fragmentation_detected",
         "typography_wrap_drift_detected",
+        "typography_spacing_drift_detected",
+        "sparse_page_header_omission_detected",
         "semantic_table_alignment_drift",
     )
     int_keys = (
         "low_coverage_page_count",
         "token_fragmentation_block_count",
         "wrap_drift_block_count",
+        "suspicious_char_width_block_count",
+        "missing_header_cell_count",
         "semantic_table_row_risk_count",
         "fragmented_table_cell_count",
     )
@@ -125,6 +131,340 @@ def _coerce_owner(owner: Any) -> dict[str, str] | None:
         if isinstance(owner.get(key), str) and str(owner.get(key)).strip()
     }
     return out or None
+
+
+def _extract_html_shell_metadata(html_text: str) -> dict[str, str | None]:
+    lang_match = _RE_HTML_LANG.search(html_text or "")
+    title_match = _RE_HTML_TITLE.search(html_text or "")
+    lang = lang_match.group(2).strip() if lang_match else None
+    title = (
+        html_mod.unescape(re.sub(r"\s+", " ", title_match.group(1))).strip()
+        if title_match
+        else None
+    )
+    return {"document_lang": lang or None, "document_title": title or None}
+
+
+def _validate_emitted_document_metadata(
+    html_text: str,
+    expected_metadata: dict[str, Any],
+) -> None:
+    observed = _extract_html_shell_metadata(html_text)
+    mismatches: list[str] = []
+    for key, label in (
+        ("document_lang", "lang"),
+        ("document_title", "title"),
+    ):
+        expected = str(expected_metadata.get(key) or "").strip()
+        if not expected:
+            continue
+        actual = str(observed.get(key) or "").strip()
+        if actual != expected:
+            mismatches.append(
+                f"{label}: expected={expected!r}, observed={actual or '[missing]'!r}"
+            )
+    if mismatches:
+        raise ValueError(
+            "DOCUMENT_METADATA_MISMATCH: emitted HTML diverges from document metadata: "
+            + "; ".join(mismatches)
+        )
+
+
+def _apply_owner_fields(target: dict[str, Any], owner: dict[str, Any] | None) -> None:
+    if not isinstance(owner, dict):
+        return
+    for key in ("selector", "dom_path", "role", "component", "tag", "id", "classes"):
+        value = owner.get(key)
+        if isinstance(value, str) and value.strip():
+            target[key] = value.strip()
+
+
+def _analyze_sparse_page_visual_pair(
+    source_preview_png_path: str | None,
+    render_preview_png_path: str | None,
+    *,
+    out_path: str | None = None,
+) -> dict[str, Any] | None:
+    if not source_preview_png_path or not render_preview_png_path:
+        return None
+    if not hasattr(_fullbleed, "audit_sparse_page_visual_pair"):
+        return None
+    analysis = dict(
+        _fullbleed.audit_sparse_page_visual_pair(
+            str(source_preview_png_path),
+            str(render_preview_png_path),
+        )
+    )
+    if out_path:
+        _dump_json(Path(out_path), analysis)
+    return analysis
+
+
+def _merge_sparse_page_visual_signals(
+    diagnostic_signals: dict[str, Any] | None,
+    sparse_page_visual_diagnostics: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    merged = dict(_coerce_diagnostic_signals(diagnostic_signals) or {})
+    if isinstance(sparse_page_visual_diagnostics, dict):
+        if bool(sparse_page_visual_diagnostics.get("header_omission_detected")):
+            merged["sparse_page_header_omission_detected"] = True
+        missing = _coerce_int(sparse_page_visual_diagnostics.get("missing_header_cell_count"))
+        if missing is not None:
+            merged["missing_header_cell_count"] = missing
+    return merged or None
+
+
+def _guard_failure_rows(
+    *,
+    report_kind: str,
+    layout_diagnostics: dict[str, Any] | None,
+    page_count_divergence: dict[str, Any] | None,
+    diagnostic_signals: dict[str, Any] | None,
+    sparse_page_visual_diagnostics: dict[str, Any] | None,
+) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+    reason_codes: list[str] = []
+    failed_ids: list[str] = []
+    rows: list[dict[str, Any]] = []
+    id_key = "rule_id" if report_kind == "a11y" else "audit_id"
+    page_guard_id = (
+        "fb.a11y.layout.page_count_guard"
+        if report_kind == "a11y"
+        else "pmr.layout.page_count_guard"
+    )
+    collapse_guard_id = (
+        "fb.a11y.layout.collapse_guard"
+        if report_kind == "a11y"
+        else "pmr.layout.collapse_guard"
+    )
+    spacing_guard_id = (
+        "fb.a11y.typography.spacing_guard"
+        if report_kind == "a11y"
+        else "pmr.typography.spacing_guard"
+    )
+    sparse_header_guard_id = (
+        "fb.a11y.visual.sparse_page_header_guard"
+        if report_kind == "a11y"
+        else "pmr.visual.sparse_page_header_guard"
+    )
+    if isinstance(page_count_divergence, dict) and not bool(
+        page_count_divergence.get("matches", True)
+    ):
+        reason_codes.append("page_count_mismatch")
+        failed_ids.append(page_guard_id)
+        rows.append(
+            {
+                id_key: page_guard_id,
+                "verdict": "fail",
+                "severity": "high",
+                "message": "Rendered page count diverges from the source page count.",
+                "stage": "pre_render",
+                "source": "pagination_trace",
+                "gate_failed": True,
+                "failure_kind": "page_count_mismatch",
+                "observed_value": str(page_count_divergence.get("render_page_count")),
+                "expected_value": str(page_count_divergence.get("source_page_count")),
+                "remediation_hint": (
+                    "Inspect pagination ownership and the first page-break trigger before rerendering."
+                ),
+            }
+        )
+
+    collapse_pages = []
+    if isinstance(layout_diagnostics, dict):
+        if bool(layout_diagnostics.get("detected")):
+            reason_codes.append("layout_collapse_detected")
+            failed_ids.append(collapse_guard_id)
+        collapse_pages = [
+            row
+            for row in (layout_diagnostics.get("pages") or [])
+            if isinstance(row, dict)
+        ]
+    for page_row in collapse_pages[:10]:
+        row = {
+            id_key: collapse_guard_id,
+            "verdict": "fail",
+            "severity": "high",
+            "message": "Rendered page content collapsed into an anomalously small footprint.",
+            "stage": "pre_render",
+            "source": "pagination_trace",
+            "gate_failed": True,
+            "failure_kind": "layout_collapse",
+            "remediation_hint": (
+                "Inspect the dominant owner, page wrapper sizing, overflow clipping, and page-break constraints for this page."
+            ),
+        }
+        page = _coerce_int(page_row.get("page"))
+        if page is not None:
+            row["page"] = page
+        _apply_owner_fields(row, page_row.get("dominant_owner"))
+        owner_label = page_row.get("dominant_owner_label")
+        if isinstance(owner_label, str) and owner_label.strip():
+            row["owner_label"] = owner_label.strip()
+        owner_source = page_row.get("dominant_owner_source")
+        if isinstance(owner_source, str) and owner_source.strip():
+            row["owner_source"] = owner_source.strip()
+        cause_codes = [
+            str(value)
+            for value in (page_row.get("suspect_cause_codes") or [])
+            if isinstance(value, str) and value.strip()
+        ]
+        if cause_codes:
+            row["suspect_cause_codes"] = cause_codes
+        rows.append(row)
+    suspicious_char_width_block_count = _coerce_int(
+        (diagnostic_signals or {}).get("suspicious_char_width_block_count")
+    ) or 0
+    if bool((diagnostic_signals or {}).get("typography_spacing_drift_detected")):
+        reason_codes.append("typography_spacing_drift_detected")
+        failed_ids.append(spacing_guard_id)
+        rows.append(
+            {
+                id_key: spacing_guard_id,
+                "verdict": "fail",
+                "severity": "high",
+                "message": "Rendered typography shows abnormal character-width or spacing distortion.",
+                "stage": "pre_render",
+                "source": "typography_trace",
+                "gate_failed": True,
+                "failure_kind": "typography_spacing_drift",
+                "observed_value": str(suspicious_char_width_block_count),
+                "remediation_hint": (
+                    "Inspect font registration, fallback resolution, letter-spacing, and text shaping before rerendering."
+                ),
+            }
+        )
+    sparse_page_visual_diagnostics = (
+        sparse_page_visual_diagnostics
+        if isinstance(sparse_page_visual_diagnostics, dict)
+        else None
+    )
+    if bool((diagnostic_signals or {}).get("sparse_page_header_omission_detected")):
+        reason_codes.append("sparse_page_header_omission_detected")
+        failed_ids.append(sparse_header_guard_id)
+        rows.append(
+            {
+                id_key: sparse_header_guard_id,
+                "verdict": "fail",
+                "severity": "high",
+                "message": str(
+                    (sparse_page_visual_diagnostics or {}).get("message")
+                    or "Sparse-page source header content is missing or materially reduced in the render."
+                ),
+                "stage": "post-render",
+                "source": "paired_preview",
+                "gate_failed": True,
+                "failure_kind": "sparse_page_header_omission",
+                "page": 1,
+                "observed_value": str(
+                    _coerce_int(
+                        (sparse_page_visual_diagnostics or {}).get("missing_header_cell_count")
+                    )
+                    or (_coerce_int((diagnostic_signals or {}).get("missing_header_cell_count")) or 0)
+                ),
+                "expected_value": str(
+                    _coerce_int(
+                        (sparse_page_visual_diagnostics or {}).get("source_header_occupied_cells")
+                    )
+                    or "[header cells present in source]"
+                ),
+                "remediation_hint": (
+                    "Inspect header artwork, top-band text, image sizing, and source-to-render asset preservation before rerendering."
+                ),
+            }
+        )
+    return reason_codes, failed_ids, rows
+
+
+def _merge_summary_rows(
+    existing: Any,
+    additions: list[dict[str, Any]],
+    *,
+    id_key: str,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for row in list(existing or []) + additions:
+        if not isinstance(row, dict):
+            continue
+        dedup_key = (
+            str(row.get(id_key) or ""),
+            str(row.get("selector") or ""),
+            str(row.get("dom_path") or ""),
+            str(row.get("page") or ""),
+        )
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+        out.append(row)
+    return out
+
+
+def _apply_diagnostic_guard_failures(
+    report: dict[str, Any],
+    *,
+    report_kind: str,
+    layout_diagnostics: dict[str, Any] | None,
+    page_count_divergence: dict[str, Any] | None,
+    diagnostic_signals: dict[str, Any] | None,
+    sparse_page_visual_diagnostics: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if not isinstance(report, dict):
+        return report
+    id_key = "rule_id" if report_kind == "a11y" else "audit_id"
+    failed_key = "failed_rule_ids" if report_kind == "a11y" else "failed_audit_ids"
+    summary_key = (
+        "blocking_issue_summary" if report_kind == "a11y" else "blocking_audit_summary"
+    )
+    reason_codes, failed_ids, rows = _guard_failure_rows(
+        report_kind=report_kind,
+        layout_diagnostics=layout_diagnostics,
+        page_count_divergence=page_count_divergence,
+        diagnostic_signals=diagnostic_signals,
+        sparse_page_visual_diagnostics=sparse_page_visual_diagnostics,
+    )
+    if not failed_ids:
+        if layout_diagnostics is not None:
+            report["layout_diagnostics"] = layout_diagnostics
+        if page_count_divergence is not None:
+            report["page_count_divergence"] = page_count_divergence
+        if sparse_page_visual_diagnostics is not None:
+            report["sparse_page_visual_diagnostics"] = sparse_page_visual_diagnostics
+        return report
+
+    gate = dict(report.get("gate") or {})
+    existing_failed = [
+        str(value)
+        for value in (gate.get(failed_key) or [])
+        if isinstance(value, str) and value.strip()
+    ]
+    existing_reasons = [
+        str(value)
+        for value in (gate.get("reason_codes") or [])
+        if isinstance(value, str) and value.strip()
+    ]
+    for value in failed_ids:
+        if value not in existing_failed:
+            existing_failed.append(value)
+    for value in reason_codes:
+        if value not in existing_reasons:
+            existing_reasons.append(value)
+    gate["ok"] = False
+    gate["reason_codes"] = existing_reasons
+    gate[failed_key] = existing_failed
+    gate["error_count"] = max(int(gate.get("error_count") or 0), len(existing_failed))
+    report["gate"] = gate
+    report[summary_key] = _merge_summary_rows(
+        report.get(summary_key),
+        rows,
+        id_key=id_key,
+    )
+    if layout_diagnostics is not None:
+        report["layout_diagnostics"] = layout_diagnostics
+    if page_count_divergence is not None:
+        report["page_count_divergence"] = page_count_divergence
+    if sparse_page_visual_diagnostics is not None:
+        report["sparse_page_visual_diagnostics"] = sparse_page_visual_diagnostics
+    return report
 
 
 def _derive_layout_diagnostics(
@@ -629,6 +969,7 @@ class AccessibilityEngine:
         if patched != html_text:
             Path(out_html_path).write_text(patched, encoding="utf-8")
             html_text = patched
+        _validate_emitted_document_metadata(html_text, self.document_metadata())
         self._record_css_link_result(
             css_link_injected=injected,
             css_link_preexisting=preexisting,
@@ -693,6 +1034,7 @@ class AccessibilityEngine:
         if patched != out.get("html"):
             Path(out_html_path).write_text(patched, encoding="utf-8")
             out["html"] = patched
+        _validate_emitted_document_metadata(str(out.get("html", "")), self.document_metadata())
         out["css_link_injected"] = bool(injected)
         out["css_link_preexisting"] = bool(preexisting)
         out["css_link_href"] = effective_css_href
@@ -715,10 +1057,20 @@ class AccessibilityEngine:
         a11y_report: dict[str, Any] | None = None,
         claim_evidence: dict[str, Any] | None = None,
         render_preview_png_path: str | None = None,
+        source_preview_png_path: str | None = None,
         pagination_trace_summary: dict[str, Any] | None = None,
         pagination_trace: dict[str, Any] | None = None,
+        page_count_divergence: dict[str, Any] | None = None,
         diagnostic_signals: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        sparse_page_visual_diagnostics = _analyze_sparse_page_visual_pair(
+            source_preview_png_path,
+            render_preview_png_path,
+        )
+        diagnostic_signals = _merge_sparse_page_visual_signals(
+            diagnostic_signals,
+            sparse_page_visual_diagnostics,
+        )
         report = dict(
             self._engine.verify_accessibility_artifacts(
                 html_path,
@@ -735,9 +1087,14 @@ class AccessibilityEngine:
             )
         )
         layout_diagnostics = _derive_layout_diagnostics(pagination_trace)
-        if layout_diagnostics is not None:
-            report["layout_diagnostics"] = layout_diagnostics
-        return report
+        return _apply_diagnostic_guard_failures(
+            report,
+            report_kind="a11y",
+            layout_diagnostics=layout_diagnostics,
+            page_count_divergence=page_count_divergence,
+            diagnostic_signals=diagnostic_signals,
+            sparse_page_visual_diagnostics=sparse_page_visual_diagnostics,
+        )
 
     def _derive_pmr_kwargs(
         self,
@@ -795,8 +1152,19 @@ class AccessibilityEngine:
         render_page_count: int | None = None,
         pagination_trace_summary: dict[str, Any] | None = None,
         pagination_trace: dict[str, Any] | None = None,
+        page_count_divergence: dict[str, Any] | None = None,
         diagnostic_signals: dict[str, Any] | None = None,
+        source_preview_png_path: str | None = None,
+        render_preview_png_path: str | None = None,
     ) -> dict[str, Any]:
+        sparse_page_visual_diagnostics = _analyze_sparse_page_visual_pair(
+            source_preview_png_path,
+            render_preview_png_path,
+        )
+        diagnostic_signals = _merge_sparse_page_visual_signals(
+            diagnostic_signals,
+            sparse_page_visual_diagnostics,
+        )
         kwargs = self._derive_pmr_kwargs(
             component_validation=component_validation,
             parity_report=parity_report,
@@ -812,9 +1180,14 @@ class AccessibilityEngine:
             )
         )
         layout_diagnostics = _derive_layout_diagnostics(pagination_trace)
-        if layout_diagnostics is not None:
-            report["layout_diagnostics"] = layout_diagnostics
-        return report
+        return _apply_diagnostic_guard_failures(
+            report,
+            report_kind="pmr",
+            layout_diagnostics=layout_diagnostics,
+            page_count_divergence=page_count_divergence,
+            diagnostic_signals=diagnostic_signals,
+            sparse_page_visual_diagnostics=sparse_page_visual_diagnostics,
+        )
 
     def export_render_time_typography_drift_trace(
         self,
@@ -1302,6 +1675,7 @@ class AccessibilityEngine:
         component_validation: dict[str, Any] | None = None,
         parity_report: dict[str, Any] | None = None,
         source_analysis: dict[str, Any] | None = None,
+        source_preview_png_path: str | None = None,
         render_preview_png: bool | None = None,
         run_verifier: bool | None = None,
         run_pmr: bool | None = None,
@@ -1312,7 +1686,15 @@ class AccessibilityEngine:
         warnings = self._metadata_warnings_or_raise()
         out_dir_path = Path(out_dir)
         out_dir_path.mkdir(parents=True, exist_ok=True)
-        render_preview_png = self._render_previews_by_default if render_preview_png is None else bool(render_preview_png)
+        render_preview_png = (
+            True
+            if source_preview_png_path
+            else (
+                self._render_previews_by_default
+                if render_preview_png is None
+                else bool(render_preview_png)
+            )
+        )
         default_reports = self._emit_reports_by_default
         run_verifier = default_reports if run_verifier is None else bool(run_verifier)
         run_pmr = default_reports if run_pmr is None else bool(run_pmr)
@@ -1337,6 +1719,9 @@ class AccessibilityEngine:
         region_text_alignment_path = (
             out_dir_path / f"{stem}_region_text_alignment_trace.json"
         )
+        sparse_page_visual_path = (
+            out_dir_path / f"{stem}_sparse_page_visual_diagnostics.json"
+        )
         run_report_path = out_dir_path / f"{stem}_run_report.json"
 
         emitted = self.emit_artifacts(body_html, css_text, str(html_path), str(css_path))
@@ -1346,10 +1731,6 @@ class AccessibilityEngine:
         css_link_media = _normalize_css_media(emitted.get("css_link_media"))
         css_link_injected = bool(emitted.get("css_link_injected", False))
         css_link_preexisting = bool(emitted.get("css_link_preexisting", False))
-        # Render from the authored fragment/body + CSS, not the emitted HTML artifact, so the
-        # injected <link rel="stylesheet"> in the artifact does not create engine asset warnings.
-        pdf_bytes = int(self._engine.render_pdf_to_file(body_html, css_out, str(pdf_path)))
-        png_paths = self._emit_preview_pngs(body_html, css_out, out_dir_path, stem=stem) if render_preview_png else []
 
         verifier_report: dict[str, Any] | None = None
         pmr_report: dict[str, Any] | None = None
@@ -1363,8 +1744,12 @@ class AccessibilityEngine:
         pagination_trace: dict[str, Any] | None = None
         typography_drift_trace: dict[str, Any] | None = None
         region_text_alignment_trace: dict[str, Any] | None = None
+        sparse_page_visual_diagnostics: dict[str, Any] | None = None
         page_count_divergence: dict[str, Any] | None = None
         diagnostic_signals: dict[str, Any] | None = None
+        layout_diagnostics: dict[str, Any] | None = None
+        pdf_bytes = 0
+        png_paths: list[str] = []
 
         if hasattr(self._engine, "export_render_time_pagination_trace"):
             try:
@@ -1408,6 +1793,7 @@ class AccessibilityEngine:
                 warnings.append(
                     f"pagination trace unavailable: {type(exc).__name__}: {exc}"
                 )
+        layout_diagnostics = _derive_layout_diagnostics(pagination_trace)
 
         if hasattr(self._engine, "export_render_time_typography_drift_trace"):
             try:
@@ -1572,6 +1958,27 @@ class AccessibilityEngine:
                     raise ValueError(message)
                 warnings.append(message)
 
+        pre_render_guard_messages: list[str] = []
+        if page_count_divergence and not bool(page_count_divergence.get("matches", True)):
+            pre_render_guard_messages.append(
+                "pre-render regression guard tripped for page-count divergence."
+            )
+        if layout_diagnostics and bool(layout_diagnostics.get("detected")):
+            collapsed_pages = [
+                str(row.get("page"))
+                for row in (layout_diagnostics.get("pages") or [])
+                if isinstance(row, dict) and row.get("page") is not None
+            ]
+            suffix = f" pages={','.join(collapsed_pages[:10])}" if collapsed_pages else ""
+            pre_render_guard_messages.append(
+                "pre-render regression guard tripped for layout collapse diagnostics."
+                + suffix
+            )
+        if pre_render_guard_messages:
+            if self._strict:
+                raise ValueError("; ".join(pre_render_guard_messages))
+            warnings.extend(pre_render_guard_messages)
+
         pagination_summary = (pagination_trace or {}).get("summary") or {}
         typography_summary = (typography_drift_trace or {}).get("summary") or {}
         region_alignment_summary = (
@@ -1604,6 +2011,9 @@ class AccessibilityEngine:
                 ),
                 "token_fragmentation_detected": token_fragmentation_block_count > 0,
                 "typography_wrap_drift_detected": wrap_drift_block_count > 0,
+                "typography_spacing_drift_detected": (
+                    suspicious_char_width_block_count > 0
+                ),
                 "semantic_table_alignment_drift": (
                     semantic_table_row_risk_count > 0
                     or fragmented_table_cell_count > 0
@@ -1611,9 +2021,36 @@ class AccessibilityEngine:
                 "low_coverage_page_count": low_coverage_page_count,
                 "token_fragmentation_block_count": token_fragmentation_block_count,
                 "wrap_drift_block_count": wrap_drift_block_count,
+                "suspicious_char_width_block_count": (
+                    suspicious_char_width_block_count
+                ),
                 "semantic_table_row_risk_count": semantic_table_row_risk_count,
                 "fragmented_table_cell_count": fragmented_table_cell_count,
             }
+        )
+
+        # Render from the authored fragment/body + CSS, not the emitted HTML artifact, so the
+        # injected <link rel=\"stylesheet\"> in the artifact does not create engine asset warnings.
+        pdf_bytes = int(self._engine.render_pdf_to_file(body_html, css_out, str(pdf_path)))
+        png_paths = (
+            self._emit_preview_pngs(body_html, css_out, out_dir_path, stem=stem)
+            if render_preview_png
+            else []
+        )
+        if source_preview_png_path and png_paths:
+            try:
+                sparse_page_visual_diagnostics = _analyze_sparse_page_visual_pair(
+                    source_preview_png_path,
+                    png_paths[0],
+                    out_path=str(sparse_page_visual_path),
+                )
+            except Exception as exc:
+                warnings.append(
+                    f"sparse-page visual diagnostics unavailable: {type(exc).__name__}: {exc}"
+                )
+        diagnostic_signals = _merge_sparse_page_visual_signals(
+            diagnostic_signals,
+            sparse_page_visual_diagnostics,
         )
 
         if run_verifier and hasattr(self._engine, "verify_accessibility_artifacts"):
@@ -1625,10 +2062,12 @@ class AccessibilityEngine:
                     profile=profile,
                     mode="error",
                     render_preview_png_path=contrast_png,
+                    source_preview_png_path=source_preview_png_path,
                     a11y_report=a11y_report,
                     claim_evidence=claim_evidence,
                     pagination_trace_summary=pagination_summary,
                     pagination_trace=pagination_trace,
+                    page_count_divergence=page_count_divergence,
                     diagnostic_signals=diagnostic_signals,
                 )
             except TypeError:
@@ -1655,7 +2094,10 @@ class AccessibilityEngine:
                     render_page_count=(len(png_paths) if png_paths else None),
                     pagination_trace_summary=pagination_summary,
                     pagination_trace=pagination_trace,
+                    page_count_divergence=page_count_divergence,
                     diagnostic_signals=diagnostic_signals,
+                    source_preview_png_path=source_preview_png_path,
+                    render_preview_png_path=(png_paths[0] if png_paths else None),
                 )
             except TypeError:
                 warnings.append(
@@ -1735,6 +2177,9 @@ class AccessibilityEngine:
             "region_text_alignment_trace_path": str(region_text_alignment_path)
             if region_text_alignment_trace
             else None,
+            "sparse_page_visual_diagnostics_path": str(sparse_page_visual_path)
+            if sparse_page_visual_diagnostics
+            else None,
             "render_preview_png_paths": png_paths,
             "engine_a11y_verify_path": str(a11y_path) if verifier_report else None,
             "engine_pmr_path": str(pmr_path) if pmr_report else None,
@@ -1745,12 +2190,14 @@ class AccessibilityEngine:
             "font_resolution_summary": (font_resolution_trace or {}).get("summary"),
             "asset_resolution_summary": (asset_resolution_trace or {}).get("summary"),
             "pagination_trace_summary": pagination_summary or None,
-            "layout_collapse_summary": _derive_layout_diagnostics(pagination_trace),
+            "layout_collapse_summary": layout_diagnostics,
             "typography_drift_summary": typography_summary or None,
             "region_text_alignment_summary": region_alignment_summary or None,
+            "sparse_page_visual_summary": sparse_page_visual_diagnostics,
             "page_count_divergence": page_count_divergence,
             "diagnostic_signals": diagnostic_signals,
             "a11y_issue_summary": (verifier_report or {}).get("blocking_issue_summary"),
+            "pmr_audit_summary": (pmr_report or {}).get("blocking_audit_summary"),
             "css_link_href": css_link_href,
             "css_link_media": css_link_media,
             "css_link_injected": css_link_injected,
@@ -1789,6 +2236,11 @@ class AccessibilityEngine:
                 "region_text_alignment_trace_path": (
                     region_text_alignment_path.name
                     if region_text_alignment_trace
+                    else None
+                ),
+                "sparse_page_visual_diagnostics_path": (
+                    sparse_page_visual_path.name
+                    if sparse_page_visual_diagnostics
                     else None
                 ),
                 "render_preview_pngs": [Path(p).name for p in png_paths],
@@ -1862,6 +2314,8 @@ class AccessibilityEngine:
             paths["typography_drift_trace_path"] = str(typography_drift_path)
         if region_text_alignment_trace:
             paths["region_text_alignment_trace_path"] = str(region_text_alignment_path)
+        if sparse_page_visual_diagnostics:
+            paths["sparse_page_visual_diagnostics_path"] = str(sparse_page_visual_path)
 
         return AccessibilityRunResult(
             ok=ok,
@@ -1879,6 +2333,7 @@ class AccessibilityEngine:
             pagination_trace=pagination_trace,
             typography_drift_trace=typography_drift_trace,
             region_text_alignment_trace=region_text_alignment_trace,
+            sparse_page_visual_diagnostics=sparse_page_visual_diagnostics,
             run_report=run_report,
             contract_fingerprint=meta.get("contract_fingerprint"),
             warnings=warnings,

@@ -49,6 +49,56 @@ def test_accessibility_engine_strict_mode_requires_metadata(tmp_path: Path) -> N
         )
 
 
+def test_accessibility_engine_metadata_guard_detects_emitted_dom_mismatch() -> None:
+    from fullbleed.accessibility.engine import _validate_emitted_document_metadata
+
+    with pytest.raises(ValueError, match="DOCUMENT_METADATA_MISMATCH"):
+        _validate_emitted_document_metadata(
+            "<!doctype html><html lang='en'><head><title>DOM Title</title></head><body></body></html>",
+            {
+                "document_lang": "en-US",
+                "document_title": "Engine Title",
+            },
+        )
+
+
+def test_accessibility_engine_strict_mode_fails_before_render_on_page_count_regression(
+    tmp_path: Path,
+) -> None:
+    _require_pdf_engine()
+
+    from fullbleed.accessibility import AccessibilityEngine
+
+    engine = AccessibilityEngine(
+        document_lang="en-US",
+        document_title="Pre-render Guard",
+        document_css_href="pre_render_guard.css",
+        strict=True,
+    )
+    out_dir = tmp_path / "pre_render_guard"
+    body_html = "<main>" + "".join(f"<p>Row {idx}</p>" for idx in range(320)) + "</main>"
+
+    with pytest.raises(
+        ValueError,
+        match="page count divergence detected|pre-render regression guard tripped",
+    ):
+        engine.render_bundle(
+            body_html=body_html,
+            css_text="@page { size: letter; margin: 0.5in; } p { margin: 0 0 14pt 0; font-size: 12pt; }",
+            out_dir=str(out_dir),
+            stem="pre_render_guard",
+            source_analysis={"page_count": 1},
+            render_preview_png=False,
+            run_verifier=False,
+            run_pmr=False,
+            run_pdf_ua_seed_verify=False,
+            emit_reading_order_trace=False,
+            emit_pdf_structure_trace=False,
+        )
+
+    assert not (out_dir / "pre_render_guard.pdf").exists()
+
+
 def test_accessibility_engine_css_metadata_emits_link_and_reports_fields(tmp_path: Path) -> None:
     _require_pdf_engine()
 
@@ -92,6 +142,291 @@ def test_accessibility_engine_css_metadata_emits_link_and_reports_fields(tmp_pat
     assert run_report["document_css_required"] is True
     assert run_report["css_link_href"] == "styles/runtime.css"
     assert run_report["css_link_media"] == "print"
+
+
+def test_accessibility_engine_verify_artifacts_promote_layout_guard_failures(
+    tmp_path: Path,
+) -> None:
+    _require_pdf_engine()
+
+    from fullbleed.accessibility import AccessibilityEngine
+
+    html = tmp_path / "doc.html"
+    html.write_text(
+        "<!doctype html><html lang='en-US'><head><title>Guard Test</title></head><body><main id='root'><p>Hello</p></main></body></html>",
+        encoding="utf-8",
+    )
+    css = tmp_path / "doc.css"
+    css.write_text("body{font-family:Helvetica}", encoding="utf-8")
+
+    page_row = {
+        "page": 1,
+        "occupied_area_ratio": 0.18,
+        "dominant_owner": {
+            "selector": "#sheet",
+            "dom_path": "main > section:nth-of-type(1)",
+            "component": "SheetSection",
+            "role": "region",
+            "tag": "section",
+            "id": "sheet",
+            "classes": "sheet-page",
+        },
+        "dominant_owner_label": "sheet-section",
+        "dominant_owner_source": "flowable_bbox",
+        "suspect_cause_codes": ["overflow_clipping", "fixed_height"],
+    }
+    pagination_trace = {
+        "layout_collapse_diagnostics": {
+            "detected": True,
+            "page_count": 1,
+            "pages": [page_row],
+        },
+        "pages": [dict(page_row, low_coverage=True)],
+        "page_break_attribution": [],
+        "dominant_break_triggers": [],
+    }
+
+    engine = AccessibilityEngine(
+        document_lang="en-US",
+        document_title="Guard Test",
+        strict=False,
+    )
+    report = engine.verify_accessibility_artifacts(
+        str(html),
+        str(css),
+        pagination_trace_summary={"page_count": 1, "low_coverage_page_count": 1},
+        pagination_trace=pagination_trace,
+        page_count_divergence={
+            "source_page_count": 2,
+            "render_page_count": 1,
+            "delta": -1,
+            "matches": False,
+        },
+        diagnostic_signals={
+            "page_count_mismatch": True,
+            "layout_collapse_detected": True,
+        },
+    )
+
+    assert report["gate"]["ok"] is False
+    assert "fb.a11y.layout.page_count_guard" in report["gate"]["failed_rule_ids"]
+    assert "fb.a11y.layout.collapse_guard" in report["gate"]["failed_rule_ids"]
+    collapse_row = next(
+        row
+        for row in report["blocking_issue_summary"]
+        if row["rule_id"] == "fb.a11y.layout.collapse_guard" and row.get("page") == 1
+    )
+    assert collapse_row["selector"] == "#sheet"
+    assert collapse_row["component"] == "SheetSection"
+    assert collapse_row["owner_label"] == "sheet-section"
+    assert "overflow_clipping" in collapse_row["suspect_cause_codes"]
+    assert report["page_count_divergence"]["delta"] == -1
+
+
+def test_accessibility_engine_verify_pmr_artifacts_promote_layout_guard_failures(
+    tmp_path: Path,
+) -> None:
+    _require_pdf_engine()
+
+    from fullbleed.accessibility import AccessibilityEngine
+
+    html = tmp_path / "doc.html"
+    html.write_text(
+        "<!doctype html><html lang='en-US'><head><title>PMR Guard Test</title></head><body><main id='root'><p>Hello</p></main></body></html>",
+        encoding="utf-8",
+    )
+    css = tmp_path / "doc.css"
+    css.write_text("body{font-family:Helvetica}", encoding="utf-8")
+
+    page_row = {
+        "page": 2,
+        "occupied_area_ratio": 0.14,
+        "dominant_owner": {
+            "selector": "#page-two",
+            "dom_path": "main > section:nth-of-type(2)",
+            "component": "PageTwoSection",
+            "role": "region",
+            "tag": "section",
+            "id": "page-two",
+            "classes": "page-section",
+        },
+        "dominant_owner_label": "page-two",
+        "dominant_owner_source": "text_block",
+        "suspect_cause_codes": ["page_root_height_mismatch"],
+    }
+    pagination_trace = {
+        "layout_collapse_diagnostics": {
+            "detected": True,
+            "page_count": 1,
+            "pages": [page_row],
+        },
+        "pages": [dict(page_row, low_coverage=True)],
+        "page_break_attribution": [],
+        "dominant_break_triggers": [],
+    }
+
+    engine = AccessibilityEngine(
+        document_lang="en-US",
+        document_title="PMR Guard Test",
+        strict=False,
+    )
+    report = engine.verify_pmr_artifacts(
+        str(html),
+        str(css),
+        profile="cav",
+        mode="error",
+        component_validation={"overflow_count": 0, "known_loss_count": 0},
+        source_analysis={"page_count": 1},
+        render_page_count=1,
+        pagination_trace_summary={"page_count": 1, "low_coverage_page_count": 1},
+        pagination_trace=pagination_trace,
+        page_count_divergence={
+            "source_page_count": 1,
+            "render_page_count": 3,
+            "delta": 2,
+            "matches": False,
+        },
+        diagnostic_signals={
+            "page_count_mismatch": True,
+            "layout_collapse_detected": True,
+        },
+    )
+
+    assert report["gate"]["ok"] is False
+    assert "pmr.layout.page_count_guard" in report["gate"]["failed_audit_ids"]
+    assert "pmr.layout.collapse_guard" in report["gate"]["failed_audit_ids"]
+    collapse_row = next(
+        row
+        for row in report["blocking_audit_summary"]
+        if row["audit_id"] == "pmr.layout.collapse_guard" and row.get("page") == 2
+    )
+    assert collapse_row["selector"] == "#page-two"
+    assert collapse_row["component"] == "PageTwoSection"
+    assert collapse_row["owner_source"] == "text_block"
+
+
+def test_accessibility_engine_verify_promotes_typography_spacing_guard(
+    tmp_path: Path,
+) -> None:
+    _require_pdf_engine()
+
+    from fullbleed.accessibility import AccessibilityEngine
+
+    html = tmp_path / "doc.html"
+    html.write_text(
+        "<!doctype html><html lang='en-US'><head><title>Spacing Guard</title></head><body><main id='root'><p>Hello</p></main></body></html>",
+        encoding="utf-8",
+    )
+    css = tmp_path / "doc.css"
+    css.write_text("body{font-family:Helvetica}", encoding="utf-8")
+
+    engine = AccessibilityEngine(
+        document_lang="en-US",
+        document_title="Spacing Guard",
+        strict=False,
+    )
+    report = engine.verify_accessibility_artifacts(
+        str(html),
+        str(css),
+        diagnostic_signals={
+            "typography_spacing_drift_detected": True,
+            "suspicious_char_width_block_count": 7,
+        },
+    )
+
+    assert report["gate"]["ok"] is False
+    assert "fb.a11y.typography.spacing_guard" in report["gate"]["failed_rule_ids"]
+    row = next(
+        row
+        for row in report["blocking_issue_summary"]
+        if row["rule_id"] == "fb.a11y.typography.spacing_guard"
+    )
+    assert row["failure_kind"] == "typography_spacing_drift"
+    assert row["observed_value"] == "7"
+
+
+def test_accessibility_engine_verify_promotes_sparse_page_header_guard(
+    tmp_path: Path,
+) -> None:
+    _require_pdf_engine()
+
+    from fullbleed.accessibility import AccessibilityEngine
+
+    html = tmp_path / "doc.html"
+    html.write_text(
+        "<!doctype html><html lang='en-US'><head><title>Sparse Guard</title></head><body><main class='page'><p class='copy'>Case log entry 001</p></main></body></html>",
+        encoding="utf-8",
+    )
+    css = tmp_path / "doc.css"
+    css.write_text(
+        "body{margin:0;background:#fff}.page{padding:18px 24px;font:18px Helvetica, Arial, sans-serif;color:#111}.copy{margin:0}",
+        encoding="utf-8",
+    )
+
+    preview_engine = fullbleed.PdfEngine(
+        document_lang="en-US",
+        document_title="Sparse Guard Source",
+    )
+    source_html = (
+        "<!doctype html><html lang='en-US'><head><title>Source</title></head><body>"
+        "<main class='page'><div class='banner'></div><p class='copy'>Case log entry 001</p></main>"
+        "</body></html>"
+    )
+    source_css = (
+        "body{margin:0;background:#fff}"
+        ".page{padding:18px 24px;font:18px Helvetica, Arial, sans-serif;color:#111}"
+        ".banner{height:88px;background:#111;margin-bottom:22px}"
+        ".copy{margin:0}"
+    )
+    if hasattr(preview_engine, "render_image_pages_to_dir"):
+        source_paths = list(
+            preview_engine.render_image_pages_to_dir(
+                source_html, source_css, str(tmp_path), 144, "sparse_source"
+            )
+            or []
+        )
+        if not source_paths:
+            pytest.skip("engine PNG render preview API not available")
+        source_png = source_paths[0]
+        render_paths = list(
+            preview_engine.render_image_pages_to_dir(
+                html.read_text(encoding="utf-8"),
+                css.read_text(encoding="utf-8"),
+                str(tmp_path),
+                144,
+                "sparse_render",
+            )
+            or []
+        )
+        if not render_paths:
+            pytest.skip("engine PNG render preview API not available")
+        render_png = render_paths[0]
+    else:
+        pytest.skip("engine PNG render preview API not available")
+
+    engine = AccessibilityEngine(
+        document_lang="en-US",
+        document_title="Sparse Guard",
+        strict=False,
+    )
+    report = engine.verify_accessibility_artifacts(
+        str(html),
+        str(css),
+        source_preview_png_path=str(source_png),
+        render_preview_png_path=str(render_png),
+    )
+
+    assert report["gate"]["ok"] is False
+    assert "sparse_page_header_omission_detected" in report["gate"]["reason_codes"]
+    assert "fb.a11y.visual.sparse_page_header_guard" in report["gate"]["failed_rule_ids"]
+    assert report["sparse_page_visual_diagnostics"]["header_omission_detected"] is True
+    row = next(
+        row
+        for row in report["blocking_issue_summary"]
+        if row["rule_id"] == "fb.a11y.visual.sparse_page_header_guard"
+    )
+    assert row["failure_kind"] == "sparse_page_header_omission"
+    assert int(row["observed_value"]) >= 4
 
 
 def test_accessibility_engine_css_required_fails_without_href(tmp_path: Path) -> None:

@@ -28,6 +28,9 @@
     "diagnostic_signals": {
       "$ref": "#/$defs/diagnosticSignals"
     },
+    "sparse_page_visual_diagnostics": {
+      "$ref": "#/$defs/sparsePageVisualDiagnostics"
+    },
     "profile": {
       "type": "string",
       "minLength": 1
@@ -122,6 +125,9 @@
     },
     "layout_diagnostics": {
       "$ref": "#/$defs/layoutDiagnosticsSummary"
+    },
+    "page_count_divergence": {
+      "$ref": "#/$defs/pageCountDivergence"
     },
     "coverage": {
       "type": "object",
@@ -571,12 +577,53 @@
         "pagination_overflow_detected": { "type": "boolean" },
         "token_fragmentation_detected": { "type": "boolean" },
         "typography_wrap_drift_detected": { "type": "boolean" },
+        "typography_spacing_drift_detected": { "type": "boolean" },
+        "sparse_page_header_omission_detected": { "type": "boolean" },
         "semantic_table_alignment_drift": { "type": "boolean" },
         "low_coverage_page_count": { "type": "integer", "minimum": 0 },
         "token_fragmentation_block_count": { "type": "integer", "minimum": 0 },
         "wrap_drift_block_count": { "type": "integer", "minimum": 0 },
+        "suspicious_char_width_block_count": { "type": "integer", "minimum": 0 },
+        "missing_header_cell_count": { "type": "integer", "minimum": 0 },
         "semantic_table_row_risk_count": { "type": "integer", "minimum": 0 },
         "fragmented_table_cell_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "sparsePageVisualDiagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "source_preview_png_path",
+        "render_preview_png_path",
+        "sparse_source_page",
+        "header_omission_detected",
+        "verdict",
+        "confidence",
+        "message"
+      ],
+      "properties": {
+        "schema": { "const": "fullbleed.visual.sparse_page_pair.v1" },
+        "source_preview_png_path": { "type": "string", "minLength": 1 },
+        "render_preview_png_path": { "type": "string", "minLength": 1 },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "sparse_source_page": { "type": "boolean" },
+        "header_omission_detected": { "type": "boolean" },
+        "source_ink_ratio": { "type": "number", "minimum": 0 },
+        "render_ink_ratio": { "type": "number", "minimum": 0 },
+        "source_header_ink_ratio": { "type": "number", "minimum": 0 },
+        "render_header_ink_ratio": { "type": "number", "minimum": 0 },
+        "source_header_occupied_cells": { "type": "integer", "minimum": 0 },
+        "render_header_occupied_cells": { "type": "integer", "minimum": 0 },
+        "missing_header_cell_count": { "type": "integer", "minimum": 0 },
+        "header_omission_ratio": { "type": "number", "minimum": 0 },
+        "verdict": {
+          "type": "string",
+          "enum": ["pass", "warn", "fail", "not_applicable", "manual_needed"]
+        },
+        "confidence": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 }
       }
     },
     "observability": {
@@ -822,6 +869,33 @@
           "type": "integer",
           "minimum": 1
         },
+        "component": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "classes": {
+          "type": "string"
+        },
+        "owner_label": {
+          "type": "string"
+        },
+        "owner_source": {
+          "type": "string"
+        },
+        "suspect_cause_codes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "failure_kind": {
           "type": "string"
         },
@@ -978,6 +1052,32 @@
               }
             }
           }
+        }
+      }
+    },
+    "pageCountDivergence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_page_count",
+        "render_page_count",
+        "delta",
+        "matches"
+      ],
+      "properties": {
+        "source_page_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "render_page_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "delta": {
+          "type": "integer"
+        },
+        "matches": {
+          "type": "boolean"
         }
       }
     },

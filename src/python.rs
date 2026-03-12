@@ -4414,6 +4414,27 @@ struct RenderContrastSeedAnalysis {
     message: String,
 }
 
+#[derive(Debug, Clone)]
+struct SparsePageVisualPairAnalysis {
+    source_preview_png_path: String,
+    render_preview_png_path: String,
+    width: u32,
+    height: u32,
+    sparse_source_page: bool,
+    header_omission_detected: bool,
+    source_ink_ratio: f64,
+    render_ink_ratio: f64,
+    source_header_ink_ratio: f64,
+    render_header_ink_ratio: f64,
+    source_header_occupied_cells: u32,
+    render_header_occupied_cells: u32,
+    missing_header_cell_count: u32,
+    header_omission_ratio: f64,
+    verdict: &'static str,
+    confidence: &'static str,
+    message: String,
+}
+
 fn _srgb_u8_to_linear(v: u8) -> f64 {
     let x = (v as f64) / 255.0;
     if x <= 0.04045 {
@@ -4436,6 +4457,233 @@ fn _percentile(sorted: &[f64], q: f64) -> f64 {
     let q = q.clamp(0.0, 1.0);
     let idx = ((sorted.len() - 1) as f64 * q).round() as usize;
     sorted[idx.min(sorted.len() - 1)]
+}
+
+fn _load_preview_luma_image(path: &str) -> Result<image::GrayImage, String> {
+    image::ImageReader::open(path)
+        .map_err(|e| format!("failed to open preview PNG: {e}"))?
+        .with_guessed_format()
+        .map_err(|e| format!("failed to detect preview image format: {e}"))?
+        .decode()
+        .map_err(|e| format!("failed to decode preview image: {e}"))
+        .map(|img| img.to_luma8())
+}
+
+fn _ink_ratio(gray: &image::GrayImage, threshold: u8) -> f64 {
+    let (width, height) = gray.dimensions();
+    let total = (width as u64) * (height as u64);
+    if total == 0 {
+        return 0.0;
+    }
+    let ink = gray.pixels().filter(|px| px[0] < threshold).count() as u64;
+    ink as f64 / total as f64
+}
+
+fn _band_ink_ratio(gray: &image::GrayImage, top: u32, bottom: u32, threshold: u8) -> f64 {
+    let (width, height) = gray.dimensions();
+    if width == 0 || height == 0 || top >= bottom || top >= height {
+        return 0.0;
+    }
+    let y1 = bottom.min(height);
+    let total = (width as u64) * ((y1 - top) as u64);
+    if total == 0 {
+        return 0.0;
+    }
+    let mut ink = 0u64;
+    for y in top..y1 {
+        for x in 0..width {
+            if gray.get_pixel(x, y)[0] < threshold {
+                ink += 1;
+            }
+        }
+    }
+    ink as f64 / total as f64
+}
+
+fn _grid_occupancy(
+    gray: &image::GrayImage,
+    cols: u32,
+    rows: u32,
+    threshold: u8,
+    min_cell_ink_ratio: f64,
+) -> Vec<bool> {
+    let (width, height) = gray.dimensions();
+    let mut out = Vec::with_capacity((cols * rows) as usize);
+    if width == 0 || height == 0 || cols == 0 || rows == 0 {
+        return out;
+    }
+    for row in 0..rows {
+        let y0 = ((row as u64) * (height as u64) / (rows as u64)) as u32;
+        let y1 = ((((row + 1) as u64) * (height as u64)) / (rows as u64)) as u32;
+        for col in 0..cols {
+            let x0 = ((col as u64) * (width as u64) / (cols as u64)) as u32;
+            let x1 = ((((col + 1) as u64) * (width as u64)) / (cols as u64)) as u32;
+            let mut ink = 0u64;
+            let mut total = 0u64;
+            for y in y0..y1.max(y0 + 1).min(height) {
+                for x in x0..x1.max(x0 + 1).min(width) {
+                    total += 1;
+                    if gray.get_pixel(x, y)[0] < threshold {
+                        ink += 1;
+                    }
+                }
+            }
+            let ratio = if total == 0 {
+                0.0
+            } else {
+                ink as f64 / total as f64
+            };
+            out.push(ratio >= min_cell_ink_ratio);
+        }
+    }
+    out
+}
+
+fn analyze_sparse_page_visual_pair(
+    source_path: &str,
+    render_path: &str,
+) -> Result<SparsePageVisualPairAnalysis, String> {
+    let source = _load_preview_luma_image(source_path)?;
+    let render = _load_preview_luma_image(render_path)?;
+    let target_width = 240u32;
+    let target_height = 320u32;
+    let source = if source.dimensions() == (target_width, target_height) {
+        source
+    } else {
+        image::imageops::resize(
+            &source,
+            target_width,
+            target_height,
+            image::imageops::FilterType::Triangle,
+        )
+    };
+    let render = if render.dimensions() == (target_width, target_height) {
+        render
+    } else {
+        image::imageops::resize(
+            &render,
+            target_width,
+            target_height,
+            image::imageops::FilterType::Triangle,
+        )
+    };
+
+    let ink_threshold = 245u8;
+    let cell_ratio_threshold = 0.010f64;
+    let source_ink_ratio = _ink_ratio(&source, ink_threshold);
+    let render_ink_ratio = _ink_ratio(&render, ink_threshold);
+    let header_band_bottom = ((target_height as f64) * 0.18).round() as u32;
+    let source_header_ink_ratio = _band_ink_ratio(&source, 0, header_band_bottom, ink_threshold);
+    let render_header_ink_ratio = _band_ink_ratio(&render, 0, header_band_bottom, ink_threshold);
+
+    let grid_cols = 12u32;
+    let grid_rows = 16u32;
+    let header_rows = 3u32;
+    let source_cells = _grid_occupancy(
+        &source,
+        grid_cols,
+        grid_rows,
+        ink_threshold,
+        cell_ratio_threshold,
+    );
+    let render_cells = _grid_occupancy(
+        &render,
+        grid_cols,
+        grid_rows,
+        ink_threshold,
+        cell_ratio_threshold,
+    );
+    let header_limit = (grid_cols * header_rows) as usize;
+    let source_header_occupied_cells = source_cells
+        .iter()
+        .take(header_limit)
+        .filter(|value| **value)
+        .count() as u32;
+    let render_header_occupied_cells = render_cells
+        .iter()
+        .take(header_limit)
+        .filter(|value| **value)
+        .count() as u32;
+    let missing_header_cell_count = source_cells
+        .iter()
+        .zip(render_cells.iter())
+        .take(header_limit)
+        .filter(|(source_cell, render_cell)| **source_cell && !**render_cell)
+        .count() as u32;
+    let header_omission_ratio = if source_header_occupied_cells == 0 {
+        0.0
+    } else {
+        missing_header_cell_count as f64 / source_header_occupied_cells as f64
+    };
+
+    let sparse_source_page = source_ink_ratio <= 0.12;
+    let prominent_source_header =
+        source_header_occupied_cells >= 4 || source_header_ink_ratio >= 0.010;
+    let header_omission_detected = sparse_source_page
+        && prominent_source_header
+        && missing_header_cell_count >= 4
+        && header_omission_ratio >= 0.50
+        && render_header_ink_ratio <= (source_header_ink_ratio * 0.65).max(0.0025);
+
+    let (verdict, confidence, message) = if !sparse_source_page {
+        (
+            "not_applicable",
+            "medium",
+            "Source page is not sparse enough for sparse-page header omission diagnostics."
+                .to_string(),
+        )
+    } else if !prominent_source_header {
+        (
+            "not_applicable",
+            "medium",
+            "Sparse-page source does not contain a prominent header cluster to compare."
+                .to_string(),
+        )
+    } else if header_omission_detected {
+        (
+            "fail",
+            "high",
+            format!(
+                "Sparse-page header omission detected: {} of {} source header cells are missing in the render.",
+                missing_header_cell_count, source_header_occupied_cells
+            ),
+        )
+    } else if header_omission_ratio >= 0.30 {
+        (
+            "warn",
+            "medium",
+            format!(
+                "Sparse-page header drift detected: {} of {} source header cells are missing in the render.",
+                missing_header_cell_count, source_header_occupied_cells
+            ),
+        )
+    } else {
+        (
+            "pass",
+            "medium",
+            "Sparse-page header cluster is materially preserved in the render preview.".to_string(),
+        )
+    };
+
+    Ok(SparsePageVisualPairAnalysis {
+        source_preview_png_path: source_path.to_string(),
+        render_preview_png_path: render_path.to_string(),
+        width: target_width,
+        height: target_height,
+        sparse_source_page,
+        header_omission_detected,
+        source_ink_ratio,
+        render_ink_ratio,
+        source_header_ink_ratio,
+        render_header_ink_ratio,
+        source_header_occupied_cells,
+        render_header_occupied_cells,
+        missing_header_cell_count,
+        header_omission_ratio,
+        verdict,
+        confidence,
+        message,
+    })
 }
 
 fn analyze_render_contrast_seed_png(path: &str) -> Result<RenderContrastSeedAnalysis, String> {
@@ -4564,10 +4812,53 @@ fn render_contrast_seed_analysis_to_py(
     Ok(out.to_object(py))
 }
 
+fn sparse_page_visual_pair_analysis_to_py(
+    py: Python<'_>,
+    a: &SparsePageVisualPairAnalysis,
+) -> PyResult<PyObject> {
+    let out = PyDict::new_bound(py);
+    out.set_item("schema", "fullbleed.visual.sparse_page_pair.v1")?;
+    out.set_item("source_preview_png_path", a.source_preview_png_path.clone())?;
+    out.set_item("render_preview_png_path", a.render_preview_png_path.clone())?;
+    out.set_item("width", a.width)?;
+    out.set_item("height", a.height)?;
+    out.set_item("sparse_source_page", a.sparse_source_page)?;
+    out.set_item("header_omission_detected", a.header_omission_detected)?;
+    out.set_item("source_ink_ratio", a.source_ink_ratio)?;
+    out.set_item("render_ink_ratio", a.render_ink_ratio)?;
+    out.set_item("source_header_ink_ratio", a.source_header_ink_ratio)?;
+    out.set_item("render_header_ink_ratio", a.render_header_ink_ratio)?;
+    out.set_item(
+        "source_header_occupied_cells",
+        a.source_header_occupied_cells,
+    )?;
+    out.set_item(
+        "render_header_occupied_cells",
+        a.render_header_occupied_cells,
+    )?;
+    out.set_item("missing_header_cell_count", a.missing_header_cell_count)?;
+    out.set_item("header_omission_ratio", a.header_omission_ratio)?;
+    out.set_item("verdict", a.verdict)?;
+    out.set_item("confidence", a.confidence)?;
+    out.set_item("message", a.message.clone())?;
+    Ok(out.to_object(py))
+}
+
 #[pyfunction]
 fn audit_contrast_render_png(py: Python<'_>, png_path: &str) -> PyResult<PyObject> {
     let analysis = analyze_render_contrast_seed_png(png_path).map_err(PyValueError::new_err)?;
     render_contrast_seed_analysis_to_py(py, &analysis)
+}
+
+#[pyfunction]
+fn audit_sparse_page_visual_pair(
+    py: Python<'_>,
+    source_png_path: &str,
+    render_png_path: &str,
+) -> PyResult<PyObject> {
+    let analysis = analyze_sparse_page_visual_pair(source_png_path, render_png_path)
+        .map_err(PyValueError::new_err)?;
+    sparse_page_visual_pair_analysis_to_py(py, &analysis)
 }
 
 fn a11y_core_evidence_to_py(py: Python<'_>, evidence: &A11yVerifierEvidence) -> PyResult<PyObject> {
@@ -5401,10 +5692,14 @@ struct DiagnosticSignals {
     pagination_overflow_detected: Option<bool>,
     token_fragmentation_detected: Option<bool>,
     typography_wrap_drift_detected: Option<bool>,
+    typography_spacing_drift_detected: Option<bool>,
+    sparse_page_header_omission_detected: Option<bool>,
     semantic_table_alignment_drift: Option<bool>,
     low_coverage_page_count: Option<i64>,
     token_fragmentation_block_count: Option<i64>,
     wrap_drift_block_count: Option<i64>,
+    suspicious_char_width_block_count: Option<i64>,
+    missing_header_cell_count: Option<i64>,
     semantic_table_row_risk_count: Option<i64>,
     fragmented_table_cell_count: Option<i64>,
 }
@@ -5506,6 +5801,14 @@ fn diagnostic_signals_from_py(
             dict,
             "typography_wrap_drift_detected",
         )?,
+        typography_spacing_drift_detected: py_dict_optional_bool(
+            dict,
+            "typography_spacing_drift_detected",
+        )?,
+        sparse_page_header_omission_detected: py_dict_optional_bool(
+            dict,
+            "sparse_page_header_omission_detected",
+        )?,
         semantic_table_alignment_drift: py_dict_optional_bool(
             dict,
             "semantic_table_alignment_drift",
@@ -5516,6 +5819,11 @@ fn diagnostic_signals_from_py(
             "token_fragmentation_block_count",
         )?,
         wrap_drift_block_count: py_dict_optional_i64(dict, "wrap_drift_block_count")?,
+        suspicious_char_width_block_count: py_dict_optional_i64(
+            dict,
+            "suspicious_char_width_block_count",
+        )?,
+        missing_header_cell_count: py_dict_optional_i64(dict, "missing_header_cell_count")?,
         semantic_table_row_risk_count: py_dict_optional_i64(dict, "semantic_table_row_risk_count")?,
         fragmented_table_cell_count: py_dict_optional_i64(dict, "fragmented_table_cell_count")?,
     }))
@@ -5541,6 +5849,12 @@ fn diagnostic_signals_to_py<'py>(
     if let Some(value) = signals.typography_wrap_drift_detected {
         out.set_item("typography_wrap_drift_detected", value)?;
     }
+    if let Some(value) = signals.typography_spacing_drift_detected {
+        out.set_item("typography_spacing_drift_detected", value)?;
+    }
+    if let Some(value) = signals.sparse_page_header_omission_detected {
+        out.set_item("sparse_page_header_omission_detected", value)?;
+    }
     if let Some(value) = signals.semantic_table_alignment_drift {
         out.set_item("semantic_table_alignment_drift", value)?;
     }
@@ -5552,6 +5866,12 @@ fn diagnostic_signals_to_py<'py>(
     }
     if let Some(value) = signals.wrap_drift_block_count {
         out.set_item("wrap_drift_block_count", value)?;
+    }
+    if let Some(value) = signals.suspicious_char_width_block_count {
+        out.set_item("suspicious_char_width_block_count", value)?;
+    }
+    if let Some(value) = signals.missing_header_cell_count {
+        out.set_item("missing_header_cell_count", value)?;
     }
     if let Some(value) = signals.semantic_table_row_risk_count {
         out.set_item("semantic_table_row_risk_count", value)?;
@@ -5582,6 +5902,17 @@ fn a11y_finding_evidence_value(finding: &A11yVerifierFinding, key: &str) -> Opti
                 None
             }
         })
+}
+
+fn evidence_list_value(value: Option<String>) -> Option<Vec<String>> {
+    value
+        .map(|raw| {
+            raw.split(',')
+                .map(|part| part.trim().to_string())
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .filter(|items| !items.is_empty())
 }
 
 fn a11y_finding_remediation_hint(finding: &A11yVerifierFinding) -> Option<&'static str> {
@@ -5669,6 +6000,36 @@ fn build_a11y_blocking_issue_summary_py<'py>(
         }
         if let Some(value) = page {
             row.set_item("page", value)?;
+        }
+        if let Some(value) = a11y_finding_evidence_value(finding, "component") {
+            row.set_item("component", value)?;
+        }
+        if let Some(value) = a11y_finding_evidence_value(finding, "role") {
+            row.set_item("role", value)?;
+        }
+        if let Some(value) = a11y_finding_evidence_value(finding, "tag") {
+            row.set_item("tag", value)?;
+        }
+        if let Some(value) = a11y_finding_evidence_value(finding, "id") {
+            row.set_item("id", value)?;
+        }
+        if let Some(value) = a11y_finding_evidence_value(finding, "classes") {
+            row.set_item("classes", value)?;
+        }
+        if let Some(value) = a11y_finding_evidence_value(finding, "owner_label") {
+            row.set_item("owner_label", value)?;
+        }
+        if let Some(value) = a11y_finding_evidence_value(finding, "owner_source") {
+            row.set_item("owner_source", value)?;
+        }
+        if let Some(values) =
+            evidence_list_value(a11y_finding_evidence_value(finding, "suspect_cause_codes"))
+        {
+            let items = PyList::empty_bound(py);
+            for value in values {
+                items.append(value)?;
+            }
+            row.set_item("suspect_cause_codes", items)?;
         }
         if let Some(value) = failure_kind {
             row.set_item("failure_kind", value)?;
@@ -5794,6 +6155,44 @@ fn build_pmr_blocking_audit_summary_py<'py>(
         )?;
         if let Some(value) = selector {
             row.set_item("selector", value)?;
+        }
+        if let Some(value) = pmr_audit_evidence_value(audit, "dom_path") {
+            row.set_item("dom_path", value)?;
+        }
+        if let Some(value) =
+            pmr_audit_evidence_value(audit, "page").and_then(|value| value.parse::<usize>().ok())
+        {
+            row.set_item("page", value)?;
+        }
+        if let Some(value) = pmr_audit_evidence_value(audit, "component") {
+            row.set_item("component", value)?;
+        }
+        if let Some(value) = pmr_audit_evidence_value(audit, "role") {
+            row.set_item("role", value)?;
+        }
+        if let Some(value) = pmr_audit_evidence_value(audit, "tag") {
+            row.set_item("tag", value)?;
+        }
+        if let Some(value) = pmr_audit_evidence_value(audit, "id") {
+            row.set_item("id", value)?;
+        }
+        if let Some(value) = pmr_audit_evidence_value(audit, "classes") {
+            row.set_item("classes", value)?;
+        }
+        if let Some(value) = pmr_audit_evidence_value(audit, "owner_label") {
+            row.set_item("owner_label", value)?;
+        }
+        if let Some(value) = pmr_audit_evidence_value(audit, "owner_source") {
+            row.set_item("owner_source", value)?;
+        }
+        if let Some(values) =
+            evidence_list_value(pmr_audit_evidence_value(audit, "suspect_cause_codes"))
+        {
+            let items = PyList::empty_bound(py);
+            for value in values {
+                items.append(value)?;
+            }
+            row.set_item("suspect_cause_codes", items)?;
         }
         if let Some(value) = diagnostic_ref {
             row.set_item("diagnostic_ref", value)?;
@@ -7837,6 +8236,46 @@ fn build_a11y_verify_report_py(
             gate_warn_count += 1;
         }
     }
+    if let Some(signals) = diagnostic_signals {
+        if signals.page_count_mismatch.unwrap_or(false)
+            && !failed_rule_ids
+                .iter()
+                .any(|value| value == "fb.a11y.layout.page_count_guard")
+        {
+            error_count += 1;
+            failed_rule_ids.push("fb.a11y.layout.page_count_guard".to_string());
+        }
+        if (signals.layout_collapse_detected.unwrap_or(false)
+            || pagination_trace_summary
+                .and_then(|summary| summary.low_coverage_page_count)
+                .unwrap_or(0)
+                > 0)
+            && !failed_rule_ids
+                .iter()
+                .any(|value| value == "fb.a11y.layout.collapse_guard")
+        {
+            error_count += 1;
+            failed_rule_ids.push("fb.a11y.layout.collapse_guard".to_string());
+        }
+        if signals.typography_spacing_drift_detected.unwrap_or(false)
+            && !failed_rule_ids
+                .iter()
+                .any(|value| value == "fb.a11y.typography.spacing_guard")
+        {
+            error_count += 1;
+            failed_rule_ids.push("fb.a11y.typography.spacing_guard".to_string());
+        }
+        if signals
+            .sparse_page_header_omission_detected
+            .unwrap_or(false)
+            && !failed_rule_ids
+                .iter()
+                .any(|value| value == "fb.a11y.visual.sparse_page_header_guard")
+        {
+            error_count += 1;
+            failed_rule_ids.push("fb.a11y.visual.sparse_page_header_guard".to_string());
+        }
+    }
 
     let manual_required = manual_needed_count > 0;
     let conformance_status_text = if fail_count > 0 {
@@ -7919,6 +8358,15 @@ fn build_a11y_verify_report_py(
         }
         if signals.typography_wrap_drift_detected.unwrap_or(false) {
             reason_codes.append("typography_wrap_drift_detected")?;
+        }
+        if signals.typography_spacing_drift_detected.unwrap_or(false) {
+            reason_codes.append("typography_spacing_drift_detected")?;
+        }
+        if signals
+            .sparse_page_header_omission_detected
+            .unwrap_or(false)
+        {
+            reason_codes.append("sparse_page_header_omission_detected")?;
         }
         if signals.semantic_table_alignment_drift.unwrap_or(false) {
             reason_codes.append("semantic_table_alignment_drift")?;
@@ -8022,6 +8470,12 @@ fn build_a11y_verify_report_py(
         }
         if let Some(value) = signals.wrap_drift_block_count {
             signal_counts_py.set_item("diagnostic_wrap_drift_block_count", value)?;
+        }
+        if let Some(value) = signals.suspicious_char_width_block_count {
+            signal_counts_py.set_item("diagnostic_suspicious_char_width_block_count", value)?;
+        }
+        if let Some(value) = signals.missing_header_cell_count {
+            signal_counts_py.set_item("diagnostic_missing_header_cell_count", value)?;
         }
         if let Some(value) = signals.semantic_table_row_risk_count {
             signal_counts_py.set_item("diagnostic_semantic_table_row_risk_count", value)?;
@@ -8281,6 +8735,55 @@ fn build_pmr_report_py(
 
     report.set_item("profile", core.profile.clone())?;
 
+    let mut gate_ok = core.gate.ok;
+    let mut gate_error_count = core.gate.error_count;
+    let gate_warn_count = core.gate.warn_count;
+    let mut gate_failed_audit_ids = core.gate.failed_audit_ids.clone();
+    if let Some(signals) = diagnostic_signals {
+        if signals.page_count_mismatch.unwrap_or(false)
+            && !gate_failed_audit_ids
+                .iter()
+                .any(|value| value == "pmr.layout.page_count_guard")
+        {
+            gate_ok = false;
+            gate_error_count += 1;
+            gate_failed_audit_ids.push("pmr.layout.page_count_guard".to_string());
+        }
+        if (signals.layout_collapse_detected.unwrap_or(false)
+            || pagination_trace_summary
+                .and_then(|summary| summary.low_coverage_page_count)
+                .unwrap_or(0)
+                > 0)
+            && !gate_failed_audit_ids
+                .iter()
+                .any(|value| value == "pmr.layout.collapse_guard")
+        {
+            gate_ok = false;
+            gate_error_count += 1;
+            gate_failed_audit_ids.push("pmr.layout.collapse_guard".to_string());
+        }
+        if signals.typography_spacing_drift_detected.unwrap_or(false)
+            && !gate_failed_audit_ids
+                .iter()
+                .any(|value| value == "pmr.typography.spacing_guard")
+        {
+            gate_ok = false;
+            gate_error_count += 1;
+            gate_failed_audit_ids.push("pmr.typography.spacing_guard".to_string());
+        }
+        if signals
+            .sparse_page_header_omission_detected
+            .unwrap_or(false)
+            && !gate_failed_audit_ids
+                .iter()
+                .any(|value| value == "pmr.visual.sparse_page_header_guard")
+        {
+            gate_ok = false;
+            gate_error_count += 1;
+            gate_failed_audit_ids.push("pmr.visual.sparse_page_header_guard".to_string());
+        }
+    }
+
     let rank = PyDict::new_bound(py);
     rank.set_item("score", core.rank.score)?;
     rank.set_item("confidence", core.rank.confidence)?;
@@ -8289,12 +8792,12 @@ fn build_pmr_report_py(
     report.set_item("rank", rank)?;
 
     let gate = PyDict::new_bound(py);
-    gate.set_item("ok", core.gate.ok)?;
+    gate.set_item("ok", gate_ok)?;
     gate.set_item("mode", core.gate.mode.clone())?;
-    gate.set_item("error_count", core.gate.error_count)?;
-    gate.set_item("warn_count", core.gate.warn_count)?;
+    gate.set_item("error_count", gate_error_count)?;
+    gate.set_item("warn_count", gate_warn_count)?;
     let failed = PyList::empty_bound(py);
-    for aid in &core.gate.failed_audit_ids {
+    for aid in &gate_failed_audit_ids {
         failed.append(aid.clone())?;
     }
     gate.set_item("failed_audit_ids", failed)?;
@@ -8325,6 +8828,15 @@ fn build_pmr_report_py(
         if signals.typography_wrap_drift_detected.unwrap_or(false) {
             reason_codes.append("typography_wrap_drift_detected")?;
         }
+        if signals.typography_spacing_drift_detected.unwrap_or(false) {
+            reason_codes.append("typography_spacing_drift_detected")?;
+        }
+        if signals
+            .sparse_page_header_omission_detected
+            .unwrap_or(false)
+        {
+            reason_codes.append("sparse_page_header_omission_detected")?;
+        }
         if signals.semantic_table_alignment_drift.unwrap_or(false) {
             reason_codes.append("semantic_table_alignment_drift")?;
         }
@@ -8349,7 +8861,7 @@ fn build_pmr_report_py(
 
     let audits = PyList::empty_bound(py);
     let failed_audit_ids: std::collections::BTreeSet<String> =
-        core.gate.failed_audit_ids.iter().cloned().collect();
+        gate_failed_audit_ids.iter().cloned().collect();
     let mut stage_counts: std::collections::BTreeMap<String, usize> =
         std::collections::BTreeMap::new();
     let mut source_counts: std::collections::BTreeMap<String, usize> =
@@ -8476,6 +8988,12 @@ fn build_pmr_report_py(
         }
         if let Some(value) = signals.wrap_drift_block_count {
             signal_counts_py.set_item("diagnostic_wrap_drift_block_count", value)?;
+        }
+        if let Some(value) = signals.suspicious_char_width_block_count {
+            signal_counts_py.set_item("diagnostic_suspicious_char_width_block_count", value)?;
+        }
+        if let Some(value) = signals.missing_header_cell_count {
+            signal_counts_py.set_item("diagnostic_missing_header_cell_count", value)?;
         }
         if let Some(value) = signals.semantic_table_row_risk_count {
             signal_counts_py.set_item("diagnostic_semantic_table_row_risk_count", value)?;
@@ -9983,6 +10501,7 @@ fn _fullbleed(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
         module
     )?)?;
     module.add_function(wrap_pyfunction!(audit_contrast_render_png, module)?)?;
+    module.add_function(wrap_pyfunction!(audit_sparse_page_visual_pair, module)?)?;
     module.add_function(wrap_pyfunction!(extract_pdf_page_texts, module)?)?;
     module.add_function(wrap_pyfunction!(export_pdf_reading_order_trace, module)?)?;
     module.add_function(wrap_pyfunction!(export_pdf_structure_trace, module)?)?;
