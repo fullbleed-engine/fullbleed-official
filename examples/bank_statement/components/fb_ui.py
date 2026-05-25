@@ -304,7 +304,18 @@ def _collect_debug_signals(debug_entries: list[dict[str, Any]]) -> dict[str, Any
                 h = _as_float(bbox.get("h"))
                 if x is None or y is None or w is None or h is None:
                     continue
-                if x < -0.01 or y < -0.01 or (x + w) > (page_w + 0.01) or (y + h) > (page_h + 0.01):
+                layer = str(placement.get("layer") or "")
+                overflows = x < -0.01 or y < -0.01 or (x + w) > (page_w + 0.01) or (y + h) > (page_h + 0.01)
+                if (
+                    overflows
+                    and layer == "content"
+                    and x >= -0.01
+                    and y >= -0.01
+                    and w <= page_w + 0.01
+                    and abs(h - page_h) <= 0.01
+                ):
+                    overflows = False
+                if overflows:
                     overflow_count += 1
                     if len(overflow_samples) < 5:
                         overflow_samples.append(

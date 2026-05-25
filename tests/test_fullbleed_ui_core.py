@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -57,6 +58,45 @@ def test_mount_component_html_passes_props_to_callable() -> None:
 
     html = mount_component_html(app, props={"message": "ok"})
     assert '<div class="payload">ok</div>' in html
+
+
+def test_component_mount_ignores_margin_shifted_page_fragment_docplan(tmp_path: Path) -> None:
+    debug_log = tmp_path / "docplan.jsonl"
+    debug_log.write_text(
+        json.dumps(
+            {
+                "type": "jit.docplan",
+                "page_size": {"w": 612.0, "h": 792.0},
+                "pages": [
+                    {
+                        "n": 2,
+                        "placements": [
+                            {
+                                "layer": "content",
+                                "bbox": {"x": 36.0, "y": 30.24, "w": 543.6, "h": 792.0},
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    class FakeEngine:
+        def render_pdf_with_glyph_report(self, _html: str, _css: str) -> tuple[bytes, list[object]]:
+            return b"%PDF-1.7\n", []
+
+    report = validate_component_mount(
+        engine=FakeEngine(),
+        node_or_component=el("div", "x"),
+        debug_log=str(debug_log),
+        fail_on_overflow=True,
+    )
+
+    assert report["ok"] is True
+    assert report["overflow_count"] == 0
 
 
 def test_to_html_dispatches_for_element_and_document() -> None:
