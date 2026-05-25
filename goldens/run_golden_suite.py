@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.machinery
 import json
 import os
 import re
@@ -30,6 +31,8 @@ class GoldenCase:
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SOURCE_PYTHON_DIR = ROOT / "python"
+SOURCE_FULLBLEED_DIR = SOURCE_PYTHON_DIR / "fullbleed"
 EXPECTED_DIR = ROOT / "goldens" / "expected"
 EXPECTED_JSON = EXPECTED_DIR / "golden_suite.expected.json"
 EXPECTED_PNG_ROOT = EXPECTED_DIR / "png"
@@ -124,12 +127,51 @@ def _assert_css_contract(payload: dict[str, Any], *, case_id: str) -> list[str]:
     return failures
 
 
+def _source_extension_available() -> bool:
+    return any(
+        (SOURCE_FULLBLEED_DIR / f"_fullbleed{suffix}").exists()
+        for suffix in importlib.machinery.EXTENSION_SUFFIXES
+    )
+
+
+def _same_path(left: str, right: Path) -> bool:
+    try:
+        return Path(left).resolve() == right.resolve()
+    except OSError:
+        return Path(left).absolute() == right.absolute()
+
+
+def _case_pythonpath(
+    existing_pythonpath: str | None,
+    *,
+    source_extension_available: bool | None = None,
+) -> str | None:
+    existing_parts = [
+        part
+        for part in (existing_pythonpath or "").split(os.pathsep)
+        if part.strip()
+    ]
+    existing_parts = [
+        part for part in existing_parts if not _same_path(part, SOURCE_PYTHON_DIR)
+    ]
+    if source_extension_available is None:
+        source_extension_available = _source_extension_available()
+    if source_extension_available:
+        return os.pathsep.join([str(SOURCE_PYTHON_DIR), *existing_parts])
+    if existing_parts:
+        return os.pathsep.join(existing_parts)
+    return None
+
+
 def _run_case(case: GoldenCase, *, python_exec: str) -> dict[str, Any]:
     env = os.environ.copy()
-    pythonpath_parts = [str(ROOT / "python")]
-    if env.get("PYTHONPATH"):
-        pythonpath_parts.append(env["PYTHONPATH"])
-    env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
+    # CI installs the freshly built wheel. Do not let the source Python package
+    # shadow it unless the native extension has also been copied into source.
+    pythonpath = _case_pythonpath(env.get("PYTHONPATH"))
+    if pythonpath:
+        env["PYTHONPATH"] = pythonpath
+    else:
+        env.pop("PYTHONPATH", None)
 
     proc = subprocess.run(
         [python_exec, str(case.report_path)],
