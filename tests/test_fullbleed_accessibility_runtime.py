@@ -135,6 +135,8 @@ def test_accessibility_engine_css_metadata_emits_link_and_reports_fields(tmp_pat
     html_text = Path(result.paths["html_path"]).read_text(encoding="utf-8")
     assert 'href="styles/runtime.css"' in html_text
     assert 'media="print"' in html_text
+    css_text = Path(result.paths["css_path"]).read_text(encoding="utf-8")
+    assert 'font-family: "Inter", sans-serif !important' in css_text
 
     run_report = json.loads(Path(result.paths["run_report_path"]).read_text(encoding="utf-8"))
     assert run_report["document_css_href"] == "styles/runtime.css"
@@ -142,6 +144,8 @@ def test_accessibility_engine_css_metadata_emits_link_and_reports_fields(tmp_pat
     assert run_report["document_css_required"] is True
     assert run_report["css_link_href"] == "styles/runtime.css"
     assert run_report["css_link_media"] == "print"
+    assert run_report["default_embedded_font_family"] == "Inter"
+    assert Path(run_report["default_embedded_font_path"]).name == "Inter-Variable.ttf"
 
 
 def test_accessibility_engine_verify_artifacts_promote_layout_guard_failures(
@@ -591,8 +595,8 @@ def test_accessibility_engine_render_bundle_emits_pdfua_seed_and_trace_artifacts
 
     run_report = json.loads(Path(result.paths["run_report_path"]).read_text(encoding="utf-8"))
     assert run_report["pdf_ua_targeted"] is True
-    assert run_report["engine_pdf_profile_requested"] == "pdfua"
-    assert run_report["engine_pdf_profile_effective"] == "tagged"
+    assert run_report["engine_pdf_profile_requested"] == "pdfua1"
+    assert run_report["engine_pdf_profile_effective"] == "pdfua1"
     assert run_report["pdf_ua_seed_verify_path"]
     assert run_report["reading_order_trace_path"]
     assert run_report["pdf_structure_trace_path"]

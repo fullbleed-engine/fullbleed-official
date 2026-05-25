@@ -81,6 +81,53 @@ impl PyAsset {
             info.set_item("pdf_version", report.pdf_version.as_str())?;
             info.set_item("page_count", report.page_count)?;
             info.set_item("encrypted", report.encrypted)?;
+            let profile = PyDict::new_bound(py);
+            profile.set_item("claims", PyList::new_bound(py, &report.profile.claims))?;
+            profile.set_item("metadata_present", report.profile.metadata_present)?;
+            profile.set_item(
+                "output_intent_present",
+                report.profile.output_intent_present,
+            )?;
+            profile.set_item(
+                "embedded_files_present",
+                report.profile.embedded_files_present,
+            )?;
+            profile.set_item(
+                "pdf_declaration_present",
+                report.profile.pdf_declaration_present,
+            )?;
+            profile.set_item("dpart_root_present", report.profile.dpart_root_present)?;
+            profile.set_item("dpart_present", report.profile.dpart_present)?;
+            profile.set_item("page_dpart_present", report.profile.page_dpart_present)?;
+            profile.set_item(
+                "pdfvt_dpart_root_node_valid",
+                report.profile.pdfvt_dpart_root_node_valid,
+            )?;
+            profile.set_item(
+                "pdfvt_dpart_parent_valid",
+                report.profile.pdfvt_dpart_parent_valid,
+            )?;
+            profile.set_item(
+                "pdfvt_dpart_node_name_list_valid",
+                report.profile.pdfvt_dpart_node_name_list_valid,
+            )?;
+            profile.set_item(
+                "pdfvt_dpart_leaf_valid",
+                report.profile.pdfvt_dpart_leaf_valid,
+            )?;
+            profile.set_item(
+                "pdfvt_dpart_page_range_valid",
+                report.profile.pdfvt_dpart_page_range_valid,
+            )?;
+            profile.set_item(
+                "pdfvt_dpart_graph_valid",
+                report.profile.pdfvt_dpart_graph_valid,
+            )?;
+            profile.set_item(
+                "seed_blockers",
+                PyList::new_bound(py, &report.profile.seed_blockers),
+            )?;
+            info.set_item("profile", profile)?;
             let issues = composition_compatibility_issues(&report);
             let issue_list = PyList::empty_bound(py);
             for issue in &issues {
@@ -255,6 +302,65 @@ fn inspect_report_to_py(
     }
     out.set_item("warnings", warnings)?;
 
+    let profile = PyDict::new_bound(py);
+    profile.set_item("claims", PyList::new_bound(py, &report.profile.claims))?;
+    profile.set_item("metadata_present", report.profile.metadata_present)?;
+    profile.set_item(
+        "output_intent_present",
+        report.profile.output_intent_present,
+    )?;
+    profile.set_item(
+        "struct_tree_root_present",
+        report.profile.struct_tree_root_present,
+    )?;
+    profile.set_item("mark_info_present", report.profile.mark_info_present)?;
+    profile.set_item("lang_present", report.profile.lang_present)?;
+    profile.set_item("embedded_font_count", report.profile.embedded_font_count)?;
+    profile.set_item(
+        "embedded_files_present",
+        report.profile.embedded_files_present,
+    )?;
+    profile.set_item(
+        "pdf_declaration_present",
+        report.profile.pdf_declaration_present,
+    )?;
+    profile.set_item("dpart_root_present", report.profile.dpart_root_present)?;
+    profile.set_item("dpart_present", report.profile.dpart_present)?;
+    profile.set_item("page_dpart_present", report.profile.page_dpart_present)?;
+    profile.set_item(
+        "pdfvt_dpart_root_node_valid",
+        report.profile.pdfvt_dpart_root_node_valid,
+    )?;
+    profile.set_item(
+        "pdfvt_dpart_parent_valid",
+        report.profile.pdfvt_dpart_parent_valid,
+    )?;
+    profile.set_item(
+        "pdfvt_dpart_node_name_list_valid",
+        report.profile.pdfvt_dpart_node_name_list_valid,
+    )?;
+    profile.set_item(
+        "pdfvt_dpart_leaf_valid",
+        report.profile.pdfvt_dpart_leaf_valid,
+    )?;
+    profile.set_item(
+        "pdfvt_dpart_page_range_valid",
+        report.profile.pdfvt_dpart_page_range_valid,
+    )?;
+    profile.set_item(
+        "pdfvt_dpart_graph_valid",
+        report.profile.pdfvt_dpart_graph_valid,
+    )?;
+    profile.set_item(
+        "pdfvt_mod_date_matches_xmp",
+        report.profile.pdfvt_mod_date_matches_xmp,
+    )?;
+    profile.set_item(
+        "seed_blockers",
+        PyList::new_bound(py, &report.profile.seed_blockers),
+    )?;
+    out.set_item("profile", profile)?;
+
     let issues = composition_compatibility_issues(report);
     let issue_codes = PyList::empty_bound(py);
     for issue in &issues {
@@ -368,6 +474,15 @@ fn template_catalog_entries_to_py(
     out.set_item("ok", true)?;
     out.set_item("templates", templates)?;
     out.set_item("metrics", metrics)?;
+    Ok(out.to_object(py))
+}
+
+#[pyfunction]
+fn build_features(py: Python<'_>) -> PyResult<PyObject> {
+    let out = PyDict::new_bound(py);
+    out.set_item("schema", "fullbleed.build_features.v1")?;
+    out.set_item("python", cfg!(feature = "python"))?;
+    out.set_item("svg_raster", cfg!(feature = "svg_raster"))?;
     Ok(out.to_object(py))
 }
 
@@ -1543,19 +1658,34 @@ fn parse_pdf_profile(arg: Option<&Bound<'_, PyAny>>) -> PyResult<Option<PdfProfi
         let raw = s.trim().to_ascii_lowercase();
         let profile = match raw.as_str() {
             "" | "none" => PdfProfile::None,
-            "pdfa2b" | "pdfa-2b" | "pdfa_2b" => PdfProfile::PdfA2b,
-            "pdfx4" | "pdfx-4" | "pdfx_4" => PdfProfile::PdfX4,
-            "tagged" | "pdfua" | "pdf/ua" => PdfProfile::Tagged,
+            "a" | "pdfa" | "pdf/a" | "pdfa2b" | "pdfa-2b" | "pdfa_2b" => PdfProfile::PdfA2b,
+            "pdfa1a" | "pdfa-1a" | "pdfa_1a" | "pdf/a-1a" | "pdf/a1a" => PdfProfile::PdfA1a,
+            "pdfa1b" | "pdfa-1b" | "pdfa_1b" | "pdf/a-1b" | "pdf/a1b" => PdfProfile::PdfA1b,
+            "pdfa2a" | "pdfa-2a" | "pdfa_2a" | "pdf/a-2a" | "pdf/a2a" => PdfProfile::PdfA2a,
+            "pdfa2u" | "pdfa-2u" | "pdfa_2u" | "pdf/a-2u" | "pdf/a2u" => PdfProfile::PdfA2u,
+            "pdfa3a" | "pdfa-3a" | "pdfa_3a" | "pdf/a-3a" | "pdf/a3a" => PdfProfile::PdfA3a,
+            "pdfa3b" | "pdfa-3b" | "pdfa_3b" | "pdf/a-3b" | "pdf/a3b" => PdfProfile::PdfA3b,
+            "pdfa3u" | "pdfa-3u" | "pdfa_3u" | "pdf/a-3u" | "pdf/a3u" => PdfProfile::PdfA3u,
+            "pdfa4" | "pdfa-4" | "pdfa_4" | "pdf/a-4" | "pdf/a4" => PdfProfile::PdfA4,
+            "pdfa4e" | "pdfa-4e" | "pdfa_4e" | "pdf/a-4e" | "pdf/a4e" => PdfProfile::PdfA4e,
+            "pdfa4f" | "pdfa-4f" | "pdfa_4f" | "pdf/a-4f" | "pdf/a4f" => PdfProfile::PdfA4f,
+            "pdfx4" | "pdfx-4" | "pdfx_4" | "pdf/x-4" | "pdf/x4" => PdfProfile::PdfX4,
+            "ua" | "pdfua" | "pdfua1" | "pdfua-1" | "pdf/ua" | "pdf/ua-1" => PdfProfile::PdfUa1,
+            "pdfua2" | "pdfua-2" | "pdf/ua-2" => PdfProfile::PdfUa2,
+            "vt" | "pdfvt" | "pdfvt1" | "pdfvt-1" | "pdf/vt" | "pdf/vt-1" => PdfProfile::PdfVt1,
+            "wtpdf1r" | "wtpdf-1r" | "wtpdf_1r" | "wt1r" | "wt-1r" => PdfProfile::Wtpdf1r,
+            "wtpdf1a" | "wtpdf-1a" | "wtpdf_1a" | "wt1a" | "wt-1a" => PdfProfile::Wtpdf1a,
+            "tagged" => PdfProfile::Tagged,
             _ => {
                 return Err(PyValueError::new_err(format!(
-                    "Invalid pdf_profile: {s:?}. Expected one of: none, pdfa2b, pdfx4, tagged"
+                    "Invalid pdf_profile: {s:?}. Expected one of: none, pdfa1a, pdfa1b, pdfa2a, pdfa2b, pdfa2u, pdfa3a, pdfa3b, pdfa3u, pdfa4, pdfa4e, pdfa4f, pdfx4, pdfua1, pdfua2, pdfvt1, wtpdf1r, wtpdf1a, tagged"
                 )));
             }
         };
         return Ok(Some(profile));
     }
     Err(PyValueError::new_err(
-        "pdf_profile must be a string like 'tagged', 'pdfa2b', or 'pdfx4'",
+        "pdf_profile must be a string like 'pdfua1', 'pdfua2', 'pdfa2a', 'pdfa2u', 'pdfa4', 'pdfa4e', 'pdfa4f', 'pdfvt1', 'wtpdf1r', 'wtpdf1a', 'tagged', or 'pdfx4'",
     ))
 }
 
@@ -1965,10 +2095,10 @@ fn collect_render_time_text_blocks_for_page(
                     artifact_depth -= 1;
                 }
             }
-            Command::DefineForm { .. } => {
+            Command::DefineForm { .. } | Command::DefineIsolatedForm { .. } => {
                 out.define_form_count = out.define_form_count.saturating_add(1);
             }
-            Command::DrawForm { .. } => {
+            Command::DrawForm { .. } | Command::DrawFilteredForm { .. } => {
                 out.draw_form_count = out.draw_form_count.saturating_add(1);
             }
             Command::DrawString { x, y, text } => {
@@ -2587,16 +2717,23 @@ fn record_font_usage_sample(entry: &mut RenderTimeFontUsage, sample: Option<&str
 
 fn collect_form_definitions(commands: &[Command], definitions: &mut HashMap<String, Vec<Command>>) {
     for cmd in commands {
-        if let Command::DefineForm {
-            resource_id,
-            commands: form_commands,
-            ..
-        } = cmd
-        {
-            definitions
-                .entry(resource_id.clone())
-                .or_insert_with(|| form_commands.clone());
-            collect_form_definitions(form_commands, definitions);
+        match cmd {
+            Command::DefineForm {
+                resource_id,
+                commands: form_commands,
+                ..
+            }
+            | Command::DefineIsolatedForm {
+                resource_id,
+                commands: form_commands,
+                ..
+            } => {
+                definitions
+                    .entry(resource_id.clone())
+                    .or_insert_with(|| form_commands.clone());
+                collect_form_definitions(form_commands, definitions);
+            }
+            _ => {}
         }
     }
 }
@@ -2656,7 +2793,8 @@ fn collect_font_usage_in_commands(
                 let entry = usage.entry(usage_key).or_default();
                 entry.glyph_run_count = entry.glyph_run_count.saturating_add(1);
             }
-            Command::DrawForm { resource_id, .. } => {
+            Command::DrawForm { resource_id, .. }
+            | Command::DrawFilteredForm { resource_id, .. } => {
                 if !active_forms.insert(resource_id.clone()) {
                     continue;
                 }
@@ -3123,6 +3261,7 @@ fn is_visible_command(cmd: &Command) -> bool {
             | Command::DrawGlyphRun { .. }
             | Command::DrawImage { .. }
             | Command::DrawForm { .. }
+            | Command::DrawFilteredForm { .. }
             | Command::ApplyBackdropFilter { .. }
             | Command::ShadingFill(_)
             | Command::Fill
@@ -10489,6 +10628,7 @@ fn _fullbleed(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyAssetBundle>()?;
     module.add_class::<PyWatermarkSpec>()?;
     module.add_function(wrap_pyfunction!(inspect_pdf, module)?)?;
+    module.add_function(wrap_pyfunction!(build_features, module)?)?;
     module.add_function(wrap_pyfunction!(inspect_template_catalog, module)?)?;
     module.add_function(wrap_pyfunction!(vendored_asset, module)?)?;
     module.add_function(wrap_pyfunction!(fetch_asset, module)?)?;

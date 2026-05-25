@@ -1,0 +1,198 @@
+{
+  "id": "inline_svg_image_mixed_run_torture",
+  "description": "Mixed paragraph inline content should keep text, inline-block styling, inline SVG, and inline raster images in one deterministic inline run.",
+  "labels": [
+    "full",
+    "inline",
+    "svg",
+    "image",
+    "paint",
+    "text",
+    "release"
+  ],
+  "required_features": [
+    "inline-formatting",
+    "inline-block",
+    "inline-svg",
+    "html-img",
+    "replaced-content",
+    "paint",
+    "render-time-text-trace"
+  ],
+  "expected_warnings": [],
+  "dpi": 120,
+  "html": "<!doctype html><html><body><p class='run'><span class='pre'>ALPHA</span><span class='chip'>BOX</span><svg class='mark' width='24' height='24' viewBox='0 0 24 24' aria-label='Inline blue square'><rect width='24' height='24' fill='#0066cc'/></svg><img class='pic' alt='red pixel' src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC'><span class='post'>OMEGA</span></p></body></html>",
+  "css": "@page { size: 4in 1.25in; margin: 0; } body { margin: 0; background: white; font-family: Helvetica, Arial, sans-serif; font-size: 12pt; line-height: 24pt; } .run { margin: 0.25in 0 0 0.25in; color: black; width: 3in; } .chip { display: inline-block; width: 0.35in; height: 0.2in; background: rgb(20,180,80); color: transparent; } .mark { display: inline-block; width: 0.2in; height: 0.2in; } .pic { display: inline-block; width: 0.2in; height: 0.2in; } .post { color: black; }",
+  "expected": {
+    "page_count": 1,
+    "compute_assertions": [
+      {
+        "node_contains": "p.run",
+        "style": {
+          "display": "Block",
+          "width": "216.000pt",
+          "line_height": 24.0
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "span.chip",
+        "style": {
+          "display": "InlineBlock",
+          "width": "25.200pt",
+          "height": "14.400pt",
+          "background": "#14b450"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "svg.mark",
+        "style": {
+          "display": "InlineBlock",
+          "width": "14.400pt",
+          "height": "14.400pt"
+        },
+        "vars_unresolved_count": 0
+      },
+      {
+        "node_contains": "img.pic",
+        "style": {
+          "display": "InlineBlock",
+          "width": "14.400pt",
+          "height": "14.400pt"
+        },
+        "vars_unresolved_count": 0
+      }
+    ],
+    "text_assertions": [
+      {
+        "page": 1,
+        "text_equals": "ALPHA",
+        "count_equals": 1
+      },
+      {
+        "page": 1,
+        "text_equals": "BOX",
+        "count_equals": 1
+      },
+      {
+        "page": 1,
+        "text_equals": "OMEGA",
+        "count_equals": 1
+      }
+    ],
+    "layout_assertions": [
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 30,
+        "start": 90,
+        "rgba": [
+          20,
+          180,
+          80,
+          255
+        ],
+        "tolerance": 8,
+        "min_length": 40,
+        "max_length": 48
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 30,
+        "start": 135,
+        "rgba": [
+          0,
+          102,
+          204,
+          255
+        ],
+        "tolerance": 8,
+        "min_length": 26,
+        "max_length": 34
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 30,
+        "start": 165,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "min_length": 20,
+        "max_length": 28
+      }
+    ],
+    "paint_samples": [
+      {
+        "page": 1,
+        "x": 45,
+        "y": 40,
+        "rgba": [
+          0,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 40
+      },
+      {
+        "page": 1,
+        "x": 105,
+        "y": 35,
+        "rgba": [
+          20,
+          180,
+          80,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 155,
+        "y": 35,
+        "rgba": [
+          0,
+          102,
+          204,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 185,
+        "y": 35,
+        "rgba": [
+          255,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 8
+      },
+      {
+        "page": 1,
+        "x": 220,
+        "y": 45,
+        "rgba": [
+          0,
+          0,
+          0,
+          255
+        ],
+        "tolerance": 40
+      }
+    ]
+  },
+  "stability_hash": "5f2ed106c34130657ceb290cdf86275bf79c41f635001a036d581ac92e648ca6"
+}

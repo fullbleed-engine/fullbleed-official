@@ -1,0 +1,35 @@
+[data-fb-role="document-root"] a {
+  color: var(--ref-blue);
+}
+
+[data-fb-role="document-root"] strong {
+  font-weight: 800;
+}
+
+[data-fb-role="document-root"] .ref-panel::after {
+  content: "";
+  position: absolute;
+  right: 0.09in;
+  bottom: 0.08in;
+  width: 0.12in;
+  height: 0.12in;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--ref-green) 62%, white);
+}
+
+[data-fb-role="document-root"] .ref-panel-table::after,
+[data-fb-role="document-root"] .ref-panel-assets::after {
+  background: color-mix(in srgb, var(--ref-red) 62%, white);
+}
+
+[data-fb-role="document-root"] .ref-cover-page::after {
+  content: "fullbleed";
+  position: absolute;
+  right: 0.48in;
+  bottom: 0.72in;
+  color: rgba(22, 32, 46, 0.08);
+  font-size: 38pt;
+  font-weight: 800;
+  text-transform: uppercase;
+  transform: rotate(-6deg);
+}

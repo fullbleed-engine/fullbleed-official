@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="Fullbleed reference mark">
+  <defs>
+    <linearGradient id="fb-ref-grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e23d52"/>
+      <stop offset="0.52" stop-color="#f2b84b"/>
+      <stop offset="1" stop-color="#1f9f8a"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="144" height="144" rx="18" fill="#ffffff" stroke="#16202e" stroke-width="8"/>
+  <path d="M32 118V42h28c22 0 35 11 35 30 0 18-13 30-34 30H49v16H32z" fill="#e23d52"/>
+  <path d="M102 42h26v76h-18V60h-8V42z" fill="#16202e"/>
+  <path d="M49 58v29h13c10 0 16-5 16-15s-6-14-16-14H49z" fill="#ffffff"/>
+</svg>

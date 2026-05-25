@@ -299,6 +299,27 @@ pub enum MixBlendMode {
     Normal,
     Multiply,
     Screen,
+    Overlay,
+    Darken,
+    Lighten,
+    ColorDodge,
+    ColorBurn,
+    HardLight,
+    SoftLight,
+    Difference,
+    Exclusion,
+    Hue,
+    Saturation,
+    Color,
+    Luminosity,
+    PlusLighter,
+    PlusDarker,
+}
+
+impl Default for MixBlendMode {
+    fn default() -> Self {
+        Self::Normal
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

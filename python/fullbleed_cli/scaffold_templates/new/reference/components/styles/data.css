@@ -1,0 +1,16 @@
+[data-fb-role="document-root"] .ref-panel-table {
+  padding: 0.14in;
+}
+
+[data-fb-role="document-root"] .ref-data-page .ref-panel-table:first-of-type {
+  margin-bottom: 0.17in;
+}
+
+[data-fb-role="document-root"] .ref-feature-page .ref-note {
+  margin-top: 0.18in;
+}
+
+[data-fb-role="document-root"] .ref-data-page .ref-table th:nth-child(2),
+[data-fb-role="document-root"] .ref-data-page .ref-table td:nth-child(2) {
+  width: 2.1in;
+}

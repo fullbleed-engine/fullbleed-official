@@ -62,9 +62,141 @@ pub enum PdfVersion {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PdfProfile {
     None,
+    PdfA1a,
+    PdfA1b,
+    PdfA2a,
     PdfA2b,
+    PdfA2u,
+    PdfA3a,
+    PdfA3b,
+    PdfA3u,
+    PdfA4,
+    PdfA4e,
+    PdfA4f,
     PdfX4,
+    PdfUa1,
+    PdfUa2,
+    PdfVt1,
+    Wtpdf1r,
+    Wtpdf1a,
     Tagged,
+}
+
+impl PdfProfile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PdfProfile::None => "none",
+            PdfProfile::PdfA1a => "pdfa1a",
+            PdfProfile::PdfA1b => "pdfa1b",
+            PdfProfile::PdfA2a => "pdfa2a",
+            PdfProfile::PdfA2b => "pdfa2b",
+            PdfProfile::PdfA2u => "pdfa2u",
+            PdfProfile::PdfA3a => "pdfa3a",
+            PdfProfile::PdfA3b => "pdfa3b",
+            PdfProfile::PdfA3u => "pdfa3u",
+            PdfProfile::PdfA4 => "pdfa4",
+            PdfProfile::PdfA4e => "pdfa4e",
+            PdfProfile::PdfA4f => "pdfa4f",
+            PdfProfile::PdfX4 => "pdfx4",
+            PdfProfile::PdfUa1 => "pdfua1",
+            PdfProfile::PdfUa2 => "pdfua2",
+            PdfProfile::PdfVt1 => "pdfvt1",
+            PdfProfile::Wtpdf1r => "wtpdf1r",
+            PdfProfile::Wtpdf1a => "wtpdf1a",
+            PdfProfile::Tagged => "tagged",
+        }
+    }
+
+    pub(crate) fn emits_tagged_structure(self) -> bool {
+        matches!(
+            self,
+            PdfProfile::Tagged
+                | PdfProfile::PdfUa1
+                | PdfProfile::PdfA1a
+                | PdfProfile::PdfA2a
+                | PdfProfile::PdfA3a
+                | PdfProfile::PdfUa2
+                | PdfProfile::Wtpdf1r
+                | PdfProfile::Wtpdf1a
+        )
+    }
+
+    pub(crate) fn requires_output_intent(self) -> bool {
+        matches!(
+            self,
+            PdfProfile::PdfA1a
+                | PdfProfile::PdfA1b
+                | PdfProfile::PdfA2a
+                | PdfProfile::PdfA2b
+                | PdfProfile::PdfA2u
+                | PdfProfile::PdfA3a
+                | PdfProfile::PdfA3b
+                | PdfProfile::PdfA3u
+                | PdfProfile::PdfA4
+                | PdfProfile::PdfA4e
+                | PdfProfile::PdfA4f
+                | PdfProfile::PdfX4
+                | PdfProfile::PdfVt1
+        )
+    }
+
+    pub(crate) fn requires_embedded_fonts(self) -> bool {
+        matches!(
+            self,
+            PdfProfile::PdfA1a
+                | PdfProfile::PdfA1b
+                | PdfProfile::PdfA2a
+                | PdfProfile::PdfA2b
+                | PdfProfile::PdfA2u
+                | PdfProfile::PdfA3a
+                | PdfProfile::PdfA3b
+                | PdfProfile::PdfA3u
+                | PdfProfile::PdfA4
+                | PdfProfile::PdfA4e
+                | PdfProfile::PdfA4f
+                | PdfProfile::PdfX4
+                | PdfProfile::PdfUa1
+                | PdfProfile::PdfUa2
+                | PdfProfile::PdfVt1
+                | PdfProfile::Wtpdf1r
+                | PdfProfile::Wtpdf1a
+        )
+    }
+
+    pub(crate) fn uses_pdfx_page_boxes(self) -> bool {
+        matches!(self, PdfProfile::PdfX4 | PdfProfile::PdfVt1)
+    }
+
+    pub(crate) fn output_intent_subtype(self) -> &'static str {
+        match self {
+            PdfProfile::PdfX4 | PdfProfile::PdfVt1 => "GTS_PDFX",
+            _ => "GTS_PDFA1",
+        }
+    }
+
+    pub(crate) fn effective_pdf_version(self, requested: PdfVersion) -> PdfVersion {
+        match self {
+            PdfProfile::PdfA4 | PdfProfile::PdfA4e | PdfProfile::PdfA4f | PdfProfile::PdfUa2 => {
+                PdfVersion::Pdf20
+            }
+            PdfProfile::Wtpdf1r | PdfProfile::Wtpdf1a => PdfVersion::Pdf20,
+            _ => requested,
+        }
+    }
+
+    pub(crate) fn uses_pdf20_structure_namespace(self) -> bool {
+        matches!(
+            self,
+            PdfProfile::PdfUa2 | PdfProfile::Wtpdf1r | PdfProfile::Wtpdf1a
+        )
+    }
+
+    pub(crate) fn is_pdfa4_family(self) -> bool {
+        matches!(
+            self,
+            PdfProfile::PdfA4 | PdfProfile::PdfA4e | PdfProfile::PdfA4f
+        )
+    }
 }
 
 fn pdf_header_bytes(version: PdfVersion) -> &'static [u8] {
@@ -210,6 +342,8 @@ pub(crate) struct PdfStreamWriter<'a, W: Write> {
     content_stream_raw_bytes: usize,
     content_stream_encoded_bytes: usize,
     content_stream_compressed_count: usize,
+    pdfvt_dpart_root_id: Option<usize>,
+    pdfvt_dpart_node_id: Option<usize>,
 }
 
 impl<'a, W: Write> PdfStreamWriter<'a, W> {
@@ -221,16 +355,30 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         debug: Option<std::sync::Arc<crate::debug::DebugLogger>>,
         perf: Option<std::sync::Arc<PerfLogger>>,
     ) -> io::Result<Self> {
-        validate_pdfx4_output_intent(&options)?;
+        let mut options = options;
+        options.pdf_version = options
+            .pdf_profile
+            .effective_pdf_version(options.pdf_version);
+        validate_profile_output_intent(&options)?;
         let mut offset: usize = 0;
         write_bytes(writer, pdf_header_bytes(options.pdf_version), &mut offset)?;
         write_bytes(writer, b"%\xE2\xE3\xCF\xD3\n", &mut offset)?;
+        let mut next_id = PDF_RESOURCES_ID + 1;
+        let (pdfvt_dpart_root_id, pdfvt_dpart_node_id) =
+            if options.pdf_profile == PdfProfile::PdfVt1 {
+                let root_id = next_id;
+                let node_id = next_id + 1;
+                next_id += 2;
+                (Some(root_id), Some(node_id))
+            } else {
+                (None, None)
+            };
 
         let s = Self {
             writer,
             offset,
-            offsets: vec![0; PDF_RESOURCES_ID + 1],
-            next_id: PDF_RESOURCES_ID + 1,
+            offsets: vec![0; next_id],
+            next_id,
             page_size,
             options,
             registry,
@@ -267,6 +415,8 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             content_stream_raw_bytes: 0,
             content_stream_encoded_bytes: 0,
             content_stream_compressed_count: 0,
+            pdfvt_dpart_root_id,
+            pdfvt_dpart_node_id,
         };
 
         Ok(s)
@@ -282,7 +432,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 "mixed page sizes are not supported in a single PDF stream",
             ));
         }
-        validate_pdfx4_font_embedding(document, self.registry, &self.options)?;
+        validate_profile_font_embedding(document, self.registry, &self.options)?;
         self.current_doc_id = doc_id;
         self.shaped_cache.clear();
         for page in &document.pages {
@@ -308,20 +458,25 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         self.write_content_stream_object(content_id, "", content_stream.as_bytes())?;
         self.page_ids.push(page_id);
 
-        let (struct_parents, tabs) = if self.options.pdf_profile == PdfProfile::Tagged {
+        let (struct_parents, tabs) = if self.options.pdf_profile.emits_tagged_structure() {
             (format!(" /StructParents {}", page_index), " /Tabs /S")
         } else {
             (String::new(), "")
         };
         let page_boxes = page_box_entries(self.options.pdf_profile, self.page_size);
+        let dpart = self
+            .pdfvt_dpart_node_id
+            .map(|id| format!(" /DPart {} 0 R", id))
+            .unwrap_or_default();
         let page_obj = format!(
-            "<< /Type /Page /Parent {} 0 R /MediaBox [0 0 {} {}]{} /Resources {} 0 R /Contents {} 0 R{}{} >>",
+            "<< /Type /Page /Parent {} 0 R /MediaBox [0 0 {} {}]{} /Resources {} 0 R /Contents {} 0 R{}{}{} >>",
             parent_id,
             fmt_pt(self.page_size.width),
             fmt_pt(self.page_size.height),
             page_boxes,
             PDF_RESOURCES_ID,
             content_id,
+            dpart,
             struct_parents,
             tabs
         );
@@ -563,12 +718,18 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
 
         // 4) Tagged PDF structure (optional).
         let mut struct_tree_root_id: Option<usize> = None;
-        if self.options.pdf_profile == PdfProfile::Tagged {
+        if self.options.pdf_profile.emits_tagged_structure() {
+            let uses_pdf20_structure_namespace =
+                self.options.pdf_profile.uses_pdf20_structure_namespace();
             let tag_records = std::mem::take(&mut self.tag_records);
             let tag_count = tag_records.len();
-            let start_id = self.alloc_ids(tag_count + 2);
+            let extra_pdf20_structure_objects = if uses_pdf20_structure_namespace { 2 } else { 0 };
+            let start_id = self.alloc_ids(tag_count + 2 + extra_pdf20_structure_objects);
             let parent_tree_id = start_id + tag_count;
             let root_id = start_id + tag_count + 1;
+            let document_node_id =
+                uses_pdf20_structure_namespace.then_some(start_id + tag_count + 2);
+            let namespace_id = uses_pdf20_structure_namespace.then_some(start_id + tag_count + 3);
 
             let mut children: Vec<Vec<usize>> = vec![Vec::new(); tag_count];
             for (idx, tag) in tag_records.iter().enumerate() {
@@ -593,7 +754,11 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 if let Some(page_id) = self.page_ids.get(tag.page_index).copied() {
                     let id = start_id + i;
                     let role = escape_pdf_name(&tag.role);
-                    let parent_id = tag.parent.map(|p| start_id + p).unwrap_or(root_id);
+                    let parent_id = tag
+                        .parent
+                        .map(|p| start_id + p)
+                        .or(document_node_id)
+                        .unwrap_or(root_id);
                     let mut k_parts: Vec<String> = Vec::new();
                     if let Some(mcid) = tag.mcid {
                         k_parts.push(format!("{}", mcid));
@@ -664,28 +829,74 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 .map(|id| format!("{} 0 R", id))
                 .collect::<Vec<_>>()
                 .join(" ");
+            if let Some(namespace_id) = namespace_id {
+                self.write_object(
+                    namespace_id,
+                    "<< /Type /Namespace /NS (http://iso.org/pdf2/ssn) >>",
+                )?;
+            }
+            if let (Some(document_node_id), Some(namespace_id)) = (document_node_id, namespace_id) {
+                let document_obj = format!(
+                    "<< /Type /StructElem /S /Document /P {} 0 R /NS {} 0 R /K [{}] >>",
+                    root_id, namespace_id, kids
+                );
+                self.write_object(document_node_id, &document_obj)?;
+            }
+            let root_k_entry = document_node_id
+                .map(|id| format!("[{} 0 R]", id))
+                .unwrap_or_else(|| format!("[{}]", kids));
             let root_obj = format!(
-                "<< /Type /StructTreeRoot /K [{}] /ParentTree {} 0 R >>",
-                kids, parent_tree_id
+                "<< /Type /StructTreeRoot /K {} /ParentTree {} 0 R >>",
+                root_k_entry, parent_tree_id
             );
             self.write_object(root_id, &root_obj)?;
             struct_tree_root_id = Some(root_id);
+        }
+
+        let mut pdfvt_dpart_root_id: Option<usize> = None;
+        if let (Some(root_id), Some(node_id), Some(first_page_id)) = (
+            self.pdfvt_dpart_root_id,
+            self.pdfvt_dpart_node_id,
+            self.page_ids.first().copied(),
+        ) {
+            let mut dpart_node = format!(
+                "<< /Type /DPart /Parent {} 0 R /Start {} 0 R",
+                root_id, first_page_id
+            );
+            if let Some(last_page_id) = self.page_ids.last().copied() {
+                if last_page_id != first_page_id {
+                    dpart_node.push_str(&format!(" /End {} 0 R", last_page_id));
+                }
+            }
+            dpart_node.push_str(" >>");
+            self.write_object(node_id, &dpart_node)?;
+            let dpart_root = format!(
+                "<< /Type /DPartRoot /DPartRootNode {} 0 R /NodeNameList [/Document] >>",
+                node_id
+            );
+            self.write_object(root_id, &dpart_root)?;
+            pdfvt_dpart_root_id = Some(root_id);
         }
 
         // 5) Compliance objects + Catalog.
         let mut metadata_id: Option<usize> = None;
         let mut output_intent_id: Option<usize> = None;
         let mut info_id: Option<usize> = None;
+        let mut embedded_files_names_id: Option<usize> = None;
+        let mut embedded_file_spec_id: Option<usize> = None;
         let pdf_profile = self.options.pdf_profile;
         let doc_lang = self.options.document_lang.clone();
         let doc_title = self.options.document_title.clone();
         let output_intent = self.options.output_intent.clone();
         if pdf_profile != PdfProfile::None {
-            if let Some(xmp) =
-                build_xmp_metadata(pdf_profile, doc_lang.as_deref(), doc_title.as_deref())
-            {
+            if let Some(xmp) = build_xmp_metadata(
+                pdf_profile,
+                self.options.pdf_version,
+                doc_lang.as_deref(),
+                doc_title.as_deref(),
+            ) {
                 let id = self.alloc_ids(1);
-                self.write_object(id, &stream_object(&xmp))?;
+                self.write_object(id, &metadata_stream_object(&xmp))?;
                 metadata_id = Some(id);
             }
             if let Some(oi) = output_intent.as_ref() {
@@ -694,6 +905,19 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 let oi_id = self.alloc_ids(1);
                 self.write_object(oi_id, &output_intent_object(oi, icc_id, pdf_profile))?;
                 output_intent_id = Some(oi_id);
+            }
+            if pdf_profile == PdfProfile::PdfA4f {
+                let embedded_file_id = self.alloc_ids(1);
+                self.write_object(embedded_file_id, &pdfa4f_seed_embedded_file_stream_object())?;
+                let file_spec_id = self.alloc_ids(1);
+                self.write_object(
+                    file_spec_id,
+                    &pdfa4f_seed_file_spec_object(embedded_file_id),
+                )?;
+                let names_id = self.alloc_ids(1);
+                self.write_object(names_id, &pdfa4f_seed_names_object(file_spec_id))?;
+                embedded_files_names_id = Some(names_id);
+                embedded_file_spec_id = Some(file_spec_id);
             }
         }
 
@@ -704,7 +928,9 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         if doc_title.is_some() {
             catalog.push_str(" /ViewerPreferences << /DisplayDocTitle true >>");
         }
-        if doc_title.is_some() || pdf_profile == PdfProfile::PdfX4 {
+        if (doc_title.is_some() && !pdf_profile.is_pdfa4_family())
+            || matches!(pdf_profile, PdfProfile::PdfX4 | PdfProfile::PdfVt1)
+        {
             let id = self.alloc_ids(1);
             self.write_object(id, &info_object(doc_title.as_deref(), pdf_profile))?;
             info_id = Some(id);
@@ -714,6 +940,15 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         }
         if let Some(id) = output_intent_id {
             catalog.push_str(&format!(" /OutputIntents [{} 0 R]", id));
+        }
+        if let Some(id) = pdfvt_dpart_root_id {
+            catalog.push_str(&format!(" /DPartRoot {} 0 R", id));
+        }
+        if let Some(id) = embedded_files_names_id {
+            catalog.push_str(&format!(" /Names << /EmbeddedFiles {} 0 R >>", id));
+        }
+        if let Some(id) = embedded_file_spec_id {
+            catalog.push_str(&format!(" /AF [{} 0 R]", id));
         }
         if !optional_content_entries.is_empty() {
             let ocg_ids = optional_content_entries
@@ -756,6 +991,18 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         if let Some(id) = info_id {
             trailer.push_str(&format!(" /Info {} 0 R", id));
         }
+        if pdf_profile != PdfProfile::None {
+            let file_id = deterministic_file_id(
+                pdf_profile,
+                self.options.pdf_version,
+                doc_lang.as_deref(),
+                doc_title.as_deref(),
+                self.page_ids.len(),
+                total_objects,
+                xref_start,
+            );
+            trailer.push_str(&format!(" /ID [<{}> <{}>]", file_id, file_id));
+        }
         trailer.push_str(&format!(" >>\nstartxref\n{}\n%%EOF", xref_start));
         write_str(self.writer, &trailer, &mut self.offset)?;
 
@@ -786,6 +1033,28 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 content_ratio_ppm
             );
             logger.log_json(&json);
+            let profile_json = format!(
+                "{{\"type\":\"jit.pdf_profile\",\"pdf_version\":\"{}\",\"pdf_profile\":\"{}\",\"metadata\":{},\"output_intent\":{},\"tagged_structure\":{},\"struct_tree_root\":{},\"page_boxes\":{},\"pdfvt_dpart_root\":{},\"embedded_files\":{},\"pdf_declaration\":{},\"requires_output_intent\":{},\"requires_embedded_fonts\":{}}}",
+                match self.options.pdf_version {
+                    PdfVersion::Pdf17 => "1.7",
+                    PdfVersion::Pdf20 => "2.0",
+                },
+                self.options.pdf_profile.as_str(),
+                metadata_id.is_some(),
+                output_intent_id.is_some(),
+                self.options.pdf_profile.emits_tagged_structure(),
+                struct_tree_root_id.is_some(),
+                self.options.pdf_profile.uses_pdfx_page_boxes(),
+                pdfvt_dpart_root_id.is_some(),
+                embedded_files_names_id.is_some(),
+                matches!(
+                    self.options.pdf_profile,
+                    PdfProfile::Wtpdf1r | PdfProfile::Wtpdf1a
+                ),
+                self.options.pdf_profile.requires_output_intent(),
+                self.options.pdf_profile.requires_embedded_fonts(),
+            );
+            logger.log_json(&profile_json);
         }
         if let Some(perf_logger) = self.perf.as_deref() {
             perf_logger.log_span_ms("pdf.link", None, finish_ms);
@@ -814,6 +1083,30 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                         self.content_stream_compressed_count as u64,
                     ),
                     ("content_stream_ratio_ppm", content_ratio_ppm),
+                    (
+                        "profile_metadata",
+                        if metadata_id.is_some() { 1 } else { 0 },
+                    ),
+                    (
+                        "profile_output_intent",
+                        if output_intent_id.is_some() { 1 } else { 0 },
+                    ),
+                    (
+                        "profile_tagged_structure",
+                        if struct_tree_root_id.is_some() { 1 } else { 0 },
+                    ),
+                    (
+                        "profile_pdfvt_dpart_root",
+                        if pdfvt_dpart_root_id.is_some() { 1 } else { 0 },
+                    ),
+                    (
+                        "profile_embedded_files",
+                        if embedded_files_names_id.is_some() {
+                            1
+                        } else {
+                            0
+                        },
+                    ),
                 ],
             );
         }
@@ -835,7 +1128,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         let mut current_font_name = "Helvetica".to_string();
         let mut current_fill = Color::BLACK;
         let mut tag_stack: Vec<usize> = Vec::new();
-        let tag_enabled = self.options.pdf_profile == PdfProfile::Tagged && page_index.is_some();
+        let tag_enabled = self.options.pdf_profile.emits_tagged_structure() && page_index.is_some();
 
         for cmd in commands {
             match cmd {
@@ -1169,7 +1462,15 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     height,
                     commands,
                 } => {
-                    let _ = self.ensure_form(resource_id, *width, *height, commands);
+                    let _ = self.ensure_form(resource_id, *width, *height, commands, false);
+                }
+                Command::DefineIsolatedForm {
+                    resource_id,
+                    width,
+                    height,
+                    commands,
+                } => {
+                    let _ = self.ensure_form(resource_id, *width, *height, commands, true);
                 }
                 Command::DrawForm {
                     x,
@@ -1177,6 +1478,14 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     width,
                     height,
                     resource_id,
+                }
+                | Command::DrawFilteredForm {
+                    x,
+                    y,
+                    width,
+                    height,
+                    resource_id,
+                    ..
                 } => {
                     if let Some(name) = self.form_name_map.get(resource_id) {
                         let draw_y = page_height - *y - *height;
@@ -1398,19 +1707,23 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         let mut encoding = FontEncoding::WinAnsi;
         let mut face = None;
 
-        if self.options.pdf_profile == PdfProfile::PdfX4 {
+        if self.options.pdf_profile.requires_embedded_fonts() {
             let Some(registry) = self.registry else {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    "pdfx4 requires a font registry for embedded font resolution",
+                    format!(
+                        "{} requires a font registry for embedded font resolution",
+                        self.options.pdf_profile.as_str()
+                    ),
                 ));
             };
             let Some(font) = registry.resolve(&logical_name) else {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     format!(
-                        "pdfx4 requires embedded fonts; unresolved font '{}'. register an embeddable font asset.",
-                        logical_name
+                        "{} requires embedded fonts; unresolved font '{}'. register an embeddable font asset.",
+                        self.options.pdf_profile.as_str(),
+                        logical_name,
                     ),
                 ));
             };
@@ -1538,13 +1851,17 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         width: Pt,
         height: Pt,
         commands: &[Command],
+        isolated: bool,
     ) -> io::Result<Option<String>> {
         if let Some(name) = self.form_name_map.get(resource_id) {
             return Ok(Some(name.clone()));
         }
 
         let content = self.render_commands(commands, height, None)?;
-        let hash = hash_bytes(content.as_bytes());
+        let mut hash_input = Vec::with_capacity(content.len() + 1);
+        hash_input.push(u8::from(isolated));
+        hash_input.extend_from_slice(content.as_bytes());
+        let hash = hash_bytes(&hash_input);
         if self.options.reuse_xobjects {
             if let Some((name, _obj_id)) = self.form_content_map.get(&hash) {
                 self.form_name_map
@@ -1559,11 +1876,17 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         let name = format!("Fm{}", self.next_form_index);
         self.next_form_index += 1;
 
+        let group = if isolated {
+            " /Group << /S /Transparency /I true /K false >>"
+        } else {
+            ""
+        };
         let dict = format!(
-            "/Type /XObject /Subtype /Form /FormType 1 /BBox [0 0 {} {}] /Resources {} 0 R",
+            "/Type /XObject /Subtype /Form /FormType 1 /BBox [0 0 {} {}] /Resources {} 0 R{}",
             fmt_pt(width),
             fmt_pt(height),
             PDF_RESOURCES_ID,
+            group,
         );
 
         self.write_content_stream_object(obj_id, &dict, content.as_bytes())?;
@@ -1617,6 +1940,26 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             MixBlendMode::Normal => "Normal",
             MixBlendMode::Multiply => "Multiply",
             MixBlendMode::Screen => "Screen",
+            MixBlendMode::Overlay => "Overlay",
+            MixBlendMode::Darken => "Darken",
+            MixBlendMode::Lighten => "Lighten",
+            MixBlendMode::ColorDodge => "ColorDodge",
+            MixBlendMode::ColorBurn => "ColorBurn",
+            MixBlendMode::HardLight => "HardLight",
+            MixBlendMode::SoftLight => "SoftLight",
+            MixBlendMode::Difference => "Difference",
+            MixBlendMode::Exclusion => "Exclusion",
+            MixBlendMode::Hue => "Hue",
+            MixBlendMode::Saturation => "Saturation",
+            MixBlendMode::Color => "Color",
+            MixBlendMode::Luminosity => "Luminosity",
+            // PDF 1.7 has no standard additive plus-lighter blend mode.
+            // Keep generated PDFs valid while the raster path provides the
+            // deterministic plus-lighter oracle used by fixture validation.
+            MixBlendMode::PlusLighter => "Lighten",
+            // PDF 1.7 has no standard plus-darker/linear-burn blend mode.
+            // Keep generated PDFs valid while raster output remains canonical.
+            MixBlendMode::PlusDarker => "Darken",
         };
         let obj = format!("<< /Type /ExtGState /BM /{} >>", blend);
         self.write_object(obj_id, &obj)?;
@@ -1954,6 +2297,10 @@ fn collect_used_font_names_in_commands(commands: &[Command], names: &mut BTreeSe
             Command::DefineForm {
                 commands: form_commands,
                 ..
+            }
+            | Command::DefineIsolatedForm {
+                commands: form_commands,
+                ..
             } => collect_used_font_names_in_commands(form_commands, names),
             _ => {}
         }
@@ -1973,12 +2320,12 @@ fn collect_font_names(document: &Document) -> Vec<String> {
     collect_used_font_names(document).into_iter().collect()
 }
 
-fn validate_pdfx4_font_embedding(
+fn validate_profile_font_embedding(
     document: &Document,
     registry: Option<&FontRegistry>,
     options: &PdfOptions,
 ) -> io::Result<()> {
-    if options.pdf_profile != PdfProfile::PdfX4 {
+    if !options.pdf_profile.requires_embedded_fonts() {
         return Ok(());
     }
     let used_fonts = collect_used_font_names(document);
@@ -1988,7 +2335,10 @@ fn validate_pdfx4_font_embedding(
     let Some(registry) = registry else {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "pdfx4 requires a font registry for embedded font resolution",
+            format!(
+                "{} requires a font registry for embedded font resolution",
+                options.pdf_profile.as_str()
+            ),
         ));
     };
     for name in used_fonts {
@@ -1996,7 +2346,8 @@ fn validate_pdfx4_font_embedding(
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
-                    "pdfx4 requires embedded fonts; unresolved font '{}'. register an embeddable font asset.",
+                    "{} requires embedded fonts; unresolved font '{}'. register an embeddable font asset.",
+                    options.pdf_profile.as_str(),
                     name
                 ),
             ));
@@ -2005,35 +2356,42 @@ fn validate_pdfx4_font_embedding(
     Ok(())
 }
 
-fn validate_pdfx4_output_intent(options: &PdfOptions) -> io::Result<()> {
-    if options.pdf_profile != PdfProfile::PdfX4 {
+pub(crate) fn validate_profile_output_intent(options: &PdfOptions) -> io::Result<()> {
+    if !options.pdf_profile.requires_output_intent() {
         return Ok(());
     }
     let Some(intent) = options.output_intent.as_ref() else {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "pdfx4 requires an output intent",
+            format!("{} requires an output intent", options.pdf_profile.as_str()),
         ));
     };
     if intent.icc_profile.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "pdfx4 output intent ICC profile cannot be empty",
+            format!(
+                "{} output intent ICC profile cannot be empty",
+                options.pdf_profile.as_str()
+            ),
         ));
     }
     if !matches!(intent.n_components, 1 | 3 | 4) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
-                "pdfx4 output intent n_components must be one of 1, 3, or 4 (got {})",
-                intent.n_components
+                "{} output intent n_components must be one of 1, 3, or 4 (got {})",
+                options.pdf_profile.as_str(),
+                intent.n_components,
             ),
         ));
     }
     if intent.identifier.trim().is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "pdfx4 output intent identifier cannot be empty",
+            format!(
+                "{} output intent identifier cannot be empty",
+                options.pdf_profile.as_str()
+            ),
         ));
     }
     Ok(())
@@ -2047,6 +2405,10 @@ fn collect_optional_content_names_in_commands(commands: &[Command], names: &mut 
                 names.insert(name.clone());
             }
             Command::DefineForm {
+                commands: form_commands,
+                ..
+            }
+            | Command::DefineIsolatedForm {
                 commands: form_commands,
                 ..
             } => collect_optional_content_names_in_commands(form_commands, names),
@@ -2543,10 +2905,7 @@ fn font_descriptor_object(font: &RegisteredFont, font_file_id: usize) -> String 
 }
 
 fn output_intent_object(oi: &OutputIntent, icc_id: usize, profile: PdfProfile) -> String {
-    let subtype = match profile {
-        PdfProfile::PdfX4 => "GTS_PDFX",
-        _ => "GTS_PDFA1",
-    };
+    let subtype = profile.output_intent_subtype();
     let mut dict = format!(
         "<< /Type /OutputIntent /S /{} /DestOutputProfile {} 0 R /OutputConditionIdentifier ({}) /OutputCondition ({})",
         subtype,
@@ -2711,7 +3070,7 @@ fn render_page(
                 col_index,
                 group_only,
             } => {
-                if options.pdf_profile == PdfProfile::Tagged {
+                if options.pdf_profile.emits_tagged_structure() {
                     let role_raw = role.clone();
                     let role = escape_pdf_name(role);
                     if *group_only {
@@ -2737,7 +3096,7 @@ fn render_page(
                 }
             }
             Command::EndTag => {
-                if options.pdf_profile == PdfProfile::Tagged {
+                if options.pdf_profile.emits_tagged_structure() {
                     out.push_str("EMC\n");
                     let _ = tag_stack.pop();
                 }
@@ -2952,7 +3311,9 @@ fn render_page(
                 }
             }
             Command::DefineForm { .. } => {}
+            Command::DefineIsolatedForm { .. } => {}
             Command::DrawForm { .. } => {}
+            Command::DrawFilteredForm { .. } => {}
         }
     }
 
@@ -3196,13 +3557,78 @@ fn build_gradient_function_objects(
     (objects, stitch_id, next_id)
 }
 
-fn stream_object(content: &str) -> String {
+fn metadata_stream_object(content: &str) -> String {
     let length = content.as_bytes().len();
-    format!("<< /Length {} >>\nstream\n{}\nendstream", length, content)
+    format!(
+        "<< /Type /Metadata /Subtype /XML /Length {} >>\nstream\n{}\nendstream",
+        length, content
+    )
+}
+
+fn pdfa4f_seed_embedded_file_stream_object() -> String {
+    const CONTENT: &str = "FullBleed deterministic PDF/A-4f associated file seed.";
+    format!(
+        "<< /Type /EmbeddedFile /Subtype /text#2Fplain /Params << /Size {} /CreationDate (D:19700101000000Z) /ModDate (D:19700101000000Z) >> /Length {} >>\nstream\n{}\nendstream",
+        CONTENT.as_bytes().len(),
+        CONTENT.as_bytes().len(),
+        CONTENT
+    )
+}
+
+fn pdfa4f_seed_file_spec_object(embedded_file_id: usize) -> String {
+    "<< /Type /Filespec /F (fullbleed-pdfa4f-seed.txt) /UF (fullbleed-pdfa4f-seed.txt) /Desc (FullBleed PDF/A-4f associated file seed) /AFRelationship /Data /EF << /F {id} 0 R /UF {id} 0 R >> >>"
+        .replace("{id}", &embedded_file_id.to_string())
+}
+
+fn pdfa4f_seed_names_object(file_spec_id: usize) -> String {
+    format!(
+        "<< /Names [(fullbleed-pdfa4f-seed.txt) {} 0 R] >>",
+        file_spec_id
+    )
+}
+
+fn deterministic_file_id(
+    profile: PdfProfile,
+    version: PdfVersion,
+    lang: Option<&str>,
+    title: Option<&str>,
+    page_count: usize,
+    object_count: usize,
+    xref_start: usize,
+) -> String {
+    let version = match version {
+        PdfVersion::Pdf17 => "1.7",
+        PdfVersion::Pdf20 => "2.0",
+    };
+    let mut state = 0xcbf29ce484222325u64;
+    fn mix(state: &mut u64, bytes: &[u8]) {
+        for byte in bytes {
+            *state ^= u64::from(*byte);
+            *state = state.wrapping_mul(0x100000001b3);
+        }
+        *state ^= 0xff;
+        *state = state.wrapping_mul(0x100000001b3);
+    }
+    mix(&mut state, b"fullbleed-pdf-id-v1");
+    mix(&mut state, profile.as_str().as_bytes());
+    mix(&mut state, version.as_bytes());
+    if let Some(lang) = lang {
+        mix(&mut state, lang.as_bytes());
+    }
+    if let Some(title) = title {
+        mix(&mut state, title.as_bytes());
+    }
+    mix(&mut state, page_count.to_string().as_bytes());
+    mix(&mut state, object_count.to_string().as_bytes());
+    mix(&mut state, xref_start.to_string().as_bytes());
+    let first = state;
+    mix(&mut state, b"secondary");
+    let second = state;
+    format!("{:016X}{:016X}", first, second)
 }
 
 fn page_box_entries(profile: PdfProfile, page_size: Size) -> String {
-    if profile != PdfProfile::PdfX4 {
+    if !profile.uses_pdfx_page_boxes() {
         return String::new();
     }
     format!(
@@ -3221,9 +3647,12 @@ fn info_object(title: Option<&str>, profile: PdfProfile) -> String {
     if let Some(title) = title {
         entries.push(format!("/Title ({})", escape_pdf_string(title)));
     }
-    if profile == PdfProfile::PdfX4 {
+    if matches!(profile, PdfProfile::PdfX4 | PdfProfile::PdfVt1) {
         entries.push("/GTS_PDFXVersion (PDF/X-4)".to_string());
         entries.push("/Trapped /False".to_string());
+    }
+    if profile == PdfProfile::PdfVt1 {
+        entries.push("/GTS_PDFVTVersion (PDF/VT-1)".to_string());
     }
     if entries.is_empty() {
         entries.push("/Producer (FullBleed)".to_string());
@@ -3485,6 +3914,7 @@ fn escape_xml_text(input: &str) -> String {
 
 fn build_xmp_metadata(
     profile: PdfProfile,
+    version: PdfVersion,
     lang: Option<&str>,
     title: Option<&str>,
 ) -> Option<String> {
@@ -3496,24 +3926,103 @@ fn build_xmp_metadata(
     out.push_str(r#"<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>"#);
     out.push_str("\n<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n");
     out.push_str("<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n");
+    out.push_str("<rdf:Description xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\" ");
+    out.push_str("xmp:CreateDate=\"1970-01-01T00:00:00Z\" ");
+    out.push_str("xmp:ModifyDate=\"1970-01-01T00:00:00Z\" ");
+    out.push_str("xmp:MetadataDate=\"1970-01-01T00:00:00Z\"/>\n");
+    out.push_str("<rdf:Description xmlns:pdf=\"http://ns.adobe.com/pdf/1.3/\" ");
+    out.push_str("pdf:Producer=\"FullBleed\" ");
+    out.push_str(&format!(
+        "pdf:PDFVersion=\"{}\"/>\n",
+        match version {
+            PdfVersion::Pdf17 => "1.7",
+            PdfVersion::Pdf20 => "2.0",
+        }
+    ));
 
     match profile {
+        PdfProfile::PdfA1a => {
+            out.push_str("<rdf:Description xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\" ");
+            out.push_str("pdfaid:part=\"1\" pdfaid:conformance=\"A\"/>\n");
+        }
+        PdfProfile::PdfA1b => {
+            out.push_str("<rdf:Description xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\" ");
+            out.push_str("pdfaid:part=\"1\" pdfaid:conformance=\"B\"/>\n");
+        }
+        PdfProfile::PdfA2a => {
+            out.push_str("<rdf:Description xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\" ");
+            out.push_str("pdfaid:part=\"2\" pdfaid:conformance=\"A\"/>\n");
+        }
         PdfProfile::PdfA2b => {
             out.push_str("<rdf:Description xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\" ");
             out.push_str("pdfaid:part=\"2\" pdfaid:conformance=\"B\"/>\n");
         }
+        PdfProfile::PdfA2u => {
+            out.push_str("<rdf:Description xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\" ");
+            out.push_str("pdfaid:part=\"2\" pdfaid:conformance=\"U\"/>\n");
+        }
+        PdfProfile::PdfA3a => {
+            out.push_str("<rdf:Description xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\" ");
+            out.push_str("pdfaid:part=\"3\" pdfaid:conformance=\"A\"/>\n");
+        }
+        PdfProfile::PdfA3b => {
+            out.push_str("<rdf:Description xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\" ");
+            out.push_str("pdfaid:part=\"3\" pdfaid:conformance=\"B\"/>\n");
+        }
+        PdfProfile::PdfA3u => {
+            out.push_str("<rdf:Description xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\" ");
+            out.push_str("pdfaid:part=\"3\" pdfaid:conformance=\"U\"/>\n");
+        }
+        PdfProfile::PdfA4 => {
+            out.push_str("<rdf:Description xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\" ");
+            out.push_str("pdfaid:part=\"4\" pdfaid:rev=\"2020\"/>\n");
+        }
+        PdfProfile::PdfA4e => {
+            out.push_str("<rdf:Description xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\" ");
+            out.push_str("pdfaid:part=\"4\" pdfaid:conformance=\"E\" pdfaid:rev=\"2020\"/>\n");
+        }
+        PdfProfile::PdfA4f => {
+            out.push_str("<rdf:Description xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\" ");
+            out.push_str("pdfaid:part=\"4\" pdfaid:conformance=\"F\" pdfaid:rev=\"2020\"/>\n");
+        }
         PdfProfile::PdfX4 => {
-            out.push_str("<rdf:Description xmlns:pdfxid=\"http://www.npes.org/pdfx/ns/id/\" ");
-            out.push_str("pdfxid:part=\"4\" pdfxid:GTS_PDFXVersion=\"PDF/X-4\"/>\n");
+            out.push_str("<rdf:Description xmlns:pdfxid=\"http://www.npes.org/pdfx/ns/id/\">");
+            out.push_str("<pdfxid:GTS_PDFXVersion>PDF/X-4</pdfxid:GTS_PDFXVersion>");
+            out.push_str("</rdf:Description>\n");
+        }
+        PdfProfile::PdfUa1 => {
+            out.push_str("<rdf:Description xmlns:pdfuaid=\"http://www.aiim.org/pdfua/ns/id/\" ");
+            out.push_str("pdfuaid:part=\"1\"/>\n");
+        }
+        PdfProfile::PdfUa2 => {
+            out.push_str("<rdf:Description xmlns:pdfuaid=\"http://www.aiim.org/pdfua/ns/id/\" ");
+            out.push_str("pdfuaid:part=\"2\" pdfuaid:rev=\"2024\"/>\n");
+        }
+        PdfProfile::PdfVt1 => {
+            out.push_str("<rdf:Description xmlns:pdfxid=\"http://www.npes.org/pdfx/ns/id/\">");
+            out.push_str("<pdfxid:GTS_PDFXVersion>PDF/X-4</pdfxid:GTS_PDFXVersion>");
+            out.push_str("</rdf:Description>\n");
+            out.push_str("<rdf:Description xmlns:pdfvtid=\"http://www.npes.org/pdfvt/ns/id/\" ");
+            out.push_str("pdfvtid:GTS_PDFVTVersion=\"PDF/VT-1\" ");
+            out.push_str("pdfvtid:GTS_PDFVTModDate=\"1970-01-01T00:00:00Z\"/>\n");
+        }
+        PdfProfile::Wtpdf1r => {
+            push_pdf_declaration(&mut out, "http://pdfa.org/declarations/wtpdf#reuse1.0");
+        }
+        PdfProfile::Wtpdf1a => {
+            push_pdf_declaration(
+                &mut out,
+                "http://pdfa.org/declarations/wtpdf#accessibility1.0",
+            );
         }
         _ => {}
     }
 
     if let Some(lang) = lang {
         out.push_str("<rdf:Description xmlns:dc=\"http://purl.org/dc/elements/1.1/\">");
-        out.push_str("<dc:language><rdf:Seq><rdf:li>");
+        out.push_str("<dc:language><rdf:Bag><rdf:li>");
         out.push_str(&escape_xml_text(lang));
-        out.push_str("</rdf:li></rdf:Seq></dc:language></rdf:Description>\n");
+        out.push_str("</rdf:li></rdf:Bag></dc:language></rdf:Description>\n");
     }
 
     if let Some(title) = title {
@@ -3526,6 +4035,16 @@ fn build_xmp_metadata(
     out.push_str("</rdf:RDF>\n</x:xmpmeta>\n");
     out.push_str("<?xpacket end=\"w\"?>");
     Some(out)
+}
+
+fn push_pdf_declaration(out: &mut String, conforms_to: &str) {
+    out.push_str("<rdf:Description rdf:about=\"\" xmlns:pdfd=\"http://pdfa.org/declarations/\">");
+    out.push_str("<pdfd:declarations><rdf:Bag><rdf:li rdf:parseType=\"Resource\">");
+    out.push_str("<pdfd:conformsTo>");
+    out.push_str(&escape_xml_text(conforms_to));
+    out.push_str("</pdfd:conformsTo>");
+    out.push_str("</rdf:li></rdf:Bag></pdfd:declarations>");
+    out.push_str("</rdf:Description>\n");
 }
 
 fn to_unicode_cmap(glyph_map: &BTreeMap<u16, String>) -> String {
@@ -3927,6 +4446,286 @@ mod tests {
     }
 
     #[test]
+    fn pdfa_variants_require_output_intent_and_emit_identification_xmp() {
+        let doc = one_page_document(vec![]);
+        for (profile, part_token, conformance_token, header_token) in [
+            (
+                PdfProfile::PdfA1a,
+                "pdfaid:part=\"1\"",
+                Some("pdfaid:conformance=\"A\""),
+                "%PDF-1.7",
+            ),
+            (
+                PdfProfile::PdfA1b,
+                "pdfaid:part=\"1\"",
+                Some("pdfaid:conformance=\"B\""),
+                "%PDF-1.7",
+            ),
+            (
+                PdfProfile::PdfA2a,
+                "pdfaid:part=\"2\"",
+                Some("pdfaid:conformance=\"A\""),
+                "%PDF-1.7",
+            ),
+            (
+                PdfProfile::PdfA2b,
+                "pdfaid:part=\"2\"",
+                Some("pdfaid:conformance=\"B\""),
+                "%PDF-1.7",
+            ),
+            (
+                PdfProfile::PdfA2u,
+                "pdfaid:part=\"2\"",
+                Some("pdfaid:conformance=\"U\""),
+                "%PDF-1.7",
+            ),
+            (
+                PdfProfile::PdfA3a,
+                "pdfaid:part=\"3\"",
+                Some("pdfaid:conformance=\"A\""),
+                "%PDF-1.7",
+            ),
+            (
+                PdfProfile::PdfA3b,
+                "pdfaid:part=\"3\"",
+                Some("pdfaid:conformance=\"B\""),
+                "%PDF-1.7",
+            ),
+            (
+                PdfProfile::PdfA3u,
+                "pdfaid:part=\"3\"",
+                Some("pdfaid:conformance=\"U\""),
+                "%PDF-1.7",
+            ),
+            (
+                PdfProfile::PdfA4,
+                "pdfaid:part=\"4\"",
+                Some("pdfaid:rev=\"2020\""),
+                "%PDF-2.0",
+            ),
+            (
+                PdfProfile::PdfA4e,
+                "pdfaid:part=\"4\"",
+                Some("pdfaid:conformance=\"E\""),
+                "%PDF-2.0",
+            ),
+            (
+                PdfProfile::PdfA4f,
+                "pdfaid:part=\"4\"",
+                Some("pdfaid:conformance=\"F\""),
+                "%PDF-2.0",
+            ),
+        ] {
+            let mut missing = PdfOptions::default();
+            missing.pdf_profile = profile;
+            let err = document_to_pdf_with_metrics_and_registry(&doc, None, None, &missing)
+                .expect_err("pdf/a profile should require output intent");
+            assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+            assert!(err.to_string().contains(profile.as_str()));
+
+            let mut options = PdfOptions::default();
+            options.pdf_profile = profile;
+            options.document_title = Some("PDF/A seed".to_string());
+            options.output_intent = Some(OutputIntent::new(
+                vec![0x00, 0x01, 0x02],
+                3,
+                "sRGB IEC61966-2.1",
+                Some("sRGB".to_string()),
+            ));
+
+            let bytes =
+                document_to_pdf_with_metrics_and_registry(&doc, None, None, &options).unwrap();
+            let pdf = String::from_utf8_lossy(&bytes);
+            assert!(pdf.starts_with(header_token));
+            assert!(pdf.contains(part_token));
+            if let Some(token) = conformance_token {
+                assert!(pdf.contains(token));
+            }
+            if profile.is_pdfa4_family() {
+                let trailer = pdf
+                    .rsplit("trailer\n")
+                    .next()
+                    .expect("pdf should contain a trailer");
+                assert!(!trailer.contains(" /Info "));
+                if profile == PdfProfile::PdfA4 {
+                    assert!(!pdf.contains("pdfaid:conformance"));
+                }
+            }
+            if profile == PdfProfile::PdfA4f {
+                assert!(pdf.contains("/EmbeddedFiles"));
+                assert!(pdf.contains("/Type /Filespec"));
+                assert!(pdf.contains("/Type /EmbeddedFile"));
+                assert!(pdf.contains("/AFRelationship /Data"));
+                assert!(pdf.contains("/AF ["));
+            }
+            assert!(pdf.contains("/Type /Metadata /Subtype /XML"));
+            assert!(pdf.contains("/S /GTS_PDFA1"));
+            assert!(pdf.contains("/ID [<"));
+        }
+    }
+
+    #[test]
+    fn pdfua1_emits_pdfua_xmp_and_tagged_structure() {
+        let inter_path = repo_font_path("Inter-Variable.ttf");
+        let inter_bytes = std::fs::read(&inter_path).expect("read inter");
+        let mut registry = FontRegistry::new();
+        let inter_name = registry
+            .register_bytes(inter_bytes, Some(inter_path.to_string_lossy().as_ref()))
+            .expect("register inter");
+        let doc = one_page_document(vec![
+            Command::BeginTag {
+                role: "P".to_string(),
+                mcid: Some(0),
+                alt: None,
+                scope: None,
+                table_id: None,
+                col_index: None,
+                group_only: false,
+            },
+            Command::SetFontName(inter_name),
+            Command::SetFontSize(Pt::from_f32(12.0)),
+            Command::DrawString {
+                x: Pt::from_f32(72.0),
+                y: Pt::from_f32(88.0),
+                text: "Tagged PDF/UA seed".to_string(),
+            },
+            Command::EndTag,
+        ]);
+        let mut options = PdfOptions::default();
+        options.pdf_profile = PdfProfile::PdfUa1;
+        options.document_lang = Some("en-US".to_string());
+        options.document_title = Some("PDF/UA seed".to_string());
+
+        let bytes =
+            document_to_pdf_with_metrics_and_registry(&doc, None, Some(&registry), &options)
+                .expect("pdf/ua seed bytes");
+        let pdf = String::from_utf8_lossy(&bytes);
+        assert!(pdf.contains("pdfuaid:part=\"1\""));
+        assert!(pdf.contains("/Type /Metadata /Subtype /XML"));
+        assert!(
+            pdf.contains("<dc:language><rdf:Bag><rdf:li>en-US</rdf:li></rdf:Bag></dc:language>")
+        );
+        assert!(pdf.contains("/StructTreeRoot"));
+        assert!(pdf.contains("/MarkInfo << /Marked true >>"));
+        assert!(pdf.contains("/Lang (en-US)"));
+        assert!(pdf.contains("/FontFile2"));
+    }
+
+    #[test]
+    fn pdfua1_requires_embedded_fonts_for_text() {
+        let doc = text_page("Helvetica", "PDF/UA-1 requires embedded text fonts");
+        let mut options = PdfOptions::default();
+        options.pdf_profile = PdfProfile::PdfUa1;
+        options.document_lang = Some("en-US".to_string());
+        options.document_title = Some("PDF/UA seed".to_string());
+
+        let err = document_to_pdf_with_metrics_and_registry(&doc, None, None, &options)
+            .expect_err("pdf/ua-1 text should fail without an embedded font registry");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("pdfua1 requires a font registry"));
+    }
+
+    #[test]
+    fn wtpdf_profiles_emit_pdf_declarations_and_pdf20_structure() {
+        let doc = one_page_document(vec![]);
+        for (profile, declaration) in [
+            (
+                PdfProfile::Wtpdf1r,
+                "http://pdfa.org/declarations/wtpdf#reuse1.0",
+            ),
+            (
+                PdfProfile::Wtpdf1a,
+                "http://pdfa.org/declarations/wtpdf#accessibility1.0",
+            ),
+        ] {
+            let mut options = PdfOptions::default();
+            options.pdf_profile = profile;
+            options.document_lang = Some("en-US".to_string());
+            options.document_title = Some("WTPDF seed".to_string());
+
+            let bytes = document_to_pdf_with_metrics_and_registry(&doc, None, None, &options)
+                .expect("wtpdf seed bytes");
+            let pdf = String::from_utf8_lossy(&bytes);
+            assert!(pdf.starts_with("%PDF-2.0"));
+            assert!(pdf.contains("<pdfd:declarations>"));
+            assert!(pdf.contains(declaration));
+            assert!(pdf.contains("/StructTreeRoot"));
+            assert!(pdf.contains("/MarkInfo << /Marked true >>"));
+            assert!(pdf.contains("/S /Document"));
+            assert!(pdf.contains("/NS (http://iso.org/pdf2/ssn)"));
+            assert!(pdf.contains("/Lang (en-US)"));
+        }
+    }
+
+    #[test]
+    fn pdfvt1_emits_pdfx_and_pdfvt_metadata_deterministically() {
+        let doc = one_page_document(vec![]);
+        let mut options = PdfOptions::default();
+        options.pdf_profile = PdfProfile::PdfVt1;
+        options.output_intent = Some(OutputIntent::new(
+            vec![0x00, 0x01, 0x02],
+            3,
+            "sRGB IEC61966-2.1",
+            Some("sRGB".to_string()),
+        ));
+
+        let first = document_to_pdf_with_metrics_and_registry(&doc, None, None, &options).unwrap();
+        let second = document_to_pdf_with_metrics_and_registry(&doc, None, None, &options).unwrap();
+        assert_eq!(first, second);
+
+        let pdf = String::from_utf8_lossy(&first);
+        assert!(pdf.contains("<pdfxid:GTS_PDFXVersion>PDF/X-4</pdfxid:GTS_PDFXVersion>"));
+        assert!(pdf.contains("pdfvtid:GTS_PDFVTVersion=\"PDF/VT-1\""));
+        assert!(pdf.contains("pdfvtid:GTS_PDFVTModDate=\"1970-01-01T00:00:00Z\""));
+        assert!(pdf.contains("xmp:ModifyDate=\"1970-01-01T00:00:00Z\""));
+        assert!(pdf.contains("/Type /Metadata /Subtype /XML"));
+        assert!(pdf.contains("/S /GTS_PDFX"));
+        assert!(pdf.contains("/GTS_PDFVTVersion (PDF/VT-1)"));
+        assert!(pdf.contains("/DPartRoot"));
+        assert!(pdf.contains("/DPartRootNode"));
+        assert!(pdf.contains("/NodeNameList [/Document]"));
+        assert!(pdf.contains("/Type /DPart"));
+        assert!(pdf.contains("/DPart "));
+        assert!(pdf.contains("/ID [<"));
+    }
+
+    #[test]
+    fn profile_debug_log_reports_deterministic_profile_state() {
+        let doc = one_page_document(vec![]);
+        let mut options = PdfOptions::default();
+        options.pdf_profile = PdfProfile::PdfVt1;
+        options.output_intent = Some(OutputIntent::new(
+            vec![0x00, 0x01, 0x02],
+            3,
+            "sRGB IEC61966-2.1",
+            Some("sRGB".to_string()),
+        ));
+        let path = temp_log_path("pdf_profile_debug");
+        let debug = Arc::new(crate::debug::DebugLogger::new(&path).expect("debug logger"));
+
+        let _ = document_to_pdf_with_metrics_and_registry_with_logs(
+            &doc,
+            None,
+            None,
+            &options,
+            Some(debug.clone()),
+            None,
+        )
+        .expect("pdf bytes");
+        debug.flush();
+        drop(debug);
+
+        let log = std::fs::read_to_string(&path).expect("read debug log");
+        assert!(log.contains("\"type\":\"jit.pdf_profile\""));
+        assert!(log.contains("\"pdf_profile\":\"pdfvt1\""));
+        assert!(log.contains("\"metadata\":true"));
+        assert!(log.contains("\"output_intent\":true"));
+        assert!(log.contains("\"pdfvt_dpart_root\":true"));
+        assert!(log.contains("\"requires_embedded_fonts\":true"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn ocg_and_artifact_marked_content_emit_tokens() {
         let doc = one_page_document(vec![
             Command::BeginOptionalContent {
@@ -4086,6 +4885,38 @@ mod tests {
         let pdf = String::from_utf8_lossy(&bytes);
         assert!(pdf.contains("/Subtype /Form"));
         assert!(count_page_content_token(&bytes, b"/Fm1 Do") > 0);
+    }
+
+    #[test]
+    fn isolated_form_xobject_emits_transparency_group() {
+        let form_id = "isolated-form".to_string();
+        let doc = one_page_document(vec![
+            Command::DefineIsolatedForm {
+                resource_id: form_id.clone(),
+                width: Pt::from_f32(50.0),
+                height: Pt::from_f32(20.0),
+                commands: vec![Command::DrawRect {
+                    x: Pt::from_f32(0.0),
+                    y: Pt::from_f32(0.0),
+                    width: Pt::from_f32(50.0),
+                    height: Pt::from_f32(20.0),
+                }],
+            },
+            Command::DrawForm {
+                x: Pt::from_f32(40.0),
+                y: Pt::from_f32(40.0),
+                width: Pt::from_f32(50.0),
+                height: Pt::from_f32(20.0),
+                resource_id: form_id,
+            },
+        ]);
+
+        let bytes =
+            document_to_pdf_with_metrics_and_registry(&doc, None, None, &PdfOptions::default())
+                .unwrap();
+        let pdf = String::from_utf8_lossy(&bytes);
+        assert!(pdf.contains("/Subtype /Form"));
+        assert!(pdf.contains("/Group << /S /Transparency /I true /K false >>"));
     }
 
     #[test]

@@ -1,5 +1,12 @@
 /.venv
 /.venv_engine
+.pytest_cache/
+/dist/
+/target-publish/
+/fullbleed_css_fixture_*.jsonl
+/fullbleed_preflight.jit
+/fullbleed_preflight.perf
+/fullbleed_preflight_hot.log
 *.pyc
 *.pyc.*
 *.pyd
@@ -27,6 +34,7 @@ dist_release_050/artifacts_0.5.0.json
 /output/_tmp_init_scaffold_smoke
 /output/_tmp_new_invoice_scaffold2
 /output/_tmp_new_statement_scaffold2
+/output/conformance_validation*/
 /audit_baseline
 .claude/worktrees/priceless-noether/
 /.venv_ci068_win311

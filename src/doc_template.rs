@@ -2,7 +2,7 @@ use crate::canvas::{Canvas, Document, META_PAGINATION_EVENT_KEY};
 use crate::debug::{DebugLogger, json_escape};
 use crate::doc_context::DocContext;
 use crate::error::FullBleedError;
-use crate::flowable::{BreakAfter, BreakBefore, Flowable};
+use crate::flowable::Flowable;
 use crate::frame::{AddResult, AddTrace};
 use crate::metrics::{DocumentMetrics, PageMetrics};
 use crate::page_template::PageTemplate;
@@ -314,7 +314,7 @@ impl DocTemplate {
                 let current_owner_meta = current.diagnostic_metadata();
                 let pagination = current.pagination();
                 if !suppress_break_before
-                    && matches!(pagination.break_before, BreakBefore::Page)
+                    && pagination.break_before.forces_page()
                     && (placed_on_page || frame_index > 0)
                 {
                     emit_pagination_transition_event(
@@ -435,7 +435,7 @@ impl DocTemplate {
                         );
                         placed_on_page = true;
                         page_flowables += 1;
-                        if matches!(pagination.break_after, BreakAfter::Page) {
+                        if pagination.break_after.forces_page() {
                             emit_pagination_transition_event(
                                 &mut canvas,
                                 debug.as_deref(),

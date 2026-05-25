@@ -1,5 +1,5 @@
 use crate::canvas::{Command, Document, Page};
-use crate::flowable::PaintFilterSpec;
+use crate::flowable::{FilterDropShadowSpec, PaintFilterSpec};
 use crate::types::{Color, MixBlendMode, Pt, Shading, ShadingStop, Size};
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
@@ -164,6 +164,21 @@ fn write_command<W: Write>(out: &mut W, command: &Command) -> io::Result<()> {
                     MixBlendMode::Normal => 0,
                     MixBlendMode::Multiply => 1,
                     MixBlendMode::Screen => 2,
+                    MixBlendMode::Overlay => 3,
+                    MixBlendMode::Darken => 4,
+                    MixBlendMode::Lighten => 5,
+                    MixBlendMode::ColorDodge => 6,
+                    MixBlendMode::ColorBurn => 7,
+                    MixBlendMode::HardLight => 8,
+                    MixBlendMode::SoftLight => 9,
+                    MixBlendMode::Difference => 10,
+                    MixBlendMode::Exclusion => 11,
+                    MixBlendMode::Hue => 12,
+                    MixBlendMode::Saturation => 13,
+                    MixBlendMode::Color => 14,
+                    MixBlendMode::Luminosity => 15,
+                    MixBlendMode::PlusLighter => 16,
+                    MixBlendMode::PlusDarker => 17,
                 },
             )
         }
@@ -181,7 +196,7 @@ fn write_command<W: Write>(out: &mut W, command: &Command) -> io::Result<()> {
             write_pt(out, *width)?;
             write_pt(out, *height)?;
             write_pt(out, *radius)?;
-            write_paint_filter(out, *filter)
+            write_paint_filter(out, filter)
         }
         Command::SetFontName(name) => {
             write_u8(out, 15)?;
@@ -356,6 +371,22 @@ fn write_command<W: Write>(out: &mut W, command: &Command) -> io::Result<()> {
             }
             Ok(())
         }
+        Command::DefineIsolatedForm {
+            resource_id,
+            width,
+            height,
+            commands,
+        } => {
+            write_u8(out, 45)?;
+            write_string(out, resource_id)?;
+            write_pt(out, *width)?;
+            write_pt(out, *height)?;
+            write_u32(out, commands.len() as u32)?;
+            for cmd in commands {
+                write_command(out, cmd)?;
+            }
+            Ok(())
+        }
         Command::DrawForm {
             x,
             y,
@@ -369,6 +400,22 @@ fn write_command<W: Write>(out: &mut W, command: &Command) -> io::Result<()> {
             write_pt(out, *width)?;
             write_pt(out, *height)?;
             write_string(out, resource_id)
+        }
+        Command::DrawFilteredForm {
+            x,
+            y,
+            width,
+            height,
+            resource_id,
+            filter,
+        } => {
+            write_u8(out, 44)?;
+            write_pt(out, *x)?;
+            write_pt(out, *y)?;
+            write_pt(out, *width)?;
+            write_pt(out, *height)?;
+            write_string(out, resource_id)?;
+            write_paint_filter(out, filter)
         }
         Command::BeginArtifact { subtype } => {
             write_u8(out, 36)?;
@@ -425,6 +472,21 @@ fn read_command<R: Read>(input: &mut R) -> io::Result<Command> {
             let mode = match read_u8(input)? {
                 1 => MixBlendMode::Multiply,
                 2 => MixBlendMode::Screen,
+                3 => MixBlendMode::Overlay,
+                4 => MixBlendMode::Darken,
+                5 => MixBlendMode::Lighten,
+                6 => MixBlendMode::ColorDodge,
+                7 => MixBlendMode::ColorBurn,
+                8 => MixBlendMode::HardLight,
+                9 => MixBlendMode::SoftLight,
+                10 => MixBlendMode::Difference,
+                11 => MixBlendMode::Exclusion,
+                12 => MixBlendMode::Hue,
+                13 => MixBlendMode::Saturation,
+                14 => MixBlendMode::Color,
+                15 => MixBlendMode::Luminosity,
+                16 => MixBlendMode::PlusLighter,
+                17 => MixBlendMode::PlusDarker,
                 _ => MixBlendMode::Normal,
             };
             Command::SetBlendMode { mode }
@@ -552,12 +614,36 @@ fn read_command<R: Read>(input: &mut R) -> io::Result<Command> {
                 commands,
             }
         }
+        45 => {
+            let resource_id = read_string(input)?;
+            let width = read_pt(input)?;
+            let height = read_pt(input)?;
+            let len = read_u32(input)? as usize;
+            let mut commands = Vec::with_capacity(len);
+            for _ in 0..len {
+                commands.push(read_command(input)?);
+            }
+            Command::DefineIsolatedForm {
+                resource_id,
+                width,
+                height,
+                commands,
+            }
+        }
         35 => Command::DrawForm {
             x: read_pt(input)?,
             y: read_pt(input)?,
             width: read_pt(input)?,
             height: read_pt(input)?,
             resource_id: read_string(input)?,
+        },
+        44 => Command::DrawFilteredForm {
+            x: read_pt(input)?,
+            y: read_pt(input)?,
+            width: read_pt(input)?,
+            height: read_pt(input)?,
+            resource_id: read_string(input)?,
+            filter: read_paint_filter(input)?,
         },
         36 => Command::BeginArtifact {
             subtype: read_option_string(input)?,
@@ -713,15 +799,64 @@ fn read_pt<R: Read>(input: &mut R) -> io::Result<Pt> {
     Ok(Pt::from_milli_i64(milli))
 }
 
-fn write_paint_filter<W: Write>(out: &mut W, filter: PaintFilterSpec) -> io::Result<()> {
+fn write_paint_filter<W: Write>(out: &mut W, filter: &PaintFilterSpec) -> io::Result<()> {
     write_f32(out, filter.saturate)?;
-    write_pt(out, filter.blur_radius)
+    write_f32(out, filter.brightness)?;
+    write_f32(out, filter.contrast)?;
+    write_f32(out, filter.invert)?;
+    write_f32(out, filter.sepia)?;
+    write_f32(out, filter.hue_rotate)?;
+    write_f32(out, filter.opacity)?;
+    write_pt(out, filter.blur_radius)?;
+    write_u32(out, filter.drop_shadows.len() as u32)?;
+    for shadow in &filter.drop_shadows {
+        write_pt(out, shadow.offset_x)?;
+        write_pt(out, shadow.offset_y)?;
+        write_pt(out, shadow.blur_radius)?;
+        write_color(out, shadow.color)?;
+        write_f32(out, shadow.opacity)?;
+        write_bool(out, shadow.color_is_current_color)?;
+    }
+    Ok(())
 }
 
 fn read_paint_filter<R: Read>(input: &mut R) -> io::Result<PaintFilterSpec> {
+    let saturate = read_f32(input)?;
+    let brightness = read_f32(input)?;
+    let contrast = read_f32(input)?;
+    let invert = read_f32(input)?;
+    let sepia = read_f32(input)?;
+    let hue_rotate = read_f32(input)?;
+    let opacity = read_f32(input)?;
+    let blur_radius = read_pt(input)?;
+    let drop_shadow_count = read_u32(input)?;
+    if drop_shadow_count > 64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "too many filter drop shadows",
+        ));
+    }
+    let mut drop_shadows = Vec::with_capacity(drop_shadow_count as usize);
+    for _ in 0..drop_shadow_count {
+        drop_shadows.push(FilterDropShadowSpec {
+            offset_x: read_pt(input)?,
+            offset_y: read_pt(input)?,
+            blur_radius: read_pt(input)?,
+            color: read_color(input)?,
+            opacity: read_f32(input)?,
+            color_is_current_color: read_bool(input)?,
+        });
+    }
     Ok(PaintFilterSpec {
-        saturate: read_f32(input)?,
-        blur_radius: read_pt(input)?,
+        saturate,
+        brightness,
+        contrast,
+        invert,
+        sepia,
+        hue_rotate,
+        opacity,
+        blur_radius,
+        drop_shadows,
     })
 }
 

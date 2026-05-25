@@ -133,12 +133,26 @@ pub enum Command {
         height: Pt,
         commands: Vec<Command>,
     },
+    DefineIsolatedForm {
+        resource_id: String,
+        width: Pt,
+        height: Pt,
+        commands: Vec<Command>,
+    },
     DrawForm {
         x: Pt,
         y: Pt,
         width: Pt,
         height: Pt,
         resource_id: String,
+    },
+    DrawFilteredForm {
+        x: Pt,
+        y: Pt,
+        width: Pt,
+        height: Pt,
+        resource_id: String,
+        filter: PaintFilterSpec,
     },
     BeginTag {
         role: String,
@@ -503,6 +517,21 @@ impl Canvas {
         });
     }
 
+    pub fn define_isolated_form(
+        &mut self,
+        resource_id: impl Into<String>,
+        width: Pt,
+        height: Pt,
+        commands: Vec<Command>,
+    ) {
+        self.current.commands.push(Command::DefineIsolatedForm {
+            resource_id: resource_id.into(),
+            width,
+            height,
+            commands,
+        });
+    }
+
     pub fn draw_form(
         &mut self,
         x: Pt,
@@ -517,6 +546,25 @@ impl Canvas {
             width,
             height,
             resource_id: resource_id.into(),
+        });
+    }
+
+    pub fn draw_filtered_form(
+        &mut self,
+        x: Pt,
+        y: Pt,
+        width: Pt,
+        height: Pt,
+        resource_id: impl Into<String>,
+        filter: PaintFilterSpec,
+    ) {
+        self.current.commands.push(Command::DrawFilteredForm {
+            x,
+            y,
+            width,
+            height,
+            resource_id: resource_id.into(),
+            filter,
         });
     }
 

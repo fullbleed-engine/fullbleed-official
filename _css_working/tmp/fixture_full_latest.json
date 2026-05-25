@@ -2,8 +2,8 @@
   "schema": "fullbleed.css_fixture_suite.v1",
   "ok": true,
   "summary": {
-    "fixtures_total": 85,
-    "fixtures_passed": 85,
+    "fixtures_total": 86,
+    "fixtures_passed": 86,
     "fixtures_failed": 0,
     "jobs": 4,
     "selected_labels": [
@@ -58,6 +58,14 @@
           "expected_page_count": 1,
           "actual_page_count": 1,
           "dpi": 120,
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
+        "text_trace": {
           "assertions_enabled": false,
           "assertions_ok": true,
           "assertions": {
@@ -154,19 +162,19 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_background_conic_gradient_supported_quadrants_46232_1771700892860522000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_background_conic_gradient_supported_quadrants_224388_1779706257794952800.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 16873,
-        "pdf_sha256": "918b82986606e0362f744a9292f82d0745433a2221f9e4fddc512fc12325927c",
+        "pdf_bytes": 16892,
+        "pdf_sha256": "b5c81cf0362705d92b7380a2917003037db7843c447d8576e46a3184e687ea25",
         "image_count": 1,
         "image_sha256": [
           "90e0ed28620df5c64742e5f3d3dc1c1db41b920982eef0e0f4b89ff9b11ca8d5"
         ],
-        "stability_hash_expected": "453e2a57c48a0abd00e625e40b6f8c93024d1d48de8d7bec304b9bd956fc2aac",
-        "stability_hash_actual": "453e2a57c48a0abd00e625e40b6f8c93024d1d48de8d7bec304b9bd956fc2aac",
+        "stability_hash_expected": "dc39e56beaefd5ad22d3d092c04b67757b004f55f34d5213393f35533de05228",
+        "stability_hash_actual": "dc39e56beaefd5ad22d3d092c04b67757b004f55f34d5213393f35533de05228",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -322,6 +330,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -392,7 +408,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_left_color_override_46232_1771700892874023900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_left_color_override_224388_1779706257799760000.jsonl"
           }
         }
       },
@@ -403,8 +419,8 @@
         "image_sha256": [
           "7e3881aa8f1d99164c74ceb759ce52d2a19d92ff084e4b4e9ba30f57adc5bc36"
         ],
-        "stability_hash_expected": "ffab5113985e4ff7ffb9f0eb101672ac0b452c7515c4259072220272e98d2866",
-        "stability_hash_actual": "ffab5113985e4ff7ffb9f0eb101672ac0b452c7515c4259072220272e98d2866",
+        "stability_hash_expected": "ee6bdc99d7241c1e786fb55523ade19a88a9bb01eddf1dc384a68357e898b1f3",
+        "stability_hash_actual": "ee6bdc99d7241c1e786fb55523ade19a88a9bb01eddf1dc384a68357e898b1f3",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -617,6 +633,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -687,7 +711,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_uniform_frame_paint_matrix_46232_1771700892878400900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_uniform_frame_paint_matrix_224388_1779706257799760000.jsonl"
           }
         }
       },
@@ -698,8 +722,8 @@
         "image_sha256": [
           "76644141263a198ace241915eb5ebf2f7466eb2ad4f777abab3c1f91ff5e2902"
         ],
-        "stability_hash_expected": "273fe95b51d7489b27461cf8720119f0d582c6fa29d7563e1be266248849159f",
-        "stability_hash_actual": "273fe95b51d7489b27461cf8720119f0d582c6fa29d7563e1be266248849159f",
+        "stability_hash_expected": "d74c548767e31205fdde0621bd8839579b17691204679182ff5b39683a8e633f",
+        "stability_hash_actual": "d74c548767e31205fdde0621bd8839579b17691204679182ff5b39683a8e633f",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -751,6 +775,14 @@
           "expected_page_count": 1,
           "actual_page_count": 1,
           "dpi": 120,
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
+        "text_trace": {
           "assertions_enabled": false,
           "assertions_ok": true,
           "assertions": {
@@ -847,7 +879,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_box_shadow_negative_spread_offset_paints_shrunk_shadow_46232_1771700892882295100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_box_shadow_negative_spread_offset_paints_shrunk_shadow_224388_1779706257800993900.jsonl"
           }
         }
       },
@@ -858,8 +890,8 @@
         "image_sha256": [
           "450591e73894c84181d5b3476c00f676812be7bdf1884914a854185511e4540e"
         ],
-        "stability_hash_expected": "218765d88e20649e731bfc0560be455c52a2426973f9ee81b02422f1f6b6d38f",
-        "stability_hash_actual": "218765d88e20649e731bfc0560be455c52a2426973f9ee81b02422f1f6b6d38f",
+        "stability_hash_expected": "5a5e3025a4c8442fe88fe28d257d844aeed37167893c054e0a9aaa04944709a7",
+        "stability_hash_actual": "5a5e3025a4c8442fe88fe28d257d844aeed37167893c054e0a9aaa04944709a7",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -967,6 +999,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -1056,7 +1096,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_calc_var_additive_mixed_lengths_46232_1771700898675516900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_calc_var_additive_mixed_lengths_224388_1779706259643243000.jsonl"
           }
         }
       },
@@ -1067,8 +1107,8 @@
         "image_sha256": [
           "e9c24da39fac0ec6d32ce48fc906b9a40852ed03ea59a4d7c46bb1cd4e313ef7"
         ],
-        "stability_hash_expected": "c912fb29b30d035b6156f1e9db54c15e188603b7f5b4712258b0a15bb515df45",
-        "stability_hash_actual": "c912fb29b30d035b6156f1e9db54c15e188603b7f5b4712258b0a15bb515df45",
+        "stability_hash_expected": "c04e58f90a630b9cbdd634d6494948cce92ed9887203968de61e7e47a53a834f",
+        "stability_hash_actual": "c04e58f90a630b9cbdd634d6494948cce92ed9887203968de61e7e47a53a834f",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -1148,6 +1188,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -1199,7 +1247,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_calc_var_percent_width_46232_1771700899072385100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_calc_var_percent_width_224388_1779706259645241400.jsonl"
           }
         }
       },
@@ -1210,8 +1258,8 @@
         "image_sha256": [
           "45d8824ee161439ee909e515feed1b5252fdb50a02ae2c86cec32d26a92776f9"
         ],
-        "stability_hash_expected": "01109ac8c428cec5f31f0ee17b90b92bfd2deaa395e8f07b7c832a869fdab6bf",
-        "stability_hash_actual": "01109ac8c428cec5f31f0ee17b90b92bfd2deaa395e8f07b7c832a869fdab6bf",
+        "stability_hash_expected": "ced9e89a9f4ba55ffbfeec39cb11d30e93a4de60bdd786e3afba2cce4011b4ef",
+        "stability_hash_actual": "ced9e89a9f4ba55ffbfeec39cb11d30e93a4de60bdd786e3afba2cce4011b4ef",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -1291,6 +1339,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -1323,7 +1379,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_fallback_chain_46232_1771700903565586700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_fallback_chain_224388_1779706259647242000.jsonl"
           }
         }
       },
@@ -1334,8 +1390,8 @@
         "image_sha256": [
           "b3314c54559e3e3bb223c5019f3c775c15c26d7eecec25d026652d12d8361809"
         ],
-        "stability_hash_expected": "099e9cb338035db65f7ca088ae66f6308ff1d192493d9979139ace56938275d1",
-        "stability_hash_actual": "099e9cb338035db65f7ca088ae66f6308ff1d192493d9979139ace56938275d1",
+        "stability_hash_expected": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
+        "stability_hash_actual": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -1442,6 +1498,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -1531,7 +1595,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_length_chain_fallback_46232_1771700903569392600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_length_chain_fallback_224388_1779706259821110700.jsonl"
           }
         }
       },
@@ -1542,8 +1606,8 @@
         "image_sha256": [
           "7c073f75168a6ccce655700ea6c3a324492ab2bff6ec3700352b3e9fd45f844a"
         ],
-        "stability_hash_expected": "aab13998cd319268a7a430e8deda6f7a6db55327e4312b06358ca9d92c361611",
-        "stability_hash_actual": "aab13998cd319268a7a430e8deda6f7a6db55327e4312b06358ca9d92c361611",
+        "stability_hash_expected": "4501533968752d8316b0adea6fc1c0efa788cfc29522d4b2f3b054e5bd1ae02d",
+        "stability_hash_actual": "4501533968752d8316b0adea6fc1c0efa788cfc29522d4b2f3b054e5bd1ae02d",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -1679,6 +1743,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -1806,7 +1878,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_math_min_max_clamp_lengths_46232_1771700904075039900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_math_min_max_clamp_lengths_224388_1779706260355923600.jsonl"
           }
         }
       },
@@ -1817,8 +1889,8 @@
         "image_sha256": [
           "f5e849f60fb14c42f7e1eabbca9f5ed3108884b84af47fc8aa2b1d8a2533c9a7"
         ],
-        "stability_hash_expected": "1fa349f6c4db9f77b59ab7fa50ad7eb684e11d38e6350976aea4a666dd23101b",
-        "stability_hash_actual": "1fa349f6c4db9f77b59ab7fa50ad7eb684e11d38e6350976aea4a666dd23101b",
+        "stability_hash_expected": "2692f3d7976c83633c1812281eca3ff29a68e721eb161c7502b13acf0bf9e4f0",
+        "stability_hash_actual": "2692f3d7976c83633c1812281eca3ff29a68e721eb161c7502b13acf0bf9e4f0",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -1899,6 +1971,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -1950,19 +2030,19 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_conic_gradient_fallback_no_color_46232_1771700904557526300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_conic_gradient_fallback_no_color_224388_1779706260446985800.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 788,
-        "pdf_sha256": "ef3f86baddb0d56672ace5ec8a74c4339e1efa270dd3724b0c6462143937be32",
+        "pdf_bytes": 753,
+        "pdf_sha256": "72ca9b74ffb742bd8f1485d17f7fc97546d431bb5d0c6592e27e7a8943e38759",
         "image_count": 1,
         "image_sha256": [
           "2a7983421e540cc52e5020297b66a088f455a86fb38d8665a835af10199d0f0e"
         ],
-        "stability_hash_expected": "15fa2373dafe896e7278c51d0c408270ebc45dcf94bbf0b715de2f8b23cb4d93",
-        "stability_hash_actual": "15fa2373dafe896e7278c51d0c408270ebc45dcf94bbf0b715de2f8b23cb4d93",
+        "stability_hash_expected": "2421e9620493c542b8a7ad632cc7eae1e55a42d7bdaecc676f60fce5541d6e1b",
+        "stability_hash_actual": "2421e9620493c542b8a7ad632cc7eae1e55a42d7bdaecc676f60fce5541d6e1b",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -2023,6 +2103,14 @@
             "checks": []
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -2074,7 +2162,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_conic_gradient_fallback_with_color_46232_1771700905678393300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_conic_gradient_fallback_with_color_224388_1779706260859476200.jsonl"
           }
         }
       },
@@ -2085,8 +2173,8 @@
         "image_sha256": [
           "ef179c9ee23666dee439e0107950820ed1315d8999a39e1f2a23474bb7b77292"
         ],
-        "stability_hash_expected": "3cebaf9bddbaeca462f085b1876778401e3fadf1aa8bff24498ff33a03160d1b",
-        "stability_hash_actual": "3cebaf9bddbaeca462f085b1876778401e3fadf1aa8bff24498ff33a03160d1b",
+        "stability_hash_expected": "ab97e9788967f246329b952679412d119d81f0c1025ccbf1f74a435fc8b26642",
+        "stability_hash_actual": "ab97e9788967f246329b952679412d119d81f0c1025ccbf1f74a435fc8b26642",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -2099,7 +2187,7 @@
         "full",
         "diagnostics"
       ],
-      "description": "Unsupported filters/effects/compositing declarations should keep deterministic paint and emit explicit known-loss diagnostics.",
+      "description": "Unsupported filter/effects declarations should keep deterministic paint and emit explicit known-loss diagnostics.",
       "required_features": [
         "filters",
         "effects",
@@ -2148,6 +2236,14 @@
             "checks": []
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -2182,7 +2278,7 @@
                 "condition": {
                   "type": "jit.known_loss",
                   "code": "FILTERS_EFFECTS_FALLBACK",
-                  "property": "opacity"
+                  "property": "filter"
                 },
                 "ok": true
               },
@@ -2190,28 +2286,28 @@
                 "kind": "summary_count_at_least",
                 "key": "jit.known_loss.filters_effects_fallback",
                 "expected": 1,
-                "actual": 9,
+                "actual": 3,
                 "ok": true
               }
             ],
             "summary_counts_total": {
-              "jit.known_loss.filters_effects_fallback": 9,
+              "jit.known_loss.filters_effects_fallback": 3,
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_filters_effects_fallback_46232_1771700905695040000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_filters_effects_fallback_224388_1779706260951546800.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 902,
-        "pdf_sha256": "626a603a740c4b64a092fb3283d7e4d35b7ed47d73beaa2557486f2dcf397482",
+        "pdf_bytes": 1039,
+        "pdf_sha256": "012d864ffa01b5936ef49d431328b7aae90dde5ed479582d8f63ac05a49d35a3",
         "image_count": 1,
         "image_sha256": [
           "a78f81e921283df878380cae92ab635061301c0189d1b578775aa6c0a40f1301"
         ],
-        "stability_hash_expected": "fd5706af4a44a948b8572e07189bdc7a5d0c33039414400a0363f91d746df9d5",
-        "stability_hash_actual": "fd5706af4a44a948b8572e07189bdc7a5d0c33039414400a0363f91d746df9d5",
+        "stability_hash_expected": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2",
+        "stability_hash_actual": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -2271,6 +2367,14 @@
             "checks": []
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -2322,7 +2426,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_multicol_single_column_fallback_46232_1771700905760156900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_multicol_single_column_fallback_224388_1779706261562118000.jsonl"
           }
         }
       },
@@ -2333,8 +2437,8 @@
         "image_sha256": [
           "d7778aae200751afd3c4e8af576483cb8d5b6415b92792eae320ff56869bd1a2"
         ],
-        "stability_hash_expected": "99a9674b962d46d60ff461b0525d2414bfd52e3655ed2dcda6a4dd702775e033",
-        "stability_hash_actual": "99a9674b962d46d60ff461b0525d2414bfd52e3655ed2dcda6a4dd702775e033",
+        "stability_hash_expected": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2",
+        "stability_hash_actual": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -2414,6 +2518,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -2474,7 +2586,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_unsupported_media_and_no_effect_46232_1771700906589745300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_unsupported_media_and_no_effect_224388_1779706261619704900.jsonl"
           }
         }
       },
@@ -2485,8 +2597,8 @@
         "image_sha256": [
           "54861c6f063edf73d6c084a65553e298217a7a64fdc8e57741609b5ee97c9463"
         ],
-        "stability_hash_expected": "31980b157c923268718a4b2e6829e55c05833a4d447c193f23670105d3076586",
-        "stability_hash_actual": "31980b157c923268718a4b2e6829e55c05833a4d447c193f23670105d3076586",
+        "stability_hash_expected": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
+        "stability_hash_actual": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -2641,6 +2753,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -2749,7 +2869,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_align_content_flex_end_wrap_46232_1771700906685675200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_align_content_flex_end_wrap_224388_1779706261777283000.jsonl"
           }
         }
       },
@@ -2760,8 +2880,8 @@
         "image_sha256": [
           "0aaf677bd0716a9b596f8cec1a96a53741041c91f54b7b3fe977934679812383"
         ],
-        "stability_hash_expected": "671aa0037d8c6375613d9c54f1ce6bff3023890fcf41a657aca232ed7e060c4b",
-        "stability_hash_actual": "671aa0037d8c6375613d9c54f1ce6bff3023890fcf41a657aca232ed7e060c4b",
+        "stability_hash_expected": "5d641a7e1d6a285858f1d15a442a79de691521ebd268cde9c1004413e0a8cb36",
+        "stability_hash_actual": "5d641a7e1d6a285858f1d15a442a79de691521ebd268cde9c1004413e0a8cb36",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -2924,6 +3044,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -3013,7 +3141,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_align_self_item_override_46232_1771700907141725200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_align_self_item_override_224388_1779706262022873500.jsonl"
           }
         }
       },
@@ -3024,8 +3152,8 @@
         "image_sha256": [
           "73b62e18fb61fe1245a5bd0c2ca19582259db99de235a57db892a2f70f3fd519"
         ],
-        "stability_hash_expected": "3da2faa3308a8f2cb758db42c55b19e45ade76566b47c7b48cd256a8c8918b17",
-        "stability_hash_actual": "3da2faa3308a8f2cb758db42c55b19e45ade76566b47c7b48cd256a8c8918b17",
+        "stability_hash_expected": "458010f30b7f18e8073574a760d8281e794858eca8b80aabf2d05f3591948aa8",
+        "stability_hash_actual": "458010f30b7f18e8073574a760d8281e794858eca8b80aabf2d05f3591948aa8",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -3169,6 +3297,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -3258,7 +3394,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_flow_row_wrap_layout_46232_1771700907347007600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_flow_row_wrap_layout_224388_1779706262631952500.jsonl"
           }
         }
       },
@@ -3269,8 +3405,8 @@
         "image_sha256": [
           "4d56e1afee9a79f90fe9985cccebf3bcf7dff52b537b465d2e7b169219e8080a"
         ],
-        "stability_hash_expected": "0cf0a20e842e34511c1216c4f340a7a84ce7ea54e3a83b7b60aa82321280050d",
-        "stability_hash_actual": "0cf0a20e842e34511c1216c4f340a7a84ce7ea54e3a83b7b60aa82321280050d",
+        "stability_hash_expected": "5a88c3edb8979365e6c191fc018fada7bd89c6e8172982613f9388cfc4a7cf0d",
+        "stability_hash_actual": "5a88c3edb8979365e6c191fc018fada7bd89c6e8172982613f9388cfc4a7cf0d",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -3464,6 +3600,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -3572,7 +3716,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_content_flex_end_center_wrap_46232_1771700909158625500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_content_flex_end_center_wrap_224388_1779706262633952900.jsonl"
           }
         }
       },
@@ -3583,8 +3727,8 @@
         "image_sha256": [
           "599fd65d036bb13cd51bd8d9134a0666f8a9b418f67a10359a7ee2c42f762b67"
         ],
-        "stability_hash_expected": "eb585b744b40d37c59b2b7b3abf3960f9f7a38360c58e4cb142347f27ee70ffa",
-        "stability_hash_actual": "eb585b744b40d37c59b2b7b3abf3960f9f7a38360c58e4cb142347f27ee70ffa",
+        "stability_hash_expected": "7a0c959c4eaee689ce32d6f625debd435b7d2eeac6ece4b54f1c74f18f6c5112",
+        "stability_hash_actual": "7a0c959c4eaee689ce32d6f625debd435b7d2eeac6ece4b54f1c74f18f6c5112",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -3720,6 +3864,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -3790,7 +3942,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_items_container_alignment_46232_1771700909886016400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_items_container_alignment_224388_1779706263479874700.jsonl"
           }
         }
       },
@@ -3801,8 +3953,8 @@
         "image_sha256": [
           "28c492c1793cb9e79d7994e4284d592df8d28c442fbdb6a73a70968353757db3"
         ],
-        "stability_hash_expected": "4c58f8855bf44f18d19876b95ac3a0284a1ff0fb03c3b2a90506f21379aeb72d",
-        "stability_hash_actual": "4c58f8855bf44f18d19876b95ac3a0284a1ff0fb03c3b2a90506f21379aeb72d",
+        "stability_hash_expected": "bf8b6da2fd5cce5eba124a99b2e313187f35f45284387a0ef6d3dc70eac50234",
+        "stability_hash_actual": "bf8b6da2fd5cce5eba124a99b2e313187f35f45284387a0ef6d3dc70eac50234",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -3965,6 +4117,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -4054,7 +4214,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_self_item_override_46232_1771700909962295800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_self_item_override_224388_1779706264947900000.jsonl"
           }
         }
       },
@@ -4065,8 +4225,8 @@
         "image_sha256": [
           "73b62e18fb61fe1245a5bd0c2ca19582259db99de235a57db892a2f70f3fd519"
         ],
-        "stability_hash_expected": "3da2faa3308a8f2cb758db42c55b19e45ade76566b47c7b48cd256a8c8918b17",
-        "stability_hash_actual": "3da2faa3308a8f2cb758db42c55b19e45ade76566b47c7b48cd256a8c8918b17",
+        "stability_hash_expected": "458010f30b7f18e8073574a760d8281e794858eca8b80aabf2d05f3591948aa8",
+        "stability_hash_actual": "458010f30b7f18e8073574a760d8281e794858eca8b80aabf2d05f3591948aa8",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -4181,6 +4341,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -4232,7 +4400,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_two_column_distribution_46232_1771700910172679800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_two_column_distribution_224388_1779706265179039900.jsonl"
           }
         }
       },
@@ -4243,8 +4411,8 @@
         "image_sha256": [
           "5bb63d3f215a7a374977b4a0c4248e1ab97442621a05ddff9c8acda42fef0429"
         ],
-        "stability_hash_expected": "7126c5bc8faabe1e3dd95b2afb27d27daa2b6b46fae636dc0302cc39d30c3ce2",
-        "stability_hash_actual": "7126c5bc8faabe1e3dd95b2afb27d27daa2b6b46fae636dc0302cc39d30c3ce2",
+        "stability_hash_expected": "e183beba4721fff5794ec13d27c053c6f2bb2bb1f03c3fc8f0f52c047c175d41",
+        "stability_hash_actual": "e183beba4721fff5794ec13d27c053c6f2bb2bb1f03c3fc8f0f52c047c175d41",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -4342,6 +4510,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -4413,7 +4589,7 @@
               "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_fragmentation_break_inside_avoid_block_46232_1771700911416311900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_fragmentation_break_inside_avoid_block_224388_1779706265258180700.jsonl"
           }
         }
       },
@@ -4425,8 +4601,8 @@
           "2f7471f27655f0ad25cd665685a5a53919991c7ffbeed9728de25e6a224ebebc",
           "c71637f192584d069238ba133c320969352038a030052324b284386a7792b09d"
         ],
-        "stability_hash_expected": "313a168fa68aaeca63ac736ed5015f0c85b338e0e43b0ef23972c0615d5071da",
-        "stability_hash_actual": "313a168fa68aaeca63ac736ed5015f0c85b338e0e43b0ef23972c0615d5071da",
+        "stability_hash_expected": "321a01269ce6f2fa9cf63f20c3ff85e087d40f676f65a3d8df1401a8203a81b6",
+        "stability_hash_actual": "321a01269ce6f2fa9cf63f20c3ff85e087d40f676f65a3d8df1401a8203a81b6",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -4505,6 +4681,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": []
@@ -4518,7 +4702,7 @@
               "jit.page_break.trigger": 24
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_fragmentation_long_paragraph_46232_1771700912380657900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_fragmentation_long_paragraph_224388_1779706265721244100.jsonl"
           }
         }
       },
@@ -4533,8 +4717,8 @@
           "ef9f6df6416795fcc263f17f8c80a509ace735fc3bcfb096f27affe0be165609",
           "c3f38f0e7927e39c9a74818e36792f9c1b562b3b9d9f7929e63260acadcd07fd"
         ],
-        "stability_hash_expected": "c0d7fc2d24df43df820928d8ac66b148a34510fdad0acf9db9a009fea3954587",
-        "stability_hash_actual": "c0d7fc2d24df43df820928d8ac66b148a34510fdad0acf9db9a009fea3954587",
+        "stability_hash_expected": "5b014d5a0a149b502a3639136c5600ca10a20e27dc1d829c902d143734364524",
+        "stability_hash_actual": "5b014d5a0a149b502a3639136c5600ca10a20e27dc1d829c902d143734364524",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -4661,6 +4845,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -4712,7 +4904,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_gap_row_column_var_resolution_46232_1771700912926970900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_gap_row_column_var_resolution_224388_1779706266319492400.jsonl"
           }
         }
       },
@@ -4723,8 +4915,8 @@
         "image_sha256": [
           "7f7dbbdded6e5147f089b1c574f846b978e7ae81af173395f60e86eb81812519"
         ],
-        "stability_hash_expected": "eed25c8684cfd69f842fd1bc07aa29bd589edca4f0f1b4a23d86be9cce275abb",
-        "stability_hash_actual": "eed25c8684cfd69f842fd1bc07aa29bd589edca4f0f1b4a23d86be9cce275abb",
+        "stability_hash_expected": "ea9dabec024fbe1d451002524e8364ccb95d90dc8e8d19c9c90a50cc8dc7faa1",
+        "stability_hash_actual": "ea9dabec024fbe1d451002524e8364ccb95d90dc8e8d19c9c90a50cc8dc7faa1",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -4823,6 +5015,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -4875,7 +5075,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_conflicting_explicit_slots_fall_forward_46232_1771700912955234300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_conflicting_explicit_slots_fall_forward_224388_1779706266510393000.jsonl"
           }
         }
       },
@@ -4886,8 +5086,8 @@
         "image_sha256": [
           "55abc8b7f736e78fd8ad0192497d4b65b76e80c48811e4b61dd81e21cb1645a6"
         ],
-        "stability_hash_expected": "471421c8d9b80817ad27231e3dd73d72c4580065de4c9b098abe3c60fc41c91a",
-        "stability_hash_actual": "471421c8d9b80817ad27231e3dd73d72c4580065de4c9b098abe3c60fc41c91a",
+        "stability_hash_expected": "e2f7c012dfb1ed97957ce749d0fee555c3cd8f15899ca6b6f6a913c460971def",
+        "stability_hash_actual": "e2f7c012dfb1ed97957ce749d0fee555c3cd8f15899ca6b6f6a913c460971def",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -5024,6 +5224,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -5114,7 +5322,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_explicit_row_column_starts_46232_1771700913079925800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_explicit_row_column_starts_224388_1779706266564577600.jsonl"
           }
         }
       },
@@ -5125,8 +5333,8 @@
         "image_sha256": [
           "5883c2daf852032b96e294230e15fb4bd2f6fd7272170673aa5b9899b6432b7c"
         ],
-        "stability_hash_expected": "fa5914105b767be1ab407432bdc04d682eecbd245a72565886e6da2456e616d8",
-        "stability_hash_actual": "fa5914105b767be1ab407432bdc04d682eecbd245a72565886e6da2456e616d8",
+        "stability_hash_expected": "5b4dd6b669a62960e67cc5f6a7f840d6ea55bb3acc739b5e2a8ed940da178f24",
+        "stability_hash_actual": "5b4dd6b669a62960e67cc5f6a7f840d6ea55bb3acc739b5e2a8ed940da178f24",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -5262,6 +5470,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -5352,7 +5568,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_rows_only_column_derivation_46232_1771700914889170100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_rows_only_column_derivation_224388_1779706266931242800.jsonl"
           }
         }
       },
@@ -5363,8 +5579,8 @@
         "image_sha256": [
           "4d56e1afee9a79f90fe9985cccebf3bcf7dff52b537b465d2e7b169219e8080a"
         ],
-        "stability_hash_expected": "0cf0a20e842e34511c1216c4f340a7a84ce7ea54e3a83b7b60aa82321280050d",
-        "stability_hash_actual": "0cf0a20e842e34511c1216c4f340a7a84ce7ea54e3a83b7b60aa82321280050d",
+        "stability_hash_expected": "07200ceb08a48fced099525df1f4b9046d5c3d4f78cacc7a1b49752c7bf88171",
+        "stability_hash_actual": "07200ceb08a48fced099525df1f4b9046d5c3d4f78cacc7a1b49752c7bf88171",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -5501,6 +5717,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -5610,7 +5834,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_template_rows_columns_matrix_46232_1771700915118963500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_template_rows_columns_matrix_224388_1779706267822837800.jsonl"
           }
         }
       },
@@ -5621,8 +5845,8 @@
         "image_sha256": [
           "4d56e1afee9a79f90fe9985cccebf3bcf7dff52b537b465d2e7b169219e8080a"
         ],
-        "stability_hash_expected": "0cf0a20e842e34511c1216c4f340a7a84ce7ea54e3a83b7b60aa82321280050d",
-        "stability_hash_actual": "0cf0a20e842e34511c1216c4f340a7a84ce7ea54e3a83b7b60aa82321280050d",
+        "stability_hash_expected": "3d332c2dbcb47021f7496812fe529a109c434757f919f494519353dec137d5c0",
+        "stability_hash_actual": "3d332c2dbcb47021f7496812fe529a109c434757f919f494519353dec137d5c0",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -5728,6 +5952,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -5798,7 +6030,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inheritance_unset_noninherited_resets_46232_1771700915164528400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inheritance_unset_noninherited_resets_224388_1779706268575308000.jsonl"
           }
         }
       },
@@ -5809,8 +6041,328 @@
         "image_sha256": [
           "ceb9d2f025a5fa7b5f6348f24b470f8f68430d87963e411d312ae72a3b49c712"
         ],
-        "stability_hash_expected": "53a76679879a49b0bafd1a7c1c9c7149b62e58a6b2a3fa688e95d25a8423a191",
-        "stability_hash_actual": "53a76679879a49b0bafd1a7c1c9c7149b62e58a6b2a3fa688e95d25a8423a191",
+        "stability_hash_expected": "fa297792afc5abcb15d6ba42cc454817010084af2f42920655884a2c26e60f85",
+        "stability_hash_actual": "fa297792afc5abcb15d6ba42cc454817010084af2f42920655884a2c26e60f85",
+        "stability_hash_ok": true,
+        "emitted": null
+      },
+      "ok": true
+    },
+    {
+      "id": "inline_svg_image_mixed_run_torture",
+      "path": "_css_working/fixtures/inline_svg_image_mixed_run_torture.json",
+      "labels": [
+        "full",
+        "inline",
+        "svg",
+        "image",
+        "paint",
+        "text",
+        "release"
+      ],
+      "description": "Mixed paragraph inline content should keep text, inline-block styling, inline SVG, and inline raster images in one deterministic inline run.",
+      "required_features": [
+        "inline-formatting",
+        "inline-block",
+        "inline-svg",
+        "html-img",
+        "replaced-content",
+        "paint",
+        "render-time-text-trace"
+      ],
+      "expected_warnings": [],
+      "actual_warnings": [],
+      "warnings_ok": true,
+      "stages": {
+        "parser": {
+          "ok": true,
+          "error": null
+        },
+        "compute": {
+          "ok": true,
+          "glyph_report_count": 0,
+          "page_data_present": false,
+          "assertions_enabled": true,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 4,
+            "computed_event_count": 58,
+            "checks": [
+              {
+                "index": 0,
+                "ok": true,
+                "node": "html:nth-child(1) > body:nth-child(2) > p.run:nth-child(1)",
+                "style_mismatches": [],
+                "vars_mismatch": null,
+                "vars_count_mismatch": null
+              },
+              {
+                "index": 1,
+                "ok": true,
+                "node": "html:nth-child(1) > body:nth-child(2) > p.run:nth-child(1) > span.chip:nth-child(2)",
+                "style_mismatches": [],
+                "vars_mismatch": null,
+                "vars_count_mismatch": null
+              },
+              {
+                "index": 2,
+                "ok": true,
+                "node": "html:nth-child(1) > body:nth-child(2) > p.run:nth-child(1) > svg.mark:nth-child(3)",
+                "style_mismatches": [],
+                "vars_mismatch": null,
+                "vars_count_mismatch": null
+              },
+              {
+                "index": 3,
+                "ok": true,
+                "node": "html:nth-child(1) > body:nth-child(2) > p.run:nth-child(1) > img.pic:nth-child(4)",
+                "style_mismatches": [],
+                "vars_mismatch": null,
+                "vars_count_mismatch": null
+              }
+            ]
+          }
+        },
+        "layout": {
+          "ok": true,
+          "expected_page_count": 1,
+          "actual_page_count": 1,
+          "dpi": 120,
+          "assertions_enabled": true,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 3,
+            "checks": [
+              {
+                "index": 0,
+                "ok": true,
+                "kind": "color_run_length",
+                "page": 1,
+                "axis": "x",
+                "fixed": 30,
+                "start": 90,
+                "expected_rgba": [
+                  20,
+                  180,
+                  80,
+                  255
+                ],
+                "tolerance": 8,
+                "actual_run_length": 42,
+                "min_length": 40,
+                "max_length": 48
+              },
+              {
+                "index": 1,
+                "ok": true,
+                "kind": "color_run_length",
+                "page": 1,
+                "axis": "x",
+                "fixed": 30,
+                "start": 135,
+                "expected_rgba": [
+                  0,
+                  102,
+                  204,
+                  255
+                ],
+                "tolerance": 8,
+                "actual_run_length": 27,
+                "min_length": 26,
+                "max_length": 34
+              },
+              {
+                "index": 2,
+                "ok": true,
+                "kind": "color_run_length",
+                "page": 1,
+                "axis": "x",
+                "fixed": 30,
+                "start": 165,
+                "expected_rgba": [
+                  255,
+                  0,
+                  0,
+                  255
+                ],
+                "tolerance": 8,
+                "actual_run_length": 21,
+                "min_length": 20,
+                "max_length": 28
+              }
+            ]
+          }
+        },
+        "text_trace": {
+          "assertions_enabled": true,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 3,
+            "block_count": 3,
+            "checks": [
+              {
+                "index": 0,
+                "ok": true,
+                "page": 1,
+                "match_count": 1,
+                "candidate_count": 3,
+                "sample_matches": [
+                  {
+                    "page": 1,
+                    "text": "ALPHA"
+                  }
+                ]
+              },
+              {
+                "index": 1,
+                "ok": true,
+                "page": 1,
+                "match_count": 1,
+                "candidate_count": 3,
+                "sample_matches": [
+                  {
+                    "page": 1,
+                    "text": "BOX"
+                  }
+                ]
+              },
+              {
+                "index": 2,
+                "ok": true,
+                "page": 1,
+                "match_count": 1,
+                "candidate_count": 3,
+                "sample_matches": [
+                  {
+                    "page": 1,
+                    "text": "OMEGA"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "paint": {
+          "ok": true,
+          "checks": [
+            {
+              "page": 1,
+              "x": 45,
+              "y": 40,
+              "expected_rgba": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "actual_rgba": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "tolerance": 40,
+              "ok": true
+            },
+            {
+              "page": 1,
+              "x": 105,
+              "y": 35,
+              "expected_rgba": [
+                20,
+                180,
+                80,
+                255
+              ],
+              "actual_rgba": [
+                20,
+                180,
+                80,
+                255
+              ],
+              "tolerance": 8,
+              "ok": true
+            },
+            {
+              "page": 1,
+              "x": 155,
+              "y": 35,
+              "expected_rgba": [
+                0,
+                102,
+                204,
+                255
+              ],
+              "actual_rgba": [
+                0,
+                102,
+                204,
+                255
+              ],
+              "tolerance": 8,
+              "ok": true
+            },
+            {
+              "page": 1,
+              "x": 185,
+              "y": 35,
+              "expected_rgba": [
+                255,
+                0,
+                0,
+                255
+              ],
+              "actual_rgba": [
+                255,
+                0,
+                0,
+                255
+              ],
+              "tolerance": 8,
+              "ok": true
+            },
+            {
+              "page": 1,
+              "x": 220,
+              "y": 45,
+              "expected_rgba": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "actual_rgba": [
+                0,
+                0,
+                0,
+                255
+              ],
+              "tolerance": 40,
+              "ok": true
+            }
+          ]
+        },
+        "diagnostics": {
+          "ok": true,
+          "enabled": true,
+          "details": {
+            "summary_counts_total": {
+              "jit.layout.strategy": 3
+            },
+            "summary_context_count": 3,
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inline_svg_image_mixed_run_torture_224388_1779706269720244700.jsonl"
+          }
+        }
+      },
+      "artifacts": {
+        "pdf_bytes": 1254,
+        "pdf_sha256": "db570bf879101c001d0f5e30ba627f552c99024e9ad788bf8149f9614096a78c",
+        "image_count": 1,
+        "image_sha256": [
+          "806651150178b391ca23d2211475e131306af72211a672e65dc15f2cb8db9954"
+        ],
+        "stability_hash_expected": "5f2ed106c34130657ceb290cdf86275bf79c41f635001a036d581ac92e648ca6",
+        "stability_hash_actual": "5f2ed106c34130657ceb290cdf86275bf79c41f635001a036d581ac92e648ca6",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -5928,6 +6480,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": []
@@ -5940,7 +6500,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inset_left_var_resolution_46232_1771700916531006000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inset_left_var_resolution_224388_1779706270186279800.jsonl"
           }
         }
       },
@@ -5951,8 +6511,8 @@
         "image_sha256": [
           "9295a67195dcbd765eace2f34e0ba1948cb00a38efc852bd21227b61f8fcc2a8"
         ],
-        "stability_hash_expected": "ef184637968d59c574725f4457defff3794db58a7482cef5828a9f9eaae125c9",
-        "stability_hash_actual": "ef184637968d59c574725f4457defff3794db58a7482cef5828a9f9eaae125c9",
+        "stability_hash_expected": "43ac4eb5215ed2b375bcb688b3d85c45fd648e03596b0c2eb5d3ef9e8588ee36",
+        "stability_hash_actual": "43ac4eb5215ed2b375bcb688b3d85c45fd648e03596b0c2eb5d3ef9e8588ee36",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -6086,6 +6646,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -6213,7 +6781,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_inline_block_size_min_max_46232_1771700917032363700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_inline_block_size_min_max_224388_1779706270507224800.jsonl"
           }
         }
       },
@@ -6224,8 +6792,8 @@
         "image_sha256": [
           "5f8842aab75b831e1a67bfc2c0adbbcffc927f5f419454759dcbccf4084c1207"
         ],
-        "stability_hash_expected": "b8d14e6ad10d1dd35989803be69e9dc26d8d5dc8982a067695680521733efa6a",
-        "stability_hash_actual": "b8d14e6ad10d1dd35989803be69e9dc26d8d5dc8982a067695680521733efa6a",
+        "stability_hash_expected": "d2c3dcad69997de9f67b2324488016b4e96fe8ad40ca94d7eed9184840d2382d",
+        "stability_hash_actual": "d2c3dcad69997de9f67b2324488016b4e96fe8ad40ca94d7eed9184840d2382d",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -6289,6 +6857,14 @@
           "expected_page_count": 1,
           "actual_page_count": 1,
           "dpi": 120,
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
+        "text_trace": {
           "assertions_enabled": false,
           "assertions_ok": true,
           "assertions": {
@@ -6385,7 +6961,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_inset_horizontal_tb_ltr_46232_1771700917323886700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_inset_horizontal_tb_ltr_224388_1779706270510089600.jsonl"
           }
         }
       },
@@ -6396,8 +6972,8 @@
         "image_sha256": [
           "088150b9838263245d13569c35a35e98c07df072b3165e1b879fcf27742ee969"
         ],
-        "stability_hash_expected": "9cdaef714ab236a16532f177cab54a32b41f9f5a52bce2c4ceacf57210d51cb8",
-        "stability_hash_actual": "9cdaef714ab236a16532f177cab54a32b41f9f5a52bce2c4ceacf57210d51cb8",
+        "stability_hash_expected": "bbe1391a86b90611b730db48a46d4cc41a92d0473d882847f5e8eade20337938",
+        "stability_hash_actual": "bbe1391a86b90611b730db48a46d4cc41a92d0473d882847f5e8eade20337938",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -6460,6 +7036,14 @@
           "expected_page_count": 1,
           "actual_page_count": 1,
           "dpi": 120,
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
+        "text_trace": {
           "assertions_enabled": false,
           "assertions_ok": true,
           "assertions": {
@@ -6556,7 +7140,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_margin_padding_horizontal_tb_ltr_46232_1771700917851509700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_margin_padding_horizontal_tb_ltr_224388_1779706271013331100.jsonl"
           }
         }
       },
@@ -6567,8 +7151,8 @@
         "image_sha256": [
           "2516a87bafb6067f03ed79f60f7149f279d5ecbd85ac2dc03d18a203827c4bbf"
         ],
-        "stability_hash_expected": "b1ce4e097e2a2be228dbf56698fdc7bd453c1485c54c5a4c736cd34debcf1cad",
-        "stability_hash_actual": "b1ce4e097e2a2be228dbf56698fdc7bd453c1485c54c5a4c736cd34debcf1cad",
+        "stability_hash_expected": "3752423858a003e6fef7cfd263328f2281ed6264ca1d0188b8beff3792fcf161",
+        "stability_hash_actual": "3752423858a003e6fef7cfd263328f2281ed6264ca1d0188b8beff3792fcf161",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -6713,6 +7297,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -6783,7 +7375,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_overflow_hidden_clips_absolute_child_46232_1771700919077159200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_overflow_hidden_clips_absolute_child_224388_1779706271138241000.jsonl"
           }
         }
       },
@@ -6794,8 +7386,8 @@
         "image_sha256": [
           "c991b54eaad0e8ac5ba41c65c26df3038cd5e411be0238e58d030fcde0aefdfd"
         ],
-        "stability_hash_expected": "9806a9fdc1fe12490ca9e70cb4525a1aeff6c822e5c7a1713c4e86e21d090a38",
-        "stability_hash_actual": "9806a9fdc1fe12490ca9e70cb4525a1aeff6c822e5c7a1713c4e86e21d090a38",
+        "stability_hash_expected": "5eddd23d6ad0798a14e4de3b5f56f6582de0d6321c12ddc81f7e0d1949e8213d",
+        "stability_hash_actual": "5eddd23d6ad0798a14e4de3b5f56f6582de0d6321c12ddc81f7e0d1949e8213d",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -6940,6 +7532,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -7010,7 +7610,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_overflow_visible_allows_absolute_bleed_46232_1771700920338365300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_overflow_visible_allows_absolute_bleed_224388_1779706272115672000.jsonl"
           }
         }
       },
@@ -7021,8 +7621,8 @@
         "image_sha256": [
           "6e2424093331cbff757ac8f7e28896985d059826fceaa220dd0044e49617759b"
         ],
-        "stability_hash_expected": "c53bac964a4fe5250a30821cd0291492d5f773a655c0afd167c6ba4417e0ad0b",
-        "stability_hash_actual": "c53bac964a4fe5250a30821cd0291492d5f773a655c0afd167c6ba4417e0ad0b",
+        "stability_hash_expected": "58d085a89002cf07bad8f458c910773b41d3f6deea4dfb9ecbf38ebe6f5b47d2",
+        "stability_hash_actual": "58d085a89002cf07bad8f458c910773b41d3f6deea4dfb9ecbf38ebe6f5b47d2",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -7120,6 +7720,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -7168,12 +7776,11 @@
           "enabled": true,
           "details": {
             "summary_counts_total": {
-              "jit.known_loss.declaration_parsed_no_effect": 3,
               "jit.layout.strategy": 3,
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_paged_break_before_forced_block_46232_1771700921646695100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_paged_break_before_forced_block_224388_1779706272727239900.jsonl"
           }
         }
       },
@@ -7185,8 +7792,8 @@
           "e2ae9089e4dadb9af023a3c8ebc7521e4897a12b309566f13dff1d7ba200e6f0",
           "eba778b96ddae69d9b7a0691dea7836e040782b9cbdd50de46c0ccd07d677822"
         ],
-        "stability_hash_expected": "dd7a3dfa5f28c50b9c2008a7ed7b8ec36ce735d8577d0c172632b9b824c1256e",
-        "stability_hash_actual": "dd7a3dfa5f28c50b9c2008a7ed7b8ec36ce735d8577d0c172632b9b824c1256e",
+        "stability_hash_expected": "62e83d5eba30e961bf14d7c59af0d59b6cf6361601e0a10e64c1bc0e360004e4",
+        "stability_hash_actual": "62e83d5eba30e961bf14d7c59af0d59b6cf6361601e0a10e64c1bc0e360004e4",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -7341,6 +7948,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -7392,7 +8007,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_auto_inset_static_position_fallback_46232_1771700922470880300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_auto_inset_static_position_fallback_224388_1779706273325762400.jsonl"
           }
         }
       },
@@ -7403,8 +8018,8 @@
         "image_sha256": [
           "45bea579b1f12e501459473d13d0072054d8dd06e9b7a8dd24b656acc050cdd6"
         ],
-        "stability_hash_expected": "bdc7f06e6830d3b0f184991bb3ca39178db8cac050f01be2f87c1d2a77393073",
-        "stability_hash_actual": "bdc7f06e6830d3b0f184991bb3ca39178db8cac050f01be2f87c1d2a77393073",
+        "stability_hash_expected": "127eb88ea4c41c5f7072b8a2b6883fe9258ad0fa543b3fe342935e797c6f9710",
+        "stability_hash_actual": "127eb88ea4c41c5f7072b8a2b6883fe9258ad0fa543b3fe342935e797c6f9710",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -7522,6 +8137,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -7592,7 +8215,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_empty_box_background_46232_1771700922649633100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_empty_box_background_224388_1779706273327806400.jsonl"
           }
         }
       },
@@ -7603,8 +8226,8 @@
         "image_sha256": [
           "06ce991bcb046fa8927e7c06951b47108e19a6cabf13ce2e22aabe871a4fb85c"
         ],
-        "stability_hash_expected": "f54955187ecbed45afce15650fd4c9947dafcad323a219a70a2f6d52c63bc031",
-        "stability_hash_actual": "f54955187ecbed45afce15650fd4c9947dafcad323a219a70a2f6d52c63bc031",
+        "stability_hash_expected": "e8b51986b327124ecdb28d381321d8d593aba0e465b8460ad7953610e82d147d",
+        "stability_hash_actual": "e8b51986b327124ecdb28d381321d8d593aba0e465b8460ad7953610e82d147d",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -7779,6 +8402,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -7849,7 +8480,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_explicit_width_overflow_no_clamp_46232_1771700922684469300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_explicit_width_overflow_no_clamp_224388_1779706274360754300.jsonl"
           }
         }
       },
@@ -7860,8 +8491,8 @@
         "image_sha256": [
           "257a4bf813436fcc56207c7ca39060ae5761501cde68d27b1ef91b6de1e69617"
         ],
-        "stability_hash_expected": "299dd2b3e84998779563f33f146c77075b8c4e76f6dea8731a4366ab8e6ef417",
-        "stability_hash_actual": "299dd2b3e84998779563f33f146c77075b8c4e76f6dea8731a4366ab8e6ef417",
+        "stability_hash_expected": "86fdf392c8800a33dee46183c4d83a622590d51e727ec9d562b9343266fc75b7",
+        "stability_hash_actual": "86fdf392c8800a33dee46183c4d83a622590d51e727ec9d562b9343266fc75b7",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -7997,6 +8628,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -8067,7 +8706,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_initial_containing_block_from_static_parent_46232_1771700923634668500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_initial_containing_block_from_static_parent_224388_1779706274484281200.jsonl"
           }
         }
       },
@@ -8078,8 +8717,8 @@
         "image_sha256": [
           "d75d47738f2bdb0274b256a7da564591f1cd68d728a17863eb33bafcbd981ac6"
         ],
-        "stability_hash_expected": "ece31850cb73b7b833849eee24fec92546edda90247a91abf3b103c468232ad4",
-        "stability_hash_actual": "ece31850cb73b7b833849eee24fec92546edda90247a91abf3b103c468232ad4",
+        "stability_hash_expected": "a3acde17715191d23dabb69a269222b5e944db63c24e77285416480a09a63f17",
+        "stability_hash_actual": "a3acde17715191d23dabb69a269222b5e944db63c24e77285416480a09a63f17",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -8197,6 +8836,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -8267,7 +8914,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_left_right_width_precedence_46232_1771700924211311800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_left_right_width_precedence_224388_1779706274528245000.jsonl"
           }
         }
       },
@@ -8278,8 +8925,8 @@
         "image_sha256": [
           "7ab75f5237e14a23e08c6d8669f641730af6dc00182cfd19d1df1e7fe53980c7"
         ],
-        "stability_hash_expected": "898db1d9d69bf7233c426ebdeda00d2ff4f4a90ba1e0444d20694527a4ad8545",
-        "stability_hash_actual": "898db1d9d69bf7233c426ebdeda00d2ff4f4a90ba1e0444d20694527a4ad8545",
+        "stability_hash_expected": "8aaf52ace27b691578f22a53b6b0875457ad68e9505c4a0d114488161fe35e21",
+        "stability_hash_actual": "8aaf52ace27b691578f22a53b6b0875457ad68e9505c4a0d114488161fe35e21",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -8435,6 +9082,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -8486,7 +9141,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_nearest_positioned_ancestor_46232_1771700925088113800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_nearest_positioned_ancestor_224388_1779706274598744000.jsonl"
           }
         }
       },
@@ -8497,8 +9152,8 @@
         "image_sha256": [
           "a2001025d8019aa754788ae01d7cc50265b791fadc497a39dc4a55b2ecd3d1d2"
         ],
-        "stability_hash_expected": "4a87c213af7c8ac28f1a380b85d6eb484f20dea0fbfa94ce537daa6b0ac89391",
-        "stability_hash_actual": "4a87c213af7c8ac28f1a380b85d6eb484f20dea0fbfa94ce537daa6b0ac89391",
+        "stability_hash_expected": "e31a62462ac1ad4c31ff4b54330a76f79f40252c6c6b5a4a8048325d6051f19e",
+        "stability_hash_actual": "e31a62462ac1ad4c31ff4b54330a76f79f40252c6c6b5a4a8048325d6051f19e",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -8654,6 +9309,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -8705,7 +9368,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_percent_nearest_positioned_ancestor_46232_1771700925094626900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_percent_nearest_positioned_ancestor_224388_1779706275551435400.jsonl"
           }
         }
       },
@@ -8716,8 +9379,8 @@
         "image_sha256": [
           "ad4744585c7632326df4439f63e1b1586d318a2061f9edd37dc1794d9185cbd8"
         ],
-        "stability_hash_expected": "527ede3dc5d9e542c886c8919758d105917afff034131d80a68775d8fc4e1fd2",
-        "stability_hash_actual": "527ede3dc5d9e542c886c8919758d105917afff034131d80a68775d8fc4e1fd2",
+        "stability_hash_expected": "885ef0e990f9fea54e34ec18cdede507ae1d66e0ef8dc8c2eb216518296f55d1",
+        "stability_hash_actual": "885ef0e990f9fea54e34ec18cdede507ae1d66e0ef8dc8c2eb216518296f55d1",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -8835,6 +9498,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -8887,7 +9558,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_negative_page_one_only_46232_1771700925649100100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_negative_page_one_only_224388_1779706275556918800.jsonl"
           }
         }
       },
@@ -8899,8 +9570,8 @@
           "cece394a4751d48ad5da13d2decf09894c802d131302494743434a28be21bd13",
           "553bdbe7e182c2e6050ee4f3423f49a7077fbdbee39aca4ff3cda1a478bd6ef4"
         ],
-        "stability_hash_expected": "9839c8b03d40c65b0d43f296b5317560f1ba2a7e305e44cbff57621765709ea5",
-        "stability_hash_actual": "9839c8b03d40c65b0d43f296b5317560f1ba2a7e305e44cbff57621765709ea5",
+        "stability_hash_expected": "49e946670c492c239f5617321430fa8d8739caa7b2e24c857820592d8bea0a5d",
+        "stability_hash_actual": "49e946670c492c239f5617321430fa8d8739caa7b2e24c857820592d8bea0a5d",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -9017,6 +9688,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -9088,7 +9767,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_page_one_only_46232_1771700926123401900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_page_one_only_224388_1779706275559922500.jsonl"
           }
         }
       },
@@ -9100,8 +9779,8 @@
           "505776781cac6c697ce36958846d38ddd76cc500d14ee3c659cadd98131e7136",
           "bd89fa281f1eba5c27cbcccf9d56db4067d90f34dead0c673eb2f92d47de1634"
         ],
-        "stability_hash_expected": "16b8100d929364455517d0d75b0a2f319d5a34f239b39062eef5ced1419392b0",
-        "stability_hash_actual": "16b8100d929364455517d0d75b0a2f319d5a34f239b39062eef5ced1419392b0",
+        "stability_hash_expected": "4e1a0d95ca9c4766e39533f7c445e10dd90d1932a510658e00e7b67ad12c3901",
+        "stability_hash_actual": "4e1a0d95ca9c4766e39533f7c445e10dd90d1932a510658e00e7b67ad12c3901",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -9228,6 +9907,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -9298,7 +9985,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_source_order_zindex_46232_1771700926457140800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_source_order_zindex_224388_1779706275638563100.jsonl"
           }
         }
       },
@@ -9309,8 +9996,8 @@
         "image_sha256": [
           "53ee99f6f8720a7035e9a99755ec32e8304c07eafc654a7809f022bf2de48a2d"
         ],
-        "stability_hash_expected": "6c79eba441ace14974cb56585888d977eba612a8e74268d9eb910e4637791eea",
-        "stability_hash_actual": "6c79eba441ace14974cb56585888d977eba612a8e74268d9eb910e4637791eea",
+        "stability_hash_expected": "404befeff2e1c8b4d21df18662cf14a586fe37c325f5286534882a80f98c290d",
+        "stability_hash_actual": "404befeff2e1c8b4d21df18662cf14a586fe37c325f5286534882a80f98c290d",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -9440,6 +10127,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -9510,7 +10205,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_specificity_zindex_id_wins_46232_1771700926940959800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_specificity_zindex_id_wins_224388_1779706276389208600.jsonl"
           }
         }
       },
@@ -9521,8 +10216,8 @@
         "image_sha256": [
           "53ee99f6f8720a7035e9a99755ec32e8304c07eafc654a7809f022bf2de48a2d"
         ],
-        "stability_hash_expected": "6c79eba441ace14974cb56585888d977eba612a8e74268d9eb910e4637791eea",
-        "stability_hash_actual": "6c79eba441ace14974cb56585888d977eba612a8e74268d9eb910e4637791eea",
+        "stability_hash_expected": "404befeff2e1c8b4d21df18662cf14a586fe37c325f5286534882a80f98c290d",
+        "stability_hash_actual": "404befeff2e1c8b4d21df18662cf14a586fe37c325f5286534882a80f98c290d",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -9647,6 +10342,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -9717,7 +10420,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_zindex_overlay_46232_1771700929102463800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_zindex_overlay_224388_1779706277801733100.jsonl"
           }
         }
       },
@@ -9728,8 +10431,8 @@
         "image_sha256": [
           "1b5a9e346f4cf9d72eab7c0c4350644a6457c6280faed4fefc737e1a619b49b1"
         ],
-        "stability_hash_expected": "9c14707dcc93b3c250b5a4c2463e3fee5dfd1d96b864a4cfd7d2d3dcbf601912",
-        "stability_hash_actual": "9c14707dcc93b3c250b5a4c2463e3fee5dfd1d96b864a4cfd7d2d3dcbf601912",
+        "stability_hash_expected": "0b2f8b19d78f2dcae5c40e5c7c43479244ef5f483dbf9eed3e22a3d0047e3024",
+        "stability_hash_actual": "0b2f8b19d78f2dcae5c40e5c7c43479244ef5f483dbf9eed3e22a3d0047e3024",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -9847,6 +10550,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -9917,7 +10628,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_top_bottom_height_precedence_46232_1771700929467324500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_top_bottom_height_precedence_224388_1779706277804737600.jsonl"
           }
         }
       },
@@ -9928,8 +10639,8 @@
         "image_sha256": [
           "734e81ec85f290aa09fc6f67a47e20a7259441d5cf07b14efc8cc4901a137c73"
         ],
-        "stability_hash_expected": "338c4c649de8905939562b0d539ad43ec70446c79f986a85893dab5e83af602a",
-        "stability_hash_actual": "338c4c649de8905939562b0d539ad43ec70446c79f986a85893dab5e83af602a",
+        "stability_hash_expected": "444ca97cb8167d5caf2b7308e7f7b0fa17dfea13d00c4be6572368a8d3db737b",
+        "stability_hash_actual": "444ca97cb8167d5caf2b7308e7f7b0fa17dfea13d00c4be6572368a8d3db737b",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -10066,6 +10777,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -10136,7 +10855,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_transform_establishes_containing_block_46232_1771700930150036300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_transform_establishes_containing_block_224388_1779706278092294400.jsonl"
           }
         }
       },
@@ -10147,8 +10866,8 @@
         "image_sha256": [
           "26c085bc21af56f807919dc5296e812bdafdaf86eb6201e83cea4397f643f2ce"
         ],
-        "stability_hash_expected": "ac6fe174fbb44cbf4c706719361ffc6a730172f0f49f3c5353880f351884e649",
-        "stability_hash_actual": "ac6fe174fbb44cbf4c706719361ffc6a730172f0f49f3c5353880f351884e649",
+        "stability_hash_expected": "3f6fdf2924957b0646ebcfaadbeabcaec207791c9c6d370cd361f39c5500955a",
+        "stability_hash_actual": "3f6fdf2924957b0646ebcfaadbeabcaec207791c9c6d370cd361f39c5500955a",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -10247,6 +10966,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -10299,7 +11026,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_negative_zindex_under_content_46232_1771700931360690400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_negative_zindex_under_content_224388_1779706278307900400.jsonl"
           }
         }
       },
@@ -10311,8 +11038,8 @@
           "160c4f68aa9b3b025dd0e3695be73558c7e3f842dad0440e7fa7ed644b7c2949",
           "bd89fa281f1eba5c27cbcccf9d56db4067d90f34dead0c673eb2f92d47de1634"
         ],
-        "stability_hash_expected": "48e9d351e8da59f3aecef747add389d0cffdfacdf9869f7accf766076a4a6b13",
-        "stability_hash_actual": "48e9d351e8da59f3aecef747add389d0cffdfacdf9869f7accf766076a4a6b13",
+        "stability_hash_expected": "32a72e35dadb80704da87e19a16d8487ca2850973ee60da6e99a4e6c4c4959dd",
+        "stability_hash_actual": "32a72e35dadb80704da87e19a16d8487ca2850973ee60da6e99a4e6c4c4959dd",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -10429,6 +11156,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -10500,7 +11235,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_repeats_each_page_46232_1771700931769622000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_repeats_each_page_224388_1779706279106243300.jsonl"
           }
         }
       },
@@ -10512,8 +11247,8 @@
           "1f22ec500f8d6e483cbd74e082d8df67c32049c3bf426f770906d8742b05a90c",
           "2f73ddd82ad3235b5e3721882839bd7b9234b0c0a4e6dc40be9045d17132c44f"
         ],
-        "stability_hash_expected": "877c90fcfd725e516fd0cfc257f52b5a1cbe736768f035e8ba00b1ce9fea0f08",
-        "stability_hash_actual": "877c90fcfd725e516fd0cfc257f52b5a1cbe736768f035e8ba00b1ce9fea0f08",
+        "stability_hash_expected": "1c0acea57e5ac9c9a59ac28681c0ae72b470d58ee8f08ca61c7d4c329cf178aa",
+        "stability_hash_actual": "1c0acea57e5ac9c9a59ac28681c0ae72b470d58ee8f08ca61c7d4c329cf178aa",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -10638,6 +11373,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -10708,7 +11451,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_zindex_front_ordering_46232_1771700932228688400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_zindex_front_ordering_224388_1779706279550929900.jsonl"
           }
         }
       },
@@ -10719,8 +11462,8 @@
         "image_sha256": [
           "1b5a9e346f4cf9d72eab7c0c4350644a6457c6280faed4fefc737e1a619b49b1"
         ],
-        "stability_hash_expected": "9c14707dcc93b3c250b5a4c2463e3fee5dfd1d96b864a4cfd7d2d3dcbf601912",
-        "stability_hash_actual": "9c14707dcc93b3c250b5a4c2463e3fee5dfd1d96b864a4cfd7d2d3dcbf601912",
+        "stability_hash_expected": "0b2f8b19d78f2dcae5c40e5c7c43479244ef5f483dbf9eed3e22a3d0047e3024",
+        "stability_hash_actual": "0b2f8b19d78f2dcae5c40e5c7c43479244ef5f483dbf9eed3e22a3d0047e3024",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -10839,6 +11582,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -10871,7 +11622,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_bottom_containing_height_46232_1771700933585011800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_bottom_containing_height_224388_1779706279596369900.jsonl"
           }
         }
       },
@@ -10882,8 +11633,8 @@
         "image_sha256": [
           "c207b80ee94bce53fc9d17d922102515909ae3c8deff974d8a3311d3850b2aee"
         ],
-        "stability_hash_expected": "43683e1c7eb6d3c3b3490e81f694ed0d1b3f0a9db36728187fb24a65f2619ceb",
-        "stability_hash_actual": "43683e1c7eb6d3c3b3490e81f694ed0d1b3f0a9db36728187fb24a65f2619ceb",
+        "stability_hash_expected": "a050a21d03ffa13c380c0339558306ca9bdc3af3768a8527ef2a7c5da00a2d12",
+        "stability_hash_actual": "a050a21d03ffa13c380c0339558306ca9bdc3af3768a8527ef2a7c5da00a2d12",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -11002,6 +11753,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -11034,7 +11793,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_left_containing_width_46232_1771700933632533200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_left_containing_width_224388_1779706280284513500.jsonl"
           }
         }
       },
@@ -11045,8 +11804,8 @@
         "image_sha256": [
           "0b4de3d15ea915be822cd27f66d41aa35767d85ef1a0a2f077a1b0fb35955478"
         ],
-        "stability_hash_expected": "ce0da3e4295f7940e942ddc52e0295c7a5bfc2bf9d977d9db0262a5d378e3dc6",
-        "stability_hash_actual": "ce0da3e4295f7940e942ddc52e0295c7a5bfc2bf9d977d9db0262a5d378e3dc6",
+        "stability_hash_expected": "40ccfac0282fc3eef3275c341c9e6c603c727d918598e01f2a56fe7b9c44e7b0",
+        "stability_hash_actual": "40ccfac0282fc3eef3275c341c9e6c603c727d918598e01f2a56fe7b9c44e7b0",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -11165,6 +11924,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -11197,7 +11964,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_right_containing_width_46232_1771700934186146400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_right_containing_width_224388_1779706280843026300.jsonl"
           }
         }
       },
@@ -11208,8 +11975,8 @@
         "image_sha256": [
           "b9b56cbf17c5db3957df4ab5022258ea0603be0db5ba119b1871ce2ea9297b95"
         ],
-        "stability_hash_expected": "501c2e4383edf1ed594a690f499376bc471a963241be5a0a28722d97770bbef4",
-        "stability_hash_actual": "501c2e4383edf1ed594a690f499376bc471a963241be5a0a28722d97770bbef4",
+        "stability_hash_expected": "9ca46894205f00f2d5625b54a4a1d66ca51f507e10a8ca0213ce9a617239bded",
+        "stability_hash_actual": "9ca46894205f00f2d5625b54a4a1d66ca51f507e10a8ca0213ce9a617239bded",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -11346,6 +12113,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -11378,7 +12153,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_inset_shorthand_uniform_46232_1771700934730465900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_inset_shorthand_uniform_224388_1779706280845045900.jsonl"
           }
         }
       },
@@ -11389,8 +12164,8 @@
         "image_sha256": [
           "90ee28437795aaefbc0c9406d3baa428ae1b30ea5cd9b8cc0b24a9f8952426fb"
         ],
-        "stability_hash_expected": "8833c30274c1dcf700b87385a869203b9dfd6feb11864cc268a56a7620d2aad7",
-        "stability_hash_actual": "8833c30274c1dcf700b87385a869203b9dfd6feb11864cc268a56a7620d2aad7",
+        "stability_hash_expected": "b44c6116bd6eb4191edc682f16adfded41dc55c1187eed836f756ba749197ee6",
+        "stability_hash_actual": "b44c6116bd6eb4191edc682f16adfded41dc55c1187eed836f756ba749197ee6",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -11546,6 +12321,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -11597,7 +12380,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_left_right_precedence_46232_1771700934941452900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_left_right_precedence_224388_1779706281445584700.jsonl"
           }
         }
       },
@@ -11608,8 +12391,8 @@
         "image_sha256": [
           "1d840ebf3bd4495fac2f338dd91c85507c683a47350a092e4300d55aaea62c0a"
         ],
-        "stability_hash_expected": "3f28616c1ae71c2f1dad83daf142fb8e65c0b60f274db5b58e059df9b799cbb0",
-        "stability_hash_actual": "3f28616c1ae71c2f1dad83daf142fb8e65c0b60f274db5b58e059df9b799cbb0",
+        "stability_hash_expected": "f95ca53970154026e559f41df870ac469ecd53a835cca8120739b881b736874e",
+        "stability_hash_actual": "f95ca53970154026e559f41df870ac469ecd53a835cca8120739b881b736874e",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -11784,6 +12567,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -11835,7 +12626,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_offset_preserves_flow_slot_46232_1771700935211158200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_offset_preserves_flow_slot_224388_1779706281460204200.jsonl"
           }
         }
       },
@@ -11846,8 +12637,8 @@
         "image_sha256": [
           "3b46cd67597432c7062c94cc71a5c8f1ddf0e0d27fe65fda020e169fb35f08df"
         ],
-        "stability_hash_expected": "c6bea22d619062125e572d62bf0ec098a339f313ec45923c5572302c9d4c3f81",
-        "stability_hash_actual": "c6bea22d619062125e572d62bf0ec098a339f313ec45923c5572302c9d4c3f81",
+        "stability_hash_expected": "08bd30e1bdaeeb1b4630a416425de346eef12e35c9de47a8125836e442eb1855",
+        "stability_hash_actual": "08bd30e1bdaeeb1b4630a416425de346eef12e35c9de47a8125836e442eb1855",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -11965,6 +12756,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -11997,7 +12796,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_percent_left_containing_width_46232_1771700935876847800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_percent_left_containing_width_224388_1779706281526260500.jsonl"
           }
         }
       },
@@ -12008,8 +12807,8 @@
         "image_sha256": [
           "9d72ae0eaa71d3daa72f15fe98aa94b0d38896d614b5257e70ee216c27bd1816"
         ],
-        "stability_hash_expected": "d2fac79e4fc5b84ccc44d6b2af6898638c685da0732ed8574e7a298f71a81731",
-        "stability_hash_actual": "d2fac79e4fc5b84ccc44d6b2af6898638c685da0732ed8574e7a298f71a81731",
+        "stability_hash_expected": "8fd842ed6f144e3461b4d48b788708428941b1ea6b2e0083a86e60490e52c5bc",
+        "stability_hash_actual": "8fd842ed6f144e3461b4d48b788708428941b1ea6b2e0083a86e60490e52c5bc",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -12127,6 +12926,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -12159,7 +12966,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_percent_top_containing_height_46232_1771700935878923100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_percent_top_containing_height_224388_1779706281683714900.jsonl"
           }
         }
       },
@@ -12170,8 +12977,8 @@
         "image_sha256": [
           "a96e97e086a6eb95a592da83527a889deed4b24dab89aa7e661d6e00fe968801"
         ],
-        "stability_hash_expected": "885908bb1516f0d7675e5837ed36549ee0bd0e3461ff37fb72e82898937beeb0",
-        "stability_hash_actual": "885908bb1516f0d7675e5837ed36549ee0bd0e3461ff37fb72e82898937beeb0",
+        "stability_hash_expected": "cbf520d5cbd5e732e75eb3465ca6480703aef8cccbc30a19f39380aab0f2b9fd",
+        "stability_hash_actual": "cbf520d5cbd5e732e75eb3465ca6480703aef8cccbc30a19f39380aab0f2b9fd",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -12327,6 +13134,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -12378,7 +13193,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_right_bottom_offsets_46232_1771700935997876500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_right_bottom_offsets_224388_1779706282140242800.jsonl"
           }
         }
       },
@@ -12389,8 +13204,8 @@
         "image_sha256": [
           "24ca0dab2cee5e49599bb089c58abd03cc2601b509e82ee420452cd9282a0bfb"
         ],
-        "stability_hash_expected": "6d8344443452972255e63e16d28d91eb7424630df34f79cb3c7d448094ae3473",
-        "stability_hash_actual": "6d8344443452972255e63e16d28d91eb7424630df34f79cb3c7d448094ae3473",
+        "stability_hash_expected": "87c602153ef4f089ae7971e69821ee01e595e52a66d73aedc59d656490c38c2f",
+        "stability_hash_actual": "87c602153ef4f089ae7971e69821ee01e595e52a66d73aedc59d656490c38c2f",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -12527,6 +13342,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -12578,7 +13401,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_top_bottom_precedence_46232_1771700936493720600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_top_bottom_precedence_224388_1779706282224494100.jsonl"
           }
         }
       },
@@ -12589,8 +13412,8 @@
         "image_sha256": [
           "9c38e5a0e152a81208786ed3156aabc93e0651ef98a3ecc08f50e9d9b1a20b83"
         ],
-        "stability_hash_expected": "4aa83a8569e5b21fcf9e5c5799869d60b60abb6c59385f41e25a6ea844983609",
-        "stability_hash_actual": "4aa83a8569e5b21fcf9e5c5799869d60b60abb6c59385f41e25a6ea844983609",
+        "stability_hash_expected": "7386ca604177d6047ce3a7b1a343db8c435101d6566e8cd23d955280458745f1",
+        "stability_hash_actual": "7386ca604177d6047ce3a7b1a343db8c435101d6566e8cd23d955280458745f1",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -12761,6 +13584,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -12850,7 +13681,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_attribute_variants_46232_1771700936585106200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_attribute_variants_224388_1779706282408248400.jsonl"
           }
         }
       },
@@ -12861,8 +13692,8 @@
         "image_sha256": [
           "cbd197a677ac80239841f5131b00a7fc26bb5edeb046fb6682a5fe10818d8a83"
         ],
-        "stability_hash_expected": "c211bc3cb7723bb1d826dcb166b5d75bfdd4b9c65219c200a98658860696b339",
-        "stability_hash_actual": "c211bc3cb7723bb1d826dcb166b5d75bfdd4b9c65219c200a98658860696b339",
+        "stability_hash_expected": "62b81eda398b5297ed06428120cceee6dc8b77b2f20e55e62660ecec94d438a4",
+        "stability_hash_actual": "62b81eda398b5297ed06428120cceee6dc8b77b2f20e55e62660ecec94d438a4",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -13031,6 +13862,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -13120,7 +13959,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_sibling_combinators_46232_1771700937433761200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_sibling_combinators_224388_1779706282625306200.jsonl"
           }
         }
       },
@@ -13131,8 +13970,8 @@
         "image_sha256": [
           "e8a7c9261f409c865b84609173baad23f22b571f5855bac6f645f90ce21a712d"
         ],
-        "stability_hash_expected": "8e98760c8233b014f8dd93f240525547cf217b4e1f45d0cebb4c4f62f305da50",
-        "stability_hash_actual": "8e98760c8233b014f8dd93f240525547cf217b4e1f45d0cebb4c4f62f305da50",
+        "stability_hash_expected": "47640035467eff10a7db43ebb4bec405056360e7a648c1a51134135e136b4956",
+        "stability_hash_actual": "47640035467eff10a7db43ebb4bec405056360e7a648c1a51134135e136b4956",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -13213,6 +14052,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -13245,7 +14092,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_specificity_id_wins_46232_1771700937691835700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_specificity_id_wins_224388_1779706283220666700.jsonl"
           }
         }
       },
@@ -13256,8 +14103,8 @@
         "image_sha256": [
           "5822fa71a9dad07fc74f33bdfd4ca8f9f7cd6531a725bcd07b8a0ef3c85aa9b5"
         ],
-        "stability_hash_expected": "3b7419de29beb8e8ac095b4c009e00e0d06cedc39792eec666bf38eb9f0f2b08",
-        "stability_hash_actual": "3b7419de29beb8e8ac095b4c009e00e0d06cedc39792eec666bf38eb9f0f2b08",
+        "stability_hash_expected": "350ca6827921c18bb29dd1f5d145be2090094e869d3d1e44163b2bf723cef7be",
+        "stability_hash_actual": "350ca6827921c18bb29dd1f5d145be2090094e869d3d1e44163b2bf723cef7be",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -13427,6 +14274,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -13516,7 +14371,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_structural_pseudos_46232_1771700938680687200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_structural_pseudos_224388_1779706283620970900.jsonl"
           }
         }
       },
@@ -13527,8 +14382,8 @@
         "image_sha256": [
           "cfc5725ac451c1e1078bf3e9186b99edd9c347e94311f40410cd915866c74142"
         ],
-        "stability_hash_expected": "d9ecfbd656a5a1db28d37976ee6a1bde78cc0b549a4a0f430864ef73974af73c",
-        "stability_hash_actual": "d9ecfbd656a5a1db28d37976ee6a1bde78cc0b549a4a0f430864ef73974af73c",
+        "stability_hash_expected": "d094d4af6008616158842acfe301b7a8d2ded13521cb3041e051d619a7c9bf82",
+        "stability_hash_actual": "d094d4af6008616158842acfe301b7a8d2ded13521cb3041e051d619a7c9bf82",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -13609,6 +14464,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -13641,7 +14504,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_solid_red_block_46232_1771700939088050200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_solid_red_block_224388_1779706284448862600.jsonl"
           }
         }
       },
@@ -13652,8 +14515,8 @@
         "image_sha256": [
           "2880ee4e415c1f61274d0e8948471f8437500f77a7f8519e697342d16aff5722"
         ],
-        "stability_hash_expected": "eebef07159dd75edc1c3afb7f6926efbdd5b6daf453b1866e403947d0ddbcc8d",
-        "stability_hash_actual": "eebef07159dd75edc1c3afb7f6926efbdd5b6daf453b1866e403947d0ddbcc8d",
+        "stability_hash_expected": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
+        "stability_hash_actual": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -13752,6 +14615,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -13823,7 +14694,7 @@
               "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_table_header_repeat_across_pages_46232_1771700940223507300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_table_header_repeat_across_pages_224388_1779706285291146000.jsonl"
           }
         }
       },
@@ -13835,8 +14706,8 @@
           "e443139fb4c0aa3a8abd2cba87952ed2d253be88907f2d6195e78d465c459d09",
           "12af9871024d877ffa5ea97a72efc26766d649cdc03316424c233b738477952c"
         ],
-        "stability_hash_expected": "ac5b3b1dbc8cbaad359b3b1dbcb32c6e5184a662682e508ec09f3fd42e03199f",
-        "stability_hash_actual": "ac5b3b1dbc8cbaad359b3b1dbcb32c6e5184a662682e508ec09f3fd42e03199f",
+        "stability_hash_expected": "94cca2c21d9073df81b584f454b631261d008e269eb2067d42865b92d00199d6",
+        "stability_hash_actual": "94cca2c21d9073df81b584f454b631261d008e269eb2067d42865b92d00199d6",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -13954,6 +14825,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -14005,7 +14884,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_individual_compose_with_transform_46232_1771700941736505400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_individual_compose_with_transform_224388_1779706285475072800.jsonl"
           }
         }
       },
@@ -14016,8 +14895,8 @@
         "image_sha256": [
           "d8c8a87803463851ed098710db95ccdb2fc24d819cc8995068cdd9d0a7a6488f"
         ],
-        "stability_hash_expected": "df2a84c78d92f4c74e917cd2b0bfe139129732a73aed148b40a451d76cffc086",
-        "stability_hash_actual": "df2a84c78d92f4c74e917cd2b0bfe139129732a73aed148b40a451d76cffc086",
+        "stability_hash_expected": "aecdaf40522b05696cb480fd328d045b20789e4150771272f2e07277e61c0e37",
+        "stability_hash_actual": "aecdaf40522b05696cb480fd328d045b20789e4150771272f2e07277e61c0e37",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -14135,6 +15014,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -14186,7 +15073,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_matrix_block_affine_46232_1771700941841082800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_matrix_block_affine_224388_1779706285689571600.jsonl"
           }
         }
       },
@@ -14197,8 +15084,8 @@
         "image_sha256": [
           "09346d32e74520f92c9f77fbade1a1da0e1063c175bb455432b9298949c03054"
         ],
-        "stability_hash_expected": "aee2100a310209770bcc829b59bd6c4956dbd5b7421033f21472469cb05049fa",
-        "stability_hash_actual": "aee2100a310209770bcc829b59bd6c4956dbd5b7421033f21472469cb05049fa",
+        "stability_hash_expected": "880c6961294074685074def2c226ccf2248500652bb8751592622fe2e9c35820",
+        "stability_hash_actual": "880c6961294074685074def2c226ccf2248500652bb8751592622fe2e9c35820",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -14297,6 +15184,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -14348,7 +15243,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_origin_left_scale_anchor_46232_1771700941900686200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_origin_left_scale_anchor_224388_1779706286171118900.jsonl"
           }
         }
       },
@@ -14359,8 +15254,8 @@
         "image_sha256": [
           "e37029064efdd40cceff9ee987cb20198418496f30c3686a05daa30c5d3cca52"
         ],
-        "stability_hash_expected": "4d467b0f70a9861f7494fb9046db7d981244b3dd40680a340aa44367c27a90f1",
-        "stability_hash_actual": "4d467b0f70a9861f7494fb9046db7d981244b3dd40680a340aa44367c27a90f1",
+        "stability_hash_expected": "9ae820e906e8480d592591e503f35b709296582dc3e4e7115cfa869fc097f03e",
+        "stability_hash_actual": "9ae820e906e8480d592591e503f35b709296582dc3e4e7115cfa869fc097f03e",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -14478,6 +15373,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -14510,7 +15413,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_block_centered_46232_1771700942401775200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_block_centered_224388_1779706286221990000.jsonl"
           }
         }
       },
@@ -14521,8 +15424,8 @@
         "image_sha256": [
           "2205c185681f2312effea16621c34193b96d0af0a742fa905adb686681ccf6b9"
         ],
-        "stability_hash_expected": "bd00108b9b1ccc34fd77f65134e443df9e305d521f4ed2cea0977156774365bd",
-        "stability_hash_actual": "bd00108b9b1ccc34fd77f65134e443df9e305d521f4ed2cea0977156774365bd",
+        "stability_hash_expected": "9ddbae61cc8e504e17e928e785092473fc986da9fa07fe8ab7d8223fbfa5f68d",
+        "stability_hash_actual": "9ddbae61cc8e504e17e928e785092473fc986da9fa07fe8ab7d8223fbfa5f68d",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -14641,6 +15544,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -14673,7 +15584,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_var_fallback_missing_46232_1771700942445900200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_var_fallback_missing_224388_1779706286236146800.jsonl"
           }
         }
       },
@@ -14684,8 +15595,8 @@
         "image_sha256": [
           "14800a3834b54fc58a9be4d6808ef3b2b6ec09c9afa1bd44f6c68437df5c2dd1"
         ],
-        "stability_hash_expected": "9e0974843bb91803d9886d185066639a57644672225001bdf2f537ecc86f4755",
-        "stability_hash_actual": "9e0974843bb91803d9886d185066639a57644672225001bdf2f537ecc86f4755",
+        "stability_hash_expected": "9ddbae61cc8e504e17e928e785092473fc986da9fa07fe8ab7d8223fbfa5f68d",
+        "stability_hash_actual": "9ddbae61cc8e504e17e928e785092473fc986da9fa07fe8ab7d8223fbfa5f68d",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -14804,6 +15715,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -14836,7 +15755,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_var_reference_custom_angle_46232_1771700942447732100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_var_reference_custom_angle_224388_1779706286576091600.jsonl"
           }
         }
       },
@@ -14847,8 +15766,8 @@
         "image_sha256": [
           "8c85df3fe37236a5398cea7fb5fcfab8ea8ee23c87022762c512d1d7a363b777"
         ],
-        "stability_hash_expected": "edee78bba70da8da54f80f0c4c9f3eaba182d40232a1ea795d71d713c2cd28a0",
-        "stability_hash_actual": "edee78bba70da8da54f80f0c4c9f3eaba182d40232a1ea795d71d713c2cd28a0",
+        "stability_hash_expected": "be5e4356562bfe63686edff1fd4d2afd14d3f89316a65a97320ef651c9deefa9",
+        "stability_hash_actual": "be5e4356562bfe63686edff1fd4d2afd14d3f89316a65a97320ef651c9deefa9",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -14966,6 +15885,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -14998,7 +15925,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_scale_block_centered_46232_1771700942881938600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_scale_block_centered_224388_1779706286716489600.jsonl"
           }
         }
       },
@@ -15009,8 +15936,8 @@
         "image_sha256": [
           "0cf81c94855662d214a372a8a188f14385f2e26c04e558a7aaebe77a93ab400e"
         ],
-        "stability_hash_expected": "1328c992dacf4357184723f2bf9b6896e8a559413a90aa4ef8cc439b778acd5e",
-        "stability_hash_actual": "1328c992dacf4357184723f2bf9b6896e8a559413a90aa4ef8cc439b778acd5e",
+        "stability_hash_expected": "95e06b4ec9dc15d33a3af532cc3b6ae2391dd2b88586b4a9331a53922c70cc9e",
+        "stability_hash_actual": "95e06b4ec9dc15d33a3af532cc3b6ae2391dd2b88586b4a9331a53922c70cc9e",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -15128,6 +16055,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -15160,7 +16095,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_scale_var_reference_custom_pair_46232_1771700942957060900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_scale_var_reference_custom_pair_224388_1779706286801818200.jsonl"
           }
         }
       },
@@ -15171,8 +16106,8 @@
         "image_sha256": [
           "34e7e5850603d8af37a81eaa835b4a4199ae71d0efa68bdfe6cf6709408ce552"
         ],
-        "stability_hash_expected": "e633923deaac3e6cd41c36787c4ffeaa55660b1e43981b8dd180416aecc1a3b0",
-        "stability_hash_actual": "e633923deaac3e6cd41c36787c4ffeaa55660b1e43981b8dd180416aecc1a3b0",
+        "stability_hash_expected": "95e06b4ec9dc15d33a3af532cc3b6ae2391dd2b88586b4a9331a53922c70cc9e",
+        "stability_hash_actual": "95e06b4ec9dc15d33a3af532cc3b6ae2391dd2b88586b4a9331a53922c70cc9e",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -15309,6 +16244,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -15379,7 +16322,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_skewx_block_left_origin_46232_1771700943061495500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_skewx_block_left_origin_224388_1779706286804022100.jsonl"
           }
         }
       },
@@ -15390,8 +16333,8 @@
         "image_sha256": [
           "10d29555d1f1941d5ac3ca7b7629ccd936a70f8bd7371d518d2e88057f2c798e"
         ],
-        "stability_hash_expected": "fac7e94136eedab6026c801a21a6fc33c40cdddf7e93cb3360d29a051477e9fa",
-        "stability_hash_actual": "fac7e94136eedab6026c801a21a6fc33c40cdddf7e93cb3360d29a051477e9fa",
+        "stability_hash_expected": "19a381102da8c90b99ec093a18e0d4d7a82235496c3ea5f5202f6f6466ec7cd6",
+        "stability_hash_actual": "19a381102da8c90b99ec093a18e0d4d7a82235496c3ea5f5202f6f6466ec7cd6",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -15509,6 +16452,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -15541,7 +16492,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_translate_block_offsets_46232_1771700943500846300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_translate_block_offsets_224388_1779706287069954500.jsonl"
           }
         }
       },
@@ -15552,8 +16503,8 @@
         "image_sha256": [
           "c90df116ad630d62066a7b0e7383e74d0409a173f73a855e4f8e497a723165ba"
         ],
-        "stability_hash_expected": "f63ea58649498e190813b583e0181df56c0f55b4b003f3a8f2ad6ab55c26e1ff",
-        "stability_hash_actual": "f63ea58649498e190813b583e0181df56c0f55b4b003f3a8f2ad6ab55c26e1ff",
+        "stability_hash_expected": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
+        "stability_hash_actual": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -15672,6 +16623,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -15704,7 +16663,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_translate_var_reference_custom_pair_46232_1771700943562323600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_translate_var_reference_custom_pair_224388_1779706287077950200.jsonl"
           }
         }
       },
@@ -15715,8 +16674,8 @@
         "image_sha256": [
           "27f96650d0d0d35dcdb70e2d0262df413da2df1a37377462cf737aa6651b9918"
         ],
-        "stability_hash_expected": "ee537c68910fe113af9405bc7d490e704f441802087a2f2e443d647a86008a56",
-        "stability_hash_actual": "ee537c68910fe113af9405bc7d490e704f441802087a2f2e443d647a86008a56",
+        "stability_hash_expected": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
+        "stability_hash_actual": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -15835,6 +16794,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -15867,7 +16834,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_var_cycle_fallback_translate_46232_1771700943901809700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_var_cycle_fallback_translate_224388_1779706287158049200.jsonl"
           }
         }
       },
@@ -15878,8 +16845,8 @@
         "image_sha256": [
           "42ee0035d807b32900efd175e6dce03fa7c90197fe1529855be2321a3361fd09"
         ],
-        "stability_hash_expected": "a1bba29c2a24f120ecb165a87070f10cc430406b95ac3c3f93a63b0b09522984",
-        "stability_hash_actual": "a1bba29c2a24f120ecb165a87070f10cc430406b95ac3c3f93a63b0b09522984",
+        "stability_hash_expected": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
+        "stability_hash_actual": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -15997,6 +16964,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -16048,7 +17023,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_var_reference_custom_list_46232_1771700943906155900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_var_reference_custom_list_224388_1779706287402330600.jsonl"
           }
         }
       },
@@ -16059,8 +17034,8 @@
         "image_sha256": [
           "fea99c5580bff2a44c537946d53ce62c83f93373ec1a0a2a681509cfd46803ad"
         ],
-        "stability_hash_expected": "651070a213c867d9280b4a262b232ca9319d42f149a41df5bf50b269dc5771b6",
-        "stability_hash_actual": "651070a213c867d9280b4a262b232ca9319d42f149a41df5bf50b269dc5771b6",
+        "stability_hash_expected": "b354b55cfc75148a3ae8cd366d17ab5943672a1dd51395a8a2d6d897bd0eb752",
+        "stability_hash_actual": "b354b55cfc75148a3ae8cd366d17ab5943672a1dd51395a8a2d6d897bd0eb752",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -16167,6 +17142,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -16219,7 +17202,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_two_page_break_colors_46232_1771700944180377300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_two_page_break_colors_224388_1779706287485194600.jsonl"
           }
         }
       },
@@ -16231,8 +17214,8 @@
           "d316b1a0517474f0b422396dd1f00fecf8179a7f2137ff75bde7bf9cc2ced52a",
           "bd89fa281f1eba5c27cbcccf9d56db4067d90f34dead0c673eb2f92d47de1634"
         ],
-        "stability_hash_expected": "491e78a3e79f1007aa7fdbd964191acf114e7e34e80afe4c5a715eb6faf8e964",
-        "stability_hash_actual": "491e78a3e79f1007aa7fdbd964191acf114e7e34e80afe4c5a715eb6faf8e964",
+        "stability_hash_expected": "bc29dde98105c22445e93abe6d2134a9084e059437e45fe4757bfea267324a0e",
+        "stability_hash_actual": "bc29dde98105c22445e93abe6d2134a9084e059437e45fe4757bfea267324a0e",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -16311,6 +17294,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -16362,7 +17353,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_calc_width_resolution_46232_1771700944193640400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_calc_width_resolution_224388_1779706287547201700.jsonl"
           }
         }
       },
@@ -16373,8 +17364,8 @@
         "image_sha256": [
           "8a9fb3af75f9a010293e11e3ce6785f116b3ebb5afcc482ccc168bd324398ce6"
         ],
-        "stability_hash_expected": "5b8dc027acf9c8cd1f1d25445c38c6ce56c60db8139d3842edeb5faf4873a709",
-        "stability_hash_actual": "5b8dc027acf9c8cd1f1d25445c38c6ce56c60db8139d3842edeb5faf4873a709",
+        "stability_hash_expected": "6ef14544be6597b2a799033f2ebd110d46a2ea845c10aea00898384669cfb76e",
+        "stability_hash_actual": "6ef14544be6597b2a799033f2ebd110d46a2ea845c10aea00898384669cfb76e",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -16509,6 +17500,14 @@
             ]
           }
         },
+        "text_trace": {
+          "assertions_enabled": false,
+          "assertions_ok": true,
+          "assertions": {
+            "assertion_count": 0,
+            "checks": []
+          }
+        },
         "paint": {
           "ok": true,
           "checks": [
@@ -16636,7 +17635,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_min_max_clamp_widths_46232_1771700944396182100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_min_max_clamp_widths_224388_1779706287731629900.jsonl"
           }
         }
       },
@@ -16647,8 +17646,8 @@
         "image_sha256": [
           "f5e849f60fb14c42f7e1eabbca9f5ed3108884b84af47fc8aa2b1d8a2533c9a7"
         ],
-        "stability_hash_expected": "1fa349f6c4db9f77b59ab7fa50ad7eb684e11d38e6350976aea4a666dd23101b",
-        "stability_hash_actual": "1fa349f6c4db9f77b59ab7fa50ad7eb684e11d38e6350976aea4a666dd23101b",
+        "stability_hash_expected": "2692f3d7976c83633c1812281eca3ff29a68e721eb161c7502b13acf0bf9e4f0",
+        "stability_hash_actual": "2692f3d7976c83633c1812281eca3ff29a68e721eb161c7502b13acf0bf9e4f0",
         "stability_hash_ok": true,
         "emitted": null
       },

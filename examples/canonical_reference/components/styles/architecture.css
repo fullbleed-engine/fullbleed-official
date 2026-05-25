@@ -1,0 +1,60 @@
+[data-fb-role="document-root"] .ref-architecture-page .ref-panel-pipeline {
+  min-height: 4.35in;
+}
+
+[data-fb-role="document-root"] .ref-contract-grid {
+  margin-top: 0.05in;
+}
+
+[data-fb-role="document-root"] .ref-layer-list {
+  margin: 0;
+  padding-left: 0.24in;
+  color: var(--ref-ink);
+  font-family: "Courier New", monospace;
+  font-size: 7.5pt;
+}
+
+[data-fb-role="document-root"] .ref-layer-list li {
+  margin-bottom: 0.045in;
+}
+
+[data-fb-role="document-root"] .ref-pagination-page .ref-panel-page-plan {
+  margin-bottom: 0.15in;
+}
+
+[data-fb-role="document-root"] .ref-page-plan-table th:first-child,
+[data-fb-role="document-root"] .ref-page-plan-table td:first-child {
+  width: 0.38in;
+  text-align: center;
+}
+
+[data-fb-role="document-root"] .ref-page-plan-table td:nth-child(2) {
+  width: 1.15in;
+  color: var(--ref-blue);
+  font-family: "Courier New", monospace;
+  font-size: 6.7pt;
+}
+
+[data-fb-role="document-root"] .ref-page-plan-table td:nth-child(4) {
+  font-size: 6.8pt;
+}
+
+[data-fb-role="document-root"] .ref-pagination-grid {
+  margin-bottom: 0.12in;
+}
+
+[data-fb-role="document-root"] .ref-footer-template-panel {
+  margin-bottom: 0;
+}
+
+[data-fb-role="document-root"] .ref-code-block {
+  margin: 0;
+  padding: 0.08in;
+  border: 1px solid var(--ref-soft-line);
+  background: #f8fafc;
+  color: var(--ref-ink);
+  font-family: "Courier New", monospace;
+  font-size: 6.8pt;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}

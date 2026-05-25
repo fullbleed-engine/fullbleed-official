@@ -92,16 +92,19 @@ jobs:
           name: css-parity-status-${{ matrix.os }}-py${{ matrix.python-version }}
           path: output/css_parity_status.ci.json
 
-      - name: Install maturin
-        run: python -m pip install --upgrade pip maturin
+      - name: Install maturin and smoke-test tools
+        run: python -m pip install --upgrade pip maturin pytest
 
       - name: Build wheel from source
-        run: python -m maturin build --release --features python
+        run: python -m maturin build --release --features python,svg_raster
 
       - name: Install built wheel
         shell: bash
         run: |
           python -m pip install --force-reinstall target/wheels/fullbleed-*.whl
+
+      - name: Verify installed-wheel SVG raster fallback
+        run: python -m pytest tests/test_fullbleed_svg_raster_fallback.py -q
 
       - name: Run CSS fixture suite
         run: python tools/run_css_fixture_suite.py --json
@@ -135,7 +138,7 @@ jobs:
         run: python -m pip install --upgrade pip maturin
 
       - name: Build wheel from source
-        run: python -m maturin build --release --features python
+        run: python -m maturin build --release --features python,svg_raster
 
       - name: Install built wheel
         shell: bash

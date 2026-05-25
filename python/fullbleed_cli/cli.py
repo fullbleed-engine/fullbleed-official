@@ -55,6 +55,135 @@ PROFILES = {
 }
 
 FAIL_ON_CHOICES = ["overflow", "missing-glyphs", "font-subst", "budget"]
+PDF_PROFILE_CHOICES = [
+    "none",
+    "pdfa1a",
+    "pdfa1b",
+    "pdfa2a",
+    "pdfa2b",
+    "pdfa2u",
+    "pdfa3a",
+    "pdfa3b",
+    "pdfa3u",
+    "pdfa4",
+    "pdfa4e",
+    "pdfa4f",
+    "pdfx4",
+    "pdfua1",
+    "pdfua2",
+    "pdfvt1",
+    "wtpdf1r",
+    "wtpdf1a",
+    "tagged",
+]
+PDF_PROFILE_ALIASES = {
+    "": None,
+    "none": "none",
+    "a": "pdfa2b",
+    "pdfa": "pdfa2b",
+    "pdf/a": "pdfa2b",
+    "pdfa1a": "pdfa1a",
+    "pdfa-1a": "pdfa1a",
+    "pdfa_1a": "pdfa1a",
+    "pdf/a-1a": "pdfa1a",
+    "pdf/a1a": "pdfa1a",
+    "pdfa1b": "pdfa1b",
+    "pdfa-1b": "pdfa1b",
+    "pdfa_1b": "pdfa1b",
+    "pdf/a-1b": "pdfa1b",
+    "pdf/a1b": "pdfa1b",
+    "pdfa2a": "pdfa2a",
+    "pdfa-2a": "pdfa2a",
+    "pdfa_2a": "pdfa2a",
+    "pdf/a-2a": "pdfa2a",
+    "pdf/a2a": "pdfa2a",
+    "pdfa2b": "pdfa2b",
+    "pdfa-2b": "pdfa2b",
+    "pdfa_2b": "pdfa2b",
+    "pdf/a-2b": "pdfa2b",
+    "pdf/a2b": "pdfa2b",
+    "pdfa2u": "pdfa2u",
+    "pdfa-2u": "pdfa2u",
+    "pdfa_2u": "pdfa2u",
+    "pdf/a-2u": "pdfa2u",
+    "pdf/a2u": "pdfa2u",
+    "pdfa3a": "pdfa3a",
+    "pdfa-3a": "pdfa3a",
+    "pdfa_3a": "pdfa3a",
+    "pdf/a-3a": "pdfa3a",
+    "pdf/a3a": "pdfa3a",
+    "pdfa3b": "pdfa3b",
+    "pdfa-3b": "pdfa3b",
+    "pdfa_3b": "pdfa3b",
+    "pdf/a-3b": "pdfa3b",
+    "pdf/a3b": "pdfa3b",
+    "pdfa3u": "pdfa3u",
+    "pdfa-3u": "pdfa3u",
+    "pdfa_3u": "pdfa3u",
+    "pdf/a-3u": "pdfa3u",
+    "pdf/a3u": "pdfa3u",
+    "pdfa4": "pdfa4",
+    "pdfa-4": "pdfa4",
+    "pdfa_4": "pdfa4",
+    "pdf/a-4": "pdfa4",
+    "pdf/a4": "pdfa4",
+    "pdfa4e": "pdfa4e",
+    "pdfa-4e": "pdfa4e",
+    "pdfa_4e": "pdfa4e",
+    "pdf/a-4e": "pdfa4e",
+    "pdf/a4e": "pdfa4e",
+    "pdfa4f": "pdfa4f",
+    "pdfa-4f": "pdfa4f",
+    "pdfa_4f": "pdfa4f",
+    "pdf/a-4f": "pdfa4f",
+    "pdf/a4f": "pdfa4f",
+    "pdfx4": "pdfx4",
+    "pdfx-4": "pdfx4",
+    "pdfx_4": "pdfx4",
+    "pdf/x-4": "pdfx4",
+    "pdf/x4": "pdfx4",
+    "ua": "pdfua1",
+    "pdfua": "pdfua1",
+    "pdfua1": "pdfua1",
+    "pdfua-1": "pdfua1",
+    "pdf/ua": "pdfua1",
+    "pdf/ua-1": "pdfua1",
+    "pdfua2": "pdfua2",
+    "pdfua-2": "pdfua2",
+    "pdf/ua-2": "pdfua2",
+    "vt": "pdfvt1",
+    "pdfvt": "pdfvt1",
+    "pdfvt1": "pdfvt1",
+    "pdfvt-1": "pdfvt1",
+    "pdf/vt": "pdfvt1",
+    "pdf/vt-1": "pdfvt1",
+    "wtpdf1r": "wtpdf1r",
+    "wtpdf-1r": "wtpdf1r",
+    "wtpdf_1r": "wtpdf1r",
+    "wt1r": "wtpdf1r",
+    "wt-1r": "wtpdf1r",
+    "wtpdf1a": "wtpdf1a",
+    "wtpdf-1a": "wtpdf1a",
+    "wtpdf_1a": "wtpdf1a",
+    "wt1a": "wtpdf1a",
+    "wt-1a": "wtpdf1a",
+    "tagged": "tagged",
+}
+PDF_PROFILES_REQUIRING_OUTPUT_INTENT = {
+    "pdfa1a",
+    "pdfa1b",
+    "pdfa2a",
+    "pdfa2b",
+    "pdfa2u",
+    "pdfa3a",
+    "pdfa3b",
+    "pdfa3u",
+    "pdfa4",
+    "pdfa4e",
+    "pdfa4f",
+    "pdfx4",
+    "pdfvt1",
+}
 WATERMARK_LAYER_ALIASES = {"underlay": "background"}
 WATERMARK_LAYER_CHOICES = {"background", "overlay"}
 LICENSE_SPDX_EXPRESSION = "AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial"
@@ -121,7 +250,9 @@ SCHEMA_REGISTRY = {
     "new:list": "fullbleed.new_list.v1",
     "new:search": "fullbleed.new_search.v1",
     "new:remote": "fullbleed.new_remote.v1",
+    "new:accessible": "fullbleed.new_template.v1",
     "new:invoice": "fullbleed.new_template.v1",
+    "new:reference": "fullbleed.new_template.v1",
     "new:statement": "fullbleed.new_template.v1",
 }
 
@@ -272,6 +403,7 @@ SCHEMA_DEFS = {
             "encrypted": {"type": "boolean"},
             "file_size_bytes": {"type": "integer"},
             "warnings": {"type": "array"},
+            "profile": {"type": "object"},
             "composition": {"type": "object"},
             "code": {"type": "string"},
             "message": {"type": "string"},
@@ -761,8 +893,23 @@ def _normalize_watermark_layer(raw_layer):
     return layer
 
 
+def _normalize_pdf_profile(raw_profile):
+    """Normalize PDF profile aliases for CLI validation and capability reporting."""
+    if raw_profile is None:
+        return None
+    key = str(raw_profile).strip().lower()
+    if key in PDF_PROFILE_ALIASES:
+        return PDF_PROFILE_ALIASES[key]
+    choices = "', '".join(PDF_PROFILE_CHOICES)
+    raise ValueError(
+        f"Invalid pdf profile: {raw_profile!r}. Expected one of '{choices}' "
+        "(aliases include pdf/a, pdf/ua, pdf/vt, a, ua, vt)."
+    )
+
+
 def _validate_pdf_options(args):
     """Validate cross-option PDF constraints before engine construction."""
+    profile = _normalize_pdf_profile(getattr(args, "pdf_profile", None))
     has_output_intent_metadata = any(
         [
             getattr(args, "output_intent_identifier", None),
@@ -773,6 +920,14 @@ def _validate_pdf_options(args):
     if has_output_intent_metadata and not getattr(args, "output_intent_icc", None):
         raise ValueError(
             "output intent metadata requires --output-intent-icc "
+            "(path or data URI)."
+        )
+    if (
+        profile in PDF_PROFILES_REQUIRING_OUTPUT_INTENT
+        and not getattr(args, "output_intent_icc", None)
+    ):
+        raise ValueError(
+            f"--pdf-profile {profile} requires --output-intent-icc "
             "(path or data URI)."
         )
 
@@ -819,6 +974,7 @@ def _build_manifest(args):
     """Build canonical compiler-input manifest for reproducibility/debugging."""
     _apply_profile(args)
     page_width, page_height = _resolve_page_size(args)
+    pdf_profile = _normalize_pdf_profile(getattr(args, "pdf_profile", None))
     command_name = getattr(args, "command", None)
     if not command_name:
         command_name = "verify" if getattr(args, "emit_pdf", None) is not None else "render"
@@ -878,7 +1034,8 @@ def _build_manifest(args):
         },
         "pdf": {
             "version": getattr(args, "pdf_version", None),
-            "profile": getattr(args, "pdf_profile", None),
+            "profile": pdf_profile,
+            "profile_requested": getattr(args, "pdf_profile", None),
             "output_intent_icc": getattr(args, "output_intent_icc", None),
             "output_intent_identifier": getattr(args, "output_intent_identifier", None),
             "output_intent_info": getattr(args, "output_intent_info", None),
@@ -987,7 +1144,7 @@ def _build_engine(args):
         )
     except Exception as exc:
         message = str(exc)
-        if "pdfx4 requires embedded fonts" in message.lower():
+        if "requires embedded fonts" in message.lower():
             raise ValueError(
                 message
                 + " Hint: add an embeddable font asset (for example '--asset vendor/fonts/Inter-Variable.ttf' from 'fullbleed init') "
@@ -1394,6 +1551,7 @@ def _inspect_template_catalog(templates):
                     "encrypted": report.get("encrypted"),
                     "file_size_bytes": report.get("file_size_bytes"),
                     "warnings": report.get("warnings", []),
+                    "profile": report.get("profile", {}),
                     "composition": report.get("composition", {"supported": None, "issues": []}),
                 }
             )
@@ -2435,7 +2593,10 @@ def cmd_doctor(args):
         "python": sys.version.split()[0],
         "platform": sys.platform,
         "pdf_versions": ["1.7", "2.0"],
-        "pdf_profiles": ["none", "pdfa2b", "pdfx4", "tagged"],
+        "pdf_profiles": PDF_PROFILE_CHOICES,
+        "pdf_profile_aliases": {
+            key: value for key, value in sorted(PDF_PROFILE_ALIASES.items()) if value
+        },
         "color_spaces": ["rgb", "cmyk"],
         "assets": {
             "bootstrap": str(bootstrap),
@@ -2801,6 +2962,16 @@ def cmd_compliance(args):
 
 def cmd_capabilities(args):
     """CLI handler for machine-readable capability inspection."""
+    build_features = {}
+    build_features_fn = getattr(fullbleed, "build_features", None)
+    if callable(build_features_fn):
+        try:
+            build_features = dict(build_features_fn())
+        except Exception:
+            build_features = {}
+    svg_raster_available = bool(build_features.get("svg_raster", False))
+    pdf_engine = getattr(fullbleed, "PdfEngine", None)
+
     commands = [
         "render",
         "verify",
@@ -2835,14 +3006,22 @@ def cmd_capabilities(args):
             "--repro-check",
         ],
         "engine": {
-            "batch_render": hasattr(fullbleed.PdfEngine, "render_pdf_batch"),
-            "batch_render_parallel": hasattr(fullbleed.PdfEngine, "render_pdf_batch_parallel"),
-            "glyph_report": hasattr(fullbleed.PdfEngine, "render_pdf_with_glyph_report"),
-            "page_data": hasattr(fullbleed.PdfEngine, "render_pdf_with_page_data"),
-            "image_pages": hasattr(fullbleed.PdfEngine, "render_image_pages"),
+            "batch_render": bool(pdf_engine and hasattr(pdf_engine, "render_pdf_batch")),
+            "batch_render_parallel": bool(
+                pdf_engine and hasattr(pdf_engine, "render_pdf_batch_parallel")
+            ),
+            "glyph_report": bool(
+                pdf_engine and hasattr(pdf_engine, "render_pdf_with_glyph_report")
+            ),
+            "page_data": bool(
+                pdf_engine and hasattr(pdf_engine, "render_pdf_with_page_data")
+            ),
+            "image_pages": bool(pdf_engine and hasattr(pdf_engine, "render_image_pages")),
             "pdf_inspect": hasattr(fullbleed, "inspect_pdf"),
             "template_catalog_inspect": hasattr(fullbleed, "inspect_template_catalog"),
-            "template_compose_planner": hasattr(fullbleed.PdfEngine, "plan_template_compose"),
+            "template_compose_planner": bool(
+                pdf_engine and hasattr(pdf_engine, "plan_template_compose")
+            ),
         },
         "svg": {
             "document_input": {
@@ -2856,10 +3035,48 @@ def cmd_capabilities(args):
             },
             "engine_flags": {
                 "svg_form_xobjects": True,
-                "svg_raster_fallback": True,
+                "svg_raster_fallback": svg_raster_available,
+            },
+            "build_features": {
+                "svg_raster": svg_raster_available,
+            },
+            "feature_matrix": {
+                "native_vector": [
+                    "standalone SVG document input",
+                    "inline SVG in HTML",
+                    "SVG asset references",
+                    "basic shapes and paths",
+                    "stylesheets and style attributes",
+                    "gradients",
+                    "use references by ID",
+                    "axis-aligned embedded images",
+                ],
+                "raster_fallback_required": [
+                    "SVG text",
+                    "foreignObject",
+                    "filters",
+                    "masks",
+                    "patterns",
+                    "markers",
+                    "symbols",
+                    "mask/filter attributes",
+                    "rotated/skewed/matrix-transformed SVG images",
+                ],
+                "unsupported_or_known_loss": [
+                    "PDF-native SVG filter effects",
+                    "SVG url() clip sources",
+                    "browser-complete SVG layout, scripting, and animation",
+                ],
             },
         },
         "profiles": list(PROFILES.keys()),
+        "pdf_profiles": PDF_PROFILE_CHOICES,
+        "pdf_profile_aliases": {
+            key: value for key, value in sorted(PDF_PROFILE_ALIASES.items()) if value
+        },
+        "pdf_profiles_requiring_output_intent": sorted(
+            PDF_PROFILES_REQUIRING_OUTPUT_INTENT
+        ),
         "fail_on": FAIL_ON_CHOICES,
         "fallback_policy_flags": ["--allow-fallbacks"],
         "budget_flags": ["--budget-max-pages", "--budget-max-bytes", "--budget-max-ms"],
@@ -2916,6 +3133,7 @@ def cmd_inspect_pdf(args):
         "encrypted": report.get("encrypted"),
         "file_size_bytes": report.get("file_size_bytes"),
         "warnings": report.get("warnings", []),
+        "profile": report.get("profile", {}),
         "composition": report.get("composition", {"supported": None, "issues": []}),
     }
     if getattr(args, "json", False):
@@ -3023,6 +3241,7 @@ def cmd_inspect_pdf_batch(args):
                     "encrypted": report.get("encrypted"),
                     "file_size_bytes": report.get("file_size_bytes"),
                     "warnings": report.get("warnings", []),
+                    "profile": report.get("profile", {}),
                     "composition": report.get("composition", {"supported": None, "issues": []}),
                 }
             )
@@ -3187,7 +3406,15 @@ def _add_common_flags(p):
     _add_bool_flag(p, "shape-text", True)
     _add_bool_flag(p, "unicode-metrics", True)
     p.add_argument("--pdf-version")
-    p.add_argument("--pdf-profile")
+    p.add_argument(
+        "--pdf-profile",
+        help=(
+            "PDF export profile: none, pdfa1a, pdfa1b, pdfa2a, pdfa2b, "
+            "pdfa2u, pdfa3a, pdfa3b, pdfa3u, pdfa4, pdfa4e, pdfa4f, pdfx4, "
+            "pdfua1, pdfua2, pdfvt1, wtpdf1r, wtpdf1a, tagged "
+            "(aliases: a, ua, vt, wt1r, wt1a, pdf/a, pdf/ua, pdf/vt)"
+        ),
+    )
     p.add_argument("--output-intent-icc")
     p.add_argument("--output-intent-identifier")
     p.add_argument("--output-intent-info")
@@ -3533,7 +3760,8 @@ def _build_parser():
     new_sub = p_new.add_subparsers(dest="new_command", required=True)
 
     p_new_local = new_sub.add_parser("local", help="Create from a local starter template")
-    p_new_local.add_argument("template", help="Template name (invoice, statement)")
+    local_template_names = ", ".join(sorted(scaffold_module.TEMPLATES.keys()))
+    p_new_local.add_argument("template", help=f"Template name ({local_template_names})")
     p_new_local.add_argument("path", nargs="?", default=".", help="Target directory")
     p_new_local.add_argument("--force", action="store_true", help="Overwrite existing files")
     p_new_local.add_argument("--json", action="store_true")

@@ -1,0 +1,43 @@
+@page {
+  size: letter;
+  margin: 0;
+}
+
+:root {
+  --ref-ink: #16202e;
+  --ref-muted: #59677a;
+  --ref-line: #cfd8e3;
+  --ref-soft-line: #e7ecf1;
+  --ref-paper: #fbfaf7;
+  --ref-surface: #ffffff;
+  --ref-wash: #f2f5f7;
+  --ref-red: #e23d52;
+  --ref-gold: #f2b84b;
+  --ref-green: #1f9f8a;
+  --ref-blue: #2765b0;
+  --ref-violet: #7357c8;
+  --ref-radius: 6px;
+  --ref-shadow: 0 6px 18px rgba(22, 32, 46, 0.12);
+  --ref-font: Inter, Arial, Helvetica, sans-serif;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--ref-paper);
+  color: var(--ref-ink);
+  font-family: var(--ref-font);
+  font-size: 9.8pt;
+  line-height: 1.32;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[data-fb-role="document-root"].report-root {
+  width: 100%;
+  padding: 0;
+  background: var(--ref-paper);
+}

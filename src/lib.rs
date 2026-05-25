@@ -540,23 +540,19 @@ fn pdf_version_str(version: PdfVersion) -> &'static str {
 }
 
 fn pdf_profile_str(profile: PdfProfile) -> &'static str {
-    match profile {
-        PdfProfile::None => "none",
-        PdfProfile::PdfA2b => "pdfa2b",
-        PdfProfile::PdfX4 => "pdfx4",
-        PdfProfile::Tagged => "tagged",
-    }
+    profile.as_str()
 }
 
 fn validate_pdf_options(options: &PdfOptions) -> Result<(), FullBleedError> {
-    if options.pdf_profile != PdfProfile::PdfX4 {
+    if !options.pdf_profile.requires_output_intent() {
         return Ok(());
     }
 
     let Some(intent) = options.output_intent.as_ref() else {
-        return Err(FullBleedError::InvalidConfiguration(
-            "pdf_profile=pdfx4 requires output_intent".to_string(),
-        ));
+        return Err(FullBleedError::InvalidConfiguration(format!(
+            "pdf_profile={} requires output_intent",
+            options.pdf_profile.as_str()
+        )));
     };
     if intent.icc_profile.is_empty() {
         return Err(FullBleedError::InvalidConfiguration(
@@ -590,13 +586,15 @@ fn count_form_commands(doc: &Document) -> (usize, usize, usize, usize) {
     for page in &doc.pages {
         for cmd in &page.commands {
             match cmd {
-                Command::DefineForm { resource_id, .. } => {
+                Command::DefineForm { resource_id, .. }
+                | Command::DefineIsolatedForm { resource_id, .. } => {
                     defs += 1;
                     if resource_id.starts_with("svg:") {
                         svg_defs += 1;
                     }
                 }
-                Command::DrawForm { resource_id, .. } => {
+                Command::DrawForm { resource_id, .. }
+                | Command::DrawFilteredForm { resource_id, .. } => {
                     draws += 1;
                     if resource_id.starts_with("svg:") {
                         svg_draws += 1;
@@ -754,6 +752,22 @@ fn substitute_placeholders_in_commands(
                 height,
                 commands,
             } => Command::DefineForm {
+                resource_id: resource_id.clone(),
+                width: *width,
+                height: *height,
+                commands: substitute_placeholders_in_commands(
+                    commands,
+                    page_number,
+                    total_pages,
+                    page_data,
+                ),
+            },
+            Command::DefineIsolatedForm {
+                resource_id,
+                width,
+                height,
+                commands,
+            } => Command::DefineIsolatedForm {
                 resource_id: resource_id.clone(),
                 width: *width,
                 height: *height,

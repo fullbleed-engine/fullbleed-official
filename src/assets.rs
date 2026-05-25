@@ -1,4 +1,5 @@
 use base64::Engine;
+use image::GenericImageView;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -235,6 +236,23 @@ pub fn renderable_image_source(bundle: Option<&AssetBundle>, source: &str) -> Op
         "file_uri" | "local_path" => resolved.trace.normalized_uri,
         "data_uri" => Some(source.trim().to_string()),
         _ => resolved.trace.normalized_uri,
+    }
+}
+
+pub fn raster_image_intrinsic_dimensions(
+    bundle: Option<&AssetBundle>,
+    source: &str,
+) -> Option<(u32, u32)> {
+    let resolved = resolve_image_asset(bundle, source);
+    if !resolved.trace.success || resolved.trace.content_kind != "raster_image" {
+        return None;
+    }
+    let image = image::load_from_memory(&resolved.bytes).ok()?;
+    let (width, height) = image.dimensions();
+    if width == 0 || height == 0 {
+        None
+    } else {
+        Some((width, height))
     }
 }
 

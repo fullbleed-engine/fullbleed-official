@@ -738,6 +738,25 @@ def _contract_meta() -> dict[str, Any]:
     return dict(meta) if isinstance(meta, dict) else {}
 
 
+def _bundled_pdfua_font_path() -> Path | None:
+    try:
+        import fullbleed_assets
+
+        path = Path(fullbleed_assets.asset_path("fonts/Inter-Variable.ttf"))
+    except Exception:
+        path = (
+            Path(__file__).resolve().parents[2]
+            / "fullbleed_assets"
+            / "fonts"
+            / "Inter-Variable.ttf"
+        )
+    return path if path.exists() and path.is_file() else None
+
+
+def _css_string(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 class AccessibilityEngine:
     def __init__(
         self,
@@ -755,7 +774,7 @@ class AccessibilityEngine:
         **engine_kwargs: Any,
     ) -> None:
         if "pdf_profile" in engine_kwargs:
-            raise TypeError("AccessibilityEngine does not accept pdf_profile (fixed to pdfua-targeted mode).")
+            raise TypeError("AccessibilityEngine does not accept pdf_profile (fixed to PDF/UA-1-targeted mode).")
         if not hasattr(_fullbleed, "PdfEngine"):
             raise RuntimeError("fullbleed.PdfEngine is unavailable in this environment")
         if "page_width" not in engine_kwargs and "page_height" not in engine_kwargs:
@@ -764,6 +783,14 @@ class AccessibilityEngine:
                 engine_kwargs["page_width"], engine_kwargs["page_height"] = _LETTER
             elif key == "A4":
                 engine_kwargs["page_width"], engine_kwargs["page_height"] = _A4
+        self._default_embedded_font_family: str | None = None
+        self._default_embedded_font_path: Path | None = None
+        if "font_files" not in engine_kwargs and "font_dirs" not in engine_kwargs:
+            default_font = _bundled_pdfua_font_path()
+            if default_font is not None:
+                engine_kwargs["font_files"] = [str(default_font)]
+                self._default_embedded_font_family = "Inter"
+                self._default_embedded_font_path = default_font
         self._strict = bool(strict)
         self._emit_reports_by_default = bool(emit_reports_by_default)
         self._render_previews_by_default = bool(render_previews_by_default)
@@ -780,7 +807,7 @@ class AccessibilityEngine:
             "css_link_media": None,
         }
         self._engine = _fullbleed.PdfEngine(
-            pdf_profile="pdfua",
+            pdf_profile="pdfua1",
             document_lang=document_lang,
             document_title=document_title,
             **engine_kwargs,
@@ -796,6 +823,18 @@ class AccessibilityEngine:
                     setattr(self._engine, attr, value)
                 except Exception:
                     pass
+
+    def _apply_default_embedded_font_css(self, css_text: str) -> str:
+        if not self._default_embedded_font_family:
+            return css_text
+        family = _css_string(self._default_embedded_font_family)
+        rule = (
+            "\n\n"
+            "body, body * { "
+            f"font-family: {family}, sans-serif !important; "
+            "}\n"
+        )
+        return css_text.rstrip() + rule
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._engine, name)
@@ -1726,7 +1765,10 @@ class AccessibilityEngine:
 
         emitted = self.emit_artifacts(body_html, css_text, str(html_path), str(css_path))
         html_text = str(emitted.get("html", ""))
-        css_out = str(emitted.get("css", css_text))
+        emitted_css = str(emitted.get("css", css_text))
+        css_out = self._apply_default_embedded_font_css(emitted_css)
+        if css_out != emitted_css:
+            css_path.write_text(css_out, encoding="utf-8")
         css_link_href = _normalize_css_href(emitted.get("css_link_href"))
         css_link_media = _normalize_css_media(emitted.get("css_link_media"))
         css_link_injected = bool(emitted.get("css_link_injected", False))
@@ -2137,8 +2179,14 @@ class AccessibilityEngine:
         run_report = {
             "schema": "fullbleed.accessibility.run_bundle.v1",
             "pdf_ua_targeted": True,
-            "engine_pdf_profile_requested": "pdfua",
-            "engine_pdf_profile_effective": "tagged",
+            "engine_pdf_profile_requested": "pdfua1",
+            "engine_pdf_profile_effective": "pdfua1",
+            "default_embedded_font_family": self._default_embedded_font_family,
+            "default_embedded_font_path": (
+                str(self._default_embedded_font_path)
+                if self._default_embedded_font_path
+                else None
+            ),
             "document_lang": self.document_metadata().get("document_lang"),
             "document_title": self.document_metadata().get("document_title"),
             "document_css_href": self.document_metadata().get("document_css_href"),

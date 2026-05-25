@@ -1,0 +1,25 @@
+[data-fb-role="document-root"] .ref-coverage-cards {
+  display: flex;
+  margin-bottom: 0.16in;
+}
+
+[data-fb-role="document-root"] .ref-coverage-card {
+  width: 24%;
+  margin-right: 1.33%;
+  padding: 0.12in;
+  border: 1px solid var(--ref-line);
+  border-radius: var(--ref-radius);
+  background: #fff;
+}
+
+[data-fb-role="document-root"] .ref-coverage-card:last-child {
+  margin-right: 0;
+}
+
+[data-fb-role="document-root"] .ref-appendix-page .ref-table td:last-child {
+  font-size: 6.5pt;
+}
+
+[data-fb-role="document-root"] .ref-appendix-bottom {
+  margin-top: 0.04in;
+}

@@ -13,7 +13,7 @@
   "expected_warnings": [],
   "dpi": 120,
   "html": "<!doctype html><html><body><section class='x'>Diagnostics fixture</section></body></html>",
-  "css": "@page { size: 4in 4in; margin: 0; } @media (hover: hover) { .x { color: rgb(255,0,0); } } .x { width: 4in; height: 4in; background: rgb(0,0,255); vendor-unknown-prop: 12px; display: grid; grid-template-rows: 1fr 1fr; }",
+  "css": "@page { size: 4in 4in; margin: 0; } @media (unknown-feature: hover) { .x { color: rgb(255,0,0); } } .x { width: 4in; height: 4in; background: rgb(0,0,255); vendor-unknown-prop: 12px; display: grid; grid-template-rows: 1fr 1fr; }",
   "expected": {
     "page_count": 1,
     "compute_assertions": [

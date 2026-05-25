@@ -1,0 +1,437 @@
+{
+  "document": {
+    "title": "Fullbleed Canonical Reference",
+    "subtitle": "Static PDF library reference for component scaffolds, assets, CSS layers, and validation output",
+    "version": "2026.05",
+    "owner": "Fullbleed Infrastructure",
+    "audience": "Engine maintainers, template authors, and downstream PDF library consumers"
+  },
+  "metrics": [
+    {
+      "label": "Primary target",
+      "value": "Static PDF",
+      "detail": "HTML5 and CSS authored for deterministic paged output"
+    },
+    {
+      "label": "Page model",
+      "value": "Letter",
+      "detail": "8.5in by 11in, zero engine margin, authored page padding"
+    },
+    {
+      "label": "Assets",
+      "value": "Bundled",
+      "detail": "Font, SVG, and data URI image paths are exercised"
+    },
+    {
+      "label": "Validation",
+      "value": "Strict-ready",
+      "detail": "Component mount, CSS layer, PNG, PDF, and page data reports"
+    }
+  ],
+  "pipeline": [
+    {
+      "step": "Scaffold",
+      "description": "Keep document assembly, components, data, styles, assets, and outputs in separate folders."
+    },
+    {
+      "step": "Compose",
+      "description": "Build pages through Fullbleed UI elements and local domain components."
+    },
+    {
+      "step": "Layer CSS",
+      "description": "Load tokens first, component styles next, and final report overrides last."
+    },
+    {
+      "step": "Register assets",
+      "description": "Register fonts and SVG files with AssetBundle; pass raster images as local files or data URIs."
+    },
+    {
+      "step": "Validate",
+      "description": "Smoke-render mounted components, scan CSS layers, and emit diagnostic JSON before final PDF output."
+    },
+    {
+      "step": "Publish",
+      "description": "Emit HTML, CSS, PDF, PNG previews, page data, and run reports from one command."
+    }
+  ],
+  "scaffold": [
+    {
+      "path": "report.py",
+      "purpose": "The executable pipeline and single source for render settings."
+    },
+    {
+      "path": "data/reference.json",
+      "purpose": "Structured input data; replace with CSV, JSON, or database loaders in real projects."
+    },
+    {
+      "path": "components/",
+      "purpose": "Pure component functions that return Fullbleed UI elements."
+    },
+    {
+      "path": "components/styles/",
+      "purpose": "Component-scoped CSS layers with reusable selectors."
+    },
+    {
+      "path": "styles/",
+      "purpose": "Global tokens and final report-level composition CSS."
+    },
+    {
+      "path": "assets/",
+      "purpose": "Local SVG, image, and font inputs registered through AssetBundle or embedded as data URIs."
+    },
+    {
+      "path": "output/",
+      "purpose": "Generated artifacts only; safe to clean and regenerate."
+    }
+  ],
+  "css_layers": [
+    "styles/tokens.css",
+    "components/styles/primitives.css",
+    "components/styles/cover.css",
+    "components/styles/architecture.css",
+    "components/styles/data.css",
+    "components/styles/visuals.css",
+    "components/styles/appendix.css",
+    "styles/report.css"
+  ],
+  "page_plan": [
+    {
+      "page": "1",
+      "page_id": "cover",
+      "section": "Cover and readiness metrics",
+      "break_rule": "CoverPage(...) returns one authored Page section."
+    },
+    {
+      "page": "2",
+      "page_id": "architecture",
+      "section": "Scaffold, pipeline, and CSS layer order",
+      "break_rule": "ArchitecturePage(...) ends with page-break-after."
+    },
+    {
+      "page": "3",
+      "page_id": "pagination-footers",
+      "section": "Manual pagination map and engine footer contract",
+      "break_rule": "PaginationPage(...) is an explicit page before data pages."
+    },
+    {
+      "page": "4",
+      "page_id": "data-tables",
+      "section": "Inventory and ledger tables",
+      "break_rule": "DataPages(...)[0] is one authored Page section."
+    },
+    {
+      "page": "5",
+      "page_id": "feature-matrix",
+      "section": "Concise feature matrix",
+      "break_rule": "DataPages(...)[1] is one authored Page section."
+    },
+    {
+      "page": "6",
+      "page_id": "visual-surface",
+      "section": "SVG, raster, chart, and heatmap visuals",
+      "break_rule": "VisualsPage(...) owns the visual surface page."
+    },
+    {
+      "page": "7",
+      "page_id": "timeline",
+      "section": "Release timeline",
+      "break_rule": "TimelinePage(...) owns the timeline page."
+    },
+    {
+      "page": "8",
+      "page_id": "appendix-coverage",
+      "section": "Coverage snapshot, runtime switches, and limits",
+      "break_rule": "AppendixPages(...)[0] is an authored appendix page."
+    },
+    {
+      "page": "9",
+      "page_id": "appendix-evidence",
+      "section": "Full feature evidence",
+      "break_rule": "AppendixPages(...)[1] is an authored appendix page."
+    }
+  ],
+  "accounts": [
+    {
+      "id": "REF-1001",
+      "name": "Component Scaffold",
+      "owner": "Template API",
+      "status": "Ready",
+      "risk": "Low",
+      "last_review": "2026-05-24"
+    },
+    {
+      "id": "REF-1002",
+      "name": "CSS Layer Loader",
+      "owner": "Rendering Pipeline",
+      "status": "Ready",
+      "risk": "Low",
+      "last_review": "2026-05-24"
+    },
+    {
+      "id": "REF-1003",
+      "name": "SVG Asset Path",
+      "owner": "AssetBundle",
+      "status": "Ready",
+      "risk": "Low",
+      "last_review": "2026-05-24"
+    },
+    {
+      "id": "REF-1004",
+      "name": "Raster Image Path",
+      "owner": "HTML Image Parser",
+      "status": "Ready",
+      "risk": "Low",
+      "last_review": "2026-05-24"
+    },
+    {
+      "id": "REF-1005",
+      "name": "Page Data Export",
+      "owner": "Python Binding",
+      "status": "Ready",
+      "risk": "Low",
+      "last_review": "2026-05-24"
+    },
+    {
+      "id": "REF-1006",
+      "name": "Strict Validation Mode",
+      "owner": "CLI Contract",
+      "status": "Ready",
+      "risk": "Medium",
+      "last_review": "2026-05-24"
+    }
+  ],
+  "transactions": [
+    {
+      "date": "2026-05-01",
+      "description": "Initialize scaffold folders",
+      "category": "Scaffold",
+      "amount": "1.00",
+      "balance": "1.00"
+    },
+    {
+      "date": "2026-05-03",
+      "description": "Add component primitives",
+      "category": "Components",
+      "amount": "2.00",
+      "balance": "3.00"
+    },
+    {
+      "date": "2026-05-06",
+      "description": "Register Inter font asset",
+      "category": "Assets",
+      "amount": "1.25",
+      "balance": "4.25"
+    },
+    {
+      "date": "2026-05-08",
+      "description": "Render SVG as image",
+      "category": "Assets",
+      "amount": "1.50",
+      "balance": "5.75"
+    },
+    {
+      "date": "2026-05-11",
+      "description": "Emit linked HTML and CSS",
+      "category": "Artifacts",
+      "amount": "1.00",
+      "balance": "6.75"
+    },
+    {
+      "date": "2026-05-14",
+      "description": "Request PDF page data",
+      "category": "Artifacts",
+      "amount": "2.25",
+      "balance": "9.00"
+    },
+    {
+      "date": "2026-05-16",
+      "description": "Generate PNG previews",
+      "category": "Artifacts",
+      "amount": "1.25",
+      "balance": "10.25"
+    },
+    {
+      "date": "2026-05-18",
+      "description": "Run component mount validation",
+      "category": "Validation",
+      "amount": "2.00",
+      "balance": "12.25"
+    },
+    {
+      "date": "2026-05-21",
+      "description": "Write run report",
+      "category": "Validation",
+      "amount": "1.50",
+      "balance": "13.75"
+    },
+    {
+      "date": "2026-05-24",
+      "description": "Close static PDF readiness epoch",
+      "category": "Release",
+      "amount": "3.25",
+      "balance": "17.00"
+    }
+  ],
+  "chart": {
+    "rows": [
+      {
+        "label": "Scaffold",
+        "value": 92
+      },
+      {
+        "label": "CSS",
+        "value": 88
+      },
+      {
+        "label": "Assets",
+        "value": 94
+      },
+      {
+        "label": "Tables",
+        "value": 90
+      },
+      {
+        "label": "Diagnostics",
+        "value": 86
+      }
+    ]
+  },
+  "heatmap": {
+    "columns": [
+      "HTML",
+      "CSS",
+      "Assets",
+      "Tables",
+      "Pages",
+      "Reports"
+    ],
+    "rows": [
+      {
+        "label": "Authoring",
+        "values": [4, 4, 3, 4, 4, 3]
+      },
+      {
+        "label": "Rendering",
+        "values": [4, 4, 4, 4, 4, 3]
+      },
+      {
+        "label": "Validation",
+        "values": [3, 4, 3, 3, 4, 4]
+      },
+      {
+        "label": "Packaging",
+        "values": [4, 3, 4, 3, 4, 4]
+      }
+    ]
+  },
+  "timeline": [
+    {
+      "date": "2026-05-01",
+      "label": "Source ready",
+      "detail": "Reference data and component folders exist."
+    },
+    {
+      "date": "2026-05-08",
+      "label": "Assets ready",
+      "detail": "Font, SVG, and raster paths render in the pipeline."
+    },
+    {
+      "date": "2026-05-14",
+      "label": "Artifacts ready",
+      "detail": "HTML, CSS, PDF, PNG, and page data are emitted."
+    },
+    {
+      "date": "2026-05-24",
+      "label": "Epoch ready",
+      "detail": "Static PDF coverage has a canonical reference target."
+    }
+  ],
+  "feature_matrix": [
+    {
+      "area": "Document",
+      "feature": "HTML5 semantic structure",
+      "status": "Covered",
+      "evidence": "main, section, article, header, footer, figure, tables"
+    },
+    {
+      "area": "Document",
+      "feature": "Paged output",
+      "status": "Covered",
+      "evidence": "@page, page breaks, fixed letter geometry"
+    },
+    {
+      "area": "Document",
+      "feature": "Manual pagination",
+      "status": "Covered",
+      "evidence": "Page(...) boundaries, data/page_plan, and .ref-page page-break-after"
+    },
+    {
+      "area": "Document",
+      "feature": "Engine footers",
+      "status": "Covered",
+      "evidence": "footer_first, footer_each, footer_last with {page}, {pages}, and page data placeholders"
+    },
+    {
+      "area": "CSS",
+      "feature": "Layered authoring",
+      "status": "Covered",
+      "evidence": "tokens, primitives, section CSS, final report overrides"
+    },
+    {
+      "area": "CSS",
+      "feature": "Visual styling",
+      "status": "Covered",
+      "evidence": "borders, outlines, shadows, gradients, transforms, filters, counters"
+    },
+    {
+      "area": "Assets",
+      "feature": "Bundled SVG image",
+      "status": "Covered",
+      "evidence": "assets/brand-mark.svg registered as brand-mark.svg"
+    },
+    {
+      "area": "Assets",
+      "feature": "Inline SVG",
+      "status": "Covered",
+      "evidence": "cover mark and visual gauge are authored as inline svg elements"
+    },
+    {
+      "area": "Assets",
+      "feature": "Raster data URI",
+      "status": "Covered",
+      "evidence": "embedded PNG data URI swatch on visual page"
+    },
+    {
+      "area": "Data",
+      "feature": "Tables",
+      "status": "Covered",
+      "evidence": "account inventory, transaction ledger, and feature matrix"
+    },
+    {
+      "area": "Diagnostics",
+      "feature": "Component mount validation",
+      "status": "Covered",
+      "evidence": "output/canonical_reference_component_mount_validation.json"
+    },
+    {
+      "area": "Diagnostics",
+      "feature": "Page data export",
+      "status": "Covered",
+      "evidence": "output/canonical_reference_page_data.json with count, sum, and every operations"
+    }
+  ],
+  "known_limits": [
+    {
+      "topic": "Interactive CSS",
+      "detail": "Transitions, animations, hover input, and script-driven layouts remain static-output contracts."
+    },
+    {
+      "topic": "Browser layout parity",
+      "detail": "This example targets reliable static PDFs, not complete browser behavior."
+    },
+    {
+      "topic": "External network assets",
+      "detail": "Production scaffolds should vendor or bundle assets for deterministic rendering."
+    }
+  ]
+}

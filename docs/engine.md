@@ -64,9 +64,36 @@ These are consumed by CLI `--fail-on` policies and repro workflows.
 Engine options include:
 
 - `pdf_version`: `1.7` or `2.0`
-- `pdf_profile`: `none`, `pdfa2b`, `pdfx4`, `tagged`
+- `pdf_profile`: `none`, `pdfa1a`, `pdfa1b`, `pdfa2a`, `pdfa2b`, `pdfa2u`, `pdfa3a`, `pdfa3b`, `pdfa3u`, `pdfa4`, `pdfa4e`, `pdfa4f`, `pdfx4`, `pdfua1`, `pdfua2`, `pdfvt1`, `wtpdf1r`, `wtpdf1a`, `tagged`
 - `color_space`: `rgb` or `cmyk`
 - output intent ICC embedding and metadata fields
+
+PDF/A and PDF/VT/X profiles require an output intent. PDF/A, PDF/X/VT, PDF/UA,
+and WTPDF profiles require embedded fonts when text is used. `pdfa4`, `pdfa4e`, `pdfa4f`, `pdfua2`, `wtpdf1r`, and `wtpdf1a` emit PDF 2.0 automatically. `pdfua1`,
+`pdfua2`, `wtpdf1r`, and `wtpdf1a` enable the tagged-PDF structure path and emit identification
+metadata. Use the accessibility verifier/seed traces as the machine gate before
+making external conformance claims.
+
+Use `python tools/validate_pdf_profiles.py --download-verapdf --install-pdf-oxide --strict-external`
+for the profile conformance gate. It regenerates canonical profile specimens,
+records inspect/JIT evidence, verifies byte-for-byte replay determinism, runs
+veraPDF for PDF/A/PDF/UA/WTPDF profiles, and runs PDF/X-4 validation for `pdfx4` and
+the PDF/X-4 base of `pdfvt1`. PDF/A-4f specimens also emit and inspect a
+deterministic associated-file `EmbeddedFiles` name tree. WTPDF specimens emit and inspect PDF Declaration evidence. PDF/VT specimens also emit and inspect a minimal
+document-part graph (`DPartRoot`, `DPartRootNode`, one-level `NodeNameList`,
+leaf page range, and page `/DPart` references), plus a supplemental multipage
+specimen that proves `/Start` and `/End`, reported as granular booleans plus
+the aggregate `pdfvt_dpart_graph_valid` gate.
+Pass `--pdfvt-cmd "tool --input {pdf}" --require-dedicated-pdfvt` to make a
+dedicated PDF/VT preflight tool part of the same gate.
+
+The distributed Python wheel feature set is `python,svg_raster`, matching the
+CLI capability claim for SVG raster fallback. Source builds that omit
+`svg_raster` keep native vector SVG support, but unsupported SVG features cannot
+fall back to raster output.
+`fullbleed capabilities --json` reports the compiled `svg_raster` build feature
+and groups SVG support into native-vector, raster-fallback-required, and
+unsupported/known-loss feature lists.
 
 ## Watermark model
 
@@ -80,4 +107,3 @@ Watermark supports:
 ## Threading and parallel render
 
 Batch APIs include parallel methods. Python bindings release the GIL around long render operations.
-

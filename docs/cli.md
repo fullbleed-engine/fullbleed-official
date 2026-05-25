@@ -72,6 +72,49 @@ Template auto-compose notes:
 - When `--emit-image` is used with template auto-compose, image artifacts are emitted from the finalized composed PDF (not overlay-only preview) via native Rust rasterization in the engine.
 - `--deterministic-hash` writes PDF SHA-256 by default; when `--emit-image` is set, it writes an artifact-set digest (`fullbleed.artifact_digest.v1`) computed from PDF SHA-256 plus ordered page-image SHA-256 values.
 
+PDF profile targets include `none`, `pdfa1a`, `pdfa1b`, `pdfa2a`, `pdfa2b`,
+`pdfa2u`, `pdfa3a`, `pdfa3b`, `pdfa3u`, `pdfa4`, `pdfa4e`, `pdfa4f`,
+`pdfx4`, `pdfua1`, `pdfua2`, `pdfvt1`, `wtpdf1r`, `wtpdf1a`, and `tagged`. Aliases `a`, `ua`, `vt`, `wt1r`, `wt1a`, `pdf/a`, `pdf/ua`, and
+`pdf/vt` normalize to the canonical profile names in manifests and capability
+output. PDF/A and PDF/X/VT profiles require `--output-intent-icc`; PDF/A,
+PDF/X/VT, PDF/UA, and WTPDF text output requires embedded fonts and fails with
+an actionable font-asset hint. `pdfa4`,
+`pdfa4e`, `pdfa4f`, `pdfua2`, `wtpdf1r`, and `wtpdf1a` emit PDF 2.0
+automatically.
+
+Profile conformance gate:
+
+```bash
+python tools/validate_pdf_profiles.py \
+  --out output/conformance_validation \
+  --download-verapdf \
+  --install-pdf-oxide \
+  --strict-external
+```
+
+The harness generates deterministic specimens for `pdfa1a`, `pdfa1b`,
+`pdfa2a`, `pdfa2b`, `pdfa2u`, `pdfa3a`, `pdfa3b`, `pdfa3u`, `pdfa4`,
+`pdfa4e`, `pdfa4f`, `pdfua1`, `pdfua2`, `wtpdf1r`, `wtpdf1a`, `pdfx4`, and `pdfvt1`;
+runs FullBleed inspect and JIT profile checks; replays each render for
+byte-for-byte SHA-256 determinism; runs veraPDF for PDF/A and PDF/UA; and runs
+`pdf_oxide` PDF/X-4 validation for `pdfx4` and the PDF/X-4 base of `pdfvt1`.
+WTPDF profiles are validated with veraPDF `wt1r`/`wt1a` and checked for PDF
+Declaration evidence. PDF/A-4f is additionally checked for its associated `EmbeddedFiles` name tree.
+PDF/VT is additionally checked for PDF/VT identification, matching modification
+dates, and a parsed DPart graph: catalog `DPartRoot`, root `DPartRootNode`,
+one-level `NodeNameList`, leaf `DPart` page range, and page `/DPart` references.
+The gate also renders a supplemental multipage PDF/VT specimen to prove the
+`/Start` and `/End` range. The inspect report exposes those PDF/VT graph checks
+as individual boolean fields as well as the aggregate `pdfvt_dpart_graph_valid`
+gate.
+A dedicated PDF/VT
+preflight tool is still required for third-party PDF/VT certification; wire one
+into the same gate with `--pdfvt-cmd "tool --input {pdf}" --require-dedicated-pdfvt`.
+
+Default Fullbleed Python wheels are built with `--features python,svg_raster`.
+Use the same feature set for local source builds when testing
+`--svg-raster-fallback`.
+
 ## `verify`
 
 Same pipeline as render but tuned for validation/preflight usage. Can emit PDF optionally with `--emit-pdf`.
@@ -137,10 +180,12 @@ Template/project bootstrap command group:
 - Local templates:
   - `fullbleed new local accessible <path>`
   - `fullbleed new local invoice <path>`
+  - `fullbleed new local reference <path>`
   - `fullbleed new local statement <path>`
   - Compatibility aliases are still supported:
     - `fullbleed new accessible <path>`
     - `fullbleed new invoice <path>`
+    - `fullbleed new reference <path>`
     - `fullbleed new statement <path>`
 - Remote registry:
   - `fullbleed new list [--registry <manifest-url>]`
@@ -149,6 +194,7 @@ Template/project bootstrap command group:
 
 Practical notes:
 - `new local accessible` seeds a verbose accessibility-first project that renders through `fullbleed.accessibility.AccessibilityEngine` and emits engine verifier, PMR, PDF/UA seed checks, and non-visual trace artifacts by default.
+- `new local reference` seeds the canonical static PDF reference scaffold, including component layers, local SVG/raster assets, page data, PDF/PNG previews, and validation reports.
 - Default registry URL can be overridden with `--registry` or `FULLBLEED_TEMPLATE_REGISTRY`.
 - `new remote --dry-run` resolves template/release metadata without downloading archives.
 - Remote install verifies archive SHA256 before extraction and blocks path traversal in zip contents.

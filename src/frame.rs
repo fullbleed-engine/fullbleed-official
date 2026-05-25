@@ -86,9 +86,7 @@ impl Frame {
         }
 
         let pagination = flowable.pagination();
-        let mut size = flowable.wrap(avail_width, avail_height);
-        size.width = size.width;
-        size.height = size.height;
+        let size = flowable.wrap(avail_width, avail_height);
         if matches!(
             pagination.break_inside,
             BreakInside::Avoid | BreakInside::AvoidPage

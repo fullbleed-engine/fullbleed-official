@@ -8,7 +8,7 @@ This folder documents the Fullbleed stack at three layers:
 
 ## Version scope
 
-These docs target the `0.6.15` stable line and the current repository source layout.
+These docs target the `1.0.0` stable line and the current repository source layout.
 
 ## Documents
 
@@ -19,6 +19,9 @@ These docs target the `0.6.15` stable line and the current repository source lay
 - `docs/ui-accessibility.md`: `fullbleed.ui` authoring, accessibility primitives, validation, signatures
 - `docs/cli.md`: command reference, JSON/machine mode, reproducibility and validation flows
 - `docs/pdf-templates.md`: Rust finalize PDF template/XObject composition policy and smoke gates
+- `docs/release/README.md`: release runbook, readiness ledger, and public claim contract
+- `docs/release/1.0.0-validation-report.md`: current local validation evidence for 1.0.0 standards/package claims
+- `examples/canonical_reference/README.md`: canonical static PDF scaffold reference and validation workflow
 
 ## Recommended reading order
 
@@ -28,10 +31,13 @@ These docs target the `0.6.15` stable line and the current repository source lay
 4. `docs/ui-accessibility.md` if you are building semantic/a11y-first document workflows
 5. `docs/cli.md` if you are automating builds/validation in CI
 6. `docs/pdf-templates.md` if your workflow overlays variable data onto source PDF templates
-7. `docs/engine.md` if you need to reason about behavior, constraints, or performance
+7. `docs/release/README.md` if you are validating, tagging, or publishing a release
+8. `examples/canonical_reference/README.md` if you need a complete runnable static PDF reference project
+9. `docs/engine.md` if you need to reason about behavior, constraints, or performance
 
 ## Scaffold and component workflow
 
 For component-first project structure and scaffold conventions, read:
 
 - `python/fullbleed_cli/scaffold_templates/init/SCAFFOLDING.md`
+- `examples/canonical_reference/SCAFFOLDING.md`

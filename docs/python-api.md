@@ -58,6 +58,16 @@ Common constructor options:
 - rendering toggles: `reuse_xobjects`, `svg_form_xobjects`, `svg_raster_fallback`
 - text controls: `unicode_support`, `shape_text`, `unicode_metrics`
 - PDF config: `pdf_version`, `pdf_profile`, `color_space`, output intent fields
+  (`pdf_profile` accepts `none`, `pdfa1a`, `pdfa1b`, `pdfa2a`, `pdfa2b`,
+  `pdfa2u`, `pdfa3a`, `pdfa3b`, `pdfa3u`, `pdfa4`, `pdfa4e`, `pdfa4f`, `pdfx4`, `pdfua1`,
+  `pdfua2`, `pdfvt1`, `wtpdf1r`, `wtpdf1a`, `tagged`, plus aliases such as `a`, `ua`, `vt`, `wt1r`, and `wt1a`)
+  `pdfa4`, `pdfa4e`, `pdfa4f`, `pdfua2`, `wtpdf1r`, and `wtpdf1a` emit PDF 2.0 automatically.
+  PDF/A, PDF/X/VT, PDF/UA, and WTPDF text output requires embeddable font assets.
+  Use `tools/validate_pdf_profiles.py` for the repeatable external/internal
+  profile gate; `inspect_pdf()` exposes profile markers, seed blockers,
+  embedded font counts, PDF/UA structure markers, and granular PDF/VT DPart
+  graph markers. The harness includes a supplemental multipage PDF/VT specimen
+  for `/Start` and `/End` range evidence.
 - document metadata: `document_lang`, `document_title`
 - page template decorations: header/footer text and HTML variants
 - watermark controls: `watermark_*` fields or `watermark=WatermarkSpec(...)`

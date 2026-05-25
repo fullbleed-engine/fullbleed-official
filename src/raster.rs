@@ -1,6 +1,6 @@
 use crate::canvas::{Command, Document};
 use crate::error::FullBleedError;
-use crate::flowable::PaintFilterSpec;
+use crate::flowable::{FilterDropShadowSpec, PaintFilterSpec};
 use crate::font::FontRegistry;
 use crate::types::{Color, MixBlendMode, Pt, Shading, ShadingStop};
 use base64::Engine;
@@ -9,9 +9,9 @@ use std::collections::HashMap;
 use std::path::Path as FsPath;
 use std::sync::{Arc, Mutex, OnceLock};
 use tiny_skia::{
-    BlendMode as SkBlendMode, FillRule, FilterQuality, GradientStop, LineCap, LineJoin,
-    LinearGradient, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint, Point, RadialGradient,
-    Rect, Shader, SpreadMode, Stroke, StrokeDash, Transform,
+    BlendMode as SkBlendMode, FillRule, FilterQuality, GradientStop, IntSize, LineCap, LineJoin,
+    LinearGradient, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint, PixmapRef, Point,
+    RadialGradient, Rect, Shader, SpreadMode, Stroke, StrokeDash, Transform,
 };
 use ttf_parser::{GlyphId, OutlineBuilder};
 
@@ -60,6 +60,7 @@ impl Default for RasterState {
 struct FormDefinition {
     width: Pt,
     height: Pt,
+    isolated: bool,
     commands: Vec<Command>,
 }
 
@@ -211,7 +212,7 @@ fn render_commands(
                     *width,
                     *height,
                     *radius,
-                    *filter,
+                    filter,
                 );
             }
             Command::SetFontName(name) => state.font_name = name.clone(),
@@ -415,12 +416,14 @@ fn render_commands(
                 {
                     let path = PathBuilder::from_rect(rect);
                     let paint = fill_paint(state.fill_color, state.fill_opacity, state.blend_mode);
-                    pixmap.fill_path(
+                    fill_path_blended(
+                        pixmap,
                         &path,
                         &paint,
                         FillRule::Winding,
                         base_transform.pre_concat(state.transform),
                         state.clip_mask.as_ref(),
+                        state.blend_mode,
                     );
                 }
             }
@@ -457,13 +460,15 @@ fn render_commands(
                         paint.quality = FilterQuality::Bilinear;
                         paint.opacity = state.fill_opacity.clamp(0.0, 1.0);
                         paint.blend_mode = sk_blend_mode(state.blend_mode);
-                        pixmap.draw_pixmap(
+                        draw_pixmap_blended(
+                            pixmap,
                             0,
                             0,
                             image.as_ref(),
                             &paint,
                             device_ts,
                             state.clip_mask.as_ref(),
+                            state.blend_mode,
                         );
                     }
                 }
@@ -479,6 +484,23 @@ fn render_commands(
                     FormDefinition {
                         width: *width,
                         height: *height,
+                        isolated: false,
+                        commands: commands.clone(),
+                    },
+                );
+            }
+            Command::DefineIsolatedForm {
+                resource_id,
+                width,
+                height,
+                commands,
+            } => {
+                forms.insert(
+                    resource_id.clone(),
+                    FormDefinition {
+                        width: *width,
+                        height: *height,
+                        isolated: true,
                         commands: commands.clone(),
                     },
                 );
@@ -506,6 +528,49 @@ fn render_commands(
                 };
                 let form_ts = Transform::from_row(sx, 0.0, 0.0, sy, x.to_f32(), draw_y);
                 let mut form_state = state.clone();
+                if form.isolated {
+                    let Some(mut offscreen) = Pixmap::new(pixmap.width(), pixmap.height()) else {
+                        continue;
+                    };
+                    form_state.blend_mode = MixBlendMode::Normal;
+                    form_state.fill_opacity = 1.0;
+                    form_state.stroke_opacity = 1.0;
+                    form_state.transform = form_state.transform.post_concat(form_ts);
+                    let mut form_stack: Vec<RasterState> = Vec::new();
+                    let mut form_path = PathBuilder::new();
+                    let mut form_has_path = false;
+                    render_commands(
+                        &mut offscreen,
+                        form.height.to_f32(),
+                        form.width.to_f32(),
+                        &form.commands,
+                        base_transform,
+                        &mut form_state,
+                        &mut form_stack,
+                        &mut form_path,
+                        &mut form_has_path,
+                        forms,
+                        image_cache,
+                        registry,
+                        shape_text,
+                    )?;
+
+                    let mut paint = PixmapPaint::default();
+                    paint.quality = FilterQuality::Bilinear;
+                    paint.opacity = state.fill_opacity.clamp(0.0, 1.0);
+                    paint.blend_mode = sk_blend_mode(state.blend_mode);
+                    draw_pixmap_blended(
+                        pixmap,
+                        0,
+                        0,
+                        offscreen.as_ref(),
+                        &paint,
+                        Transform::identity(),
+                        state.clip_mask.as_ref(),
+                        state.blend_mode,
+                    );
+                    continue;
+                }
                 // Form commands are emitted in local form space, then mapped by form placement CTM.
                 form_state.transform = form_state.transform.post_concat(form_ts);
                 let mut form_stack: Vec<RasterState> = Vec::new();
@@ -527,6 +592,56 @@ fn render_commands(
                     shape_text,
                 )?;
             }
+            Command::DrawFilteredForm {
+                x,
+                y,
+                width,
+                height,
+                resource_id,
+                filter,
+            } => {
+                let Some(form) = forms.get(resource_id).cloned() else {
+                    continue;
+                };
+                let Some(mut offscreen) = Pixmap::new(pixmap.width(), pixmap.height()) else {
+                    continue;
+                };
+                let draw_y = page_height_pt - y.to_f32() - height.to_f32();
+                let sx = if form.width.to_f32() > 0.0 {
+                    width.to_f32() / form.width.to_f32()
+                } else {
+                    1.0
+                };
+                let sy = if form.height.to_f32() > 0.0 {
+                    height.to_f32() / form.height.to_f32()
+                } else {
+                    1.0
+                };
+                let form_ts = Transform::from_row(sx, 0.0, 0.0, sy, x.to_f32(), draw_y);
+                let mut form_state = state.clone();
+                form_state.blend_mode = MixBlendMode::Normal;
+                form_state.transform = form_state.transform.post_concat(form_ts);
+                let filter_transform = base_transform.pre_concat(form_state.transform);
+                let mut form_stack: Vec<RasterState> = Vec::new();
+                let mut form_path = PathBuilder::new();
+                let mut form_has_path = false;
+                render_commands(
+                    &mut offscreen,
+                    form.height.to_f32(),
+                    form.width.to_f32(),
+                    &form.commands,
+                    base_transform,
+                    &mut form_state,
+                    &mut form_stack,
+                    &mut form_path,
+                    &mut form_has_path,
+                    forms,
+                    image_cache,
+                    registry,
+                    shape_text,
+                )?;
+                apply_foreground_filter_group(pixmap, &offscreen, state, filter, filter_transform);
+            }
         }
     }
     Ok(())
@@ -544,12 +659,14 @@ fn fill_current_path(
         return;
     };
     let paint = fill_paint(state.fill_color, state.fill_opacity, state.blend_mode);
-    pixmap.fill_path(
+    fill_path_blended(
+        pixmap,
         &path,
         &paint,
         fill_rule,
         base_transform.pre_concat(state.transform),
         state.clip_mask.as_ref(),
+        state.blend_mode,
     );
 }
 
@@ -565,12 +682,14 @@ fn stroke_current_path(
     };
     let paint = fill_paint(state.stroke_color, state.stroke_opacity, state.blend_mode);
     let stroke = build_stroke(state);
-    pixmap.stroke_path(
+    stroke_path_blended(
+        pixmap,
         &path,
         &paint,
         &stroke,
         base_transform.pre_concat(state.transform),
         state.clip_mask.as_ref(),
+        state.blend_mode,
     );
 }
 
@@ -586,22 +705,120 @@ fn fill_stroke_current_path(
         return;
     };
     let fill = fill_paint(state.fill_color, state.fill_opacity, state.blend_mode);
-    pixmap.fill_path(
+    fill_path_blended(
+        pixmap,
         &path,
         &fill,
         fill_rule,
         base_transform.pre_concat(state.transform),
         state.clip_mask.as_ref(),
+        state.blend_mode,
     );
     let stroke_paint = fill_paint(state.stroke_color, state.stroke_opacity, state.blend_mode);
     let stroke = build_stroke(state);
-    pixmap.stroke_path(
+    stroke_path_blended(
+        pixmap,
         &path,
         &stroke_paint,
         &stroke,
         base_transform.pre_concat(state.transform),
         state.clip_mask.as_ref(),
+        state.blend_mode,
     );
+}
+
+fn fill_path_blended(
+    pixmap: &mut Pixmap,
+    path: &Path,
+    paint: &Paint<'static>,
+    fill_rule: FillRule,
+    transform: Transform,
+    clip_mask: Option<&Mask>,
+    blend_mode: MixBlendMode,
+) {
+    if blend_mode != MixBlendMode::PlusDarker {
+        pixmap.fill_path(path, paint, fill_rule, transform, clip_mask);
+        return;
+    }
+    let Some(mut source) = Pixmap::new(pixmap.width(), pixmap.height()) else {
+        return;
+    };
+    let mut source_paint = paint.clone();
+    source_paint.blend_mode = SkBlendMode::SourceOver;
+    source.fill_path(path, &source_paint, fill_rule, transform, clip_mask);
+    composite_plus_darker(pixmap, &source);
+}
+
+fn stroke_path_blended(
+    pixmap: &mut Pixmap,
+    path: &Path,
+    paint: &Paint<'static>,
+    stroke: &Stroke,
+    transform: Transform,
+    clip_mask: Option<&Mask>,
+    blend_mode: MixBlendMode,
+) {
+    if blend_mode != MixBlendMode::PlusDarker {
+        pixmap.stroke_path(path, paint, stroke, transform, clip_mask);
+        return;
+    }
+    let Some(mut source) = Pixmap::new(pixmap.width(), pixmap.height()) else {
+        return;
+    };
+    let mut source_paint = paint.clone();
+    source_paint.blend_mode = SkBlendMode::SourceOver;
+    source.stroke_path(path, &source_paint, stroke, transform, clip_mask);
+    composite_plus_darker(pixmap, &source);
+}
+
+fn draw_pixmap_blended(
+    pixmap: &mut Pixmap,
+    x: i32,
+    y: i32,
+    source: PixmapRef<'_>,
+    paint: &PixmapPaint,
+    transform: Transform,
+    clip_mask: Option<&Mask>,
+    blend_mode: MixBlendMode,
+) {
+    if blend_mode != MixBlendMode::PlusDarker {
+        pixmap.draw_pixmap(x, y, source, paint, transform, clip_mask);
+        return;
+    }
+    let Some(mut layer) = Pixmap::new(pixmap.width(), pixmap.height()) else {
+        return;
+    };
+    let mut source_paint = *paint;
+    source_paint.blend_mode = SkBlendMode::SourceOver;
+    layer.draw_pixmap(x, y, source, &source_paint, transform, clip_mask);
+    composite_plus_darker(pixmap, &layer);
+}
+
+fn composite_plus_darker(dst: &mut Pixmap, src: &Pixmap) {
+    if dst.width() != src.width() || dst.height() != src.height() {
+        return;
+    }
+    let src_data = src.data();
+    let dst_data = dst.data_mut();
+    for (src_px, dst_px) in src_data.chunks_exact(4).zip(dst_data.chunks_exact_mut(4)) {
+        let sa = (src_px[3] as f32) / 255.0;
+        if sa <= 0.0 {
+            continue;
+        }
+        let da = (dst_px[3] as f32) / 255.0;
+        let out_a = (sa + da * (1.0 - sa)).clamp(0.0, 1.0);
+        for channel in 0..3 {
+            let sc = (src_px[channel] as f32) / 255.0;
+            let dc = (dst_px[channel] as f32) / 255.0;
+            let out = (out_a - (da - dc) - (sa - sc)).clamp(0.0, out_a);
+            dst_px[channel] = unit_to_u8(out);
+        }
+        dst_px[3] = unit_to_u8(out_a);
+    }
+}
+
+fn unit_to_u8(value: f32) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 fn apply_clip_path(
@@ -634,7 +851,7 @@ fn apply_backdrop_filter(
     width: Pt,
     height: Pt,
     radius: Pt,
-    filter: PaintFilterSpec,
+    filter: &PaintFilterSpec,
 ) {
     if filter.is_identity() {
         return;
@@ -708,6 +925,23 @@ fn apply_backdrop_filter(
     };
     let filtered = filtered_img.as_raw();
     let saturate = filter.saturate.max(0.0);
+    let brightness = filter.brightness.max(0.0);
+    let contrast = filter.contrast.max(0.0);
+    let invert = filter.invert.clamp(0.0, 1.0);
+    let sepia = filter.sepia.clamp(0.0, 1.0);
+    let hue_rotate = filter.hue_rotate;
+    let filter_opacity = filter.opacity.clamp(0.0, 1.0);
+
+    for drop_shadow in &filter.drop_shadows {
+        draw_backdrop_filter_drop_shadow(
+            pixmap,
+            &mask,
+            state,
+            *drop_shadow,
+            filter_opacity,
+            device_transform,
+        );
+    }
 
     let mask_data = mask.data();
     let pixmap_width = pixmap.width() as usize;
@@ -721,7 +955,7 @@ fn apply_backdrop_filter(
             if mask_alpha == 0 {
                 continue;
             }
-            let mix = (mask_alpha as f32) / 255.0;
+            let mix = ((mask_alpha as f32) / 255.0) * filter_opacity;
             let src_idx = (row * roi_w as usize + col) * 4;
             let dst_idx = global_y * row_stride + global_x * 4;
 
@@ -734,6 +968,11 @@ fn apply_backdrop_filter(
             let mut filt_g = filtered[src_idx + 1] as f32;
             let mut filt_b = filtered[src_idx + 2] as f32;
             apply_saturate_rgb(&mut filt_r, &mut filt_g, &mut filt_b, saturate);
+            apply_contrast_rgb(&mut filt_r, &mut filt_g, &mut filt_b, contrast);
+            apply_hue_rotate_rgb(&mut filt_r, &mut filt_g, &mut filt_b, hue_rotate);
+            apply_invert_rgb(&mut filt_r, &mut filt_g, &mut filt_b, invert);
+            apply_sepia_rgb(&mut filt_r, &mut filt_g, &mut filt_b, sepia);
+            apply_brightness_rgb(&mut filt_r, &mut filt_g, &mut filt_b, brightness);
 
             let out_r = (orig_r * (1.0 - mix) + filt_r * mix).clamp(0.0, 255.0);
             let out_g = (orig_g * (1.0 - mix) + filt_g * mix).clamp(0.0, 255.0);
@@ -745,6 +984,361 @@ fn apply_backdrop_filter(
             dst[dst_idx + 2] = premul_u8(out_b.round() as u8, orig_a);
         }
     }
+}
+
+fn draw_backdrop_filter_drop_shadow(
+    pixmap: &mut Pixmap,
+    source_mask: &Mask,
+    state: &RasterState,
+    shadow: FilterDropShadowSpec,
+    filter_opacity: f32,
+    device_transform: Transform,
+) {
+    let width = pixmap.width();
+    let height = pixmap.height();
+    if width == 0 || height == 0 || shadow.opacity <= 0.0 {
+        return;
+    }
+
+    let (sx, sy) = device_transform.get_scale();
+    let dx = (shadow.offset_x.to_f32() * sx.abs()).round() as i32;
+    let dy = (shadow.offset_y.to_f32() * sy.abs()).round() as i32;
+    let alpha_scale = (shadow.opacity * filter_opacity.clamp(0.0, 1.0)).clamp(0.0, 1.0);
+    if alpha_scale <= 0.0 {
+        return;
+    }
+
+    let mut shadow_data = vec![0_u8; (width as usize) * (height as usize) * 4];
+    {
+        let src_mask = source_mask.data();
+        let src = pixmap.data();
+        let width_i = width as i32;
+        let height_i = height as i32;
+        let color_r = (shadow.color.r.clamp(0.0, 1.0) * 255.0).round() as u8;
+        let color_g = (shadow.color.g.clamp(0.0, 1.0) * 255.0).round() as u8;
+        let color_b = (shadow.color.b.clamp(0.0, 1.0) * 255.0).round() as u8;
+
+        for y in 0..height_i {
+            let target_y = y + dy;
+            if target_y < 0 || target_y >= height_i {
+                continue;
+            }
+            for x in 0..width_i {
+                let target_x = x + dx;
+                if target_x < 0 || target_x >= width_i {
+                    continue;
+                }
+                let src_pixel_idx = (y as usize) * (width as usize) + x as usize;
+                let mask_alpha = src_mask[src_pixel_idx];
+                if mask_alpha == 0 {
+                    continue;
+                }
+                let src_idx = src_pixel_idx * 4;
+                let src_alpha = src[src_idx + 3];
+                if src_alpha == 0 {
+                    continue;
+                }
+                let dst_idx = ((target_y as usize) * (width as usize) + target_x as usize) * 4;
+                let masked_alpha = ((mask_alpha as u16) * (src_alpha as u16) / 255) as f32;
+                let alpha = (masked_alpha * alpha_scale).round().clamp(0.0, 255.0) as u8;
+                if alpha <= shadow_data[dst_idx + 3] {
+                    continue;
+                }
+                shadow_data[dst_idx] = color_r;
+                shadow_data[dst_idx + 1] = color_g;
+                shadow_data[dst_idx + 2] = color_b;
+                shadow_data[dst_idx + 3] = alpha;
+            }
+        }
+    }
+
+    let blur_px = backdrop_blur_sigma_px(shadow.blur_radius, device_transform);
+    if blur_px > 0.05 {
+        let Some(base_img) = image::RgbaImage::from_raw(width, height, shadow_data) else {
+            return;
+        };
+        shadow_data = image::imageops::blur(&base_img, blur_px).into_raw();
+    }
+    premultiply_rgba(&mut shadow_data);
+
+    let Some(size) = IntSize::from_wh(width, height) else {
+        return;
+    };
+    let Some(shadow_pixmap) = Pixmap::from_vec(shadow_data, size) else {
+        return;
+    };
+
+    let mut paint = PixmapPaint::default();
+    paint.quality = FilterQuality::Bilinear;
+    paint.opacity = 1.0;
+    paint.blend_mode = sk_blend_mode(state.blend_mode);
+    draw_pixmap_blended(
+        pixmap,
+        0,
+        0,
+        shadow_pixmap.as_ref(),
+        &paint,
+        Transform::identity(),
+        state.clip_mask.as_ref(),
+        state.blend_mode,
+    );
+}
+
+fn apply_foreground_filter_group(
+    pixmap: &mut Pixmap,
+    offscreen: &Pixmap,
+    state: &RasterState,
+    filter: &PaintFilterSpec,
+    device_transform: Transform,
+) {
+    let width = offscreen.width();
+    let height = offscreen.height();
+    if width == 0 || height == 0 {
+        return;
+    }
+
+    for drop_shadow in &filter.drop_shadows {
+        draw_filter_drop_shadow(
+            pixmap,
+            offscreen,
+            state,
+            *drop_shadow,
+            filter.opacity,
+            device_transform,
+        );
+    }
+
+    let mut filtered_data = offscreen.data().to_vec();
+    let blur_px = backdrop_blur_sigma_px(filter.blur_radius, device_transform);
+    if blur_px > 0.05 {
+        let Some(base_img) = image::RgbaImage::from_raw(width, height, filtered_data) else {
+            return;
+        };
+        filtered_data = image::imageops::blur(&base_img, blur_px).into_raw();
+    }
+
+    apply_filter_to_premul_rgba(&mut filtered_data, filter);
+
+    let Some(size) = IntSize::from_wh(width, height) else {
+        return;
+    };
+    let Some(filtered_pixmap) = Pixmap::from_vec(filtered_data, size) else {
+        return;
+    };
+
+    let mut paint = PixmapPaint::default();
+    paint.quality = FilterQuality::Bilinear;
+    paint.opacity = 1.0;
+    paint.blend_mode = sk_blend_mode(state.blend_mode);
+    draw_pixmap_blended(
+        pixmap,
+        0,
+        0,
+        filtered_pixmap.as_ref(),
+        &paint,
+        Transform::identity(),
+        state.clip_mask.as_ref(),
+        state.blend_mode,
+    );
+}
+
+fn draw_filter_drop_shadow(
+    pixmap: &mut Pixmap,
+    offscreen: &Pixmap,
+    state: &RasterState,
+    shadow: FilterDropShadowSpec,
+    filter_opacity: f32,
+    device_transform: Transform,
+) {
+    let width = offscreen.width();
+    let height = offscreen.height();
+    if width == 0 || height == 0 || shadow.opacity <= 0.0 {
+        return;
+    }
+
+    let (sx, sy) = device_transform.get_scale();
+    let dx = (shadow.offset_x.to_f32() * sx.abs()).round() as i32;
+    let dy = (shadow.offset_y.to_f32() * sy.abs()).round() as i32;
+    let alpha_scale = (shadow.opacity * filter_opacity.clamp(0.0, 1.0)).clamp(0.0, 1.0);
+    if alpha_scale <= 0.0 {
+        return;
+    }
+
+    let mut shadow_data = vec![0_u8; (width as usize) * (height as usize) * 4];
+    let src = offscreen.data();
+    let width_i = width as i32;
+    let height_i = height as i32;
+    let color_r = (shadow.color.r.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let color_g = (shadow.color.g.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let color_b = (shadow.color.b.clamp(0.0, 1.0) * 255.0).round() as u8;
+
+    for y in 0..height_i {
+        let target_y = y + dy;
+        if target_y < 0 || target_y >= height_i {
+            continue;
+        }
+        for x in 0..width_i {
+            let target_x = x + dx;
+            if target_x < 0 || target_x >= width_i {
+                continue;
+            }
+            let src_idx = ((y as usize) * (width as usize) + x as usize) * 4;
+            let src_alpha = src[src_idx + 3];
+            if src_alpha == 0 {
+                continue;
+            }
+            let dst_idx = ((target_y as usize) * (width as usize) + target_x as usize) * 4;
+            let alpha = ((src_alpha as f32) * alpha_scale).round().clamp(0.0, 255.0) as u8;
+            if alpha <= shadow_data[dst_idx + 3] {
+                continue;
+            }
+            shadow_data[dst_idx] = color_r;
+            shadow_data[dst_idx + 1] = color_g;
+            shadow_data[dst_idx + 2] = color_b;
+            shadow_data[dst_idx + 3] = alpha;
+        }
+    }
+
+    let blur_px = backdrop_blur_sigma_px(shadow.blur_radius, device_transform);
+    if blur_px > 0.05 {
+        let Some(base_img) = image::RgbaImage::from_raw(width, height, shadow_data) else {
+            return;
+        };
+        shadow_data = image::imageops::blur(&base_img, blur_px).into_raw();
+    }
+    premultiply_rgba(&mut shadow_data);
+
+    let Some(size) = IntSize::from_wh(width, height) else {
+        return;
+    };
+    let Some(shadow_pixmap) = Pixmap::from_vec(shadow_data, size) else {
+        return;
+    };
+
+    let mut paint = PixmapPaint::default();
+    paint.quality = FilterQuality::Bilinear;
+    paint.opacity = 1.0;
+    paint.blend_mode = sk_blend_mode(state.blend_mode);
+    draw_pixmap_blended(
+        pixmap,
+        0,
+        0,
+        shadow_pixmap.as_ref(),
+        &paint,
+        Transform::identity(),
+        state.clip_mask.as_ref(),
+        state.blend_mode,
+    );
+}
+
+fn premultiply_rgba(data: &mut [u8]) {
+    for px in data.chunks_exact_mut(4) {
+        let alpha = px[3];
+        px[0] = premul_u8(px[0], alpha);
+        px[1] = premul_u8(px[1], alpha);
+        px[2] = premul_u8(px[2], alpha);
+    }
+}
+
+fn apply_filter_to_premul_rgba(data: &mut [u8], filter: &PaintFilterSpec) {
+    let saturate = filter.saturate.max(0.0);
+    let brightness = filter.brightness.max(0.0);
+    let contrast = filter.contrast.max(0.0);
+    let invert = filter.invert.clamp(0.0, 1.0);
+    let sepia = filter.sepia.clamp(0.0, 1.0);
+    let hue_rotate = filter.hue_rotate;
+    let filter_opacity = filter.opacity.clamp(0.0, 1.0);
+
+    for px in data.chunks_exact_mut(4) {
+        let alpha = px[3];
+        if alpha == 0 {
+            px[0] = 0;
+            px[1] = 0;
+            px[2] = 0;
+            continue;
+        }
+
+        let (r, g, b, _) = unpremul_rgba(px[0], px[1], px[2], alpha);
+        let mut filt_r = r as f32;
+        let mut filt_g = g as f32;
+        let mut filt_b = b as f32;
+        apply_saturate_rgb(&mut filt_r, &mut filt_g, &mut filt_b, saturate);
+        apply_contrast_rgb(&mut filt_r, &mut filt_g, &mut filt_b, contrast);
+        apply_hue_rotate_rgb(&mut filt_r, &mut filt_g, &mut filt_b, hue_rotate);
+        apply_invert_rgb(&mut filt_r, &mut filt_g, &mut filt_b, invert);
+        apply_sepia_rgb(&mut filt_r, &mut filt_g, &mut filt_b, sepia);
+        apply_brightness_rgb(&mut filt_r, &mut filt_g, &mut filt_b, brightness);
+
+        let out_alpha = ((alpha as f32) * filter_opacity).round().clamp(0.0, 255.0) as u8;
+        px[0] = premul_u8(filt_r.round().clamp(0.0, 255.0) as u8, out_alpha);
+        px[1] = premul_u8(filt_g.round().clamp(0.0, 255.0) as u8, out_alpha);
+        px[2] = premul_u8(filt_b.round().clamp(0.0, 255.0) as u8, out_alpha);
+        px[3] = out_alpha;
+    }
+}
+
+fn apply_hue_rotate_rgb(r: &mut f32, g: &mut f32, b: &mut f32, radians: f32) {
+    if radians.abs() <= 1.0e-6 {
+        return;
+    }
+    let cos = radians.cos();
+    let sin = radians.sin();
+    let out_r = *r * (0.213 + cos * 0.787 - sin * 0.213)
+        + *g * (0.715 - cos * 0.715 - sin * 0.715)
+        + *b * (0.072 - cos * 0.072 + sin * 0.928);
+    let out_g = *r * (0.213 - cos * 0.213 + sin * 0.143)
+        + *g * (0.715 + cos * 0.285 + sin * 0.140)
+        + *b * (0.072 - cos * 0.072 - sin * 0.283);
+    let out_b = *r * (0.213 - cos * 0.213 - sin * 0.787)
+        + *g * (0.715 - cos * 0.715 + sin * 0.715)
+        + *b * (0.072 + cos * 0.928 + sin * 0.072);
+    *r = out_r.clamp(0.0, 255.0);
+    *g = out_g.clamp(0.0, 255.0);
+    *b = out_b.clamp(0.0, 255.0);
+}
+
+fn apply_sepia_rgb(r: &mut f32, g: &mut f32, b: &mut f32, sepia: f32) {
+    if sepia <= 1.0e-6 {
+        return;
+    }
+    let amount = sepia.clamp(0.0, 1.0);
+    let sepia_r = *r * 0.393 + *g * 0.769 + *b * 0.189;
+    let sepia_g = *r * 0.349 + *g * 0.686 + *b * 0.168;
+    let sepia_b = *r * 0.272 + *g * 0.534 + *b * 0.131;
+    *r = (*r * (1.0 - amount) + sepia_r * amount).clamp(0.0, 255.0);
+    *g = (*g * (1.0 - amount) + sepia_g * amount).clamp(0.0, 255.0);
+    *b = (*b * (1.0 - amount) + sepia_b * amount).clamp(0.0, 255.0);
+}
+
+fn apply_invert_rgb(r: &mut f32, g: &mut f32, b: &mut f32, invert: f32) {
+    if invert <= 1.0e-6 {
+        return;
+    }
+    let amount = invert.clamp(0.0, 1.0);
+    *r = (*r * (1.0 - amount) + (255.0 - *r) * amount).clamp(0.0, 255.0);
+    *g = (*g * (1.0 - amount) + (255.0 - *g) * amount).clamp(0.0, 255.0);
+    *b = (*b * (1.0 - amount) + (255.0 - *b) * amount).clamp(0.0, 255.0);
+}
+
+fn apply_contrast_rgb(r: &mut f32, g: &mut f32, b: &mut f32, contrast: f32) {
+    if (contrast - 1.0).abs() <= 1.0e-6 {
+        return;
+    }
+    let factor = contrast.max(0.0);
+    let intercept = 127.5 * (1.0 - factor);
+    *r = (*r * factor + intercept).clamp(0.0, 255.0);
+    *g = (*g * factor + intercept).clamp(0.0, 255.0);
+    *b = (*b * factor + intercept).clamp(0.0, 255.0);
+}
+
+fn apply_brightness_rgb(r: &mut f32, g: &mut f32, b: &mut f32, brightness: f32) {
+    if (brightness - 1.0).abs() <= 1.0e-6 {
+        return;
+    }
+    let factor = brightness.max(0.0);
+    *r = (*r * factor).clamp(0.0, 255.0);
+    *g = (*g * factor).clamp(0.0, 255.0);
+    *b = (*b * factor).clamp(0.0, 255.0);
 }
 
 fn backdrop_blur_sigma_px(blur_radius: Pt, transform: Transform) -> f32 {
@@ -873,12 +1467,14 @@ fn draw_shading_fill(
     paint.shader = shader;
     paint.anti_alias = true;
     paint.blend_mode = sk_blend_mode(state.blend_mode);
-    pixmap.fill_path(
+    fill_path_blended(
+        pixmap,
         &page_path,
         &paint,
         FillRule::Winding,
         base_transform.pre_concat(state.transform),
         state.clip_mask.as_ref(),
+        state.blend_mode,
     );
 }
 
@@ -995,12 +1591,14 @@ fn draw_string(
             let Some(path) = builder.finish() else {
                 continue;
             };
-            pixmap.fill_path(
+            fill_path_blended(
+                pixmap,
                 &path,
                 &paint,
                 FillRule::Winding,
                 device_transform,
                 state.clip_mask.as_ref(),
+                state.blend_mode,
             );
             drawn += 1;
         }
@@ -1124,12 +1722,14 @@ fn draw_string_transformed(
             let Some(path) = builder.finish() else {
                 continue;
             };
-            pixmap.fill_path(
+            fill_path_blended(
+                pixmap,
                 &path,
                 &paint,
                 FillRule::Winding,
                 device_transform.pre_concat(run_transform),
                 state.clip_mask.as_ref(),
+                state.blend_mode,
             );
             drawn += 1;
         }
@@ -1203,12 +1803,14 @@ fn draw_glyph_run(
                 if face.outline_glyph(GlyphId(*gid), &mut builder).is_some() {
                     if let Some(path) = builder.finish() {
                         let local = Transform::from_row(m00, m01, m10, m11, pen_x, pen_y);
-                        pixmap.fill_path(
+                        fill_path_blended(
+                            pixmap,
                             &path,
                             &paint,
                             FillRule::Winding,
                             device_transform.pre_concat(local),
                             state.clip_mask.as_ref(),
+                            state.blend_mode,
                         );
                         drawn += 1;
                     }
@@ -2141,6 +2743,21 @@ fn sk_blend_mode(mode: MixBlendMode) -> SkBlendMode {
         MixBlendMode::Normal => SkBlendMode::SourceOver,
         MixBlendMode::Multiply => SkBlendMode::Multiply,
         MixBlendMode::Screen => SkBlendMode::Screen,
+        MixBlendMode::Overlay => SkBlendMode::Overlay,
+        MixBlendMode::Darken => SkBlendMode::Darken,
+        MixBlendMode::Lighten => SkBlendMode::Lighten,
+        MixBlendMode::ColorDodge => SkBlendMode::ColorDodge,
+        MixBlendMode::ColorBurn => SkBlendMode::ColorBurn,
+        MixBlendMode::HardLight => SkBlendMode::HardLight,
+        MixBlendMode::SoftLight => SkBlendMode::SoftLight,
+        MixBlendMode::Difference => SkBlendMode::Difference,
+        MixBlendMode::Exclusion => SkBlendMode::Exclusion,
+        MixBlendMode::Hue => SkBlendMode::Hue,
+        MixBlendMode::Saturation => SkBlendMode::Saturation,
+        MixBlendMode::Color => SkBlendMode::Color,
+        MixBlendMode::Luminosity => SkBlendMode::Luminosity,
+        MixBlendMode::PlusLighter => SkBlendMode::Plus,
+        MixBlendMode::PlusDarker => SkBlendMode::SourceOver,
     }
 }
 

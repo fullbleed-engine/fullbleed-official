@@ -237,6 +237,10 @@ TEMPLATES = {
         "description": "Basic invoice template",
         "source_dir": "new/invoice",
     },
+    "reference": {
+        "description": "Canonical static PDF reference scaffold",
+        "source_dir": "new/reference",
+    },
     "statement": {
         "description": "Bank/account statement template",
         "source_dir": "new/statement",

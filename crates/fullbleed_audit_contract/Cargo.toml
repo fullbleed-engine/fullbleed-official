@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
 description = "Embedded audit/compliance contract payloads and fingerprints for FullBleed verifier/PMR."
+repository = "https://github.com/fullbleed-engine/fullbleed-official"
+homepage = "https://fullbleed.dev"
+documentation = "https://github.com/fullbleed-engine/fullbleed-official/tree/main/crates/fullbleed_audit_contract"
 
 [lib]
 name = "fullbleed_audit_contract"

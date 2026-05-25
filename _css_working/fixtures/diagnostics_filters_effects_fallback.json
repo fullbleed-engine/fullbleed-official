@@ -1,6 +1,6 @@
 {
   "id": "diagnostics_filters_effects_fallback",
-  "description": "Unsupported filters/effects/compositing declarations should keep deterministic paint and emit explicit known-loss diagnostics.",
+  "description": "Unsupported filter/effects declarations should keep deterministic paint and emit explicit known-loss diagnostics.",
   "labels": [
     "full",
     "diagnostics"
@@ -15,7 +15,7 @@
   "expected_warnings": [],
   "dpi": 120,
   "html": "<!doctype html><html><body><section class='x'>Effects fallback</section></body></html>",
-  "css": "@page { size: 4in 4in; margin: 0; } body { margin: 0; } .x { width: 4in; height: 4in; background: rgb(255,0,0); opacity: 0.5; filter: blur(2px); backdrop-filter: blur(1px); mix-blend-mode: multiply; isolation: isolate; }",
+  "css": "@page { size: 4in 4in; margin: 0; } body { margin: 0; } .x { width: 4in; height: 4in; background: rgb(255,0,0); filter: url(\"filters.svg#x\"); mask-image: linear-gradient(red, transparent); }",
   "expected": {
     "page_count": 1,
     "compute_assertions": [
@@ -53,7 +53,7 @@
       {
         "type": "jit.known_loss",
         "code": "FILTERS_EFFECTS_FALLBACK",
-        "property": "opacity"
+        "property": "filter"
       }
     ]
   },

@@ -631,6 +631,13 @@ fn commands_bbox(commands: &[Command], font_registry: Option<&FontRegistry>) -> 
                 width,
                 height,
                 ..
+            }
+            | Command::DrawFilteredForm {
+                x,
+                y,
+                width,
+                height,
+                ..
             } => {
                 let x0 = x.to_f32();
                 let y0 = y.to_f32();
@@ -773,6 +780,7 @@ fn commands_bbox(commands: &[Command], font_registry: Option<&FontRegistry>) -> 
             | Command::SetBlendMode { .. }
             | Command::ApplyBackdropFilter { .. }
             | Command::DefineForm { .. }
+            | Command::DefineIsolatedForm { .. }
             | Command::BeginTag { .. }
             | Command::EndTag
             | Command::BeginArtifact { .. }

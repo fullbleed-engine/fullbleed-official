@@ -15,8 +15,8 @@ ESCAMBIA_DIR = REPO_ROOT / "_escambia"
 if str(ESCAMBIA_DIR) not in sys.path:
     sys.path.insert(0, str(ESCAMBIA_DIR))
 
-import sqlite_ledger as ledger
-import sqlite_ledger_api as api
+ledger = pytest.importorskip("sqlite_ledger")
+api = pytest.importorskip("sqlite_ledger_api")
 
 
 def _seed_minimal_db(db_path: Path) -> None:

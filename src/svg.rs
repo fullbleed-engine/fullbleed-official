@@ -56,21 +56,27 @@ pub(crate) fn rasterize_svg_to_data_uri(svg_xml: &str, width: Pt, height: Pt) ->
     use image::codecs::png::PngEncoder;
     use resvg::{tiny_skia, usvg};
 
-    let mut opt = usvg::Options::default();
-    opt.keep_named_groups = false;
-
-    let tree = usvg::Tree::from_str(svg_xml, &opt).ok()?;
+    let opt = usvg::Options::default();
+    let mut tree = usvg::Tree::from_str(svg_xml, &opt).ok()?;
+    let mut fontdb = usvg::fontdb::Database::new();
+    fontdb.load_system_fonts();
+    tree.postprocess(usvg::PostProcessingSteps::default(), &fontdb);
 
     let mut w = width.to_f32().round().max(1.0) as u32;
     let mut h = height.to_f32().round().max(1.0) as u32;
     if w == 0 || h == 0 {
-        let size = tree.size();
+        let size = tree.size;
         w = size.width().ceil().max(1.0) as u32;
         h = size.height().ceil().max(1.0) as u32;
     }
 
     let mut pixmap = tiny_skia::Pixmap::new(w, h)?;
-    resvg::render(&tree, usvg::FitTo::Size(w, h), pixmap.as_mut())?;
+    let source_size = tree.size.to_int_size();
+    let transform = tiny_skia::Transform::from_scale(
+        w as f32 / source_size.width().max(1) as f32,
+        h as f32 / source_size.height().max(1) as f32,
+    );
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
 
     let data = pixmap.data().to_vec();
     let mut png = Vec::new();
@@ -270,12 +276,14 @@ struct SvgStylesheet {
 }
 
 #[derive(Debug, Clone)]
-enum PathSeg {
+pub(crate) enum SvgPathSegment {
     MoveTo(f32, f32),
     LineTo(f32, f32),
     CurveTo(f32, f32, f32, f32, f32, f32),
     Close,
 }
+
+type PathSeg = SvgPathSegment;
 
 #[derive(Debug, Clone)]
 pub(crate) struct CompiledPath {
@@ -2446,6 +2454,24 @@ fn parse_path_data(d: &str) -> Vec<PathSeg> {
     }
 
     segs
+}
+
+pub(crate) fn parse_svg_path_data(d: &str) -> Vec<SvgPathSegment> {
+    parse_path_data(d)
+}
+
+pub(crate) fn svg_arc_to_cubic_segments(
+    x0: f32,
+    y0: f32,
+    rx: f32,
+    ry: f32,
+    rotation_deg: f32,
+    large_arc: bool,
+    sweep: bool,
+    x1: f32,
+    y1: f32,
+) -> Vec<SvgPathSegment> {
+    arc_to_cubics(x0, y0, rx, ry, rotation_deg, large_arc, sweep, x1, y1)
 }
 
 fn quad_to_cubic(x0: f32, y0: f32, x1: f32, y1: f32, x2: f32, y2: f32) -> (f32, f32, f32, f32) {

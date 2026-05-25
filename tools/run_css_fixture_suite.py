@@ -680,6 +680,132 @@ def _evaluate_compute_assertions(
     )
 
 
+def _numeric_assertion_matches(block: Dict[str, Any], field: str, assertion: Dict[str, Any]) -> bool:
+    raw = block.get(field)
+    if raw is None and isinstance(block.get("bbox"), dict):
+        raw = block["bbox"].get(field)
+    try:
+        value = float(raw)
+    except Exception:  # noqa: BLE001
+        return not any(
+            key in assertion
+            for key in (
+                f"{field}_min",
+                f"{field}_max",
+                f"{field}_approx",
+                f"{field}_equals",
+            )
+        )
+
+    if f"{field}_min" in assertion and value < float(assertion[f"{field}_min"]):
+        return False
+    if f"{field}_max" in assertion and value > float(assertion[f"{field}_max"]):
+        return False
+    if f"{field}_equals" in assertion and value != float(assertion[f"{field}_equals"]):
+        return False
+    approx_key = f"{field}_approx"
+    if approx_key in assertion:
+        tolerance = float(
+            assertion.get(f"{field}_tolerance", assertion.get("tolerance", 0.01))
+        )
+        if abs(value - float(assertion[approx_key])) > tolerance:
+            return False
+    return True
+
+
+def _trace_text_matches(block: Dict[str, Any], assertion: Dict[str, Any]) -> bool:
+    text = str(block.get("text", ""))
+    if "text_equals" in assertion and text != str(assertion["text_equals"]):
+        return False
+    if "text_contains" in assertion and str(assertion["text_contains"]) not in text:
+        return False
+    if "text_not_contains" in assertion and str(assertion["text_not_contains"]) in text:
+        return False
+    if "text_startswith" in assertion and not text.startswith(str(assertion["text_startswith"])):
+        return False
+    if "text_endswith" in assertion and not text.endswith(str(assertion["text_endswith"])):
+        return False
+    for field in ("x", "y", "w", "h"):
+        if not _numeric_assertion_matches(block, field, assertion):
+            return False
+    return True
+
+
+def _evaluate_text_assertions(
+    reading_trace: Dict[str, Any], expected_assertions: List[Any]
+) -> Tuple[bool, List[str], Dict[str, Any]]:
+    failures: List[str] = []
+    checks: List[Dict[str, Any]] = []
+    blocks: List[Dict[str, Any]] = []
+    for raw_page in _safe_list(reading_trace.get("pages")):
+        if not isinstance(raw_page, dict):
+            continue
+        page_number = int(raw_page.get("page", 0) or 0)
+        for raw_block in _safe_list(raw_page.get("blocks")):
+            if not isinstance(raw_block, dict):
+                continue
+            block = dict(raw_block)
+            block["_page"] = page_number
+            blocks.append(block)
+
+    for idx, raw_assertion in enumerate(expected_assertions):
+        if not isinstance(raw_assertion, dict):
+            failures.append(f"text_assertion_invalid:{idx}")
+            checks.append(
+                {
+                    "index": idx,
+                    "ok": False,
+                    "reason": "assertion_must_be_object",
+                }
+            )
+            continue
+
+        page_raw = raw_assertion.get("page")
+        page = int(page_raw) if page_raw is not None else None
+        candidates = [
+            block
+            for block in blocks
+            if page is None or int(block.get("_page", 0) or 0) == page
+        ]
+        matches = [
+            block
+            for block in candidates
+            if _trace_text_matches(block, raw_assertion)
+        ]
+        min_count = int(raw_assertion.get("min_count", 1))
+        count_equals_raw = raw_assertion.get("count_equals")
+        ok = (
+            len(matches) == int(count_equals_raw)
+            if count_equals_raw is not None
+            else len(matches) >= min_count
+        )
+        checks.append(
+            {
+                "index": idx,
+                "ok": ok,
+                "page": page,
+                "match_count": len(matches),
+                "candidate_count": len(candidates),
+                "sample_matches": [
+                    {"page": block.get("_page"), "text": block.get("text", "")}
+                    for block in matches[:3]
+                ],
+            }
+        )
+        if not ok:
+            failures.append(f"text_assertion_failed:{idx}")
+
+    return (
+        not failures,
+        failures,
+        {
+            "assertion_count": len(expected_assertions),
+            "block_count": len(blocks),
+            "checks": checks,
+        },
+    )
+
+
 def _run_fixture(
     fixture: FixtureFile, update_stability: bool, artifacts_dir: Optional[Path]
 ) -> Dict[str, Any]:
@@ -697,6 +823,7 @@ def _run_fixture(
     paint_samples = _safe_list(expected.get("paint_samples"))
     expected_compute_assertions = _safe_list(expected.get("compute_assertions"))
     expected_layout_assertions = _safe_list(expected.get("layout_assertions"))
+    expected_text_assertions = _safe_list(expected.get("text_assertions"))
     expected_warnings = [str(v) for v in _safe_list(payload.get("expected_warnings"))]
     stability_expected = payload.get("stability_hash")
     expected_diagnostics = _safe_dict(payload.get("expected_diagnostics"))
@@ -743,6 +870,11 @@ def _run_fixture(
     layout_assertions_ok = not bool(expected_layout_assertions)
     layout_assertions_details: Dict[str, Any] = {
         "assertion_count": len(expected_layout_assertions),
+        "checks": [],
+    }
+    text_trace_ok = not bool(expected_text_assertions)
+    text_trace_details: Dict[str, Any] = {
+        "assertion_count": len(expected_text_assertions),
         "checks": [],
     }
 
@@ -813,6 +945,22 @@ def _run_fixture(
         warnings.extend(layout_failures)
         layout_assertions_details = layout_result
 
+    if compute_ok and expected_text_assertions:
+        try:
+            reading_trace = engine.export_render_time_reading_order_trace(html, css)
+            if isinstance(reading_trace, dict):
+                text_trace_ok, text_failures, text_result = _evaluate_text_assertions(
+                    reading_trace, expected_text_assertions
+                )
+                warnings.extend(text_failures)
+                text_trace_details = text_result
+            else:
+                text_trace_ok = False
+                warnings.append("text_trace_error:trace_not_dict")
+        except Exception as exc:  # noqa: BLE001
+            text_trace_ok = False
+            warnings.append(f"text_trace_error:{exc}")
+
     pdf_sha = _sha256_bytes(pdf_bytes) if pdf_bytes else None
     img_sha = [_sha256_bytes(img) for img in image_bytes]
     stability_payload = {
@@ -841,6 +989,11 @@ def _run_fixture(
         },
         "warnings": sorted(warnings),
     }
+    if expected_text_assertions:
+        stability_payload["text_trace"] = {
+            "ok": text_trace_ok,
+            "assertions": text_trace_details,
+        }
     stability_actual = _stability_hash(stability_payload) if pdf_bytes else None
     stability_ok = (
         True
@@ -885,6 +1038,7 @@ def _run_fixture(
         and layout_assertions_ok
         and paint_ok
         and diagnostics_ok
+        and text_trace_ok
         and warnings_ok
         and stability_ok
     )
@@ -921,6 +1075,11 @@ def _run_fixture(
                         "assertions_enabled": bool(expected_layout_assertions),
                         "assertions_ok": layout_assertions_ok,
                         "assertions": layout_assertions_details,
+                    },
+                    "text_trace": {
+                        "assertions_enabled": bool(expected_text_assertions),
+                        "assertions_ok": text_trace_ok,
+                        "assertions": text_trace_details,
                     },
                     "paint": {"ok": paint_ok, "checks": paint_checks},
                     "diagnostics": {
@@ -959,6 +1118,11 @@ def _run_fixture(
                 "assertions_enabled": bool(expected_layout_assertions),
                 "assertions_ok": layout_assertions_ok,
                 "assertions": layout_assertions_details,
+            },
+            "text_trace": {
+                "assertions_enabled": bool(expected_text_assertions),
+                "assertions_ok": text_trace_ok,
+                "assertions": text_trace_details,
             },
             "paint": {
                 "ok": paint_ok,

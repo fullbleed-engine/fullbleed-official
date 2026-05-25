@@ -1,0 +1,100 @@
+[data-fb-role="document-root"] .ref-cover-page {
+  background:
+    linear-gradient(135deg, rgba(226, 61, 82, 0.14), rgba(31, 159, 138, 0.1)),
+    var(--ref-paper);
+}
+
+[data-fb-role="document-root"] .ref-cover-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.42in;
+}
+
+[data-fb-role="document-root"] .ref-cover-mark {
+  width: 0.88in;
+  height: 0.88in;
+}
+
+[data-fb-role="document-root"] .ref-cover-mark-box {
+  fill: #fff;
+  stroke: var(--ref-ink);
+  stroke-width: 7;
+}
+
+[data-fb-role="document-root"] .ref-cover-mark-a {
+  fill: var(--ref-red);
+}
+
+[data-fb-role="document-root"] .ref-cover-mark-b {
+  fill: var(--ref-ink);
+}
+
+[data-fb-role="document-root"] .ref-cover-version {
+  margin: 0;
+  color: var(--ref-muted);
+  font-size: 8pt;
+  font-weight: 800;
+}
+
+[data-fb-role="document-root"] .ref-cover-header {
+  margin-bottom: 0.5in;
+}
+
+[data-fb-role="document-root"] .ref-cover-title {
+  width: 6.8in;
+  margin: 0;
+  font-size: 37pt;
+  line-height: 1.1;
+}
+
+[data-fb-role="document-root"] .ref-cover-subtitle {
+  width: 6.1in;
+  margin: 0.16in 0 0;
+  color: var(--ref-muted);
+  font-size: 13pt;
+  line-height: 1.24;
+}
+
+[data-fb-role="document-root"] .ref-cover-metrics {
+  display: flex;
+  margin-bottom: 0.42in;
+}
+
+[data-fb-role="document-root"] .ref-cover-metrics .ref-metric-card {
+  width: 19%;
+  margin-right: 1.25%;
+}
+
+[data-fb-role="document-root"] .ref-cover-metrics .ref-metric-card:last-child {
+  margin-right: 0;
+}
+
+[data-fb-role="document-root"] .ref-cover-metrics .ref-metric-warm {
+  border-top: 5px solid var(--ref-red);
+}
+
+[data-fb-role="document-root"] .ref-cover-metrics .ref-metric-cool {
+  border-top: 5px solid var(--ref-green);
+}
+
+[data-fb-role="document-root"] .ref-cover-footer {
+  position: absolute;
+  right: 0.48in;
+  bottom: 0.43in;
+  left: 0.48in;
+  display: flex;
+  justify-content: space-between;
+  padding-top: 0.12in;
+  border-top: 1px solid var(--ref-line);
+  color: var(--ref-muted);
+  font-size: 8pt;
+}
+
+[data-fb-role="document-root"] .ref-cover-footer p {
+  margin: 0;
+}
+
+[data-fb-role="document-root"] .ref-cover-owner {
+  font-weight: 800;
+}

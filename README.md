@@ -71,7 +71,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-0.6.15-cp311-cp311-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-1.0.0-cp311-cp311-win_amd64.whl
 ```
 
 Platform artifact policy:
@@ -132,6 +132,17 @@ Expected artifacts from scaffolded `report.py`:
 - `output/component_mount_validation.json`
 - `output/css_layers.json`
 
+Canonical static PDF reference:
+
+```bash
+python examples/canonical_reference/report.py
+```
+
+`examples/canonical_reference/` is the exhaustive scaffold-shaped reference for
+component composition, layered CSS, bundled fonts/SVG, inline SVG, raster data
+URIs, linked and standalone HTML artifacts, PDF output, PNG previews, and
+validation reports.
+
 ## Project Bootstrap Templates (`fullbleed new`)
 
 Use local starters:
@@ -140,6 +151,7 @@ Use local starters:
 fullbleed new local invoice ./my-invoice
 fullbleed new local statement ./my-statement
 fullbleed new local accessible ./my-accessible-doc
+fullbleed new local reference ./my-reference-doc
 ```
 
 Discover remote starters from registry:
@@ -153,6 +165,9 @@ fullbleed new remote i9-stamped-vdp ./i9-job --json
 `fullbleed new local accessible` is the verbose accessibility-first starter and
 demonstrates the `fullbleed.accessibility` runtime surface (engine verifier,
 PMR, PDF/UA-targeted seed checks, and non-visual trace artifacts).
+`fullbleed new local reference` vendors the canonical static PDF reference shape
+as a scaffolded project with component layers, assets, PDF/PNG outputs, page data,
+and validation reports.
 
 Optional registry override (for private/canary registries):
 
@@ -412,7 +427,21 @@ Render/verify/plan key flags:
 - Engine toggles: `--reuse-xobjects`, `--svg-form-xobjects`, `--svg-raster-fallback`, `--shape-text`, `--unicode-support`, `--unicode-metrics`
 - PDF/compliance: `--pdf-version`, `--pdf-profile`, `--color-space`, `--document-lang`, `--document-title`
   Stable default is `--pdf-version 1.7` for shipping workflows.
+  Profile targets: `none`, `pdfa1a`, `pdfa1b`, `pdfa2a`, `pdfa2b`, `pdfa2u`, `pdfa3a`, `pdfa3b`, `pdfa3u`, `pdfa4`, `pdfa4e`, `pdfa4f`, `pdfx4`, `pdfua1`, `pdfua2`, `pdfvt1`, `wtpdf1r`, `wtpdf1a`, `tagged`.
+  Aliases: `a`, `ua`, `vt`, `wt1r`, `wt1a`, `pdf/a`, `pdf/ua`, `pdf/vt`.
   Output intent metadata (`--output-intent-identifier|--output-intent-info|--output-intent-components`) requires `--output-intent-icc`.
+  Run `python tools/validate_pdf_profiles.py --download-verapdf --install-pdf-oxide --strict-external`
+  to regenerate profile specimens, capture inspect/JIT evidence, replay
+  deterministic hashes, validate PDF/A and PDF/UA with veraPDF, and validate
+  PDF/X-4 with `pdf_oxide`. WTPDF profiles are validated with veraPDF
+  `wt1r`/`wt1a` and include PDF Declaration evidence. `pdfa4f` emits and
+  checks an associated `EmbeddedFiles` name tree. `pdfvt1` also emits and checks a parsed
+  DPart graph (`DPartRoot`, `DPartRootNode`, one-level `NodeNameList`, leaf page range,
+  and page `/DPart` references), including a supplemental multipage specimen
+  for `/Start` and `/End`, reported as granular booleans plus
+  `pdfvt_dpart_graph_valid`; use a dedicated PDF/VT preflight tool
+  for third-party PDF/VT certification, or wire one into the same harness with
+  `--pdfvt-cmd "tool --input {pdf}" --require-dedicated-pdfvt`.
 - Watermarking: `--watermark-text`, `--watermark-html`, `--watermark-image`, `--watermark-layer`, `--watermark-semantics`, `--watermark-opacity`, `--watermark-rotation`
 - Artifacts: `--emit-jit`, `--emit-perf`, `--emit-glyph-report`, `--emit-page-data`, `--emit-compose-plan`, `--emit-image`, `--image-dpi`, `--deterministic-hash`
 - Assets: `--asset`, `--asset-kind`, `--asset-name`, `--asset-trusted`, `--allow-remote-assets`
@@ -464,6 +493,12 @@ SVG render behavior flags:
 - `--svg-form-xobjects` / `--no-svg-form-xobjects`
 - `--svg-raster-fallback` / `--no-svg-raster-fallback`
 
+Distributed Python wheels enable the `svg_raster` engine feature, so
+`--svg-raster-fallback` can rasterize unsupported SVG constructs such as SVG
+text, filters, masks, and `foreignObject` into deterministic image content.
+Custom source builds must include `--features python,svg_raster` to advertise
+and use that fallback path.
+
 Machine discovery:
 
 ```bash
@@ -471,6 +506,26 @@ fullbleed capabilities --json
 ```
 
 Inspect the `svg` object in `fullbleed.capabilities.v1` for SVG support metadata.
+It reports the compiled `svg_raster` build feature plus a feature matrix for
+native-vector SVG, raster-fallback-required SVG, and unsupported/known-loss SVG
+features.
+
+## Image Support Matrix
+
+Launch-safe image claims:
+
+- Supported direct raster inputs: PNG and JPEG.
+- SVG is handled by the SVG pipeline described above, with native-vector output
+  where supported and raster fallback for fallback-only features when
+  `svg_raster` is enabled.
+- Supported references include filesystem paths, registered bundle assets,
+  file/data URIs, `<img>`, CSS `background-image: url(...)`, list-style images,
+  and watermark images.
+- Unsupported or not launch-claimed as direct inputs: WebP, GIF, TIFF, AVIF,
+  BMP, animated images, `<picture>`, `srcset`, `sizes`, density descriptors,
+  and browser-style responsive image selection.
+- For deterministic builds, prefer vendored local assets or registered
+  `AssetBundle` inputs; remote assets must be explicitly allowed.
 
 ## Per-Page Templates (`page_1`, `page_2`, `page_n`)
 
@@ -635,26 +690,27 @@ Bootstrap notes:
 
 For the full, maintained coverage statement, see `docs/css-coverage.md`.
 
-Summary as of February 21, 2026:
+Summary as of May 19, 2026:
 
 - Tracked CSS modules: `22`
 - Module state: `22/22 in_progress`
-- Full CSS fixture lane: `85/85` passing
+- Full CSS fixture lane: `86/86` fixtures passing with `605` assertion/paint checks
 - Parity status check: green (`tools/generate_css_parity_status.py --check --json`)
 - Canonical validation artifact: `_css_working/css_parity_status.json`
 - Canonical validation artifact: `_css_working/tmp/fixture_full_latest.json`
 - Canonical validation artifact: `_css_working/css_broad_coverage_sprint_s14.md`
 
-Current validated behavior includes first-class parser -> evaluator -> calculator -> layout/paint coverage across broad static-document CSS domains (values math, layout primitives, pagination/fragmentation baselines, transforms phase-1, gradient/effects subsets, and deterministic diagnostics).
+Current validated behavior includes first-class parser -> evaluator -> calculator -> layout/paint coverage across broad static-document CSS domains (values math, layout primitives, pagination/fragmentation baselines, transforms phase-1, gradient/effects subsets including color-first and interleaved-color `filter: drop-shadow(...)` with computed lengths, modern `rgb()` shadow colors with `mm` lengths, duplicate `drop-shadow(...)` color rejection, empty optional filter-function defaults, explicit/currentColor `backdrop-filter: drop-shadow(...)` raster paint, strict `box-shadow` length/color grammar with modern `rgb()` plus `mm` paint coverage, softened blurred inset edge paint, and directional inset offset edge paint, overflow-gated `text-overflow: ellipsis`, physical min/max box constraints, horizontal-tb RTL `direction` inline inset/margin/padding/border mapping, vertical writing-mode `direction: rtl` inline inset remapping, vertical-rl logical sizing/insets/margin/padding/border/min-max constraints, vertical-lr logical sizing/min-max/insets/margin/padding/border remapping, basic vertical text columns with `vertical-rl` leftward and `vertical-lr` rightward line progression, and deterministic diagnostics).
 
 Known gap categories are explicitly tracked for the final parity push:
 
-- filter/backdrop-filter function breadth beyond current subset
-- clip-path shapes beyond `inset(...)`
-- blend-mode and isolation breadth
-- multi-shadow list semantics
-- multi-layer background compositing
-- table layout edge semantics hardening
+- remaining filter/backdrop-filter function breadth beyond current subset, including SVG `url()` filters, advanced `drop-shadow()` forms beyond the current flexible-color-order foreground and baseline backdrop coverage, and PDF-native foreground filters
+- advanced `clip-path` grammar beyond the current basic-shape subset, including SVG clip sources, SVG-specific geometry boxes, and deeper edge grammar
+- plus-lighter PDF-native parity and deeper nested compositing/isolation breadth
+- deeper blurred inset shadow edge fidelity
+- remaining multi-layer background image edge semantics beyond the current sized gradient-layer repeat-x/space/round and PNG `url(...)` explicit-size/auto-auto-intrinsic/negative-size-invalid/contain/cover/auto-dimension-size/single-value-size/alpha-stack/default-repeat-repeat/repeat-y/repeat/repeat-no-repeat/no-repeat-repeat/space-space/round-round/round-space/space-round/round-repeat/round-no-repeat/no-repeat-round/no-repeat-space/space-no-repeat/repeat-space/repeat-round/space-repeat/logical-repeat-aliases/multi-layer-repeat-axis/background-list-repetition/percentage-position/edge-offset-position/logical-position-aliases/shorthand-position-size-repeat/content-box-origin-clip/multi-layer-origin-clip/background-blend-normal/background-blend-multiply/screen-mode/overlay-mode/exclusion-mode/hard-light-mode/darken-mode/lighten-mode/color-dodge-mode/color-burn-mode/soft-light-mode/hue-mode/saturation-mode/color-mode/luminosity-mode/plus-lighter-mode/list-repetition/truncation/raster-blend/raster-layer-mapping/mixed-raster-gradient-mapping/mixed-gradient-raster-mapping subset, including broader mixed raster stack combinations
+- table layout edge semantics hardening beyond the current fixed-layout width-hint, auto-width, caption-side placement, and invalid caption-side inheritance lanes
+- full vertical text/layout flow beyond the current vertical static-layout and basic wrapped text-column baseline
 
 ## `run` Command (Python Factory Interop)
 
@@ -840,6 +896,12 @@ When `deterministic_hash` is set, engine writes PDF SHA-256 to the provided file
 - `css()`
 
 ## Python Examples (Smoke-Checked)
+
+Canonical scaffold reference:
+
+```bash
+python examples/canonical_reference/report.py
+```
 
 Text watermark + diagnostics:
 
@@ -1191,7 +1253,8 @@ print(payload["outputs"]["pdf"])
 - `--allow-fallbacks` allows fallback diagnostics to remain informational for `missing-glyphs` / `font-subst` gates while still reporting them in JSON output.
 - `--fail-on budget` requires at least one budget threshold flag.
 - `--repro-check` fails on input/hash drift and lock hash mismatches when lock data is available.
-- `--pdf-profile pdfx4` enforces embedded-font constraints; CLI errors include an actionable hint to add an embeddable font asset.
+- PDF/A and PDF/X/VT profiles require output intent metadata; `pdfa4`, `pdfa4e`, and `pdfa4f` emit PDF 2.0 automatically. PDF/A, PDF/X/VT, PDF/UA, and WTPDF text output enforces embedded-font constraints, and CLI errors include an actionable hint to add an embeddable font asset.
+- `--pdf-profile pdfua1` enables tagged output and PDF/UA-1 identification metadata. Treat verifier/seed traces as machine evidence before making external conformance claims.
 - `argparse` usage errors exit with code `2` and emit usage text (not JSON), even when `--json` is present.
 
 ## Related Docs
@@ -1218,6 +1281,10 @@ Fullbleed is dual-licensed:
 SPDX expression:
 
 - `AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial`
+
+Packaging note: the main crates.io manifest uses `AGPL-3.0-only` in Cargo
+metadata and includes this commercial licensing guide in the packaged source;
+PyPI metadata uses the dual-license expression above.
 
 - Copyright notice: `COPYRIGHT`
 - Third-party notices: `THIRD_PARTY_LICENSES.md`

@@ -47,15 +47,15 @@ function Build-WithMaturinOrFallback {
         $useFallback = $true
     } else {
         # Prefer maturin when possible, but it requires an active venv/conda environment.
-        & maturin develop --release --features python
+        & maturin develop --release --features python,svg_raster
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "maturin develop exited with code $LASTEXITCODE; falling back to cargo release build with python feature."
+            Write-Host "maturin develop exited with code $LASTEXITCODE; falling back to cargo release build with python and svg_raster features."
             $useFallback = $true
         }
     }
 
     if ($useFallback) {
-        & cargo build -q --release --features python
+        & cargo build -q --release --features python,svg_raster
         if ($LASTEXITCODE -ne 0) {
             throw "cargo build failed with exit code $LASTEXITCODE"
         }

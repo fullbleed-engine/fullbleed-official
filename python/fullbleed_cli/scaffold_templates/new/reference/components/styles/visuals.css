@@ -1,0 +1,202 @@
+[data-fb-role="document-root"] .ref-panel-bars {
+  min-height: 2.6in;
+}
+
+[data-fb-role="document-root"] .ref-bar {
+  display: block;
+  margin-bottom: 0.09in;
+}
+
+[data-fb-role="document-root"] .ref-bar-top {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.025in;
+}
+
+[data-fb-role="document-root"] .ref-bar-label,
+[data-fb-role="document-root"] .ref-bar-value {
+  font-size: 7.5pt;
+  font-weight: 800;
+}
+
+[data-fb-role="document-root"] .ref-bar-track {
+  display: block;
+  height: 0.18in;
+  border: 1px solid var(--ref-line);
+  border-radius: 4px;
+  background: #f7f8fa;
+}
+
+[data-fb-role="document-root"] .ref-heatmap {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 7pt;
+}
+
+[data-fb-role="document-root"] .ref-heatmap th,
+[data-fb-role="document-root"] .ref-heatmap td {
+  width: 0.45in;
+  height: 0.32in;
+  border: 1px solid var(--ref-line);
+  text-align: center;
+}
+
+[data-fb-role="document-root"] .ref-heatmap th:first-child {
+  width: 0.85in;
+  text-align: left;
+}
+
+[data-fb-role="document-root"] .ref-heat-1 {
+  background: #f8d7da;
+}
+
+[data-fb-role="document-root"] .ref-heat-2 {
+  background: #ffe3a3;
+}
+
+[data-fb-role="document-root"] .ref-heat-3 {
+  background: #cae9e2;
+}
+
+[data-fb-role="document-root"] .ref-heat-4 {
+  background: #75c7b8;
+  color: #fff;
+  font-weight: 800;
+}
+
+[data-fb-role="document-root"] .ref-panel-assets {
+  min-height: 2.75in;
+}
+
+[data-fb-role="document-root"] .ref-asset-row {
+  display: flex;
+  align-items: center;
+  min-height: 0.58in;
+  margin-bottom: 0.08in;
+  padding: 0.05in;
+  border: 1px solid var(--ref-soft-line);
+  border-radius: 4px;
+  background: #fff;
+}
+
+[data-fb-role="document-root"] .ref-asset-img {
+  width: 0.48in;
+  height: 0.48in;
+  margin-right: 0.08in;
+  object-fit: contain;
+}
+
+[data-fb-role="document-root"] .ref-pattern-img {
+  width: 1.15in;
+  height: 0.56in;
+  margin-right: 0.08in;
+  object-fit: contain;
+}
+
+[data-fb-role="document-root"] .ref-raster-img {
+  width: 0.48in;
+  height: 0.48in;
+  margin-right: 0.08in;
+  border: 1px solid var(--ref-line);
+  image-rendering: pixelated;
+}
+
+[data-fb-role="document-root"] .ref-asset-row span,
+[data-fb-role="document-root"] .ref-gauge figcaption,
+[data-fb-role="document-root"] .ref-plot figcaption {
+  color: var(--ref-muted);
+  font-size: 6.8pt;
+}
+
+[data-fb-role="document-root"] .ref-panel-inline-svg {
+  min-height: 2.75in;
+}
+
+[data-fb-role="document-root"] .ref-gauge,
+[data-fb-role="document-root"] .ref-plot {
+  display: inline-block;
+  margin: 0 0.08in 0.06in 0;
+  vertical-align: top;
+}
+
+[data-fb-role="document-root"] .ref-gauge-svg {
+  width: 0.95in;
+  height: 0.95in;
+}
+
+[data-fb-role="document-root"] .ref-gauge-track {
+  fill: none;
+  stroke: #e4e9ef;
+  stroke-width: 9;
+}
+
+[data-fb-role="document-root"] .ref-gauge-fill {
+  fill: none;
+  stroke: var(--ref-green);
+  stroke-width: 9;
+  stroke-linecap: round;
+}
+
+[data-fb-role="document-root"] .ref-gauge-text {
+  fill: var(--ref-ink);
+  font-size: 16px;
+  font-weight: 800;
+  transform: rotate(90deg);
+}
+
+[data-fb-role="document-root"] .ref-plot-svg {
+  width: 2.05in;
+  height: 1.02in;
+}
+
+[data-fb-role="document-root"] .ref-plot-bg {
+  fill: #f7f5ef;
+}
+
+[data-fb-role="document-root"] .ref-plot-axis {
+  fill: none;
+  stroke: var(--ref-line);
+  stroke-width: 2;
+}
+
+[data-fb-role="document-root"] .ref-plot-line {
+  fill: none;
+  stroke: var(--ref-red);
+  stroke-width: 4;
+}
+
+[data-fb-role="document-root"] .ref-plot-point {
+  fill: var(--ref-blue);
+}
+
+[data-fb-role="document-root"] .ref-panel-timeline {
+  margin-top: 0.02in;
+}
+
+[data-fb-role="document-root"] .ref-timeline {
+  display: flex;
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+}
+
+[data-fb-role="document-root"] .ref-timeline li {
+  flex: 1;
+  min-height: 0.62in;
+  margin-right: 0.1in;
+  padding: 0.09in;
+  border-top: 4px solid var(--ref-blue);
+  background: #f7f9fc;
+}
+
+[data-fb-role="document-root"] .ref-timeline-date {
+  display: block;
+  color: var(--ref-muted);
+  font-size: 6.8pt;
+  font-weight: 800;
+}
+
+[data-fb-role="document-root"] .ref-timeline strong,
+[data-fb-role="document-root"] .ref-timeline span {
+  display: block;
+}
