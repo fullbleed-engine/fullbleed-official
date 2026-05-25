@@ -134,18 +134,6 @@
     "paint_samples": [
       {
         "page": 1,
-        "x": 45,
-        "y": 40,
-        "rgba": [
-          0,
-          0,
-          0,
-          255
-        ],
-        "tolerance": 40
-      },
-      {
-        "page": 1,
         "x": 105,
         "y": 35,
         "rgba": [
@@ -179,20 +167,8 @@
           255
         ],
         "tolerance": 8
-      },
-      {
-        "page": 1,
-        "x": 220,
-        "y": 45,
-        "rgba": [
-          0,
-          0,
-          0,
-          255
-        ],
-        "tolerance": 40
       }
     ]
   },
-  "stability_hash": "5f2ed106c34130657ceb290cdf86275bf79c41f635001a036d581ac92e648ca6"
+  "stability_hash": "2dceec197b1d1211beaaa9d45b6a1c1b8147bd31aca82bf716239b32d5425c49"
 }

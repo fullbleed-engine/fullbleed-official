@@ -694,7 +694,7 @@ Summary as of May 19, 2026:
 
 - Tracked CSS modules: `22`
 - Module state: `22/22 in_progress`
-- Full CSS fixture lane: `86/86` fixtures passing with `605` assertion/paint checks
+- Full CSS fixture lane: `86/86` fixtures passing with `603` assertion/paint checks
 - Parity status check: green (`tools/generate_css_parity_status.py --check --json`)
 - Canonical validation artifact: `_css_working/css_parity_status.json`
 - Canonical validation artifact: `_css_working/tmp/fixture_full_latest.json`

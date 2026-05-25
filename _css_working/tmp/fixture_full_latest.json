@@ -162,7 +162,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_background_conic_gradient_supported_quadrants_224388_1779706257794952800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_background_conic_gradient_supported_quadrants_277140_1779749225984293500.jsonl"
           }
         }
       },
@@ -408,7 +408,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_left_color_override_224388_1779706257799760000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_left_color_override_277140_1779749225985589900.jsonl"
           }
         }
       },
@@ -711,7 +711,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_uniform_frame_paint_matrix_224388_1779706257799760000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_uniform_frame_paint_matrix_277140_1779749225987025700.jsonl"
           }
         }
       },
@@ -879,7 +879,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_box_shadow_negative_spread_offset_paints_shrunk_shadow_224388_1779706257800993900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_box_shadow_negative_spread_offset_paints_shrunk_shadow_277140_1779749225987025700.jsonl"
           }
         }
       },
@@ -1096,7 +1096,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_calc_var_additive_mixed_lengths_224388_1779706259643243000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_calc_var_additive_mixed_lengths_277140_1779749227849048200.jsonl"
           }
         }
       },
@@ -1247,7 +1247,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_calc_var_percent_width_224388_1779706259645241400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_calc_var_percent_width_277140_1779749227908097200.jsonl"
           }
         }
       },
@@ -1379,7 +1379,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_fallback_chain_224388_1779706259647242000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_fallback_chain_277140_1779749227998043400.jsonl"
           }
         }
       },
@@ -1595,7 +1595,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_length_chain_fallback_224388_1779706259821110700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_length_chain_fallback_277140_1779749228000053700.jsonl"
           }
         }
       },
@@ -1878,7 +1878,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_math_min_max_clamp_lengths_224388_1779706260355923600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_math_min_max_clamp_lengths_277140_1779749228814287600.jsonl"
           }
         }
       },
@@ -2030,7 +2030,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_conic_gradient_fallback_no_color_224388_1779706260446985800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_conic_gradient_fallback_no_color_277140_1779749228956829000.jsonl"
           }
         }
       },
@@ -2162,7 +2162,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_conic_gradient_fallback_with_color_224388_1779706260859476200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_conic_gradient_fallback_with_color_277140_1779749229121461300.jsonl"
           }
         }
       },
@@ -2295,7 +2295,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_filters_effects_fallback_224388_1779706260951546800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_filters_effects_fallback_277140_1779749229682997100.jsonl"
           }
         }
       },
@@ -2426,7 +2426,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_multicol_single_column_fallback_224388_1779706261562118000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_multicol_single_column_fallback_277140_1779749229684999800.jsonl"
           }
         }
       },
@@ -2586,7 +2586,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_unsupported_media_and_no_effect_224388_1779706261619704900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_unsupported_media_and_no_effect_277140_1779749229688001000.jsonl"
           }
         }
       },
@@ -2869,7 +2869,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_align_content_flex_end_wrap_224388_1779706261777283000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_align_content_flex_end_wrap_277140_1779749230294406800.jsonl"
           }
         }
       },
@@ -3141,7 +3141,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_align_self_item_override_224388_1779706262022873500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_align_self_item_override_277140_1779749230325181700.jsonl"
           }
         }
       },
@@ -3394,7 +3394,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_flow_row_wrap_layout_224388_1779706262631952500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_flow_row_wrap_layout_277140_1779749230762421800.jsonl"
           }
         }
       },
@@ -3716,7 +3716,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_content_flex_end_center_wrap_224388_1779706262633952900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_content_flex_end_center_wrap_277140_1779749230764421300.jsonl"
           }
         }
       },
@@ -3942,7 +3942,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_items_container_alignment_224388_1779706263479874700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_items_container_alignment_277140_1779749231642155300.jsonl"
           }
         }
       },
@@ -4214,7 +4214,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_self_item_override_224388_1779706264947900000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_self_item_override_277140_1779749232579485600.jsonl"
           }
         }
       },
@@ -4400,7 +4400,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_two_column_distribution_224388_1779706265179039900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_two_column_distribution_277140_1779749233008455600.jsonl"
           }
         }
       },
@@ -4589,7 +4589,7 @@
               "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_fragmentation_break_inside_avoid_block_224388_1779706265258180700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_fragmentation_break_inside_avoid_block_277140_1779749233012587800.jsonl"
           }
         }
       },
@@ -4702,7 +4702,7 @@
               "jit.page_break.trigger": 24
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_fragmentation_long_paragraph_224388_1779706265721244100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_fragmentation_long_paragraph_277140_1779749233047052800.jsonl"
           }
         }
       },
@@ -4904,7 +4904,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_gap_row_column_var_resolution_224388_1779706266319492400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_gap_row_column_var_resolution_277140_1779749233665941400.jsonl"
           }
         }
       },
@@ -5075,7 +5075,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_conflicting_explicit_slots_fall_forward_224388_1779706266510393000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_conflicting_explicit_slots_fall_forward_277140_1779749233888283100.jsonl"
           }
         }
       },
@@ -5322,7 +5322,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_explicit_row_column_starts_224388_1779706266564577600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_explicit_row_column_starts_277140_1779749234235298300.jsonl"
           }
         }
       },
@@ -5568,7 +5568,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_rows_only_column_derivation_224388_1779706266931242800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_rows_only_column_derivation_277140_1779749234319405800.jsonl"
           }
         }
       },
@@ -5834,7 +5834,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_template_rows_columns_matrix_224388_1779706267822837800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_template_rows_columns_matrix_277140_1779749234465231700.jsonl"
           }
         }
       },
@@ -6030,7 +6030,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inheritance_unset_noninherited_resets_224388_1779706268575308000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inheritance_unset_noninherited_resets_277140_1779749235290468900.jsonl"
           }
         }
       },
@@ -6247,25 +6247,6 @@
           "checks": [
             {
               "page": 1,
-              "x": 45,
-              "y": 40,
-              "expected_rgba": [
-                0,
-                0,
-                0,
-                255
-              ],
-              "actual_rgba": [
-                0,
-                0,
-                0,
-                255
-              ],
-              "tolerance": 40,
-              "ok": true
-            },
-            {
-              "page": 1,
               "x": 105,
               "y": 35,
               "expected_rgba": [
@@ -6320,25 +6301,6 @@
               ],
               "tolerance": 8,
               "ok": true
-            },
-            {
-              "page": 1,
-              "x": 220,
-              "y": 45,
-              "expected_rgba": [
-                0,
-                0,
-                0,
-                255
-              ],
-              "actual_rgba": [
-                0,
-                0,
-                0,
-                255
-              ],
-              "tolerance": 40,
-              "ok": true
             }
           ]
         },
@@ -6350,7 +6312,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inline_svg_image_mixed_run_torture_224388_1779706269720244700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inline_svg_image_mixed_run_torture_277140_1779749236484922200.jsonl"
           }
         }
       },
@@ -6361,8 +6323,8 @@
         "image_sha256": [
           "806651150178b391ca23d2211475e131306af72211a672e65dc15f2cb8db9954"
         ],
-        "stability_hash_expected": "5f2ed106c34130657ceb290cdf86275bf79c41f635001a036d581ac92e648ca6",
-        "stability_hash_actual": "5f2ed106c34130657ceb290cdf86275bf79c41f635001a036d581ac92e648ca6",
+        "stability_hash_expected": "2dceec197b1d1211beaaa9d45b6a1c1b8147bd31aca82bf716239b32d5425c49",
+        "stability_hash_actual": "2dceec197b1d1211beaaa9d45b6a1c1b8147bd31aca82bf716239b32d5425c49",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -6500,7 +6462,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inset_left_var_resolution_224388_1779706270186279800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inset_left_var_resolution_277140_1779749236919465300.jsonl"
           }
         }
       },
@@ -6781,7 +6743,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_inline_block_size_min_max_224388_1779706270507224800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_inline_block_size_min_max_277140_1779749236934220400.jsonl"
           }
         }
       },
@@ -6961,7 +6923,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_inset_horizontal_tb_ltr_224388_1779706270510089600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_inset_horizontal_tb_ltr_277140_1779749237307095900.jsonl"
           }
         }
       },
@@ -7140,7 +7102,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_margin_padding_horizontal_tb_ltr_224388_1779706271013331100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_margin_padding_horizontal_tb_ltr_277140_1779749237309641700.jsonl"
           }
         }
       },
@@ -7375,7 +7337,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_overflow_hidden_clips_absolute_child_224388_1779706271138241000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_overflow_hidden_clips_absolute_child_277140_1779749237427305800.jsonl"
           }
         }
       },
@@ -7610,7 +7572,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_overflow_visible_allows_absolute_bleed_224388_1779706272115672000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_overflow_visible_allows_absolute_bleed_277140_1779749238468586600.jsonl"
           }
         }
       },
@@ -7780,7 +7742,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_paged_break_before_forced_block_224388_1779706272727239900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_paged_break_before_forced_block_277140_1779749239032512100.jsonl"
           }
         }
       },
@@ -8007,7 +7969,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_auto_inset_static_position_fallback_224388_1779706273325762400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_auto_inset_static_position_fallback_277140_1779749239088260900.jsonl"
           }
         }
       },
@@ -8215,7 +8177,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_empty_box_background_224388_1779706273327806400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_empty_box_background_277140_1779749239091311600.jsonl"
           }
         }
       },
@@ -8480,7 +8442,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_explicit_width_overflow_no_clamp_224388_1779706274360754300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_explicit_width_overflow_no_clamp_277140_1779749239946983800.jsonl"
           }
         }
       },
@@ -8706,7 +8668,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_initial_containing_block_from_static_parent_224388_1779706274484281200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_initial_containing_block_from_static_parent_277140_1779749240150762700.jsonl"
           }
         }
       },
@@ -8914,7 +8876,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_left_right_width_precedence_224388_1779706274528245000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_left_right_width_precedence_277140_1779749240180223800.jsonl"
           }
         }
       },
@@ -9141,7 +9103,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_nearest_positioned_ancestor_224388_1779706274598744000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_nearest_positioned_ancestor_277140_1779749240785809200.jsonl"
           }
         }
       },
@@ -9368,7 +9330,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_percent_nearest_positioned_ancestor_224388_1779706275551435400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_percent_nearest_positioned_ancestor_277140_1779749240913592800.jsonl"
           }
         }
       },
@@ -9558,7 +9520,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_negative_page_one_only_224388_1779706275556918800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_negative_page_one_only_277140_1779749241083952800.jsonl"
           }
         }
       },
@@ -9767,7 +9729,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_page_one_only_224388_1779706275559922500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_page_one_only_277140_1779749241218549400.jsonl"
           }
         }
       },
@@ -9985,7 +9947,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_source_order_zindex_224388_1779706275638563100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_source_order_zindex_277140_1779749241668294800.jsonl"
           }
         }
       },
@@ -10205,7 +10167,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_specificity_zindex_id_wins_224388_1779706276389208600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_specificity_zindex_id_wins_277140_1779749241833046700.jsonl"
           }
         }
       },
@@ -10420,7 +10382,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_zindex_overlay_224388_1779706277801733100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_zindex_overlay_277140_1779749243157269900.jsonl"
           }
         }
       },
@@ -10628,7 +10590,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_top_bottom_height_precedence_224388_1779706277804737600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_top_bottom_height_precedence_277140_1779749243687622500.jsonl"
           }
         }
       },
@@ -10855,7 +10817,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_transform_establishes_containing_block_224388_1779706278092294400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_transform_establishes_containing_block_277140_1779749243805355700.jsonl"
           }
         }
       },
@@ -11026,7 +10988,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_negative_zindex_under_content_224388_1779706278307900400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_negative_zindex_under_content_277140_1779749244204773300.jsonl"
           }
         }
       },
@@ -11235,7 +11197,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_repeats_each_page_224388_1779706279106243300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_repeats_each_page_277140_1779749244782188000.jsonl"
           }
         }
       },
@@ -11451,7 +11413,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_zindex_front_ordering_224388_1779706279550929900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_zindex_front_ordering_277140_1779749244934214500.jsonl"
           }
         }
       },
@@ -11622,7 +11584,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_bottom_containing_height_224388_1779706279596369900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_bottom_containing_height_277140_1779749245256299800.jsonl"
           }
         }
       },
@@ -11793,7 +11755,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_left_containing_width_224388_1779706280284513500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_left_containing_width_277140_1779749246070805500.jsonl"
           }
         }
       },
@@ -11964,7 +11926,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_right_containing_width_224388_1779706280843026300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_right_containing_width_277140_1779749246509907500.jsonl"
           }
         }
       },
@@ -12153,7 +12115,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_inset_shorthand_uniform_224388_1779706280845045900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_inset_shorthand_uniform_277140_1779749246666383100.jsonl"
           }
         }
       },
@@ -12380,7 +12342,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_left_right_precedence_224388_1779706281445584700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_left_right_precedence_277140_1779749246995335700.jsonl"
           }
         }
       },
@@ -12626,7 +12588,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_offset_preserves_flow_slot_224388_1779706281460204200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_offset_preserves_flow_slot_277140_1779749246997323800.jsonl"
           }
         }
       },
@@ -12796,7 +12758,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_percent_left_containing_width_224388_1779706281526260500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_percent_left_containing_width_277140_1779749247060755700.jsonl"
           }
         }
       },
@@ -12966,7 +12928,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_percent_top_containing_height_224388_1779706281683714900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_percent_top_containing_height_277140_1779749247189559100.jsonl"
           }
         }
       },
@@ -13193,7 +13155,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_right_bottom_offsets_224388_1779706282140242800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_right_bottom_offsets_277140_1779749247560475000.jsonl"
           }
         }
       },
@@ -13401,7 +13363,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_top_bottom_precedence_224388_1779706282224494100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_top_bottom_precedence_277140_1779749247591674200.jsonl"
           }
         }
       },
@@ -13681,7 +13643,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_attribute_variants_224388_1779706282408248400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_attribute_variants_277140_1779749247595177600.jsonl"
           }
         }
       },
@@ -13959,7 +13921,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_sibling_combinators_224388_1779706282625306200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_sibling_combinators_277140_1779749248193783900.jsonl"
           }
         }
       },
@@ -14092,7 +14054,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_specificity_id_wins_224388_1779706283220666700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_specificity_id_wins_277140_1779749248658725600.jsonl"
           }
         }
       },
@@ -14371,7 +14333,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_structural_pseudos_224388_1779706283620970900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_structural_pseudos_277140_1779749248660736200.jsonl"
           }
         }
       },
@@ -14504,7 +14466,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_solid_red_block_224388_1779706284448862600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_solid_red_block_277140_1779749249902716600.jsonl"
           }
         }
       },
@@ -14694,7 +14656,7 @@
               "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_table_header_repeat_across_pages_224388_1779706285291146000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_table_header_repeat_across_pages_277140_1779749249904701700.jsonl"
           }
         }
       },
@@ -14884,7 +14846,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_individual_compose_with_transform_224388_1779706285475072800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_individual_compose_with_transform_277140_1779749250398713100.jsonl"
           }
         }
       },
@@ -15073,7 +15035,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_matrix_block_affine_224388_1779706285689571600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_matrix_block_affine_277140_1779749250822088600.jsonl"
           }
         }
       },
@@ -15243,7 +15205,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_origin_left_scale_anchor_224388_1779706286171118900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_origin_left_scale_anchor_277140_1779749250877608000.jsonl"
           }
         }
       },
@@ -15413,7 +15375,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_block_centered_224388_1779706286221990000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_block_centered_277140_1779749250879112600.jsonl"
           }
         }
       },
@@ -15584,7 +15546,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_var_fallback_missing_224388_1779706286236146800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_var_fallback_missing_277140_1779749251123128700.jsonl"
           }
         }
       },
@@ -15755,7 +15717,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_var_reference_custom_angle_224388_1779706286576091600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_var_reference_custom_angle_277140_1779749251228771800.jsonl"
           }
         }
       },
@@ -15925,7 +15887,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_scale_block_centered_224388_1779706286716489600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_scale_block_centered_277140_1779749251244876200.jsonl"
           }
         }
       },
@@ -16095,7 +16057,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_scale_var_reference_custom_pair_224388_1779706286801818200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_scale_var_reference_custom_pair_277140_1779749251276483400.jsonl"
           }
         }
       },
@@ -16322,7 +16284,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_skewx_block_left_origin_224388_1779706286804022100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_skewx_block_left_origin_277140_1779749251539809000.jsonl"
           }
         }
       },
@@ -16492,7 +16454,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_translate_block_offsets_224388_1779706287069954500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_translate_block_offsets_277140_1779749251541482500.jsonl"
           }
         }
       },
@@ -16663,7 +16625,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_translate_var_reference_custom_pair_224388_1779706287077950200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_translate_var_reference_custom_pair_277140_1779749251545494300.jsonl"
           }
         }
       },
@@ -16834,7 +16796,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_var_cycle_fallback_translate_224388_1779706287158049200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_var_cycle_fallback_translate_277140_1779749251646736200.jsonl"
           }
         }
       },
@@ -17023,7 +16985,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_var_reference_custom_list_224388_1779706287402330600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_var_reference_custom_list_277140_1779749251808700900.jsonl"
           }
         }
       },
@@ -17202,7 +17164,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_two_page_break_colors_224388_1779706287485194600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_two_page_break_colors_277140_1779749251932740800.jsonl"
           }
         }
       },
@@ -17353,7 +17315,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_calc_width_resolution_224388_1779706287547201700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_calc_width_resolution_277140_1779749252025895800.jsonl"
           }
         }
       },
@@ -17635,7 +17597,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_min_max_clamp_widths_224388_1779706287731629900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_min_max_clamp_widths_277140_1779749252057821900.jsonl"
           }
         }
       },
