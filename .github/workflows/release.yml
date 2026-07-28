@@ -60,8 +60,11 @@ jobs:
       - name: Install Python test tools
         run: python -m pip install "maturin==1.14.1" pytest
 
-      - name: Install extension from release source
-        run: python -m maturin develop --release --locked
+      - name: Build and install extension from release source
+        shell: bash
+        run: |
+          python -m maturin build --release --locked --out target/validate-wheel
+          python -m pip install --force-reinstall target/validate-wheel/*.whl
 
       - name: Test Python package and CLI
         run: python -m pytest -q
