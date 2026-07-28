@@ -2159,43 +2159,79 @@ fn load_system_font_from_candidates(font_name: &str) -> Option<SystemFontCacheEn
 }
 
 fn system_font_dirs() -> Vec<std::path::PathBuf> {
-    let mut dirs = Vec::new();
+    let mut roots = Vec::new();
 
     #[cfg(target_os = "windows")]
     {
-        dirs.push(std::path::PathBuf::from(r"C:\Windows\Fonts"));
+        roots.push(std::path::PathBuf::from(r"C:\Windows\Fonts"));
         if let Ok(windir) = std::env::var("WINDIR") {
-            dirs.push(std::path::PathBuf::from(windir).join("Fonts"));
+            roots.push(std::path::PathBuf::from(windir).join("Fonts"));
         }
     }
 
     #[cfg(target_os = "linux")]
     {
-        dirs.push(std::path::PathBuf::from("/usr/share/fonts"));
-        dirs.push(std::path::PathBuf::from("/usr/local/share/fonts"));
+        roots.push(std::path::PathBuf::from("/usr/share/fonts"));
+        roots.push(std::path::PathBuf::from("/usr/local/share/fonts"));
         if let Ok(home) = std::env::var("HOME") {
-            dirs.push(std::path::PathBuf::from(home).join(".fonts"));
+            roots.push(std::path::PathBuf::from(home).join(".fonts"));
         }
     }
 
     #[cfg(target_os = "macos")]
     {
-        dirs.push(std::path::PathBuf::from("/System/Library/Fonts"));
-        dirs.push(std::path::PathBuf::from("/Library/Fonts"));
+        roots.push(std::path::PathBuf::from("/System/Library/Fonts"));
+        roots.push(std::path::PathBuf::from("/Library/Fonts"));
         if let Ok(home) = std::env::var("HOME") {
-            dirs.push(std::path::PathBuf::from(home).join("Library/Fonts"));
+            roots.push(std::path::PathBuf::from(home).join("Library/Fonts"));
         }
     }
 
     if let Ok(extra) = std::env::var("FULLBLEED_FONT_DIR") {
         for path in std::env::split_paths(&extra) {
             if !path.as_os_str().is_empty() {
-                dirs.push(path);
+                roots.push(path);
             }
         }
     }
 
+    let mut dirs = Vec::new();
+    for root in roots {
+        collect_system_font_dirs(&root, 0, &mut dirs);
+    }
     dirs
+}
+
+fn collect_system_font_dirs(
+    directory: &std::path::Path,
+    depth: usize,
+    out: &mut Vec<std::path::PathBuf>,
+) {
+    if !directory.is_dir() {
+        return;
+    }
+    out.push(directory.to_path_buf());
+    if depth >= 4 {
+        return;
+    }
+
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    let mut children = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            entry
+                .file_type()
+                .ok()
+                .filter(|file_type| file_type.is_dir())
+                .map(|_| entry.path())
+        })
+        .collect::<Vec<_>>();
+    children.sort();
+    for child in children {
+        collect_system_font_dirs(&child, depth + 1, out);
+    }
 }
 
 fn system_font_file_candidates(font_name: &str) -> Vec<String> {
@@ -2426,6 +2462,48 @@ fn system_font_file_candidates(font_name: &str) -> Vec<String> {
             );
         }
         _ => {}
+    }
+    if !out.is_empty() {
+        if matches!(
+            family.as_str(),
+            "ui-monospace" | "monospace" | "courier" | "courier new" | "liberation mono"
+        ) {
+            extend_style_candidates(
+                &mut out,
+                style,
+                &["DejaVuSansMono.ttf"],
+                &["DejaVuSansMono-Bold.ttf"],
+                &["DejaVuSansMono-Oblique.ttf"],
+                &["DejaVuSansMono-BoldOblique.ttf"],
+            );
+        } else if matches!(
+            family.as_str(),
+            "serif"
+                | "times"
+                | "times roman"
+                | "times new roman"
+                | "century schoolbook"
+                | "new century schoolbook"
+                | "liberation serif"
+        ) {
+            extend_style_candidates(
+                &mut out,
+                style,
+                &["DejaVuSerif.ttf"],
+                &["DejaVuSerif-Bold.ttf"],
+                &["DejaVuSerif-Italic.ttf"],
+                &["DejaVuSerif-BoldItalic.ttf"],
+            );
+        } else {
+            extend_style_candidates(
+                &mut out,
+                style,
+                &["DejaVuSans.ttf"],
+                &["DejaVuSans-Bold.ttf"],
+                &["DejaVuSans-Oblique.ttf"],
+                &["DejaVuSans-BoldOblique.ttf"],
+            );
+        }
     }
     out
 }
@@ -2958,6 +3036,11 @@ mod tests {
             candidates
                 .iter()
                 .any(|v| v.eq_ignore_ascii_case("arial.ttf"))
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|v| v.eq_ignore_ascii_case("DejaVuSans-Bold.ttf"))
         );
     }
 

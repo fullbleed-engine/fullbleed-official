@@ -33,6 +33,8 @@ HTML/CSS-to-PDF generation.
 - Added installed-wheel smoke gates for every target architecture. Linux
   cross-built wheels execute under QEMU, while the x86-64 manylinux wheel is
   also exercised on every supported CPython release.
+- Improved Linux and macOS system-font discovery by scanning nested font
+  directories and adding DejaVu fallbacks for standard PDF font families.
 - Retained a source distribution so users on additional Rust-supported
   platforms can build locally when no prebuilt wheel matches.
 - Superseded the initial 1.6.0 PyPI upload, which contained six platform
