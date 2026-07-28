@@ -1,182 +1,71 @@
-# Fullbleed Release Notes - 1.0.0
+# Fullbleed Release Notes - 1.6.1
 
-Status: Local release validation refreshed; final publish handoff requires a clean release worktree
+Status: released
 
-Draft date: May 25, 2026
+Release date: July 28, 2026
 
 ## Summary
 
-`1.0.0` is the static PDF library readiness release.
+Fullbleed 1.6.1 completes the move to the MIT License and replaces the partial
+1.6.0 PyPI artifact set with full platform coverage. The engine behavior and
+public rendering contract remain focused on deterministic static
+HTML/CSS-to-PDF generation.
 
-This release promotes Fullbleed from the `0.6.x` hardening line to a stable
-public contract for deterministic static HTML/CSS-to-PDF generation, Python-first
-project scaffolds, auditable static PDF workflows, and production-oriented
-CSS coverage for transactional, report, VDP, statement, invoice, menu, and
-chart-style documents.
+## Licensing
 
-Fullbleed is not claiming browser-equivalent CSS parity. The 1.0 contract is
-that supported static PDF behavior is deterministic and fixture-covered, and
-unsupported or intentionally degraded behavior is surfaced through deterministic
-fallback/known-loss diagnostics.
+- Replaced the AGPL/commercial dual-license model with the MIT License.
+- Updated Cargo, PyPI, runtime compliance, documentation, examples, and source
+  SPDX headers to declare `MIT`.
+- Removed the obsolete commercial-attestation helpers, CLI flags, and
+  one-time runtime license warning.
+- Retained third-party asset and dependency notices; those components remain
+  under their respective licenses.
 
-## Key Changes
+## Python Packaging
 
-### Static PDF Library Readiness
+- Raised the Python floor to 3.10, matching syntax already used by the package.
+- Declared and continuously tests CPython 3.10, 3.11, 3.12, 3.13, and 3.14.
+- Updated PyO3 and enabled `abi3-py310`, producing one compatible wheel per
+  platform for the supported CPython range.
+- Added 15 release wheels: manylinux 2014 for x86-64, x86, ARM64, ARMv7,
+  s390x, and ppc64le; musllinux 1.2 for x86-64, x86, ARM64, and ARMv7;
+  Windows x86-64, x86, and ARM64; and macOS Intel and Apple silicon.
+- Added installed-wheel smoke gates for every target architecture. Linux
+  cross-built wheels execute under QEMU, while the x86-64 manylinux wheel is
+  also exercised on every supported CPython release.
+- Retained a source distribution so users on additional Rust-supported
+  platforms can build locally when no prebuilt wheel matches.
+- Superseded the initial 1.6.0 PyPI upload, which contained six platform
+  wheels, with the complete 15-wheel release matrix in 1.6.1.
+- Prepared PyPI trusted publishing through the protected `pypi` GitHub
+  environment.
 
-- Validated broad CSS coverage against the MDN-derived local taxonomy.
-- Current broad fixture lane is `86/86` fixtures passing with `605`
-  assertion/paint checks in `_css_working/tmp/fixture_full_latest.json`.
-- `docs/css-coverage.md` now defines the static PDF readiness contract, the
-  current coverage matrix, and the known non-browser-parity boundaries.
-- The CSS parity status artifact is generated and checkable through
-  `tools/generate_css_parity_status.py --check --json`.
+## Cargo Packaging
 
-### Canonical Reference Scaffold
+- Set the main crate and Python distribution version to `1.6.1` and license
+  metadata to `MIT`.
+- Bumped `fullbleed_audit_contract` to `0.1.1` so its newly MIT-licensed
+  package can be published before the main crate.
+- Added package metadata and release gates for both crates.
+- Prepared crates.io publishing through the protected `crates-io` GitHub
+  environment and the `CARGO_REGISTRY_TOKEN` secret.
 
-- Added `fullbleed new local reference` as a source-only canonical static PDF
-  project scaffold.
-- Added `examples/canonical_reference/` as the runnable reference project.
-- The reference project exercises component composition, layered CSS, local SVG
-  and raster assets, page data, PDF/PNG artifact emission, strict validation,
-  component mount validation, and run reports.
-- The reference output now visibly demonstrates authored manual pagination and
-  engine-rendered footers (`footer_first`, `footer_each`, `footer_last`).
+## Release Gates
 
-### CSS/HTML Rendering Breadth
+The exact `v1.6.1` release commit must pass:
 
-- Expanded static CSS coverage across cascade/layers, values, box model,
-  display, positioning, sizing, text/fonts, backgrounds/borders, lists/counters,
-  overflow, flex/grid lowering, tables, fragmentation, transforms, effects,
-  writing modes, replaced content, color functions, and diagnostics.
-- Kept remaining advanced parity work explicitly scoped as next-epoch backlog
-  rather than silent 1.0 compatibility claims.
+```powershell
+cargo fmt --all --check
+cargo test --locked
+cargo test --locked --features python,svg_raster
+python -m pytest -q
+python tools/check_license_integrity.py --json
+python tools/check_release_metadata.py --expected-version 1.6.1
+python -m maturin build --release --locked
+python -m maturin sdist
+python -m twine check target/wheels/*
+```
 
-### CLI and Scaffolding
-
-- `fullbleed init` remains the production-oriented starter scaffold.
-- `fullbleed new local accessible` remains the accessibility-first scaffold.
-- `fullbleed new local reference` is now the canonical static PDF library
-  reference scaffold.
-- CLI docs list local and remote template flows, JSON/machine-mode surfaces,
-  PDF inspection, template composition, and release/preflight gates.
-- `fullbleed capabilities --json` reports the compiled `svg_raster` build
-  feature and a native/fallback/known-loss SVG feature matrix.
-- README launch docs now include an image support matrix that limits direct
-  raster-input claims to PNG/JPEG and marks responsive/alternate image formats
-  out of scope unless preconverted.
-- Added `docs/release/` with a 1.0.0 readiness ledger, final release runbook,
-  public claim contract, and validation report for infrastructure-grade release
-  handoff.
-
-### Packaging Metadata
-
-- Main Rust and Python package metadata is set to `1.0.0`.
-- PyPI metadata includes homepage, repository, documentation, issues, keywords,
-  and topic classifiers.
-- The main crate package includes the commercial licensing guide alongside the
-  AGPL license files. Cargo metadata remains `AGPL-3.0-only` for crates.io
-  publication; commercial licensing is documented in `LICENSING.md` and PyPI
-  metadata.
-- The main crate package include list is root-anchored so local virtualenv,
-  generated-output, and nested README/license files are not swept into the
-  crates.io package.
-- Removed checked-in development artifacts from the source tree, including the
-  Windows native extension artifact, pytest cache files, and root preflight
-  logs; platform extensions are generated by `maturin` release-feature builds.
-- The embedded audit contract crate now includes repository, homepage, and
-  documentation metadata to eliminate prior publish dry-run warnings.
-
-## Release Validation Plan
-
-The following gates are required before publishing `1.0.0`:
-
-- [x] `cargo test --locked`
-- [x] `cargo test --locked --features svg_raster`
-- [x] `python -m maturin develop --release --features python,svg_raster`
-- [x] `python -m maturin build --release --features python,svg_raster`
-- [x] installed-wheel SVG raster fallback smoke is wired into CI wheel smoke
-- [x] `pytest -q`
-- [x] `python tools/generate_css_parity_status.py --check --json`
-- [x] `python tools/run_css_fixture_suite.py --labels full --jobs 4 --out _css_working/tmp/fixture_full_latest.json --json`
-- [x] `python tools/run_css_fixture_suite.py --fixtures inline_svg_image_mixed_run_torture --jobs 1 --json`
-- [x] `python tools/validate_pdf_profiles.py --out output/conformance_validation_harness --download-verapdf --install-pdf-oxide --strict-external`
-- [x] `python examples/canonical_reference/report.py` with strict validation
-- [x] `fullbleed doctor --strict --json`
-- [x] `fullbleed compliance --strict --json`
-- [x] `python tools/check_license_integrity.py --json`
-- [x] `cargo publish --dry-run --allow-dirty`
-- [x] `cargo publish --dry-run --allow-dirty --manifest-path crates/fullbleed_audit_contract/Cargo.toml`
-- [ ] `python tools/check_release_worktree.py --json`
-- [ ] Final clean-worktree wheel builds and installed-wheel smoke on release commit
-
-## Current Local Evidence
-
-- `cargo test --locked`
-  - passed: `546` Rust tests
-- `cargo test --locked --features svg_raster`
-  - passed: `546` Rust tests
-- `python -m maturin develop --release --features python,svg_raster`
-  - passed before full Python test validation
-- `python -m maturin build --release --features python,svg_raster`
-  - passed, built `target/wheels/fullbleed-1.0.0-cp311-cp311-win_amd64.whl`
-- Installed-wheel SVG raster fallback smoke
-  - CI wheel smoke builds with `python,svg_raster`, installs the wheel, then
-    runs `python -m pytest tests/test_fullbleed_svg_raster_fallback.py -q`
-  - local Windows CPython 3.11 wheel smoke passed for
-    `target/wheels/fullbleed-1.0.0-cp311-cp311-win_amd64.whl`
-  - size: `9497762` bytes
-  - sha256: `0DBAD528E41970EA8D5E2164BF5DE280F172BD150CD08C7D2DD74A2A917A94E2`
-- `pytest -q`
-  - passed: `207` passed, `4` skipped
-- CSS parity status check
-  - passed: `_css_working/css_parity_status.json`
-- Full CSS fixture lane
-  - passed: `86/86` fixtures, `0` failed, `605` assertion/paint checks
-- Integrated inline/SVG/image torture lane
-  - passed: text, `inline-block`, inline SVG, and inline raster image remain in one deterministic inline run with paint and text-trace assertions
-- PDF profile conformance harness
-  - passed: `17` standard profiles regenerated, inspected, replay-hashed, and externally validated where validators are configured
-  - PDF/VT scope: deterministic PDF/VT-1 seed/DPart inspection plus PDF/X-4 base validation; third-party PDF/VT certification still requires `--pdfvt-cmd`
-- Canonical reference strict render
-  - passed: `9` PNG pages, `921017` byte PDF, page-data/run-report emitted
-  - component validation: `0` warnings, `0` overflow, `0` text overlap,
-    `0` CSS warnings, `0` unresolved assets
-  - manual visual QA: inspected regenerated contact sheet plus pagination,
-    table, visual-surface, coverage, and evidence pages
-- CLI/runtime checks
-  - `fullbleed --version`: `fullbleed-cli 1.0.0`
-  - `fullbleed doctor --strict --json`: passed
-  - `fullbleed compliance --strict --json`: passed
-  - `python tools/check_license_integrity.py --json`: passed
-- Cargo publish dry-runs
-  - `fullbleed v1.0.0`: passed
-  - `fullbleed_audit_contract v0.1.0`: passed with the expected warning that
-    `0.1.0` already exists on crates.io; do not republish this crate unchanged
-- Cargo package list
-  - passed: main crate package list is constrained to `38` files and includes
-    `LICENSING.md`; publish dry-run packaged `3.7MiB` / `561.7KiB`
-    compressed
-- Release worktree gate
-  - `python tools/check_release_worktree.py --json` is now the required
-    machine gate for the clean-tree blocker and tracked generated-artifact
-    violations
-  - the gate rejects tracked `.pytest_cache/`, native extension artifacts, root
-    CSS fixture trace logs, and root preflight logs
-  - current checkout still fails the gate until dirty release source changes and
-    generated-artifact deletions are committed, stashed, or removed deliberately
-- Final wheel smoke
-  - local dirty-tree Windows wheel smoke passed with `svg_raster`; repeat from
-    the final clean release commit before publication
-
-## Known Scope Boundaries
-
-- Static paged PDF output is the product target.
-- JavaScript, interactive browser runtime behavior, and full browser print
-  fidelity are out of scope for 1.0.
-- Advanced parity gaps tracked in `docs/css-coverage.md` remain next-epoch
-  hardening work, not blockers for static PDF library usefulness.
-
-## Release Artifacts
-
-Built wheel artifacts must be regenerated from the final clean release commit
-with the `python,svg_raster` feature set before publishing.
+The GitHub release workflow performs platform wheel builds, supported-version
+smoke tests, and package validation from `v*` tags. Registry publication is an
+explicit manual action after the complete artifact set passes.

@@ -1,8 +1,8 @@
-# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial
+# SPDX-License-Identifier: MIT
 """Fullbleed public CLI entrypoint.
 
 COMPLIANCE_SPEC: fullbleed.cli_compliance.v1
-PACKAGE_LICENSE: AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial
+PACKAGE_LICENSE: MIT
 COPYRIGHT_FILE: COPYRIGHT
 THIRD_PARTY_NOTICE_FILE: THIRD_PARTY_LICENSES.md
 THIRD_PARTY_ALLOWED_LICENSES: OFL-1.1, Apache-2.0, MIT, UFL-1.0
@@ -14,7 +14,6 @@ AUTO_COMPLIANCE_FLAG_CODES:
   - LIC_UNKNOWN
   - LIC_AUDIT_STALE
   - LIC_ASSET_UNMAPPED
-  - LIC_COMMERCIAL_UNATTESTED
 """
 import argparse
 import importlib.metadata as metadata
@@ -186,27 +185,20 @@ PDF_PROFILES_REQUIRING_OUTPUT_INTENT = {
 }
 WATERMARK_LAYER_ALIASES = {"underlay": "background"}
 WATERMARK_LAYER_CHOICES = {"background", "overlay"}
-LICENSE_SPDX_EXPRESSION = "AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial"
-LICENSE_OPEN_SOURCE = "AGPL-3.0-only"
-LICENSE_COMMERCIAL_REF = "LicenseRef-Fullbleed-Commercial"
+LICENSE_SPDX_EXPRESSION = "MIT"
 COMPLIANCE_POLICY = {
     "schema": "fullbleed.cli_compliance.v1",
     "package_license": LICENSE_SPDX_EXPRESSION,
-    "license_options": [LICENSE_OPEN_SOURCE, LICENSE_COMMERCIAL_REF],
+    "license_options": [LICENSE_SPDX_EXPRESSION],
     "license_file": "LICENSE",
-    "license_required_header": "GNU AFFERO GENERAL PUBLIC LICENSE",
-    "license_forbidden_markers": ["Apache License"],
+    "license_required_header": "MIT License",
+    "license_forbidden_markers": [],
     "licensing_guide_file": "LICENSING.md",
-    "commercial_contact_email": "info@fullbleed.dev",
-    "commercial_contact_web": "fullbleed.dev",
     "copyright_file": "COPYRIGHT",
     "copyright_required_spdx": LICENSE_SPDX_EXPRESSION,
     "copyright_required_markers": [
-        "dual-licensed",
-        "AGPL-3.0-only",
-        "LicenseRef-Fullbleed-Commercial",
+        "MIT License",
         "LICENSE",
-        "LICENSING.md",
     ],
     "third_party_notice_file": "THIRD_PARTY_LICENSES.md",
     "third_party_allowed_licenses": ["OFL-1.1", "Apache-2.0", "MIT", "UFL-1.0"],
@@ -218,7 +210,6 @@ COMPLIANCE_POLICY = {
         "LIC_UNKNOWN",
         "LIC_AUDIT_STALE",
         "LIC_ASSET_UNMAPPED",
-        "LIC_COMMERCIAL_UNATTESTED",
     ],
 }
 
@@ -552,147 +543,24 @@ def _compliance_roots():
 
 
 def _find_compliance_file(rel_name):
-    """Locate a compliance file by searching known repository roots."""
+    """Locate a compliance file in a source tree or installed distribution."""
     for root in _compliance_roots():
         path = root / rel_name
         if path.exists():
             return path
+
+    try:
+        distribution = metadata.distribution("fullbleed")
+    except metadata.PackageNotFoundError:
+        return None
+    expected_name = Path(rel_name).name
+    for entry in distribution.files or ():
+        if Path(str(entry)).name != expected_name:
+            continue
+        path = Path(distribution.locate_file(entry))
+        if path.is_file():
+            return path
     return None
-
-
-def _is_truthy(value):
-    """Return True for common truthy string/integer environment values."""
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _load_commercial_license_file(path):
-    """Parse a commercial attestation file (JSON object/string or plain text id)."""
-    p = Path(path).expanduser()
-    text = p.read_text(encoding="utf-8").strip()
-    payload = {}
-    if not text:
-        return payload
-    try:
-        obj = json.loads(text)
-    except Exception:
-        payload["license_id"] = text
-        return payload
-    if isinstance(obj, dict):
-        for key in ("license_id", "tier", "company"):
-            if key in obj and obj.get(key) is not None:
-                payload[key] = str(obj.get(key))
-    elif isinstance(obj, str):
-        payload["license_id"] = obj
-    return payload
-
-
-def _resolve_license_attestation(args=None):
-    """Resolve effective commercial license attestation from args/env/file."""
-    mode = str(
-        getattr(args, "license_mode", None)
-        or os.environ.get("FULLBLEED_LICENSE_MODE")
-        or "auto"
-    ).strip().lower()
-    if mode not in {"auto", "agpl", "commercial"}:
-        mode = "auto"
-
-    arg_license_id = getattr(args, "commercial_license_id", None)
-    env_license_id = (
-        os.environ.get("FULLBLEED_COMMERCIAL_LICENSE_ID")
-        or os.environ.get("FULLBLEED_COMMERCIAL_LICENSE")
-    )
-    arg_license_file = getattr(args, "commercial_license_file", None)
-    env_license_file = os.environ.get("FULLBLEED_COMMERCIAL_LICENSE_FILE")
-    arg_company = getattr(args, "commercial_company", None)
-    env_company = os.environ.get("FULLBLEED_COMMERCIAL_COMPANY")
-    arg_tier = getattr(args, "commercial_tier", None)
-    env_tier = os.environ.get("FULLBLEED_COMMERCIAL_TIER")
-    explicit_attest = bool(getattr(args, "commercial_licensed", False)) or _is_truthy(
-        os.environ.get("FULLBLEED_COMMERCIAL_LICENSED")
-    )
-
-    payload = {}
-    source = None
-    parse_error = None
-    license_file = arg_license_file or env_license_file
-    if license_file:
-        try:
-            payload = _load_commercial_license_file(license_file)
-            source = "file"
-        except Exception as exc:
-            parse_error = str(exc)
-
-    license_id = arg_license_id or env_license_id or payload.get("license_id")
-    company = arg_company or env_company or payload.get("company")
-    tier = arg_tier or env_tier or payload.get("tier")
-
-    if mode == "auto":
-        if explicit_attest or license_id or license_file:
-            mode = "commercial"
-        else:
-            mode = "agpl"
-
-    attested = False
-    if mode == "commercial":
-        attested = bool(explicit_attest or license_id or source == "file")
-
-    return {
-        "mode": mode,
-        "attested": attested,
-        "license_id": license_id,
-        "company": company,
-        "tier": tier,
-        "source": source or ("arg_or_env" if license_id else None),
-        "file": str(Path(license_file).expanduser()) if license_file else None,
-        "parse_error": parse_error,
-    }
-
-
-def _license_warning_state_path():
-    """Return persisted marker path for one-time `run` license warning."""
-    base = os.environ.get("FULLBLEED_STATE_DIR")
-    if base:
-        state_dir = Path(base).expanduser()
-    else:
-        state_dir = Path.home() / ".fullbleed"
-    return state_dir / "notices" / "run_license_warn_v1.ack"
-
-
-def _maybe_emit_run_license_warning(args):
-    """Emit a one-time AGPL/commercial reminder for `fullbleed run`."""
-    if getattr(args, "no_license_warn", False):
-        return False
-    if os.environ.get("FULLBLEED_NO_LICENSE_WARN", "").strip().lower() in {"1", "true", "yes"}:
-        return False
-    license_state = _resolve_license_attestation(None)
-    if license_state["mode"] == "commercial" and license_state["attested"]:
-        return False
-    marker = _license_warning_state_path()
-    if marker.exists():
-        return False
-
-    sys.stderr.write(
-        "[license] fullbleed is dual-licensed (AGPL-3.0-only OR commercial). "
-        "Using `fullbleed run` loads and executes your Python code against fullbleed APIs. "
-        "For commercial licensing: info@fullbleed.dev\n"
-    )
-    try:
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.write_text(
-            json.dumps(
-                {
-                    "schema": "fullbleed.license_notice_ack.v1",
-                    "acknowledged_at_utc": datetime.now(timezone.utc).isoformat(),
-                },
-                ensure_ascii=True,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-    except Exception:
-        # Notice emission should never block rendering.
-        pass
-    return True
 
 
 def _apply_global_flags(args):
@@ -2579,7 +2447,7 @@ def cmd_doctor(args):
     bootstrap_icons = Path(fullbleed_assets.asset_path("icons/bootstrap-icons.svg"))
     noto = Path(fullbleed_assets.asset_path("fonts/NotoSans-Regular.ttf"))
     checks = [
-        {"name": "python>=3.8", "ok": sys.version_info >= (3, 8), "detail": sys.version.split()[0]},
+        {"name": "python>=3.10", "ok": sys.version_info >= (3, 10), "detail": sys.version.split()[0]},
         {"name": "fullbleed.PdfEngine", "ok": hasattr(fullbleed, "PdfEngine"), "detail": "available"},
         {"name": "fullbleed.AssetBundle", "ok": hasattr(fullbleed, "AssetBundle"), "detail": "available"},
         {"name": "assets.bootstrap", "ok": bootstrap.exists(), "detail": str(bootstrap)},
@@ -2618,10 +2486,6 @@ def cmd_compliance(args):
     """CLI handler for compliance and license policy reporting."""
     now = datetime.now(timezone.utc)
     max_age_days = max(int(getattr(args, "max_audit_age_days", 180) or 180), 1)
-    license_state = _resolve_license_attestation(args)
-    commercial_attested = (
-        license_state["mode"] == "commercial" and license_state["attested"]
-    )
 
     license_file = _find_compliance_file(COMPLIANCE_POLICY["license_file"])
     copyright_file = _find_compliance_file(COMPLIANCE_POLICY["copyright_file"])
@@ -2632,33 +2496,6 @@ def cmd_compliance(args):
 
     flags = []
     advisories = []
-
-    if license_state["parse_error"]:
-        flags.append(
-            {
-                "code": "LIC_UNKNOWN",
-                "target": license_state["file"] or "commercial_license_file",
-                "message": f"Unable to parse commercial license file: {license_state['parse_error']}",
-            }
-        )
-
-    if license_state["mode"] == "commercial" and not license_state["attested"]:
-        flags.append(
-            {
-                "code": "LIC_COMMERCIAL_UNATTESTED",
-                "target": "commercial_license",
-                "message": (
-                    "Commercial mode selected but no attestation found. "
-                    "Provide --commercial-license-id, --commercial-license-file, "
-                    "--commercial-licensed, or equivalent FULLBLEED_COMMERCIAL_* env vars."
-                ),
-            }
-        )
-
-    if commercial_attested:
-        advisories.append(
-            "Commercial license attested: AGPL source/audit gate checks were skipped."
-        )
 
     if not license_file:
         flags.append(
@@ -2677,7 +2514,7 @@ def cmd_compliance(args):
                         "code": "LIC_POLICY_MISMATCH",
                         "target": COMPLIANCE_POLICY["license_file"],
                         "message": (
-                            "Primary license file does not match expected AGPL text "
+                            "Primary license file does not match expected MIT text "
                             f"(missing header: {COMPLIANCE_POLICY['license_required_header']})."
                         ),
                     }
@@ -2739,7 +2576,7 @@ def cmd_compliance(args):
                         "code": "LIC_POLICY_MISMATCH",
                         "target": COMPLIANCE_POLICY["copyright_file"],
                         "message": (
-                            "Copyright notice missing required dual-license marker(s): "
+                            "Copyright notice missing required MIT marker(s): "
                             + ", ".join(missing_markers)
                         ),
                     }
@@ -2758,7 +2595,7 @@ def cmd_compliance(args):
             {
                 "code": "LIC_MISSING_NOTICE",
                 "target": COMPLIANCE_POLICY["licensing_guide_file"],
-                "message": "Missing dual-license guide file",
+                "message": "Missing licensing guide file",
             }
         )
     else:
@@ -2772,12 +2609,12 @@ def cmd_compliance(args):
                         "message": "Licensing guide missing SPDX expression: " + LICENSE_SPDX_EXPRESSION,
                     }
                 )
-            if "dual-licensed" not in licensing_text.lower():
+            if "mit license" not in licensing_text.lower():
                 flags.append(
                     {
                         "code": "LIC_POLICY_MISMATCH",
                         "target": COMPLIANCE_POLICY["licensing_guide_file"],
-                        "message": "Licensing guide should explicitly state dual-licensed terms.",
+                        "message": "Licensing guide should explicitly state MIT License terms.",
                     }
                 )
             mojibake_markers = ["â€”", "â€™", "â€œ", "â€", "\ufffd"]
@@ -2802,7 +2639,7 @@ def cmd_compliance(args):
                 }
             )
 
-    if not commercial_attested and not third_party_file:
+    if not third_party_file:
         flags.append(
             {
                 "code": "LIC_MISSING_NOTICE",
@@ -2814,8 +2651,8 @@ def cmd_compliance(args):
     audit_date = None
     audit_age_days = None
     audit_issue_count = None
-    audit_skipped = commercial_attested
-    if not commercial_attested and audit_json:
+    audit_skipped = False
+    if audit_json:
         try:
             audit_payload = json.loads(audit_json.read_text(encoding="utf-8"))
             raw_date = (audit_payload.get("summary") or {}).get("audit_date")
@@ -2840,7 +2677,7 @@ def cmd_compliance(args):
                     "message": f"Unable to parse license audit JSON: {exc}",
                 }
             )
-    elif not commercial_attested:
+    else:
         flags.append(
             {
                 "code": "LIC_AUDIT_STALE",
@@ -2849,11 +2686,7 @@ def cmd_compliance(args):
             }
         )
 
-    if (
-        not commercial_attested
-        and audit_age_days is not None
-        and audit_age_days > max_age_days
-    ):
+    if audit_age_days is not None and audit_age_days > max_age_days:
         flags.append(
             {
                 "code": "LIC_AUDIT_STALE",
@@ -2862,7 +2695,7 @@ def cmd_compliance(args):
             }
         )
 
-    if not commercial_attested and third_party_file:
+    if third_party_file:
         required_entries = [
             "bootstrap.min.css",
             "bootstrap-icons.svg",
@@ -2898,15 +2731,7 @@ def cmd_compliance(args):
         "policy": COMPLIANCE_POLICY,
         "license": {
             "spdx_expression": LICENSE_SPDX_EXPRESSION,
-            "mode": license_state["mode"],
-            "commercial": {
-                "attested": commercial_attested,
-                "license_id": license_state["license_id"],
-                "company": license_state["company"],
-                "tier": license_state["tier"],
-                "source": license_state["source"],
-                "file": license_state["file"],
-            },
+            "name": "MIT License",
         },
         "runtime": {
             "cli_version": _get_version(),
@@ -2940,9 +2765,6 @@ def cmd_compliance(args):
         sys.stdout.write(f"schema: {report['schema']}\n")
         sys.stdout.write(f"ok: {report['ok']}\n")
         sys.stdout.write(f"package_license: {COMPLIANCE_POLICY['package_license']}\n")
-        sys.stdout.write(f"license_mode: {report['license']['mode']}\n")
-        if report["license"]["commercial"]["attested"]:
-            sys.stdout.write("commercial_license_attested: true\n")
         for key, value in report["files"].items():
             sys.stdout.write(f"{key}: {value}\n")
         if advisories:
@@ -3310,7 +3132,7 @@ def cmd_run(args):
     
     module_path, engine_name = entrypoint.rsplit(":", 1)
 
-    license_warning_emitted = _maybe_emit_run_license_warning(args)
+    license_warning_emitted = False
     
     # Check if it's a file path or a module name
     if module_path.endswith(".py") or os.path.isfile(module_path):
@@ -3590,33 +3412,6 @@ def _build_parser():
                               help="Exit non-zero when any compliance flag is present")
     p_compliance.add_argument("--max-audit-age-days", type=int, default=180,
                               help="Maximum allowed age for license audit artifacts")
-    p_compliance.add_argument(
-        "--license-mode",
-        choices=["auto", "agpl", "commercial"],
-        default="auto",
-        help="Compliance basis. 'commercial' expects attestation via flags/env.",
-    )
-    p_compliance.add_argument(
-        "--commercial-licensed",
-        action="store_true",
-        help="Attest that your organization holds a Fullbleed commercial license.",
-    )
-    p_compliance.add_argument(
-        "--commercial-license-id",
-        help="Commercial license/order identifier (or set FULLBLEED_COMMERCIAL_LICENSE_ID).",
-    )
-    p_compliance.add_argument(
-        "--commercial-license-file",
-        help="Path to commercial license attestation file (JSON or plain text id).",
-    )
-    p_compliance.add_argument(
-        "--commercial-company",
-        help="Company/legal entity for commercial attestation metadata.",
-    )
-    p_compliance.add_argument(
-        "--commercial-tier",
-        help="Commercial revenue tier metadata (optional).",
-    )
     p_compliance.set_defaults(func=cmd_compliance)
 
     # ===== Asset management commands =====
@@ -3825,8 +3620,6 @@ def _build_parser():
     p_run.add_argument("--css", action="append", help="Path to CSS file (repeatable)")
     p_run.add_argument("--css-str", action="append", help="CSS string (repeatable)")
     p_run.add_argument("--out", required=True, help="Output PDF path or - for stdout")
-    p_run.add_argument("--no-license-warn", action="store_true",
-                       help="Suppress one-time AGPL/commercial licensing reminder")
     p_run.add_argument("--json", action="store_true")
     p_run.set_defaults(func=cmd_run)
 

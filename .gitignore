@@ -13,7 +13,9 @@
 *.pyc
 /.venv_pypi_smoke_2
 ./venv_i9
-python/fullbleed/_fullbleed.cp311-win_amd64.pyd
+/python/fullbleed/_fullbleed*.pyd
+/python/fullbleed/_fullbleed*.so
+/python/fullbleed/_fullbleed*.dylib
 python/fullbleed_cli/__pycache__/scaffold.cpython-311.pyc
 scafold_engine_review.md
 

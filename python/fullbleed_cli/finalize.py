@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial
+# SPDX-License-Identifier: MIT
 """Finalize command handlers (template composition workflows)."""
 
 import json

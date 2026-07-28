@@ -61,7 +61,7 @@ struct PyAsset {
 #[pymethods]
 impl PyAsset {
     fn info(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let info = PyDict::new_bound(py);
+        let info = PyDict::new(py);
         info.set_item("name", self.asset.name.clone())?;
         info.set_item("kind", self.asset.kind.as_str())?;
         info.set_item("bytes", self.asset.bytes_len())?;
@@ -81,8 +81,8 @@ impl PyAsset {
             info.set_item("pdf_version", report.pdf_version.as_str())?;
             info.set_item("page_count", report.page_count)?;
             info.set_item("encrypted", report.encrypted)?;
-            let profile = PyDict::new_bound(py);
-            profile.set_item("claims", PyList::new_bound(py, &report.profile.claims))?;
+            let profile = PyDict::new(py);
+            profile.set_item("claims", PyList::new(py, &report.profile.claims)?)?;
             profile.set_item("metadata_present", report.profile.metadata_present)?;
             profile.set_item(
                 "output_intent_present",
@@ -125,18 +125,18 @@ impl PyAsset {
             )?;
             profile.set_item(
                 "seed_blockers",
-                PyList::new_bound(py, &report.profile.seed_blockers),
+                PyList::new(py, &report.profile.seed_blockers)?,
             )?;
             info.set_item("profile", profile)?;
             let issues = composition_compatibility_issues(&report);
-            let issue_list = PyList::empty_bound(py);
+            let issue_list = PyList::empty(py);
             for issue in &issues {
                 issue_list.append(issue.as_str())?;
             }
             info.set_item("composition_supported", issues.is_empty())?;
             info.set_item("composition_issues", issue_list)?;
         }
-        Ok(info.to_object(py))
+        Ok(info.unbind().into_any())
     }
 }
 
@@ -176,7 +176,7 @@ impl PyAssetBundle {
         };
         self.bundle.add(asset);
         let py_obj = Py::new(py, wrapper)?;
-        Ok(py_obj.to_object(py))
+        Ok(py_obj.into_any())
     }
 
     fn css(&self) -> String {
@@ -184,14 +184,14 @@ impl PyAssetBundle {
     }
 
     fn assets_info(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let list = PyList::empty_bound(py);
+        let list = PyList::empty(py);
         for asset in &self.bundle.assets {
             let wrapper = PyAsset {
                 asset: asset.clone(),
             };
             list.append(wrapper.info(py)?)?;
         }
-        Ok(list.to_object(py))
+        Ok(list.unbind().into_any())
     }
 }
 
@@ -229,7 +229,7 @@ fn load_asset_bytes(py: Python<'_>, source: &str, remote: bool) -> PyResult<Vec<
                 "remote asset disabled (set remote=True to fetch)",
             ));
         }
-        let urllib = py.import_bound("urllib.request")?;
+        let urllib = py.import("urllib.request")?;
         let response = urllib.call_method1("urlopen", (source,))?;
         let data = response.call_method0("read")?;
         let bytes = data.downcast::<PyBytes>()?;
@@ -286,24 +286,24 @@ fn inspect_report_to_py(
     path: &str,
     report: &crate::PdfInspectReport,
 ) -> PyResult<PyObject> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("path", path)?;
     out.set_item("pdf_version", report.pdf_version.as_str())?;
     out.set_item("page_count", report.page_count)?;
     out.set_item("encrypted", report.encrypted)?;
     out.set_item("file_size_bytes", report.file_size_bytes)?;
 
-    let warnings = PyList::empty_bound(py);
+    let warnings = PyList::empty(py);
     for warning in &report.warnings {
-        let d = PyDict::new_bound(py);
+        let d = PyDict::new(py);
         d.set_item("code", warning.code.clone())?;
         d.set_item("message", warning.message.clone())?;
         warnings.append(d)?;
     }
     out.set_item("warnings", warnings)?;
 
-    let profile = PyDict::new_bound(py);
-    profile.set_item("claims", PyList::new_bound(py, &report.profile.claims))?;
+    let profile = PyDict::new(py);
+    profile.set_item("claims", PyList::new(py, &report.profile.claims)?)?;
     profile.set_item("metadata_present", report.profile.metadata_present)?;
     profile.set_item(
         "output_intent_present",
@@ -357,21 +357,21 @@ fn inspect_report_to_py(
     )?;
     profile.set_item(
         "seed_blockers",
-        PyList::new_bound(py, &report.profile.seed_blockers),
+        PyList::new(py, &report.profile.seed_blockers)?,
     )?;
     out.set_item("profile", profile)?;
 
     let issues = composition_compatibility_issues(report);
-    let issue_codes = PyList::empty_bound(py);
+    let issue_codes = PyList::empty(py);
     for issue in &issues {
         issue_codes.append(issue.as_str())?;
     }
-    let compat = PyDict::new_bound(py);
+    let compat = PyDict::new(py);
     compat.set_item("supported", issues.is_empty())?;
     compat.set_item("issues", issue_codes)?;
     out.set_item("composition", compat)?;
 
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 fn inspect_template_catalog_entries(
@@ -423,7 +423,7 @@ fn template_catalog_entries_to_py(
     py: Python<'_>,
     entries: &[TemplateCatalogReportItem],
 ) -> PyResult<PyObject> {
-    let templates = PyList::empty_bound(py);
+    let templates = PyList::empty(py);
     let mut compatible = 0usize;
     let mut total_pages = 0usize;
     for entry in entries {
@@ -432,7 +432,7 @@ fn template_catalog_entries_to_py(
         }
         total_pages += entry.report.page_count;
 
-        let d = PyDict::new_bound(py);
+        let d = PyDict::new(py);
         d.set_item("template_id", entry.template_id.clone())?;
         d.set_item("path", entry.pdf_path.clone())?;
         d.set_item("pdf_version", entry.report.pdf_version.as_str())?;
@@ -440,20 +440,20 @@ fn template_catalog_entries_to_py(
         d.set_item("encrypted", entry.report.encrypted)?;
         d.set_item("file_size_bytes", entry.report.file_size_bytes)?;
 
-        let warnings = PyList::empty_bound(py);
+        let warnings = PyList::empty(py);
         for warning in &entry.report.warnings {
-            let w = PyDict::new_bound(py);
+            let w = PyDict::new(py);
             w.set_item("code", warning.code.clone())?;
             w.set_item("message", warning.message.clone())?;
             warnings.append(w)?;
         }
         d.set_item("warnings", warnings)?;
 
-        let issues = PyList::empty_bound(py);
+        let issues = PyList::empty(py);
         for issue in &entry.issues {
             issues.append(issue.as_str())?;
         }
-        let composition = PyDict::new_bound(py);
+        let composition = PyDict::new(py);
         composition.set_item("supported", entry.issues.is_empty())?;
         composition.set_item("issues", issues)?;
         d.set_item("composition", composition)?;
@@ -461,7 +461,7 @@ fn template_catalog_entries_to_py(
         templates.append(d)?;
     }
 
-    let metrics = PyDict::new_bound(py);
+    let metrics = PyDict::new(py);
     metrics.set_item("templates", entries.len())?;
     metrics.set_item("compatible_templates", compatible)?;
     metrics.set_item(
@@ -470,20 +470,20 @@ fn template_catalog_entries_to_py(
     )?;
     metrics.set_item("total_template_pages", total_pages)?;
 
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("ok", true)?;
     out.set_item("templates", templates)?;
     out.set_item("metrics", metrics)?;
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 #[pyfunction]
 fn build_features(py: Python<'_>) -> PyResult<PyObject> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("schema", "fullbleed.build_features.v1")?;
     out.set_item("python", cfg!(feature = "python"))?;
     out.set_item("svg_raster", cfg!(feature = "svg_raster"))?;
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 #[pyfunction]
@@ -498,7 +498,7 @@ fn inspect_pdf(py: Python<'_>, path: &str) -> PyResult<PyObject> {
 #[pyfunction]
 fn extract_pdf_page_texts(py: Python<'_>, pdf_path: &str) -> PyResult<PyObject> {
     let path = Path::new(pdf_path);
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("schema", "fullbleed.pdf.page_text_extract.v1")?;
     out.set_item("schema_version", 1)?;
     out.set_item("pdf_path", pdf_path)?;
@@ -511,8 +511,8 @@ fn extract_pdf_page_texts(py: Python<'_>, pdf_path: &str) -> PyResult<PyObject> 
             .as_millis()) as u64,
     )?;
 
-    let warnings = PyList::empty_bound(py);
-    let pages_out = PyList::empty_bound(py);
+    let warnings = PyList::empty(py);
+    let pages_out = PyList::empty(py);
     let mut ok = false;
     let mut page_count: usize = 0;
     let mut non_empty_pages: usize = 0;
@@ -542,7 +542,7 @@ fn extract_pdf_page_texts(py: Python<'_>, pdf_path: &str) -> PyResult<PyObject> 
                             non_empty_chunk_count += 1;
                         }
                         Err(err) => {
-                            let w = PyDict::new_bound(py);
+                            let w = PyDict::new(py);
                             w.set_item("code", "PAGE_TEXT_CHUNK_ERROR")?;
                             w.set_item("page", *page_num)?;
                             w.set_item("message", err.to_string())?;
@@ -557,7 +557,7 @@ fn extract_pdf_page_texts(py: Python<'_>, pdf_path: &str) -> PyResult<PyObject> 
                 }
                 let page_char_count = page_text.len();
 
-                let page_row = PyDict::new_bound(py);
+                let page_row = PyDict::new(py);
                 page_row.set_item("page_index", (*page_num as usize).saturating_sub(1))?;
                 page_row.set_item("page", *page_num)?;
                 page_row.set_item("text", page_text)?;
@@ -569,14 +569,14 @@ fn extract_pdf_page_texts(py: Python<'_>, pdf_path: &str) -> PyResult<PyObject> 
             ok = true;
         }
         Err(err) => {
-            let w = PyDict::new_bound(py);
+            let w = PyDict::new(py);
             w.set_item("code", "PDF_PARSE_ERROR")?;
             w.set_item("message", err.to_string())?;
             warnings.append(w)?;
         }
     }
 
-    let summary = PyDict::new_bound(py);
+    let summary = PyDict::new(py);
     summary.set_item("page_count", page_count)?;
     summary.set_item("non_empty_pages", non_empty_pages)?;
     summary.set_item("total_chars", total_chars)?;
@@ -584,7 +584,7 @@ fn extract_pdf_page_texts(py: Python<'_>, pdf_path: &str) -> PyResult<PyObject> 
     out.set_item("pages", pages_out)?;
     out.set_item("summary", summary)?;
     out.set_item("warnings", warnings)?;
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 fn resolve_lopdf_obj<'a>(
@@ -654,7 +654,7 @@ fn read_pdf_catalog_flags(
 #[pyfunction]
 fn export_pdf_reading_order_trace(py: Python<'_>, pdf_path: &str) -> PyResult<PyObject> {
     let path = Path::new(pdf_path);
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("schema", "fullbleed.pdf.reading_order_trace.v1")?;
     out.set_item("schema_version", 1)?;
     out.set_item("seed_only", true)?;
@@ -667,8 +667,8 @@ fn export_pdf_reading_order_trace(py: Python<'_>, pdf_path: &str) -> PyResult<Py
             .as_millis()) as u64,
     )?;
 
-    let warnings = PyList::empty_bound(py);
-    let pages_out = PyList::empty_bound(py);
+    let warnings = PyList::empty(py);
+    let pages_out = PyList::empty(py);
     let mut total_blocks: usize = 0;
     let mut non_empty_pages: usize = 0;
     let mut page_count: usize = 0;
@@ -680,7 +680,7 @@ fn export_pdf_reading_order_trace(py: Python<'_>, pdf_path: &str) -> PyResult<Py
             page_count = pages.len();
             for (page_num, _id) in &pages {
                 let chunks = doc.extract_text_chunks(&[*page_num]);
-                let blocks = PyList::empty_bound(py);
+                let blocks = PyList::empty(py);
                 let mut block_count = 0usize;
                 for (idx, chunk) in chunks.into_iter().enumerate() {
                     match chunk {
@@ -689,21 +689,21 @@ fn export_pdf_reading_order_trace(py: Python<'_>, pdf_path: &str) -> PyResult<Py
                             if text.is_empty() {
                                 continue;
                             }
-                            let d = PyDict::new_bound(py);
+                            let d = PyDict::new(py);
                             d.set_item("index", idx)?;
                             d.set_item("text", text)?;
                             blocks.append(d)?;
                             block_count += 1;
                         }
                         Err(err) => {
-                            let w = PyDict::new_bound(py);
+                            let w = PyDict::new(py);
                             w.set_item("code", "READING_TRACE_CHUNK_ERROR")?;
                             w.set_item("message", format!("page {}: {}", page_num, err))?;
                             warnings.append(w)?;
                         }
                     }
                 }
-                let page_row = PyDict::new_bound(py);
+                let page_row = PyDict::new(py);
                 page_row.set_item("page_index", (*page_num as usize).saturating_sub(1))?;
                 page_row.set_item("page", *page_num)?;
                 page_row.set_item("width", py.None())?;
@@ -720,7 +720,7 @@ fn export_pdf_reading_order_trace(py: Python<'_>, pdf_path: &str) -> PyResult<Py
             out.set_item("extractor", "lopdf")?;
         }
         Err(err) => {
-            let w = PyDict::new_bound(py);
+            let w = PyDict::new(py);
             w.set_item("code", "PDF_PARSE_ERROR")?;
             w.set_item("message", err.to_string())?;
             warnings.append(w)?;
@@ -728,7 +728,7 @@ fn export_pdf_reading_order_trace(py: Python<'_>, pdf_path: &str) -> PyResult<Py
         }
     }
 
-    let summary = PyDict::new_bound(py);
+    let summary = PyDict::new(py);
     summary.set_item("page_count", page_count)?;
     summary.set_item("total_blocks", total_blocks)?;
     summary.set_item("non_empty_pages", non_empty_pages)?;
@@ -736,13 +736,13 @@ fn export_pdf_reading_order_trace(py: Python<'_>, pdf_path: &str) -> PyResult<Py
     out.set_item("pages", pages_out)?;
     out.set_item("summary", summary)?;
     out.set_item("warnings", warnings)?;
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 #[pyfunction]
 fn export_pdf_structure_trace(py: Python<'_>, pdf_path: &str) -> PyResult<PyObject> {
     let path = Path::new(pdf_path);
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("schema", "fullbleed.pdf.structure_trace.v1")?;
     out.set_item("schema_version", 1)?;
     out.set_item("seed_only", true)?;
@@ -755,11 +755,11 @@ fn export_pdf_structure_trace(py: Python<'_>, pdf_path: &str) -> PyResult<PyObje
             .unwrap_or_default()
             .as_millis()) as u64,
     )?;
-    let warnings = PyList::empty_bound(py);
+    let warnings = PyList::empty(py);
 
     let bytes = std::fs::read(path)
         .map_err(|e| PyValueError::new_err(format!("failed to read pdf: {e}")))?;
-    let token_counts = PyDict::new_bound(py);
+    let token_counts = PyDict::new(py);
     for token in [
         "/StructTreeRoot",
         "/StructElem",
@@ -792,7 +792,7 @@ fn export_pdf_structure_trace(py: Python<'_>, pdf_path: &str) -> PyResult<PyObje
             title_token_present,
             _page_count,
         )) => {
-            let summary = PyDict::new_bound(py);
+            let summary = PyDict::new(py);
             summary.set_item("bytes_len", bytes.len())?;
             summary.set_item("struct_tree_root_present", struct_tree_root_present)?;
             summary.set_item("mark_info_present", mark_info_present)?;
@@ -803,11 +803,11 @@ fn export_pdf_structure_trace(py: Python<'_>, pdf_path: &str) -> PyResult<PyObje
             out.set_item("summary", summary)?;
         }
         Err(err) => {
-            let w = PyDict::new_bound(py);
+            let w = PyDict::new(py);
             w.set_item("code", "PDF_PARSE_ERROR")?;
             w.set_item("message", err.to_string())?;
             warnings.append(w)?;
-            let summary = PyDict::new_bound(py);
+            let summary = PyDict::new(py);
             summary.set_item("bytes_len", bytes.len())?;
             summary.set_item("struct_tree_root_present", false)?;
             summary.set_item("mark_info_present", false)?;
@@ -820,7 +820,7 @@ fn export_pdf_structure_trace(py: Python<'_>, pdf_path: &str) -> PyResult<PyObje
     }
     out.set_item("token_counts", token_counts)?;
     out.set_item("warnings", warnings)?;
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 #[pyfunction]
@@ -862,7 +862,7 @@ fn verify_pdf_ua_seed(py: Python<'_>, pdf_path: &str, mode: &str) -> PyResult<Py
     let title_token_present = extract_summary_bool(structure_dict, "title_token_present");
     let total_blocks = extract_summary_usize(reading_dict, "total_blocks");
 
-    let checks = PyList::empty_bound(py);
+    let checks = PyList::empty(py);
     let mut critical_fail_count = 0usize;
     let mut nonpass_count = 0usize;
     let mut push_check = |id: &str,
@@ -872,7 +872,7 @@ fn verify_pdf_ua_seed(py: Python<'_>, pdf_path: &str, mode: &str) -> PyResult<Py
                           message: String,
                           evidence: Option<Bound<'_, PyDict>>|
      -> PyResult<()> {
-        let d = PyDict::new_bound(py);
+        let d = PyDict::new(py);
         d.set_item("id", id)?;
         d.set_item("verdict", verdict)?;
         d.set_item("severity", severity)?;
@@ -954,7 +954,7 @@ fn verify_pdf_ua_seed(py: Python<'_>, pdf_path: &str, mode: &str) -> PyResult<Py
         },
         None,
     )?;
-    let ro_ev = PyDict::new_bound(py);
+    let ro_ev = PyDict::new(py);
     ro_ev.set_item("extractor", reading_dict.get_item("extractor")?)?;
     ro_ev.set_item("total_blocks", total_blocks)?;
     push_check(
@@ -974,7 +974,7 @@ fn verify_pdf_ua_seed(py: Python<'_>, pdf_path: &str, mode: &str) -> PyResult<Py
         },
         Some(ro_ev),
     )?;
-    let st_ev = PyDict::new_bound(py);
+    let st_ev = PyDict::new(py);
     st_ev.set_item("extractor", "lopdf")?;
     st_ev.set_item("struct_tree_root_present", struct_tree_root_present)?;
     st_ev.set_item("marked_true_present", marked_true_present)?;
@@ -996,21 +996,21 @@ fn verify_pdf_ua_seed(py: Python<'_>, pdf_path: &str, mode: &str) -> PyResult<Py
     )?;
 
     let gate_ok = critical_fail_count == 0 || !mode.eq_ignore_ascii_case("error");
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("schema", "fullbleed.pdf.ua_seed_verify.v1")?;
     out.set_item("schema_version", 1)?;
     out.set_item("seed_only", true)?;
     out.set_item("pdf_path", pdf_path)?;
     out.set_item("mode", mode)?;
     out.set_item("ok", gate_ok)?;
-    let gate = PyDict::new_bound(py);
+    let gate = PyDict::new(py);
     gate.set_item("ok", gate_ok)?;
     gate.set_item("critical_fail_count", critical_fail_count)?;
     gate.set_item("nonpass_count", nonpass_count)?;
     gate.set_item("mode", mode)?;
     out.set_item("gate", gate)?;
     out.set_item("checks", checks)?;
-    let warnings = PyList::empty_bound(py);
+    let warnings = PyList::empty(py);
     for src in [structure_dict, reading_dict] {
         if let Ok(Some(src_warnings)) = src.get_item("warnings") {
             for item in src_warnings.downcast::<PyList>()?.iter() {
@@ -1027,7 +1027,7 @@ fn verify_pdf_ua_seed(py: Python<'_>, pdf_path: &str, mode: &str) -> PyResult<Py
             .as_millis()) as u64,
     )?;
     let meta = audit_contract::metadata();
-    let tooling = PyDict::new_bound(py);
+    let tooling = PyDict::new(py);
     tooling.set_item("audit_contract_id", meta.contract_id)?;
     tooling.set_item("audit_contract_version", meta.contract_version)?;
     tooling.set_item(
@@ -1035,7 +1035,7 @@ fn verify_pdf_ua_seed(py: Python<'_>, pdf_path: &str, mode: &str) -> PyResult<Py
         meta.contract_fingerprint_sha256,
     )?;
     out.set_item("tooling", tooling)?;
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 #[pyfunction]
@@ -1064,7 +1064,7 @@ fn vendored_asset(
 
 #[pyfunction]
 fn fetch_asset(py: Python<'_>, url: &str) -> PyResult<Py<PyBytes>> {
-    let urllib = py.import_bound("urllib.request")?;
+    let urllib = py.import("urllib.request")?;
     let response = urllib.call_method1("urlopen", (url,))?;
     let data = response.call_method0("read")?;
     let bytes = data.downcast::<PyBytes>()?;
@@ -1096,10 +1096,10 @@ fn finalize_stamp_pdf(
     )
     .map_err(to_py_err)?;
     Python::with_gil(|py| {
-        let d = PyDict::new_bound(py);
+        let d = PyDict::new(py);
         d.set_item("ok", true)?;
         d.set_item("pages_written", summary.pages_written)?;
-        Ok(d.to_object(py))
+        Ok(d.unbind().into_any())
     })
 }
 
@@ -1144,11 +1144,11 @@ fn finalize_compose_pdf(
     .map_err(to_py_err)?;
 
     Python::with_gil(|py| {
-        let d = PyDict::new_bound(py);
+        let d = PyDict::new(py);
         d.set_item("ok", true)?;
         d.set_item("pages_written", summary.pages_written)?;
         d.set_item("annotation_mode", compose_annotation_mode_name(mode))?;
-        Ok(d.to_object(py))
+        Ok(d.unbind().into_any())
     })
 }
 
@@ -1716,11 +1716,11 @@ fn parse_pdf_version(arg: Option<&Bound<'_, PyAny>>) -> PyResult<Option<PdfVersi
 }
 
 fn page_data_value_to_py(py: Python<'_>, v: &PageDataValue) -> PyResult<PyObject> {
-    let d = PyDict::new_bound(py);
+    let d = PyDict::new(py);
     match v {
         PageDataValue::Every(items) => {
             d.set_item("op", "every")?;
-            d.set_item("value", PyList::new_bound(py, items))?;
+            d.set_item("value", PyList::new(py, items)?)?;
         }
         PageDataValue::Count(n) => {
             d.set_item("op", "count")?;
@@ -1736,16 +1736,16 @@ fn page_data_value_to_py(py: Python<'_>, v: &PageDataValue) -> PyResult<PyObject
             )?;
         }
     }
-    Ok(d.to_object(py))
+    Ok(d.unbind().into_any())
 }
 
 fn page_data_context_to_py(py: Python<'_>, ctx: &PageDataContext) -> PyResult<PyObject> {
-    let root = PyDict::new_bound(py);
+    let root = PyDict::new(py);
     root.set_item("page_count", ctx.page_count)?;
 
-    let pages = PyList::empty_bound(py);
+    let pages = PyList::empty(py);
     for (idx0, page) in ctx.pages.iter().enumerate() {
-        let pd = PyDict::new_bound(py);
+        let pd = PyDict::new(py);
         pd.set_item("page", idx0 + 1)?;
         for (k, v) in page {
             pd.set_item(k, page_data_value_to_py(py, v)?)?;
@@ -1754,29 +1754,26 @@ fn page_data_context_to_py(py: Python<'_>, ctx: &PageDataContext) -> PyResult<Py
     }
     root.set_item("pages", pages)?;
 
-    let totals = PyDict::new_bound(py);
+    let totals = PyDict::new(py);
     for (k, v) in &ctx.totals {
         totals.set_item(k, page_data_value_to_py(py, v)?)?;
     }
     root.set_item("totals", totals)?;
 
-    Ok(root.to_object(py))
+    Ok(root.unbind().into_any())
 }
 
 fn template_binding_decisions_to_py(
     py: Python<'_>,
     decisions: &[crate::PageBindingDecision],
 ) -> PyResult<PyObject> {
-    let list = PyList::empty_bound(py);
+    let list = PyList::empty(py);
     for decision in decisions {
-        let d = PyDict::new_bound(py);
+        let d = PyDict::new(py);
         d.set_item("page_index", decision.page_index)?;
         d.set_item("page", decision.page_index + 1)?;
         d.set_item("page_template_name", decision.page_template_name.clone())?;
-        d.set_item(
-            "feature_hits",
-            PyList::new_bound(py, &decision.feature_hits),
-        )?;
+        d.set_item("feature_hits", PyList::new(py, &decision.feature_hits)?)?;
         d.set_item("template_id", decision.template_id.clone())?;
         let source = match decision.source {
             crate::BindingSource::Feature => "feature",
@@ -1786,7 +1783,7 @@ fn template_binding_decisions_to_py(
         d.set_item("source", source)?;
         list.append(d)?;
     }
-    Ok(list.to_object(py))
+    Ok(list.unbind().into_any())
 }
 
 fn compose_plan_to_py(
@@ -1806,7 +1803,7 @@ fn compose_plan_to_py(
     sorted.sort_by_key(|d| d.page_index);
 
     let mut seen_pages: BTreeSet<usize> = BTreeSet::new();
-    let plan = PyList::empty_bound(py);
+    let plan = PyList::empty(py);
     for decision in &sorted {
         if !seen_pages.insert(decision.page_index) {
             return Err(PyValueError::new_err(format!(
@@ -1831,7 +1828,7 @@ fn compose_plan_to_py(
             )));
         }
         let template_page = decision.page_index % template_page_count;
-        let row = PyDict::new_bound(py);
+        let row = PyDict::new(py);
         row.set_item("page_index", decision.page_index)?;
         row.set_item("page", decision.page_index + 1)?;
         row.set_item("template_id", decision.template_id.clone())?;
@@ -1841,7 +1838,7 @@ fn compose_plan_to_py(
         row.set_item("dy", dy)?;
         plan.append(row)?;
     }
-    Ok(plan.to_object(py))
+    Ok(plan.unbind().into_any())
 }
 
 #[derive(Clone)]
@@ -1996,7 +1993,7 @@ fn trace_owner_to_py(py: Python<'_>, owner: &TraceOwnerContext) -> PyResult<PyOb
     if !owner.has_identity() {
         return Ok(py.None());
     }
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("selector", owner.selector.clone())?;
     out.set_item("dom_path", owner.dom_path.clone())?;
     out.set_item("role", owner.role.clone())?;
@@ -2005,7 +2002,7 @@ fn trace_owner_to_py(py: Python<'_>, owner: &TraceOwnerContext) -> PyResult<PyOb
     out.set_item("id", owner.id.clone())?;
     out.set_item("classes", owner.classes.clone())?;
     out.set_item("label", owner.label())?;
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 fn accumulate_owner_score(
@@ -2262,15 +2259,15 @@ fn build_render_time_typography_drift_trace_py(
     doc: &Document,
     engine: &FullBleed,
 ) -> PyResult<PyObject> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("schema", "fullbleed.typography_drift_trace.v1")?;
     out.set_item("schema_version", 1)?;
     out.set_item("extractor", "render_time_commands")?;
     out.set_item("source", "engine_render_time")?;
 
     let page_width = doc.page_size.width.to_f32().max(1.0);
-    let pages_out = PyList::empty_bound(py);
-    let warnings = PyList::empty_bound(py);
+    let pages_out = PyList::empty(py);
+    let warnings = PyList::empty(py);
 
     let mut block_count = 0usize;
     let mut flagged_block_count = 0usize;
@@ -2282,7 +2279,7 @@ fn build_render_time_typography_drift_trace_py(
 
     for (page_index, page) in doc.pages.iter().enumerate() {
         let text_collection = collect_render_time_text_blocks_for_page(page, Some(engine));
-        let flagged_blocks = PyList::empty_bound(py);
+        let flagged_blocks = PyList::empty(py);
         let mut page_flagged_count = 0usize;
 
         for block in &text_collection.blocks {
@@ -2361,13 +2358,13 @@ fn build_render_time_typography_drift_trace_py(
 
             flagged_block_count = flagged_block_count.saturating_add(1);
             page_flagged_count = page_flagged_count.saturating_add(1);
-            let row = PyDict::new_bound(py);
+            let row = PyDict::new(py);
             row.set_item("page", page_index + 1)?;
             row.set_item("index", block.index)?;
             row.set_item("command_index", block.command_index)?;
             row.set_item("kind", block.kind)?;
             row.set_item("text", trace_text_sample(&block.text))?;
-            let bbox = PyDict::new_bound(py);
+            let bbox = PyDict::new(py);
             bbox.set_item("x", block.bbox.0)?;
             bbox.set_item("y", block.bbox.1)?;
             bbox.set_item("w", bbox_width(block.bbox))?;
@@ -2386,7 +2383,7 @@ fn build_render_time_typography_drift_trace_py(
             row.set_item("whitespace_ratio", whitespace_ratio)?;
             row.set_item("avg_char_width", avg_char_width)?;
             row.set_item("char_width_ratio", char_width_ratio)?;
-            let risk_codes = PyList::empty_bound(py);
+            let risk_codes = PyList::empty(py);
             if fallback_sensitive {
                 risk_codes.append("fallback_sensitive")?;
             }
@@ -2406,7 +2403,7 @@ fn build_render_time_typography_drift_trace_py(
             flagged_blocks.append(row)?;
         }
 
-        let page_row = PyDict::new_bound(py);
+        let page_row = PyDict::new(py);
         page_row.set_item("page_index", page_index)?;
         page_row.set_item("page", page_index + 1)?;
         page_row.set_item("block_count", text_collection.blocks.len())?;
@@ -2416,19 +2413,19 @@ fn build_render_time_typography_drift_trace_py(
     }
 
     if token_fragmentation_block_count > 0 {
-        let row = PyDict::new_bound(py);
+        let row = PyDict::new(py);
         row.set_item("code", "TOKEN_FRAGMENTATION_DETECTED")?;
         row.set_item("count", token_fragmentation_block_count)?;
         warnings.append(row)?;
     }
     if wrap_drift_block_count > 0 {
-        let row = PyDict::new_bound(py);
+        let row = PyDict::new(py);
         row.set_item("code", "TYPOGRAPHY_WRAP_DRIFT_DETECTED")?;
         row.set_item("count", wrap_drift_block_count)?;
         warnings.append(row)?;
     }
 
-    let summary = PyDict::new_bound(py);
+    let summary = PyDict::new(py);
     summary.set_item("page_count", doc.pages.len())?;
     summary.set_item("block_count", block_count)?;
     summary.set_item("flagged_block_count", flagged_block_count)?;
@@ -2460,7 +2457,7 @@ fn build_render_time_typography_drift_trace_py(
             .unwrap_or_default()
             .as_millis()) as u64,
     )?;
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 fn build_render_time_region_text_alignment_trace_py(
@@ -2468,14 +2465,14 @@ fn build_render_time_region_text_alignment_trace_py(
     doc: &Document,
     engine: &FullBleed,
 ) -> PyResult<PyObject> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("schema", "fullbleed.region_text_alignment_trace.v1")?;
     out.set_item("schema_version", 1)?;
     out.set_item("extractor", "render_time_commands")?;
     out.set_item("source", "engine_render_time")?;
 
-    let pages_out = PyList::empty_bound(py);
-    let warnings = PyList::empty_bound(py);
+    let pages_out = PyList::empty(py);
+    let warnings = PyList::empty(py);
 
     let mut table_like_page_count = 0usize;
     let mut row_count = 0usize;
@@ -2509,8 +2506,8 @@ fn build_render_time_region_text_alignment_trace_py(
                 })
         });
 
-        let page_rows = PyList::empty_bound(py);
-        let dense_regions = PyList::empty_bound(py);
+        let page_rows = PyList::empty(py);
+        let dense_regions = PyList::empty(py);
         if !table_blocks.is_empty() {
             table_like_page_count = table_like_page_count.saturating_add(1);
             let mut clustered_rows: Vec<Vec<&TraceTextBlockRow>> = Vec::new();
@@ -2540,7 +2537,7 @@ fn build_render_time_region_text_alignment_trace_py(
                 });
                 row_count = row_count.saturating_add(1);
                 let mut row_bbox = row_blocks[0].bbox;
-                let cells = PyList::empty_bound(py);
+                let cells = PyList::empty(py);
                 let mut row_char_count = 0usize;
                 let mut row_token_count = 0usize;
                 let mut row_fragmented_cells = 0usize;
@@ -2556,12 +2553,12 @@ fn build_render_time_region_text_alignment_trace_py(
                         fragmented_cell_count = fragmented_cell_count.saturating_add(1);
                         row_fragmented_cells = row_fragmented_cells.saturating_add(1);
                     }
-                    let cell = PyDict::new_bound(py);
+                    let cell = PyDict::new(py);
                     cell.set_item("text", trace_text_sample(&block.text))?;
                     cell.set_item("kind", block.kind)?;
                     cell.set_item("top_role", block.top_role.clone())?;
                     cell.set_item("owner", trace_owner_to_py(py, &block.owner)?)?;
-                    let bbox = PyDict::new_bound(py);
+                    let bbox = PyDict::new(py);
                     bbox.set_item("x", block.bbox.0)?;
                     bbox.set_item("y", block.bbox.1)?;
                     bbox.set_item("w", bbox_width(block.bbox))?;
@@ -2577,10 +2574,10 @@ fn build_render_time_region_text_alignment_trace_py(
                 if dense_row_risk {
                     dense_row_risk_count = dense_row_risk_count.saturating_add(1);
                 }
-                let row = PyDict::new_bound(py);
+                let row = PyDict::new(py);
                 row.set_item("row_index", row_index)?;
                 row.set_item("page", page_index + 1)?;
-                let bbox = PyDict::new_bound(py);
+                let bbox = PyDict::new(py);
                 bbox.set_item("x", row_bbox.0)?;
                 bbox.set_item("y", row_bbox.1)?;
                 bbox.set_item("w", bbox_width(row_bbox))?;
@@ -2596,14 +2593,14 @@ fn build_render_time_region_text_alignment_trace_py(
             }
         } else if text_collection.blocks.len() >= 24 {
             dense_region_candidate_page_count = dense_region_candidate_page_count.saturating_add(1);
-            let row = PyDict::new_bound(py);
+            let row = PyDict::new(py);
             row.set_item("page", page_index + 1)?;
             row.set_item("text_block_count", text_collection.blocks.len())?;
             row.set_item("kind", "dense_text_page")?;
             dense_regions.append(row)?;
         }
 
-        let page_row = PyDict::new_bound(py);
+        let page_row = PyDict::new(py);
         page_row.set_item("page_index", page_index)?;
         page_row.set_item("page", page_index + 1)?;
         page_row.set_item("text_block_count", text_collection.blocks.len())?;
@@ -2614,13 +2611,13 @@ fn build_render_time_region_text_alignment_trace_py(
     }
 
     if dense_row_risk_count > 0 {
-        let row = PyDict::new_bound(py);
+        let row = PyDict::new(py);
         row.set_item("code", "SEMANTIC_TABLE_ALIGNMENT_DRIFT")?;
         row.set_item("count", dense_row_risk_count)?;
         warnings.append(row)?;
     }
 
-    let summary = PyDict::new_bound(py);
+    let summary = PyDict::new(py);
     summary.set_item("page_count", doc.pages.len())?;
     summary.set_item("table_like_page_count", table_like_page_count)?;
     summary.set_item("row_count", row_count)?;
@@ -2641,7 +2638,7 @@ fn build_render_time_region_text_alignment_trace_py(
             .unwrap_or_default()
             .as_millis()) as u64,
     )?;
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -2849,7 +2846,7 @@ fn build_pdf_font_target_py(
     requested_name: &str,
     resolved_name: &str,
 ) -> PyResult<(PyObject, bool, bool)> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     let normalized_requested = normalized_font_name(requested_name);
     let normalized_resolved = normalized_font_name(resolved_name);
     if let Some(trace) = engine.resolve_registered_font_trace(&normalized_resolved) {
@@ -2861,10 +2858,10 @@ fn build_pdf_font_target_py(
         out.set_item("resolved_name", trace.resolved_name)?;
         out.set_item("resolved_file_name", trace.source_file_name)?;
         out.set_item("program_kind", trace.program_kind.as_str())?;
-        let debug = PyDict::new_bound(py);
+        let debug = PyDict::new(py);
         debug.set_item("source_identifier", trace.source_identifier)?;
         out.set_item("debug", debug)?;
-        return Ok((out.to_object(py), true, false));
+        return Ok((out.unbind().into_any(), true, false));
     }
     if is_base14_font_name(&normalized_resolved) {
         out.set_item("target", "pdf")?;
@@ -2882,7 +2879,7 @@ fn build_pdf_font_target_py(
         out.set_item("resolved_name", normalized_resolved)?;
         out.set_item("resolved_file_name", py.None())?;
         out.set_item("program_kind", py.None())?;
-        return Ok((out.to_object(py), true, false));
+        return Ok((out.unbind().into_any(), true, false));
     }
 
     out.set_item("target", "pdf")?;
@@ -2897,7 +2894,7 @@ fn build_pdf_font_target_py(
         "warning",
         "Non-base14 font is not registered; PDF output will rely on viewer substitution.",
     )?;
-    Ok((out.to_object(py), false, true))
+    Ok((out.unbind().into_any(), false, true))
 }
 
 fn build_raster_font_target_py(
@@ -2906,7 +2903,7 @@ fn build_raster_font_target_py(
     requested_name: &str,
     resolved_name: &str,
 ) -> PyResult<(PyObject, bool, bool, bool)> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     let normalized_requested = normalized_font_name(requested_name);
     let normalized_resolved = normalized_font_name(resolved_name);
     if let Some(trace) = engine.resolve_registered_font_trace(&normalized_resolved) {
@@ -2918,10 +2915,10 @@ fn build_raster_font_target_py(
         out.set_item("resolved_name", trace.resolved_name)?;
         out.set_item("resolved_file_name", trace.source_file_name)?;
         out.set_item("program_kind", trace.program_kind.as_str())?;
-        let debug = PyDict::new_bound(py);
+        let debug = PyDict::new(py);
         debug.set_item("source_identifier", trace.source_identifier)?;
         out.set_item("debug", debug)?;
-        return Ok((out.to_object(py), true, false, false));
+        return Ok((out.unbind().into_any(), true, false, false));
     }
     if let Some(trace) = crate::raster::inspect_system_font_resolution(&normalized_resolved) {
         out.set_item("target", "raster_preview")?;
@@ -2934,9 +2931,9 @@ fn build_raster_font_target_py(
         out.set_item("resolved_file_name", trace.resolved_file_name)?;
         out.set_item(
             "candidate_file_names",
-            PyList::new_bound(py, trace.candidate_file_names),
+            PyList::new(py, trace.candidate_file_names)?,
         )?;
-        let debug = PyDict::new_bound(py);
+        let debug = PyDict::new(py);
         debug.set_item(
             "resolved_path",
             trace.resolved_path.to_string_lossy().to_string(),
@@ -2946,7 +2943,7 @@ fn build_raster_font_target_py(
             "warning",
             "Raster preview is using a host system font fallback; output may drift across machines.",
         )?;
-        return Ok((out.to_object(py), false, true, false));
+        return Ok((out.unbind().into_any(), false, true, false));
     }
 
     out.set_item("target", "raster_preview")?;
@@ -2961,7 +2958,7 @@ fn build_raster_font_target_py(
         "warning",
         "Raster preview could not resolve a font for this logical family.",
     )?;
-    Ok((out.to_object(py), false, false, true))
+    Ok((out.unbind().into_any(), false, false, true))
 }
 
 fn build_render_time_font_resolution_trace_py(
@@ -2969,15 +2966,15 @@ fn build_render_time_font_resolution_trace_py(
     doc: &Document,
     engine: &FullBleed,
 ) -> PyResult<PyObject> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("schema", "fullbleed.font_resolution_trace.v1")?;
     out.set_item("schema_version", 1)?;
     out.set_item("extractor", "render_time_commands")?;
     out.set_item("source", "engine_render_time")?;
 
     let usage = collect_render_time_font_usage(doc);
-    let fonts_out = PyList::empty_bound(py);
-    let warnings = PyList::empty_bound(py);
+    let fonts_out = PyList::empty(py);
+    let warnings = PyList::empty(py);
     let mut deterministic_font_count = 0usize;
     let mut nondeterministic_font_count = 0usize;
     let mut pdf_viewer_fallback_count = 0usize;
@@ -2985,7 +2982,7 @@ fn build_render_time_font_resolution_trace_py(
     let mut unresolved_target_count = 0usize;
 
     for (usage_key, stats) in usage {
-        let row = PyDict::new_bound(py);
+        let row = PyDict::new(py);
         row.set_item("requested_name", usage_key.requested_name.clone())?;
         row.set_item("resolved_name", usage_key.resolved_name.clone())?;
         row.set_item("fallback_reason", usage_key.fallback_reason.clone())?;
@@ -3051,7 +3048,7 @@ fn build_render_time_font_resolution_trace_py(
         ))?;
     }
 
-    let summary = PyDict::new_bound(py);
+    let summary = PyDict::new(py);
     summary.set_item("font_count", fonts_out.len())?;
     summary.set_item("deterministic_font_count", deterministic_font_count)?;
     summary.set_item("nondeterministic_font_count", nondeterministic_font_count)?;
@@ -3061,7 +3058,7 @@ fn build_render_time_font_resolution_trace_py(
     out.set_item("summary", summary)?;
     out.set_item("fonts", fonts_out)?;
     out.set_item("warnings", warnings)?;
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 fn build_render_time_asset_resolution_trace_py(
@@ -3069,7 +3066,7 @@ fn build_render_time_asset_resolution_trace_py(
     html: &str,
     engine: &FullBleed,
 ) -> PyResult<PyObject> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("schema", "fullbleed.asset_resolution_trace.v1")?;
     out.set_item("schema_version", 1)?;
     out.set_item("extractor", "html_image_sources")?;
@@ -3086,8 +3083,8 @@ fn build_render_time_asset_resolution_trace_py(
         }
     }
 
-    let assets_out = PyList::empty_bound(py);
-    let warnings = PyList::empty_bound(py);
+    let assets_out = PyList::empty(py);
+    let warnings = PyList::empty(py);
     let mut resolved_count = 0usize;
     let mut unresolved_count = 0usize;
     let mut raster_image_count = 0usize;
@@ -3101,7 +3098,7 @@ fn build_render_time_asset_resolution_trace_py(
 
     for (src, reference_count) in &references {
         let resolved = resolve_image_asset(Some(engine.asset_bundle_ref()), src);
-        let row = PyDict::new_bound(py);
+        let row = PyDict::new(py);
         let mut effective_outcome = resolved.trace.render_outcome.clone();
         if resolved.trace.success && resolved.trace.content_kind == "svg" {
             if let Ok(xml) = String::from_utf8(resolved.bytes.clone()) {
@@ -3161,7 +3158,7 @@ fn build_render_time_asset_resolution_trace_py(
         }
     }
 
-    let summary = PyDict::new_bound(py);
+    let summary = PyDict::new(py);
     summary.set_item(
         "image_reference_count",
         references.values().copied().sum::<usize>(),
@@ -3180,7 +3177,7 @@ fn build_render_time_asset_resolution_trace_py(
     out.set_item("summary", summary)?;
     out.set_item("assets", assets_out)?;
     out.set_item("warnings", warnings)?;
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 fn parse_trace_fields(raw: &str) -> HashMap<&str, &str> {
@@ -3302,17 +3299,17 @@ fn build_render_time_pagination_trace_py(
     doc: &Document,
     engine: &FullBleed,
 ) -> PyResult<PyObject> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("schema", "fullbleed.pagination_trace.v1")?;
     out.set_item("schema_version", 1)?;
     out.set_item("extractor", "render_time_layout")?;
     out.set_item("source", "engine_doc_template")?;
 
-    let events_out = PyList::empty_bound(py);
-    let pages_out = PyList::empty_bound(py);
-    let page_break_attribution_out = PyList::empty_bound(py);
-    let warnings = PyList::empty_bound(py);
-    let page_size = PyDict::new_bound(py);
+    let events_out = PyList::empty(py);
+    let pages_out = PyList::empty(py);
+    let page_break_attribution_out = PyList::empty(py);
+    let warnings = PyList::empty(py);
+    let page_size = PyDict::new(py);
     page_size.set_item("width", doc.page_size.width.to_f32())?;
     page_size.set_item("height", doc.page_size.height.to_f32())?;
 
@@ -3331,7 +3328,7 @@ fn build_render_time_pagination_trace_py(
     let mut flowable_overlap_count = 0usize;
     let mut low_coverage_page_count = 0usize;
     let mut text_overlap_count = 0usize;
-    let text_overlap_samples_out = PyList::empty_bound(py);
+    let text_overlap_samples_out = PyList::empty(py);
     let mut break_trigger_counts: std::collections::BTreeMap<String, usize> =
         std::collections::BTreeMap::new();
     let mut flowable_issue_counts: std::collections::BTreeMap<String, usize> =
@@ -3340,7 +3337,7 @@ fn build_render_time_pagination_trace_py(
         usize,
         BTreeMap<String, (TraceOwnerContext, usize)>,
     > = BTreeMap::new();
-    let collapse_pages_out = PyList::empty_bound(py);
+    let collapse_pages_out = PyList::empty(py);
 
     for (page_index, page) in doc.pages.iter().enumerate() {
         let mut template_name: Option<String> = None;
@@ -3386,7 +3383,7 @@ fn build_render_time_pagination_trace_py(
                     let fields = parse_trace_fields(value);
                     let owner = owner_from_trace_fields(&fields);
                     let event_type = fields.get("event").copied().unwrap_or("unknown");
-                    let row = PyDict::new_bound(py);
+                    let row = PyDict::new(py);
                     row.set_item("event_index", event_count)?;
                     row.set_item("event_type", event_type)?;
                     row.set_item("page_index", page_index)?;
@@ -3421,7 +3418,7 @@ fn build_render_time_pagination_trace_py(
                         row.set_item("reason", reason)?;
                         row.set_item("overflow_severity", overflow_severity)?;
 
-                        let available_before = PyDict::new_bound(py);
+                        let available_before = PyDict::new(py);
                         available_before
                             .set_item("width", trace_i64(&fields, "avail_w").map(milli_to_f32))?;
                         available_before
@@ -3432,7 +3429,7 @@ fn build_render_time_pagination_trace_py(
                         )?;
                         row.set_item("available_before", available_before)?;
 
-                        let frame_rect = PyDict::new_bound(py);
+                        let frame_rect = PyDict::new(py);
                         frame_rect
                             .set_item("x", trace_i64(&fields, "frame_x").map(milli_to_f32))?;
                         frame_rect
@@ -3443,7 +3440,7 @@ fn build_render_time_pagination_trace_py(
                             .set_item("h", trace_i64(&fields, "frame_h").map(milli_to_f32))?;
                         row.set_item("frame_rect", frame_rect)?;
 
-                        let wrapped_size = PyDict::new_bound(py);
+                        let wrapped_size = PyDict::new(py);
                         wrapped_size
                             .set_item("width", trace_i64(&fields, "wrapped_w").map(milli_to_f32))?;
                         wrapped_size.set_item(
@@ -3455,7 +3452,7 @@ fn build_render_time_pagination_trace_py(
                         let placed_w = trace_i64(&fields, "placed_w").unwrap_or(0);
                         let placed_h = trace_i64(&fields, "placed_h").unwrap_or(0);
                         if placed_w > 0 && placed_h > 0 {
-                            let placed_rect = PyDict::new_bound(py);
+                            let placed_rect = PyDict::new(py);
                             placed_rect
                                 .set_item("x", trace_i64(&fields, "placed_x").map(milli_to_f32))?;
                             placed_rect
@@ -3533,7 +3530,7 @@ fn build_render_time_pagination_trace_py(
                                 page_transition_owner_hints.entry(to_page).or_default(),
                                 &owner,
                             );
-                            let attribution = PyDict::new_bound(py);
+                            let attribution = PyDict::new(py);
                             attribution.set_item("page", page_index + 1)?;
                             attribution.set_item("from_page", from_page)?;
                             attribution.set_item("to_page", to_page)?;
@@ -3594,21 +3591,21 @@ fn build_render_time_pagination_trace_py(
             .iter()
             .take(8usize.saturating_sub(text_overlap_samples_out.len()))
         {
-            let row = PyDict::new_bound(py);
+            let row = PyDict::new(py);
             row.set_item("page", page_index + 1)?;
-            let overlap_bbox = PyDict::new_bound(py);
+            let overlap_bbox = PyDict::new(py);
             overlap_bbox.set_item("x", sample.overlap_bbox.0)?;
             overlap_bbox.set_item("y", sample.overlap_bbox.1)?;
             overlap_bbox.set_item("w", sample.overlap_bbox.2)?;
             overlap_bbox.set_item("h", sample.overlap_bbox.3)?;
             row.set_item("overlap_bbox", overlap_bbox)?;
-            let a = PyDict::new_bound(py);
+            let a = PyDict::new(py);
             a.set_item("index", sample.a_index)?;
             a.set_item("command_index", sample.a_command_index)?;
             a.set_item("top_role", sample.a_top_role.clone())?;
             a.set_item("text", sample.a_text.clone())?;
             row.set_item("a", a)?;
-            let b = PyDict::new_bound(py);
+            let b = PyDict::new(py);
             b.set_item("index", sample.b_index)?;
             b.set_item("command_index", sample.b_command_index)?;
             b.set_item("top_role", sample.b_top_role.clone())?;
@@ -3632,7 +3629,7 @@ fn build_render_time_pagination_trace_py(
             || (!flowable_bboxes.is_empty() && occupied_area_ratio < 0.0005f64);
         if low_coverage {
             low_coverage_page_count = low_coverage_page_count.saturating_add(1);
-            let warning = PyDict::new_bound(py);
+            let warning = PyDict::new(py);
             warning.set_item("code", "LOW_COVERAGE_PAGE")?;
             warning.set_item("page", page_index + 1)?;
             warning.set_item("visible_command_count", visible_command_count)?;
@@ -3641,14 +3638,14 @@ fn build_render_time_pagination_trace_py(
             warnings.append(warning)?;
         }
         if overlap_count > 0 {
-            let warning = PyDict::new_bound(py);
+            let warning = PyDict::new(py);
             warning.set_item("code", "FLOWABLE_OVERPRINT")?;
             warning.set_item("page", page_index + 1)?;
             warning.set_item("overlap_count", overlap_count)?;
             warnings.append(warning)?;
         }
         if page_text_overlap_count > 0 {
-            let warning = PyDict::new_bound(py);
+            let warning = PyDict::new(py);
             warning.set_item("code", "TEXT_OVERLAP")?;
             warning.set_item("page", page_index + 1)?;
             warning.set_item("overlap_count", page_text_overlap_count)?;
@@ -3671,7 +3668,7 @@ fn build_render_time_pagination_trace_py(
             .or(transition_hint_entry)
             .unwrap_or((TraceOwnerContext::default(), 0.0, "none"));
 
-        let page_row = PyDict::new_bound(py);
+        let page_row = PyDict::new(py);
         page_row.set_item("page_index", page_index)?;
         page_row.set_item("page", page_index + 1)?;
         page_row.set_item("width", doc.page_size.width.to_f32())?;
@@ -3684,23 +3681,23 @@ fn build_render_time_pagination_trace_py(
         page_row.set_item("flowable_overlap_count", overlap_count)?;
         page_row.set_item("text_block_count", text_collection.blocks.len())?;
         page_row.set_item("text_overlap_count", page_text_overlap_count)?;
-        let page_samples = PyList::empty_bound(py);
+        let page_samples = PyList::empty(py);
         for sample in &page_text_overlap_samples {
-            let row = PyDict::new_bound(py);
+            let row = PyDict::new(py);
             row.set_item("page", page_index + 1)?;
-            let overlap_bbox = PyDict::new_bound(py);
+            let overlap_bbox = PyDict::new(py);
             overlap_bbox.set_item("x", sample.overlap_bbox.0)?;
             overlap_bbox.set_item("y", sample.overlap_bbox.1)?;
             overlap_bbox.set_item("w", sample.overlap_bbox.2)?;
             overlap_bbox.set_item("h", sample.overlap_bbox.3)?;
             row.set_item("overlap_bbox", overlap_bbox)?;
-            let a = PyDict::new_bound(py);
+            let a = PyDict::new(py);
             a.set_item("index", sample.a_index)?;
             a.set_item("command_index", sample.a_command_index)?;
             a.set_item("top_role", sample.a_top_role.clone())?;
             a.set_item("text", sample.a_text.clone())?;
             row.set_item("a", a)?;
-            let b = PyDict::new_bound(py);
+            let b = PyDict::new(py);
             b.set_item("index", sample.b_index)?;
             b.set_item("command_index", sample.b_command_index)?;
             b.set_item("top_role", sample.b_top_role.clone())?;
@@ -3715,23 +3712,23 @@ fn build_render_time_pagination_trace_py(
         page_row.set_item("dominant_owner_label", dominant_owner.label())?;
         page_row.set_item("dominant_owner_score", dominant_owner_score)?;
         page_row.set_item("dominant_owner_source", dominant_owner_source)?;
-        let transition_reason_rows = PyList::empty_bound(py);
+        let transition_reason_rows = PyList::empty(py);
         for (reason, count) in &page_transition_reasons {
-            let row = PyDict::new_bound(py);
+            let row = PyDict::new(py);
             row.set_item("reason", reason.clone())?;
             row.set_item("count", *count)?;
             transition_reason_rows.append(row)?;
         }
         page_row.set_item("transition_reasons", &transition_reason_rows)?;
-        let issue_flowable_rows = PyList::empty_bound(py);
+        let issue_flowable_rows = PyList::empty(py);
         for (flowable_name, count) in page_issue_flowables.iter().take(5) {
-            let row = PyDict::new_bound(py);
+            let row = PyDict::new(py);
             row.set_item("flowable_name", flowable_name.clone())?;
             row.set_item("count", *count)?;
             issue_flowable_rows.append(row)?;
         }
         page_row.set_item("suspect_flowables", &issue_flowable_rows)?;
-        let owner_candidates = PyList::empty_bound(py);
+        let owner_candidates = PyList::empty(py);
         let mut owner_candidate_rows: Vec<(TraceOwnerContext, f64)> = page_owner_scores
             .values()
             .map(|(owner, score)| (owner.clone(), *score))
@@ -3743,7 +3740,7 @@ fn build_render_time_pagination_trace_py(
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         for (owner, score) in owner_candidate_rows.into_iter().take(5) {
-            let row = PyDict::new_bound(py);
+            let row = PyDict::new(py);
             row.set_item("owner", trace_owner_to_py(py, &owner)?)?;
             row.set_item("label", owner.label())?;
             row.set_item("score", score)?;
@@ -3757,7 +3754,7 @@ fn build_render_time_pagination_trace_py(
                     .collect();
                 hint_rows.sort_by(|left, right| right.1.cmp(&left.1));
                 for (owner, count) in hint_rows.into_iter().take(5) {
-                    let row = PyDict::new_bound(py);
+                    let row = PyDict::new(py);
                     row.set_item("owner", trace_owner_to_py(py, &owner)?)?;
                     row.set_item("label", owner.label())?;
                     row.set_item("score", count as f64)?;
@@ -3768,7 +3765,7 @@ fn build_render_time_pagination_trace_py(
         }
         page_row.set_item("owner_candidates", owner_candidates.clone())?;
 
-        let suspect_cause_codes = PyList::empty_bound(py);
+        let suspect_cause_codes = PyList::empty(py);
         if low_coverage && occupied_area_ratio < 0.0005f64 {
             suspect_cause_codes.append("content_collapsed_into_small_region")?;
         }
@@ -3790,7 +3787,7 @@ fn build_render_time_pagination_trace_py(
             || overlap_count > 0
             || page_text_overlap_count > 0
         {
-            let collapse_row = PyDict::new_bound(py);
+            let collapse_row = PyDict::new(py);
             collapse_row.set_item("page", page_index + 1)?;
             collapse_row.set_item("occupied_area_ratio", occupied_area_ratio)?;
             collapse_row.set_item("visible_command_count", visible_command_count)?;
@@ -3807,7 +3804,7 @@ fn build_render_time_pagination_trace_py(
         pages_out.append(page_row)?;
     }
 
-    let summary = PyDict::new_bound(py);
+    let summary = PyDict::new(py);
     summary.set_item("page_count", doc.pages.len())?;
     summary.set_item("event_count", event_count)?;
     summary.set_item("transition_count", transition_count)?;
@@ -3830,21 +3827,21 @@ fn build_render_time_pagination_trace_py(
     out.set_item("page_break_attribution", page_break_attribution_out)?;
     out.set_item("text_overlap_samples", text_overlap_samples_out)?;
     out.set_item("summary", summary)?;
-    let break_trigger_rows = PyList::empty_bound(py);
+    let break_trigger_rows = PyList::empty(py);
     for (reason, count) in &break_trigger_counts {
-        let row = PyDict::new_bound(py);
+        let row = PyDict::new(py);
         row.set_item("reason", reason.clone())?;
         row.set_item("count", *count)?;
         break_trigger_rows.append(row)?;
     }
-    let issue_flowable_rows = PyList::empty_bound(py);
+    let issue_flowable_rows = PyList::empty(py);
     for (flowable_name, count) in flowable_issue_counts.iter().take(8) {
-        let row = PyDict::new_bound(py);
+        let row = PyDict::new(py);
         row.set_item("flowable_name", flowable_name.clone())?;
         row.set_item("count", *count)?;
         issue_flowable_rows.append(row)?;
     }
-    let collapse_diag = PyDict::new_bound(py);
+    let collapse_diag = PyDict::new(py);
     collapse_diag.set_item("detected", low_coverage_page_count > 0)?;
     collapse_diag.set_item("page_count", collapse_pages_out.len())?;
     collapse_diag.set_item("pages", collapse_pages_out)?;
@@ -3859,7 +3856,7 @@ fn build_render_time_pagination_trace_py(
             .unwrap_or_default()
             .as_millis()) as u64,
     )?;
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 fn build_render_time_reading_order_trace_py(
@@ -3867,15 +3864,15 @@ fn build_render_time_reading_order_trace_py(
     doc: &Document,
     engine: Option<&FullBleed>,
 ) -> PyResult<PyObject> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("schema", "fullbleed.pdf.reading_order_trace.v1")?;
     out.set_item("schema_version", 1)?;
     out.set_item("seed_only", true)?;
     out.set_item("extractor", "render_time_commands")?;
     out.set_item("source", "engine_render_time")?;
 
-    let pages_out = PyList::empty_bound(py);
-    let warnings = PyList::empty_bound(py);
+    let pages_out = PyList::empty(py);
+    let warnings = PyList::empty(py);
     let mut total_blocks = 0usize;
     let mut non_empty_pages = 0usize;
     let mut artifact_text_blocks_excluded = 0usize;
@@ -3884,7 +3881,7 @@ fn build_render_time_reading_order_trace_py(
     let mut untagged_text_blocks = 0usize;
 
     for (page_index, page) in doc.pages.iter().enumerate() {
-        let blocks = PyList::empty_bound(py);
+        let blocks = PyList::empty(py);
         let text_collection = collect_render_time_text_blocks_for_page(page, engine);
         let block_count = text_collection.blocks.len();
         let page_draw_form_count = text_collection.draw_form_count;
@@ -3894,7 +3891,7 @@ fn build_render_time_reading_order_trace_py(
             untagged_text_blocks.saturating_add(text_collection.untagged_text_blocks);
 
         for block in &text_collection.blocks {
-            let row = PyDict::new_bound(py);
+            let row = PyDict::new(py);
             row.set_item("index", block.index)?;
             row.set_item("command_index", block.command_index)?;
             row.set_item("kind", block.kind)?;
@@ -3903,7 +3900,7 @@ fn build_render_time_reading_order_trace_py(
             row.set_item("y", block.bbox.1)?;
             row.set_item("w", (block.bbox.2 - block.bbox.0).max(0.0))?;
             row.set_item("h", (block.bbox.3 - block.bbox.1).max(0.0))?;
-            let bbox = PyDict::new_bound(py);
+            let bbox = PyDict::new(py);
             bbox.set_item("x", block.bbox.0)?;
             bbox.set_item("y", block.bbox.1)?;
             bbox.set_item("w", (block.bbox.2 - block.bbox.0).max(0.0))?;
@@ -3914,7 +3911,7 @@ fn build_render_time_reading_order_trace_py(
             } else {
                 row.set_item("top_role", py.None())?;
             }
-            row.set_item("tag_path", PyList::new_bound(py, &block.tag_path))?;
+            row.set_item("tag_path", PyList::new(py, &block.tag_path)?)?;
             row.set_item("owner", trace_owner_to_py(py, &block.owner)?)?;
             blocks.append(row)?;
         }
@@ -3928,7 +3925,7 @@ fn build_render_time_reading_order_trace_py(
         draw_form_count_total = draw_form_count_total.saturating_add(page_draw_form_count);
         define_form_count_total = define_form_count_total.saturating_add(page_define_form_count);
 
-        let page_row = PyDict::new_bound(py);
+        let page_row = PyDict::new(py);
         page_row.set_item("page_index", page_index)?;
         page_row.set_item("page", page_index + 1)?;
         page_row.set_item("width", doc.page_size.width.to_f32())?;
@@ -3942,13 +3939,13 @@ fn build_render_time_reading_order_trace_py(
     }
 
     if draw_form_count_total > 0 {
-        let w = PyDict::new_bound(py);
+        let w = PyDict::new(py);
         w.set_item("code", "RENDER_TIME_TRACE_DRAW_FORM_PRESENT")?;
         w.set_item("message", "Render-time reading-order trace excludes text inside drawn form XObjects (seed limitation).")?;
         warnings.append(w)?;
     }
 
-    let summary = PyDict::new_bound(py);
+    let summary = PyDict::new(py);
     summary.set_item("page_count", doc.pages.len())?;
     summary.set_item("total_blocks", total_blocks)?;
     summary.set_item("non_empty_pages", non_empty_pages)?;
@@ -3971,20 +3968,20 @@ fn build_render_time_reading_order_trace_py(
             .unwrap_or_default()
             .as_millis()) as u64,
     )?;
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyResult<PyObject> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("schema", "fullbleed.pdf.structure_trace.v1")?;
     out.set_item("schema_version", 1)?;
     out.set_item("seed_only", true)?;
     out.set_item("extractor", "render_time_commands")?;
     out.set_item("source", "engine_render_time")?;
 
-    let warnings = PyList::empty_bound(py);
-    let pages_out = PyList::empty_bound(py);
-    let role_counts = PyDict::new_bound(py);
+    let warnings = PyList::empty(py);
+    let pages_out = PyList::empty(py);
+    let role_counts = PyDict::new(py);
 
     let mut begin_tag_count = 0usize;
     let mut end_tag_count = 0usize;
@@ -3997,7 +3994,7 @@ fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyRes
     let mut tag_balance_underflow = 0usize;
 
     for (page_index, page) in doc.pages.iter().enumerate() {
-        let events = PyList::empty_bound(py);
+        let events = PyList::empty(py);
         let mut tag_stack: Vec<String> = Vec::new();
         let mut artifact_depth = 0usize;
         let mut page_begin_tags = 0usize;
@@ -4023,7 +4020,7 @@ fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyRes
                     role_counts.set_item(&role_key, cur.saturating_add(1))?;
                     tag_stack.push(role.clone());
                     if events.len() < 32 {
-                        let ev = PyDict::new_bound(py);
+                        let ev = PyDict::new(py);
                         ev.set_item("command_index", cmd_index)?;
                         ev.set_item("kind", "begin_tag")?;
                         ev.set_item("role", role.clone())?;
@@ -4043,7 +4040,7 @@ fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyRes
                     begin_artifact_count = begin_artifact_count.saturating_add(1);
                     artifact_depth = artifact_depth.saturating_add(1);
                     if events.len() < 32 {
-                        let ev = PyDict::new_bound(py);
+                        let ev = PyDict::new(py);
                         ev.set_item("command_index", cmd_index)?;
                         ev.set_item("kind", "begin_artifact")?;
                         ev.set_item("subtype", subtype.clone())?;
@@ -4074,7 +4071,7 @@ fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyRes
         if page_begin_tags > 0 {
             tagged_pages = tagged_pages.saturating_add(1);
         }
-        let page_row = PyDict::new_bound(py);
+        let page_row = PyDict::new(py);
         page_row.set_item("page_index", page_index)?;
         page_row.set_item("page", page_index + 1)?;
         page_row.set_item("begin_tag_count", page_begin_tags)?;
@@ -4084,7 +4081,7 @@ fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyRes
         pages_out.append(page_row)?;
     }
 
-    let summary = PyDict::new_bound(py);
+    let summary = PyDict::new(py);
     summary.set_item("page_count", doc.pages.len())?;
     summary.set_item("struct_tree_root_present", begin_tag_count > 0)?;
     summary.set_item("mark_info_present", begin_tag_count > 0)?;
@@ -4117,20 +4114,20 @@ fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyRes
             .unwrap_or_default()
             .as_millis()) as u64,
     )?;
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 fn glyph_report_to_py(py: Python<'_>, report: &GlyphCoverageReport) -> PyResult<PyObject> {
-    let list = PyList::empty_bound(py);
+    let list = PyList::empty(py);
     for missing in report.missing() {
-        let d = PyDict::new_bound(py);
+        let d = PyDict::new(py);
         d.set_item("codepoint", missing.codepoint)?;
         d.set_item("char", missing.ch.to_string())?;
         d.set_item("fonts_tried", missing.fonts_tried)?;
         d.set_item("count", missing.count)?;
         list.append(d)?;
     }
-    Ok(list.to_object(py))
+    Ok(list.unbind().into_any())
 }
 
 #[pyclass]
@@ -4275,7 +4272,7 @@ fn wcag20aa_coverage_summary_to_py(
     py: Python<'_>,
     summary: &audit_contract::Wcag20AaCoverageSummary,
 ) -> PyResult<PyObject> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("registry_id", summary.registry_id.clone())?;
     out.set_item("registry_version", summary.registry_version)?;
     out.set_item("wcag_version", summary.wcag_version.clone())?;
@@ -4316,7 +4313,7 @@ fn wcag20aa_coverage_summary_to_py(
         summary.planned_only_mapped_entry_count,
     )?;
     out.set_item("unmapped_entry_count", summary.unmapped_entry_count)?;
-    let counts = PyDict::new_bound(py);
+    let counts = PyDict::new(py);
     counts.set_item("pass", summary.implemented_mapped_result_counts.pass)?;
     counts.set_item("fail", summary.implemented_mapped_result_counts.fail)?;
     counts.set_item("warn", summary.implemented_mapped_result_counts.warn)?;
@@ -4330,14 +4327,14 @@ fn wcag20aa_coverage_summary_to_py(
     )?;
     counts.set_item("unknown", summary.implemented_mapped_result_counts.unknown)?;
     out.set_item("implemented_mapped_result_counts", counts)?;
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 fn section508_html_coverage_summary_to_py(
     py: Python<'_>,
     summary: &audit_contract::Section508HtmlCoverageSummary,
 ) -> PyResult<PyObject> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("registry_id", summary.registry_id.clone())?;
     out.set_item("registry_version", summary.registry_version)?;
     out.set_item("profile_id", summary.profile_id.clone())?;
@@ -4405,7 +4402,7 @@ fn section508_html_coverage_summary_to_py(
         "inherited_wcag_unmapped_entry_count",
         summary.inherited_wcag_unmapped_entry_count,
     )?;
-    let counts = PyDict::new_bound(py);
+    let counts = PyDict::new(py);
     counts.set_item("pass", summary.implemented_mapped_result_counts.pass)?;
     counts.set_item("fail", summary.implemented_mapped_result_counts.fail)?;
     counts.set_item("warn", summary.implemented_mapped_result_counts.warn)?;
@@ -4419,22 +4416,22 @@ fn section508_html_coverage_summary_to_py(
     )?;
     counts.set_item("unknown", summary.implemented_mapped_result_counts.unknown)?;
     out.set_item("implemented_mapped_result_counts", counts)?;
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 #[pyfunction]
 fn audit_contract_metadata(py: Python<'_>) -> PyResult<PyObject> {
     let meta = audit_contract::metadata();
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("contract_id", meta.contract_id)?;
     out.set_item("contract_version", meta.contract_version)?;
     out.set_item(
         "contract_fingerprint",
         format!("sha256:{}", meta.contract_fingerprint_sha256),
     )?;
-    let registries = PyList::empty_bound(py);
+    let registries = PyList::empty(py);
 
-    let reg_audit = PyDict::new_bound(py);
+    let reg_audit = PyDict::new(py);
     reg_audit.set_item("id", meta.audit_registry_id)?;
     reg_audit.set_item(
         "hash",
@@ -4442,7 +4439,7 @@ fn audit_contract_metadata(py: Python<'_>) -> PyResult<PyObject> {
     )?;
     registries.append(reg_audit)?;
 
-    let reg_wcag = PyDict::new_bound(py);
+    let reg_wcag = PyDict::new(py);
     reg_wcag.set_item("id", meta.wcag20aa_registry_id)?;
     reg_wcag.set_item(
         "hash",
@@ -4450,7 +4447,7 @@ fn audit_contract_metadata(py: Python<'_>) -> PyResult<PyObject> {
     )?;
     registries.append(reg_wcag)?;
 
-    let reg_s508 = PyDict::new_bound(py);
+    let reg_s508 = PyDict::new(py);
     reg_s508.set_item("id", meta.section508_html_registry_id)?;
     reg_s508.set_item(
         "hash",
@@ -4459,7 +4456,7 @@ fn audit_contract_metadata(py: Python<'_>) -> PyResult<PyObject> {
     registries.append(reg_s508)?;
 
     out.set_item("registries", registries)?;
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 #[pyfunction]
@@ -4475,7 +4472,7 @@ fn audit_contract_wcag20aa_coverage(
     findings: &Bound<'_, PyAny>,
 ) -> PyResult<PyObject> {
     let mut owned_pairs: Vec<(String, String)> = Vec::new();
-    let iter = findings.iter().map_err(|_| {
+    let iter = findings.try_iter().map_err(|_| {
         PyValueError::new_err("findings must be an iterable of mappings with rule_id/verdict")
     })?;
     for item in iter {
@@ -4510,7 +4507,7 @@ fn audit_contract_section508_html_coverage(
     findings: &Bound<'_, PyAny>,
 ) -> PyResult<PyObject> {
     let mut owned_pairs: Vec<(String, String)> = Vec::new();
-    let iter = findings.iter().map_err(|_| {
+    let iter = findings.try_iter().map_err(|_| {
         PyValueError::new_err("findings must be an iterable of mappings with rule_id/verdict")
     })?;
     for item in iter {
@@ -4928,7 +4925,7 @@ fn render_contrast_seed_analysis_to_py(
     py: Python<'_>,
     a: &RenderContrastSeedAnalysis,
 ) -> PyResult<PyObject> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("schema", "fullbleed.contrast.render_seed.v1")?;
     out.set_item("width", a.width)?;
     out.set_item("height", a.height)?;
@@ -4948,14 +4945,14 @@ fn render_contrast_seed_analysis_to_py(
     out.set_item("verdict", a.verdict)?;
     out.set_item("confidence", a.confidence)?;
     out.set_item("message", a.message.clone())?;
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 fn sparse_page_visual_pair_analysis_to_py(
     py: Python<'_>,
     a: &SparsePageVisualPairAnalysis,
 ) -> PyResult<PyObject> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("schema", "fullbleed.visual.sparse_page_pair.v1")?;
     out.set_item("source_preview_png_path", a.source_preview_png_path.clone())?;
     out.set_item("render_preview_png_path", a.render_preview_png_path.clone())?;
@@ -4980,7 +4977,7 @@ fn sparse_page_visual_pair_analysis_to_py(
     out.set_item("verdict", a.verdict)?;
     out.set_item("confidence", a.confidence)?;
     out.set_item("message", a.message.clone())?;
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 #[pyfunction]
@@ -5001,22 +4998,22 @@ fn audit_sparse_page_visual_pair(
 }
 
 fn a11y_core_evidence_to_py(py: Python<'_>, evidence: &A11yVerifierEvidence) -> PyResult<PyObject> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     if let Some(selector) = &evidence.selector {
         out.set_item("selector", selector.clone())?;
     }
     if !evidence.values.is_empty() {
-        let values = PyDict::new_bound(py);
+        let values = PyDict::new(py);
         for (k, v) in &evidence.values {
             values.set_item(k.clone(), v.clone())?;
         }
         out.set_item("values", values)?;
     }
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 fn a11y_core_finding_to_py(py: Python<'_>, finding: &A11yVerifierFinding) -> PyResult<PyObject> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("rule_id", finding.rule_id.clone())?;
     out.set_item("applicability", finding.applicability.clone())?;
     out.set_item("verification_mode", finding.verification_mode.clone())?;
@@ -5027,13 +5024,13 @@ fn a11y_core_finding_to_py(py: Python<'_>, finding: &A11yVerifierFinding) -> PyR
     out.set_item("source", finding.source.clone())?;
     out.set_item("message", finding.message.clone())?;
     if !finding.evidence.is_empty() {
-        let evid = PyList::empty_bound(py);
+        let evid = PyList::empty(py);
         for e in &finding.evidence {
             evid.append(a11y_core_evidence_to_py(py, e)?)?;
         }
         out.set_item("evidence", evid)?;
     }
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 #[derive(Debug, Clone, Default)]
@@ -5876,7 +5873,7 @@ fn pagination_trace_summary_to_py<'py>(
     py: Python<'py>,
     summary: &PaginationTraceSummary,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     if let Some(value) = summary.page_count {
         out.set_item("page_count", value)?;
     }
@@ -5972,7 +5969,7 @@ fn diagnostic_signals_to_py<'py>(
     py: Python<'py>,
     signals: &DiagnosticSignals,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     if let Some(value) = signals.page_count_mismatch {
         out.set_item("page_count_mismatch", value)?;
     }
@@ -6082,7 +6079,7 @@ fn build_a11y_blocking_issue_summary_py<'py>(
     findings: &[A11yVerifierFinding],
     failed_rule_ids: &[String],
 ) -> PyResult<Bound<'py, PyList>> {
-    let out = PyList::empty_bound(py);
+    let out = PyList::empty(py);
     let failed_rule_ids: std::collections::BTreeSet<&str> =
         failed_rule_ids.iter().map(|value| value.as_str()).collect();
     let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -6120,7 +6117,7 @@ fn build_a11y_blocking_issue_summary_py<'py>(
             continue;
         }
 
-        let row = PyDict::new_bound(py);
+        let row = PyDict::new(py);
         row.set_item("rule_id", finding.rule_id.clone())?;
         row.set_item("verdict", finding.verdict.clone())?;
         row.set_item("severity", finding.severity.clone())?;
@@ -6164,7 +6161,7 @@ fn build_a11y_blocking_issue_summary_py<'py>(
         if let Some(values) =
             evidence_list_value(a11y_finding_evidence_value(finding, "suspect_cause_codes"))
         {
-            let items = PyList::empty_bound(py);
+            let items = PyList::empty(py);
             for value in values {
                 items.append(value)?;
             }
@@ -6238,7 +6235,7 @@ fn build_pmr_blocking_audit_summary_py<'py>(
     audits: &[PmrCoreAudit],
     failed_audit_ids: &[String],
 ) -> PyResult<Bound<'py, PyList>> {
-    let out = PyList::empty_bound(py);
+    let out = PyList::empty(py);
     let failed_audit_ids: std::collections::BTreeSet<&str> = failed_audit_ids
         .iter()
         .map(|value| value.as_str())
@@ -6279,7 +6276,7 @@ fn build_pmr_blocking_audit_summary_py<'py>(
             continue;
         }
 
-        let row = PyDict::new_bound(py);
+        let row = PyDict::new(py);
         row.set_item("audit_id", audit.audit_id.clone())?;
         row.set_item("category", audit.category.clone())?;
         row.set_item("class", audit.class_name.clone())?;
@@ -6327,7 +6324,7 @@ fn build_pmr_blocking_audit_summary_py<'py>(
         if let Some(values) =
             evidence_list_value(pmr_audit_evidence_value(audit, "suspect_cause_codes"))
         {
-            let items = PyList::empty_bound(py);
+            let items = PyList::empty(py);
             for value in values {
                 items.append(value)?;
             }
@@ -8329,7 +8326,7 @@ fn build_a11y_verify_report_py(
     let (reported_findings, observability_summary) =
         a11y_dedup_and_correlate_findings(all_findings);
 
-    let findings_py = PyList::empty_bound(py);
+    let findings_py = PyList::empty(py);
     let mut pass_count = 0usize;
     let mut fail_count = 0usize;
     let mut warn_count = 0usize;
@@ -8425,10 +8422,10 @@ fn build_a11y_verify_report_py(
         "pass_machine_subset"
     };
 
-    let report = PyDict::new_bound(py);
+    let report = PyDict::new(py);
     report.set_item("schema", "fullbleed.a11y.verify.v1")?;
 
-    let target = PyDict::new_bound(py);
+    let target = PyDict::new(py);
     target.set_item("html_path", html_path)?;
     target.set_item("css_path", css_path)?;
     target.set_item(
@@ -8448,7 +8445,7 @@ fn build_a11y_verify_report_py(
 
     report.set_item("profile", core.profile.clone())?;
 
-    let conformance_status = PyDict::new_bound(py);
+    let conformance_status = PyDict::new(py);
     conformance_status.set_item("status", conformance_status_text)?;
     conformance_status.set_item(
         "claim_scope",
@@ -8461,17 +8458,17 @@ fn build_a11y_verify_report_py(
     conformance_status.set_item("manual_review_required", manual_required)?;
     report.set_item("conformance_status", conformance_status)?;
 
-    let gate = PyDict::new_bound(py);
+    let gate = PyDict::new(py);
     gate.set_item("ok", error_count == 0)?;
     gate.set_item("mode", mode_norm.clone())?;
     gate.set_item("error_count", error_count)?;
     gate.set_item("warn_count", gate_warn_count)?;
-    let failed_list = PyList::empty_bound(py);
+    let failed_list = PyList::empty(py);
     for rid in &failed_rule_ids {
         failed_list.append(rid.clone())?;
     }
     gate.set_item("failed_rule_ids", failed_list)?;
-    let reason_codes = PyList::empty_bound(py);
+    let reason_codes = PyList::empty(py);
     if let Some(signals) = diagnostic_signals {
         if signals.page_count_mismatch.unwrap_or(false) {
             reason_codes.append("page_count_mismatch")?;
@@ -8514,7 +8511,7 @@ fn build_a11y_verify_report_py(
     gate.set_item("reason_codes", reason_codes)?;
     report.set_item("gate", gate)?;
 
-    let summary = PyDict::new_bound(py);
+    let summary = PyDict::new(py);
     summary.set_item("pass_count", pass_count)?;
     summary.set_item("fail_count", fail_count)?;
     summary.set_item("warn_count", warn_count)?;
@@ -8528,7 +8525,7 @@ fn build_a11y_verify_report_py(
         build_a11y_blocking_issue_summary_py(py, &reported_findings, &failed_rule_ids)?,
     )?;
 
-    let observability = PyDict::new_bound(py);
+    let observability = PyDict::new(py);
     observability.set_item(
         "original_finding_count",
         observability_summary.original_finding_count,
@@ -8546,27 +8543,27 @@ fn build_a11y_verify_report_py(
         "correlated_finding_count",
         observability_summary.correlated_finding_count,
     )?;
-    let stage_counts_py = PyDict::new_bound(py);
+    let stage_counts_py = PyDict::new(py);
     for (k, v) in &observability_summary.stage_counts {
         stage_counts_py.set_item(k, *v)?;
     }
     observability.set_item("stage_counts", stage_counts_py)?;
-    let source_counts_py = PyDict::new_bound(py);
+    let source_counts_py = PyDict::new(py);
     for (k, v) in &observability_summary.source_counts {
         source_counts_py.set_item(k, *v)?;
     }
     observability.set_item("source_counts", source_counts_py)?;
-    let original_stage_counts_py = PyDict::new_bound(py);
+    let original_stage_counts_py = PyDict::new(py);
     for (k, v) in &observability_summary.original_stage_counts {
         original_stage_counts_py.set_item(k, *v)?;
     }
     observability.set_item("original_stage_counts", original_stage_counts_py)?;
-    let original_source_counts_py = PyDict::new_bound(py);
+    let original_source_counts_py = PyDict::new(py);
     for (k, v) in &observability_summary.original_source_counts {
         original_source_counts_py.set_item(k, *v)?;
     }
     observability.set_item("original_source_counts", original_source_counts_py)?;
-    let signal_counts_py = PyDict::new_bound(py);
+    let signal_counts_py = PyDict::new(py);
     signal_counts_py.set_item(
         "figure_alt_over_budget_count",
         core.facts.figure_alt_over_budget_count,
@@ -8624,21 +8621,21 @@ fn build_a11y_verify_report_py(
         }
     }
     observability.set_item("signal_counts", signal_counts_py)?;
-    let correlation_index_py = PyList::empty_bound(py);
+    let correlation_index_py = PyList::empty(py);
     for item in &observability_summary.correlation_index {
-        let row = PyDict::new_bound(py);
+        let row = PyDict::new(py);
         row.set_item("rule_id", item.rule_id.clone())?;
         row.set_item("canonical_stage", item.canonical_stage.clone())?;
         row.set_item("canonical_source", item.canonical_source.clone())?;
         row.set_item("canonical_verdict", item.canonical_verdict.clone())?;
         row.set_item("merged_finding_count", item.merged_finding_count)?;
         row.set_item("merged_pre_render_count", item.merged_pre_render_count)?;
-        let stage_map = PyDict::new_bound(py);
+        let stage_map = PyDict::new(py);
         for (k, v) in &item.merged_stage_counts {
             stage_map.set_item(k, *v)?;
         }
         row.set_item("merged_stage_counts", stage_map)?;
-        let source_map = PyDict::new_bound(py);
+        let source_map = PyDict::new(py);
         for (k, v) in &item.merged_source_counts {
             source_map.set_item(k, *v)?;
         }
@@ -8648,7 +8645,7 @@ fn build_a11y_verify_report_py(
     observability.set_item("correlation_index", correlation_index_py)?;
     report.set_item("observability", observability)?;
 
-    let coverage = PyDict::new_bound(py);
+    let coverage = PyDict::new(py);
     coverage.set_item("evaluated_rule_count", reported_findings.len())?;
     coverage.set_item(
         "applicable_rule_count",
@@ -8673,8 +8670,8 @@ fn build_a11y_verify_report_py(
     )?;
     coverage.set_item("manual_needed_count", manual_needed_count)?;
     coverage.set_item("not_evaluated_rule_count", 0)?;
-    let rule_pack_coverage = PyList::empty_bound(py);
-    let engine_pack = PyDict::new_bound(py);
+    let rule_pack_coverage = PyList::empty(py);
+    let engine_pack = PyDict::new(py);
     engine_pack.set_item("pack_id", "fullbleed.a11y.engine_core.v1")?;
     engine_pack.set_item("evaluated", reported_findings.len())?;
     engine_pack.set_item("total", reported_findings.len())?;
@@ -8694,7 +8691,7 @@ fn build_a11y_verify_report_py(
     coverage.set_item("wcag20aa", &wcag_cov)?;
     let section508_cov = section508_html_coverage_summary_to_py(py, &section508_summary)?;
     coverage.set_item("section508", &section508_cov)?;
-    let wcag_pack = PyDict::new_bound(py);
+    let wcag_pack = PyDict::new(py);
     wcag_pack.set_item("pack_id", "wcag20aa.implemented_map.v1")?;
     wcag_pack.set_item(
         "evaluated",
@@ -8702,7 +8699,7 @@ fn build_a11y_verify_report_py(
     )?;
     wcag_pack.set_item("total", wcag_summary.implemented_mapped_entry_count)?;
     rule_pack_coverage.append(wcag_pack)?;
-    let s508_pack = PyDict::new_bound(py);
+    let s508_pack = PyDict::new(py);
     s508_pack.set_item("pack_id", "section508_html.implemented_map.v1")?;
     s508_pack.set_item(
         "evaluated",
@@ -8713,7 +8710,7 @@ fn build_a11y_verify_report_py(
     coverage.set_item("rule_pack_coverage", rule_pack_coverage)?;
     report.set_item("coverage", coverage)?;
 
-    let wcag_claim = PyDict::new_bound(py);
+    let wcag_claim = PyDict::new(py);
     wcag_claim.set_item("target", "wcag20aa")?;
     wcag_claim.set_item("status", claim_status)?;
     wcag_claim.set_item("claim_ready", false)?;
@@ -8734,7 +8731,7 @@ fn build_a11y_verify_report_py(
         wcag_summary.implemented_mapped_entry_pending_count,
     )?;
     wcag_claim.set_item("unmapped_entry_count", wcag_summary.unmapped_entry_count)?;
-    let wcag_claim_notes = PyList::empty_bound(py);
+    let wcag_claim_notes = PyList::empty(py);
     if wcag_summary.unmapped_entry_count > 0 {
         wcag_claim_notes.append("WCAG target registry still contains unmapped entries.")?;
     }
@@ -8747,7 +8744,7 @@ fn build_a11y_verify_report_py(
     wcag_claim.set_item("notes", wcag_claim_notes)?;
     report.set_item("wcag20aa_claim_readiness", wcag_claim)?;
 
-    let tooling = PyDict::new_bound(py);
+    let tooling = PyDict::new(py);
     tooling.set_item("fullbleed_version", env!("CARGO_PKG_VERSION"))?;
     tooling.set_item("engine_version", env!("CARGO_PKG_VERSION"))?;
     tooling.set_item("report_schema_version", "1.0.0-draft")?;
@@ -8773,14 +8770,14 @@ fn build_a11y_verify_report_py(
             contract_meta.section508_html_registry_hash_sha256
         ),
     )?;
-    let dt = py.import_bound("datetime")?;
+    let dt = py.import("datetime")?;
     let tz = dt.getattr("timezone")?.getattr("utc")?;
     let now = dt.getattr("datetime")?.call_method1("now", (tz,))?;
     let iso = now.call_method0("isoformat")?.extract::<String>()?;
     tooling.set_item("generated_at", iso.replace("+00:00", "Z"))?;
     report.set_item("tooling", tooling)?;
 
-    let artifacts = PyDict::new_bound(py);
+    let artifacts = PyDict::new(py);
     artifacts.set_item(
         "html_hash",
         format!("sha256:{}", sha256_file_hex(html_path)?),
@@ -8797,11 +8794,11 @@ fn build_a11y_verify_report_py(
     )?;
     report.set_item("artifacts", artifacts)?;
 
-    Ok(report.to_object(py))
+    Ok(report.unbind().into_any())
 }
 
 fn pmr_core_evidence_to_py(py: Python<'_>, evidence: &PmrCoreEvidence) -> PyResult<PyObject> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     if let Some(selector) = &evidence.selector {
         out.set_item("selector", selector.clone())?;
     }
@@ -8809,17 +8806,17 @@ fn pmr_core_evidence_to_py(py: Python<'_>, evidence: &PmrCoreEvidence) -> PyResu
         out.set_item("diagnostic_ref", diagnostic_ref.clone())?;
     }
     if !evidence.values.is_empty() {
-        let values = PyDict::new_bound(py);
+        let values = PyDict::new(py);
         for (k, v) in &evidence.values {
             values.set_item(k.clone(), v.clone())?;
         }
         out.set_item("values", values)?;
     }
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 fn pmr_core_audit_to_py(py: Python<'_>, audit: &PmrCoreAudit) -> PyResult<PyObject> {
-    let out = PyDict::new_bound(py);
+    let out = PyDict::new(py);
     out.set_item("audit_id", audit.audit_id.clone())?;
     out.set_item("category", audit.category.clone())?;
     out.set_item("weight", audit.weight)?;
@@ -8838,13 +8835,13 @@ fn pmr_core_audit_to_py(py: Python<'_>, audit: &PmrCoreAudit) -> PyResult<PyObje
         out.set_item("fix_hint", fix_hint.clone())?;
     }
     if !audit.evidence.is_empty() {
-        let evid = PyList::empty_bound(py);
+        let evid = PyList::empty(py);
         for e in &audit.evidence {
             evid.append(pmr_core_evidence_to_py(py, e)?)?;
         }
         out.set_item("evidence", evid)?;
     }
-    Ok(out.to_object(py))
+    Ok(out.unbind().into_any())
 }
 
 fn build_pmr_report_py(
@@ -8855,10 +8852,10 @@ fn build_pmr_report_py(
     pagination_trace_summary: Option<&PaginationTraceSummary>,
     diagnostic_signals: Option<&DiagnosticSignals>,
 ) -> PyResult<PyObject> {
-    let report = PyDict::new_bound(py);
+    let report = PyDict::new(py);
     report.set_item("schema", "fullbleed.pmr.v1")?;
 
-    let target = PyDict::new_bound(py);
+    let target = PyDict::new(py);
     target.set_item("html_path", html_path)?;
     target.set_item("css_path", css_path)?;
     report.set_item("target", target)?;
@@ -8923,24 +8920,24 @@ fn build_pmr_report_py(
         }
     }
 
-    let rank = PyDict::new_bound(py);
+    let rank = PyDict::new(py);
     rank.set_item("score", core.rank.score)?;
     rank.set_item("confidence", core.rank.confidence)?;
     rank.set_item("band", core.rank.band.clone())?;
     rank.set_item("raw_score", core.rank.raw_score)?;
     report.set_item("rank", rank)?;
 
-    let gate = PyDict::new_bound(py);
+    let gate = PyDict::new(py);
     gate.set_item("ok", gate_ok)?;
     gate.set_item("mode", core.gate.mode.clone())?;
     gate.set_item("error_count", gate_error_count)?;
     gate.set_item("warn_count", gate_warn_count)?;
-    let failed = PyList::empty_bound(py);
+    let failed = PyList::empty(py);
     for aid in &gate_failed_audit_ids {
         failed.append(aid.clone())?;
     }
     gate.set_item("failed_audit_ids", failed)?;
-    let reason_codes = PyList::empty_bound(py);
+    let reason_codes = PyList::empty(py);
     if let Some(signals) = diagnostic_signals {
         if signals.page_count_mismatch.unwrap_or(false) {
             reason_codes.append("page_count_mismatch")?;
@@ -8983,9 +8980,9 @@ fn build_pmr_report_py(
     gate.set_item("reason_codes", reason_codes)?;
     report.set_item("gate", gate)?;
 
-    let categories = PyList::empty_bound(py);
+    let categories = PyList::empty(py);
     for cat in &core.categories {
-        let d = PyDict::new_bound(py);
+        let d = PyDict::new(py);
         d.set_item("id", cat.id.clone())?;
         d.set_item("name", cat.name.clone())?;
         d.set_item("weight", cat.weight)?;
@@ -8998,7 +8995,7 @@ fn build_pmr_report_py(
     }
     report.set_item("categories", categories)?;
 
-    let audits = PyList::empty_bound(py);
+    let audits = PyList::empty(py);
     let failed_audit_ids: std::collections::BTreeSet<String> =
         gate_failed_audit_ids.iter().cloned().collect();
     let mut stage_counts: std::collections::BTreeMap<String, usize> =
@@ -9011,7 +9008,7 @@ fn build_pmr_report_py(
         std::collections::BTreeMap::new();
     let mut verdict_counts: std::collections::BTreeMap<String, usize> =
         std::collections::BTreeMap::new();
-    let correlation_index = PyList::empty_bound(py);
+    let correlation_index = PyList::empty(py);
     for audit in &core.audits {
         audits.append(pmr_core_audit_to_py(py, audit)?)?;
         *stage_counts.entry(audit.stage.clone()).or_insert(0) += 1;
@@ -9022,7 +9019,7 @@ fn build_pmr_report_py(
         let include_corr = matches!(audit.verdict.as_str(), "fail" | "warn" | "manual_needed")
             || audit.fix_hint.is_some();
         if include_corr {
-            let row = PyDict::new_bound(py);
+            let row = PyDict::new(py);
             row.set_item("audit_id", audit.audit_id.clone())?;
             row.set_item("category", audit.category.clone())?;
             row.set_item("class", audit.class_name.clone())?;
@@ -9053,38 +9050,38 @@ fn build_pmr_report_py(
         build_pmr_blocking_audit_summary_py(py, &core.audits, &core.gate.failed_audit_ids)?,
     )?;
 
-    let observability = PyDict::new_bound(py);
+    let observability = PyDict::new(py);
     observability.set_item("original_audit_count", core.audits.len())?;
     observability.set_item("reported_audit_count", core.audits.len())?;
     observability.set_item("dedup_event_count", 0usize)?;
     observability.set_item("dedup_merged_audit_count", 0usize)?;
     observability.set_item("correlated_audit_count", correlation_index.len())?;
-    let stage_counts_py = PyDict::new_bound(py);
+    let stage_counts_py = PyDict::new(py);
     for (k, v) in &stage_counts {
         stage_counts_py.set_item(k, *v)?;
     }
     observability.set_item("stage_counts", stage_counts_py)?;
-    let source_counts_py = PyDict::new_bound(py);
+    let source_counts_py = PyDict::new(py);
     for (k, v) in &source_counts {
         source_counts_py.set_item(k, *v)?;
     }
     observability.set_item("source_counts", source_counts_py)?;
-    let category_counts_py = PyDict::new_bound(py);
+    let category_counts_py = PyDict::new(py);
     for (k, v) in &category_counts {
         category_counts_py.set_item(k, *v)?;
     }
     observability.set_item("category_counts", category_counts_py)?;
-    let class_counts_py = PyDict::new_bound(py);
+    let class_counts_py = PyDict::new(py);
     for (k, v) in &class_counts {
         class_counts_py.set_item(k, *v)?;
     }
     observability.set_item("class_counts", class_counts_py)?;
-    let verdict_counts_py = PyDict::new_bound(py);
+    let verdict_counts_py = PyDict::new(py);
     for (k, v) in &verdict_counts {
         verdict_counts_py.set_item(k, *v)?;
     }
     observability.set_item("verdict_counts", verdict_counts_py)?;
-    let signal_counts_py = PyDict::new_bound(py);
+    let signal_counts_py = PyDict::new(py);
     signal_counts_py.set_item(
         "figure_alt_over_budget_count",
         core.facts.figure_alt_over_budget_count,
@@ -9145,13 +9142,13 @@ fn build_pmr_report_py(
     observability.set_item("correlation_index", correlation_index)?;
     report.set_item("observability", observability)?;
 
-    let manual_debt = PyDict::new_bound(py);
+    let manual_debt = PyDict::new(py);
     manual_debt.set_item("item_count", core.manual_debt_item_count)?;
     manual_debt.set_item("high_risk_count", core.manual_debt_high_risk_count)?;
     if !core.manual_debt_items.is_empty() {
-        let items = PyList::empty_bound(py);
+        let items = PyList::empty(py);
         for item in &core.manual_debt_items {
-            let d = PyDict::new_bound(py);
+            let d = PyDict::new(py);
             d.set_item("id", item.id.clone())?;
             d.set_item("reason", item.reason.clone())?;
             d.set_item("severity", item.severity.clone())?;
@@ -9164,7 +9161,7 @@ fn build_pmr_report_py(
     }
     report.set_item("manual_debt", manual_debt)?;
 
-    let coverage = PyDict::new_bound(py);
+    let coverage = PyDict::new(py);
     coverage.set_item("evaluated_audit_count", core.coverage.evaluated_audit_count)?;
     coverage.set_item(
         "applicable_audit_count",
@@ -9178,7 +9175,7 @@ fn build_pmr_report_py(
     )?;
     report.set_item("coverage", coverage)?;
 
-    let tooling = PyDict::new_bound(py);
+    let tooling = PyDict::new(py);
     tooling.set_item("fullbleed_version", env!("CARGO_PKG_VERSION"))?;
     tooling.set_item("report_schema_version", "1.0.0-draft")?;
     let contract_meta = audit_contract::metadata();
@@ -9203,14 +9200,14 @@ fn build_pmr_report_py(
             contract_meta.section508_html_registry_hash_sha256
         ),
     )?;
-    let dt = py.import_bound("datetime")?;
+    let dt = py.import("datetime")?;
     let tz = dt.getattr("timezone")?.getattr("utc")?;
     let now = dt.getattr("datetime")?.call_method1("now", (tz,))?;
     let iso = now.call_method0("isoformat")?.extract::<String>()?;
     tooling.set_item("generated_at", iso.replace("+00:00", "Z"))?;
     report.set_item("tooling", tooling)?;
 
-    let artifacts = PyDict::new_bound(py);
+    let artifacts = PyDict::new(py);
     artifacts.set_item(
         "html_hash",
         format!("sha256:{}", sha256_file_hex(html_path)?),
@@ -9227,7 +9224,7 @@ fn build_pmr_report_py(
     )?;
     report.set_item("artifacts", artifacts)?;
 
-    Ok(report.to_object(py))
+    Ok(report.unbind().into_any())
 }
 
 #[pymethods]
@@ -9744,14 +9741,14 @@ impl PdfEngine {
     }
 
     fn document_metadata(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let out = PyDict::new_bound(py);
+        let out = PyDict::new(py);
         out.set_item("document_lang", self.document_lang())?;
         out.set_item("document_title", self.document_title())?;
         out.set_item("document_css_href", self.document_css_href())?;
         out.set_item("document_css_source_path", self.document_css_source_path())?;
         out.set_item("document_css_media", self.document_css_media())?;
         out.set_item("document_css_required", self.document_css_required())?;
-        Ok(out.to_object(py))
+        Ok(out.unbind().into_any())
     }
 
     #[pyo3(signature = (html, out_path, wrap_document=true))]
@@ -9810,7 +9807,7 @@ impl PdfEngine {
         } else {
             html_text
         };
-        let out = PyDict::new_bound(py);
+        let out = PyDict::new(py);
         out.set_item("html_path", html_path)?;
         out.set_item("css_path", css_path)?;
         out.set_item("html", html_effective)?;
@@ -9819,7 +9816,7 @@ impl PdfEngine {
         out.set_item("css_link_media", css_media)?;
         out.set_item("css_link_injected", injected)?;
         out.set_item("css_link_preexisting", preexisting)?;
-        Ok(out.to_object(py))
+        Ok(out.unbind().into_any())
     }
 
     #[pyo3(signature = (html, css="", profile="strict", mode="error", render_preview_png_path=None, a11y_report=None, claim_evidence=None, pagination_trace_summary=None, diagnostic_signals=None))]
@@ -10078,7 +10075,7 @@ impl PdfEngine {
         if let Some(path) = deterministic_hash.as_deref() {
             write_hash_file(path, &sha256_hex(&bytes))?;
         }
-        Ok(PyBytes::new_bound(py, &bytes).unbind())
+        Ok(PyBytes::new(py, &bytes).unbind())
     }
 
     #[pyo3(signature = (html, css, dpi=150))]
@@ -10092,11 +10089,11 @@ impl PdfEngine {
         let pages = py
             .allow_threads(|| self.engine.render_image_pages(html, css, dpi))
             .map_err(to_py_err)?;
-        let out = PyList::empty_bound(py);
+        let out = PyList::empty(py);
         for page in pages {
-            out.append(PyBytes::new_bound(py, &page))?;
+            out.append(PyBytes::new(py, &page))?;
         }
-        Ok(out.to_object(py))
+        Ok(out.unbind().into_any())
     }
 
     #[pyo3(signature = (html, css, out_dir, dpi=150, stem=None))]
@@ -10116,11 +10113,11 @@ impl PdfEngine {
                     .render_image_pages_to_dir(html, css, out_dir, &stem, dpi)
             })
             .map_err(to_py_err)?;
-        let out = PyList::empty_bound(py);
+        let out = PyList::empty(py);
         for path in paths {
             out.append(path.to_string_lossy().to_string())?;
         }
-        Ok(out.to_object(py))
+        Ok(out.unbind().into_any())
     }
 
     #[pyo3(signature = (pdf_path, dpi=150))]
@@ -10133,11 +10130,11 @@ impl PdfEngine {
         let pages = py
             .allow_threads(|| self.engine.render_finalized_pdf_image_pages(pdf_path, dpi))
             .map_err(to_py_err)?;
-        let out = PyList::empty_bound(py);
+        let out = PyList::empty(py);
         for page in pages {
-            out.append(PyBytes::new_bound(py, &page))?;
+            out.append(PyBytes::new(py, &page))?;
         }
-        Ok(out.to_object(py))
+        Ok(out.unbind().into_any())
     }
 
     #[pyo3(signature = (pdf_path, out_dir, dpi=150, stem=None))]
@@ -10156,11 +10153,11 @@ impl PdfEngine {
                     .render_finalized_pdf_image_pages_to_dir(pdf_path, out_dir, &stem, dpi)
             })
             .map_err(to_py_err)?;
-        let out = PyList::empty_bound(py);
+        let out = PyList::empty(py);
         for path in paths {
             out.append(path.to_string_lossy().to_string())?;
         }
-        Ok(out.to_object(py))
+        Ok(out.unbind().into_any())
     }
 
     fn render_pdf_with_page_data(
@@ -10178,7 +10175,7 @@ impl PdfEngine {
             None => py.None(),
         };
 
-        Ok((PyBytes::new_bound(py, &bytes).unbind(), data_obj))
+        Ok((PyBytes::new(py, &bytes).unbind(), data_obj))
     }
 
     fn render_pdf_with_page_data_and_glyph_report(
@@ -10200,11 +10197,7 @@ impl PdfEngine {
         };
         let report_obj = glyph_report_to_py(py, &report)?;
 
-        Ok((
-            PyBytes::new_bound(py, &bytes).unbind(),
-            data_obj,
-            report_obj,
-        ))
+        Ok((PyBytes::new(py, &bytes).unbind(), data_obj, report_obj))
     }
 
     fn export_render_time_reading_order_trace(
@@ -10313,11 +10306,7 @@ impl PdfEngine {
             None => py.None(),
         };
 
-        Ok((
-            PyBytes::new_bound(py, &bytes).unbind(),
-            data_obj,
-            bindings_obj,
-        ))
+        Ok((PyBytes::new(py, &bytes).unbind(), data_obj, bindings_obj))
     }
 
     fn render_pdf_with_page_data_and_template_bindings_and_glyph_report(
@@ -10344,7 +10333,7 @@ impl PdfEngine {
         let report_obj = glyph_report_to_py(py, &report)?;
 
         Ok((
-            PyBytes::new_bound(py, &bytes).unbind(),
+            PyBytes::new(py, &bytes).unbind(),
             data_obj,
             bindings_obj,
             report_obj,
@@ -10396,7 +10385,7 @@ impl PdfEngine {
         sorted_bindings.sort_by_key(|item| item.page_index);
         let plan_obj = compose_plan_to_py(py, &sorted_bindings, &template_page_counts, dx, dy)?;
 
-        let out = PyDict::new_bound(py);
+        let out = PyDict::new(py);
         out.set_item("ok", true)?;
         out.set_item("dx", dx)?;
         out.set_item("dy", dy)?;
@@ -10415,14 +10404,14 @@ impl PdfEngine {
             template_catalog_entries_to_py(py, &entries)?,
         )?;
 
-        let metrics = PyDict::new_bound(py);
+        let metrics = PyDict::new(py);
         metrics.set_item("pages", sorted_bindings.len())?;
         metrics.set_item("templates", template_page_counts.len())?;
         metrics.set_item("dx", dx)?;
         metrics.set_item("dy", dy)?;
         out.set_item("metrics", metrics)?;
 
-        Ok(out.to_object(py))
+        Ok(out.unbind().into_any())
     }
 
     #[pyo3(signature = (html, css))]
@@ -10436,7 +10425,7 @@ impl PdfEngine {
             .allow_threads(|| self.engine.render_with_glyph_report(html, css))
             .map_err(to_py_err)?;
         let report_obj = glyph_report_to_py(py, &report)?;
-        Ok((PyBytes::new_bound(py, &bytes).unbind(), report_obj))
+        Ok((PyBytes::new(py, &bytes).unbind(), report_obj))
     }
 
     #[pyo3(signature = (html, css))]
@@ -10451,11 +10440,7 @@ impl PdfEngine {
             .map_err(to_py_err)?;
         let report_obj = glyph_report_to_py(py, &report)?;
         let trace_obj = build_render_time_reading_order_trace_py(py, &doc, Some(&self.engine))?;
-        Ok((
-            PyBytes::new_bound(py, &bytes).unbind(),
-            report_obj,
-            trace_obj,
-        ))
+        Ok((PyBytes::new(py, &bytes).unbind(), report_obj, trace_obj))
     }
 
     #[pyo3(signature = (html, css, path, deterministic_hash=None))]
@@ -10491,7 +10476,7 @@ impl PdfEngine {
         if let Some(path) = deterministic_hash.as_deref() {
             write_hash_file(path, &sha256_hex(&bytes))?;
         }
-        Ok(PyBytes::new_bound(py, &bytes).unbind())
+        Ok(PyBytes::new(py, &bytes).unbind())
     }
 
     #[pyo3(signature = (html_list, css, path, deterministic_hash=None))]
@@ -10526,7 +10511,7 @@ impl PdfEngine {
         if let Some(path) = deterministic_hash.as_deref() {
             write_hash_file(path, &sha256_hex(&bytes))?;
         }
-        Ok(PyBytes::new_bound(py, &bytes).unbind())
+        Ok(PyBytes::new(py, &bytes).unbind())
     }
 
     #[pyo3(signature = (jobs, path, deterministic_hash=None))]
@@ -10562,7 +10547,7 @@ impl PdfEngine {
         if let Some(path) = deterministic_hash.as_deref() {
             write_hash_file(path, &sha256_hex(&bytes))?;
         }
-        Ok(PyBytes::new_bound(py, &bytes).unbind())
+        Ok(PyBytes::new(py, &bytes).unbind())
     }
 
     #[pyo3(signature = (html_list, css, path, deterministic_hash=None))]
@@ -10585,7 +10570,7 @@ impl PdfEngine {
             write_hash_file(hash_path, &hash)?;
         }
         Python::with_gil(|py| {
-            let list = PyList::empty_bound(py);
+            let list = PyList::empty(py);
             for ctx in page_data {
                 let obj = match ctx {
                     Some(c) => page_data_context_to_py(py, &c)?,
@@ -10593,7 +10578,7 @@ impl PdfEngine {
                 };
                 list.append(obj)?;
             }
-            Ok((bytes_written, list.to_object(py)))
+            Ok((bytes_written, list.unbind().into_any()))
         })
     }
 

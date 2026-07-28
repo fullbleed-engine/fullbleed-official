@@ -1,22 +1,38 @@
 [build-system]
-requires = ["maturin>=1.5,<2.0"]
+requires = ["maturin>=1.9,<2.0"]
 build-backend = "maturin"
 
 [project]
 name = "fullbleed"
-version = "1.0.0"
+version = "1.6.1"
 description = "Deterministic static HTML/CSS-to-PDF renderer built in Rust"
 readme = "README.md"
-requires-python = ">=3.8"
-license = {text = "AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial"}
-license-files = ["LICENSE", "COPYRIGHT", "LICENSING.md", "THIRD_PARTY_LICENSES.md"]
+requires-python = ">=3.10"
+license = "MIT"
+license-files = [
+    "LICENSE",
+    "COPYRIGHT",
+    "LICENSING.md",
+    "THIRD_PARTY_LICENSES.md",
+    "FONT_LICENSE_AUDIT.md",
+    "FONT_LICENSE_AUDIT.json",
+]
 keywords = ["pdf", "html", "css", "rust", "static-pdf", "document-generation"]
 classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Rust",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
     "Topic :: Printing",
     "Topic :: Text Processing :: Markup :: HTML",
 ]
@@ -39,11 +55,15 @@ api = [
 ]
 
 [tool.maturin]
+bindings = "pyo3"
 features = ["python", "svg_raster"]
 python-source = "python"
 python-packages = ["fullbleed", "fullbleed_assets", "fullbleed_cli"]
 module-name = "fullbleed._fullbleed"
 include = ["python/fullbleed/**", "python/fullbleed_assets/**", "python/fullbleed_cli/**"]
+strip = true
 
 [tool.pytest.ini_options]
 addopts = ["--ignore-glob=*.txt"]
+testpaths = ["tests"]
+norecursedirs = [".git", ".venv", "target"]

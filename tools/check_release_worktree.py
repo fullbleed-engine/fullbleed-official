@@ -12,8 +12,10 @@ SCHEMA = "fullbleed.release_worktree.v1"
 FORBIDDEN_TRACKED_ARTIFACTS = {
     ".dll",
     ".dylib",
+    ".pyc",
     ".pyd",
     ".so",
+    ".whl",
 }
 FORBIDDEN_TRACKED_PATHS = {
     "fullbleed_preflight.jit",
@@ -63,6 +65,7 @@ def is_forbidden_tracked_artifact(path: str) -> bool:
     name = Path(normalized).name
     return (
         normalized.startswith(".pytest_cache/")
+        or "/__pycache__/" in f"/{normalized}"
         or suffix in FORBIDDEN_TRACKED_ARTIFACTS
         or normalized in FORBIDDEN_TRACKED_PATHS
         or (name.startswith("fullbleed_css_fixture_") and suffix == ".jsonl")

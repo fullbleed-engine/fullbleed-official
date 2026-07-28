@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial
+# SPDX-License-Identifier: MIT
 """Public CAV authoring surface.
 
 Public chunk size is the family kit (e.g. MarriageRecordCavKit, WarrantyDeedCavKit).

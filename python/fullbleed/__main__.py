@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial
+# SPDX-License-Identifier: MIT
 """Enable `python -m fullbleed` invocation."""
 from fullbleed_cli.cli import main
 

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial
+# SPDX-License-Identifier: MIT
 """Asset pipeline commands for fullbleed.
 
 Provides commands for installing, listing, verifying, and locking asset packages.

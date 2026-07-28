@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Validate project licensing files for dual-license integrity.
+"""Validate project licensing files and package metadata for MIT integrity.
 
 This check is intentionally independent of package build/install steps so it can
 be used as a fast CI gate.
@@ -12,17 +12,25 @@ from pathlib import Path
 from typing import Dict, List
 
 
-SPDX_EXPRESSION = "AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial"
-LICENSE_HEADER = "GNU AFFERO GENERAL PUBLIC LICENSE"
-LICENSE_FORBIDDEN = ("Apache License",)
+SPDX_EXPRESSION = "MIT"
+LICENSE_HEADER = "MIT License"
+LICENSE_FORBIDDEN: tuple[str, ...] = ()
 COPYRIGHT_MARKERS = (
-    "dual-licensed",
-    "AGPL-3.0-only",
-    "LicenseRef-Fullbleed-Commercial",
+    "SPDX-License-Identifier: MIT",
+    "MIT License",
     "LICENSE",
-    "LICENSING.md",
 )
-LICENSING_MARKERS = ("dual-licensed", SPDX_EXPRESSION)
+LICENSING_MARKERS = ("licensed under the MIT License", "SPDX identifier: `MIT`")
+PACKAGE_METADATA_MARKERS = {
+    "Cargo.toml": ('license = "MIT"',),
+    "crates/fullbleed_audit_contract/Cargo.toml": ('license = "MIT"',),
+    "pyproject.toml": (
+        'license = "MIT"',
+        '"License :: OSI Approved :: MIT License"',
+        '"FONT_LICENSE_AUDIT.md"',
+        '"FONT_LICENSE_AUDIT.json"',
+    ),
+}
 MOJIBAKE_MARKERS = ("â€”", "â€™", "â€œ", "â€", "\ufffd")
 
 
@@ -41,6 +49,12 @@ def run(repo_root: Path) -> Dict:
         "copyright": repo_root / "COPYRIGHT",
         "licensing_guide": repo_root / "LICENSING.md",
         "third_party_notice": repo_root / "THIRD_PARTY_LICENSES.md",
+        "font_license_audit_md": repo_root / "FONT_LICENSE_AUDIT.md",
+        "font_license_audit_json": repo_root / "FONT_LICENSE_AUDIT.json",
+        "audit_contract_license": repo_root
+        / "crates"
+        / "fullbleed_audit_contract"
+        / "LICENSE",
     }
 
     for key, path in files.items():
@@ -64,6 +78,16 @@ def run(repo_root: Path) -> Dict:
                     "LIC_POLICY_MISMATCH",
                     str(files["license"]),
                     "LICENSE contains disallowed marker(s): " + ", ".join(bad),
+                )
+            )
+
+    if files["license"].exists() and files["audit_contract_license"].exists():
+        if _read(files["license"]) != _read(files["audit_contract_license"]):
+            flags.append(
+                _fail(
+                    "LIC_POLICY_MISMATCH",
+                    str(files["audit_contract_license"]),
+                    "Audit contract LICENSE must match the repository MIT LICENSE",
                 )
             )
 
@@ -110,6 +134,24 @@ def run(repo_root: Path) -> Dict:
                 )
             )
 
+    for relative_path, markers in PACKAGE_METADATA_MARKERS.items():
+        path = repo_root / relative_path
+        if not path.exists():
+            flags.append(
+                _fail("LIC_MISSING_NOTICE", str(path), "Missing package metadata file")
+            )
+            continue
+        text = _read(path)
+        missing = [marker for marker in markers if marker not in text]
+        if missing:
+            flags.append(
+                _fail(
+                    "LIC_POLICY_MISMATCH",
+                    str(path),
+                    "Package metadata missing MIT marker(s): " + ", ".join(missing),
+                )
+            )
+
     return {
         "schema": "fullbleed.license_integrity.v1",
         "ok": len(flags) == 0,
@@ -120,7 +162,7 @@ def run(repo_root: Path) -> Dict:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Check dual-license file integrity.")
+    parser = argparse.ArgumentParser(description="Check MIT license file integrity.")
     parser.add_argument(
         "--repo-root",
         default=str(Path(__file__).resolve().parents[1]),
@@ -146,4 +188,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

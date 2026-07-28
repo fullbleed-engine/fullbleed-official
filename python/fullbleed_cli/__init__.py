@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial
+# SPDX-License-Identifier: MIT
 """Version metadata for the public Fullbleed CLI package."""
 from importlib.metadata import PackageNotFoundError, version
 

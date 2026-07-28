@@ -254,7 +254,7 @@ Project-aware installs default to `./vendor/`; use `--global` for cache install 
 - licensing file checks
 - third-party notice checks
 - audit artifact staleness checks
-- commercial attestation metadata status
+- MIT package-license metadata consistency
 
 Use `--strict` for non-zero exit on flags.
 

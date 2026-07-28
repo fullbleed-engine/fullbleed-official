@@ -1,8 +1,8 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial -->
+<!-- SPDX-License-Identifier: MIT -->
 # Third-Party Licenses
 
 Schema: `fullbleed.third_party_licenses.v1`  
-Last updated: 2026-02-11  
+Last updated: 2026-07-28
 Scope: third-party artifacts directly redistributed by this repository and wheel package.
 
 ## Bundled Artifacts
@@ -24,7 +24,7 @@ Scope: third-party artifacts directly redistributed by this repository and wheel
 - Current audit artifacts:
   - `FONT_LICENSE_AUDIT.md`
   - `FONT_LICENSE_AUDIT.json`
-- Audit summary (2026-02-10):
+- Audit summary (2026-07-28):
   - `39` fonts checked
   - `39` passed
   - Allowed license set: `OFL-1.1`, `Apache-2.0`, `UFL-1.0`, `MIT`
@@ -45,5 +45,5 @@ Machine/readable policy identifier: `fullbleed.cli_compliance.v1`
 - This file focuses on directly redistributed static assets (CSS/fonts) and remote asset registry policy.
 - USPS IMB fonts are currently treated as manual user-supplied assets pending explicit redistribution policy sign-off.
 - For project license terms, see `LICENSE`.
-- For questions or commercial/license discussions, email `info@fullbleed.dev` or visit `fullbleed.dev`.
+- For licensing questions, email `info@fullbleed.dev` or visit `fullbleed.dev`.
 

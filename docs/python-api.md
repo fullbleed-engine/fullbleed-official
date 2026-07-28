@@ -154,16 +154,6 @@ fullbleed.WatermarkSpec(
 - `finalize_stamp_pdf(template, overlay, out, page_map=None, dx=0.0, dy=0.0) -> dict`
 - `finalize_compose_pdf(templates, plan, overlay, out) -> dict`
 
-## License helper utilities
-
-Process-local helpers exposed by `fullbleed`:
-
-- `activate_commercial_license(...)`
-- `clear_commercial_license()`
-- `commercial_license_status()`
-
-These exist for CLI/tooling interop and do not enforce licensing by themselves.
-
 ## Component-driven project pattern
 
 For component-style reporting:

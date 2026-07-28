@@ -6,7 +6,8 @@ Goal: install Python, install Fullbleed, and generate your first PDF.
 
 ## 1. Install Python
 
-Use Python `3.11` (64-bit) if you are unsure. Fullbleed requires Python `3.8+`.
+Use Python `3.12` (64-bit) if you are unsure. Fullbleed supports Python
+`3.10` through `3.14`.
 
 ### Windows
 
@@ -133,5 +134,5 @@ Expected output file:
 If someone gives you a `.whl` file directly:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-1.0.0-cp311-cp311-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-1.6.1-cp310-abi3-win_amd64.whl
 ```

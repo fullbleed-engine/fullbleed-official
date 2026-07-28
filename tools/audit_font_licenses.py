@@ -41,7 +41,7 @@ def _fetch_head_or_get(url: str) -> Tuple[bool, bytes]:
 
 
 def _load_remote_assets(repo_root: Path) -> Dict[str, Dict]:
-    sys.path.insert(0, str((repo_root / "fullbleed_cli" / "src").resolve()))
+    sys.path.insert(0, str((repo_root / "python").resolve()))
     from fullbleed_cli import assets  # pylint: disable=import-error
 
     return assets.REMOTE_ASSETS
@@ -101,13 +101,13 @@ def _write_reports(repo_root: Path, audit_date: str, rows: List[Dict], issues: L
         "",
         f"Audit date: {audit_date}",
         "",
-        "Scope: `REMOTE_ASSETS` in `fullbleed_cli/src/fullbleed_cli/assets.py`.",
+        "Scope: `REMOTE_ASSETS` in `python/fullbleed_cli/assets.py`.",
         "",
         "Method:",
         "- Checked each font URL is reachable.",
         "- Checked each license URL is reachable.",
         "- Checked license text contains expected marker for declared license.",
-        "- Enforced allowlist for AGPL distribution compatibility review: `OFL-1.1`, `Apache-2.0`, `UFL-1.0`, `MIT`.",
+        "- Enforced allowlist for redistribution review: `OFL-1.1`, `Apache-2.0`, `UFL-1.0`, `MIT`.",
         "",
         "Result:",
         f"- Total fonts: {summary['remote_assets_count']}",
@@ -130,7 +130,9 @@ def _write_reports(repo_root: Path, audit_date: str, rows: List[Dict], issues: L
     else:
         lines.append("No license or source integrity issues detected in this pass.")
     lines.append("")
-    (repo_root / "FONT_LICENSE_AUDIT.md").write_text("\n".join(lines), encoding="utf-8")
+    (repo_root / "FONT_LICENSE_AUDIT.md").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
+    )
 
 
 def main() -> int:

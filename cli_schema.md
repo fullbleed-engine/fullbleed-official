@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial -->
+<!-- SPDX-License-Identifier: MIT -->
 # CLI JSON Contract (v1)
 
 Machine contract for `fullbleed` automation.
@@ -104,27 +104,16 @@ Compatibility note:
   "schema": "fullbleed.compliance.v1",
   "ok": true,
   "license": {
-    "spdx_expression": "AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial",
-    "mode": "commercial",
-    "commercial": {
-      "attested": true,
-      "license_id": "ACME-2026-001"
-    }
+    "spdx_expression": "MIT",
+    "name": "MIT License"
   },
   "policy": {
     "schema": "fullbleed.cli_compliance.v1",
-    "package_license": "AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial"
+    "package_license": "MIT"
   },
   "flags": []
 }
 ```
-
-Commercial attestation options for `compliance`:
-
-- `--license-mode auto|agpl|commercial`
-- `--commercial-licensed`
-- `--commercial-license-id <id>`
-- `--commercial-license-file <path>`
 
 ### CapabilitiesResult
 

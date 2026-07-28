@@ -71,6 +71,12 @@ def test_release_worktree_identifies_forbidden_tracked_artifacts() -> None:
     assert check_release_worktree.is_forbidden_tracked_artifact(
         "python/fullbleed/_fullbleed.cp311-win_amd64.pyd"
     )
+    assert check_release_worktree.is_forbidden_tracked_artifact(
+        "python/fullbleed/__pycache__/__init__.cpython-311.pyc"
+    )
+    assert check_release_worktree.is_forbidden_tracked_artifact(
+        "dist/fullbleed-1.6.1-cp310-abi3-win_amd64.whl"
+    )
     assert check_release_worktree.is_forbidden_tracked_artifact("libfullbleed.so")
     assert check_release_worktree.is_forbidden_tracked_artifact(
         "fullbleed_preflight_hot.log"

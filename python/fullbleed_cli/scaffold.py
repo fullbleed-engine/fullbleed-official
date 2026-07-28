@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial
+# SPDX-License-Identifier: MIT
 """Project scaffolding commands for fullbleed.
 
 Provides commands for initializing new projects and creating templates.

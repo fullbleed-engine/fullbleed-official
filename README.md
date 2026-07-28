@@ -1,10 +1,10 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial -->
+<!-- SPDX-License-Identifier: MIT -->
 # Fullbleed
 
-Deterministic, dependency-free HTML/CSS-to-PDF generation in Rust, with a Python-first CLI and Python engine bindings.
+Deterministic, self-contained HTML/CSS-to-PDF generation in Rust, with a Python-first CLI and Python engine bindings.
 
 
-License: AGPLv3 for OSS use; commercial license available for proprietary/closed-source production.
+License: MIT.
 
 
 
@@ -71,15 +71,20 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-1.0.0-cp311-cp311-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-1.6.1-cp310-abi3-win_amd64.whl
 ```
 
 Platform artifact policy:
 
-- Linux (`manylinux`) and Windows wheels are built as release artifacts.
-- Linux wheel builds are smoke-tested in Ubuntu/WSL during release prep.
-- macOS wheel artifacts are built in CI, but are currently maintainer-untested.
-- If macOS wheel behavior differs from your environment, open an issue and include `fullbleed doctor --json`.
+- Linux wheels cover `manylinux2014` on x86-64, x86, ARM64, ARMv7, s390x,
+  and ppc64le, plus `musllinux_1_2` on x86-64, x86, ARM64, and ARMv7.
+- Windows wheels cover x86-64, x86, and ARM64; macOS wheels cover Intel and
+  Apple silicon.
+- The CPython stable ABI allows each platform wheel to support Python 3.10
+  through 3.14.
+- CI installs and exercises every built wheel on its target architecture,
+  using native runners or QEMU as appropriate. The x86-64 manylinux wheel is
+  additionally tested on every supported Python version before publication.
 
 Verify command surface:
 
@@ -451,7 +456,6 @@ Render/verify/plan key flags:
 - Reproducibility: `--repro-record <path>`, `--repro-check <path>`
 - Budget thresholds: `--budget-max-pages`, `--budget-max-bytes`, `--budget-max-ms`
 - Release gates: `doctor --strict`, `compliance --strict --max-audit-age-days <n>`
-- Commercial attestation (compliance): `--license-mode commercial`, `--commercial-licensed`, `--commercial-license-id`, `--commercial-license-file`
 
 ## SVG Workflows
 
@@ -1243,7 +1247,6 @@ print(payload["outputs"]["pdf"])
 - If both `--emit-page-data` and `--emit-glyph-report` are set, current engines use a combined API and render once; older engines without that API fall back to a double render.
 - Production target is PDF `1.7`.
 - `run` accepts `--html-str` without requiring `--html`.
-- `run` emits a one-time AGPL/commercial licensing reminder; suppress with `--no-license-warn` or by activating commercial attestation (`FULLBLEED_LICENSE_MODE=commercial` + `FULLBLEED_COMMERCIAL_LICENSED=1`).
 - `init` now scaffolds `COMPLIANCE.md` for project-level release review.
 - `compliance --json` emits machine-readable legal/procurement diagnostics.
 - `--watermark-layer underlay` is accepted as a legacy alias and normalized to `background`.
@@ -1273,18 +1276,11 @@ print(payload["outputs"]["pdf"])
 
 ## License
 
-Fullbleed is dual-licensed:
+Fullbleed is licensed under the MIT License (`MIT`). Commercial use,
+modification, distribution, and use in proprietary software are permitted
+subject to the notice-preservation requirement in `LICENSE`.
 
-- Open-source option: `AGPL-3.0-only` (`LICENSE`)
-- Commercial option: `LicenseRef-Fullbleed-Commercial` (`LICENSING.md`)
-
-SPDX expression:
-
-- `AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial`
-
-Packaging note: the main crates.io manifest uses `AGPL-3.0-only` in Cargo
-metadata and includes this commercial licensing guide in the packaged source;
-PyPI metadata uses the dual-license expression above.
+Cargo and PyPI metadata both declare `MIT`.
 
 - Copyright notice: `COPYRIGHT`
 - Third-party notices: `THIRD_PARTY_LICENSES.md`
@@ -1296,31 +1292,4 @@ License integrity gate (CI-friendly, no build required):
 
 ```bash
 python tools/check_license_integrity.py --json
-```
-
-Commercial compliance attestation examples:
-
-```bash
-fullbleed compliance --json \
-  --license-mode commercial \
-  --commercial-license-id "ACME-2026-001"
-```
-
-```bash
-# env-based attestation (useful in CI/containers)
-set FULLBLEED_LICENSE_MODE=commercial
-set FULLBLEED_COMMERCIAL_LICENSED=1
-set FULLBLEED_COMMERCIAL_LICENSE_ID=ACME-2026-001
-fullbleed compliance --json
-```
-
-```python
-import fullbleed
-
-# Process-local helper for library users and agent runtimes.
-fullbleed.activate_commercial_license(
-    "ACME-2026-001",
-    company="Acme Corp",
-    tier="$1,000,001-$10,000,000",
-)
 ```

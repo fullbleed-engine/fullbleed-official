@@ -147,7 +147,7 @@ def build_release(
         "summary": "Per-record overlay + PDF template composition with conditional back pages.",
         "description": "Production-ready Fullbleed project template for high-volume VDP jobs.",
         "tags": ["vdp", "transactional", "templating", "duplex", "pdf"],
-        "license": "AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial",
+        "license": "MIT",
         "maintainer": "fullbleed-engine",
         "homepage": homepage,
         "latest": version,

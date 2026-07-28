@@ -1,13 +1,13 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Fullbleed-Commercial -->
+<!-- SPDX-License-Identifier: MIT -->
 # Fullbleed LLM Guide
 
-Version target: `fullbleed 0.5.0 (stable)`
+Version target: `fullbleed 1.6.1`
 
 This document is for LLM-driven automation using `fullbleed` in real user environments.
 
 Scope:
 - Assumes a normal installed release (`pip install fullbleed`), not a mixed local dev tree.
-- Assumes CLI/Python behavior from `0.5.0 (stable)`.
+- Assumes CLI/Python behavior from `1.6.1`.
 - Focuses on reliable automation patterns for repeatable document generation.
 - Treat Fullbleed as a document engine, not a web-to-print/browser-runtime substitute.
 - Treat HTML/CSS as the familiar document DSL; with pinned assets and flags, Fullbleed targets reproducible outputs.
@@ -133,15 +133,11 @@ Exit-code handling contract:
 - For CLI, pass `--page-margins` JSON with keys `1`, `2`, `n`.
 - For Python, pass `page_margins={1: ..., 2: ..., "n": ...}`.
 
-9. If the user states they are on a commercial license, attest it in tooling context.
-- CLI path:
-  - `fullbleed compliance --license-mode commercial --commercial-license-id <id> --json`
-- Env path (automation):
-  - `FULLBLEED_LICENSE_MODE=commercial`
-  - `FULLBLEED_COMMERCIAL_LICENSED=1`
-  - `FULLBLEED_COMMERCIAL_LICENSE_ID=<id>`
-- Python path:
-  - `fullbleed.activate_commercial_license(<id>, company=..., tier=...)`
+9. Preserve license notices in redistributed copies.
+- Fullbleed is licensed under the MIT License.
+- Keep `LICENSE` with copies or substantial portions of Fullbleed.
+- Preserve applicable notices for bundled assets listed in
+  `THIRD_PARTY_LICENSES.md`.
 
 10. For SVG outputs, use the explicit SVG paths instead of guessing.
 - Standalone SVG document:
