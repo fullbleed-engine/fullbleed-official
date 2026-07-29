@@ -1,8 +1,8 @@
 # Fullbleed Release Notes - 1.6.2
 
-Status: release candidate
+Status: released
 
-Release date: pending
+Release date: July 29, 2026
 
 ## Summary
 
@@ -38,6 +38,19 @@ supported Python/platform matrix are unchanged from 1.6.1.
 Both Fullbleed-authored crates and the Python distribution remain MIT
 licensed. Third-party dependencies retain their own licenses.
 
+## Publication
+
+- Published `fullbleed 1.6.2` to crates.io through trusted publishing after
+  the Rust 1.85 packaged-consumer gate passed.
+- Published 15 `cp310-abi3` platform wheels and one source distribution to
+  PyPI after every build and installed-wheel smoke job passed.
+- Published the same 16 distributions as assets on the GitHub `v1.6.2`
+  Release.
+- PyPI rejected the configured OpenID Connect publisher with
+  `invalid-publisher`; the validated `release-dists` artifact was uploaded
+  with the project-scoped API token instead. Repair the PyPI trusted-publisher
+  record before the next release.
+
 ## Release Gates
 
 The exact `v1.6.2` release commit must pass:
@@ -57,5 +70,4 @@ python -m maturin sdist
 python -m twine check target/wheels/*
 ```
 
-Registry publication remains an explicit manual action after the complete
-artifact and installed-package gates pass.
+All release gates passed before registry and GitHub publication.
