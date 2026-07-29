@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "fullbleed"
-version = "1.6.1"
+version = "1.6.2"
 description = "Deterministic static HTML/CSS-to-PDF renderer built in Rust"
 readme = "README.md"
 requires-python = ">=3.10"

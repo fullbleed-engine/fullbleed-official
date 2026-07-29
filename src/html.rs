@@ -1418,26 +1418,25 @@ fn node_to_flowables(
                                 Some(w.to_f32() / h)
                             }
                         });
-                        if width.is_none()
-                            && let (Some(h), Some(ratio)) = (height, intrinsic_ratio)
-                        {
-                            if ratio.is_finite() && ratio > 0.0 {
-                                width = Some(Pt::from_f32(h.to_f32() * ratio));
+                        if width.is_none() {
+                            if let (Some(h), Some(ratio)) = (height, intrinsic_ratio) {
+                                if ratio.is_finite() && ratio > 0.0 {
+                                    width = Some(Pt::from_f32(h.to_f32() * ratio));
+                                }
                             }
                         }
-                        if height.is_none()
-                            && let (Some(w), Some(ratio)) = (width, intrinsic_ratio)
-                        {
-                            if ratio.is_finite() && ratio > 0.0 {
-                                height = Some(Pt::from_f32(w.to_f32() / ratio));
+                        if height.is_none() {
+                            if let (Some(w), Some(ratio)) = (width, intrinsic_ratio) {
+                                if ratio.is_finite() && ratio > 0.0 {
+                                    height = Some(Pt::from_f32(w.to_f32() / ratio));
+                                }
                             }
                         }
-                        if width.is_none()
-                            && height.is_none()
-                            && let Some((intrinsic_width, intrinsic_height)) = intrinsic_size
-                        {
-                            width = Some(intrinsic_width);
-                            height = Some(intrinsic_height);
+                        if width.is_none() && height.is_none() {
+                            if let Some((intrinsic_width, intrinsic_height)) = intrinsic_size {
+                                width = Some(intrinsic_width);
+                                height = Some(intrinsic_height);
+                            }
                         }
                         let width = width
                             .unwrap_or_else(|| style.font_size * 4.0)
@@ -2559,17 +2558,16 @@ fn list_marker_image_flowable(
     let intrinsic_size = raster_image_intrinsic_dimensions(asset_bundle, source)
         .map(|(w, h)| (Pt::from_f32(w as f32 * 0.75), Pt::from_f32(h as f32 * 0.75)));
     if let Some(xml) = load_svg_xml_from_image_source(asset_bundle, source) {
-        if svg_raster_fallback
-            && crate::svg::svg_needs_raster_fallback(&xml)
-            && let Some(data_uri) = crate::svg::rasterize_svg_to_data_uri(&xml, size, size)
-        {
-            let image = ImageFlowable::new_pt(size, size, data_uri)
-                .with_intrinsic_size(intrinsic_size)
-                .with_font_metrics(style.font_size, style.root_font_size)
-                .with_pagination(style.pagination)
-                .with_visible(style.visibility.paints())
-                .with_tag_role("Lbl");
-            return Some(Box::new(image) as Box<dyn Flowable>);
+        if svg_raster_fallback && crate::svg::svg_needs_raster_fallback(&xml) {
+            if let Some(data_uri) = crate::svg::rasterize_svg_to_data_uri(&xml, size, size) {
+                let image = ImageFlowable::new_pt(size, size, data_uri)
+                    .with_intrinsic_size(intrinsic_size)
+                    .with_font_metrics(style.font_size, style.root_font_size)
+                    .with_pagination(style.pagination)
+                    .with_visible(style.visibility.paints())
+                    .with_tag_role("Lbl");
+                return Some(Box::new(image) as Box<dyn Flowable>);
+            }
         }
         let svg = SvgFlowable::new_pt(size, size, xml)
             .with_pagination(style.pagination)
@@ -7563,18 +7561,18 @@ fn resolve_svg_dimensions(
         .or_else(|| parse_dimension(attr_height))
         .or(css_height);
 
-    if width.is_none()
-        && let (Some(h), Some(ratio)) = (height, viewbox_ratio)
-    {
-        if ratio.is_finite() && ratio > 0.0 {
-            width = Some(Pt::from_f32(h.to_f32() * ratio));
+    if width.is_none() {
+        if let (Some(h), Some(ratio)) = (height, viewbox_ratio) {
+            if ratio.is_finite() && ratio > 0.0 {
+                width = Some(Pt::from_f32(h.to_f32() * ratio));
+            }
         }
     }
-    if height.is_none()
-        && let (Some(w), Some(ratio)) = (width, viewbox_ratio)
-    {
-        if ratio.is_finite() && ratio > 0.0 {
-            height = Some(Pt::from_f32(w.to_f32() / ratio));
+    if height.is_none() {
+        if let (Some(w), Some(ratio)) = (width, viewbox_ratio) {
+            if ratio.is_finite() && ratio > 0.0 {
+                height = Some(Pt::from_f32(w.to_f32() / ratio));
+            }
         }
     }
 

@@ -1,61 +1,46 @@
-# Fullbleed Release Notes - 1.6.1
+# Fullbleed Release Notes - 1.6.2
 
-Status: released
+Status: release candidate
 
-Release date: July 28, 2026
+Release date: pending
 
 ## Summary
 
-Fullbleed 1.6.1 completes the move to the MIT License and replaces the partial
-1.6.0 PyPI artifact set with full platform coverage. The engine behavior and
-public rendering contract remain focused on deterministic static
-HTML/CSS-to-PDF generation.
-
-## Licensing
-
-- Replaced the AGPL/commercial dual-license model with the MIT License.
-- Updated Cargo, PyPI, runtime compliance, documentation, examples, and source
-  SPDX headers to declare `MIT`.
-- Removed the obsolete commercial-attestation helpers, CLI flags, and
-  one-time runtime license warning.
-- Retained third-party asset and dependency notices; those components remain
-  under their respective licenses.
-
-## Python Packaging
-
-- Raised the Python floor to 3.10, matching syntax already used by the package.
-- Declared and continuously tests CPython 3.10, 3.11, 3.12, 3.13, and 3.14.
-- Updated PyO3 and enabled `abi3-py310`, producing one compatible wheel per
-  platform for the supported CPython range.
-- Added 15 release wheels: manylinux 2014 for x86-64, x86, ARM64, ARMv7,
-  s390x, and ppc64le; musllinux 1.2 for x86-64, x86, ARM64, and ARMv7;
-  Windows x86-64, x86, and ARM64; and macOS Intel and Apple silicon.
-- Added installed-wheel smoke gates for every target architecture. Linux
-  cross-built wheels execute under QEMU, while the x86-64 manylinux wheel is
-  also exercised on every supported CPython release.
-- Improved Linux and macOS system-font discovery by scanning nested font
-  directories and adding DejaVu fallbacks for standard PDF font families.
-- Retained a source distribution so users on additional Rust-supported
-  platforms can build locally when no prebuilt wheel matches.
-- Superseded the initial 1.6.0 PyPI upload, which contained six platform
-  wheels, with the complete 15-wheel release matrix in 1.6.1.
-- Prepared PyPI trusted publishing through the protected `pypi` GitHub
-  environment.
+Fullbleed 1.6.2 is a compatibility and packaging patch for Cargo consumers. It
+prevents a fresh consumer lockfile from selecting mutually incompatible alpha
+releases in the Lightning CSS dependency family and preserves the declared
+Rust 1.85 floor. Rendering behavior, public APIs, the MIT license, and the
+supported Python/platform matrix are unchanged from 1.6.1.
 
 ## Cargo Packaging
 
-- Set the main crate and Python distribution version to `1.6.1` and license
-  metadata to `MIT`.
-- Bumped `fullbleed_audit_contract` to `0.1.1` so its newly MIT-licensed
-  package can be published before the main crate.
-- Added package metadata and release gates for both crates.
-- Prepared crates.io trusted publishing through a dedicated crates-only
-  workflow, the protected `crates-io` GitHub environment, and short-lived OIDC
-  credentials. No long-lived registry token is required.
+- Exact-pinned `lightningcss` to the tested `1.0.0-alpha.70` release.
+- Added an exact compatibility constraint for `parcel_selectors 0.28.2`.
+- Exact-pinned `time 0.3.45`, the newest tested release in that line whose
+  declared MSRV remains below Fullbleed's Rust 1.85 floor.
+- Replaced six post-1.85 `let` chains with behavior-equivalent nested
+  conditionals.
+- Added a release gate that packages Fullbleed, extracts the exact `.crate`,
+  consumes it from a temporary project with no repository lockfile, and runs
+  `cargo check` using Rust 1.85.
+- Verifies that the fresh consumer resolves `fullbleed 1.6.2`,
+  `fullbleed_audit_contract 0.1.1`, and the intended CSS and time dependencies.
+- Keeps the already-published audit-contract crate at version 0.1.1.
+
+## Python Packaging
+
+- Keeps `abi3-py310` and CPython 3.10 through 3.14 support.
+- Keeps the existing 15-wheel platform matrix and source distribution.
+- Aligns the Python distribution version with the patched Rust crate at 1.6.2.
+
+## Licensing
+
+Both Fullbleed-authored crates and the Python distribution remain MIT
+licensed. Third-party dependencies retain their own licenses.
 
 ## Release Gates
 
-The exact `v1.6.1` release commit must pass:
+The exact `v1.6.2` release commit must pass:
 
 ```powershell
 cargo fmt --all --check
@@ -63,12 +48,14 @@ cargo test --locked
 cargo test --locked --features python,svg_raster
 python -m pytest -q
 python tools/check_license_integrity.py --json
-python tools/check_release_metadata.py --expected-version 1.6.1
+python tools/check_release_metadata.py --expected-version 1.6.2 --json
+rustup toolchain install 1.85.0 --profile minimal
+rustup run 1.85.0 python tools/smoke_crates_consumer.py --expected-version 1.6.2 --json
+cargo publish --locked --dry-run
 python -m maturin build --release --locked
 python -m maturin sdist
 python -m twine check target/wheels/*
 ```
 
-The GitHub release workflow performs platform wheel builds, supported-version
-smoke tests, and package validation from `v*` tags. Registry publication is an
-explicit manual action after the complete artifact set passes.
+Registry publication remains an explicit manual action after the complete
+artifact and installed-package gates pass.

@@ -4,11 +4,16 @@ This directory is the release-operations layer for Fullbleed. It is separate
 from feature documentation so release decisions can be audited without reading
 engine internals.
 
+## 1.6.2 Documents
+
+- `docs/release/1.6.2-runbook.md`: current MIT, Cargo, PyPI, wheel-build, and
+  registry publication procedure.
+- `ReleaseNotes.MD`: current 1.6.2 release summary and gate list.
+
 ## 1.6.1 Documents
 
-- `docs/release/1.6.1-runbook.md`: current MIT, Cargo, PyPI, wheel-build, and
-  registry publication procedure.
-- `ReleaseNotes.MD`: current 1.6.1 release summary and gate list.
+- `docs/release/1.6.1-runbook.md`: original MIT launch and full wheel-matrix
+  release procedure.
 
 ## Historical 1.0.0 Documents
 

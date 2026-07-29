@@ -34,6 +34,11 @@ jobs:
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
 
@@ -56,6 +61,14 @@ jobs:
 
       - name: Run rust test suite
         run: cargo test --locked -- --nocapture
+
+      - name: Install declared Rust MSRV
+        run: rustup toolchain install 1.85.0 --profile minimal
+
+      - name: Compile packaged crate from a fresh consumer lockfile at MSRV
+        env:
+          RUSTUP_TOOLCHAIN: "1.85.0"
+        run: python tools/smoke_crates_consumer.py --json
 
   python-wheel-smoke:
     name: Python Wheel Smoke (${{ matrix.os }}, py${{ matrix.python-version }})
@@ -111,7 +124,7 @@ jobs:
           python -m pip install --force-reinstall target/wheels/fullbleed-*.whl
 
       - name: Smoke-test installed wheel
-        run: python tools/smoke_installed_package.py --expected-version 1.6.1 --json
+        run: python tools/smoke_installed_package.py --expected-version 1.6.2 --json
 
       - name: Verify installed-wheel SVG raster fallback
         run: python -m pytest tests/test_fullbleed_svg_raster_fallback.py -q
@@ -158,8 +171,8 @@ jobs:
       - name: Install and smoke-test wheel
         shell: bash
         run: |
-          python -m pip install --no-index --find-links dist fullbleed==1.6.1
-          python tools/smoke_installed_package.py --expected-version 1.6.1 --json
+          python -m pip install --no-index --find-links dist fullbleed==1.6.2
+          python tools/smoke_installed_package.py --expected-version 1.6.2 --json
           python -m fullbleed --version
           python -m fullbleed doctor --strict --json
 

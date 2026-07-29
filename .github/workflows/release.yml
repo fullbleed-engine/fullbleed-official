@@ -85,6 +85,17 @@ jobs:
         shell: bash
         run: cargo package --locked --list > target/fullbleed-package-files.txt
 
+      - name: Install declared Rust MSRV
+        run: rustup toolchain install 1.85.0 --profile minimal
+
+      - name: Compile packaged crate from a fresh consumer lockfile at MSRV
+        env:
+          RUSTUP_TOOLCHAIN: "1.85.0"
+        run: |
+          python tools/smoke_crates_consumer.py \
+            --expected-version "${{ steps.release-version.outputs.version }}" \
+            --json
+
       - name: Upload Cargo package evidence
         uses: actions/upload-artifact@v7
         with:

@@ -27,6 +27,11 @@ REQUIRED_WHEEL_TARGETS = (
     "macos-x86_64",
     "macos-aarch64",
 )
+REQUIRED_CARGO_PINS = {
+    "lightningcss": "=1.0.0-alpha.70",
+    "parcel_selectors": "=0.28.2",
+    "time": "=0.3.45",
+}
 
 
 def _read(path: Path) -> str:
@@ -54,6 +59,16 @@ def _dependency_version(text: str, dependency: str) -> str | None:
         text,
     )
     return match.group(1) if match else None
+
+
+def _dependency_requirement(text: str, dependency: str) -> str | None:
+    string_match = re.search(
+        rf"(?m)^\s*{re.escape(dependency)}\s*=\s*[\"']([^\"']+)[\"']",
+        text,
+    )
+    if string_match:
+        return string_match.group(1)
+    return _dependency_version(text, dependency)
 
 
 def _lock_version(text: str, package: str) -> str | None:
@@ -92,7 +107,7 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
     audit_version = _table_string(audit, "package", "version")
     expected_version = expected_version or cargo_version
     expected_tag = f"v{expected_version}" if expected_version else None
-    audit_dependency = _dependency_version(cargo, "fullbleed_audit_contract")
+    audit_dependency = _dependency_requirement(cargo, "fullbleed_audit_contract")
 
     flags: list[dict[str, str]] = []
     if not expected_version:
@@ -130,6 +145,16 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
             "Cargo.toml",
             f"Audit dependency requires {audit_dependency}, package is {audit_version}",
         )
+
+    for dependency, expected_requirement in REQUIRED_CARGO_PINS.items():
+        observed = _dependency_requirement(cargo, dependency)
+        if observed != expected_requirement:
+            _flag(
+                flags,
+                "REL_DEPENDENCY_PIN_MISMATCH",
+                "Cargo.toml",
+                f"{dependency} expected {expected_requirement}, observed {observed}",
+            )
 
     for package, expected in (
         ("fullbleed", expected_version),
@@ -207,6 +232,8 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
         "tools/check_release_worktree.py",
         "tools/smoke_installed_package.py",
         "python -m pytest -q",
+        "tools/smoke_crates_consumer.py",
+        "rustup toolchain install 1.85.0",
     ):
         target_text = cargo if marker == "abi3-py310" else workflow
         target_name = "Cargo.toml" if marker == "abi3-py310" else ".github/workflows/release.yml"
@@ -225,6 +252,8 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
         "tools/check_license_integrity.py",
         "cargo publish --locked --dry-run",
         "rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18",
+        "tools/smoke_crates_consumer.py",
+        "rustup toolchain install 1.85.0",
     ):
         if marker not in crates_workflow:
             _flag(

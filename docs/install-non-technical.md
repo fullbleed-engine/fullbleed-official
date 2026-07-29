@@ -134,5 +134,5 @@ Expected output file:
 If someone gives you a `.whl` file directly:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-1.6.1-cp310-abi3-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-1.6.2-cp310-abi3-win_amd64.whl
 ```

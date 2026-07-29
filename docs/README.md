@@ -8,7 +8,7 @@ This folder documents the Fullbleed stack at three layers:
 
 ## Version scope
 
-These docs target the `1.6.1` release line and the current repository source layout.
+These docs target the `1.6.2` release line and the current repository source layout.
 
 ## Documents
 
@@ -20,7 +20,7 @@ These docs target the `1.6.1` release line and the current repository source lay
 - `docs/cli.md`: command reference, JSON/machine mode, reproducibility and validation flows
 - `docs/pdf-templates.md`: Rust finalize PDF template/XObject composition policy and smoke gates
 - `docs/release/README.md`: release runbook, readiness ledger, and public claim contract
-- `docs/release/1.6.1-runbook.md`: current Cargo/PyPI release and deployment procedure
+- `docs/release/1.6.2-runbook.md`: current Cargo/PyPI release and deployment procedure
 - `examples/canonical_reference/README.md`: canonical static PDF scaffold reference and validation workflow
 
 ## Recommended reading order

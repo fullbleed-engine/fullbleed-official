@@ -1,6 +1,6 @@
 [package]
 name = "fullbleed"
-version = "1.6.1"
+version = "1.6.2"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -36,7 +36,12 @@ debug = true
 [dependencies]
 fullbleed_audit_contract = { version = "0.1.1", path = "crates/fullbleed_audit_contract" }
 kuchiki = "0.8.1"
-lightningcss = "1.0.0-alpha.70"
+# These dependency families have shipped either breaking alpha changes or
+# MSRV increases within Cargo-compatible ranges. Exact pins keep lockfile-free
+# consumers on the tested Rust 1.85-compatible graph.
+lightningcss = "=1.0.0-alpha.70"
+parcel_selectors = "=0.28.2"
+time = "=0.3.45"
 ttf-parser = "0.20.0"
 pyo3 = { version = "0.25.1", optional = true, features = ["extension-module", "abi3-py310"] }
 image = { version = "0.25.5", default-features = false, features = ["png", "jpeg"] }
