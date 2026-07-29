@@ -49,8 +49,9 @@ HTML/CSS-to-PDF generation.
 - Bumped `fullbleed_audit_contract` to `0.1.1` so its newly MIT-licensed
   package can be published before the main crate.
 - Added package metadata and release gates for both crates.
-- Prepared crates.io publishing through the protected `crates-io` GitHub
-  environment and the `CARGO_REGISTRY_TOKEN` secret.
+- Prepared crates.io trusted publishing through a dedicated crates-only
+  workflow, the protected `crates-io` GitHub environment, and short-lived OIDC
+  credentials. No long-lived registry token is required.
 
 ## Release Gates
 

@@ -74,12 +74,18 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
     audit_path = repo_root / "crates" / "fullbleed_audit_contract" / "Cargo.toml"
     lock_path = repo_root / "Cargo.lock"
     workflow_path = repo_root / ".github" / "workflows" / "release.yml"
+    crates_workflow_path = (
+        repo_root / ".github" / "workflows" / "publish-crates.yml"
+    )
 
     cargo = _read(cargo_path)
     pyproject = _read(pyproject_path)
     audit = _read(audit_path)
     lock = _read(lock_path)
     workflow = _read(workflow_path) if workflow_path.exists() else ""
+    crates_workflow = (
+        _read(crates_workflow_path) if crates_workflow_path.exists() else ""
+    )
 
     cargo_version = _table_string(cargo, "package", "version")
     python_version = _table_string(pyproject, "project", "version")
@@ -188,7 +194,7 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
     for marker in (
         "abi3-py310",
         'environment: "pypi"',
-        'environment: "crates-io"',
+        "publish_pypi:",
         "maturin-version: v1.14.1",
         'manylinux: "2014"',
         "manylinux: musllinux_1_2",
@@ -210,6 +216,22 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
                 "REL_AUTOMATION_MARKER_MISSING",
                 target_name,
                 f"Missing release marker: {marker}",
+            )
+
+    for marker in (
+        "name: Publish crates.io",
+        "name: crates-io",
+        "id-token: write",
+        "tools/check_license_integrity.py",
+        "cargo publish --locked --dry-run",
+        "rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18",
+    ):
+        if marker not in crates_workflow:
+            _flag(
+                flags,
+                "REL_AUTOMATION_MARKER_MISSING",
+                ".github/workflows/publish-crates.yml",
+                f"Missing crates.io release marker: {marker}",
             )
 
     for relative_path, marker in (

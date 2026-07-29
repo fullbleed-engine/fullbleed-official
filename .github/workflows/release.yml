@@ -6,8 +6,8 @@ on:
       - "v*"
   workflow_dispatch:
     inputs:
-      publish:
-        description: "Publish validated artifacts to crates.io and PyPI via trusted publishing"
+      publish_pypi:
+        description: "Publish the validated Python distributions to PyPI"
         required: true
         type: boolean
         default: false
@@ -58,7 +58,7 @@ jobs:
         run: python tools/check_release_worktree.py --json
 
       - name: Install Python test tools
-        run: python -m pip install "maturin==1.14.1" pytest
+        run: python -m pip install "maturin==1.14.1" pytest jsonschema
 
       - name: Build and install extension from release source
         shell: bash
@@ -487,69 +487,11 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  publish-cargo:
-    name: Publish crates.io packages
-    if: github.event_name == 'workflow_dispatch' && inputs.publish
-    needs:
-      - validate
-      - assemble
-    runs-on: ubuntu-latest
-    environment: "crates-io"
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Publish audit contract, then main crate
-        shell: bash
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: |
-          audit_version="$(python -c 'import re; print(re.search(r"(?ms)^\\[package\\].*?^version = \"([^\"]+)\"", open("crates/fullbleed_audit_contract/Cargo.toml", encoding="utf-8").read()).group(1))')"
-          main_version="${{ needs.validate.outputs.version }}"
-
-          crate_has_version() {
-            curl --fail --silent --show-error "https://crates.io/api/v1/crates/$1" |
-              python -c "import json,sys; data=json.load(sys.stdin); raise SystemExit(0 if any(v['num'] == '$2' for v in data['versions']) else 1)"
-          }
-
-          if ! crate_has_version fullbleed_audit_contract "${audit_version}"; then
-            cargo publish --locked --manifest-path crates/fullbleed_audit_contract/Cargo.toml
-          fi
-
-          for attempt in {1..18}; do
-            if crate_has_version fullbleed_audit_contract "${audit_version}"; then
-              break
-            fi
-            if [[ "${attempt}" == "18" ]]; then
-              echo "fullbleed_audit_contract ${audit_version} did not propagate to crates.io" >&2
-              exit 1
-            fi
-            sleep 10
-          done
-
-          for attempt in {1..18}; do
-            if crate_has_version fullbleed "${main_version}"; then
-              break
-            fi
-            if cargo publish --locked; then
-              break
-            fi
-            if [[ "${attempt}" == "18" ]]; then
-              echo "Unable to publish fullbleed ${main_version} after dependency propagation" >&2
-              exit 1
-            fi
-            sleep 10
-          done
-
   publish-pypi:
     name: Publish PyPI distributions
-    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_pypi
     needs:
       - assemble
-      - publish-cargo
     runs-on: ubuntu-latest
     environment: "pypi"
     permissions:

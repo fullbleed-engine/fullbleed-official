@@ -76,7 +76,9 @@ def test_pdf_engine_verify_accessibility_artifacts_emits_schema_valid_report(
 
     assert report["schema"] == "fullbleed.a11y.verify.v1"
     assert report["gate"]["ok"] is True
-    assert report["conformance_status"]["status"] == "pass_machine_subset"
+    assert report["conformance_status"]["status"] == "manual_review_required"
+    assert report["conformance_status"]["claim_scope"] == "manual_required"
+    assert report["conformance_status"]["manual_review_required"] is True
     assert report["target"]["html_path"] == str(html)
     assert report["target"]["css_path"] == str(css)
     assert report["artifacts"]["css_linked"] is True

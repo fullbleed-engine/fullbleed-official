@@ -14,7 +14,11 @@ from typing import Dict, List
 
 SPDX_EXPRESSION = "MIT"
 LICENSE_HEADER = "MIT License"
-LICENSE_FORBIDDEN: tuple[str, ...] = ()
+LICENSE_FORBIDDEN = (
+    "GNU Affero General Public License",
+    "GNU General Public License",
+    "commercial license agreement",
+)
 COPYRIGHT_MARKERS = (
     "SPDX-License-Identifier: MIT",
     "MIT License",
@@ -24,6 +28,13 @@ LICENSING_MARKERS = ("licensed under the MIT License", "SPDX identifier: `MIT`")
 PACKAGE_METADATA_MARKERS = {
     "Cargo.toml": ('license = "MIT"',),
     "crates/fullbleed_audit_contract/Cargo.toml": ('license = "MIT"',),
+    "README.md": (
+        "Fullbleed is licensed under the MIT License (`MIT`).",
+        "Cargo and PyPI metadata both declare `MIT`.",
+    ),
+    "crates/fullbleed_audit_contract/README.md": (
+        "Licensed under the MIT License.",
+    ),
     "pyproject.toml": (
         'license = "MIT"',
         '"License :: OSI Approved :: MIT License"',
