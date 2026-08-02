@@ -8518,6 +8518,49 @@ fn apply_native_flex_basis(raw: &str, delta: &mut StyleDelta) -> bool {
     false
 }
 
+fn parse_native_flex_number(raw: &str) -> Option<f32> {
+    let value = raw.trim().parse::<f32>().ok()?;
+    (value.is_finite() && value >= 0.0).then_some(value)
+}
+
+fn parse_native_flex_basis_component(raw: &str) -> Option<NativeLengthComponent> {
+    let lowered = raw.trim().to_ascii_lowercase();
+    if lowered == "auto" || lowered == "content" {
+        return Some(NativeLengthComponent::Spec(LengthSpec::Auto));
+    }
+    if lowered.contains("var(") {
+        return Some(NativeLengthComponent::Var(lowered));
+    }
+    // A unitless zero is valid as a <flex-basis>, but any other bare number is not.
+    if let Ok(number) = lowered.parse::<f32>() {
+        if !number.is_finite() || number != 0.0 {
+            return None;
+        }
+    }
+    let value = length_spec_from_string(&lowered)?;
+    native_length_is_nonnegative(value).then_some(NativeLengthComponent::Spec(value))
+}
+
+fn set_native_flex_components(
+    delta: &mut StyleDelta,
+    grow: f32,
+    shrink: f32,
+    basis: NativeLengthComponent,
+) {
+    delta.flex_grow = Some(grow);
+    delta.flex_shrink = Some(shrink);
+    match basis {
+        NativeLengthComponent::Spec(value) => {
+            delta.flex_basis = Some(value);
+            delta.flex_basis_var = None;
+        }
+        NativeLengthComponent::Var(value) => {
+            delta.flex_basis = None;
+            delta.flex_basis_var = Some(value);
+        }
+    }
+}
+
 fn apply_native_flex_shorthand(raw: &str, delta: &mut StyleDelta) -> bool {
     let lowered = raw.trim().to_ascii_lowercase();
     match lowered.as_str() {
@@ -8548,53 +8591,67 @@ fn apply_native_flex_shorthand(raw: &str, delta: &mut StyleDelta) -> bool {
     if parts.is_empty() || parts.len() > 3 {
         return false;
     }
-    let mut grow = None;
-    let mut shrink = None;
-    let mut basis = None;
-    let mut basis_var = None;
-    for part in parts {
-        if let Ok(number) = part.parse::<f32>() {
-            if !number.is_finite() || number < 0.0 {
-                return false;
-            }
-            if grow.is_none() {
-                grow = Some(number);
-            } else if shrink.is_none() {
-                shrink = Some(number);
-            } else {
-                return false;
-            }
-            continue;
+    if parts.len() == 1 {
+        if let Some(grow) = parse_native_flex_number(&parts[0]) {
+            set_native_flex_components(
+                delta,
+                grow,
+                1.0,
+                NativeLengthComponent::Spec(LengthSpec::Percent(0.0)),
+            );
+            return true;
         }
-        if part.to_ascii_lowercase().contains("var(") {
-            basis_var = Some(part.to_ascii_lowercase());
-            continue;
+        if let Some(basis) = parse_native_flex_basis_component(&parts[0]) {
+            set_native_flex_components(delta, 1.0, 1.0, basis);
+            return true;
         }
-        let parsed = if part.eq_ignore_ascii_case("auto") || part.eq_ignore_ascii_case("content") {
-            Some(LengthSpec::Auto)
-        } else {
-            length_spec_from_string(&part)
+        return false;
+    }
+    if parts.len() == 2 {
+        let first_number = parse_native_flex_number(&parts[0]);
+        let second_number = parse_native_flex_number(&parts[1]);
+        if let (Some(grow), Some(shrink)) = (first_number, second_number) {
+            set_native_flex_components(
+                delta,
+                grow,
+                shrink,
+                NativeLengthComponent::Spec(LengthSpec::Percent(0.0)),
+            );
+            return true;
+        }
+        if let Some(grow) = first_number {
+            if let Some(basis) = parse_native_flex_basis_component(&parts[1]) {
+                set_native_flex_components(delta, grow, 1.0, basis);
+                return true;
+            }
+        }
+        if let Some(grow) = second_number {
+            if let Some(basis) = parse_native_flex_basis_component(&parts[0]) {
+                set_native_flex_components(delta, grow, 1.0, basis);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // The grammar permits the basis before, between, or after the two numeric factors. Try the
+    // conventional trailing-basis form first so `flex: 1 1 0` treats the final zero as a basis.
+    for basis_index in [2usize, 0, 1] {
+        let Some(basis) = parse_native_flex_basis_component(&parts[basis_index]) else {
+            continue;
         };
-        let Some(parsed) = parsed else {
-            return false;
-        };
-        if basis.replace(parsed).is_some() {
-            return false;
+        let numbers: Vec<f32> = parts
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| *index != basis_index)
+            .filter_map(|(_, part)| parse_native_flex_number(part))
+            .collect();
+        if numbers.len() == 2 {
+            set_native_flex_components(delta, numbers[0], numbers[1], basis);
+            return true;
         }
     }
-    delta.flex_grow = Some(grow.unwrap_or(1.0));
-    delta.flex_shrink = Some(shrink.unwrap_or(1.0));
-    if let Some(value) = basis {
-        delta.flex_basis = Some(value);
-        delta.flex_basis_var = None;
-    } else if let Some(value) = basis_var {
-        delta.flex_basis = None;
-        delta.flex_basis_var = Some(value);
-    } else {
-        delta.flex_basis = Some(LengthSpec::Percent(0.0));
-        delta.flex_basis_var = None;
-    }
-    true
+    false
 }
 
 fn apply_native_pagination_count(property_name: &str, raw: &str, delta: &mut StyleDelta) -> bool {
@@ -32260,14 +32317,50 @@ mod tests {
     }
 
     #[test]
-    fn flex_flow_shorthand_sets_direction_and_wrap() {
-        let css = ".x { flex-flow: column wrap; }";
+    fn flex_shorthands_set_flow_and_item_components() {
+        let css = ".x { flex-flow: column wrap; } \
+                   .triple { flex: 1 1 0; } \
+                   .grow { flex: 2; } \
+                   .basis { flex: 24px; } \
+                   .auto { flex: auto; } \
+                   .none { flex: none; } \
+                   .invalid { flex: 2 3 4; }";
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
         assert_eq!(style.flex_direction, FlexDirectionMode::Column);
         assert_eq!(style.flex_wrap, FlexWrapMode::Wrap);
+
+        let triple = resolver.compute_style(&element("div", None, &["triple"]), &root, None, &[]);
+        assert_eq!(triple.flex_grow, 1.0);
+        assert_eq!(triple.flex_shrink, 1.0);
+        assert_eq!(triple.flex_basis, LengthSpec::Absolute(Pt::ZERO));
+
+        let grow = resolver.compute_style(&element("div", None, &["grow"]), &root, None, &[]);
+        assert_eq!(grow.flex_grow, 2.0);
+        assert_eq!(grow.flex_shrink, 1.0);
+        assert_eq!(grow.flex_basis, LengthSpec::Percent(0.0));
+
+        let basis = resolver.compute_style(&element("div", None, &["basis"]), &root, None, &[]);
+        assert_eq!(basis.flex_grow, 1.0);
+        assert_eq!(basis.flex_shrink, 1.0);
+        assert_eq!(basis.flex_basis, LengthSpec::Absolute(Pt::from_f32(18.0)));
+
+        let auto = resolver.compute_style(&element("div", None, &["auto"]), &root, None, &[]);
+        assert_eq!(auto.flex_grow, 1.0);
+        assert_eq!(auto.flex_shrink, 1.0);
+        assert_eq!(auto.flex_basis, LengthSpec::Auto);
+
+        let none = resolver.compute_style(&element("div", None, &["none"]), &root, None, &[]);
+        assert_eq!(none.flex_grow, 0.0);
+        assert_eq!(none.flex_shrink, 0.0);
+        assert_eq!(none.flex_basis, LengthSpec::Auto);
+
+        let invalid = resolver.compute_style(&element("div", None, &["invalid"]), &root, None, &[]);
+        assert_eq!(invalid.flex_grow, 0.0);
+        assert_eq!(invalid.flex_shrink, 1.0);
+        assert_eq!(invalid.flex_basis, LengthSpec::Auto);
     }
 
     #[test]
