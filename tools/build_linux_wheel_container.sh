@@ -48,6 +48,20 @@ if command -v rustup >/dev/null 2>&1; then
     rustup target add "$fullbleed_target"
 fi
 
+case "$fullbleed_target" in
+    *-linux-musl*)
+        # Rust's musl targets default to a static CRT, which cannot emit the
+        # cdylib needed by a musllinux Python extension.
+        case " ${RUSTFLAGS-} " in
+            *" target-feature=-crt-static "*) ;;
+            *)
+                RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C target-feature=-crt-static"
+                export RUSTFLAGS
+                ;;
+        esac
+        ;;
+esac
+
 "$fullbleed_python" build_backend/fullbleed_build_backend.py wheel \
     --out "$fullbleed_output" \
     --target "$fullbleed_target" \
