@@ -723,6 +723,12 @@ def _build_extension(options: dict) -> Path:
 
     environment = os.environ.copy()
     environment.setdefault("SOURCE_DATE_EPOCH", str(_source_date_epoch()))
+    if options["release"]:
+        # Parallel codegen units can reach the linker in different orders even
+        # when the source tree is identical. One unit makes checkout and sdist
+        # builds byte-reproducible and gives release builds full-crate
+        # optimization scope.
+        environment.setdefault("CARGO_PROFILE_RELEASE_CODEGEN_UNITS", "1")
     if options["release"] and options["strip"]:
         environment.setdefault("CARGO_PROFILE_RELEASE_STRIP", "symbols")
     target = options.get("target") or ""

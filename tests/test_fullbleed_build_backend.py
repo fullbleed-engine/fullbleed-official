@@ -334,6 +334,7 @@ def test_msvc_build_uses_reproducible_linker_and_source_epoch(
     assert result == artifact
     environment = observed["environment"]
     assert environment["SOURCE_DATE_EPOCH"] == "315532800"
+    assert environment["CARGO_PROFILE_RELEASE_CODEGEN_UNITS"] == "1"
     assert (
         "-C link-arg=/Brepro"
         in environment["CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS"]
