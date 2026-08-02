@@ -46,7 +46,7 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             version="${GITHUB_REF_NAME#v}"
           else
-            version="$(python -c 'import re; print(re.search(r"(?ms)^\\[package\\].*?^version = \"([^\"]+)\"", open("Cargo.toml", encoding="utf-8").read()).group(1))')"
+            version="$(python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
           fi
           python tools/check_release_metadata.py --expected-version "${version}" --json
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
