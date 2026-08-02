@@ -1,0 +1,175 @@
+diff --git a/tests/parity_support/render.rs b/tests/parity_support/render.rs
+index 660b403..50d0d33 100644
+--- a/tests/parity_support/render.rs
++++ b/tests/parity_support/render.rs
+@@ -3,11 +3,107 @@
+ //!
+ //! Extracted verbatim from the former monolithic `mod.rs` (C1 mechanical split).
+ 
++use std::cell::RefCell;
+ use std::collections::BTreeMap;
++use std::io::{BufReader, Read, Write};
+ use std::path::{Path, PathBuf};
++use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+ 
+ use super::util::contains;
+ 
++const ADAPTER_RESPONSE_LIMIT: u64 = 256 * 1024 * 1024;
++
++thread_local! {
++    static ADAPTER_CLIENT: RefCell<Option<AdapterClient>> = const { RefCell::new(None) };
++}
++
++struct AdapterClient {
++    child: Child,
++    stdin: ChildStdin,
++    stdout: BufReader<ChildStdout>,
++}
++
++impl AdapterClient {
++    fn start(resource_root: &Path) -> Result<Self, String> {
++        let adapter = std::env::var_os("FULLBLEED_PARITY_ADAPTER")
++            .ok_or_else(|| "FULLBLEED_PARITY_ADAPTER is not set".to_string())?;
++        let python =
++            std::env::var_os("FULLBLEED_PARITY_PYTHON").unwrap_or_else(|| "python3".into());
++        let mut child = Command::new(python)
++            .arg(adapter)
++            .arg("--server")
++            .arg("--resource-root")
++            .arg(resource_root)
++            .stdin(Stdio::piped())
++            .stdout(Stdio::piped())
++            .stderr(Stdio::inherit())
++            .spawn()
++            .map_err(|error| format!("cannot start FullBleed parity adapter: {error}"))?;
++        let stdin = child
++            .stdin
++            .take()
++            .ok_or_else(|| "FullBleed parity adapter stdin is unavailable".to_string())?;
++        let stdout = child
++            .stdout
++            .take()
++            .ok_or_else(|| "FullBleed parity adapter stdout is unavailable".to_string())?;
++        Ok(Self {
++            child,
++            stdin,
++            stdout: BufReader::new(stdout),
++        })
++    }
++
++    fn render(&mut self, base_path: &Path, html: &str) -> Result<Vec<u8>, String> {
++        let base_path = base_path.to_string_lossy();
++        let base = base_path.as_bytes();
++        let base_len = u32::try_from(base.len())
++            .map_err(|_| "fixture base path is too long for adapter protocol".to_string())?;
++        let html_len = u64::try_from(html.len())
++            .map_err(|_| "fixture HTML is too large for adapter protocol".to_string())?;
++
++        self.stdin
++            .write_all(&base_len.to_be_bytes())
++            .and_then(|_| self.stdin.write_all(&html_len.to_be_bytes()))
++            .and_then(|_| self.stdin.write_all(base))
++            .and_then(|_| self.stdin.write_all(html.as_bytes()))
++            .and_then(|_| self.stdin.flush())
++            .map_err(|error| format!("cannot send fixture to FullBleed: {error}"))?;
++
++        let mut header = [0_u8; 9];
++        self.stdout
++            .read_exact(&mut header)
++            .map_err(|error| format!("cannot read FullBleed adapter response: {error}"))?;
++        let status = header[0];
++        let mut payload_len_bytes = [0_u8; 8];
++        payload_len_bytes.copy_from_slice(&header[1..]);
++        let payload_len = u64::from_be_bytes(payload_len_bytes);
++        if payload_len > ADAPTER_RESPONSE_LIMIT {
++            return Err(format!(
++                "FullBleed adapter response is too large: {payload_len} bytes"
++            ));
++        }
++        let mut payload = vec![0_u8; payload_len as usize];
++        self.stdout
++            .read_exact(&mut payload)
++            .map_err(|error| format!("cannot read FullBleed adapter payload: {error}"))?;
++        if status != 0 {
++            return Err(format!(
++                "FullBleed parity adapter failed: {}",
++                String::from_utf8_lossy(&payload).trim()
++            ));
++        }
++        Ok(payload)
++    }
++}
++
++impl Drop for AdapterClient {
++    fn drop(&mut self) {
++        let _ = self.child.kill();
++        let _ = self.child.wait();
++    }
++}
++
+ /// Immutable deterministic font inputs shared by reference across parallel
+ /// fixture jobs. Registration aliases point at uniquely owned byte buffers;
+ /// only the fresh converter receives the owned clones required by its builder.
+@@ -66,43 +162,30 @@ impl PinnedUaStylesheet {
+ 
+ pub(crate) fn render_pdf(
+     html: &str,
+-    sanitize: bool,
+-    fonts: &FontBundle,
++    _sanitize: bool,
++    _fonts: &FontBundle,
+     ua_stylesheet: &PinnedUaStylesheet,
+     base_path: Option<&std::path::Path>,
+     resource_root: Option<&std::path::Path>,
+ ) -> Result<Vec<u8>, String> {
+-    use ironpress::{HtmlConverter, Margin, PageSize};
+-    let mut conv = HtmlConverter::new()
+-        .page_size(PageSize::LETTER)
+-        .margin(Margin::uniform(28.8))
+-        .sanitize(sanitize);
+-
+-    // Resolve a fixture's relative resource URLs (e.g. `@font-face { src:
+-    // url('../../fonts/ParitySerif.ttf') }`) against the fixture's own directory,
+-    // exactly as the Chrome oracle PDF producer did when it loaded that font
+-    // from disk. This is a determinism fix: it gives ironpress the SAME font
+-    // input used to produce the oracle PDF; it does not alter comparison.
+-    if let Some(base) = base_path {
+-        conv = conv.base_path(base);
+-    }
+-    if let Some(root) = resource_root {
+-        conv = conv.resource_root(root);
+-    }
+-
+-    // Register the bundled deterministic Parity faces (DejaVu Sans/Serif/Mono
+-    // renamed) so in-process rendering uses the SAME outlines Chrome uses via
+-    // FONTCONFIG_FILE in scripts/parity-gen-refs.sh. Registered under the Parity
+-    // family names AND the CSS generic families so fixtures may use either. The
+-    // bytes are loaded ONCE (see `load_bundled_fonts`) and shared immutably; this
+-    // builds a FRESH converter per render so no mutable state is shared across
+-    // parallel jobs.
+-    for &(family, face_index) in &fonts.registrations {
+-        conv = conv.add_font(family, fonts.faces[face_index].clone());
+-    }
+-
++    let base_path = base_path.ok_or_else(|| "fixture base path is unavailable".to_string())?;
++    let resource_root =
++        resource_root.ok_or_else(|| "parity resource root is unavailable".to_string())?;
+     let html = ua_stylesheet.inject(html)?;
+-    conv.convert(&html).map_err(|e| e.to_string())
++    ADAPTER_CLIENT.with(|slot| {
++        let mut slot = slot.borrow_mut();
++        if slot.is_none() {
++            *slot = Some(AdapterClient::start(resource_root)?);
++        }
++        let result = slot
++            .as_mut()
++            .ok_or_else(|| "FullBleed adapter client initialization was lost".to_string())?
++            .render(base_path, &html);
++        if result.is_err() {
++            *slot = None;
++        }
++        result
++    })
+ }
+ 
+ /// Load every bundled face's bytes ONCE so the parallel per-fixture renders can

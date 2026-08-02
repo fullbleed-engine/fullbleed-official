@@ -146,6 +146,7 @@ pub(crate) struct FontMetrics {
     pub(crate) cap_height: i16,
     pub(crate) italic_angle: i16,
     pub(crate) stem_v: i16,
+    pub(crate) weight_class: u16,
     pub(crate) bbox: (i16, i16, i16, i16),
     pub(crate) underline_metrics: Option<DecorationMetrics>,
     pub(crate) strikeout_metrics: Option<DecorationMetrics>,
@@ -296,6 +297,13 @@ impl FontRegistry {
             .and_then(|index| self.fonts.get(*index))
     }
 
+    pub(crate) fn requires_synthetic_bold(&self, name: &str, requested_weight: u16) -> bool {
+        requested_weight >= 600
+            && self
+                .resolve(name)
+                .is_some_and(|font| font.metrics.weight_class < 600)
+    }
+
     #[cfg(feature = "python")]
     pub(crate) fn resolve_trace(&self, name: &str) -> Option<RegisteredFontTrace> {
         let font = self.resolve(name)?;
@@ -368,6 +376,17 @@ impl FontRegistry {
             return fallback;
         };
         font.metrics.line_height(font_size).max(fallback)
+    }
+
+    pub(crate) fn vertical_metrics(&self, name: &str, font_size: Pt) -> Option<(Pt, Pt)> {
+        let font = self.resolve(name)?;
+        if font.metrics.ascent <= 0 {
+            return None;
+        }
+        let ascent = font_size.mul_ratio(font.metrics.ascent as i32, 1000);
+        let descent_units = (-(font.metrics.descent as i32)).max(0);
+        let descent = font_size.mul_ratio(descent_units, 1000);
+        Some((ascent, descent))
     }
 
     pub(crate) fn map_glyph_id_for_char(&self, name: &str, ch: char) -> u16 {
@@ -591,6 +610,7 @@ impl FontMetrics {
                 cap_height,
                 italic_angle,
                 stem_v: 80,
+                weight_class: face.weight_class(),
                 bbox,
                 underline_metrics,
                 strikeout_metrics,

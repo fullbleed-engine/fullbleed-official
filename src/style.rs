@@ -15,8 +15,8 @@ use crate::flowable::{
     ClipPathRadiusSpec, ClipPathRectSpec, ClipPathReferenceBox, ClipPathShapeControlAnchor,
     ClipPathShapeFunctionCommand, ClipPathShapeFunctionSpec, ClipPathShapeRadius,
     ClipPathShapeSpec, ClipPathXywhSpec, CssTransformOp, CssTransformOrigin, EdgeSizes,
-    FilterDropShadowSpec, LengthSpec, OutlineLineStyle, Pagination, PaintFilterSpec, TabSizeSpec,
-    TableLayoutMode, TextStyle,
+    FilterDropShadowSpec, GridTrackBreadth, GridTrackSize, LengthSpec, OutlineLineStyle,
+    Pagination, PaintFilterSpec, TabSizeSpec, TableLayoutMode, TextStyle,
 };
 use crate::svg;
 use crate::types::{BoxSizingMode, Color, I32F32, Margins, MixBlendMode, Pt, ShadingStop, Size};
@@ -895,6 +895,7 @@ pub enum AlignContentMode {
     FlexStart,
     FlexEnd,
     Center,
+    Stretch,
     SpaceBetween,
     SpaceAround,
     SpaceEvenly,
@@ -1442,6 +1443,8 @@ struct StyleDelta {
     align_content: Option<AlignContentMode>,
     grid_columns: Option<usize>,
     grid_rows: Option<usize>,
+    grid_column_tracks: Option<Vec<GridTrackSize>>,
+    grid_row_tracks: Option<Vec<GridTrackSize>>,
     grid_column_start: Option<usize>,
     grid_row_start: Option<usize>,
     gap: Option<LengthSpec>,
@@ -1908,6 +1911,8 @@ pub struct ComputedStyle {
     pub align_content: AlignContentMode,
     pub grid_columns: Option<usize>,
     pub grid_rows: Option<usize>,
+    pub grid_column_tracks: Vec<GridTrackSize>,
+    pub grid_row_tracks: Vec<GridTrackSize>,
     pub grid_column_start: Option<usize>,
     pub grid_row_start: Option<usize>,
     pub gap: LengthSpec,
@@ -2006,6 +2011,7 @@ impl ComputedStyle {
             tab_size: self.tab_size,
             root_font_size: self.root_font_size,
             visible: self.visibility.paints(),
+            css_pixel_snap_metrics: true,
         }
     }
 
@@ -3468,9 +3474,11 @@ impl StyleResolver {
             justify_content: JustifyContentMode::FlexStart,
             align_items: AlignItemsMode::Stretch,
             align_self: AlignSelfMode::Auto,
-            align_content: AlignContentMode::FlexStart,
+            align_content: AlignContentMode::Stretch,
             grid_columns: None,
             grid_rows: None,
+            grid_column_tracks: Vec::new(),
+            grid_row_tracks: Vec::new(),
             grid_column_start: None,
             grid_row_start: None,
             gap: LengthSpec::Absolute(Pt::ZERO),
@@ -3669,6 +3677,8 @@ impl StyleResolver {
             align_content: parent.align_content,
             grid_columns: None,
             grid_rows: None,
+            grid_column_tracks: Vec::new(),
+            grid_row_tracks: Vec::new(),
             grid_column_start: None,
             grid_row_start: None,
             gap: parent.gap,
@@ -4409,6 +4419,8 @@ impl StyleResolver {
             align_content: parent.align_content,
             grid_columns: None,
             grid_rows: None,
+            grid_column_tracks: Vec::new(),
+            grid_row_tracks: Vec::new(),
             grid_column_start: None,
             grid_row_start: None,
             gap: parent.gap,
@@ -6092,12 +6104,22 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
             }
         }
         "grid-template-columns" => {
-            delta.grid_columns = parse_grid_track_count(raw);
-            true
+            if let Some(tracks) = parse_grid_track_list(raw) {
+                delta.grid_columns = Some(tracks.len());
+                delta.grid_column_tracks = Some(tracks);
+                true
+            } else {
+                false
+            }
         }
         "grid-template-rows" => {
-            delta.grid_rows = parse_grid_track_count(raw);
-            true
+            if let Some(tracks) = parse_grid_track_list(raw) {
+                delta.grid_rows = Some(tracks.len());
+                delta.grid_row_tracks = Some(tracks);
+                true
+            } else {
+                false
+            }
         }
         "grid-column-start" | "grid-column" => {
             delta.grid_column_start = parse_grid_track_start(raw);
@@ -12313,6 +12335,14 @@ fn apply_delta(
     if let Some(rows) = delta.grid_rows {
         computed.grid_rows = if rows == 0 { None } else { Some(rows) };
     }
+    if let Some(tracks) = &delta.grid_column_tracks {
+        computed.grid_column_tracks = tracks.clone();
+        computed.grid_columns = (!tracks.is_empty()).then_some(tracks.len());
+    }
+    if let Some(tracks) = &delta.grid_row_tracks {
+        computed.grid_row_tracks = tracks.clone();
+        computed.grid_rows = (!tracks.is_empty()).then_some(tracks.len());
+    }
     if let Some(column_start) = delta.grid_column_start {
         computed.grid_column_start = if column_start == 0 {
             None
@@ -15834,9 +15864,10 @@ fn align_items_mode_from_keyword(keyword: &str) -> Option<AlignItemsMode> {
 
 fn align_content_mode_from_keyword(keyword: &str) -> Option<AlignContentMode> {
     match keyword {
-        "flex-start" | "start" | "normal" | "stretch" => Some(AlignContentMode::FlexStart),
+        "flex-start" | "start" => Some(AlignContentMode::FlexStart),
         "flex-end" | "end" => Some(AlignContentMode::FlexEnd),
         "center" => Some(AlignContentMode::Center),
+        "normal" | "stretch" => Some(AlignContentMode::Stretch),
         "space-between" => Some(AlignContentMode::SpaceBetween),
         "space-around" => Some(AlignContentMode::SpaceAround),
         "space-evenly" => Some(AlignContentMode::SpaceEvenly),
@@ -17684,22 +17715,109 @@ fn parse_length_list(raw: &str) -> Vec<LengthSpec> {
         .collect()
 }
 
-fn parse_grid_track_count(raw: &str) -> Option<usize> {
-    let mut normalized = raw.trim().to_ascii_lowercase();
+fn parse_grid_track_list(raw: &str) -> Option<Vec<GridTrackSize>> {
+    let normalized = raw.trim().to_ascii_lowercase();
     if normalized.is_empty() {
         return None;
     }
-
-    if let Some((before_slash, _)) = normalized.split_once('/') {
-        normalized = before_slash.trim().to_string();
+    if normalized == "none" {
+        return Some(Vec::new());
     }
 
-    if normalized.is_empty() || normalized == "none" {
+    let mut tracks = Vec::new();
+    parse_grid_track_segment(&normalized, 0, &mut tracks)?;
+    (!tracks.is_empty()).then_some(tracks)
+}
+
+fn parse_grid_track_segment(
+    raw: &str,
+    depth: usize,
+    tracks: &mut Vec<GridTrackSize>,
+) -> Option<()> {
+    if depth > 8 {
         return None;
     }
+    for token in split_top_level_whitespace_tokens(raw) {
+        let token = token.trim();
+        if token.is_empty() || (token.starts_with('[') && token.ends_with(']')) {
+            continue;
+        }
+        if token.starts_with("repeat(") && token.ends_with(')') {
+            let inner = &token[7..token.len().saturating_sub(1)];
+            let (repeat_raw, segment_raw) = split_top_level_comma_once(inner)?;
+            if let Ok(repeat_count) = repeat_raw.trim().parse::<usize>() {
+                if repeat_count == 0 || repeat_count > 4096 {
+                    return None;
+                }
+                let mut repeated = Vec::new();
+                parse_grid_track_segment(segment_raw.trim(), depth + 1, &mut repeated)?;
+                if repeated.is_empty() {
+                    return None;
+                }
+                tracks.reserve(repeated.len().saturating_mul(repeat_count));
+                for _ in 0..repeat_count {
+                    tracks.extend(repeated.iter().copied());
+                }
+                continue;
+            }
 
-    let count = count_grid_tracks_in_segment(&normalized, 0);
-    if count > 0 { Some(count) } else { None }
+            // The number of auto-fill/auto-fit tracks depends on the eventual
+            // containing block. Preserve one semantic pattern here; layout can
+            // still use it as a safe intrinsic fallback.
+            if matches!(repeat_raw.trim(), "auto-fill" | "auto-fit") {
+                parse_grid_track_segment(segment_raw.trim(), depth + 1, tracks)?;
+                continue;
+            }
+            return None;
+        }
+        tracks.push(parse_grid_track_size(token)?);
+    }
+    Some(())
+}
+
+fn parse_grid_track_size(raw: &str) -> Option<GridTrackSize> {
+    let raw = raw.trim();
+    if raw.starts_with("minmax(") && raw.ends_with(')') {
+        let inner = &raw[7..raw.len().saturating_sub(1)];
+        let (min_raw, max_raw) = split_top_level_comma_once(inner)?;
+        return Some(GridTrackSize {
+            min: parse_grid_track_breadth(min_raw.trim())?,
+            max: parse_grid_track_breadth(max_raw.trim())?,
+        });
+    }
+    if raw.starts_with("fit-content(") && raw.ends_with(')') {
+        let inner = &raw[12..raw.len().saturating_sub(1)];
+        return Some(GridTrackSize {
+            min: GridTrackBreadth::Auto,
+            max: GridTrackBreadth::Length(length_spec_from_string(inner.trim())?),
+        });
+    }
+
+    match parse_grid_track_breadth(raw)? {
+        GridTrackBreadth::Auto => Some(GridTrackSize::auto()),
+        GridTrackBreadth::Length(length) => Some(GridTrackSize::fixed(length)),
+        GridTrackBreadth::Fraction(factor) => Some(GridTrackSize::fraction(factor)),
+        breadth => Some(GridTrackSize {
+            min: breadth,
+            max: breadth,
+        }),
+    }
+}
+
+fn parse_grid_track_breadth(raw: &str) -> Option<GridTrackBreadth> {
+    match raw.trim() {
+        "auto" => Some(GridTrackBreadth::Auto),
+        "min-content" => Some(GridTrackBreadth::MinContent),
+        "max-content" => Some(GridTrackBreadth::MaxContent),
+        raw => {
+            if let Some(number) = raw.strip_suffix("fr") {
+                let factor = number.trim().parse::<f32>().ok()?;
+                return (factor.is_finite() && factor >= 0.0)
+                    .then_some(GridTrackBreadth::Fraction(factor));
+            }
+            length_spec_from_string(raw).map(GridTrackBreadth::Length)
+        }
+    }
 }
 
 fn parse_grid_track_start(raw: &str) -> Option<usize> {
@@ -17731,41 +17849,6 @@ fn parse_grid_area_starts(raw: &str) -> (Option<usize>, Option<usize>) {
     let row_start = parts.next().and_then(parse_grid_track_start);
     let column_start = parts.next().and_then(parse_grid_track_start);
     (row_start, column_start)
-}
-
-fn count_grid_tracks_in_segment(raw: &str, depth: usize) -> usize {
-    if depth > 8 {
-        return 0;
-    }
-    let tracks = split_top_level_whitespace_tokens(raw);
-    let mut count = 0usize;
-    for track in tracks {
-        let track = track.trim();
-        if track.is_empty() {
-            continue;
-        }
-        if track.starts_with('[') && track.ends_with(']') {
-            continue;
-        }
-        if track.starts_with("repeat(") && track.ends_with(')') {
-            let inner = &track[7..track.len().saturating_sub(1)];
-            if let Some((repeat_raw, segment_raw)) = split_top_level_comma_once(inner) {
-                if let Ok(repeat_count) = repeat_raw.trim().parse::<usize>() {
-                    if repeat_count > 0 {
-                        let segment_count =
-                            count_grid_tracks_in_segment(segment_raw.trim(), depth + 1);
-                        if segment_count > 0 {
-                            count =
-                                count.saturating_add(repeat_count.saturating_mul(segment_count));
-                            continue;
-                        }
-                    }
-                }
-            }
-        }
-        count = count.saturating_add(1);
-    }
-    count
 }
 
 fn split_top_level_comma_once(raw: &str) -> Option<(&str, &str)> {
@@ -25152,6 +25235,8 @@ impl StyleDelta {
             && self.align_content.is_none()
             && self.grid_columns.is_none()
             && self.grid_rows.is_none()
+            && self.grid_column_tracks.is_none()
+            && self.grid_row_tracks.is_none()
             && self.grid_column_start.is_none()
             && self.grid_row_start.is_none()
             && self.gap.is_none()
@@ -25175,7 +25260,6 @@ impl StyleDelta {
 
 fn default_ua_css() -> &'static str {
     r#"
-    body { font-size: 16px; line-height: 1.2; color: #000; }
     h1 { font-size: 2em; }
     h2 { font-size: 1.5em; }
     h3 { font-size: 1.17em; }
@@ -30925,6 +31009,14 @@ mod tests {
         let style = resolver.compute_style(&info, &root, None, &[]);
         assert_eq!(style.display, DisplayMode::Grid);
         assert_eq!(style.grid_columns, Some(3));
+        assert_eq!(
+            style.grid_column_tracks,
+            vec![
+                GridTrackSize::fraction(1.0),
+                GridTrackSize::fraction(1.0),
+                GridTrackSize::fraction(1.0),
+            ]
+        );
     }
 
     #[test]
@@ -30935,6 +31027,10 @@ mod tests {
         let style = resolver.compute_style(&info, &root, None, &[]);
         assert_eq!(style.display, DisplayMode::Grid);
         assert_eq!(style.grid_rows, Some(2));
+        assert_eq!(
+            style.grid_row_tracks,
+            vec![GridTrackSize::fraction(1.0), GridTrackSize::fraction(2.0)]
+        );
     }
 
     #[test]
@@ -30946,6 +31042,27 @@ mod tests {
         let info = element("div", None, &["menu"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
         assert_eq!(style.grid_columns, Some(5));
+        assert_eq!(style.grid_column_tracks[0], GridTrackSize::fraction(1.0));
+        assert_eq!(style.grid_column_tracks[1], GridTrackSize::fraction(2.0));
+        assert_eq!(style.grid_column_tracks[2], GridTrackSize::fraction(1.0));
+        assert_eq!(style.grid_column_tracks[3], GridTrackSize::fraction(2.0));
+        assert_eq!(
+            style.grid_column_tracks[4],
+            GridTrackSize::fixed(LengthSpec::Absolute(Pt::from_f32(7.5)))
+        );
+    }
+
+    #[test]
+    fn grid_fixed_tracks_retain_authored_lengths() {
+        let resolver = StyleResolver::new(
+            ".menu { display: grid; grid-template-columns: 100px 100px; grid-template-rows: repeat(2, 100px); }",
+        );
+        let root = resolver.default_style();
+        let info = element("div", None, &["menu"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        let fixed = GridTrackSize::fixed(LengthSpec::Absolute(Pt::from_f32(75.0)));
+        assert_eq!(style.grid_column_tracks, vec![fixed, fixed]);
+        assert_eq!(style.grid_row_tracks, vec![fixed, fixed]);
     }
 
     #[test]

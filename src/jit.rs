@@ -529,6 +529,11 @@ fn commands_bbox(commands: &[Command], font_registry: Option<&FontRegistry>) -> 
             Command::Translate(x, y) => {
                 transform = transform.mul(Transform::translate(x.to_f32(), y.to_f32()));
             }
+            Command::CssTransformOrigin { x, y, inverse } => {
+                let sign = if *inverse { -1.0 } else { 1.0 };
+                transform =
+                    transform.mul(Transform::translate(x.to_f32() * sign, y.to_f32() * sign));
+            }
             Command::Scale(x, y) => {
                 transform = transform.mul(Transform::scale(*x, *y));
             }
@@ -541,6 +546,7 @@ fn commands_bbox(commands: &[Command], font_registry: Option<&FontRegistry>) -> 
             }
             Command::SetFontName(name) => font_name = name.clone(),
             Command::SetFontSize(size) => font_size = *size,
+            Command::SetTextRenderingMode(_) => {}
             Command::MoveTo { x, y } => {
                 let (tx, ty) = transform.apply(x.to_f32(), y.to_f32());
                 path_points.push((tx, ty));

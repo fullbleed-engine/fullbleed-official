@@ -96,6 +96,12 @@ fn write_command<W: Write>(out: &mut W, command: &Command) -> io::Result<()> {
             write_pt(out, *x)?;
             write_pt(out, *y)
         }
+        Command::CssTransformOrigin { x, y, inverse } => {
+            write_u8(out, 46)?;
+            write_pt(out, *x)?;
+            write_pt(out, *y)?;
+            write_bool(out, *inverse)
+        }
         Command::Scale(x, y) => {
             write_u8(out, 4)?;
             write_f32(out, *x)?;
@@ -205,6 +211,10 @@ fn write_command<W: Write>(out: &mut W, command: &Command) -> io::Result<()> {
         Command::SetFontSize(size) => {
             write_u8(out, 16)?;
             write_pt(out, *size)
+        }
+        Command::SetTextRenderingMode(mode) => {
+            write_u8(out, 47)?;
+            write_u8(out, (*mode).min(7))
         }
         Command::ClipRect {
             x,
@@ -435,6 +445,11 @@ fn read_command<R: Read>(input: &mut R) -> io::Result<Command> {
         1 => Command::SaveState,
         2 => Command::RestoreState,
         3 => Command::Translate(read_pt(input)?, read_pt(input)?),
+        46 => Command::CssTransformOrigin {
+            x: read_pt(input)?,
+            y: read_pt(input)?,
+            inverse: read_bool(input)?,
+        },
         4 => Command::Scale(read_f32(input)?, read_f32(input)?),
         5 => Command::Rotate(read_f32(input)?),
         41 => Command::ConcatMatrix {
@@ -501,6 +516,7 @@ fn read_command<R: Read>(input: &mut R) -> io::Result<Command> {
         },
         15 => Command::SetFontName(read_string(input)?),
         16 => Command::SetFontSize(read_pt(input)?),
+        47 => Command::SetTextRenderingMode(read_u8(input)?.min(7)),
         17 => Command::ClipRect {
             x: read_pt(input)?,
             y: read_pt(input)?,

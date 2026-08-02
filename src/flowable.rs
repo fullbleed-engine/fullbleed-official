@@ -328,6 +328,67 @@ pub enum LengthSpec {
     Initial,
 }
 
+/// The sizing component of an explicit CSS grid track.
+///
+/// Keeping this representation compact lets the style layer retain the
+/// authored track contract without invoking grid layout for non-grid nodes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GridTrackBreadth {
+    Auto,
+    Length(LengthSpec),
+    Fraction(f32),
+    MinContent,
+    MaxContent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GridTrackSize {
+    pub min: GridTrackBreadth,
+    pub max: GridTrackBreadth,
+}
+
+impl GridTrackSize {
+    pub const fn auto() -> Self {
+        Self {
+            min: GridTrackBreadth::Auto,
+            max: GridTrackBreadth::Auto,
+        }
+    }
+
+    pub const fn fixed(length: LengthSpec) -> Self {
+        Self {
+            min: GridTrackBreadth::Length(length),
+            max: GridTrackBreadth::Length(length),
+        }
+    }
+
+    pub const fn fraction(factor: f32) -> Self {
+        Self {
+            min: GridTrackBreadth::Auto,
+            max: GridTrackBreadth::Fraction(factor),
+        }
+    }
+
+    pub(crate) fn fixed_breadth(self) -> Option<LengthSpec> {
+        match (self.min, self.max) {
+            (GridTrackBreadth::Length(min), GridTrackBreadth::Length(max)) if min == max => {
+                Some(max)
+            }
+            (_, GridTrackBreadth::Length(max)) => Some(max),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn fraction_factor(self) -> Option<f32> {
+        match self.max {
+            GridTrackBreadth::Fraction(factor) if factor.is_finite() && factor > 0.0 => {
+                Some(factor)
+            }
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TabSizeSpec {
     Spaces(f32),
@@ -1177,7 +1238,21 @@ pub trait Flowable: FlowableClone + Send + Sync {
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)>;
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt);
 
+    /// Paint an auto-sized box into a definite cross-axis slot. Most flowables
+    /// have no stretchable box of their own, so their normal draw behavior is
+    /// already correct. CSS box flowables override this hook.
+    fn draw_stretched(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt) {
+        self.draw(canvas, x, y, avail_width, avail_height);
+    }
+
     fn intrinsic_width(&self) -> Option<Pt> {
+        None
+    }
+
+    /// Distance from the flowable's top margin edge to its first inline
+    /// baseline. Inline formatting contexts use this to align text and
+    /// replaced/inline-block boxes without inspecting concrete flowable types.
+    fn first_baseline(&self, _avail_width: Pt) -> Option<Pt> {
         None
     }
 
@@ -1232,7 +1307,7 @@ impl Clone for Box<dyn Flowable> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TextStyle {
     pub font_size: Pt,
     pub line_height: Pt,
@@ -1264,6 +1339,10 @@ pub struct TextStyle {
     pub tab_size: TabSizeSpec,
     pub root_font_size: Pt,
     pub visible: bool,
+    /// CSS layout obtains integer-CSS-pixel font extents from the browser font
+    /// substrate before distributing line-height leading. Point-native users
+    /// keep exact font metrics by leaving this disabled.
+    pub css_pixel_snap_metrics: bool,
 }
 
 impl Default for TextStyle {
@@ -1300,6 +1379,7 @@ impl Default for TextStyle {
             tab_size: TabSizeSpec::initial(),
             root_font_size: font_size,
             visible: true,
+            css_pixel_snap_metrics: false,
         }
     }
 }
@@ -1365,6 +1445,83 @@ fn resolve_tab_advance(style: &TextStyle, space_width: Pt) -> Pt {
         }
     };
     value.max(Pt::ZERO)
+}
+
+fn ceil_to_css_pixel(value: Pt) -> Pt {
+    let milli = value.to_milli_i64();
+    if milli <= 0 {
+        return value;
+    }
+    // One CSS px is 72/96 pt.
+    Pt::from_milli_i64(((milli + 749) / 750) * 750)
+}
+
+fn text_baseline_for_line(
+    style: &TextStyle,
+    font_registry: Option<&FontRegistry>,
+    line_height: Pt,
+) -> Pt {
+    let metrics = font_registry.and_then(|registry| {
+        let (primary, _) = resolve_font_stack(Some(registry), style);
+        registry.vertical_metrics(&primary, style.font_size)
+    });
+    let (mut ascent, mut descent) = metrics.unwrap_or_else(|| {
+        // Stable Base-14 fallback. Registered fonts use their exact hhea metrics.
+        (style.font_size * 0.8, style.font_size * 0.2)
+    });
+    if style.css_pixel_snap_metrics {
+        ascent = ceil_to_css_pixel(ascent);
+        descent = ceil_to_css_pixel(descent);
+    }
+    let font_box = ascent + descent;
+    let half_leading = (line_height - font_box).mul_ratio(1, 2);
+    half_leading + ascent
+}
+
+fn text_draw_y_for_line(
+    style: &TextStyle,
+    font_registry: Option<&FontRegistry>,
+    line_top: Pt,
+    line_height: Pt,
+) -> Pt {
+    let baseline_from_top = text_baseline_for_line(style, font_registry, line_height);
+
+    // Canvas::draw_string takes the top of a one-em text box and converts it to
+    // a PDF baseline by adding font_size. Shift that top so the baseline follows
+    // CSS inline formatting metrics instead of sitting one full em below the line.
+    line_top + baseline_from_top - style.font_size
+}
+
+#[cfg(test)]
+mod text_baseline_tests {
+    use super::{Pt, TextStyle, text_baseline_for_line, text_draw_y_for_line};
+
+    #[test]
+    fn base14_text_uses_css_baseline_instead_of_full_em_offset() {
+        let mut style = TextStyle::default();
+        style.font_size = Pt::from_f32(10.0);
+        style.line_height = Pt::from_f32(10.0);
+        style.line_height_is_auto = false;
+
+        let draw_y = text_draw_y_for_line(&style, None, Pt::from_f32(20.0), Pt::from_f32(10.0));
+        assert_eq!(draw_y, Pt::from_f32(18.0));
+    }
+
+    #[test]
+    fn css_font_extents_snap_outward_before_leading_is_distributed() {
+        let mut style = TextStyle::default();
+        style.font_size = Pt::from_f32(11.0);
+        style.line_height = Pt::from_f32(11.0);
+        style.line_height_is_auto = false;
+        style.css_pixel_snap_metrics = true;
+
+        // Raw Base-14 extents are 8.8pt/2.2pt. CSS snaps those outward to
+        // 9pt/2.25pt before distributing the resulting negative half-leading.
+        assert_eq!(
+            text_baseline_for_line(&style, None, style.line_height),
+            Pt::from_f32(8.875)
+        );
+    }
 }
 
 fn expanded_integer_tabs(style: &TextStyle, text: &str) -> Option<String> {
@@ -1728,6 +1885,26 @@ fn resolve_font_stack(
     (primary, fallbacks)
 }
 
+fn draw_registered_text_run(
+    canvas: &mut Canvas,
+    registry: &FontRegistry,
+    style: &TextStyle,
+    font_name: &str,
+    x: Pt,
+    y: Pt,
+    text: String,
+) {
+    if registry.requires_synthetic_bold(font_name, style.font_weight) {
+        // A compact outline stroke approximates synthetic emboldening. PDF
+        // fill+stroke preserves a single extractable text run and its authored
+        // advances while expanding the glyph outline in both axes.
+        let strength = (style.font_size * (1.0 / 32.0)).max(Pt::from_f32(0.25));
+        canvas.draw_string_synthetic_bold(x, y, text, strength);
+    } else {
+        canvas.draw_string(x, y, text);
+    }
+}
+
 fn is_base14_name(name: &str) -> bool {
     let n = name
         .trim()
@@ -2064,7 +2241,15 @@ impl Paragraph {
                         self.style.font_size,
                         &run_text,
                     );
-                    canvas.draw_string(cursor_x, y, run_text);
+                    draw_registered_text_run(
+                        canvas,
+                        registry,
+                        &self.style,
+                        &run.font_name,
+                        cursor_x,
+                        y,
+                        run_text,
+                    );
                     cursor_x = cursor_x + w;
                     remaining = remaining.saturating_sub(run_len);
                 } else {
@@ -2079,14 +2264,30 @@ impl Paragraph {
                             self.style.font_size,
                             &run_text,
                         );
-                        canvas.draw_string(cursor_x, y, run_text);
+                        draw_registered_text_run(
+                            canvas,
+                            registry,
+                            &self.style,
+                            &run.font_name,
+                            cursor_x,
+                            y,
+                            run_text,
+                        );
                         cursor_x = cursor_x + w;
                         remaining = remaining.saturating_sub(run_len);
                         continue;
                     }
                     for ch in run.text.chars() {
                         let ch_str = ch.to_string();
-                        canvas.draw_string(cursor_x, y, ch_str.clone());
+                        draw_registered_text_run(
+                            canvas,
+                            registry,
+                            &self.style,
+                            &run.font_name,
+                            cursor_x,
+                            y,
+                            ch_str.clone(),
+                        );
                         let w = registry.measure_text_width(
                             &run.font_name,
                             self.style.font_size,
@@ -2767,6 +2968,18 @@ impl Flowable for Paragraph {
         Some(max_w)
     }
 
+    fn first_baseline(&self, _avail_width: Pt) -> Option<Pt> {
+        if self.is_vertical_text() {
+            return None;
+        }
+        let line_height = self.effective_line_height();
+        Some(text_baseline_for_line(
+            &self.style,
+            self.font_registry.as_deref(),
+            line_height,
+        ))
+    }
+
     fn split(
         &self,
         avail_width: Pt,
@@ -2897,22 +3110,28 @@ impl Flowable for Paragraph {
         for (idx, line) in lines.iter().enumerate() {
             let line_width = line.width;
             let align = self.effective_text_align_for_line(idx, &lines);
+            let draw_y = text_draw_y_for_line(
+                &self.style,
+                self.font_registry.as_deref(),
+                cursor_y,
+                line_height,
+            );
             if matches!(align, TextAlign::Justify)
-                && self.draw_justified_line(canvas, x, cursor_y, avail_width, line)
+                && self.draw_justified_line(canvas, x, draw_y, avail_width, line)
             {
                 cursor_y = cursor_y + line_height;
                 continue;
             }
             let offset = text_align_offset(align, avail_width, line_width);
             let text_x = x + offset + line.indent;
-            self.draw_text_shadows_for_line(canvas, text_x, cursor_y, &line.text, line.text_width);
-            self.draw_text_with_fallbacks(canvas, text_x, cursor_y, &line.text);
+            self.draw_text_shadows_for_line(canvas, text_x, draw_y, &line.text, line.text_width);
+            self.draw_text_with_fallbacks(canvas, text_x, draw_y, &line.text);
             draw_text_decorations(
                 canvas,
                 &self.style,
                 self.font_registry.as_deref(),
                 text_x,
-                cursor_y,
+                draw_y,
                 line.text_width,
             );
             cursor_y = cursor_y + line_height;
@@ -3195,6 +3414,56 @@ impl Flowable for Spacer {
     fn pagination(&self) -> Pagination {
         self.pagination
     }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CollapsibleSpaceFlowable {
+    width: Pt,
+    height: Pt,
+    baseline: Pt,
+}
+
+impl CollapsibleSpaceFlowable {
+    pub(crate) fn new(style: TextStyle, font_registry: Option<Arc<FontRegistry>>) -> Self {
+        let probe = Paragraph::new(" ")
+            .with_style(style)
+            .with_font_registry(font_registry);
+        let width = probe.measure_text_width(" ").max(Pt::ZERO);
+        let height = probe.effective_line_height().max(Pt::ZERO);
+        let baseline = probe.first_baseline(width).unwrap_or(height);
+        Self {
+            width,
+            height,
+            baseline,
+        }
+    }
+}
+
+impl Flowable for CollapsibleSpaceFlowable {
+    fn wrap(&self, _avail_width: Pt, _avail_height: Pt) -> Size {
+        Size {
+            width: self.width,
+            height: self.height,
+        }
+    }
+
+    fn intrinsic_width(&self) -> Option<Pt> {
+        Some(self.width)
+    }
+
+    fn first_baseline(&self, _avail_width: Pt) -> Option<Pt> {
+        Some(self.baseline)
+    }
+
+    fn split(
+        &self,
+        _avail_width: Pt,
+        _avail_height: Pt,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        None
+    }
+
+    fn draw(&self, _canvas: &mut Canvas, _x: Pt, _y: Pt, _avail_width: Pt, _avail_height: Pt) {}
 }
 
 #[derive(Debug, Clone)]
@@ -3676,6 +3945,7 @@ fn text_align_offset(align: TextAlign, avail_width: Pt, line_width: Pt) -> Pt {
 
 #[derive(Debug, Clone, Copy)]
 pub enum VerticalAlign {
+    Baseline,
     Top,
     Middle,
     Bottom,
@@ -4377,7 +4647,15 @@ impl TableCell {
                         self.style.font_size,
                         &run_text,
                     );
-                    canvas.draw_string(cursor_x, y, run_text);
+                    draw_registered_text_run(
+                        canvas,
+                        registry,
+                        &self.style,
+                        &run.font_name,
+                        cursor_x,
+                        y,
+                        run_text,
+                    );
                     cursor_x = cursor_x + w;
                     remaining = remaining.saturating_sub(run_len);
                 } else {
@@ -4389,14 +4667,30 @@ impl TableCell {
                             self.style.font_size,
                             &run_text,
                         );
-                        canvas.draw_string(cursor_x, y, run_text);
+                        draw_registered_text_run(
+                            canvas,
+                            registry,
+                            &self.style,
+                            &run.font_name,
+                            cursor_x,
+                            y,
+                            run_text,
+                        );
                         cursor_x = cursor_x + w;
                         remaining = remaining.saturating_sub(run_len);
                         continue;
                     }
                     for ch in run.text.chars() {
                         let ch_str = ch.to_string();
-                        canvas.draw_string(cursor_x, y, ch_str.clone());
+                        draw_registered_text_run(
+                            canvas,
+                            registry,
+                            &self.style,
+                            &run.font_name,
+                            cursor_x,
+                            y,
+                            ch_str.clone(),
+                        );
                         let w = registry.measure_text_width(
                             &run.font_name,
                             self.style.font_size,
@@ -5603,7 +5897,7 @@ impl TableFlowable {
                 let wrapped = content.wrap(content_width, content_height);
                 let draw_h = wrapped.height.min(content_height).max(Pt::ZERO);
                 let draw_y = match cell.valign {
-                    VerticalAlign::Top => cell_y + pad_top,
+                    VerticalAlign::Baseline | VerticalAlign::Top => cell_y + pad_top,
                     VerticalAlign::Middle => {
                         cell_y + pad_top + (content_height - draw_h).mul_ratio(1, 2)
                     }
@@ -5622,7 +5916,7 @@ impl TableFlowable {
                 let line_height = cell.effective_line_height();
                 let text_block_height = line_height * (lines.len() as i32);
                 let text_y = match cell.valign {
-                    VerticalAlign::Top => cell_y + pad_top,
+                    VerticalAlign::Baseline | VerticalAlign::Top => cell_y + pad_top,
                     VerticalAlign::Middle => {
                         cell_y + pad_top + (content_height - text_block_height).mul_ratio(1, 2)
                     }
@@ -5638,13 +5932,19 @@ impl TableFlowable {
                         let text_x = cell_x
                             + pad_left
                             + text_align_offset(cell.align, content_width, line_width);
-                        cell.draw_text_line(canvas, text_x, cursor_y, &line.text);
+                        let draw_y = text_draw_y_for_line(
+                            &cell.style,
+                            cell.font_registry.as_deref(),
+                            cursor_y,
+                            line_height,
+                        );
+                        cell.draw_text_line(canvas, text_x, draw_y, &line.text);
                         draw_text_decorations(
                             canvas,
                             &cell.style,
                             cell.font_registry.as_deref(),
                             text_x,
-                            cursor_y,
+                            draw_y,
                             line_width,
                         );
                         cursor_y = cursor_y + line_height;
@@ -6837,11 +7137,13 @@ struct InlineItemLayout {
     x_off: Pt,
     size: Size,
     valign: VerticalAlign,
+    baseline: Option<Pt>,
 }
 
 #[derive(Clone)]
 struct InlineLineLayout {
     line_height: Pt,
+    baseline: Option<Pt>,
     items: Vec<InlineItemLayout>,
 }
 
@@ -6858,6 +7160,7 @@ pub struct InlineBlockLayoutFlowable {
     children: Vec<(Box<dyn Flowable>, VerticalAlign)>,
     gap: Pt,
     forced_line_height: Option<Pt>,
+    css_pixel_snap: bool,
     pagination: Pagination,
     layout_cache: Arc<Mutex<Option<InlineLayoutCache>>>,
 }
@@ -6872,9 +7175,15 @@ impl InlineBlockLayoutFlowable {
             children,
             gap,
             forced_line_height,
+            css_pixel_snap: false,
             pagination: Pagination::default(),
             layout_cache: Arc::new(Mutex::new(None)),
         }
+    }
+
+    pub fn with_css_pixel_line_snap(mut self, enabled: bool) -> Self {
+        self.css_pixel_snap = enabled;
+        self
     }
 
     fn compute_layout(&self, avail_width: Pt) -> InlineLayoutCache {
@@ -6886,20 +7195,45 @@ impl InlineBlockLayoutFlowable {
         let mut line_items: Vec<InlineItemLayout> = Vec::new();
         let mut line_width = Pt::ZERO;
         let mut line_height = forced;
+        let css_pixel_snap = self.css_pixel_snap;
 
         let flush_line = |lines: &mut Vec<InlineLineLayout>,
                           line_items: &mut Vec<InlineItemLayout>,
                           line_width: Pt,
-                          line_height: Pt,
+                          mut line_height: Pt,
                           max_width: &mut Pt,
                           total_height: &mut Pt| {
             if line_items.is_empty() {
                 return;
             }
+            let mut line_baseline: Option<Pt> = None;
+            let mut max_descent = Pt::ZERO;
+            for item in line_items.iter() {
+                if !matches!(item.valign, VerticalAlign::Baseline) {
+                    continue;
+                }
+                let item_baseline = item.baseline.unwrap_or(item.size.height);
+                line_baseline = Some(
+                    line_baseline
+                        .map(|current| current.max(item_baseline))
+                        .unwrap_or(item_baseline),
+                );
+                max_descent = max_descent.max((item.size.height - item_baseline).max(Pt::ZERO));
+            }
+            if let Some(baseline) = line_baseline {
+                line_height = line_height.max(baseline + max_descent);
+            }
+            if css_pixel_snap {
+                line_height = ceil_to_css_pixel(line_height);
+            }
             *total_height = *total_height + line_height;
             *max_width = (*max_width).max(line_width);
             let items = std::mem::take(line_items);
-            lines.push(InlineLineLayout { line_height, items });
+            lines.push(InlineLineLayout {
+                line_height,
+                baseline: line_baseline,
+                items,
+            });
         };
 
         for (idx, (child, valign)) in self.children.iter().enumerate() {
@@ -6932,6 +7266,11 @@ impl InlineBlockLayoutFlowable {
                 x_off,
                 size,
                 valign: *valign,
+                baseline: if matches!(valign, VerticalAlign::Baseline) {
+                    child.first_baseline(avail_width).or(Some(size.height))
+                } else {
+                    None
+                },
             });
             line_width = x_off + size.width;
             line_height = line_height.max(size.height);
@@ -7004,6 +7343,13 @@ impl Flowable for InlineBlockLayoutFlowable {
         Some(total.max(Pt::ZERO))
     }
 
+    fn first_baseline(&self, avail_width: Pt) -> Option<Pt> {
+        self.cached_layout(avail_width)
+            .lines
+            .first()
+            .and_then(|line| line.baseline)
+    }
+
     fn split(
         &self,
         _avail_width: Pt,
@@ -7019,6 +7365,11 @@ impl Flowable for InlineBlockLayoutFlowable {
         for line in &layout.lines {
             for item in &line.items {
                 let y_off = match item.valign {
+                    VerticalAlign::Baseline => line
+                        .baseline
+                        .zip(item.baseline)
+                        .map(|(line_baseline, item_baseline)| line_baseline - item_baseline)
+                        .unwrap_or(Pt::ZERO),
                     VerticalAlign::Top => Pt::ZERO,
                     VerticalAlign::Middle => (line.line_height - item.size.height).mul_ratio(1, 2),
                     VerticalAlign::Bottom => line.line_height - item.size.height,
@@ -7039,6 +7390,73 @@ impl Flowable for InlineBlockLayoutFlowable {
 
     fn pagination(&self) -> Pagination {
         self.pagination
+    }
+}
+
+#[cfg(test)]
+mod inline_baseline_tests {
+    use super::{Canvas, Flowable, InlineBlockLayoutFlowable, Pagination, Pt, Size, VerticalAlign};
+
+    #[derive(Clone)]
+    struct BaselineProbe {
+        size: Size,
+        baseline: Pt,
+    }
+
+    impl Flowable for BaselineProbe {
+        fn wrap(&self, _avail_width: Pt, _avail_height: Pt) -> Size {
+            self.size
+        }
+
+        fn split(
+            &self,
+            _avail_width: Pt,
+            _avail_height: Pt,
+        ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+            None
+        }
+
+        fn draw(&self, _canvas: &mut Canvas, _x: Pt, _y: Pt, _avail_width: Pt, _avail_height: Pt) {}
+
+        fn first_baseline(&self, _avail_width: Pt) -> Option<Pt> {
+            Some(self.baseline)
+        }
+
+        fn pagination(&self) -> Pagination {
+            Pagination::default()
+        }
+    }
+
+    #[test]
+    fn baseline_union_includes_parent_strut_descent() {
+        let strut = BaselineProbe {
+            size: Size {
+                width: Pt::ZERO,
+                height: Pt::from_f32(18.0),
+            },
+            baseline: Pt::from_f32(12.0),
+        };
+        let large_run = BaselineProbe {
+            size: Size {
+                width: Pt::from_f32(90.0),
+                height: Pt::from_f32(30.0),
+            },
+            baseline: Pt::from_f32(25.0),
+        };
+        let line = InlineBlockLayoutFlowable::new_pt(
+            vec![
+                (Box::new(strut), VerticalAlign::Baseline),
+                (Box::new(large_run), VerticalAlign::Baseline),
+            ],
+            Pt::ZERO,
+            None,
+        )
+        .with_css_pixel_line_snap(true);
+
+        assert_eq!(
+            line.wrap(Pt::from_f32(200.0), Pt::from_f32(200.0)).height,
+            Pt::from_f32(31.5)
+        );
     }
 }
 
@@ -7071,6 +7489,7 @@ pub enum AlignContent {
     FlexStart,
     FlexEnd,
     Center,
+    Stretch,
     SpaceBetween,
     SpaceAround,
     SpaceEvenly,
@@ -7130,6 +7549,9 @@ pub struct FlexFlowable {
     align_content: AlignContent,
     gap: LengthSpec,
     wrap: bool,
+    line_item_limit: Option<usize>,
+    row_tracks: Vec<GridTrackSize>,
+    row_track_offset: usize,
     font_size: Pt,
     root_font_size: Pt,
     pagination: Pagination,
@@ -7171,11 +7593,21 @@ impl FlexFlowable {
             align_content,
             gap,
             wrap,
+            line_item_limit: None,
+            row_tracks: Vec::new(),
+            row_track_offset: 0,
             font_size,
             root_font_size,
             pagination: Pagination::default(),
             layout_cache: Arc::new(Mutex::new(None)),
         }
+    }
+
+    pub fn with_grid_tracks(mut self, column_count: usize, row_tracks: Vec<GridTrackSize>) -> Self {
+        self.line_item_limit = Some(column_count.max(1));
+        self.row_tracks = row_tracks;
+        self.layout_cache = Arc::new(Mutex::new(None));
+        self
     }
 
     fn bounded_height(avail_height: Pt) -> Option<Pt> {
@@ -7190,6 +7622,21 @@ impl FlexFlowable {
         self.gap
             .resolve_width(avail_width, self.font_size, self.root_font_size)
             .max(Pt::ZERO)
+    }
+
+    fn row_track(&self, line_index: usize) -> Option<GridTrackSize> {
+        self.row_tracks
+            .get(self.row_track_offset.saturating_add(line_index))
+            .copied()
+    }
+
+    fn fixed_row_track_height(&self, line_index: usize, avail_height: Pt) -> Option<Pt> {
+        self.row_track(line_index)
+            .and_then(GridTrackSize::fixed_breadth)
+            .map(|spec| {
+                spec.resolve_height(avail_height, self.font_size, self.root_font_size)
+                    .max(Pt::ZERO)
+            })
     }
 
     fn with_items(&self, items: Vec<FlexItem>, first: bool) -> FlexFlowable {
@@ -7214,6 +7661,9 @@ impl FlexFlowable {
             align_content: self.align_content,
             gap: self.gap,
             wrap: self.wrap,
+            line_item_limit: self.line_item_limit,
+            row_tracks: self.row_tracks.clone(),
+            row_track_offset: self.row_track_offset,
             font_size: self.font_size,
             root_font_size: self.root_font_size,
             pagination,
@@ -7315,12 +7765,13 @@ impl FlexFlowable {
                     )
                 } else {
                     let lines = self.row_lines(avail_width, avail_height);
-                    let mut total_h = Pt::ZERO;
                     let mut line_layouts: Vec<FlexLineLayout> = Vec::new();
-                    for line in &lines {
-                        let (widths, child_avails, sizes, line_h) =
+                    for (line_index, line) in lines.iter().enumerate() {
+                        let (widths, child_avails, sizes, intrinsic_line_h) =
                             self.row_line_layout(line, avail_width, avail_height);
-                        total_h = total_h + line_h;
+                        let line_h = self
+                            .fixed_row_track_height(line_index, avail_height)
+                            .unwrap_or(intrinsic_line_h);
                         line_layouts.push(FlexLineLayout {
                             indices: line.clone(),
                             widths,
@@ -7329,7 +7780,80 @@ impl FlexFlowable {
                             line_h,
                         });
                     }
-                    let container_h = Self::bounded_height(avail_height).unwrap_or(total_h);
+                    let mut total_h = line_layouts
+                        .iter()
+                        .fold(Pt::ZERO, |acc, line| acc + line.line_h);
+                    let bounded_height = Self::bounded_height(avail_height);
+                    if let Some(target_height) = bounded_height
+                        .filter(|height| !line_layouts.is_empty() && *height > total_h)
+                    {
+                        let fraction_total: f32 = line_layouts
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(index, _)| {
+                                self.row_track(index)
+                                    .and_then(GridTrackSize::fraction_factor)
+                            })
+                            .sum();
+                        if fraction_total > 0.0 {
+                            let distributable = target_height - total_h;
+                            let mut assigned = Pt::ZERO;
+                            let fraction_indices: Vec<(usize, f32)> = line_layouts
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(index, _)| {
+                                    self.row_track(index)
+                                        .and_then(GridTrackSize::fraction_factor)
+                                        .map(|factor| (index, factor))
+                                })
+                                .collect();
+                            for (position, (index, factor)) in
+                                fraction_indices.iter().copied().enumerate()
+                            {
+                                let extra = if position + 1 == fraction_indices.len() {
+                                    distributable - assigned
+                                } else {
+                                    distributable * (factor / fraction_total)
+                                };
+                                line_layouts[index].line_h = line_layouts[index].line_h + extra;
+                                assigned = assigned + extra;
+                            }
+                            total_h = target_height;
+                        } else if matches!(self.align_content, AlignContent::Stretch) {
+                            let stretch_indices: Vec<usize> = if self.row_tracks.is_empty() {
+                                (0..line_layouts.len()).collect()
+                            } else {
+                                line_layouts
+                                    .iter()
+                                    .enumerate()
+                                    .filter_map(|(index, _)| {
+                                        matches!(
+                                            self.row_track(index).map(|track| track.max),
+                                            Some(GridTrackBreadth::Auto) | None
+                                        )
+                                        .then_some(index)
+                                    })
+                                    .collect()
+                            };
+                            if !stretch_indices.is_empty() {
+                                let distributable = target_height - total_h;
+                                let share = distributable / (stretch_indices.len() as i32);
+                                let mut assigned = Pt::ZERO;
+                                for (position, index) in stretch_indices.iter().copied().enumerate()
+                                {
+                                    let extra = if position + 1 == stretch_indices.len() {
+                                        distributable - assigned
+                                    } else {
+                                        share
+                                    };
+                                    line_layouts[index].line_h = line_layouts[index].line_h + extra;
+                                    assigned = assigned + extra;
+                                }
+                                total_h = target_height;
+                            }
+                        }
+                    }
+                    let container_h = bounded_height.unwrap_or(total_h);
                     (
                         FlexLayout::RowWrap {
                             lines: line_layouts,
@@ -7533,6 +8057,14 @@ impl FlexFlowable {
         }
         if !self.wrap {
             return vec![(0..n).collect()];
+        }
+        if let Some(limit) = self.line_item_limit {
+            let limit = limit.max(1);
+            return (0..n)
+                .collect::<Vec<_>>()
+                .chunks(limit)
+                .map(|chunk| chunk.to_vec())
+                .collect();
         }
         let gap = self.resolved_gap(avail_width);
         let mut lines: Vec<Vec<usize>> = Vec::new();
@@ -7785,8 +8317,23 @@ impl Flowable for FlexFlowable {
                     }
                     .max(Pt::ZERO);
 
-                    item.child
-                        .draw(canvas, cursor_x, y + y_off, child_avails[idx], *container_h);
+                    if matches!(item_align, AlignItems::Stretch) {
+                        item.child.draw_stretched(
+                            canvas,
+                            cursor_x,
+                            y + y_off,
+                            child_avails[idx],
+                            *container_h,
+                        );
+                    } else {
+                        item.child.draw(
+                            canvas,
+                            cursor_x,
+                            y + y_off,
+                            child_avails[idx],
+                            *container_h,
+                        );
+                    }
                     cursor_x = cursor_x + widths[idx];
                     if idx + 1 < n {
                         cursor_x = cursor_x + gap;
@@ -7859,13 +8406,23 @@ impl Flowable for FlexFlowable {
                         }
                         .max(Pt::ZERO);
 
-                        self.items[*idx].child.draw(
-                            canvas,
-                            cursor_x,
-                            cursor_y + y_off,
-                            line.child_avails[pos],
-                            line.line_h,
-                        );
+                        if matches!(item_align, AlignItems::Stretch) {
+                            self.items[*idx].child.draw_stretched(
+                                canvas,
+                                cursor_x,
+                                cursor_y + y_off,
+                                line.child_avails[pos],
+                                line.line_h,
+                            );
+                        } else {
+                            self.items[*idx].child.draw(
+                                canvas,
+                                cursor_x,
+                                cursor_y + y_off,
+                                line.child_avails[pos],
+                                line.line_h,
+                            );
+                        }
                         cursor_x = cursor_x + line.widths[pos];
                         if pos + 1 < line.indices.len() {
                             cursor_x = cursor_x + gap;
@@ -8467,7 +9024,10 @@ impl ContainerFlowable {
                     canvas.scale(*x, *y);
                 }
                 CssTransformOp::Rotate { radians } => {
-                    canvas.rotate(*radians);
+                    // CSS uses a top-down coordinate system, so positive angles
+                    // are clockwise. PDF's current transformation matrix is
+                    // bottom-up, which requires the opposite mathematical sign.
+                    canvas.rotate(-*radians);
                 }
                 CssTransformOp::Skew {
                     x_radians,
@@ -11675,6 +12235,21 @@ impl Flowable for ContainerFlowable {
         Some((border_box_width + margin.left + margin.right).max(Pt::ZERO))
     }
 
+    fn first_baseline(&self, avail_width: Pt) -> Option<Pt> {
+        let (margin, border, padding, content_width, _) = self.resolve_box(avail_width);
+        let mut offset = margin.top + border.top + padding.top;
+        for child in &self.children {
+            if child.out_of_flow() {
+                continue;
+            }
+            if let Some(baseline) = child.first_baseline(content_width) {
+                return Some(offset + baseline);
+            }
+            offset = offset + child.wrap(content_width, huge_pt()).height;
+        }
+        None
+    }
+
     fn wrap(&self, avail_width: Pt, avail_height: Pt) -> Size {
         let cache = self.cached_layout(avail_width, avail_height);
         Size {
@@ -12076,9 +12651,9 @@ impl Flowable for ContainerFlowable {
                     let origin_x = border_box_x + origin_dx;
                     let origin_y = border_box_y + origin_dy;
                     canvas.save_state();
-                    canvas.translate(-origin_x, -origin_y);
+                    canvas.translate_css_transform_origin(origin_x, origin_y, false);
                     self.apply_transforms(canvas, border_box_width, border_box_height);
-                    canvas.translate(origin_x, origin_y);
+                    canvas.translate_css_transform_origin(origin_x, origin_y, true);
                 }
                 canvas.apply_backdrop_filter(
                     border_box_x,
@@ -12231,9 +12806,9 @@ impl Flowable for ContainerFlowable {
             let origin_x = border_box_x + origin_dx;
             let origin_y = border_box_y + origin_dy;
             canvas.save_state();
-            canvas.translate(-origin_x, -origin_y);
+            canvas.translate_css_transform_origin(origin_x, origin_y, false);
             self.apply_transforms(canvas, border_box_width, border_box_height);
-            canvas.translate(origin_x, origin_y);
+            canvas.translate_css_transform_origin(origin_x, origin_y, true);
         }
         let border_clip_radii = self.border_radius.resolve(
             border_box_width,
@@ -12726,6 +13301,29 @@ impl Flowable for ContainerFlowable {
         }
     }
 
+    fn draw_stretched(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt) {
+        if !matches!(
+            self.height,
+            LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
+        ) {
+            self.draw(canvas, x, y, avail_width, avail_height);
+            return;
+        }
+
+        let (margin, border, padding, _, _) = self.resolve_box(avail_width);
+        let border_box_height = (avail_height - margin.top - margin.bottom).max(Pt::ZERO);
+        let forced_height = if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+            border_box_height
+        } else {
+            (border_box_height - border.top - border.bottom - padding.top - padding.bottom)
+                .max(Pt::ZERO)
+        };
+        let mut stretched = self.clone();
+        stretched.height = LengthSpec::Absolute(forced_height);
+        stretched.layout_cache = Arc::new(Mutex::new(None));
+        stretched.draw(canvas, x, y, avail_width, avail_height);
+    }
+
     fn pagination(&self) -> Pagination {
         self.pagination
     }
@@ -12805,8 +13403,22 @@ impl Flowable for MetaFlowable {
         canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "flowable");
     }
 
+    fn draw_stretched(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt) {
+        canvas.meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "flowable");
+        for (key, value) in self.metadata.iter() {
+            canvas.meta(key.clone(), value.clone());
+        }
+        self.child
+            .draw_stretched(canvas, x, y, avail_width, avail_height);
+        canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "flowable");
+    }
+
     fn intrinsic_width(&self) -> Option<Pt> {
         self.child.intrinsic_width()
+    }
+
+    fn first_baseline(&self, avail_width: Pt) -> Option<Pt> {
+        self.child.first_baseline(avail_width)
     }
 
     fn out_of_flow(&self) -> bool {
@@ -13222,6 +13834,10 @@ impl Flowable for RelativePositionedFlowable {
         self.child.intrinsic_width()
     }
 
+    fn first_baseline(&self, avail_width: Pt) -> Option<Pt> {
+        self.child.first_baseline(avail_width)
+    }
+
     fn out_of_flow(&self) -> bool {
         self.child.out_of_flow()
     }
@@ -13236,5 +13852,110 @@ impl Flowable for RelativePositionedFlowable {
 
     fn prefers_containing_block_draw_space(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod grid_and_transform_regression_tests {
+    use super::*;
+    use crate::canvas::Command;
+
+    #[test]
+    fn explicit_grid_tracks_keep_fixed_columns_and_rows_when_they_overflow() {
+        let fixed = LengthSpec::Absolute(Pt::from_f32(75.0));
+        let items = (0..4)
+            .map(|_| {
+                (
+                    Box::new(Spacer::new_pt(Pt::ZERO)) as Box<dyn Flowable>,
+                    0.0,
+                    0.0,
+                    Some(fixed),
+                    None,
+                )
+            })
+            .collect();
+        let flex = FlexFlowable::new_pt(
+            items,
+            FlexDirection::Row,
+            JustifyContent::FlexStart,
+            AlignItems::Stretch,
+            AlignContent::Stretch,
+            LengthSpec::Absolute(Pt::ZERO),
+            true,
+            Pt::from_f32(12.0),
+            Pt::from_f32(12.0),
+        )
+        .with_grid_tracks(
+            2,
+            vec![GridTrackSize::fixed(fixed), GridTrackSize::fixed(fixed)],
+        );
+
+        let layout = flex.compute_layout(Pt::from_f32(147.0), Pt::from_f32(147.0));
+        let FlexLayout::RowWrap { lines, container_h } = layout.layout else {
+            panic!("expected wrapped grid rows");
+        };
+        assert_eq!(container_h, Pt::from_f32(147.0));
+        assert_eq!(lines.len(), 2);
+        for line in lines {
+            assert_eq!(line.widths, vec![Pt::from_f32(75.0); 2]);
+            assert_eq!(line.line_h, Pt::from_f32(75.0));
+        }
+    }
+
+    #[test]
+    fn css_rotation_uses_clockwise_sign_around_the_default_center() {
+        let box_width = Pt::from_f32(75.0);
+        let box_height = Pt::from_f32(45.0);
+        let flowable =
+            ContainerFlowable::new_pt(Vec::new(), Pt::from_f32(12.0), Pt::from_f32(12.0))
+                .with_width(LengthSpec::Absolute(box_width))
+                .with_height(LengthSpec::Absolute(box_height))
+                .with_transforms(vec![CssTransformOp::Rotate { radians: 0.5 }]);
+        let mut canvas = Canvas::new(Size {
+            width: Pt::from_f32(200.0),
+            height: Pt::from_f32(200.0),
+        });
+        flowable.draw(
+            &mut canvas,
+            Pt::ZERO,
+            Pt::ZERO,
+            Pt::from_f32(200.0),
+            Pt::from_f32(200.0),
+        );
+        let document = canvas.finish();
+        let commands = &document.pages[0].commands;
+        let transform = commands.windows(3).find(|window| {
+            matches!(
+                window,
+                [
+                    Command::CssTransformOrigin { inverse: false, .. },
+                    Command::Rotate(_),
+                    Command::CssTransformOrigin { inverse: true, .. }
+                ]
+            )
+        });
+        let Some(
+            [
+                Command::CssTransformOrigin {
+                    x: origin_x,
+                    y: origin_y,
+                    inverse: false,
+                },
+                Command::Rotate(angle),
+                Command::CssTransformOrigin {
+                    x: return_x,
+                    y: return_y,
+                    inverse: true,
+                },
+            ],
+        ) = transform
+        else {
+            panic!("missing transform-origin command sequence: {commands:?}");
+        };
+        assert_eq!(*origin_x, box_width.mul_ratio(1, 2));
+        assert_eq!(*origin_y, box_height.mul_ratio(1, 2));
+        assert!((*angle + 0.5).abs() < f32::EPSILON);
+        assert_eq!(*return_x, *origin_x);
+        assert_eq!(*return_y, *origin_y);
     }
 }

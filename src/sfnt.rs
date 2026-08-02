@@ -213,6 +213,13 @@ impl<'a> Face<'a> {
             .unwrap_or(0)
     }
 
+    pub(crate) fn weight_class(&self) -> u16 {
+        self.table(*b"OS/2")
+            .and_then(|table| read_u16(table, 4))
+            .filter(|weight| (1..=1000).contains(weight))
+            .unwrap_or(400)
+    }
+
     pub(crate) fn global_bounding_box(&self) -> Rect {
         let head = self.table(*b"head").unwrap_or_default();
         Rect {

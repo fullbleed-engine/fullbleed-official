@@ -1987,6 +1987,12 @@ fn collect_render_time_text_blocks_for_page(
                     .transform
                     .mul(Transform::translate(dx.to_f32(), dy.to_f32()));
             }
+            Command::CssTransformOrigin { x, y, inverse } => {
+                let sign = if *inverse { -1.0 } else { 1.0 };
+                state.transform = state
+                    .transform
+                    .mul(Transform::translate(x.to_f32() * sign, y.to_f32() * sign));
+            }
             Command::Scale(sx, sy) => {
                 state.transform = state.transform.mul(Transform::scale(*sx, *sy));
             }
@@ -2001,6 +2007,7 @@ fn collect_render_time_text_blocks_for_page(
             }
             Command::SetFontName(name) => state.font_name = name.clone(),
             Command::SetFontSize(size) => state.font_size = *size,
+            Command::SetTextRenderingMode(_) => {}
             Command::Meta { key, value } if key == "font.requested_name" => {
                 pending_requested_font_name = Some(value.clone());
             }

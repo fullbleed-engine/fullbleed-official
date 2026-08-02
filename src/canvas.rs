@@ -11,6 +11,14 @@ pub enum Command {
     SaveState,
     RestoreState,
     Translate(Pt, Pt),
+    /// Translate around a point expressed in FullBleed's top-down page space.
+    /// PDF emission converts the y coordinate to bottom-up space; raster/JIT
+    /// consumers keep it top-down. `inverse` emits the return translation.
+    CssTransformOrigin {
+        x: Pt,
+        y: Pt,
+        inverse: bool,
+    },
     Scale(f32, f32),
     Rotate(f32),
     ConcatMatrix {
@@ -54,6 +62,7 @@ pub enum Command {
     },
     SetFontName(String),
     SetFontSize(Pt),
+    SetTextRenderingMode(u8),
     ClipRect {
         x: Pt,
         y: Pt,
@@ -202,6 +211,7 @@ struct GraphicsState {
     blend_mode: MixBlendMode,
     font_size: Pt,
     font_name: String,
+    text_rendering_mode: u8,
 }
 
 pub struct Canvas {
@@ -231,6 +241,7 @@ impl Canvas {
                 blend_mode: MixBlendMode::Normal,
                 font_size: Pt::from_f32(12.0),
                 font_name: "Helvetica".to_string(),
+                text_rendering_mode: 0,
             },
             current_mcid: 0,
             abs_containing_block_stack: Vec::new(),
@@ -267,6 +278,12 @@ impl Canvas {
 
     pub fn translate(&mut self, x: Pt, y: Pt) {
         self.current.commands.push(Command::Translate(x, y));
+    }
+
+    pub fn translate_css_transform_origin(&mut self, x: Pt, y: Pt, inverse: bool) {
+        self.current
+            .commands
+            .push(Command::CssTransformOrigin { x, y, inverse });
     }
 
     pub fn scale(&mut self, x: f32, y: f32) {
@@ -408,6 +425,17 @@ impl Canvas {
         self.current.commands.push(Command::SetFontSize(size));
     }
 
+    pub fn set_text_rendering_mode(&mut self, mode: u8) {
+        let mode = mode.min(7);
+        if self.current_state.text_rendering_mode == mode {
+            return;
+        }
+        self.current_state.text_rendering_mode = mode;
+        self.current
+            .commands
+            .push(Command::SetTextRenderingMode(mode));
+    }
+
     pub fn clip_rect(&mut self, x: Pt, y: Pt, width: Pt, height: Pt) {
         self.current.commands.push(Command::ClipRect {
             x,
@@ -474,6 +502,21 @@ impl Canvas {
             y,
             text: text.into(),
         });
+    }
+
+    pub fn draw_string_synthetic_bold(
+        &mut self,
+        x: Pt,
+        y: Pt,
+        text: impl Into<String>,
+        stroke_width: Pt,
+    ) {
+        self.save_state();
+        self.set_stroke_color(self.current_state.fill_color);
+        self.set_line_width(stroke_width.max(Pt::ZERO));
+        self.set_text_rendering_mode(2);
+        self.draw_string(x, y, text);
+        self.restore_state();
     }
 
     pub fn draw_rect(&mut self, x: Pt, y: Pt, width: Pt, height: Pt) {
@@ -581,6 +624,7 @@ impl Canvas {
             blend_mode: MixBlendMode::Normal,
             font_size: Pt::from_f32(12.0),
             font_name: "Helvetica".to_string(),
+            text_rendering_mode: 0,
         };
         self.current_mcid = 0;
     }
@@ -656,5 +700,40 @@ impl Canvas {
             page_size: self.page_size,
             pages: self.pages,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn synthetic_bold_keeps_one_extractable_text_command() {
+        let mut canvas = Canvas::new(Size {
+            width: Pt::from_f32(100.0),
+            height: Pt::from_f32(100.0),
+        });
+        canvas.set_fill_color(Color::rgb(0.4, 0.0, 0.0));
+        canvas.draw_string_synthetic_bold(
+            Pt::from_f32(10.0),
+            Pt::from_f32(20.0),
+            "Bold",
+            Pt::from_f32(0.75),
+        );
+        let document = canvas.finish();
+        let commands = &document.pages[0].commands;
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|command| matches!(command, Command::DrawString { .. }))
+                .count(),
+            1
+        );
+        assert!(
+            commands
+                .iter()
+                .any(|command| { matches!(command, Command::SetTextRenderingMode(2)) })
+        );
+        assert!(matches!(commands.last(), Some(Command::RestoreState)));
     }
 }

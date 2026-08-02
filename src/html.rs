@@ -4,11 +4,12 @@ use crate::assets::{
 };
 use crate::flowable::{
     AbsolutePositionedFlowable, AlignContent, AlignItems, BackgroundPaintFlowable, BorderRadiiSpec,
-    BorderSpec, CalcLength, ContainerFlowable, EdgeSizes, FlexDirection, FlexFlowable,
-    ImageFlowable, InlineBlockLayoutFlowable, JustifyContent, LengthSpec, ListItemFlowable,
-    MetaFlowable, Paragraph, RelativePositionedFlowable, Spacer, SvgFlowable, TableCell,
-    TableColumnBorder, TableColumnGroupBorder, TableColumnWidthHint, TableFlowable,
-    TableLayoutMode, TextAlign, TextStyle, VerticalAlign,
+    BorderSpec, CalcLength, CollapsibleSpaceFlowable, ContainerFlowable, EdgeSizes, FlexDirection,
+    FlexFlowable, GridTrackBreadth, GridTrackSize, ImageFlowable, InlineBlockLayoutFlowable,
+    JustifyContent, LengthSpec, ListItemFlowable, MetaFlowable, Paragraph,
+    RelativePositionedFlowable, Spacer, SvgFlowable, TableCell, TableColumnBorder,
+    TableColumnGroupBorder, TableColumnWidthHint, TableFlowable, TableLayoutMode, TextAlign,
+    TextStyle, VerticalAlign,
 };
 use crate::font::FontRegistry;
 use crate::glyph_report::GlyphCoverageReport;
@@ -333,11 +334,14 @@ fn counter_set_value(style: &ComputedStyle, name: &str) -> Option<i32> {
 
 fn vertical_align_from_style(style: &ComputedStyle) -> VerticalAlign {
     match style.vertical_align {
+        VerticalAlignMode::Baseline => VerticalAlign::Baseline,
         VerticalAlignMode::Middle => VerticalAlign::Middle,
         VerticalAlignMode::Bottom | VerticalAlignMode::TextBottom | VerticalAlignMode::Sub => {
             VerticalAlign::Bottom
         }
-        _ => VerticalAlign::Top,
+        VerticalAlignMode::Top | VerticalAlignMode::TextTop | VerticalAlignMode::Super => {
+            VerticalAlign::Top
+        }
     }
 }
 
@@ -921,9 +925,39 @@ fn collect_children(
 ) -> Vec<LayoutItem> {
     let mut out = Vec::new();
     let mut report = report;
-    for child in node.children() {
+    let children: Vec<NodeRef> = node.children().collect();
+    let has_boundary_space_candidate = children.iter().any(|child| match child.data() {
+        NodeData::Text(text) => {
+            let text = text.borrow();
+            !text.trim().is_empty()
+                && (text.starts_with(char::is_whitespace) || text.ends_with(char::is_whitespace))
+        }
+        _ => false,
+    });
+    let inline_context = has_boundary_space_candidate
+        && inline_or_replaced_children_only(node, resolver, parent_style, ancestors);
+    for (index, child) in children.iter().enumerate() {
+        if inline_context {
+            if let NodeData::Text(text) = child.data() {
+                let has_before = children[..index].iter().any(dom_child_has_inline_content);
+                let has_after = children[index + 1..]
+                    .iter()
+                    .any(dom_child_has_inline_content);
+                out.extend(text_node_to_flowables(
+                    &text.borrow(),
+                    parent_style,
+                    !has_before,
+                    !has_after,
+                    font_registry.clone(),
+                    report.as_deref_mut(),
+                    perf,
+                    doc_id,
+                ));
+                continue;
+            }
+        }
         out.extend(node_to_flowables(
-            &child,
+            child,
             resolver,
             parent_style,
             ancestors,
@@ -938,6 +972,105 @@ fn collect_children(
         ));
     }
     out
+}
+
+fn dom_child_has_inline_content(node: &NodeRef) -> bool {
+    match node.data() {
+        NodeData::Text(text) => !text.borrow().trim().is_empty(),
+        NodeData::Element(element) => !matches!(element.name.local.as_ref(), "script" | "style"),
+        _ => false,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn text_node_to_flowables(
+    text: &str,
+    parent_style: &ComputedStyle,
+    trim_start: bool,
+    trim_end: bool,
+    font_registry: Option<Arc<FontRegistry>>,
+    mut report: Option<&mut GlyphCoverageReport>,
+    perf: Option<&crate::perf::PerfLogger>,
+    doc_id: Option<usize>,
+) -> Vec<LayoutItem> {
+    if let Some(perf_logger) = perf {
+        perf_logger.log_counts("story.text_nodes", doc_id, &[("count", 1)]);
+    }
+    let t_norm = std::time::Instant::now();
+    let cleaned =
+        normalize_text_node_boundaries(text, parent_style.white_space, trim_start, trim_end);
+    if let Some(perf_logger) = perf {
+        let ms = t_norm.elapsed().as_secs_f64() * 1000.0;
+        perf_logger.log_span_ms("story.text.normalize", doc_id, ms);
+    }
+    let split_boundary_spaces = !preserve_whitespace(parent_style.white_space);
+    let leading_space = split_boundary_spaces && cleaned.starts_with(' ');
+    let trailing_space = split_boundary_spaces && cleaned.ends_with(' ');
+    let cleaned = if split_boundary_spaces {
+        cleaned.trim_matches(' ').to_string()
+    } else {
+        cleaned
+    };
+    if cleaned.is_empty() && !leading_space && !trailing_space {
+        return Vec::new();
+    }
+
+    let t_transform = std::time::Instant::now();
+    let cleaned = apply_text_transform(&cleaned, parent_style.text_transform);
+    if let Some(perf_logger) = perf {
+        let ms = t_transform.elapsed().as_secs_f64() * 1000.0;
+        perf_logger.log_span_ms("story.text.transform", doc_id, ms);
+    }
+    let text_style = text_style_for_flow_text(parent_style);
+    let t_glyph = std::time::Instant::now();
+    if !cleaned.is_empty() {
+        report_missing_glyphs(
+            report.as_deref_mut(),
+            font_registry.as_deref(),
+            &text_style,
+            &cleaned,
+        );
+    }
+    if let Some(perf_logger) = perf {
+        let ms = t_glyph.elapsed().as_secs_f64() * 1000.0;
+        perf_logger.log_span_ms("story.glyph.report", doc_id, ms);
+    }
+    let inline_item = |flowable: Box<dyn Flowable>| LayoutItem::Block {
+        flowable,
+        flex_grow: 0.0,
+        flex_shrink: 1.0,
+        width_spec: None,
+        order: 0,
+    };
+    let mut items = Vec::new();
+    let has_text = !cleaned.is_empty();
+    if leading_space || (!has_text && trailing_space) {
+        items.push(inline_item(Box::new(CollapsibleSpaceFlowable::new(
+            text_style.clone(),
+            font_registry.clone(),
+        ))));
+    }
+    if has_text {
+        let paragraph = Paragraph::new(cleaned)
+            .with_style(text_style.clone())
+            .with_align(text_align_from_style(parent_style))
+            .with_last_align(text_align_last_from_style(parent_style))
+            .with_whitespace(
+                preserve_whitespace(parent_style.white_space),
+                no_wrap(parent_style),
+            )
+            .with_pagination(parent_style.pagination)
+            .with_font_registry(font_registry.clone())
+            .with_tag_role("P");
+        items.push(inline_item(Box::new(paragraph)));
+    }
+    if trailing_space && has_text {
+        items.push(inline_item(Box::new(CollapsibleSpaceFlowable::new(
+            text_style,
+            font_registry,
+        ))));
+    }
+    items
 }
 
 fn node_to_flowables(
@@ -956,58 +1089,16 @@ fn node_to_flowables(
 ) -> Vec<LayoutItem> {
     let mut report = report;
     match node.data() {
-        NodeData::Text(text) => {
-            if let Some(perf_logger) = perf {
-                perf_logger.log_counts("story.text_nodes", doc_id, &[("count", 1)]);
-            }
-            let text = text.borrow();
-            let t_norm = std::time::Instant::now();
-            let cleaned = normalize_text(&text, parent_style.white_space, true);
-            if let Some(perf_logger) = perf {
-                let ms = t_norm.elapsed().as_secs_f64() * 1000.0;
-                perf_logger.log_span_ms("story.text.normalize", doc_id, ms);
-            }
-            if cleaned.is_empty() {
-                Vec::new()
-            } else {
-                let t_transform = std::time::Instant::now();
-                let cleaned = apply_text_transform(&cleaned, parent_style.text_transform);
-                if let Some(perf_logger) = perf {
-                    let ms = t_transform.elapsed().as_secs_f64() * 1000.0;
-                    perf_logger.log_span_ms("story.text.transform", doc_id, ms);
-                }
-                let text_style = text_style_for_flow_text(parent_style);
-                let t_glyph = std::time::Instant::now();
-                report_missing_glyphs(
-                    report.as_deref_mut(),
-                    font_registry.as_deref(),
-                    &text_style,
-                    &cleaned,
-                );
-                if let Some(perf_logger) = perf {
-                    let ms = t_glyph.elapsed().as_secs_f64() * 1000.0;
-                    perf_logger.log_span_ms("story.glyph.report", doc_id, ms);
-                }
-                let paragraph = Paragraph::new(cleaned)
-                    .with_style(text_style)
-                    .with_align(text_align_from_style(parent_style))
-                    .with_last_align(text_align_last_from_style(parent_style))
-                    .with_whitespace(
-                        preserve_whitespace(parent_style.white_space),
-                        no_wrap(parent_style),
-                    )
-                    .with_pagination(parent_style.pagination)
-                    .with_font_registry(font_registry.clone())
-                    .with_tag_role("P");
-                vec![LayoutItem::Block {
-                    flowable: Box::new(paragraph) as Box<dyn Flowable>,
-                    flex_grow: 0.0,
-                    flex_shrink: 1.0,
-                    width_spec: None,
-                    order: 0,
-                }]
-            }
-        }
+        NodeData::Text(text) => text_node_to_flowables(
+            &text.borrow(),
+            parent_style,
+            true,
+            true,
+            font_registry,
+            report.as_deref_mut(),
+            perf,
+            doc_id,
+        ),
         NodeData::Element(element) => {
             if let Some(perf_logger) = perf {
                 perf_logger.log_counts("story.elements", doc_id, &[("count", 1)]);
@@ -1278,6 +1369,8 @@ fn node_to_flowables(
                                 coerce_items_to_inline_run(
                                     children,
                                     vertical_align_from_style(&style),
+                                    &style,
+                                    font_registry.clone(),
                                 )
                             } else {
                                 children
@@ -2027,6 +2120,10 @@ fn node_to_flowables(
                                 }
                             }
                         } else {
+                            let coerce_mixed_inline = info.tag.as_str() != "dl"
+                                && inline_or_replaced_children_only(
+                                    node, resolver, &style, ancestors,
+                                );
                             let children = if info.tag.as_str() == "dl" {
                                 definition_list_children_flowables(
                                     node,
@@ -2060,6 +2157,16 @@ fn node_to_flowables(
                             };
                             let children =
                                 inject_pseudo_items(children, &before_items, &after_items);
+                            let children = if coerce_mixed_inline {
+                                coerce_items_to_inline_run(
+                                    children,
+                                    vertical_align_from_style(&style),
+                                    &style,
+                                    font_registry.clone(),
+                                )
+                            } else {
+                                children
+                            };
                             if dl_container_role.is_some() {
                                 container_flowables_with_role(children, &style, dl_container_role)
                             } else {
@@ -2623,16 +2730,68 @@ fn inline_children_only(
             .map(|s| s.to_string());
         let child_style =
             resolver.compute_style(&info, parent_style, inline_style.as_deref(), ancestors);
-        match child_style.display {
-            DisplayMode::Inline
-            | DisplayMode::InlineBlock
-            | DisplayMode::InlineFlex
-            | DisplayMode::InlineGrid
-            | DisplayMode::Contents => {}
-            _ => return false,
+        if !matches!(
+            child_style.display,
+            DisplayMode::Inline | DisplayMode::Contents
+        ) || !inline_style_can_flatten_into(&child_style, parent_style)
+            || resolver
+                .compute_pseudo_style(
+                    &info,
+                    &child_style,
+                    ancestors,
+                    crate::style::PseudoTarget::Before,
+                )
+                .is_some()
+            || resolver
+                .compute_pseudo_style(
+                    &info,
+                    &child_style,
+                    ancestors,
+                    crate::style::PseudoTarget::After,
+                )
+                .is_some()
+        {
+            return false;
+        }
+
+        let mut child_ancestors = ancestors.to_vec();
+        child_ancestors.push(info);
+        if !inline_children_only(&child, resolver, &child_style, &child_ancestors) {
+            return false;
         }
     }
     true
+}
+
+/// Return whether an inline wrapper is semantically transparent to the single-style
+/// paragraph fast path.  Display alone is not enough: flattening a styled descendant
+/// would otherwise discard its typography or inline box paint.
+fn inline_style_can_flatten_into(style: &ComputedStyle, parent: &ComputedStyle) -> bool {
+    text_style_for_flow_text(style) == text_style_for_flow_text(parent)
+        && style.white_space == parent.white_space
+        && style.text_transform == parent.text_transform
+        && style.text_wrap_mode == parent.text_wrap_mode
+        && style.direction == parent.direction
+        && style.vertical_align == parent.vertical_align
+        && style.margin == EdgeSizes::zero()
+        && style.padding == EdgeSizes::zero()
+        && style.border_width == EdgeSizes::zero()
+        && style.background_color.is_none()
+        && style.background_paint.is_none()
+        && style.background_paints.is_empty()
+        && style.box_shadow.is_none()
+        && style.box_shadows.is_empty()
+        && style.paint_filter.is_none()
+        && style.backdrop_filter.is_none()
+        && style.clip_path.is_none()
+        && !style.outline_visible
+        && style.opacity >= 1.0 - 1.0e-6
+        && style.transform.is_empty()
+        && matches!(style.position, PositionMode::Static)
+        && matches!(style.width, LengthSpec::Auto)
+        && matches!(style.height, LengthSpec::Auto)
+        && style.content.is_none()
+        && style.generated_content.is_none()
 }
 
 fn inline_or_replaced_children_only(
@@ -2687,27 +2846,40 @@ fn inline_or_replaced_children_only(
 fn coerce_items_to_inline_run(
     items: Vec<LayoutItem>,
     default_valign: VerticalAlign,
+    parent_style: &ComputedStyle,
+    font_registry: Option<Arc<FontRegistry>>,
 ) -> Vec<LayoutItem> {
-    items
-        .into_iter()
-        .map(|item| match item {
-            LayoutItem::Inline { .. } => item,
-            LayoutItem::Block {
-                flowable,
-                flex_grow,
-                flex_shrink,
-                width_spec,
-                order,
-            } => LayoutItem::Inline {
-                flowable,
-                valign: default_valign,
-                flex_grow,
-                flex_shrink,
-                width_spec,
-                order,
-            },
-        })
-        .collect()
+    let strut = Paragraph::new("")
+        .with_style(text_style_for_flow_text(parent_style))
+        .with_whitespace(preserve_whitespace(parent_style.white_space), true)
+        .with_font_registry(font_registry);
+    let mut inline = Vec::with_capacity(items.len() + 1);
+    inline.push(LayoutItem::Inline {
+        flowable: Box::new(strut) as Box<dyn Flowable>,
+        valign: VerticalAlign::Baseline,
+        flex_grow: 0.0,
+        flex_shrink: 0.0,
+        width_spec: None,
+        order: 0,
+    });
+    inline.extend(items.into_iter().map(|item| match item {
+        LayoutItem::Inline { .. } => item,
+        LayoutItem::Block {
+            flowable,
+            flex_grow,
+            flex_shrink,
+            width_spec,
+            order,
+        } => LayoutItem::Inline {
+            flowable,
+            valign: default_valign,
+            flex_grow,
+            flex_shrink,
+            width_spec,
+            order,
+        },
+    }));
+    inline
 }
 
 fn css_display_list_item_flowables(
@@ -2881,6 +3053,22 @@ mod tests {
         assert_eq!(
             text_style_for_flow_text(&style).text_overflow,
             crate::style::TextOverflowMode::Ellipsis
+        );
+    }
+
+    #[test]
+    fn inline_text_boundaries_keep_collapsible_spaces_between_items() {
+        assert_eq!(
+            normalize_text_node_boundaries("Text \n", WhiteSpaceMode::Normal, true, false),
+            "Text "
+        );
+        assert_eq!(
+            normalize_text_node_boundaries("\n Text", WhiteSpaceMode::Normal, false, true),
+            " Text"
+        );
+        assert_eq!(
+            normalize_text_node_boundaries(" \n Text \n ", WhiteSpaceMode::Normal, true, true),
+            "Text"
         );
     }
 
@@ -3102,6 +3290,92 @@ mod tests {
         assert!(
             !inline_children_only(h1.as_node(), &resolver, &h1_style, &ancestors),
             "h1 with span display:block children must not take inline flatten path"
+        );
+    }
+
+    #[test]
+    fn inline_children_only_rejects_styled_inline_descendants() {
+        let document = parse_html(
+            r##"
+            <html><body>
+              <div class="line"><span class="styled">Baseline Hxy</span></div>
+              <div class="plain"><span>Plain text</span></div>
+              <div class="paint"><span>Painted text</span></div>
+            </body></html>
+            "##,
+        );
+        let resolver = StyleResolver::new(
+            ".styled { font-size: 40px; color: #102a43; } .paint > span { background: red; }",
+        );
+        let root = resolver.default_style();
+
+        let check = |selector: &str| {
+            let element = document.select_first(selector).expect("container");
+            let info = element_info(element.as_node(), resolver.has_sibling_selectors());
+            let style = resolver.compute_style(&info, &root, None, &[]);
+            let ancestors = vec![info];
+            inline_children_only(element.as_node(), &resolver, &style, &ancestors)
+        };
+
+        assert!(
+            !check(".line"),
+            "font and color changes must preserve a styled run"
+        );
+        assert!(
+            check(".plain"),
+            "a semantically transparent span may use the fast path"
+        );
+        assert!(
+            !check(".paint"),
+            "inline box paint must not be flattened away"
+        );
+    }
+
+    #[test]
+    fn styled_inline_descendant_contributes_its_font_size_to_the_line_box() {
+        let resolver = StyleResolver::new(
+            "html { font-family: ParitySans; line-height: 1.5; } \
+             .line { width: 300px; border-bottom: 2px solid black; } \
+             .t { font-family: ParitySans; font-size: 40px; line-height: 1; color: #102a43; }",
+        );
+        let inheritance_document = parse_html(
+            "<html><body><div class='line'><span class='t'>Baseline Hxy</span></div></body></html>",
+        );
+        let html_element = inheritance_document.select_first("html").unwrap();
+        let body_element = inheritance_document.select_first("body").unwrap();
+        let line_element = inheritance_document.select_first(".line").unwrap();
+        let html_info = element_info(html_element.as_node(), false);
+        let body_info = element_info(body_element.as_node(), false);
+        let line_info = element_info(line_element.as_node(), false);
+        let root_style = resolver.compute_style(&html_info, &resolver.default_style(), None, &[]);
+        let body_style = resolver.compute_style(
+            &body_info,
+            &root_style,
+            None,
+            std::slice::from_ref(&html_info),
+        );
+        let line_style =
+            resolver.compute_style(&line_info, &body_style, None, &[html_info, body_info]);
+        assert_eq!(line_style.font_name.as_ref(), "ParitySans");
+        assert_eq!(line_style.to_text_style().line_height, Pt::from_f32(18.0));
+        let story = html_to_story_with_resolver_and_fonts_and_report(
+            "<html><body><div class='line'><span class='t'>Baseline Hxy</span></div></body></html>",
+            &resolver,
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        );
+
+        assert_eq!(story.len(), 1);
+        let size = story[0].wrap(Pt::from_f32(288.0), Pt::from_f32(1_000.0));
+        assert_eq!(
+            size.height,
+            Pt::from_f32(31.5),
+            "40px text plus a 2px border should form a 42px box with Base-14 metrics"
         );
     }
 
@@ -5194,11 +5468,14 @@ fn layout_children_to_flowables(
             } => inline_group.push((flowable, valign)),
             LayoutItem::Block { flowable, .. } => {
                 if !inline_group.is_empty() {
-                    out.push(Box::new(InlineBlockLayoutFlowable::new_pt(
-                        inline_group,
-                        Pt::ZERO,
-                        forced_line_height,
-                    )));
+                    out.push(Box::new(
+                        InlineBlockLayoutFlowable::new_pt(
+                            inline_group,
+                            Pt::ZERO,
+                            forced_line_height,
+                        )
+                        .with_css_pixel_line_snap(true),
+                    ));
                     inline_group = Vec::new();
                 }
                 out.push(flowable);
@@ -5207,11 +5484,10 @@ fn layout_children_to_flowables(
     }
 
     if !inline_group.is_empty() {
-        out.push(Box::new(InlineBlockLayoutFlowable::new_pt(
-            inline_group,
-            Pt::ZERO,
-            forced_line_height,
-        )));
+        out.push(Box::new(
+            InlineBlockLayoutFlowable::new_pt(inline_group, Pt::ZERO, forced_line_height)
+                .with_css_pixel_line_snap(true),
+        ));
     }
 
     out
@@ -5397,9 +5673,6 @@ fn flex_container_flowables(
                     .with_self_visible(style.visibility.paints()),
             )
         };
-        let effective_width_spec = width_spec.or(grid_basis);
-        let effective_grow = if is_grid_like { 0.0 } else { grow };
-        let effective_shrink = if is_grid_like { 1.0 } else { shrink };
         let child_style = child.as_element().map(|el| {
             let child_info = element_info(&child, resolver.has_sibling_selectors());
             let inline_style = el.attributes.borrow().get("style").map(|s| s.to_string());
@@ -5418,6 +5691,17 @@ fn flex_container_flowables(
         } else {
             order
         };
+        let (effective_grow, effective_width_spec) = if is_grid_like && grid_track_count > 0 {
+            grid_column_item_sizing(
+                &style.grid_column_tracks,
+                (effective_order.max(0) as usize) % grid_track_count,
+                width_spec,
+                grid_basis,
+            )
+        } else {
+            (grow, width_spec)
+        };
+        let effective_shrink = if is_grid_like { 0.0 } else { shrink };
 
         items_with_order.push((
             effective_order,
@@ -5468,11 +5752,17 @@ fn flex_container_flowables(
                 }
             }
             if !placed {
+                let (grow, basis) = grid_column_item_sizing(
+                    &style.grid_column_tracks,
+                    (slot as usize) % grid_track_count,
+                    None,
+                    grid_basis,
+                );
                 padded_items.push((
                     Box::new(Spacer::new_pt(Pt::ZERO)) as Box<dyn Flowable>,
+                    grow,
                     0.0,
-                    1.0,
-                    grid_basis,
+                    basis,
                     None,
                 ));
             }
@@ -5489,7 +5779,7 @@ fn flex_container_flowables(
             })
             .collect()
     };
-    let grid_wrap = is_grid_like && grid_track_count > 0 && items.len() > grid_track_count;
+    let grid_wrap = is_grid_like && grid_track_count > 0;
 
     let dir = if is_grid_like {
         FlexDirection::Row
@@ -5516,6 +5806,7 @@ fn flex_container_flowables(
     let align_content = match style.align_content {
         AlignContentMode::FlexEnd => AlignContent::FlexEnd,
         AlignContentMode::Center => AlignContent::Center,
+        AlignContentMode::Stretch => AlignContent::Stretch,
         AlignContentMode::SpaceBetween => AlignContent::SpaceBetween,
         AlignContentMode::SpaceAround => AlignContent::SpaceAround,
         AlignContentMode::SpaceEvenly => AlignContent::SpaceEvenly,
@@ -5537,6 +5828,11 @@ fn flex_container_flowables(
         style.font_size,
         style.root_font_size,
     );
+    let flex = if is_grid_like && grid_track_count > 0 {
+        flex.with_grid_tracks(grid_track_count, style.grid_row_tracks.clone())
+    } else {
+        flex
+    };
 
     let container =
         ContainerFlowable::new_pt(vec![Box::new(flex)], style.font_size, style.root_font_size)
@@ -6223,8 +6519,18 @@ fn table_row_flowable_from_cells(
 }
 
 fn resolve_grid_track_count(style: &ComputedStyle, child_hint: usize) -> usize {
+    if !style.grid_column_tracks.is_empty() {
+        return style.grid_column_tracks.len();
+    }
     if let Some(columns) = style.grid_columns {
         return columns.max(1);
+    }
+    if !style.grid_row_tracks.is_empty() {
+        let rows = style.grid_row_tracks.len().max(1);
+        return child_hint
+            .saturating_add(rows.saturating_sub(1))
+            .saturating_div(rows)
+            .max(1);
     }
     if let Some(rows) = style.grid_rows {
         let rows = rows.max(1);
@@ -6234,6 +6540,29 @@ fn resolve_grid_track_count(style: &ComputedStyle, child_hint: usize) -> usize {
             .max(1);
     }
     1
+}
+
+fn grid_column_item_sizing(
+    tracks: &[GridTrackSize],
+    column: usize,
+    item_width: Option<LengthSpec>,
+    fallback_basis: Option<LengthSpec>,
+) -> (f32, Option<LengthSpec>) {
+    let Some(track) = tracks.get(column).copied() else {
+        return (0.0, fallback_basis.or(item_width));
+    };
+
+    if let Some(factor) = track.fraction_factor() {
+        let basis = match track.min {
+            GridTrackBreadth::Length(length) => Some(length),
+            _ => None,
+        };
+        return (factor, basis);
+    }
+    if let Some(length) = track.fixed_breadth() {
+        return (0.0, Some(length));
+    }
+    (0.0, item_width)
 }
 
 fn grid_track_basis(track_count: usize, gap: LengthSpec) -> LengthSpec {
@@ -7723,6 +8052,25 @@ fn normalize_text(text: &str, mode: WhiteSpaceMode, trim: bool) -> String {
             .to_string();
     }
     out
+}
+
+fn normalize_text_node_boundaries(
+    text: &str,
+    mode: WhiteSpaceMode,
+    trim_start: bool,
+    trim_end: bool,
+) -> String {
+    let mut cleaned = normalize_text(text, mode, false);
+    if preserve_whitespace(mode) {
+        return cleaned;
+    }
+    if trim_start {
+        cleaned = cleaned.trim_start_matches([' ', '\n', '\t']).to_string();
+    }
+    if trim_end {
+        cleaned = cleaned.trim_end_matches([' ', '\n', '\t']).to_string();
+    }
+    cleaned
 }
 
 fn apply_text_transform(text: &str, mode: crate::style::TextTransformMode) -> String {

@@ -32,6 +32,7 @@ struct RasterState {
     blend_mode: MixBlendMode,
     font_name: String,
     font_size: Pt,
+    text_rendering_mode: u8,
     clip_mask: Option<Mask>,
 }
 
@@ -52,6 +53,7 @@ impl Default for RasterState {
             blend_mode: MixBlendMode::Normal,
             font_name: "Helvetica".to_string(),
             font_size: Pt::from_f32(12.0),
+            text_rendering_mode: 0,
             clip_mask: None,
         }
     }
@@ -154,6 +156,13 @@ fn render_commands(
                     .transform
                     .post_concat(Transform::from_translate(x.to_f32(), y.to_f32()));
             }
+            Command::CssTransformOrigin { x, y, inverse } => {
+                let sign = if *inverse { -1.0 } else { 1.0 };
+                state.transform = state.transform.post_concat(Transform::from_translate(
+                    x.to_f32() * sign,
+                    y.to_f32() * sign,
+                ));
+            }
             Command::Scale(x, y) => {
                 state.transform = state.transform.post_concat(Transform::from_scale(*x, *y));
             }
@@ -221,6 +230,7 @@ fn render_commands(
             }
             Command::SetFontName(name) => state.font_name = name.clone(),
             Command::SetFontSize(size) => state.font_size = *size,
+            Command::SetTextRenderingMode(mode) => state.text_rendering_mode = (*mode).min(7),
             Command::ClipRect {
                 x,
                 y,
@@ -1596,15 +1606,31 @@ fn draw_string(
             let Some(path) = builder.finish() else {
                 continue;
             };
-            fill_path_blended(
-                pixmap,
-                &path,
-                &paint,
-                FillRule::Winding,
-                device_transform,
-                state.clip_mask.as_ref(),
-                state.blend_mode,
-            );
+            if matches!(state.text_rendering_mode, 0 | 2) {
+                fill_path_blended(
+                    pixmap,
+                    &path,
+                    &paint,
+                    FillRule::Winding,
+                    device_transform,
+                    state.clip_mask.as_ref(),
+                    state.blend_mode,
+                );
+            }
+            if matches!(state.text_rendering_mode, 1 | 2) {
+                let stroke_paint =
+                    fill_paint(state.stroke_color, state.stroke_opacity, state.blend_mode);
+                let stroke = build_stroke(state);
+                stroke_path_blended(
+                    pixmap,
+                    &path,
+                    &stroke_paint,
+                    &stroke,
+                    device_transform,
+                    state.clip_mask.as_ref(),
+                    state.blend_mode,
+                );
+            }
             drawn += 1;
         }
 

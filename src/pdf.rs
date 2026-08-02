@@ -1131,6 +1131,11 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 Command::Translate(x, y) => {
                     out.push_str(&format!("1 0 0 1 {} {} cm\n", fmt_pt(*x), fmt_pt(*y)));
                 }
+                Command::CssTransformOrigin { x, y, inverse } => {
+                    let pdf_y = page_height - *y;
+                    let (tx, ty) = if *inverse { (-*x, -pdf_y) } else { (*x, pdf_y) };
+                    out.push_str(&format!("1 0 0 1 {} {} cm\n", fmt_pt(tx), fmt_pt(ty)));
+                }
                 Command::Scale(x, y) => {
                     out.push_str(&format!("{} 0 0 {} 0 0 cm\n", fmt(*x), fmt(*y)));
                 }
@@ -1263,6 +1268,9 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 }
                 Command::SetFontSize(size) => {
                     current_font_size = *size;
+                }
+                Command::SetTextRenderingMode(mode) => {
+                    out.push_str(&format!("{} Tr\n", (*mode).min(7)));
                 }
                 Command::ClipRect {
                     x,
@@ -3018,6 +3026,11 @@ fn render_page(
             Command::Translate(x, y) => {
                 out.push_str(&format!("1 0 0 1 {} {} cm\n", fmt_pt(*x), fmt_pt(*y)));
             }
+            Command::CssTransformOrigin { x, y, inverse } => {
+                let pdf_y = page_height - *y;
+                let (tx, ty) = if *inverse { (-*x, -pdf_y) } else { (*x, pdf_y) };
+                out.push_str(&format!("1 0 0 1 {} {} cm\n", fmt_pt(tx), fmt_pt(ty)));
+            }
             Command::Scale(x, y) => {
                 out.push_str(&format!("{} 0 0 {} 0 0 cm\n", fmt(*x), fmt(*y)));
             }
@@ -3150,6 +3163,9 @@ fn render_page(
             }
             Command::SetFontSize(size) => {
                 current_font_size = *size;
+            }
+            Command::SetTextRenderingMode(mode) => {
+                out.push_str(&format!("{} Tr\n", (*mode).min(7)));
             }
             Command::ClipRect {
                 x,
@@ -4285,6 +4301,27 @@ mod tests {
             page_size: Size::a4(),
             pages: vec![Page { commands }],
         }
+    }
+
+    #[test]
+    fn synthetic_bold_emits_fill_stroke_for_one_text_run() {
+        let doc = one_page_document(vec![
+            Command::SetFontName("Helvetica".to_string()),
+            Command::SetFontSize(Pt::from_f32(12.0)),
+            Command::SaveState,
+            Command::SetLineWidth(Pt::from_f32(0.5)),
+            Command::SetTextRenderingMode(2),
+            Command::DrawString {
+                x: Pt::from_f32(10.0),
+                y: Pt::from_f32(20.0),
+                text: "Bold".to_string(),
+            },
+            Command::RestoreState,
+        ]);
+        let bytes = document_to_pdf(&doc).expect("render synthetic bold pdf");
+        let content = page_content_bytes(&bytes);
+        assert_eq!(count_token(&content, b"2 Tr"), 1);
+        assert_eq!(count_token(&content, b"(Bold) Tj"), 1);
     }
 
     fn count_token(bytes: &[u8], token: &[u8]) -> usize {
