@@ -1346,6 +1346,7 @@ struct StyleDelta {
     empty_cells_hide: Option<bool>,
     visibility: Option<VisibilitySpec>,
     border_radius: Option<BorderRadiiSpec>,
+    border_radius_var: Option<String>,
     outline_width: Option<LengthSpec>,
     outline_offset: Option<LengthSpec>,
     outline_offset_var: Option<String>,
@@ -1858,6 +1859,7 @@ pub struct ComputedStyle {
     pub table_layout: TableLayoutMode,
     pub empty_cells_hide: bool,
     pub border_radius: BorderRadiiSpec,
+    pending_border_radius_var: Option<String>,
     pub outline_width: LengthSpec,
     pub outline_offset: LengthSpec,
     pub outline_style: OutlineLineStyle,
@@ -3420,6 +3422,7 @@ impl StyleResolver {
             table_layout: TableLayoutMode::Auto,
             empty_cells_hide: false,
             border_radius: BorderRadiiSpec::zero(),
+            pending_border_radius_var: None,
             outline_width: LengthSpec::Absolute(Pt::from_f32(1.5)),
             outline_offset: LengthSpec::Absolute(Pt::ZERO),
             outline_style: OutlineLineStyle::Solid,
@@ -3617,6 +3620,7 @@ impl StyleResolver {
             table_layout: TableLayoutMode::Auto,
             empty_cells_hide: parent.empty_cells_hide,
             border_radius: BorderRadiiSpec::zero(),
+            pending_border_radius_var: None,
             outline_width: LengthSpec::Absolute(Pt::from_f32(1.5)),
             outline_offset: LengthSpec::Absolute(Pt::ZERO),
             outline_style: OutlineLineStyle::Solid,
@@ -4021,6 +4025,17 @@ impl StyleResolver {
                 unresolved.push(name);
             }
         }
+        if let Some(name) = computed.pending_border_radius_var.clone() {
+            if resolve_custom_border_radius_from_maps(
+                &computed.custom_color_refs,
+                &computed.custom_raw_values,
+                &name,
+            )
+            .is_none()
+            {
+                unresolved.push(name);
+            }
+        }
         if let Some(name) = computed.pending_translate_var.clone() {
             if resolve_custom_transform_ops_from_maps(
                 &computed.custom_color_refs,
@@ -4345,6 +4360,7 @@ impl StyleResolver {
             table_layout: TableLayoutMode::Auto,
             empty_cells_hide: parent.empty_cells_hide,
             border_radius: BorderRadiiSpec::zero(),
+            pending_border_radius_var: None,
             outline_width: LengthSpec::Absolute(Pt::from_f32(1.5)),
             outline_offset: LengthSpec::Absolute(Pt::ZERO),
             outline_style: OutlineLineStyle::Solid,
@@ -6285,8 +6301,13 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
         }
         "orphans" | "widows" => apply_native_pagination_count(&name, raw, delta),
         "border-radius" => {
+            delta.border_radius_var = None;
             if let Some(value) = parse_border_radius_str(raw) {
                 delta.border_radius = Some(value);
+                true
+            } else if raw.to_ascii_lowercase().contains("var(") {
+                delta.border_radius = None;
+                delta.border_radius_var = Some(raw.trim().to_ascii_lowercase());
                 true
             } else {
                 false
@@ -12084,6 +12105,12 @@ fn apply_delta(
     }
     if let Some(radius) = &delta.border_radius {
         computed.border_radius = *radius;
+        computed.pending_border_radius_var = None;
+    }
+    if delta.border_radius.is_none() {
+        if let Some(var) = &delta.border_radius_var {
+            computed.pending_border_radius_var = Some(var.clone());
+        }
     }
     if let Some(shadow) = &delta.box_shadow {
         computed.box_shadow = Some(shadow.clone());
@@ -15085,6 +15112,87 @@ fn resolve_custom_transform_ops_from_maps(
     )
 }
 
+fn resolve_custom_border_radius_from_maps(
+    custom_refs: &HashMap<String, String>,
+    custom_raw_values: &HashMap<String, String>,
+    expr: &str,
+) -> Option<BorderRadiiSpec> {
+    let mut stack: Vec<String> = Vec::new();
+    resolve_custom_border_radius_from_maps_inner(
+        custom_refs,
+        custom_raw_values,
+        expr,
+        0,
+        &mut stack,
+    )
+}
+
+fn resolve_custom_border_radius_from_maps_inner(
+    custom_refs: &HashMap<String, String>,
+    custom_raw_values: &HashMap<String, String>,
+    expr: &str,
+    depth: usize,
+    stack: &mut Vec<String>,
+) -> Option<BorderRadiiSpec> {
+    if depth > 16 {
+        return None;
+    }
+    let expr = expr.trim();
+    if expr.is_empty() {
+        return None;
+    }
+    if let Some((name, fallback)) = parse_var_function(expr) {
+        if let Some(value) = resolve_custom_border_radius_from_maps_inner(
+            custom_refs,
+            custom_raw_values,
+            &name,
+            depth + 1,
+            stack,
+        ) {
+            return Some(value);
+        }
+        if let Some(fallback_expr) = fallback {
+            return resolve_custom_border_radius_from_maps_inner(
+                custom_refs,
+                custom_raw_values,
+                &fallback_expr,
+                depth + 1,
+                stack,
+            );
+        }
+        return None;
+    }
+    if expr.starts_with("--") {
+        let key = expr.to_ascii_lowercase();
+        if stack.iter().any(|entry| entry == &key) {
+            return None;
+        }
+        stack.push(key.clone());
+        let resolved = if let Some(raw) = custom_raw_values.get(&key) {
+            resolve_custom_border_radius_from_maps_inner(
+                custom_refs,
+                custom_raw_values,
+                raw,
+                depth + 1,
+                stack,
+            )
+        } else if let Some(next) = custom_refs.get(&key) {
+            resolve_custom_border_radius_from_maps_inner(
+                custom_refs,
+                custom_raw_values,
+                next,
+                depth + 1,
+                stack,
+            )
+        } else {
+            None
+        };
+        stack.pop();
+        return resolved;
+    }
+    parse_border_radius_str(expr)
+}
+
 fn resolve_custom_transform_ops_from_maps_inner(
     custom_refs: &HashMap<String, String>,
     custom_raw_values: &HashMap<String, String>,
@@ -15266,6 +15374,15 @@ fn resolve_pending_vars(style: &mut ComputedStyle) {
             resolve_custom_length_from_maps(&style.custom_lengths, &style.custom_color_refs, &name)
         {
             style.outline_offset = normalize_length_spec(spec, style.outline_offset);
+        }
+    }
+    if let Some(name) = style.pending_border_radius_var.take() {
+        if let Some(radius) = resolve_custom_border_radius_from_maps(
+            &style.custom_color_refs,
+            &style.custom_raw_values,
+            &name,
+        ) {
+            style.border_radius = radius;
         }
     }
     let mut transforms_dirty = false;
@@ -24932,6 +25049,7 @@ impl StyleDelta {
             && self.empty_cells_hide.is_none()
             && self.visibility.is_none()
             && self.border_radius.is_none()
+            && self.border_radius_var.is_none()
             && self.font_name.is_none()
             && self.font_name_var.is_none()
             && self.box_shadow.is_none()
@@ -34536,7 +34654,9 @@ mod tests {
 
     #[test]
     fn border_radius_four_value_shorthand_maps_corners_clockwise() {
-        let css = ".x { border-radius: 10px 5px 0 2px; }";
+        let css = ".x { border-radius: 10px 5px 0 2px; }
+            .variable { --radius: 8px 4px; border-radius: var(--radius); }
+            .fallback { border-radius: var(--missing, 6px / 3px); }";
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let info = element("div", None, &["x"]);
@@ -34559,6 +34679,32 @@ mod tests {
             LengthSpec::Absolute(Pt::from_f32(1.5))
         );
         assert_eq!(style.border_radius.horizontal, style.border_radius.vertical);
+
+        let variable = element("div", None, &["variable"]);
+        let variable_style = resolver.compute_style(&variable, &root, None, &[]);
+        assert_eq!(
+            variable_style.border_radius.horizontal.top_left,
+            LengthSpec::Absolute(Pt::from_f32(6.0))
+        );
+        assert_eq!(
+            variable_style.border_radius.horizontal.top_right,
+            LengthSpec::Absolute(Pt::from_f32(3.0))
+        );
+        assert_eq!(
+            variable_style.border_radius.horizontal,
+            variable_style.border_radius.vertical
+        );
+
+        let fallback = element("div", None, &["fallback"]);
+        let fallback_style = resolver.compute_style(&fallback, &root, None, &[]);
+        assert_eq!(
+            fallback_style.border_radius.horizontal.top_left,
+            LengthSpec::Absolute(Pt::from_f32(4.5))
+        );
+        assert_eq!(
+            fallback_style.border_radius.vertical.top_left,
+            LengthSpec::Absolute(Pt::from_f32(2.25))
+        );
     }
 
     #[test]
