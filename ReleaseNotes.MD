@@ -55,7 +55,7 @@ The detailed replacement/evidence matrix is in
 
 ## Verification Baseline
 
-The release candidate has a 658-test all-feature Rust suite and a 247-test
+The release candidate has a 658-test all-feature Rust suite and a 248-test
 Python suite. The Rust suite reports 657 passed and one explicit local-font
 opt-in ignored. It also carries the complete 376-test style module and all 86
 full CSS parity fixtures. Local release validation passes the Rust 1.85
