@@ -17,7 +17,12 @@ for fullbleed_candidate in \
     /usr/bin/python3 \
     /usr/local/bin/python3
 do
-    if [ -x "$fullbleed_candidate" ]; then
+    # Cross images may include a target-architecture CPython whose executable
+    # bit is set even though the host runner has no binfmt/QEMU registration.
+    # Use the first interpreter that can actually run the build backend.
+    if [ -x "$fullbleed_candidate" ] \
+        && "$fullbleed_candidate" -c 'import sys' >/dev/null 2>&1
+    then
         fullbleed_python=$fullbleed_candidate
         break
     fi
