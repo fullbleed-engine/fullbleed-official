@@ -54,22 +54,28 @@ pub(crate) mod ffi {
     }
 
     #[repr(C)]
+    pub(crate) struct PyModuleDefSlot {
+        pub(crate) slot: c_int,
+        pub(crate) value: *mut c_void,
+    }
+
+    #[repr(C)]
     pub(crate) struct PyModuleDef {
         pub(crate) m_base: PyModuleDefBase,
         pub(crate) m_name: *const c_char,
         pub(crate) m_doc: *const c_char,
         pub(crate) m_size: PySsizeT,
         pub(crate) m_methods: *mut PyMethodDef,
-        pub(crate) m_slots: *mut c_void,
+        pub(crate) m_slots: *mut PyModuleDefSlot,
         pub(crate) m_traverse: *mut c_void,
         pub(crate) m_clear: *mut c_void,
         pub(crate) m_free: *mut c_void,
     }
 
     pub(crate) const METH_VARARGS: c_int = 0x0001;
-    // PEP 384 fixes this value at 3 for the lifetime of Python 3.
-    pub(crate) const PYTHON_ABI_VERSION: c_int = 3;
-
+    pub(crate) const PY_MOD_EXEC: c_int = 2;
+    pub(crate) const PY_MOD_MULTIPLE_INTERPRETERS: c_int = 3;
+    pub(crate) const PY_MOD_PER_INTERPRETER_GIL_SUPPORTED: usize = 2;
     #[cfg_attr(windows, link(name = "python3"))]
     unsafe extern "C" {
         pub(crate) fn Py_IncRef(object: *mut PyObject);
@@ -92,6 +98,7 @@ pub(crate) mod ffi {
         pub(crate) static mut PyExc_RuntimeError: *mut PyObject;
 
         pub(crate) fn PyImport_ImportModule(name: *const c_char) -> *mut PyObject;
+        pub(crate) fn Py_GetVersion() -> *const c_char;
         pub(crate) fn PyEval_SaveThread() -> *mut PyThreadState;
         pub(crate) fn PyEval_RestoreThread(state: *mut PyThreadState);
 
@@ -181,10 +188,7 @@ pub(crate) mod ffi {
             name: *const c_char,
         ) -> *mut c_void;
 
-        pub(crate) fn PyModule_Create2(
-            definition: *mut PyModuleDef,
-            api_version: c_int,
-        ) -> *mut PyObject;
+        pub(crate) fn PyModuleDef_Init(definition: *mut PyModuleDef) -> *mut PyObject;
     }
 }
 

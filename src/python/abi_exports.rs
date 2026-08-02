@@ -1,6 +1,6 @@
 use super::*;
 use crate::python_abi::{self, FromPyObject, IntoPyValue, ffi};
-use std::ffi::c_void;
+use std::ffi::{CStr, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 use std::sync::{Mutex, MutexGuard, TryLockError};
@@ -883,7 +883,29 @@ unsafe extern "C" fn native_dispatch(
     }
 }
 
-fn initialize_module() -> PyResult<PyObject> {
+unsafe extern "C" fn execute_module(_module: *mut ffi::PyObject) -> i32 {
+    0
+}
+
+fn python_runtime_at_least(required_major: u32, required_minor: u32) -> bool {
+    let version_pointer = unsafe { ffi::Py_GetVersion() };
+    if version_pointer.is_null() {
+        return false;
+    }
+    let Ok(version) = unsafe { CStr::from_ptr(version_pointer) }.to_str() else {
+        return false;
+    };
+    let mut parts = version.split('.');
+    let Some(major) = parts.next().and_then(|part| part.parse::<u32>().ok()) else {
+        return false;
+    };
+    let Some(minor) = parts.next().and_then(|part| part.parse::<u32>().ok()) else {
+        return false;
+    };
+    (major, minor) >= (required_major, required_minor)
+}
+
+fn initialize_module() -> PyResult<*mut ffi::PyObject> {
     let methods = Box::leak(Box::new([
         ffi::PyMethodDef {
             ml_name: c"_dispatch".as_ptr(),
@@ -898,6 +920,23 @@ fn initialize_module() -> PyResult<PyObject> {
             ml_doc: ptr::null(),
         },
     ]));
+    let mut slots = vec![ffi::PyModuleDefSlot {
+        slot: ffi::PY_MOD_EXEC,
+        value: execute_module as *const () as *mut c_void,
+    }];
+    // The wheel targets Python 3.10's stable ABI, where slot 3 is unknown. Add
+    // the multiple-interpreters declaration only when the runtime supports it.
+    if python_runtime_at_least(3, 12) {
+        slots.push(ffi::PyModuleDefSlot {
+            slot: ffi::PY_MOD_MULTIPLE_INTERPRETERS,
+            value: ffi::PY_MOD_PER_INTERPRETER_GIL_SUPPORTED as *mut c_void,
+        });
+    }
+    slots.push(ffi::PyModuleDefSlot {
+        slot: 0,
+        value: ptr::null_mut(),
+    });
+    let slots = Box::leak(slots.into_boxed_slice());
     let definition = Box::leak(Box::new(ffi::PyModuleDef {
         m_base: ffi::PyModuleDefBase {
             ob_base: ffi::PyObjectHead {
@@ -910,22 +949,30 @@ fn initialize_module() -> PyResult<PyObject> {
         },
         m_name: c"_fullbleed".as_ptr(),
         m_doc: c"Fullbleed's dependency-free CPython stable-ABI boundary.".as_ptr(),
-        m_size: -1,
+        m_size: 0,
         m_methods: methods.as_mut_ptr(),
-        m_slots: ptr::null_mut(),
+        m_slots: slots.as_mut_ptr(),
         m_traverse: ptr::null_mut(),
         m_clear: ptr::null_mut(),
         m_free: ptr::null_mut(),
     }));
-    let module_pointer = unsafe { ffi::PyModule_Create2(definition, ffi::PYTHON_ABI_VERSION) };
-    unsafe { Bound::<PyAny>::from_owned_ptr(module_pointer) }.map(Bound::unbind)
+    let definition_pointer = unsafe { ffi::PyModuleDef_Init(definition) };
+    if definition_pointer.is_null() {
+        Err(PyErr::fetch())
+    } else {
+        Ok(definition_pointer)
+    }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn PyInit__fullbleed() -> *mut ffi::PyObject {
     let result = catch_unwind(AssertUnwindSafe(initialize_module));
     match result {
-        Ok(result) => unsafe { python_abi::result_to_raw(result) },
+        Ok(Ok(definition)) => definition,
+        Ok(Err(error)) => {
+            unsafe { error.restore() };
+            ptr::null_mut()
+        }
         Err(_) => unsafe {
             python_abi::result_to_raw::<PyObject>(Err(PyErr::runtime_error(
                 "panic while initializing FullBleed's native Python module",
