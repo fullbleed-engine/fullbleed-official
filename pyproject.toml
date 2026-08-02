@@ -1,10 +1,11 @@
 [build-system]
-requires = ["maturin>=1.9,<2.0"]
-build-backend = "maturin"
+requires = []
+build-backend = "fullbleed_build_backend"
+backend-path = ["build_backend"]
 
 [project]
 name = "fullbleed"
-version = "1.6.2"
+version = "2.0.0"
 description = "Deterministic static HTML/CSS-to-PDF renderer built in Rust"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -48,20 +49,24 @@ Documentation = "https://github.com/fullbleed-engine/fullbleed-official#readme"
 Issues = "https://github.com/fullbleed-engine/fullbleed-official/issues"
 
 [project.optional-dependencies]
-api = [
-    "fastapi>=0.115,<1.0",
-    "uvicorn>=0.30,<1.0",
-    "httpx>=0.27,<1.0",
-]
+# Compatibility name retained for existing `fullbleed[api]` consumers. The
+# shipped package never contained the ignored Escambia HTTP prototype.
+api = []
 
-[tool.maturin]
-bindings = "pyo3"
+[tool.fullbleed-build]
 features = ["python", "svg_raster"]
 python-source = "python"
 python-packages = ["fullbleed", "fullbleed_assets", "fullbleed_cli"]
 module-name = "fullbleed._fullbleed"
-include = ["python/fullbleed/**", "python/fullbleed_assets/**", "python/fullbleed_cli/**"]
+abi-tag = "cp310-abi3"
 strip = true
+
+[tool.fullbleed-build.wheel-resources]
+"fullbleed/specs/fullbleed.audit_registry.v1.yaml" = "docs/specs/fullbleed.audit_registry.v1.yaml"
+"fullbleed/specs/fullbleed.a11y.verify.v1.schema.json" = "docs/specs/fullbleed.a11y.verify.v1.schema.json"
+"fullbleed/specs/fullbleed.pmr.v1.schema.json" = "docs/specs/fullbleed.pmr.v1.schema.json"
+"fullbleed/specs/wcag20aa_registry.v1.yaml" = "docs/specs/wcag20aa_registry.v1.yaml"
+"fullbleed/specs/section508_html_registry.v1.yaml" = "docs/specs/section508_html_registry.v1.yaml"
 
 [tool.pytest.ini_options]
 addopts = ["--ignore-glob=*.txt"]

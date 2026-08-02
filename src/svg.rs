@@ -1,48 +1,28 @@
 use crate::Canvas;
+use crate::css_native::{self, AtRuleBlock, Declaration, DeclarationBlock, Rule as CssRule};
+use crate::flowable::{FilterDropShadowSpec, PaintFilterSpec};
 use crate::types::{Color, Pt};
-use lightningcss::printer::PrinterOptions;
-use lightningcss::properties::Property;
-use lightningcss::properties::svg::{
-    SVGPaint, SVGPaintFallback, StrokeDasharray, StrokeLinecap, StrokeLinejoin,
-};
-use lightningcss::rules::CssRule;
-use lightningcss::stylesheet::{ParserOptions, StyleAttribute, StyleSheet};
-use lightningcss::traits::ToCss;
-use lightningcss::values::alpha::AlphaValue;
-use lightningcss::values::color::{CssColor, SRGB};
-use lightningcss::values::shape::FillRule;
+use crate::xml::{ContentNode as XmlContentNode, Document as XmlDocument, Node as XmlNode};
 
 // Lightweight detection for SVG features that our vector compiler does not support yet.
 // When present, we can optionally fall back to rasterization.
 pub(crate) fn svg_needs_raster_fallback(svg_xml: &str) -> bool {
-    let Ok(doc) = roxmltree::Document::parse(svg_xml) else {
+    let Ok(doc) = XmlDocument::parse(svg_xml) else {
         return false;
     };
 
     for node in doc.descendants().filter(|n| n.is_element()) {
         let name = node.tag_name().name();
         match name {
-            // Text and HTML-in-SVG are not supported in our vector subset.
-            "text" | "foreignObject" => return true,
             // Filter/mask pipelines are raster-only for us.
             "filter" | "mask" => return true,
-            // Pattern/marker/symbol are not implemented in our subset.
-            "pattern" | "marker" | "symbol" => return true,
+            // Pattern and marker paint servers are not implemented in our subset.
+            "pattern" | "marker" => return true,
             _ => {}
         }
 
         if node.attribute("mask").is_some() || node.attribute("filter").is_some() {
             return true;
-        }
-
-        if name == "image" {
-            if let Some(transform) = node.attribute("transform") {
-                // Any rotation/skew/matrix on <image> would require a general image matrix draw.
-                let t = transform.to_ascii_lowercase();
-                if t.contains("rotate") || t.contains("skew") || t.contains("matrix") {
-                    return true;
-                }
-            }
         }
     }
 
@@ -51,42 +31,20 @@ pub(crate) fn svg_needs_raster_fallback(svg_xml: &str) -> bool {
 
 #[cfg(feature = "svg_raster")]
 pub(crate) fn rasterize_svg_to_data_uri(svg_xml: &str, width: Pt, height: Pt) -> Option<String> {
-    use base64::Engine;
-    use image::ColorType;
-    use image::codecs::png::PngEncoder;
-    use resvg::{tiny_skia, usvg};
-
-    let opt = usvg::Options::default();
-    let mut tree = usvg::Tree::from_str(svg_xml, &opt).ok()?;
-    let mut fontdb = usvg::fontdb::Database::new();
-    fontdb.load_system_fonts();
-    tree.postprocess(usvg::PostProcessingSteps::default(), &fontdb);
-
-    let mut w = width.to_f32().round().max(1.0) as u32;
-    let mut h = height.to_f32().round().max(1.0) as u32;
-    if w == 0 || h == 0 {
-        let size = tree.size;
-        w = size.width().ceil().max(1.0) as u32;
-        h = size.height().ceil().max(1.0) as u32;
+    let width = width.max(Pt::from_f32(1.0));
+    let height = height.max(Pt::from_f32(1.0));
+    let mut canvas = Canvas::new(crate::types::Size { width, height });
+    let compiled = compile_svg(svg_xml, width, height);
+    if compiled.is_empty() {
+        return None;
     }
-
-    let mut pixmap = tiny_skia::Pixmap::new(w, h)?;
-    let source_size = tree.size.to_int_size();
-    let transform = tiny_skia::Transform::from_scale(
-        w as f32 / source_size.width().max(1) as f32,
-        h as f32 / source_size.height().max(1) as f32,
-    );
-    resvg::render(&tree, transform, &mut pixmap.as_mut());
-
-    let data = pixmap.data().to_vec();
-    let mut png = Vec::new();
-    let encoder = PngEncoder::new(&mut png);
-    use image::ImageEncoder;
-    encoder
-        .write_image(&data, w, h, ColorType::Rgba8.into())
-        .ok()?;
-
-    let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+    render_compiled_items(&compiled, &mut canvas, Pt::ZERO, Pt::ZERO);
+    let document = canvas.finish();
+    let png = crate::raster::document_to_png_pages(&document, 72, None, true)
+        .ok()?
+        .into_iter()
+        .next()?;
+    let b64 = crate::base64::encode_standard(&png);
     Some(format!("data:image/png;base64,{}", b64))
 }
 
@@ -108,8 +66,8 @@ pub(crate) fn rasterize_svg_to_data_uri(_svg_xml: &str, _width: Pt, _height: Pt)
 // - presentation attributes + style="" for: fill, stroke, stroke-width, stroke-linecap, stroke-linejoin
 // - transform="" on elements: translate, scale, rotate, matrix
 //
-// Not supported (yet):
-// - <text>, <clipPath>, <mask>, <filter>, <foreignObject>, arcs (A/a), gradients
+// Still handled outside the native vector path:
+// - <mask>, <filter>, <foreignObject>
 
 #[derive(Debug, Clone, Copy)]
 struct Matrix {
@@ -157,8 +115,7 @@ impl Matrix {
 
     fn rotate(deg: f32) -> Self {
         let rad = deg.to_radians();
-        let s = libm::sinf(rad);
-        let c = libm::cosf(rad);
+        let (s, c) = crate::math::sin_cos(rad);
         Self {
             a: c,
             b: s,
@@ -191,7 +148,7 @@ impl Matrix {
     fn scale_factor(self) -> f32 {
         // Approx: area scale -> sqrt(|det|). Good enough for scaling stroke widths in our subset.
         let det = self.a * self.d - self.b * self.c;
-        libm::sqrtf(det.abs()).max(0.0)
+        crate::math::sqrt(det.abs()).max(0.0)
     }
 }
 
@@ -219,6 +176,21 @@ struct SvgStyle {
     fill_opacity: f32,
     stroke_opacity: f32,
     fill_shading: Option<crate::types::Shading>,
+    font_family: String,
+    font_size: f32,
+    font_weight: u16,
+    font_italic: bool,
+    text_anchor: TextAnchor,
+    marker_start: Option<String>,
+    marker_mid: Option<String>,
+    marker_end: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextAnchor {
+    Start,
+    Middle,
+    End,
 }
 
 impl SvgStyle {
@@ -243,6 +215,14 @@ impl SvgStyle {
             fill_opacity: 1.0,
             stroke_opacity: 1.0,
             fill_shading: None,
+            font_family: "Helvetica".to_string(),
+            font_size: 16.0,
+            font_weight: 400,
+            font_italic: false,
+            text_anchor: TextAnchor::Start,
+            marker_start: None,
+            marker_mid: None,
+            marker_end: None,
         }
     }
 }
@@ -266,7 +246,7 @@ struct SvgSelector {
 #[derive(Debug, Clone)]
 struct SvgCssRule {
     selector: SvgSelector,
-    declarations: String,
+    declarations: DeclarationBlock,
     order: usize,
 }
 
@@ -299,16 +279,47 @@ pub(crate) struct CompiledImage {
     width: f32,
     height: f32,
     source: String,
+    opacity: f32,
+    transform: Option<Matrix>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CompiledText {
+    x: f32,
+    y: f32,
+    text: String,
+    font_name: String,
+    font_size: f32,
+    fill: Color,
+    opacity: f32,
+    anchor: TextAnchor,
+    transform: Matrix,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CompiledMask {
+    segs: Vec<PathSeg>,
+    evenodd: bool,
+    paints_anything: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CompiledGroup {
+    items: Vec<CompiledItem>,
+    filter: Option<PaintFilterSpec>,
+    mask: Option<CompiledMask>,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) enum CompiledItem {
     Path(CompiledPath),
     Image(CompiledImage),
+    Text(CompiledText),
+    Group(CompiledGroup),
 }
 
 pub(crate) fn compile_svg(svg_xml: &str, width: Pt, height: Pt) -> Vec<CompiledItem> {
-    let Ok(doc) = roxmltree::Document::parse(svg_xml) else {
+    let Ok(doc) = XmlDocument::parse(svg_xml) else {
         return Vec::new();
     };
     let Some(root) = doc
@@ -321,12 +332,16 @@ pub(crate) fn compile_svg(svg_xml: &str, width: Pt, height: Pt) -> Vec<CompiledI
     let stylesheet = extract_svg_stylesheet(&doc);
     let gradients = extract_gradients(&doc, &stylesheet);
     let id_map = build_id_map(&doc);
-    let view_box = parse_viewbox(root.attribute("viewBox"));
+    let view_box = parse_viewbox(
+        root.attribute("viewBox")
+            .or_else(|| root.attribute("viewbox")),
+    );
     let viewport = viewbox_to_viewport_matrix(view_box, width.to_f32(), height.to_f32());
     let base = viewport;
 
     let style = SvgStyle::default();
     let mut out = Vec::new();
+    let mut resolving_ids = Vec::new();
     compile_element(
         &mut out,
         root,
@@ -335,6 +350,7 @@ pub(crate) fn compile_svg(svg_xml: &str, width: Pt, height: Pt) -> Vec<CompiledI
         &gradients,
         &id_map,
         &stylesheet,
+        &mut resolving_ids,
     );
     out
 }
@@ -344,16 +360,141 @@ pub(crate) fn render_compiled_items(items: &[CompiledItem], canvas: &mut Canvas,
         match it {
             CompiledItem::Path(path) => draw_compiled_path(canvas, path, x, y),
             CompiledItem::Image(img) => {
-                canvas.draw_image(
-                    x + Pt::from_f32(img.x),
-                    y + Pt::from_f32(img.y),
-                    Pt::from_f32(img.width),
-                    Pt::from_f32(img.height),
-                    img.source.clone(),
-                );
+                canvas.save_state();
+                canvas.set_opacity(img.opacity, img.opacity);
+                if let Some(transform) = img.transform {
+                    concat_top_left_matrix(canvas, transform, x, y);
+                    canvas.draw_image(
+                        Pt::from_f32(img.x),
+                        Pt::from_f32(img.y),
+                        Pt::from_f32(img.width),
+                        Pt::from_f32(img.height),
+                        img.source.clone(),
+                    );
+                } else {
+                    canvas.draw_image(
+                        x + Pt::from_f32(img.x),
+                        y + Pt::from_f32(img.y),
+                        Pt::from_f32(img.width),
+                        Pt::from_f32(img.height),
+                        img.source.clone(),
+                    );
+                }
+                canvas.restore_state();
             }
+            CompiledItem::Text(text) => draw_compiled_text(canvas, text, x, y),
+            CompiledItem::Group(group) => draw_compiled_group(canvas, group, x, y),
         }
     }
+}
+
+fn emit_path(canvas: &mut Canvas, segs: &[PathSeg], x_off: Pt, y_off: Pt) {
+    for seg in segs {
+        match *seg {
+            PathSeg::MoveTo(px, py) => {
+                canvas.move_to(x_off + Pt::from_f32(px), y_off + Pt::from_f32(py))
+            }
+            PathSeg::LineTo(px, py) => {
+                canvas.line_to(x_off + Pt::from_f32(px), y_off + Pt::from_f32(py))
+            }
+            PathSeg::CurveTo(x1, y1, x2, y2, x3, y3) => {
+                canvas.curve_to(
+                    x_off + Pt::from_f32(x1),
+                    y_off + Pt::from_f32(y1),
+                    x_off + Pt::from_f32(x2),
+                    y_off + Pt::from_f32(y2),
+                    x_off + Pt::from_f32(x3),
+                    y_off + Pt::from_f32(y3),
+                );
+            }
+            PathSeg::Close => canvas.close_path(),
+        }
+    }
+}
+
+fn draw_compiled_group(canvas: &mut Canvas, group: &CompiledGroup, x: Pt, y: Pt) {
+    if group
+        .mask
+        .as_ref()
+        .is_some_and(|mask| !mask.paints_anything)
+    {
+        return;
+    }
+    canvas.save_state();
+    if let Some(mask) = &group.mask {
+        emit_path(canvas, &mask.segs, x, y);
+        canvas.clip_path(mask.evenodd);
+    }
+
+    if let Some(filter) = &group.filter {
+        let size = canvas.page_size();
+        let mut form_canvas = Canvas::new(size);
+        render_compiled_items(&group.items, &mut form_canvas, x, y);
+        let document = form_canvas.finish();
+        let commands = document
+            .pages
+            .first()
+            .map(|page| page.commands.clone())
+            .unwrap_or_default();
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        format!("{group:?}").hash(&mut hasher);
+        let resource_id = format!("svg-effect:{:016x}", hasher.finish());
+        canvas.define_isolated_form(resource_id.clone(), size.width, size.height, commands);
+        canvas.draw_filtered_form(
+            Pt::ZERO,
+            Pt::ZERO,
+            size.width,
+            size.height,
+            resource_id,
+            filter.clone(),
+        );
+    } else {
+        render_compiled_items(&group.items, canvas, x, y);
+    }
+    canvas.restore_state();
+}
+
+fn concat_top_left_matrix(canvas: &mut Canvas, transform: Matrix, x: Pt, y: Pt) {
+    // Canvas transforms operate in PDF's bottom-left coordinate system. Conjugating
+    // the SVG top-left matrix by the page-height flip keeps PDF and raster output
+    // identical for rotations, skews, and general affine matrices.
+    let absolute = Matrix::translate(x.to_f32(), y.to_f32()).mul(transform);
+    let page_height = canvas.page_size().height.to_f32();
+    canvas.concat_matrix(
+        absolute.a,
+        -absolute.b,
+        -absolute.c,
+        absolute.d,
+        Pt::from_f32(absolute.c * page_height + absolute.e),
+        Pt::from_f32(page_height * (1.0 - absolute.d) - absolute.f),
+    );
+}
+
+fn draw_compiled_text(canvas: &mut Canvas, text: &CompiledText, x: Pt, y: Pt) {
+    if text.text.is_empty() || text.font_size <= 0.0 || text.opacity <= 0.0 {
+        return;
+    }
+
+    let approximate_width = text.font_size * 0.6 * text.text.chars().count() as f32;
+    let anchor_offset = match text.anchor {
+        TextAnchor::Start => 0.0,
+        TextAnchor::Middle => approximate_width * 0.5,
+        TextAnchor::End => approximate_width,
+    };
+
+    canvas.save_state();
+    concat_top_left_matrix(canvas, text.transform, x, y);
+    canvas.set_fill_color(text.fill);
+    canvas.set_opacity(text.opacity, text.opacity);
+    canvas.set_font_name(&text.font_name);
+    canvas.set_font_size(Pt::from_f32(text.font_size));
+    canvas.draw_string(
+        Pt::from_f32(text.x - anchor_offset),
+        Pt::from_f32(text.y - text.font_size),
+        text.text.clone(),
+    );
+    canvas.restore_state();
 }
 
 #[cfg(test)]
@@ -371,12 +512,63 @@ pub(crate) fn render_svg_to_canvas(
 
 fn compile_element(
     out: &mut Vec<CompiledItem>,
-    node: roxmltree::Node<'_, '_>,
+    node: XmlNode<'_>,
     ctm: Matrix,
     style: &SvgStyle,
     gradients: &std::collections::HashMap<String, GradientDef>,
-    id_map: &std::collections::HashMap<String, roxmltree::Node<'_, '_>>,
+    id_map: &std::collections::HashMap<String, XmlNode<'_>>,
     stylesheet: &SvgStylesheet,
+    resolving_ids: &mut Vec<String>,
+) {
+    let mut effect_ctm = ctm;
+    if let Some(transform) = node.attribute("transform") {
+        effect_ctm = effect_ctm.mul(parse_transform(transform));
+    }
+    let filter = compile_filter_for_node(node, effect_ctm, id_map);
+    let mask = compile_mask_for_node(node, effect_ctm, id_map, stylesheet);
+    if filter.is_none() && mask.is_none() {
+        compile_element_inner(
+            out,
+            node,
+            ctm,
+            style,
+            gradients,
+            id_map,
+            stylesheet,
+            resolving_ids,
+        );
+        return;
+    }
+
+    let mut items = Vec::new();
+    compile_element_inner(
+        &mut items,
+        node,
+        ctm,
+        style,
+        gradients,
+        id_map,
+        stylesheet,
+        resolving_ids,
+    );
+    if !items.is_empty() {
+        out.push(CompiledItem::Group(CompiledGroup {
+            items,
+            filter,
+            mask,
+        }));
+    }
+}
+
+fn compile_element_inner(
+    out: &mut Vec<CompiledItem>,
+    node: XmlNode<'_>,
+    ctm: Matrix,
+    style: &SvgStyle,
+    gradients: &std::collections::HashMap<String, GradientDef>,
+    id_map: &std::collections::HashMap<String, XmlNode<'_>>,
+    stylesheet: &SvgStylesheet,
+    resolving_ids: &mut Vec<String>,
 ) {
     if !node.is_element() {
         return;
@@ -405,73 +597,162 @@ fn compile_element(
                     gradients,
                     id_map,
                     stylesheet,
+                    resolving_ids,
                 );
             }
         }
         "use" => {
-            // Minimal <use> support: href/xlink:href with "#id", optional x/y.
             if let Some(id) = href_id(node) {
+                if resolving_ids.iter().any(|active| active == &id) {
+                    return;
+                }
                 if let Some(target) = id_map.get(&id).copied() {
                     let x = parse_number(node.attribute("x").unwrap_or("0")).unwrap_or(0.0);
                     let y = parse_number(node.attribute("y").unwrap_or("0")).unwrap_or(0.0);
                     let use_ctm = local_ctm.mul(Matrix::translate(x, y));
-                    compile_element(
-                        out,
-                        target,
-                        use_ctm,
-                        &local_style,
-                        gradients,
-                        id_map,
-                        stylesheet,
-                    );
+                    resolving_ids.push(id);
+                    if target.tag_name().name().eq_ignore_ascii_case("symbol") {
+                        compile_symbol_use(
+                            out,
+                            node,
+                            target,
+                            use_ctm,
+                            &local_style,
+                            gradients,
+                            id_map,
+                            stylesheet,
+                            resolving_ids,
+                        );
+                    } else {
+                        compile_element(
+                            out,
+                            target,
+                            use_ctm,
+                            &local_style,
+                            gradients,
+                            id_map,
+                            stylesheet,
+                            resolving_ids,
+                        );
+                    }
+                    resolving_ids.pop();
                 }
             }
+        }
+        "symbol" => {
+            // Symbols establish a reusable viewport and only paint through <use>.
+        }
+        "text" => {
+            compile_text_element(out, node, local_ctm, &local_style, stylesheet);
         }
         "path" => {
             if let Some(d) = node.attribute("d") {
                 let segs = parse_path_data(d);
-                let clip = compile_clip_for_node(node, local_ctm, id_map);
-                push_compiled_path(out, &segs, &local_style, local_ctm, gradients, clip);
+                compile_graphic_path(
+                    out,
+                    node,
+                    &segs,
+                    &local_style,
+                    local_ctm,
+                    gradients,
+                    id_map,
+                    stylesheet,
+                    resolving_ids,
+                );
             }
         }
         "rect" => {
             if let Some(segs) = rect_to_path(node) {
-                let clip = compile_clip_for_node(node, local_ctm, id_map);
-                push_compiled_path(out, &segs, &local_style, local_ctm, gradients, clip);
+                compile_graphic_path(
+                    out,
+                    node,
+                    &segs,
+                    &local_style,
+                    local_ctm,
+                    gradients,
+                    id_map,
+                    stylesheet,
+                    resolving_ids,
+                );
             }
         }
         "circle" => {
             if let Some(segs) = circle_to_path(node) {
-                let clip = compile_clip_for_node(node, local_ctm, id_map);
-                push_compiled_path(out, &segs, &local_style, local_ctm, gradients, clip);
+                compile_graphic_path(
+                    out,
+                    node,
+                    &segs,
+                    &local_style,
+                    local_ctm,
+                    gradients,
+                    id_map,
+                    stylesheet,
+                    resolving_ids,
+                );
             }
         }
         "ellipse" => {
             if let Some(segs) = ellipse_to_path(node) {
-                let clip = compile_clip_for_node(node, local_ctm, id_map);
-                push_compiled_path(out, &segs, &local_style, local_ctm, gradients, clip);
+                compile_graphic_path(
+                    out,
+                    node,
+                    &segs,
+                    &local_style,
+                    local_ctm,
+                    gradients,
+                    id_map,
+                    stylesheet,
+                    resolving_ids,
+                );
             }
         }
         "line" => {
             if let Some(segs) = line_to_path(node) {
-                let clip = compile_clip_for_node(node, local_ctm, id_map);
-                push_compiled_path(out, &segs, &local_style, local_ctm, gradients, clip);
+                compile_graphic_path(
+                    out,
+                    node,
+                    &segs,
+                    &local_style,
+                    local_ctm,
+                    gradients,
+                    id_map,
+                    stylesheet,
+                    resolving_ids,
+                );
             }
         }
         "polyline" => {
             if let Some(segs) = poly_points_to_path(node, false) {
-                let clip = compile_clip_for_node(node, local_ctm, id_map);
-                push_compiled_path(out, &segs, &local_style, local_ctm, gradients, clip);
+                compile_graphic_path(
+                    out,
+                    node,
+                    &segs,
+                    &local_style,
+                    local_ctm,
+                    gradients,
+                    id_map,
+                    stylesheet,
+                    resolving_ids,
+                );
             }
         }
         "polygon" => {
             if let Some(segs) = poly_points_to_path(node, true) {
-                let clip = compile_clip_for_node(node, local_ctm, id_map);
-                push_compiled_path(out, &segs, &local_style, local_ctm, gradients, clip);
+                compile_graphic_path(
+                    out,
+                    node,
+                    &segs,
+                    &local_style,
+                    local_ctm,
+                    gradients,
+                    id_map,
+                    stylesheet,
+                    resolving_ids,
+                );
             }
         }
         "image" => {
-            // Raster image inside SVG (PNG/JPEG/data URI). We only support axis-aligned transforms for now.
+            // Raster image inside SVG (PNG/JPEG/data URI).
             let href = node
                 .attribute("href")
                 .or_else(|| node.attribute("xlink:href"))
@@ -488,9 +769,16 @@ fn compile_element(
                 return;
             }
 
-            // If the CTM includes rotation/shear, we'd need a matrix-based image draw.
-            // For now, only accept near-axis-aligned matrices.
             if local_ctm.b.abs() > 1e-4 || local_ctm.c.abs() > 1e-4 {
+                out.push(CompiledItem::Image(CompiledImage {
+                    x: q(x),
+                    y: q(y),
+                    width: q(w),
+                    height: q(h),
+                    source: href,
+                    opacity: local_style.fill_opacity.clamp(0.0, 1.0),
+                    transform: Some(local_ctm),
+                }));
                 return;
             }
 
@@ -521,6 +809,8 @@ fn compile_element(
                 width: iw,
                 height: ih,
                 source: href,
+                opacity: local_style.fill_opacity.clamp(0.0, 1.0),
+                transform: None,
             }));
         }
         _ => {
@@ -529,9 +819,457 @@ fn compile_element(
     }
 }
 
-fn build_id_map<'a>(
-    doc: &'a roxmltree::Document<'a>,
-) -> std::collections::HashMap<String, roxmltree::Node<'a, 'a>> {
+fn compile_filter_for_node(
+    node: XmlNode<'_>,
+    ctm: Matrix,
+    id_map: &std::collections::HashMap<String, XmlNode<'_>>,
+) -> Option<PaintFilterSpec> {
+    let id = node.attribute("filter").and_then(parse_url_ref)?;
+    let filter_node = id_map.get(&id).copied()?;
+    if !filter_node.tag_name().name().eq_ignore_ascii_case("filter") {
+        return None;
+    }
+    let mut filter = PaintFilterSpec::identity();
+    compile_filter_subtree(filter_node, ctm.scale_factor(), &mut filter);
+    Some(filter)
+}
+
+fn compile_filter_subtree(node: XmlNode<'_>, scale: f32, filter: &mut PaintFilterSpec) {
+    for child in node.children() {
+        let tag = child.tag_name().name();
+        if tag.eq_ignore_ascii_case("feGaussianBlur") {
+            let deviations = parse_number_list(
+                child
+                    .attribute("stdDeviation")
+                    .or_else(|| child.attribute("stddeviation"))
+                    .unwrap_or("0"),
+            );
+            let sigma = deviations.iter().copied().fold(0.0_f32, f32::max).max(0.0) * scale;
+            filter.blur_radius = filter.blur_radius.max(Pt::from_f32(sigma));
+        } else if tag.eq_ignore_ascii_case("feDropShadow") {
+            let sigma = parse_number_list(
+                child
+                    .attribute("stdDeviation")
+                    .or_else(|| child.attribute("stddeviation"))
+                    .unwrap_or("0"),
+            )
+            .into_iter()
+            .fold(0.0_f32, f32::max)
+            .max(0.0)
+                * scale;
+            let offset_x = child.attribute("dx").and_then(parse_number).unwrap_or(2.0) * scale;
+            let offset_y = child.attribute("dy").and_then(parse_number).unwrap_or(2.0) * scale;
+            let color = child
+                .attribute("flood-color")
+                .and_then(parse_color)
+                .unwrap_or(Color::BLACK);
+            let opacity = child
+                .attribute("flood-opacity")
+                .and_then(parse_number)
+                .unwrap_or(1.0)
+                .clamp(0.0, 1.0);
+            filter.drop_shadows.push(FilterDropShadowSpec {
+                offset_x: Pt::from_f32(offset_x),
+                offset_y: Pt::from_f32(offset_y),
+                blur_radius: Pt::from_f32(sigma),
+                color,
+                opacity,
+                color_is_current_color: false,
+            });
+        } else if tag.eq_ignore_ascii_case("feColorMatrix") {
+            let values = parse_number_list(child.attribute("values").unwrap_or(""));
+            match child.attribute("type").unwrap_or("matrix") {
+                "saturate" => {
+                    if let Some(value) = values.first() {
+                        filter.saturate *= value.max(0.0);
+                    }
+                }
+                value if value.eq_ignore_ascii_case("hueRotate") => {
+                    if let Some(value) = values.first() {
+                        filter.hue_rotate += value.to_radians();
+                    }
+                }
+                _ => {}
+            }
+        } else if tag.eq_ignore_ascii_case("filter") || tag.eq_ignore_ascii_case("g") {
+            compile_filter_subtree(child, scale, filter);
+        }
+    }
+}
+
+fn compile_mask_for_node(
+    node: XmlNode<'_>,
+    ctm: Matrix,
+    id_map: &std::collections::HashMap<String, XmlNode<'_>>,
+    stylesheet: &SvgStylesheet,
+) -> Option<CompiledMask> {
+    let id = node.attribute("mask").and_then(parse_url_ref)?;
+    let mask_node = id_map.get(&id).copied()?;
+    if !mask_node.tag_name().name().eq_ignore_ascii_case("mask") {
+        return None;
+    }
+    let mut positive = Vec::new();
+    let mut negative = Vec::new();
+    let style = SvgStyle::default();
+    compile_mask_subtree(
+        mask_node,
+        ctm,
+        &style,
+        id_map,
+        stylesheet,
+        &mut positive,
+        &mut negative,
+        0,
+    );
+    let paints_anything = !positive.is_empty();
+    positive.extend(negative);
+    Some(CompiledMask {
+        segs: positive,
+        evenodd: true,
+        paints_anything,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compile_mask_subtree(
+    node: XmlNode<'_>,
+    ctm: Matrix,
+    inherited_style: &SvgStyle,
+    id_map: &std::collections::HashMap<String, XmlNode<'_>>,
+    stylesheet: &SvgStylesheet,
+    positive: &mut Vec<PathSeg>,
+    negative: &mut Vec<PathSeg>,
+    depth: usize,
+) {
+    if depth > 32 {
+        return;
+    }
+    let mut style = inherited_style.clone();
+    apply_presentation_and_style(node, stylesheet, &mut style);
+    let mut local_ctm = ctm;
+    if let Some(transform) = node.attribute("transform") {
+        local_ctm = local_ctm.mul(parse_transform(transform));
+    }
+    let tag = node.tag_name().name();
+    if matches!(tag, "mask" | "g" | "svg" | "defs") {
+        for child in node.children() {
+            compile_mask_subtree(
+                child,
+                local_ctm,
+                &style,
+                id_map,
+                stylesheet,
+                positive,
+                negative,
+                depth + 1,
+            );
+        }
+        return;
+    }
+    if tag == "use" {
+        if let Some(id) = href_id(node) {
+            if let Some(target) = id_map.get(&id).copied() {
+                let x = parse_number(node.attribute("x").unwrap_or("0")).unwrap_or(0.0);
+                let y = parse_number(node.attribute("y").unwrap_or("0")).unwrap_or(0.0);
+                compile_mask_subtree(
+                    target,
+                    local_ctm.mul(Matrix::translate(x, y)),
+                    &style,
+                    id_map,
+                    stylesheet,
+                    positive,
+                    negative,
+                    depth + 1,
+                );
+            }
+        }
+        return;
+    }
+
+    let raw = match tag {
+        "path" => node.attribute("d").map(parse_path_data),
+        "rect" => rect_to_path(node),
+        "circle" => circle_to_path(node),
+        "ellipse" => ellipse_to_path(node),
+        "line" => line_to_path(node),
+        "polyline" => poly_points_to_path(node, false),
+        "polygon" => poly_points_to_path(node, true),
+        _ => None,
+    };
+    let Some(raw) = raw else { return };
+    let transformed = transform_path_segs(&raw, local_ctm);
+    let luminance = style
+        .fill
+        .color
+        .map(|color| 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b)
+        .unwrap_or_else(|| {
+            if style.fill.gradient_id.is_some() {
+                1.0
+            } else {
+                0.0
+            }
+        })
+        * style.fill_opacity;
+    if luminance >= 0.5 {
+        positive.extend(transformed);
+    } else {
+        negative.extend(transformed);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compile_symbol_use(
+    out: &mut Vec<CompiledItem>,
+    use_node: XmlNode<'_>,
+    symbol: XmlNode<'_>,
+    use_ctm: Matrix,
+    inherited_style: &SvgStyle,
+    gradients: &std::collections::HashMap<String, GradientDef>,
+    id_map: &std::collections::HashMap<String, XmlNode<'_>>,
+    stylesheet: &SvgStylesheet,
+    resolving_ids: &mut Vec<String>,
+) {
+    let view_box = parse_viewbox(
+        symbol
+            .attribute("viewBox")
+            .or_else(|| symbol.attribute("viewbox")),
+    );
+    let view_box_width = view_box.map(|(_, _, width, _)| width);
+    let view_box_height = view_box.map(|(_, _, _, height)| height);
+    let width = use_node
+        .attribute("width")
+        .and_then(parse_number)
+        .or_else(|| symbol.attribute("width").and_then(parse_number))
+        .or(view_box_width)
+        .unwrap_or(0.0);
+    let height = use_node
+        .attribute("height")
+        .and_then(parse_number)
+        .or_else(|| symbol.attribute("height").and_then(parse_number))
+        .or(view_box_height)
+        .unwrap_or(0.0);
+    if width <= 0.0 || height <= 0.0 {
+        return;
+    }
+
+    let mut symbol_style = inherited_style.clone();
+    apply_presentation_and_style(symbol, stylesheet, &mut symbol_style);
+    let mut symbol_ctm = use_ctm.mul(viewbox_to_viewport_matrix(view_box, width, height));
+    if let Some(transform) = symbol.attribute("transform") {
+        symbol_ctm = symbol_ctm.mul(parse_transform(transform));
+    }
+
+    for child in symbol.children() {
+        compile_element(
+            out,
+            child,
+            symbol_ctm,
+            &symbol_style,
+            gradients,
+            id_map,
+            stylesheet,
+            resolving_ids,
+        );
+    }
+}
+
+fn compile_text_element(
+    out: &mut Vec<CompiledItem>,
+    node: XmlNode<'_>,
+    ctm: Matrix,
+    style: &SvgStyle,
+    stylesheet: &SvgStylesheet,
+) {
+    let mut cursor = TextCursor {
+        x: first_length(node.attribute("x")).unwrap_or(0.0),
+        y: first_length(node.attribute("y")).unwrap_or(0.0),
+    };
+    cursor.x += first_length(node.attribute("dx")).unwrap_or(0.0);
+    cursor.y += first_length(node.attribute("dy")).unwrap_or(0.0);
+    apply_text_anchor_offset(node, style, stylesheet, &mut cursor, true);
+    compile_text_content(out, node, ctm, style, stylesheet, &mut cursor);
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TextCursor {
+    x: f32,
+    y: f32,
+}
+
+fn compile_text_content(
+    out: &mut Vec<CompiledItem>,
+    node: XmlNode<'_>,
+    ctm: Matrix,
+    style: &SvgStyle,
+    stylesheet: &SvgStylesheet,
+    cursor: &mut TextCursor,
+) {
+    for content in node.content() {
+        match content {
+            XmlContentNode::Text(raw) => {
+                let text = collapse_svg_text(raw);
+                if text.trim().is_empty() {
+                    continue;
+                }
+                let Some(fill) = style.fill.color else {
+                    cursor.x += approximate_text_width(&text, style.font_size);
+                    continue;
+                };
+                out.push(CompiledItem::Text(CompiledText {
+                    x: q(cursor.x),
+                    y: q(cursor.y),
+                    text: text.clone(),
+                    font_name: svg_font_name(style),
+                    font_size: q(style.font_size.max(0.0)),
+                    fill,
+                    opacity: style.fill_opacity.clamp(0.0, 1.0),
+                    anchor: TextAnchor::Start,
+                    transform: ctm,
+                }));
+                cursor.x += approximate_text_width(&text, style.font_size);
+            }
+            XmlContentNode::Element(child) => {
+                let tag = child.tag_name().name();
+                if !tag.eq_ignore_ascii_case("tspan") && !tag.eq_ignore_ascii_case("a") {
+                    continue;
+                }
+                let mut child_style = style.clone();
+                apply_presentation_and_style(child, stylesheet, &mut child_style);
+                let mut child_ctm = ctm;
+                if let Some(transform) = child.attribute("transform") {
+                    child_ctm = child_ctm.mul(parse_transform(transform));
+                }
+                let resets_chunk = child.attribute("x").is_some();
+                if let Some(value) = first_length(child.attribute("x")) {
+                    cursor.x = value;
+                }
+                if let Some(value) = first_length(child.attribute("y")) {
+                    cursor.y = value;
+                }
+                cursor.x += first_length(child.attribute("dx")).unwrap_or(0.0);
+                cursor.y += first_length(child.attribute("dy")).unwrap_or(0.0);
+                apply_text_anchor_offset(child, &child_style, stylesheet, cursor, resets_chunk);
+                compile_text_content(out, child, child_ctm, &child_style, stylesheet, cursor);
+            }
+        }
+    }
+}
+
+fn apply_text_anchor_offset(
+    node: XmlNode<'_>,
+    style: &SvgStyle,
+    stylesheet: &SvgStylesheet,
+    cursor: &mut TextCursor,
+    establishes_chunk: bool,
+) {
+    if !establishes_chunk || matches!(style.text_anchor, TextAnchor::Start) {
+        return;
+    }
+    let width = estimate_text_content_width(node, style, stylesheet);
+    cursor.x -= match style.text_anchor {
+        TextAnchor::Start => 0.0,
+        TextAnchor::Middle => width * 0.5,
+        TextAnchor::End => width,
+    };
+}
+
+fn estimate_text_content_width(
+    node: XmlNode<'_>,
+    style: &SvgStyle,
+    stylesheet: &SvgStylesheet,
+) -> f32 {
+    let mut width = 0.0;
+    for content in node.content() {
+        match content {
+            XmlContentNode::Text(raw) => {
+                width += approximate_text_width(&collapse_svg_text(raw), style.font_size);
+            }
+            XmlContentNode::Element(child)
+                if child.tag_name().name().eq_ignore_ascii_case("tspan")
+                    || child.tag_name().name().eq_ignore_ascii_case("a") =>
+            {
+                let mut child_style = style.clone();
+                apply_presentation_and_style(child, stylesheet, &mut child_style);
+                width += estimate_text_content_width(child, &child_style, stylesheet);
+            }
+            XmlContentNode::Element(_) => {}
+        }
+    }
+    width
+}
+
+fn collapse_svg_text(raw: &str) -> String {
+    let mut out = String::new();
+    let mut whitespace = false;
+    for ch in raw.chars() {
+        if ch.is_whitespace() {
+            whitespace = true;
+        } else {
+            if whitespace && !out.is_empty() {
+                out.push(' ');
+            }
+            whitespace = false;
+            out.push(ch);
+        }
+    }
+    if whitespace && !out.is_empty() {
+        out.push(' ');
+    }
+    out
+}
+
+fn approximate_text_width(text: &str, font_size: f32) -> f32 {
+    text.chars().count() as f32 * font_size.max(0.0) * 0.6
+}
+
+fn first_length(value: Option<&str>) -> Option<f32> {
+    value?
+        .split(|ch: char| ch.is_whitespace() || ch == ',')
+        .find(|part| !part.is_empty())
+        .and_then(parse_number)
+}
+
+fn svg_font_name(style: &SvgStyle) -> String {
+    let family = style
+        .font_family
+        .split(',')
+        .next()
+        .unwrap_or("Helvetica")
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'');
+    let compact = family
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect::<String>();
+    let (base, base14) = match compact.as_str() {
+        "arial" | "arialmt" | "helvetica" | "helveticaneue" | "sansserif" | "systemui" => {
+            ("Helvetica".to_string(), true)
+        }
+        "times" | "timesroman" | "timesnewroman" | "serif" => ("Times".to_string(), true),
+        "courier" | "couriernew" | "monospace" => ("Courier".to_string(), true),
+        _ if family.is_empty() => ("Helvetica".to_string(), true),
+        _ => (family.to_string(), false),
+    };
+    let bold = style.font_weight >= 600;
+    match (base14, base.as_str(), bold, style.font_italic) {
+        (true, "Times", false, false) => "Times-Roman".to_string(),
+        (true, "Times", true, false) => "Times-Bold".to_string(),
+        (true, "Times", false, true) => "Times-Italic".to_string(),
+        (true, "Times", true, true) => "Times-BoldItalic".to_string(),
+        (true, _, false, false) => base,
+        (true, _, true, false) => format!("{base}-Bold"),
+        (true, _, false, true) => format!("{base}-Oblique"),
+        (true, _, true, true) => format!("{base}-BoldOblique"),
+        (false, _, false, false) => base,
+        (false, _, true, false) => format!("{base} Bold"),
+        (false, _, false, true) => format!("{base} Italic"),
+        (false, _, true, true) => format!("{base} Bold Italic"),
+    }
+}
+
+fn build_id_map(doc: &XmlDocument) -> std::collections::HashMap<String, XmlNode<'_>> {
     let mut out = std::collections::HashMap::new();
     for node in doc.descendants().filter(|n| n.is_element()) {
         if let Some(id) = node.attribute("id") {
@@ -542,7 +1280,7 @@ fn build_id_map<'a>(
     out
 }
 
-fn href_id(node: roxmltree::Node<'_, '_>) -> Option<String> {
+fn href_id(node: XmlNode<'_>) -> Option<String> {
     // Prefer plain href, then xlink:href.
     let raw = node
         .attribute("href")
@@ -553,6 +1291,523 @@ fn href_id(node: roxmltree::Node<'_, '_>) -> Option<String> {
         return None;
     }
     Some(id.to_string())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compile_graphic_path(
+    out: &mut Vec<CompiledItem>,
+    node: XmlNode<'_>,
+    segs: &[PathSeg],
+    style: &SvgStyle,
+    ctm: Matrix,
+    gradients: &std::collections::HashMap<String, GradientDef>,
+    id_map: &std::collections::HashMap<String, XmlNode<'_>>,
+    stylesheet: &SvgStylesheet,
+    resolving_ids: &mut Vec<String>,
+) {
+    let clip = compile_clip_for_node(node, ctm, id_map);
+    let pattern = style
+        .fill
+        .gradient_id
+        .as_deref()
+        .and_then(|id| id_map.get(id).copied().map(|pattern| (id, pattern)))
+        .filter(|(_, pattern)| pattern.tag_name().name().eq_ignore_ascii_case("pattern"));
+    if let Some((id, pattern)) = pattern {
+        compile_pattern_fill(
+            out,
+            id,
+            pattern,
+            segs,
+            style,
+            ctm,
+            gradients,
+            id_map,
+            stylesheet,
+            resolving_ids,
+        );
+        let mut stroke_only = style.clone();
+        stroke_only.fill.color = None;
+        stroke_only.fill.gradient_id = None;
+        push_compiled_path(out, segs, &stroke_only, ctm, gradients, clip);
+    } else {
+        push_compiled_path(out, segs, style, ctm, gradients, clip);
+    }
+    compile_path_markers(
+        out,
+        segs,
+        style,
+        ctm,
+        gradients,
+        id_map,
+        stylesheet,
+        resolving_ids,
+    );
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PatternUnits {
+    ObjectBoundingBox,
+    UserSpaceOnUse,
+}
+
+fn resolve_pattern_coordinate(
+    raw: Option<&str>,
+    origin: f32,
+    extent: f32,
+    units: PatternUnits,
+    is_extent: bool,
+) -> f32 {
+    let Some(raw) = raw else {
+        return if is_extent { 0.0 } else { origin };
+    };
+    let raw = raw.trim();
+    if let Some(percent) = raw.strip_suffix('%') {
+        let fraction = percent.trim().parse::<f32>().unwrap_or(0.0) / 100.0;
+        return if is_extent {
+            extent * fraction
+        } else {
+            origin + extent * fraction
+        };
+    }
+    let value = parse_number(raw).unwrap_or(0.0);
+    match units {
+        PatternUnits::ObjectBoundingBox => {
+            if is_extent {
+                extent * value
+            } else {
+                origin + extent * value
+            }
+        }
+        PatternUnits::UserSpaceOnUse => value,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compile_pattern_fill(
+    out: &mut Vec<CompiledItem>,
+    id: &str,
+    pattern: XmlNode<'_>,
+    target_segs: &[PathSeg],
+    target_style: &SvgStyle,
+    ctm: Matrix,
+    gradients: &std::collections::HashMap<String, GradientDef>,
+    id_map: &std::collections::HashMap<String, XmlNode<'_>>,
+    stylesheet: &SvgStylesheet,
+    resolving_ids: &mut Vec<String>,
+) {
+    if resolving_ids.iter().any(|active| active == id) {
+        return;
+    }
+    let Some((bbox_x, bbox_y, bbox_width, bbox_height)) = bbox_of_segs(target_segs) else {
+        return;
+    };
+    if bbox_width <= 0.0 || bbox_height <= 0.0 {
+        return;
+    }
+    let units = if pattern
+        .attribute("patternUnits")
+        .or_else(|| pattern.attribute("patternunits"))
+        .is_some_and(|value| value.eq_ignore_ascii_case("userSpaceOnUse"))
+    {
+        PatternUnits::UserSpaceOnUse
+    } else {
+        PatternUnits::ObjectBoundingBox
+    };
+    let tile_origin_x =
+        resolve_pattern_coordinate(pattern.attribute("x"), bbox_x, bbox_width, units, false);
+    let tile_origin_y =
+        resolve_pattern_coordinate(pattern.attribute("y"), bbox_y, bbox_height, units, false);
+    let tile_width =
+        resolve_pattern_coordinate(pattern.attribute("width"), bbox_x, bbox_width, units, true);
+    let tile_height = resolve_pattern_coordinate(
+        pattern.attribute("height"),
+        bbox_y,
+        bbox_height,
+        units,
+        true,
+    );
+    if tile_width <= 0.0
+        || tile_height <= 0.0
+        || !tile_width.is_finite()
+        || !tile_height.is_finite()
+    {
+        return;
+    }
+    let first_x =
+        tile_origin_x + crate::math::floor((bbox_x - tile_origin_x) / tile_width) * tile_width;
+    let first_y =
+        tile_origin_y + crate::math::floor((bbox_y - tile_origin_y) / tile_height) * tile_height;
+    let columns =
+        (crate::math::ceil((bbox_x + bbox_width - first_x) / tile_width) as usize + 1).min(256);
+    let rows =
+        (crate::math::ceil((bbox_y + bbox_height - first_y) / tile_height) as usize + 1).min(256);
+    if columns.saturating_mul(rows) > 16_384 {
+        return;
+    }
+
+    let view_box = parse_viewbox(
+        pattern
+            .attribute("viewBox")
+            .or_else(|| pattern.attribute("viewbox")),
+    );
+    let pattern_transform = pattern
+        .attribute("patternTransform")
+        .or_else(|| pattern.attribute("patterntransform"))
+        .map(parse_transform)
+        .unwrap_or_else(Matrix::identity);
+    let content_units_object_bbox = pattern
+        .attribute("patternContentUnits")
+        .or_else(|| pattern.attribute("patterncontentunits"))
+        .is_some_and(|value| value.eq_ignore_ascii_case("objectBoundingBox"));
+    let mut pattern_style = SvgStyle::default();
+    apply_presentation_and_style(pattern, stylesheet, &mut pattern_style);
+    pattern_style.marker_start = None;
+    pattern_style.marker_mid = None;
+    pattern_style.marker_end = None;
+
+    let mut items = Vec::new();
+    resolving_ids.push(id.to_string());
+    for row in 0..rows {
+        for column in 0..columns {
+            let tile_x = first_x + column as f32 * tile_width;
+            let tile_y = first_y + row as f32 * tile_height;
+            let content_matrix = if let Some(view_box) = view_box {
+                viewbox_to_viewport_matrix(Some(view_box), tile_width, tile_height)
+            } else if content_units_object_bbox {
+                Matrix::scale(bbox_width, bbox_height)
+            } else {
+                Matrix::identity()
+            };
+            let tile_ctm = ctm
+                .mul(pattern_transform)
+                .mul(Matrix::translate(tile_x, tile_y))
+                .mul(content_matrix);
+            for child in pattern.children() {
+                compile_element(
+                    &mut items,
+                    child,
+                    tile_ctm,
+                    &pattern_style,
+                    gradients,
+                    id_map,
+                    stylesheet,
+                    resolving_ids,
+                );
+            }
+        }
+    }
+    resolving_ids.pop();
+    if items.is_empty() {
+        return;
+    }
+    out.push(CompiledItem::Group(CompiledGroup {
+        items,
+        filter: None,
+        mask: Some(CompiledMask {
+            segs: transform_path_segs(target_segs, ctm),
+            evenodd: target_style.fill_rule_evenodd,
+            paints_anything: true,
+        }),
+    }));
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MarkerVertex {
+    x: f32,
+    y: f32,
+    incoming: Option<f32>,
+    outgoing: Option<f32>,
+}
+
+fn marker_vertices(segs: &[PathSeg]) -> Vec<MarkerVertex> {
+    let mut vertices = Vec::new();
+    let mut current = (0.0_f32, 0.0_f32);
+    let mut subpath_start = None;
+    for seg in segs {
+        match *seg {
+            PathSeg::MoveTo(x, y) => {
+                current = (x, y);
+                subpath_start = Some((x, y));
+                vertices.push(MarkerVertex {
+                    x,
+                    y,
+                    incoming: None,
+                    outgoing: None,
+                });
+            }
+            PathSeg::LineTo(x, y) => {
+                let angle = crate::math::atan2(y - current.1, x - current.0);
+                if let Some(vertex) = vertices.last_mut() {
+                    vertex.outgoing = Some(angle);
+                }
+                vertices.push(MarkerVertex {
+                    x,
+                    y,
+                    incoming: Some(angle),
+                    outgoing: None,
+                });
+                current = (x, y);
+            }
+            PathSeg::CurveTo(x1, y1, x2, y2, x, y) => {
+                let start_vector =
+                    if (x1 - current.0).abs() > 1.0e-6 || (y1 - current.1).abs() > 1.0e-6 {
+                        (x1 - current.0, y1 - current.1)
+                    } else {
+                        (x2 - current.0, y2 - current.1)
+                    };
+                let end_vector = if (x - x2).abs() > 1.0e-6 || (y - y2).abs() > 1.0e-6 {
+                    (x - x2, y - y2)
+                } else {
+                    (x - x1, y - y1)
+                };
+                let start_angle = crate::math::atan2(start_vector.1, start_vector.0);
+                let end_angle = crate::math::atan2(end_vector.1, end_vector.0);
+                if let Some(vertex) = vertices.last_mut() {
+                    vertex.outgoing = Some(start_angle);
+                }
+                vertices.push(MarkerVertex {
+                    x,
+                    y,
+                    incoming: Some(end_angle),
+                    outgoing: None,
+                });
+                current = (x, y);
+            }
+            PathSeg::Close => {
+                if let Some((x, y)) = subpath_start {
+                    let angle = crate::math::atan2(y - current.1, x - current.0);
+                    if let Some(vertex) = vertices.last_mut() {
+                        vertex.outgoing = Some(angle);
+                    }
+                    vertices.push(MarkerVertex {
+                        x,
+                        y,
+                        incoming: Some(angle),
+                        outgoing: None,
+                    });
+                    current = (x, y);
+                }
+            }
+        }
+    }
+    vertices
+}
+
+fn marker_mid_angle(incoming: Option<f32>, outgoing: Option<f32>) -> f32 {
+    match (incoming, outgoing) {
+        (Some(incoming), Some(outgoing)) => {
+            let (sin_in, cos_in) = crate::math::sin_cos(incoming);
+            let (sin_out, cos_out) = crate::math::sin_cos(outgoing);
+            crate::math::atan2(sin_in + sin_out, cos_in + cos_out)
+        }
+        (Some(angle), None) | (None, Some(angle)) => angle,
+        (None, None) => 0.0,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MarkerPosition {
+    Start,
+    Mid,
+    End,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compile_path_markers(
+    out: &mut Vec<CompiledItem>,
+    segs: &[PathSeg],
+    style: &SvgStyle,
+    ctm: Matrix,
+    gradients: &std::collections::HashMap<String, GradientDef>,
+    id_map: &std::collections::HashMap<String, XmlNode<'_>>,
+    stylesheet: &SvgStylesheet,
+    resolving_ids: &mut Vec<String>,
+) {
+    if style.marker_start.is_none() && style.marker_mid.is_none() && style.marker_end.is_none() {
+        return;
+    }
+    let vertices = marker_vertices(segs);
+    if vertices.len() < 2 {
+        return;
+    }
+    if let Some(id) = style.marker_start.as_deref() {
+        let vertex = vertices[0];
+        compile_marker_instance(
+            out,
+            id,
+            vertex.x,
+            vertex.y,
+            vertex.outgoing.unwrap_or(0.0),
+            MarkerPosition::Start,
+            style,
+            ctm,
+            gradients,
+            id_map,
+            stylesheet,
+            resolving_ids,
+        );
+    }
+    if let Some(id) = style.marker_mid.as_deref() {
+        for vertex in &vertices[1..vertices.len() - 1] {
+            compile_marker_instance(
+                out,
+                id,
+                vertex.x,
+                vertex.y,
+                marker_mid_angle(vertex.incoming, vertex.outgoing),
+                MarkerPosition::Mid,
+                style,
+                ctm,
+                gradients,
+                id_map,
+                stylesheet,
+                resolving_ids,
+            );
+        }
+    }
+    if let Some(id) = style.marker_end.as_deref() {
+        let vertex = vertices[vertices.len() - 1];
+        compile_marker_instance(
+            out,
+            id,
+            vertex.x,
+            vertex.y,
+            vertex.incoming.unwrap_or(0.0),
+            MarkerPosition::End,
+            style,
+            ctm,
+            gradients,
+            id_map,
+            stylesheet,
+            resolving_ids,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compile_marker_instance(
+    out: &mut Vec<CompiledItem>,
+    id: &str,
+    x: f32,
+    y: f32,
+    auto_angle: f32,
+    position: MarkerPosition,
+    path_style: &SvgStyle,
+    ctm: Matrix,
+    gradients: &std::collections::HashMap<String, GradientDef>,
+    id_map: &std::collections::HashMap<String, XmlNode<'_>>,
+    stylesheet: &SvgStylesheet,
+    resolving_ids: &mut Vec<String>,
+) {
+    if resolving_ids.iter().any(|active| active == id) {
+        return;
+    }
+    let Some(marker) = id_map.get(id).copied() else {
+        return;
+    };
+    if !marker.tag_name().name().eq_ignore_ascii_case("marker") {
+        return;
+    }
+    let marker_width = marker
+        .attribute("markerWidth")
+        .or_else(|| marker.attribute("markerwidth"))
+        .and_then(parse_number)
+        .unwrap_or(3.0)
+        .max(0.0);
+    let marker_height = marker
+        .attribute("markerHeight")
+        .or_else(|| marker.attribute("markerheight"))
+        .and_then(parse_number)
+        .unwrap_or(3.0)
+        .max(0.0);
+    if marker_width <= 0.0 || marker_height <= 0.0 {
+        return;
+    }
+    let view_box = parse_viewbox(
+        marker
+            .attribute("viewBox")
+            .or_else(|| marker.attribute("viewbox")),
+    );
+    let viewport = viewbox_to_viewport_matrix(view_box, marker_width, marker_height);
+    let ref_x = marker
+        .attribute("refX")
+        .or_else(|| marker.attribute("refx"))
+        .and_then(parse_number)
+        .unwrap_or(0.0);
+    let ref_y = marker
+        .attribute("refY")
+        .or_else(|| marker.attribute("refy"))
+        .and_then(parse_number)
+        .unwrap_or(0.0);
+    let (reference_x, reference_y) = viewport.apply(ref_x, ref_y);
+    let unit_scale = if marker
+        .attribute("markerUnits")
+        .or_else(|| marker.attribute("markerunits"))
+        .is_some_and(|value| value.eq_ignore_ascii_case("userSpaceOnUse"))
+    {
+        1.0
+    } else {
+        path_style.stroke_width.max(0.0)
+    };
+    let orient = marker.attribute("orient").unwrap_or("0").trim();
+    let angle_degrees = match orient {
+        "auto" => auto_angle.to_degrees(),
+        "auto-start-reverse" if matches!(position, MarkerPosition::Start) => {
+            auto_angle.to_degrees() + 180.0
+        }
+        "auto-start-reverse" => auto_angle.to_degrees(),
+        value => parse_number(value).unwrap_or(0.0),
+    };
+    let mut marker_ctm = ctm
+        .mul(Matrix::translate(x, y))
+        .mul(Matrix::rotate(angle_degrees))
+        .mul(Matrix::scale(unit_scale, unit_scale))
+        .mul(Matrix::translate(-reference_x, -reference_y))
+        .mul(viewport);
+    if let Some(transform) = marker.attribute("transform") {
+        marker_ctm = marker_ctm.mul(parse_transform(transform));
+    }
+
+    let mut marker_style = SvgStyle::default();
+    apply_presentation_and_style(marker, stylesheet, &mut marker_style);
+    apply_marker_context_paint(marker, path_style, &mut marker_style);
+    resolving_ids.push(id.to_string());
+    for child in marker.children() {
+        let mut child_style = marker_style.clone();
+        apply_marker_context_paint(child, path_style, &mut child_style);
+        compile_element(
+            out,
+            child,
+            marker_ctm,
+            &child_style,
+            gradients,
+            id_map,
+            stylesheet,
+            resolving_ids,
+        );
+    }
+    resolving_ids.pop();
+}
+
+fn apply_marker_context_paint(node: XmlNode<'_>, path_style: &SvgStyle, style: &mut SvgStyle) {
+    match node.attribute("fill").map(str::trim) {
+        Some(value) if value.eq_ignore_ascii_case("context-stroke") => {
+            style.fill = path_style.stroke.clone();
+        }
+        Some(value) if value.eq_ignore_ascii_case("context-fill") => {
+            style.fill = path_style.fill.clone();
+        }
+        _ => {}
+    }
+    match node.attribute("stroke").map(str::trim) {
+        Some(value) if value.eq_ignore_ascii_case("context-stroke") => {
+            style.stroke = path_style.stroke.clone();
+        }
+        Some(value) if value.eq_ignore_ascii_case("context-fill") => {
+            style.stroke = path_style.fill.clone();
+        }
+        _ => {}
+    }
 }
 
 fn push_compiled_path(
@@ -813,9 +2068,9 @@ fn translate_shading(sh: &crate::types::Shading, dx: f32, dy: f32) -> crate::typ
 }
 
 fn compile_clip_for_node(
-    node: roxmltree::Node<'_, '_>,
+    node: XmlNode<'_>,
     ctm: Matrix,
-    id_map: &std::collections::HashMap<String, roxmltree::Node<'_, '_>>,
+    id_map: &std::collections::HashMap<String, XmlNode<'_>>,
 ) -> Option<(Vec<PathSeg>, bool)> {
     let clip = node.attribute("clip-path")?;
     let id = parse_url_ref(clip)?;
@@ -841,9 +2096,9 @@ fn compile_clip_for_node(
 
 fn compile_clip_subtree(
     out: &mut Vec<PathSeg>,
-    node: roxmltree::Node<'_, '_>,
+    node: XmlNode<'_>,
     ctm: Matrix,
-    id_map: &std::collections::HashMap<String, roxmltree::Node<'_, '_>>,
+    id_map: &std::collections::HashMap<String, XmlNode<'_>>,
 ) {
     if !node.is_element() {
         return;
@@ -1085,7 +2340,7 @@ fn viewbox_to_viewport_matrix(view_box: Option<(f32, f32, f32, f32)>, w: f32, h:
     Matrix::translate(tx, ty).mul(Matrix::scale(s, s))
 }
 
-fn extract_svg_stylesheet(doc: &roxmltree::Document<'_>) -> SvgStylesheet {
+fn extract_svg_stylesheet(doc: &XmlDocument) -> SvgStylesheet {
     let mut out = SvgStylesheet::default();
     let mut order = 0usize;
 
@@ -1097,48 +2352,40 @@ fn extract_svg_stylesheet(doc: &roxmltree::Document<'_>) -> SvgStylesheet {
         if css.is_empty() {
             continue;
         }
-        let Ok(sheet) = StyleSheet::parse(css, ParserOptions::default()) else {
+        let Ok(sheet) = css_native::parse_stylesheet(css) else {
             continue;
         };
-        collect_svg_style_rules(sheet.rules, &mut out.rules, &mut order);
+        collect_svg_style_rules(&sheet.rules, &mut out.rules, &mut order);
     }
 
     out
 }
 
-fn collect_svg_style_rules(
-    rules: lightningcss::rules::CssRuleList,
-    out: &mut Vec<SvgCssRule>,
-    order: &mut usize,
-) {
-    for rule in rules.0 {
+fn collect_svg_style_rules(rules: &[CssRule], out: &mut Vec<SvgCssRule>, order: &mut usize) {
+    for rule in rules {
         match rule {
             CssRule::Style(style_rule) => {
-                let selectors = style_rule
-                    .selectors
-                    .to_css_string(PrinterOptions::default())
-                    .unwrap_or_default();
-                let declarations = style_rule
-                    .declarations
-                    .to_css_string(PrinterOptions::default())
-                    .unwrap_or_default();
-                if declarations.trim().is_empty() {
+                if style_rule.declarations.is_empty() {
                     *order += 1;
                     continue;
                 }
-                for selector_raw in selectors.split(',') {
-                    if let Some(selector) = parse_svg_selector(selector_raw) {
+                let selectors = css_native::split_top_level(&style_rule.selectors, ',')
+                    .unwrap_or_else(|_| vec![style_rule.selectors.clone()]);
+                for selector_raw in selectors {
+                    if let Some(selector) = parse_svg_selector(&selector_raw) {
                         out.push(SvgCssRule {
                             selector,
-                            declarations: declarations.clone(),
+                            declarations: style_rule.declarations.clone(),
                             order: *order,
                         });
                     }
                 }
                 *order += 1;
             }
-            CssRule::Media(media) => {
-                collect_svg_style_rules(media.rules, out, order);
+            CssRule::At(at_rule) if at_rule.name == "media" => {
+                if let Some(AtRuleBlock::Rules(nested)) = &at_rule.block {
+                    collect_svg_style_rules(nested, out, order);
+                }
             }
             _ => {}
         }
@@ -1259,9 +2506,7 @@ fn is_svg_selector_ident_char(ch: u8) -> bool {
     ch.is_ascii_alphanumeric() || matches!(ch, b'_' | b'-' | b':')
 }
 
-fn parent_element<'a, 'input>(
-    node: roxmltree::Node<'a, 'input>,
-) -> Option<roxmltree::Node<'a, 'input>> {
+fn parent_element<'a>(node: XmlNode<'a>) -> Option<XmlNode<'a>> {
     let mut cursor = node.parent();
     while let Some(parent) = cursor {
         if parent.is_element() {
@@ -1272,10 +2517,7 @@ fn parent_element<'a, 'input>(
     None
 }
 
-fn svg_simple_selector_matches(
-    node: roxmltree::Node<'_, '_>,
-    selector: &SvgSimpleSelector,
-) -> bool {
+fn svg_simple_selector_matches(node: XmlNode<'_>, selector: &SvgSimpleSelector) -> bool {
     if let Some(tag) = &selector.tag {
         if !node.tag_name().name().eq_ignore_ascii_case(tag) {
             return false;
@@ -1300,7 +2542,7 @@ fn svg_simple_selector_matches(
     true
 }
 
-fn svg_selector_matches(node: roxmltree::Node<'_, '_>, selector: &SvgSelector) -> bool {
+fn svg_selector_matches(node: XmlNode<'_>, selector: &SvgSelector) -> bool {
     let Some(last) = selector.parts.last() else {
         return false;
     };
@@ -1328,27 +2570,7 @@ fn svg_selector_matches(node: roxmltree::Node<'_, '_>, selector: &SvgSelector) -
     true
 }
 
-fn apply_style_string_normal_only(input: &str, style: &mut SvgStyle) -> bool {
-    if let Ok(style_attr) = StyleAttribute::parse(input, ParserOptions::default()) {
-        apply_svg_property_list(&style_attr.declarations.declarations, style);
-        return true;
-    }
-    false
-}
-
-fn apply_style_string_important_only(input: &str, style: &mut SvgStyle) -> bool {
-    if let Ok(style_attr) = StyleAttribute::parse(input, ParserOptions::default()) {
-        apply_svg_property_list(&style_attr.declarations.important_declarations, style);
-        return true;
-    }
-    false
-}
-
-fn apply_svg_stylesheet(
-    node: roxmltree::Node<'_, '_>,
-    stylesheet: &SvgStylesheet,
-    style: &mut SvgStyle,
-) {
+fn apply_svg_stylesheet(node: XmlNode<'_>, stylesheet: &SvgStylesheet, style: &mut SvgStyle) {
     if stylesheet.rules.is_empty() {
         return;
     }
@@ -1370,17 +2592,15 @@ fn apply_svg_stylesheet(
     });
 
     for rule in &matched {
-        if !apply_style_string_normal_only(&rule.declarations, style) {
-            apply_style_string_legacy(&rule.declarations, style);
-        }
+        apply_svg_declarations(rule.declarations.normal(), style);
     }
     for rule in &matched {
-        let _ = apply_style_string_important_only(&rule.declarations, style);
+        apply_svg_declarations(rule.declarations.important(), style);
     }
 }
 
 fn apply_presentation_and_style(
-    node: roxmltree::Node<'_, '_>,
+    node: XmlNode<'_>,
     stylesheet: &SvgStylesheet,
     style: &mut SvgStyle,
 ) {
@@ -1434,6 +2654,43 @@ fn apply_presentation_and_style(
             style.dash_offset = v;
         }
     }
+    if let Some(value) = node.attribute("font-family") {
+        style.font_family = value.trim().to_string();
+    }
+    if let Some(value) = node.attribute("font-size") {
+        if let Some(size) = parse_svg_font_size(value, style.font_size) {
+            style.font_size = size;
+        }
+    }
+    if let Some(value) = node.attribute("font-weight") {
+        if let Some(weight) = parse_svg_font_weight(value) {
+            style.font_weight = weight;
+        }
+    }
+    if let Some(value) = node.attribute("font-style") {
+        style.font_italic = matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "italic" | "oblique"
+        );
+    }
+    if let Some(value) = node.attribute("text-anchor") {
+        style.text_anchor = parse_text_anchor(value);
+    }
+    if let Some(value) = node.attribute("marker") {
+        let marker = parse_optional_url_ref(value);
+        style.marker_start = marker.clone();
+        style.marker_mid = marker.clone();
+        style.marker_end = marker;
+    }
+    if let Some(value) = node.attribute("marker-start") {
+        style.marker_start = parse_optional_url_ref(value);
+    }
+    if let Some(value) = node.attribute("marker-mid") {
+        style.marker_mid = parse_optional_url_ref(value);
+    }
+    if let Some(value) = node.attribute("marker-end") {
+        style.marker_end = parse_optional_url_ref(value);
+    }
 
     // Opacity attributes multiply (opacity affects both fill/stroke).
     if let Some(v) = node.attribute("opacity").and_then(parse_number) {
@@ -1458,242 +2715,215 @@ fn apply_presentation_and_style(
 }
 
 fn apply_style_string(input: &str, style: &mut SvgStyle) {
-    if let Ok(style_attr) = StyleAttribute::parse(input, ParserOptions::default()) {
-        apply_svg_property_list(&style_attr.declarations.declarations, style);
-        apply_svg_property_list(&style_attr.declarations.important_declarations, style);
-        return;
-    }
-    apply_style_string_legacy(input, style);
-}
-
-fn apply_svg_property_list(props: &[Property], style: &mut SvgStyle) {
-    for prop in props {
-        apply_svg_property(prop, style);
+    if let Ok(declarations) = css_native::parse_declaration_block(input) {
+        apply_svg_declarations(declarations.normal(), style);
+        apply_svg_declarations(declarations.important(), style);
     }
 }
 
-fn apply_svg_property(prop: &Property<'_>, style: &mut SvgStyle) {
-    match prop {
-        Property::Fill(paint) => {
-            if let Some(alpha) = apply_svg_paint(paint, &mut style.fill) {
+fn apply_svg_declarations<'a>(
+    declarations: impl IntoIterator<Item = &'a Declaration>,
+    style: &mut SvgStyle,
+) {
+    for declaration in declarations {
+        apply_svg_declaration(declaration, style);
+    }
+}
+
+fn apply_svg_declaration(declaration: &Declaration, style: &mut SvgStyle) {
+    let value = declaration.value.trim();
+    match declaration.name.to_ascii_lowercase().as_str() {
+        "fill" => {
+            if let Some(alpha) = apply_svg_paint_value(value, &mut style.fill) {
                 style.fill_opacity *= alpha;
             }
         }
-        Property::Stroke(paint) => {
-            if let Some(alpha) = apply_svg_paint(paint, &mut style.stroke) {
+        "stroke" => {
+            if let Some(alpha) = apply_svg_paint_value(value, &mut style.stroke) {
                 style.stroke_opacity *= alpha;
             }
         }
-        Property::StrokeWidth(value) => {
-            if let Some(raw) = value.to_css_string(PrinterOptions::default()).ok() {
-                if let Some(v) = parse_number(&raw) {
-                    style.stroke_width = v.max(0.0);
-                }
+        "stroke-width" => {
+            if let Some(width) = parse_number(value) {
+                style.stroke_width = width.max(0.0);
             }
         }
-        Property::StrokeMiterlimit(value) => {
-            style.miter_limit = value.max(0.0);
-        }
-        Property::StrokeLinecap(value) => {
-            style.line_cap = match value {
-                StrokeLinecap::Round => 1,
-                StrokeLinecap::Square => 2,
-                StrokeLinecap::Butt => 0,
-            };
-        }
-        Property::StrokeLinejoin(value) => {
-            style.line_join = match value {
-                StrokeLinejoin::Round => 1,
-                StrokeLinejoin::Bevel => 2,
-                StrokeLinejoin::Miter | StrokeLinejoin::MiterClip | StrokeLinejoin::Arcs => 0,
-            };
-        }
-        Property::FillRule(value) => {
-            style.fill_rule_evenodd = matches!(value, FillRule::Evenodd);
-        }
-        Property::StrokeDasharray(value) => match value {
-            StrokeDasharray::None => {
-                style.dash_pattern.clear();
+        "stroke-miterlimit" => {
+            if let Some(limit) = parse_number(value) {
+                style.miter_limit = limit.max(0.0);
             }
-            StrokeDasharray::Values(values) => {
-                style.dash_pattern = values
-                    .iter()
-                    .filter_map(|v| v.to_css_string(PrinterOptions::default()).ok())
-                    .filter_map(|raw| parse_number(&raw))
-                    .collect();
-                if style.dash_pattern.len() % 2 == 1 {
-                    let dup = style.dash_pattern.clone();
-                    style.dash_pattern.extend_from_slice(&dup);
-                }
-            }
+        }
+        "stroke-linecap" => match value.to_ascii_lowercase().as_str() {
+            "butt" => style.line_cap = 0,
+            "round" => style.line_cap = 1,
+            "square" => style.line_cap = 2,
+            _ => {}
         },
-        Property::StrokeDashoffset(value) => {
-            if let Some(raw) = value.to_css_string(PrinterOptions::default()).ok() {
-                if let Some(v) = parse_number(&raw) {
-                    style.dash_offset = v;
+        "stroke-linejoin" => match value.to_ascii_lowercase().as_str() {
+            "miter" | "miter-clip" | "arcs" => style.line_join = 0,
+            "round" => style.line_join = 1,
+            "bevel" => style.line_join = 2,
+            _ => {}
+        },
+        "fill-rule" => match value.to_ascii_lowercase().as_str() {
+            "nonzero" => style.fill_rule_evenodd = false,
+            "evenodd" => style.fill_rule_evenodd = true,
+            _ => {}
+        },
+        "stroke-dasharray" => {
+            if value.eq_ignore_ascii_case("none") {
+                style.dash_pattern.clear();
+            } else {
+                let values = parse_length_list(value);
+                if !values.is_empty() {
+                    style.dash_pattern = values;
+                    if style.dash_pattern.len() % 2 == 1 {
+                        let duplicate = style.dash_pattern.clone();
+                        style.dash_pattern.extend_from_slice(&duplicate);
+                    }
                 }
             }
         }
-        Property::Opacity(value) => {
-            let o = alpha_value(value);
-            style.fill_opacity *= o;
-            style.stroke_opacity *= o;
+        "stroke-dashoffset" => {
+            if let Some(offset) = parse_number(value) {
+                style.dash_offset = offset;
+            }
         }
-        Property::FillOpacity(value) => {
-            style.fill_opacity *= alpha_value(value);
+        "opacity" => {
+            if let Some(opacity) = parse_svg_alpha(value) {
+                style.fill_opacity *= opacity;
+                style.stroke_opacity *= opacity;
+            }
         }
-        Property::StrokeOpacity(value) => {
-            style.stroke_opacity *= alpha_value(value);
+        "fill-opacity" => {
+            if let Some(opacity) = parse_svg_alpha(value) {
+                style.fill_opacity *= opacity;
+            }
         }
+        "stroke-opacity" => {
+            if let Some(opacity) = parse_svg_alpha(value) {
+                style.stroke_opacity *= opacity;
+            }
+        }
+        "font-family" => style.font_family = value.to_string(),
+        "font-size" => {
+            if let Some(size) = parse_svg_font_size(value, style.font_size) {
+                style.font_size = size;
+            }
+        }
+        "font-weight" => {
+            if let Some(weight) = parse_svg_font_weight(value) {
+                style.font_weight = weight;
+            }
+        }
+        "font-style" => {
+            let lower = value.to_ascii_lowercase();
+            if lower == "normal" {
+                style.font_italic = false;
+            } else if lower == "italic" || lower == "oblique" || lower.starts_with("oblique ") {
+                style.font_italic = true;
+            }
+        }
+        "text-anchor" => match value.to_ascii_lowercase().as_str() {
+            "start" | "middle" | "end" => style.text_anchor = parse_text_anchor(value),
+            _ => {}
+        },
+        "marker" => {
+            let marker = parse_optional_url_ref(value);
+            style.marker_start = marker.clone();
+            style.marker_mid = marker.clone();
+            style.marker_end = marker;
+        }
+        "marker-start" => style.marker_start = parse_optional_url_ref(value),
+        "marker-mid" => style.marker_mid = parse_optional_url_ref(value),
+        "marker-end" => style.marker_end = parse_optional_url_ref(value),
         _ => {}
     }
 }
 
-fn apply_svg_paint(paint: &SVGPaint<'_>, out: &mut Paint) -> Option<f32> {
-    match paint {
-        SVGPaint::None => {
-            out.color = None;
-            out.gradient_id = None;
-            Some(1.0)
-        }
-        SVGPaint::Color(color) => {
-            if let Some((mapped, alpha)) = css_color_to_svg_color(color) {
-                out.color = Some(mapped);
-                out.gradient_id = None;
-                Some(alpha)
-            } else {
-                None
-            }
-        }
-        SVGPaint::Url { url, fallback } => {
-            let raw = url.url.as_ref().trim();
-            if let Some(id) = raw.strip_prefix('#') {
-                if !id.is_empty() {
-                    out.color = None;
-                    out.gradient_id = Some(id.to_string());
-                    return Some(1.0);
-                }
-            }
-            match fallback {
-                Some(SVGPaintFallback::Color(color)) => {
-                    if let Some((mapped, alpha)) = css_color_to_svg_color(color) {
-                        out.color = Some(mapped);
-                        out.gradient_id = None;
-                        Some(alpha)
-                    } else {
-                        None
-                    }
-                }
-                Some(SVGPaintFallback::None) => {
-                    out.color = None;
-                    out.gradient_id = None;
-                    Some(1.0)
-                }
-                None => None,
-            }
-        }
-        SVGPaint::ContextFill | SVGPaint::ContextStroke => None,
+fn apply_svg_paint_value(value: &str, output: &mut Paint) -> Option<f32> {
+    if value.eq_ignore_ascii_case("none") {
+        output.color = None;
+        output.gradient_id = None;
+        return Some(1.0);
     }
-}
-
-fn css_color_to_svg_color(color: &CssColor) -> Option<(Color, f32)> {
-    if let CssColor::RGBA(rgba) = color {
-        let alpha = (rgba.alpha as f32 / 255.0).clamp(0.0, 1.0);
-        let r = rgba.red as f32 / 255.0;
-        let g = rgba.green as f32 / 255.0;
-        let b = rgba.blue as f32 / 255.0;
-        return Some((Color::rgb(r, g, b), alpha));
+    if let Some(id) = parse_url_ref(value) {
+        output.color = None;
+        output.gradient_id = Some(id);
+        return Some(1.0);
     }
-    if let Ok(srgb) = SRGB::try_from(color) {
-        return Some((Color::rgb(srgb.r, srgb.g, srgb.b), 1.0));
+    if matches!(
+        value.to_ascii_lowercase().as_str(),
+        "context-fill" | "context-stroke" | "currentcolor"
+    ) {
+        return None;
+    }
+    if let Some((color, alpha)) = crate::style::parse_color_string(value) {
+        output.color = Some(color);
+        output.gradient_id = None;
+        return Some(alpha.clamp(0.0, 1.0));
     }
     None
 }
 
-fn alpha_value(value: &AlphaValue) -> f32 {
-    value.0.clamp(0.0, 1.0)
+fn parse_svg_alpha(value: &str) -> Option<f32> {
+    let value = value.trim();
+    let alpha = if let Some(percent) = value.strip_suffix('%') {
+        percent.trim().parse::<f32>().ok()? / 100.0
+    } else {
+        value.parse::<f32>().ok()?
+    };
+    alpha.is_finite().then_some(alpha.clamp(0.0, 1.0))
 }
 
-fn apply_style_string_legacy(input: &str, style: &mut SvgStyle) {
-    for decl in input.split(';') {
-        let decl = decl.trim();
-        if decl.is_empty() {
-            continue;
+fn parse_svg_font_size(value: &str, inherited: f32) -> Option<f32> {
+    let raw = value.trim().to_ascii_lowercase();
+    let size = if let Some(percent) = raw.strip_suffix('%') {
+        inherited * percent.trim().parse::<f32>().ok()? / 100.0
+    } else if let Some(em) = raw.strip_suffix("em") {
+        inherited * em.trim().parse::<f32>().ok()?
+    } else if let Some(ex) = raw.strip_suffix("ex") {
+        inherited * ex.trim().parse::<f32>().ok()? * 0.5
+    } else {
+        match raw.as_str() {
+            "xx-small" => 9.0,
+            "x-small" => 10.0,
+            "small" => 13.0,
+            "medium" => 16.0,
+            "large" => 18.0,
+            "x-large" => 24.0,
+            "xx-large" => 32.0,
+            "smaller" => inherited * 0.8,
+            "larger" => inherited * 1.2,
+            _ => parse_number(&raw)?,
         }
-        let Some((k, v)) = decl.split_once(':') else {
-            continue;
-        };
-        let key = k.trim().to_ascii_lowercase();
-        let val = v.trim();
-        match key.as_str() {
-            "fill" => {
-                parse_paint_into(val, &mut style.fill);
-            }
-            "stroke" => {
-                parse_paint_into(val, &mut style.stroke);
-            }
-            "stroke-width" => {
-                if let Some(v) = parse_number(val) {
-                    style.stroke_width = v.max(0.0);
-                }
-            }
-            "stroke-miterlimit" => {
-                if let Some(v) = parse_number(val) {
-                    style.miter_limit = v.max(0.0);
-                }
-            }
-            "stroke-linecap" => {
-                style.line_cap = match val {
-                    "round" => 1,
-                    "square" => 2,
-                    _ => 0,
-                };
-            }
-            "stroke-linejoin" => {
-                style.line_join = match val {
-                    "round" => 1,
-                    "bevel" => 2,
-                    _ => 0,
-                };
-            }
-            "fill-rule" => {
-                style.fill_rule_evenodd = val.eq_ignore_ascii_case("evenodd");
-            }
-            "stroke-dasharray" => {
-                if val.eq_ignore_ascii_case("none") {
-                    style.dash_pattern.clear();
-                } else {
-                    style.dash_pattern = parse_length_list(val);
-                    if style.dash_pattern.len() % 2 == 1 {
-                        let dup = style.dash_pattern.clone();
-                        style.dash_pattern.extend_from_slice(&dup);
-                    }
-                }
-            }
-            "stroke-dashoffset" => {
-                if let Some(v) = parse_number(val) {
-                    style.dash_offset = v;
-                }
-            }
-            "opacity" => {
-                if let Some(v) = parse_number(val) {
-                    let o = v.clamp(0.0, 1.0);
-                    style.fill_opacity *= o;
-                    style.stroke_opacity *= o;
-                }
-            }
-            "fill-opacity" => {
-                if let Some(v) = parse_number(val) {
-                    style.fill_opacity *= v.clamp(0.0, 1.0);
-                }
-            }
-            "stroke-opacity" => {
-                if let Some(v) = parse_number(val) {
-                    style.stroke_opacity *= v.clamp(0.0, 1.0);
-                }
-            }
-            _ => {}
-        }
+    };
+    size.is_finite().then_some(size.max(0.0))
+}
+
+fn parse_svg_font_weight(value: &str) -> Option<u16> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "normal" => Some(400),
+        "bold" => Some(700),
+        "bolder" => Some(700),
+        "lighter" => Some(300),
+        raw => raw.parse::<u16>().ok().map(|weight| weight.clamp(1, 1000)),
+    }
+}
+
+fn parse_text_anchor(value: &str) -> TextAnchor {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "middle" => TextAnchor::Middle,
+        "end" => TextAnchor::End,
+        _ => TextAnchor::Start,
+    }
+}
+
+fn parse_optional_url_ref(value: &str) -> Option<String> {
+    if value.trim().eq_ignore_ascii_case("none") {
+        None
+    } else {
+        parse_url_ref(value)
     }
 }
 
@@ -1813,8 +3043,8 @@ fn parse_stop_offset(input: Option<&str>) -> Option<f32> {
     Some(v.clamp(0.0, 1.0))
 }
 
-fn parse_stop_color(node: roxmltree::Node<'_, '_>, stylesheet: &SvgStylesheet) -> Option<Color> {
-    let mut stop_color = node.attribute("stop-color").and_then(parse_color);
+fn parse_stop_color(node: XmlNode<'_>, stylesheet: &SvgStylesheet) -> Option<Color> {
+    let mut stop_color = node.attribute("stop-color").and_then(parse_svg_color);
 
     // Support class/id based declarations in embedded <style> blocks.
     if !stylesheet.rules.is_empty() {
@@ -1830,64 +3060,52 @@ fn parse_stop_color(node: roxmltree::Node<'_, '_>, stylesheet: &SvgStylesheet) -
                 .then(a.order.cmp(&b.order))
         });
         for rule in &matched {
-            if let Some(color) = parse_named_stop_color_decl(&rule.declarations, false) {
+            if let Some(color) = stop_color_from_declarations(rule.declarations.normal()) {
                 stop_color = Some(color);
             }
         }
         for rule in &matched {
-            if let Some(color) = parse_named_stop_color_decl(&rule.declarations, true) {
+            if let Some(color) = stop_color_from_declarations(rule.declarations.important()) {
                 stop_color = Some(color);
             }
         }
     }
 
     if let Some(style_attr) = node.attribute("style") {
-        for decl in style_attr.split(';') {
-            let decl = decl.trim();
-            let Some((k, v)) = decl.split_once(':') else {
-                continue;
-            };
-            if k.trim().eq_ignore_ascii_case("stop-color") {
-                stop_color = parse_color(v.trim());
+        if let Ok(declarations) = css_native::parse_declaration_block(style_attr) {
+            if let Some(color) = stop_color_from_declarations(declarations.normal()) {
+                stop_color = Some(color);
+            }
+            if let Some(color) = stop_color_from_declarations(declarations.important()) {
+                stop_color = Some(color);
             }
         }
     }
     stop_color
 }
 
-fn parse_named_stop_color_decl(input: &str, important_only: bool) -> Option<Color> {
-    let mut out = None;
-    for decl in input.split(';') {
-        let decl = decl.trim();
-        if decl.is_empty() {
-            continue;
-        }
-        let Some((raw_key, raw_value)) = decl.split_once(':') else {
-            continue;
-        };
-        if !raw_key.trim().eq_ignore_ascii_case("stop-color") {
-            continue;
-        }
-        let mut value = raw_value.trim();
-        let has_important = value.to_ascii_lowercase().contains("!important");
-        if important_only != has_important {
-            continue;
-        }
-        if has_important {
-            value = value
-                .rsplit_once("!important")
-                .map(|(v, _)| v.trim())
-                .unwrap_or(value);
-        }
-        if let Some(color) = parse_color(value) {
-            out = Some(color);
+fn stop_color_from_declarations<'a>(
+    declarations: impl IntoIterator<Item = &'a Declaration>,
+) -> Option<Color> {
+    let mut color = None;
+    for declaration in declarations {
+        if declaration.name_eq("stop-color") {
+            if let Some(parsed) = parse_svg_color(&declaration.value) {
+                color = Some(parsed);
+            }
         }
     }
-    out
+    color
+}
+
+fn parse_svg_color(value: &str) -> Option<Color> {
+    crate::style::parse_color_string(value)
+        .map(|(color, _)| color)
+        .or_else(|| parse_color(value))
 }
 
 fn extract_gradients(
-    doc: &roxmltree::Document<'_>,
+    doc: &XmlDocument,
     stylesheet: &SvgStylesheet,
 ) -> std::collections::HashMap<String, GradientDef> {
     // Opinionated SVG 1.1 subset: linearGradient + radialGradient with stop colors.
@@ -2148,7 +3366,7 @@ fn parse_number_list(input: &str) -> Vec<f32> {
         .collect()
 }
 
-fn rect_to_path(node: roxmltree::Node<'_, '_>) -> Option<Vec<PathSeg>> {
+fn rect_to_path(node: XmlNode<'_>) -> Option<Vec<PathSeg>> {
     let x = parse_number(node.attribute("x").unwrap_or("0")).unwrap_or(0.0);
     let y = parse_number(node.attribute("y").unwrap_or("0")).unwrap_or(0.0);
     let w = parse_number(node.attribute("width")?)?;
@@ -2165,7 +3383,7 @@ fn rect_to_path(node: roxmltree::Node<'_, '_>) -> Option<Vec<PathSeg>> {
     ])
 }
 
-fn circle_to_path(node: roxmltree::Node<'_, '_>) -> Option<Vec<PathSeg>> {
+fn circle_to_path(node: XmlNode<'_>) -> Option<Vec<PathSeg>> {
     let cx = parse_number(node.attribute("cx").unwrap_or("0")).unwrap_or(0.0);
     let cy = parse_number(node.attribute("cy").unwrap_or("0")).unwrap_or(0.0);
     let r = parse_number(node.attribute("r")?)?;
@@ -2175,7 +3393,7 @@ fn circle_to_path(node: roxmltree::Node<'_, '_>) -> Option<Vec<PathSeg>> {
     ellipse_to_path_impl(cx, cy, r, r)
 }
 
-fn ellipse_to_path(node: roxmltree::Node<'_, '_>) -> Option<Vec<PathSeg>> {
+fn ellipse_to_path(node: XmlNode<'_>) -> Option<Vec<PathSeg>> {
     let cx = parse_number(node.attribute("cx").unwrap_or("0")).unwrap_or(0.0);
     let cy = parse_number(node.attribute("cy").unwrap_or("0")).unwrap_or(0.0);
     let rx = parse_number(node.attribute("rx")?)?;
@@ -2201,7 +3419,7 @@ fn ellipse_to_path_impl(cx: f32, cy: f32, rx: f32, ry: f32) -> Option<Vec<PathSe
     ])
 }
 
-fn line_to_path(node: roxmltree::Node<'_, '_>) -> Option<Vec<PathSeg>> {
+fn line_to_path(node: XmlNode<'_>) -> Option<Vec<PathSeg>> {
     let x1 = parse_number(node.attribute("x1").unwrap_or("0")).unwrap_or(0.0);
     let y1 = parse_number(node.attribute("y1").unwrap_or("0")).unwrap_or(0.0);
     let x2 = parse_number(node.attribute("x2").unwrap_or("0")).unwrap_or(0.0);
@@ -2209,7 +3427,7 @@ fn line_to_path(node: roxmltree::Node<'_, '_>) -> Option<Vec<PathSeg>> {
     Some(vec![PathSeg::MoveTo(x1, y1), PathSeg::LineTo(x2, y2)])
 }
 
-fn poly_points_to_path(node: roxmltree::Node<'_, '_>, close: bool) -> Option<Vec<PathSeg>> {
+fn poly_points_to_path(node: XmlNode<'_>, close: bool) -> Option<Vec<PathSeg>> {
     let pts = node.attribute("points")?;
     let points = parse_points(pts);
     if points.len() < 2 {
@@ -2505,8 +3723,7 @@ fn arc_to_cubics(
     }
 
     let phi = x_axis_rotation_deg.to_radians();
-    let sin_phi = libm::sinf(phi);
-    let cos_phi = libm::cosf(phi);
+    let (sin_phi, cos_phi) = crate::math::sin_cos(phi);
 
     // Step 1: compute (x1', y1')
     let dx2 = (x0 - x1) / 2.0;
@@ -2521,7 +3738,7 @@ fn arc_to_cubics(
     let y1p2 = y1p * y1p;
     let lambda = (x1p2 / rx2) + (y1p2 / ry2);
     if lambda > 1.0 {
-        let s = libm::sqrtf(lambda);
+        let s = crate::math::sqrt(lambda);
         rx *= s;
         ry *= s;
     }
@@ -2534,7 +3751,7 @@ fn arc_to_cubics(
     let mut coef = 0.0;
     if den != 0.0 {
         let sign = if large_arc == sweep { -1.0 } else { 1.0 };
-        coef = sign * libm::sqrtf((num / den).max(0.0));
+        coef = sign * crate::math::sqrt((num / den).max(0.0));
     }
     let cxp = coef * (rx * y1p / ry);
     let cyp = coef * (-ry * x1p / rx);
@@ -2547,7 +3764,7 @@ fn arc_to_cubics(
     fn angle(ux: f32, uy: f32, vx: f32, vy: f32) -> f32 {
         let dot = ux * vx + uy * vy;
         let det = ux * vy - uy * vx;
-        libm::atan2f(det, dot)
+        crate::math::atan2(det, dot)
     }
 
     let ux = (x1p - cxp) / rx;
@@ -2565,7 +3782,7 @@ fn arc_to_cubics(
     }
 
     // Split into <= 90deg segments.
-    let segs_count = libm::ceilf(dtheta.abs() / (PI / 2.0)).max(1.0) as i32;
+    let segs_count = crate::math::ceil(dtheta.abs() / (PI / 2.0)).max(1.0) as i32;
     let delta = dtheta / (segs_count as f32);
 
     let mut out = Vec::new();
@@ -2598,12 +3815,10 @@ fn arc_segment_to_cubic(
 ) -> (f32, f32, f32, f32, f32, f32) {
     // Convert an ellipse arc segment t1..t2 into a cubic Bezier.
     let dt = t2 - t1;
-    let k = (4.0 / 3.0) * libm::tanf(dt / 4.0);
+    let k = (4.0 / 3.0) * crate::math::tan(dt / 4.0);
 
-    let s1 = libm::sinf(t1);
-    let c1 = libm::cosf(t1);
-    let s2 = libm::sinf(t2);
-    let c2 = libm::cosf(t2);
+    let (s1, c1) = crate::math::sin_cos(t1);
+    let (s2, c2) = crate::math::sin_cos(t2);
 
     // Unit circle control points
     let p1x = c1 - k * s1;
@@ -2750,7 +3965,32 @@ impl<'a> PathParser<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canvas::Command;
+    use crate::image_native::{encode_png_rgba8, load_from_memory};
+    use crate::raster::document_to_png_pages;
     use crate::types::Size;
+
+    fn rasterize_native_svg(svg: &str, width: f32, height: f32) -> crate::image_native::RgbaImage {
+        let mut canvas = Canvas::new(Size {
+            width: Pt::from_f32(width),
+            height: Pt::from_f32(height),
+        });
+        render_svg_to_canvas(
+            svg,
+            &mut canvas,
+            Pt::ZERO,
+            Pt::ZERO,
+            Pt::from_f32(width),
+            Pt::from_f32(height),
+        );
+        let document = canvas.finish();
+        let png = document_to_png_pages(&document, 72, None, true)
+            .expect("native SVG should rasterize")
+            .remove(0);
+        load_from_memory(&png)
+            .expect("raster output should decode")
+            .into_rgba8()
+    }
 
     #[test]
     fn parses_simple_path() {
@@ -2888,6 +4128,24 @@ mod tests {
     }
 
     #[test]
+    fn native_text_symbol_and_affine_image_features_do_not_force_fallback() {
+        let svg = r##"
+        <svg width="80" height="40" viewBox="0 0 80 40">
+          <defs><symbol id="s" viewBox="0 0 10 10"><rect width="10" height="10" /></symbol></defs>
+          <use href="#s" width="20" height="20" />
+          <text x="2" y="34">native</text>
+          <image x="40" y="4" width="10" height="10"
+                 href="data:image/png;base64,iVBORw0KGgo=" transform="rotate(12 45 9)" />
+          <foreignObject x="0" y="0" width="1" height="1"><div>ignored</div></foreignObject>
+        </svg>
+        "##;
+        assert!(
+            !svg_needs_raster_fallback(svg),
+            "native features and fallback-equivalent foreignObject handling should stay native"
+        );
+    }
+
+    #[test]
     fn renders_svg_without_panic() {
         let svg = r##"<svg viewBox="0 0 10 10"><rect x="1" y="1" width="8" height="8" fill="#ff0000"/></svg>"##;
         let mut canvas = Canvas::new(Size {
@@ -2944,6 +4202,304 @@ mod tests {
         "##;
         let compiled = compile_svg(svg, Pt::from_f32(40.0), Pt::from_f32(20.0));
         assert!(!compiled.is_empty());
+    }
+
+    #[test]
+    fn text_and_tspan_compile_in_mixed_content_order() {
+        let svg = r##"
+        <svg width="120" height="40" viewBox="0 0 120 40">
+          <style>.label { font-family: Arial, sans-serif; font-size: 20px; }</style>
+          <text class="label" x="4" y="28" fill="#cc0000">A<tspan fill="#0000cc" font-weight="bold">B</tspan>C</text>
+        </svg>
+        "##;
+        let compiled = compile_svg(svg, Pt::from_f32(120.0), Pt::from_f32(40.0));
+        let texts = compiled
+            .iter()
+            .filter_map(|item| match item {
+                CompiledItem::Text(text) => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            texts
+                .iter()
+                .map(|text| text.text.as_str())
+                .collect::<Vec<_>>(),
+            ["A", "B", "C"]
+        );
+        assert_eq!(texts[0].font_name, "Helvetica");
+        assert_eq!(texts[1].font_name, "Helvetica-Bold");
+        assert!((texts[0].font_size - 20.0).abs() < 0.01);
+        assert!(texts[0].x < texts[1].x && texts[1].x < texts[2].x);
+        assert!(texts[0].fill.r > 0.7 && texts[0].fill.b < 0.1);
+        assert!(texts[1].fill.b > 0.7 && texts[1].fill.r < 0.1);
+    }
+
+    #[test]
+    fn symbol_use_maps_viewbox_into_requested_viewport() {
+        let svg = r##"
+        <svg width="100" height="50" viewBox="0 0 100 50">
+          <defs>
+            <symbol id="tile" viewBox="0 0 10 10">
+              <rect x="0" y="0" width="10" height="10" fill="#00aa00" />
+            </symbol>
+          </defs>
+          <use href="#tile" x="8" y="6" width="40" height="20" />
+        </svg>
+        "##;
+        let compiled = compile_svg(svg, Pt::from_f32(100.0), Pt::from_f32(50.0));
+        let path = compiled
+            .iter()
+            .find_map(|item| match item {
+                CompiledItem::Path(path) => Some(path),
+                _ => None,
+            })
+            .expect("symbol should compile through use");
+        let bounds = bbox_of_segs(&path.segs).expect("symbol path bounds");
+        assert!((bounds.0 - 18.0).abs() < 0.01);
+        assert!((bounds.1 - 6.0).abs() < 0.01);
+        assert!((bounds.2 - 20.0).abs() < 0.01);
+        assert!((bounds.3 - 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn transformed_images_and_text_emit_affine_canvas_commands() {
+        let svg = r##"
+        <svg width="80" height="50" viewBox="0 0 80 50">
+          <image x="10" y="8" width="12" height="10"
+                 href="data:image/png;base64,iVBORw0KGgo="
+                 transform="rotate(20 16 13)" />
+          <text x="4" y="42" font-size="12">ok</text>
+        </svg>
+        "##;
+        let compiled = compile_svg(svg, Pt::from_f32(80.0), Pt::from_f32(50.0));
+        assert!(compiled.iter().any(|item| {
+            matches!(item, CompiledItem::Image(image) if image.transform.is_some())
+        }));
+        assert!(
+            compiled
+                .iter()
+                .any(|item| matches!(item, CompiledItem::Text(_)))
+        );
+
+        let mut canvas = Canvas::new(Size {
+            width: Pt::from_f32(100.0),
+            height: Pt::from_f32(70.0),
+        });
+        render_compiled_items(&compiled, &mut canvas, Pt::from_f32(5.0), Pt::from_f32(7.0));
+        let document = canvas.finish();
+        let commands = &document.pages[0].commands;
+        assert!(
+            commands
+                .iter()
+                .any(|command| matches!(command, Command::DrawImage { .. }))
+        );
+        assert!(
+            commands
+                .iter()
+                .any(|command| matches!(command, Command::DrawString { text, .. } if text == "ok"))
+        );
+        assert!(
+            commands
+                .iter()
+                .filter(|command| matches!(command, Command::ConcatMatrix { .. }))
+                .count()
+                >= 2
+        );
+    }
+
+    #[test]
+    fn native_text_rasterization_paints_requested_fill() {
+        let svg = r##"
+        <svg width="120" height="48" viewBox="0 0 120 48">
+          <text x="5" y="36" font-family="Arial, sans-serif" font-size="32" fill="#cc0000">SVG</text>
+        </svg>
+        "##;
+        let image = rasterize_native_svg(svg, 120.0, 48.0);
+        let red_pixels = image
+            .pixels()
+            .filter(|pixel| pixel[0] > 150 && pixel[1] < 90 && pixel[2] < 90 && pixel[3] > 200)
+            .count();
+        assert!(
+            red_pixels > 80,
+            "expected native SVG text pixels, got {red_pixels}"
+        );
+    }
+
+    #[test]
+    fn native_symbol_and_transformed_image_rasterization_paint_pixels() {
+        let source =
+            encode_png_rgba8(&[220, 0, 0, 255].repeat(16), 4, 4).expect("test PNG should encode");
+        let uri = format!(
+            "data:image/png;base64,{}",
+            crate::base64::encode_standard(&source)
+        );
+        let svg = format!(
+            r##"<svg width="100" height="60" viewBox="0 0 100 60">
+              <defs>
+                <symbol id="s" viewBox="0 0 10 10">
+                  <circle cx="5" cy="5" r="5" fill="#008800" />
+                </symbol>
+              </defs>
+              <use href="#s" x="4" y="4" width="28" height="28" />
+              <image x="50" y="12" width="20" height="16" href="{uri}"
+                     transform="rotate(25 60 20)" />
+            </svg>"##
+        );
+        let image = rasterize_native_svg(&svg, 100.0, 60.0);
+        let green_pixels = image
+            .pixels()
+            .filter(|pixel| pixel[1] > 80 && pixel[0] < 80 && pixel[2] < 80)
+            .count();
+        let red_pixels = image
+            .pixels()
+            .filter(|pixel| pixel[0] > 140 && pixel[1] < 80 && pixel[2] < 80)
+            .count();
+        assert!(
+            green_pixels > 200,
+            "expected symbol pixels, got {green_pixels}"
+        );
+        assert!(
+            red_pixels > 150,
+            "expected transformed image pixels, got {red_pixels}"
+        );
+    }
+
+    #[test]
+    fn gaussian_filter_compiles_to_native_filtered_group_and_expands_pixels() {
+        let svg = r##"
+        <svg width="90" height="50" viewBox="0 0 90 50">
+          <defs><filter id="blur"><feGaussianBlur stdDeviation="3" /></filter></defs>
+          <rect x="25" y="15" width="40" height="20" fill="#cc0000" filter="url(#blur)" />
+        </svg>
+        "##;
+        let compiled = compile_svg(svg, Pt::from_f32(90.0), Pt::from_f32(50.0));
+        assert!(compiled.iter().any(|item| {
+            matches!(
+                item,
+                CompiledItem::Group(CompiledGroup {
+                    filter: Some(filter),
+                    ..
+                }) if filter.blur_radius >= Pt::from_f32(2.9)
+            )
+        }));
+        let image = rasterize_native_svg(svg, 90.0, 50.0);
+        let painted = image
+            .enumerate_pixels()
+            .filter(|(_, _, pixel)| pixel[0] > 30 && pixel[1] < 245 && pixel[2] < 245)
+            .map(|(x, y, _)| (x, y))
+            .collect::<Vec<_>>();
+        assert!(!painted.is_empty());
+        assert!(painted.iter().any(|(x, _)| *x < 25));
+        assert!(painted.iter().any(|(x, _)| *x > 64));
+    }
+
+    #[test]
+    fn luminance_mask_compiles_to_clip_with_transparent_hole() {
+        let svg = r##"
+        <svg width="80" height="50" viewBox="0 0 80 50">
+          <defs>
+            <mask id="cutout">
+              <rect x="5" y="5" width="70" height="40" fill="white" />
+              <circle cx="40" cy="25" r="10" fill="black" />
+            </mask>
+          </defs>
+          <rect x="5" y="5" width="70" height="40" fill="#0044cc" mask="url(#cutout)" />
+        </svg>
+        "##;
+        let compiled = compile_svg(svg, Pt::from_f32(80.0), Pt::from_f32(50.0));
+        assert!(compiled.iter().any(|item| {
+            matches!(
+                item,
+                CompiledItem::Group(CompiledGroup {
+                    mask: Some(mask),
+                    ..
+                }) if mask.paints_anything && mask.evenodd
+            )
+        }));
+        let image = rasterize_native_svg(svg, 80.0, 50.0);
+        let painted = image.get_pixel(10, 10);
+        let hole = image.get_pixel(40, 25);
+        assert!(painted[2] > 150 && painted[0] < 80);
+        assert!(hole[0] > 245 && hole[1] > 245 && hole[2] > 245);
+    }
+
+    #[test]
+    fn path_markers_compile_and_rasterize_with_auto_orientation() {
+        let svg = r##"
+        <svg width="90" height="60" viewBox="0 0 90 60">
+          <defs>
+            <marker id="arrow" markerWidth="8" markerHeight="8" refX="8" refY="4"
+                    markerUnits="userSpaceOnUse" orient="auto" viewBox="0 0 8 8">
+              <path d="M0 0 L8 4 L0 8 Z" fill="#cc0000" />
+            </marker>
+          </defs>
+          <polyline points="10,45 42,15 76,38" fill="none" stroke="#003399"
+                    stroke-width="3" marker-start="url(#arrow)" marker-mid="url(#arrow)"
+                    marker-end="url(#arrow)" />
+        </svg>
+        "##;
+        let compiled = compile_svg(svg, Pt::from_f32(90.0), Pt::from_f32(60.0));
+        assert!(
+            compiled
+                .iter()
+                .filter(|item| matches!(item, CompiledItem::Path(_)))
+                .count()
+                >= 4
+        );
+        let image = rasterize_native_svg(svg, 90.0, 60.0);
+        let red_pixels = image
+            .pixels()
+            .filter(|pixel| pixel[0] > 140 && pixel[1] < 80 && pixel[2] < 80)
+            .count();
+        let blue_pixels = image
+            .pixels()
+            .filter(|pixel| pixel[2] > 100 && pixel[0] < 80 && pixel[1] < 120)
+            .count();
+        assert!(red_pixels > 45, "expected marker pixels, got {red_pixels}");
+        assert!(
+            blue_pixels > 80,
+            "expected stroked path pixels, got {blue_pixels}"
+        );
+    }
+
+    #[test]
+    fn user_space_pattern_tiles_are_clipped_to_target_geometry() {
+        let svg = r##"
+        <svg width="96" height="52" viewBox="0 0 96 52">
+          <defs>
+            <pattern id="checker" patternUnits="userSpaceOnUse" width="10" height="10">
+              <rect x="0" y="0" width="5" height="5" fill="#cc0000" />
+              <rect x="5" y="5" width="5" height="5" fill="#cc0000" />
+            </pattern>
+          </defs>
+          <rect x="3" y="4" width="90" height="44" rx="8" fill="url(#checker)" />
+        </svg>
+        "##;
+        let compiled = compile_svg(svg, Pt::from_f32(96.0), Pt::from_f32(52.0));
+        assert!(compiled.iter().any(|item| {
+            matches!(
+                item,
+                CompiledItem::Group(CompiledGroup {
+                    filter: None,
+                    mask: Some(_),
+                    ..
+                })
+            )
+        }));
+        let image = rasterize_native_svg(svg, 96.0, 52.0);
+        let red_pixels = image
+            .pixels()
+            .filter(|pixel| pixel[0] > 140 && pixel[1] < 80 && pixel[2] < 80)
+            .count();
+        assert!(
+            red_pixels > 1_400,
+            "expected tiled pattern pixels, got {red_pixels}"
+        );
+        let outside = image.get_pixel(1, 1);
+        let gap = image.get_pixel(7, 11);
+        assert!(outside[0] > 245 && outside[1] > 245 && outside[2] > 245);
+        assert!(gap[0] > 245 && gap[1] > 245 && gap[2] > 245);
     }
 
     #[test]

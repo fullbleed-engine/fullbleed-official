@@ -87,8 +87,9 @@ the aggregate `pdfvt_dpart_graph_valid` gate.
 Pass `--pdfvt-cmd "tool --input {pdf}" --require-dedicated-pdfvt` to make a
 dedicated PDF/VT preflight tool part of the same gate.
 
-The distributed Python wheel feature set is `python,svg_raster`, matching the
-CLI capability claim for SVG raster fallback. Source builds that omit
+The distributed Python wheel feature set is `python,svg_raster`; the latter is
+a compatibility gate over Fullbleed's native SVG compiler/Canvas raster path,
+not a separate renderer dependency. Source builds that omit
 `svg_raster` keep native vector SVG support, but unsupported SVG features cannot
 fall back to raster output.
 `fullbleed capabilities --json` reports the compiled `svg_raster` build feature

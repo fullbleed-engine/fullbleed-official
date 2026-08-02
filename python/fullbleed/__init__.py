@@ -1,20 +1,18 @@
 # SPDX-License-Identifier: MIT
-"""Public Python bindings for the Fullbleed PDF engine.
+"""Public Python bindings for the Fullbleed PDF engine."""
 
-This package re-exports the Rust extension module symbols (`PdfEngine`,
-`AssetBundle`, `WatermarkSpec`, and helpers).
-"""
 from . import _fullbleed as _ext
-from ._fullbleed import *  # noqa: F401,F403
+from . import _abi
+from ._abi import *  # noqa: F401,F403
 
-__doc__ = _ext.__doc__
-if hasattr(_ext, "__all__"):
-    __all__ = _ext.__all__
+__all__ = list(_abi.__all__)
+
+# Preserve the historical ``fullbleed._fullbleed`` import surface while the
+# native module itself stays intentionally tiny and stable-ABI-only.
+for _name in _abi.__all__:
+    setattr(_ext, _name, getattr(_abi, _name))
+_ext.__all__ = list(_abi.__all__)
 
 SPDX_LICENSE_EXPRESSION = "MIT"
 
-_EXTRA_EXPORTS = ["SPDX_LICENSE_EXPRESSION"]
-if "__all__" in globals():
-    __all__ = list(__all__) + _EXTRA_EXPORTS
-else:
-    __all__ = _EXTRA_EXPORTS
+__all__.append("SPDX_LICENSE_EXPRESSION")

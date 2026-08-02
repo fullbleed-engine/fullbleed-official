@@ -7,7 +7,7 @@ on:
         description: "Annotated release tag whose exact source commit will be published"
         required: true
         type: string
-        default: "v1.6.2"
+        default: "v2.0.0"
       publish:
         description: "Publish after all validation gates pass"
         required: true
@@ -126,7 +126,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo package --locked --list | tee target/fullbleed-package-files.txt
-          test "$(wc -l < target/fullbleed-package-files.txt)" -eq 38
+          test "$(wc -l < target/fullbleed-package-files.txt)" -eq 66
           ! grep -E '(^|/)(target|dist|secrets?)(/|$)|(^|/)\.env$' target/fullbleed-package-files.txt
 
       - name: Install declared Rust MSRV

@@ -65,7 +65,9 @@ def test_cli_capabilities_expose_asserted_pdf_standards(capsys: pytest.CaptureFi
     assert set(payload["pdf_profiles_requiring_output_intent"]) == cli.PDF_PROFILES_REQUIRING_OUTPUT_INTENT
     assert payload["svg"]["engine_flags"]["svg_raster_fallback"] is svg_raster_available
     assert payload["svg"]["build_features"]["svg_raster"] is svg_raster_available
-    assert "SVG text" in payload["svg"]["feature_matrix"]["raster_fallback_required"]
+    assert "SVG text and tspan runs" in payload["svg"]["feature_matrix"]["native_vector"]
+    assert "symbols with use viewports" in payload["svg"]["feature_matrix"]["native_vector"]
+    assert "foreignObject content" in payload["svg"]["feature_matrix"]["unsupported_or_known_loss"]
     assert "basic shapes and paths" in payload["svg"]["feature_matrix"]["native_vector"]
 
 
@@ -90,14 +92,14 @@ def test_release_packaging_enables_asserted_svg_raster_fallback() -> None:
     ci = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
     feature_match = re.search(r"(?m)^features\s*=\s*\[(?P<features>[^\]]+)\]", pyproject)
-    assert feature_match, "pyproject.toml must declare maturin build features"
+    assert feature_match, "pyproject.toml must declare native backend build features"
     features = {
         item.strip().strip('"').strip("'")
         for item in feature_match.group("features").split(",")
     }
 
     assert {"python", "svg_raster"}.issubset(features)
-    assert "--features python,svg_raster" in ci
+    assert "build_backend/fullbleed_build_backend.py wheel" in ci
     assert "tests/test_fullbleed_svg_raster_fallback.py" in ci
 
     include_match = re.search(

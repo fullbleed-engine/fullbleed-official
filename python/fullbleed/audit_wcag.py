@@ -12,6 +12,9 @@ def _repo_root_from_package() -> Path:
 
 
 def _wcag_registry_path() -> Path:
+    packaged = Path(__file__).resolve().with_name("specs") / "wcag20aa_registry.v1.yaml"
+    if packaged.is_file():
+        return packaged
     return _repo_root_from_package() / "docs" / "specs" / "wcag20aa_registry.v1.yaml"
 
 
@@ -82,7 +85,9 @@ def wcag20aa_coverage_from_findings(
         rule_verdicts.setdefault(rid, []).append(str(finding.get("verdict") or ""))
 
     def _entry_mappings(entry: dict[str, Any]) -> list[dict[str, Any]]:
-        return [m for m in entry.get("fullbleed_rule_mapping", []) if isinstance(m, dict)]
+        return [
+            m for m in entry.get("fullbleed_rule_mapping", []) if isinstance(m, dict)
+        ]
 
     mapped_entries = [e for e in entries if _entry_mappings(e)]
     sc_entries = [e for e in entries if e.get("kind") == "success_criterion"]
@@ -96,7 +101,9 @@ def wcag20aa_coverage_from_findings(
         statuses = {str(m.get("status")) for m in maps}
         if "implemented" in statuses:
             implemented_entries.append(entry)
-        elif statuses == {"supporting"} or ("supporting" in statuses and "planned" not in statuses):
+        elif statuses == {"supporting"} or (
+            "supporting" in statuses and "planned" not in statuses
+        ):
             supporting_only_entries.append(entry)
         else:
             planned_only_entries.append(entry)
@@ -123,7 +130,9 @@ def wcag20aa_coverage_from_findings(
         if verdicts:
             implemented_evaluated += 1
             worst = _worst_verdict(verdicts) or "unknown"
-            implemented_result_counts[worst if worst in implemented_result_counts else "unknown"] += 1
+            implemented_result_counts[
+                worst if worst in implemented_result_counts else "unknown"
+            ] += 1
         else:
             implemented_pending += 1
 
@@ -132,7 +141,9 @@ def wcag20aa_coverage_from_findings(
 
     total_entries = int(reg.get("scope", {}).get("total_entries", len(entries)))
     total_sc = int(reg.get("scope", {}).get("total_success_criteria", len(sc_entries)))
-    total_conf = int(reg.get("scope", {}).get("total_conformance_requirements", len(conf_entries)))
+    total_conf = int(
+        reg.get("scope", {}).get("total_conformance_requirements", len(conf_entries))
+    )
 
     return {
         "registry_id": str(reg.get("schema") or "wcag20aa_registry.v1"),

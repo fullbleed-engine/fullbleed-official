@@ -4,11 +4,18 @@ This directory is the release-operations layer for Fullbleed. It is separate
 from feature documentation so release decisions can be audited without reading
 engine internals.
 
+## 2.0.0 Documents
+
+- `docs/release/2.0.0-runbook.md`: current MIT, Cargo, PyPI, wheel-build, and
+  registry publication procedure.
+- `docs/2.0-dependency-removal.md`: dependency-removal implementation and
+  evidence ledger.
+- `ReleaseNotes.MD`: current 2.0.0 release summary and gate list.
+
 ## 1.6.2 Documents
 
-- `docs/release/1.6.2-runbook.md`: current MIT, Cargo, PyPI, wheel-build, and
-  registry publication procedure.
-- `ReleaseNotes.MD`: current 1.6.2 release summary and gate list.
+- `docs/release/1.6.2-runbook.md`: Cargo-consumer compatibility patch release
+  procedure.
 
 ## 1.6.1 Documents
 
@@ -45,7 +52,7 @@ The final release commit must pass:
 cargo fmt --check
 cargo test --locked
 cargo test --locked --features svg_raster
-python -m maturin develop --release --features python,svg_raster
+python -m pip install --no-build-isolation --no-deps --editable .
 python -m pytest -q
 python tools\generate_css_parity_status.py --check --json
 python tools\run_css_fixture_suite.py --fixtures inline_svg_image_mixed_run_torture --jobs 1 --json

@@ -1,5 +1,3 @@
-use base64::Engine;
-use image::GenericImageView;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,9 +151,7 @@ pub fn parse_data_uri_bytes(uri: &str) -> Option<(String, Vec<u8>)> {
         .unwrap_or("application/octet-stream")
         .to_string();
     let data = if header.contains(";base64") {
-        base64::engine::general_purpose::STANDARD
-            .decode(payload)
-            .ok()?
+        crate::base64::decode_standard(payload).ok()?
     } else {
         payload.as_bytes().to_vec()
     };
@@ -230,7 +226,7 @@ pub fn renderable_image_source(bundle: Option<&AssetBundle>, source: &str) -> Op
                 .mime
                 .clone()
                 .unwrap_or_else(|| "application/octet-stream".to_string());
-            let payload = base64::engine::general_purpose::STANDARD.encode(resolved.bytes);
+            let payload = crate::base64::encode_standard(resolved.bytes);
             Some(format!("data:{mime};base64,{payload}"))
         }
         "file_uri" | "local_path" => resolved.trace.normalized_uri,
@@ -247,8 +243,7 @@ pub fn raster_image_intrinsic_dimensions(
     if !resolved.trace.success || resolved.trace.content_kind != "raster_image" {
         return None;
     }
-    let image = image::load_from_memory(&resolved.bytes).ok()?;
-    let (width, height) = image.dimensions();
+    let (width, height) = crate::image_native::dimensions(&resolved.bytes).ok()?;
     if width == 0 || height == 0 {
         None
     } else {
@@ -478,7 +473,7 @@ fn content_kind_for(mime: Option<&str>, label: &str, bytes: &[u8]) -> String {
             return "svg".to_string();
         }
     }
-    if image::guess_format(bytes).is_ok() {
+    if crate::image_native::guess_format(bytes).is_ok() {
         return "raster_image".to_string();
     }
     "unknown".to_string()
@@ -508,7 +503,6 @@ mod tests {
         Asset, AssetBundle, AssetKind, file_uri_to_path_buf, parse_data_uri_bytes,
         renderable_image_source, resolve_image_asset,
     };
-    use base64::Engine;
     use std::path::Path;
 
     #[test]
@@ -526,7 +520,7 @@ mod tests {
 
     #[test]
     fn parse_data_uri_decodes_base64_payload() {
-        let encoded = base64::engine::general_purpose::STANDARD.encode(b"png-bytes");
+        let encoded = crate::base64::encode_standard(b"png-bytes");
         let uri = format!("data:image/png;base64,{encoded}");
         let (mime, bytes) = parse_data_uri_bytes(&uri).expect("data uri");
         assert_eq!(mime, "image/png");

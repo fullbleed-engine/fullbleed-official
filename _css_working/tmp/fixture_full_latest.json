@@ -162,7 +162,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_background_conic_gradient_supported_quadrants_277140_1779749225984293500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_background_conic_gradient_supported_quadrants_228040_1785658525764273200.jsonl"
           }
         }
       },
@@ -171,7 +171,7 @@
         "pdf_sha256": "b5c81cf0362705d92b7380a2917003037db7843c447d8576e46a3184e687ea25",
         "image_count": 1,
         "image_sha256": [
-          "90e0ed28620df5c64742e5f3d3dc1c1db41b920982eef0e0f4b89ff9b11ca8d5"
+          "dfa26da602b42e2fdcc41765f113fb2af57169d55b9ad9efe43cf4ece470949c"
         ],
         "stability_hash_expected": "dc39e56beaefd5ad22d3d092c04b67757b004f55f34d5213393f35533de05228",
         "stability_hash_actual": "dc39e56beaefd5ad22d3d092c04b67757b004f55f34d5213393f35533de05228",
@@ -408,7 +408,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_left_color_override_277140_1779749225985589900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_left_color_override_228040_1785658525770271100.jsonl"
           }
         }
       },
@@ -417,7 +417,7 @@
         "pdf_sha256": "f615a4aed02078472190ec3ea0c624b026aec3bd5e02b0076b1b13899eca83b3",
         "image_count": 1,
         "image_sha256": [
-          "7e3881aa8f1d99164c74ceb759ce52d2a19d92ff084e4b4e9ba30f57adc5bc36"
+          "e1d1d56950a44a63b74da9363329499f9266c87ee2222b11c010619081b1ec6e"
         ],
         "stability_hash_expected": "ee6bdc99d7241c1e786fb55523ade19a88a9bb01eddf1dc384a68357e898b1f3",
         "stability_hash_actual": "ee6bdc99d7241c1e786fb55523ade19a88a9bb01eddf1dc384a68357e898b1f3",
@@ -711,7 +711,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_uniform_frame_paint_matrix_277140_1779749225987025700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_uniform_frame_paint_matrix_228040_1785658525770271100.jsonl"
           }
         }
       },
@@ -720,7 +720,7 @@
         "pdf_sha256": "ffd725204f6e5733ff5ce2e67bf3fdd6106cf635722e88ddcad695440b42bb2a",
         "image_count": 1,
         "image_sha256": [
-          "76644141263a198ace241915eb5ebf2f7466eb2ad4f777abab3c1f91ff5e2902"
+          "96889497f1846ac4e8225e91e6180f2c52ee1e90a7960be962de879bc8bd80d3"
         ],
         "stability_hash_expected": "d74c548767e31205fdde0621bd8839579b17691204679182ff5b39683a8e633f",
         "stability_hash_actual": "d74c548767e31205fdde0621bd8839579b17691204679182ff5b39683a8e633f",
@@ -879,7 +879,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_box_shadow_negative_spread_offset_paints_shrunk_shadow_277140_1779749225987025700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_box_shadow_negative_spread_offset_paints_shrunk_shadow_228040_1785658525771271600.jsonl"
           }
         }
       },
@@ -888,7 +888,7 @@
         "pdf_sha256": "2f08753ee05f8e0c34d0d1df402a5d2c60c04eb3d83e94fd946a5bd533295320",
         "image_count": 1,
         "image_sha256": [
-          "450591e73894c84181d5b3476c00f676812be7bdf1884914a854185511e4540e"
+          "67710fe7a4a1ad581d4348a212f859491c4db30475277b03faf9b6fbd56156f0"
         ],
         "stability_hash_expected": "5a5e3025a4c8442fe88fe28d257d844aeed37167893c054e0a9aaa04944709a7",
         "stability_hash_actual": "5a5e3025a4c8442fe88fe28d257d844aeed37167893c054e0a9aaa04944709a7",
@@ -1096,7 +1096,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_calc_var_additive_mixed_lengths_277140_1779749227849048200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_calc_var_additive_mixed_lengths_228040_1785658527217815000.jsonl"
           }
         }
       },
@@ -1105,7 +1105,7 @@
         "pdf_sha256": "21c8fba470034eb2ef19589f687becb6f68bd03f0c48f029ad702c889085c726",
         "image_count": 1,
         "image_sha256": [
-          "e9c24da39fac0ec6d32ce48fc906b9a40852ed03ea59a4d7c46bb1cd4e313ef7"
+          "a3c549880d25326e1f7168fe537cfcccc97ef8bf30f6d87b33e4c0b4258ba52a"
         ],
         "stability_hash_expected": "c04e58f90a630b9cbdd634d6494948cce92ed9887203968de61e7e47a53a834f",
         "stability_hash_actual": "c04e58f90a630b9cbdd634d6494948cce92ed9887203968de61e7e47a53a834f",
@@ -1247,7 +1247,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_calc_var_percent_width_277140_1779749227908097200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_calc_var_percent_width_228040_1785658527249079800.jsonl"
           }
         }
       },
@@ -1256,7 +1256,7 @@
         "pdf_sha256": "f771cb003f07405ea2b526ef3623799da0fb86d2fa0b7774fe640f32238d5a62",
         "image_count": 1,
         "image_sha256": [
-          "45d8824ee161439ee909e515feed1b5252fdb50a02ae2c86cec32d26a92776f9"
+          "b854db1e3d887cbceca074b56387e33657084fe5048478ad6d4aae498e139116"
         ],
         "stability_hash_expected": "ced9e89a9f4ba55ffbfeec39cb11d30e93a4de60bdd786e3afba2cce4011b4ef",
         "stability_hash_actual": "ced9e89a9f4ba55ffbfeec39cb11d30e93a4de60bdd786e3afba2cce4011b4ef",
@@ -1379,7 +1379,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_fallback_chain_277140_1779749227998043400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_fallback_chain_228040_1785658527401185300.jsonl"
           }
         }
       },
@@ -1388,7 +1388,7 @@
         "pdf_sha256": "d02493736fae880b310cf07528b233cef03c21369351ec7d67f74e5d0132d54f",
         "image_count": 1,
         "image_sha256": [
-          "b3314c54559e3e3bb223c5019f3c775c15c26d7eecec25d026652d12d8361809"
+          "a07f51127b5e11463c627eacf08a0fc96a04db54afd9e648f8d2478030a30d38"
         ],
         "stability_hash_expected": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
         "stability_hash_actual": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
@@ -1595,7 +1595,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_length_chain_fallback_277140_1779749228000053700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_length_chain_fallback_228040_1785658527717324700.jsonl"
           }
         }
       },
@@ -1604,7 +1604,7 @@
         "pdf_sha256": "3450863d9b7bd36582bbd421f0a2179febe82a3f8da669003107513d69980e1f",
         "image_count": 1,
         "image_sha256": [
-          "7c073f75168a6ccce655700ea6c3a324492ab2bff6ec3700352b3e9fd45f844a"
+          "38c3308034f66970c93e85c44af81e79f7c2b93c6e7fadfd004ff3d1cd776341"
         ],
         "stability_hash_expected": "4501533968752d8316b0adea6fc1c0efa788cfc29522d4b2f3b054e5bd1ae02d",
         "stability_hash_actual": "4501533968752d8316b0adea6fc1c0efa788cfc29522d4b2f3b054e5bd1ae02d",
@@ -1878,7 +1878,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_math_min_max_clamp_lengths_277140_1779749228814287600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_math_min_max_clamp_lengths_228040_1785658528012086500.jsonl"
           }
         }
       },
@@ -1887,7 +1887,7 @@
         "pdf_sha256": "e9aa768a56e7eb23405f19c97419a6f79446c0e9db227639a0400140b05ac33b",
         "image_count": 1,
         "image_sha256": [
-          "f5e849f60fb14c42f7e1eabbca9f5ed3108884b84af47fc8aa2b1d8a2533c9a7"
+          "0dcfac0fc86cd9af65bed95e6d3876a255e63be721c13585c9ac8b1df36e834a"
         ],
         "stability_hash_expected": "2692f3d7976c83633c1812281eca3ff29a68e721eb161c7502b13acf0bf9e4f0",
         "stability_hash_actual": "2692f3d7976c83633c1812281eca3ff29a68e721eb161c7502b13acf0bf9e4f0",
@@ -2030,7 +2030,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_conic_gradient_fallback_no_color_277140_1779749228956829000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_conic_gradient_fallback_no_color_228040_1785658528014089100.jsonl"
           }
         }
       },
@@ -2039,7 +2039,7 @@
         "pdf_sha256": "72ca9b74ffb742bd8f1485d17f7fc97546d431bb5d0c6592e27e7a8943e38759",
         "image_count": 1,
         "image_sha256": [
-          "2a7983421e540cc52e5020297b66a088f455a86fb38d8665a835af10199d0f0e"
+          "17c08b03e6b6de68b3cadab4721bf9be80d1b1d33bf20d607fa268e27366b7b7"
         ],
         "stability_hash_expected": "2421e9620493c542b8a7ad632cc7eae1e55a42d7bdaecc676f60fce5541d6e1b",
         "stability_hash_actual": "2421e9620493c542b8a7ad632cc7eae1e55a42d7bdaecc676f60fce5541d6e1b",
@@ -2162,7 +2162,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_conic_gradient_fallback_with_color_277140_1779749229121461300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_conic_gradient_fallback_with_color_228040_1785658528325542000.jsonl"
           }
         }
       },
@@ -2171,7 +2171,7 @@
         "pdf_sha256": "b829b26817f0de7165898f887b884f16ead8f7ee7bb774cc0b53815074940308",
         "image_count": 1,
         "image_sha256": [
-          "ef179c9ee23666dee439e0107950820ed1315d8999a39e1f2a23474bb7b77292"
+          "2054d36550d6573ebcf387ba4836dccee42e0d6d60b1363e3d833c3fac53d32e"
         ],
         "stability_hash_expected": "ab97e9788967f246329b952679412d119d81f0c1025ccbf1f74a435fc8b26642",
         "stability_hash_actual": "ab97e9788967f246329b952679412d119d81f0c1025ccbf1f74a435fc8b26642",
@@ -2295,7 +2295,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_filters_effects_fallback_277140_1779749229682997100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_filters_effects_fallback_228040_1785658528650046300.jsonl"
           }
         }
       },
@@ -2304,7 +2304,7 @@
         "pdf_sha256": "012d864ffa01b5936ef49d431328b7aae90dde5ed479582d8f63ac05a49d35a3",
         "image_count": 1,
         "image_sha256": [
-          "a78f81e921283df878380cae92ab635061301c0189d1b578775aa6c0a40f1301"
+          "da8d067e9431df1a51b2e3ec7b9d80cc5d56d737e4fcedf1873ddb70c7bed07a"
         ],
         "stability_hash_expected": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2",
         "stability_hash_actual": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2",
@@ -2426,7 +2426,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_multicol_single_column_fallback_277140_1779749229684999800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_multicol_single_column_fallback_228040_1785658528652247900.jsonl"
           }
         }
       },
@@ -2435,7 +2435,7 @@
         "pdf_sha256": "79c2aeddb9af336a7d26ef97ab26b63912c9be1bf1b6181269bbd4f3316bc451",
         "image_count": 1,
         "image_sha256": [
-          "d7778aae200751afd3c4e8af576483cb8d5b6415b92792eae320ff56869bd1a2"
+          "ac33c2774d015e12d923104fb6ce58fa8c0a80fa76a354d3ac961b6cadede1dd"
         ],
         "stability_hash_expected": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2",
         "stability_hash_actual": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2",
@@ -2586,7 +2586,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_unsupported_media_and_no_effect_277140_1779749229688001000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_unsupported_media_and_no_effect_228040_1785658528752743200.jsonl"
           }
         }
       },
@@ -2595,7 +2595,7 @@
         "pdf_sha256": "2f43f7fa8b3845eda1d3ba158b6032391f8e5694fde66928ee743bba86f6c6d1",
         "image_count": 1,
         "image_sha256": [
-          "54861c6f063edf73d6c084a65553e298217a7a64fdc8e57741609b5ee97c9463"
+          "48cb91d336dc2ed8f5cba8e7a30dbe08cd233d5c0ea34c6a63ad7e6a7e8ee9e2"
         ],
         "stability_hash_expected": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
         "stability_hash_actual": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
@@ -2869,7 +2869,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_align_content_flex_end_wrap_277140_1779749230294406800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_align_content_flex_end_wrap_228040_1785658529097341100.jsonl"
           }
         }
       },
@@ -2878,7 +2878,7 @@
         "pdf_sha256": "053c61c3c7e0a3085589eaae94ed4c359454b670de96b0f3a0c43dea6fa69958",
         "image_count": 1,
         "image_sha256": [
-          "0aaf677bd0716a9b596f8cec1a96a53741041c91f54b7b3fe977934679812383"
+          "7d5c6c3f419f474078f2c9bdbb18e971dbd80243f1ff356ef167acf473227f9e"
         ],
         "stability_hash_expected": "5d641a7e1d6a285858f1d15a442a79de691521ebd268cde9c1004413e0a8cb36",
         "stability_hash_actual": "5d641a7e1d6a285858f1d15a442a79de691521ebd268cde9c1004413e0a8cb36",
@@ -3141,7 +3141,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_align_self_item_override_277140_1779749230325181700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_align_self_item_override_228040_1785658529129330300.jsonl"
           }
         }
       },
@@ -3150,7 +3150,7 @@
         "pdf_sha256": "d0230cc8e1abcd8749f6922cab013ace795be732545248c8b5be215a9260b169",
         "image_count": 1,
         "image_sha256": [
-          "73b62e18fb61fe1245a5bd0c2ca19582259db99de235a57db892a2f70f3fd519"
+          "a536c8fc695140004b7b6cf353bcd04263726e9d7d8724b421f2bff9c04e81b0"
         ],
         "stability_hash_expected": "458010f30b7f18e8073574a760d8281e794858eca8b80aabf2d05f3591948aa8",
         "stability_hash_actual": "458010f30b7f18e8073574a760d8281e794858eca8b80aabf2d05f3591948aa8",
@@ -3394,7 +3394,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_flow_row_wrap_layout_277140_1779749230762421800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_flow_row_wrap_layout_228040_1785658529406347000.jsonl"
           }
         }
       },
@@ -3403,7 +3403,7 @@
         "pdf_sha256": "098620b2b7fb53a887b101c90c69c3f0650d6795f5e304f1407989a797b17706",
         "image_count": 1,
         "image_sha256": [
-          "4d56e1afee9a79f90fe9985cccebf3bcf7dff52b537b465d2e7b169219e8080a"
+          "2dbebd58d4cfde1c470517f6362d2fd979661a13e432b88356af21fda223bb20"
         ],
         "stability_hash_expected": "5a88c3edb8979365e6c191fc018fada7bd89c6e8172982613f9388cfc4a7cf0d",
         "stability_hash_actual": "5a88c3edb8979365e6c191fc018fada7bd89c6e8172982613f9388cfc4a7cf0d",
@@ -3716,7 +3716,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_content_flex_end_center_wrap_277140_1779749230764421300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_content_flex_end_center_wrap_228040_1785658529482551200.jsonl"
           }
         }
       },
@@ -3725,7 +3725,7 @@
         "pdf_sha256": "44ac5b46581c1c83c3855cb5b9b06e52f9b9fcdc3750d86de6ab8ebf6c33d679",
         "image_count": 1,
         "image_sha256": [
-          "599fd65d036bb13cd51bd8d9134a0666f8a9b418f67a10359a7ee2c42f762b67"
+          "b49435e7dd3989a69e4b3657bf543c39b1f074254bb95dbe4ecc6f1861d33e77"
         ],
         "stability_hash_expected": "7a0c959c4eaee689ce32d6f625debd435b7d2eeac6ece4b54f1c74f18f6c5112",
         "stability_hash_actual": "7a0c959c4eaee689ce32d6f625debd435b7d2eeac6ece4b54f1c74f18f6c5112",
@@ -3942,7 +3942,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_items_container_alignment_277140_1779749231642155300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_items_container_alignment_228040_1785658530254690500.jsonl"
           }
         }
       },
@@ -3951,7 +3951,7 @@
         "pdf_sha256": "bf0becb4e884e534fce087c71f2b9f4f9e98a400ca77d8c51687e5a9521b1849",
         "image_count": 1,
         "image_sha256": [
-          "28c492c1793cb9e79d7994e4284d592df8d28c442fbdb6a73a70968353757db3"
+          "804aa9d681dde5f7e312fccaa8a776b02a06edb19f8fa082b41b161910005f80"
         ],
         "stability_hash_expected": "bf8b6da2fd5cce5eba124a99b2e313187f35f45284387a0ef6d3dc70eac50234",
         "stability_hash_actual": "bf8b6da2fd5cce5eba124a99b2e313187f35f45284387a0ef6d3dc70eac50234",
@@ -4214,7 +4214,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_self_item_override_277140_1779749232579485600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_self_item_override_228040_1785658530818028200.jsonl"
           }
         }
       },
@@ -4223,7 +4223,7 @@
         "pdf_sha256": "d0230cc8e1abcd8749f6922cab013ace795be732545248c8b5be215a9260b169",
         "image_count": 1,
         "image_sha256": [
-          "73b62e18fb61fe1245a5bd0c2ca19582259db99de235a57db892a2f70f3fd519"
+          "a536c8fc695140004b7b6cf353bcd04263726e9d7d8724b421f2bff9c04e81b0"
         ],
         "stability_hash_expected": "458010f30b7f18e8073574a760d8281e794858eca8b80aabf2d05f3591948aa8",
         "stability_hash_actual": "458010f30b7f18e8073574a760d8281e794858eca8b80aabf2d05f3591948aa8",
@@ -4400,7 +4400,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_two_column_distribution_277140_1779749233008455600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_two_column_distribution_228040_1785658531153718300.jsonl"
           }
         }
       },
@@ -4409,7 +4409,7 @@
         "pdf_sha256": "c2eb2a0dc186bc9115e95c88d0a89a09fc048ecf0a54c16bb9f093ba082012d2",
         "image_count": 1,
         "image_sha256": [
-          "5bb63d3f215a7a374977b4a0c4248e1ab97442621a05ddff9c8acda42fef0429"
+          "afb65813d09af136aaa3e6ad3b1209fbb9ccafb6eb7ba30c6aa8755722d4c2f5"
         ],
         "stability_hash_expected": "e183beba4721fff5794ec13d27c053c6f2bb2bb1f03c3fc8f0f52c047c175d41",
         "stability_hash_actual": "e183beba4721fff5794ec13d27c053c6f2bb2bb1f03c3fc8f0f52c047c175d41",
@@ -4589,7 +4589,7 @@
               "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_fragmentation_break_inside_avoid_block_277140_1779749233012587800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_fragmentation_break_inside_avoid_block_228040_1785658531275589400.jsonl"
           }
         }
       },
@@ -4598,8 +4598,8 @@
         "pdf_sha256": "31b8fbd64cb0ba84934fac6f63cabf3b16c16758de9457bc1ae0e980df0e008c",
         "image_count": 2,
         "image_sha256": [
-          "2f7471f27655f0ad25cd665685a5a53919991c7ffbeed9728de25e6a224ebebc",
-          "c71637f192584d069238ba133c320969352038a030052324b284386a7792b09d"
+          "9195067b5b537c83401af936eec3ea6772ed7b385c5f259832e7a787691cc3a0",
+          "2fa57a973e218e0ec4c6de15cd374e2e28312681b4f838b65d78ec4c6aad2a97"
         ],
         "stability_hash_expected": "321a01269ce6f2fa9cf63f20c3ff85e087d40f676f65a3d8df1401a8203a81b6",
         "stability_hash_actual": "321a01269ce6f2fa9cf63f20c3ff85e087d40f676f65a3d8df1401a8203a81b6",
@@ -4702,7 +4702,7 @@
               "jit.page_break.trigger": 24
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_fragmentation_long_paragraph_277140_1779749233047052800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_fragmentation_long_paragraph_228040_1785658531392628100.jsonl"
           }
         }
       },
@@ -4711,11 +4711,11 @@
         "pdf_sha256": "c37df39b8df4d9a75b3483582ddfb08e306bd3f80bb9985c861c0a8e2e238554",
         "image_count": 5,
         "image_sha256": [
-          "6c65e83e25336098de950439ef88a5dd2416d992cbaec8f74de186f0bbe7663c",
-          "b838990fd1b8ee05f17e69592d18779396c3e30f75ed4632cf559c560a330e77",
-          "215538afee465a52161f923431f99e99cd044b933b1b82e8f8f33f293594ef93",
-          "ef9f6df6416795fcc263f17f8c80a509ace735fc3bcfb096f27affe0be165609",
-          "c3f38f0e7927e39c9a74818e36792f9c1b562b3b9d9f7929e63260acadcd07fd"
+          "ae4825c6336a2bdae7eed9a868b654a0a743cd2f666f171f53fd9f3eb8f633de",
+          "5ac426fc21a9ffec66a879c2bc4ccee70555da2a9eedd5138c9f1550654e393b",
+          "664df5d570eafb98aef75ac5b97fcaa11bd5bc81532708902ca6b1871088f399",
+          "fee7bf75dc4499b53bb1bd37aaf6765b1ae56ac649d48e275f20e4565266146e",
+          "bfbef5d97901c11464d3d3c3b8018d178255d4325e47881f586e0d1964475416"
         ],
         "stability_hash_expected": "5b014d5a0a149b502a3639136c5600ca10a20e27dc1d829c902d143734364524",
         "stability_hash_actual": "5b014d5a0a149b502a3639136c5600ca10a20e27dc1d829c902d143734364524",
@@ -4904,7 +4904,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_gap_row_column_var_resolution_277140_1779749233665941400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_gap_row_column_var_resolution_228040_1785658531570674000.jsonl"
           }
         }
       },
@@ -4913,7 +4913,7 @@
         "pdf_sha256": "a36509d90237728c5cbde2ca3a429e8ae85d444cd640c23f0380db4bb7bb29fc",
         "image_count": 1,
         "image_sha256": [
-          "7f7dbbdded6e5147f089b1c574f846b978e7ae81af173395f60e86eb81812519"
+          "08e8362b50c4104df9ec813972d284d6fc13c955f9f9576f63a4027c0fe23ea8"
         ],
         "stability_hash_expected": "ea9dabec024fbe1d451002524e8364ccb95d90dc8e8d19c9c90a50cc8dc7faa1",
         "stability_hash_actual": "ea9dabec024fbe1d451002524e8364ccb95d90dc8e8d19c9c90a50cc8dc7faa1",
@@ -5075,7 +5075,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_conflicting_explicit_slots_fall_forward_277140_1779749233888283100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_conflicting_explicit_slots_fall_forward_228040_1785658531891548600.jsonl"
           }
         }
       },
@@ -5084,7 +5084,7 @@
         "pdf_sha256": "b72cc008f73b8172c1a6b4de6937848d2ca342e090df5a748face19ca3225f92",
         "image_count": 1,
         "image_sha256": [
-          "55abc8b7f736e78fd8ad0192497d4b65b76e80c48811e4b61dd81e21cb1645a6"
+          "bf5eddc7ee7799ae346d1f30082acbd862500a33c29b2394c6c14d0d9c816d71"
         ],
         "stability_hash_expected": "e2f7c012dfb1ed97957ce749d0fee555c3cd8f15899ca6b6f6a913c460971def",
         "stability_hash_actual": "e2f7c012dfb1ed97957ce749d0fee555c3cd8f15899ca6b6f6a913c460971def",
@@ -5322,7 +5322,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_explicit_row_column_starts_277140_1779749234235298300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_explicit_row_column_starts_228040_1785658531973482600.jsonl"
           }
         }
       },
@@ -5331,7 +5331,7 @@
         "pdf_sha256": "1cd2d7f870b673b76147c47ccdc9319c62063dda4f7e59a5938054def895f44a",
         "image_count": 1,
         "image_sha256": [
-          "5883c2daf852032b96e294230e15fb4bd2f6fd7272170673aa5b9899b6432b7c"
+          "24962acf86fbd47948ce82593102e22b5a67142b47adcb86bcf24890ed45afd8"
         ],
         "stability_hash_expected": "5b4dd6b669a62960e67cc5f6a7f840d6ea55bb3acc739b5e2a8ed940da178f24",
         "stability_hash_actual": "5b4dd6b669a62960e67cc5f6a7f840d6ea55bb3acc739b5e2a8ed940da178f24",
@@ -5568,7 +5568,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_rows_only_column_derivation_277140_1779749234319405800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_rows_only_column_derivation_228040_1785658532131336700.jsonl"
           }
         }
       },
@@ -5577,7 +5577,7 @@
         "pdf_sha256": "098620b2b7fb53a887b101c90c69c3f0650d6795f5e304f1407989a797b17706",
         "image_count": 1,
         "image_sha256": [
-          "4d56e1afee9a79f90fe9985cccebf3bcf7dff52b537b465d2e7b169219e8080a"
+          "2dbebd58d4cfde1c470517f6362d2fd979661a13e432b88356af21fda223bb20"
         ],
         "stability_hash_expected": "07200ceb08a48fced099525df1f4b9046d5c3d4f78cacc7a1b49752c7bf88171",
         "stability_hash_actual": "07200ceb08a48fced099525df1f4b9046d5c3d4f78cacc7a1b49752c7bf88171",
@@ -5834,7 +5834,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_template_rows_columns_matrix_277140_1779749234465231700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_template_rows_columns_matrix_228040_1785658532212293300.jsonl"
           }
         }
       },
@@ -5843,7 +5843,7 @@
         "pdf_sha256": "098620b2b7fb53a887b101c90c69c3f0650d6795f5e304f1407989a797b17706",
         "image_count": 1,
         "image_sha256": [
-          "4d56e1afee9a79f90fe9985cccebf3bcf7dff52b537b465d2e7b169219e8080a"
+          "2dbebd58d4cfde1c470517f6362d2fd979661a13e432b88356af21fda223bb20"
         ],
         "stability_hash_expected": "3d332c2dbcb47021f7496812fe529a109c434757f919f494519353dec137d5c0",
         "stability_hash_actual": "3d332c2dbcb47021f7496812fe529a109c434757f919f494519353dec137d5c0",
@@ -6030,7 +6030,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inheritance_unset_noninherited_resets_277140_1779749235290468900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inheritance_unset_noninherited_resets_228040_1785658532763152200.jsonl"
           }
         }
       },
@@ -6039,7 +6039,7 @@
         "pdf_sha256": "2fc8bad9481eb3cb1fd83121d5557f9066be49ab6d94f1173dfc05242180c334",
         "image_count": 1,
         "image_sha256": [
-          "ceb9d2f025a5fa7b5f6348f24b470f8f68430d87963e411d312ae72a3b49c712"
+          "5c169f39ac6c9d586e38c66062a7276dedc8f84ee2a64e75d36c4a1e59088dbe"
         ],
         "stability_hash_expected": "fa297792afc5abcb15d6ba42cc454817010084af2f42920655884a2c26e60f85",
         "stability_hash_actual": "fa297792afc5abcb15d6ba42cc454817010084af2f42920655884a2c26e60f85",
@@ -6312,7 +6312,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inline_svg_image_mixed_run_torture_277140_1779749236484922200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inline_svg_image_mixed_run_torture_228040_1785658533730523300.jsonl"
           }
         }
       },
@@ -6321,7 +6321,7 @@
         "pdf_sha256": "db570bf879101c001d0f5e30ba627f552c99024e9ad788bf8149f9614096a78c",
         "image_count": 1,
         "image_sha256": [
-          "806651150178b391ca23d2211475e131306af72211a672e65dc15f2cb8db9954"
+          "35abf429d4695186be13dd42b4a30030a66b706c9ee5f319ec997acfcc4a8c96"
         ],
         "stability_hash_expected": "2dceec197b1d1211beaaa9d45b6a1c1b8147bd31aca82bf716239b32d5425c49",
         "stability_hash_actual": "2dceec197b1d1211beaaa9d45b6a1c1b8147bd31aca82bf716239b32d5425c49",
@@ -6462,7 +6462,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inset_left_var_resolution_277140_1779749236919465300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inset_left_var_resolution_228040_1785658533777095200.jsonl"
           }
         }
       },
@@ -6471,7 +6471,7 @@
         "pdf_sha256": "33e7778813031b96a6ca43314e3393c7cff768651e8047a67247ddf65c431529",
         "image_count": 1,
         "image_sha256": [
-          "9295a67195dcbd765eace2f34e0ba1948cb00a38efc852bd21227b61f8fcc2a8"
+          "047aefb64a2ea93611b872e5679a4b4bfa166cac4f022662a35d20438ec625af"
         ],
         "stability_hash_expected": "43ac4eb5215ed2b375bcb688b3d85c45fd648e03596b0c2eb5d3ef9e8588ee36",
         "stability_hash_actual": "43ac4eb5215ed2b375bcb688b3d85c45fd648e03596b0c2eb5d3ef9e8588ee36",
@@ -6743,7 +6743,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_inline_block_size_min_max_277140_1779749236934220400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_inline_block_size_min_max_228040_1785658533950945100.jsonl"
           }
         }
       },
@@ -6752,7 +6752,7 @@
         "pdf_sha256": "06876f4001505d8f13b88c6afe8e6c6c79c997db5d95f5ddbbd7558c8afc4f3f",
         "image_count": 1,
         "image_sha256": [
-          "5f8842aab75b831e1a67bfc2c0adbbcffc927f5f419454759dcbccf4084c1207"
+          "b6197877e9b7363b708bfb4e637162b6f3cabceab5a187b1b813df82b800eeb6"
         ],
         "stability_hash_expected": "d2c3dcad69997de9f67b2324488016b4e96fe8ad40ca94d7eed9184840d2382d",
         "stability_hash_actual": "d2c3dcad69997de9f67b2324488016b4e96fe8ad40ca94d7eed9184840d2382d",
@@ -6923,7 +6923,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_inset_horizontal_tb_ltr_277140_1779749237307095900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_inset_horizontal_tb_ltr_228040_1785658533986284000.jsonl"
           }
         }
       },
@@ -6932,7 +6932,7 @@
         "pdf_sha256": "ee5d1d3b32007ddbc701614ad8dbb54e8347d5c190d66f910036fc33da202290",
         "image_count": 1,
         "image_sha256": [
-          "088150b9838263245d13569c35a35e98c07df072b3165e1b879fcf27742ee969"
+          "0db5c8d66fdc9ac422985acf8d2bc90db9031c8b805feb941f27a34ae048204e"
         ],
         "stability_hash_expected": "bbe1391a86b90611b730db48a46d4cc41a92d0473d882847f5e8eade20337938",
         "stability_hash_actual": "bbe1391a86b90611b730db48a46d4cc41a92d0473d882847f5e8eade20337938",
@@ -7102,7 +7102,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_margin_padding_horizontal_tb_ltr_277140_1779749237309641700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_margin_padding_horizontal_tb_ltr_228040_1785658534019541600.jsonl"
           }
         }
       },
@@ -7111,7 +7111,7 @@
         "pdf_sha256": "0d86883f4188797aa19803741af6b05402bdfb83ec1696249f62508ae814f65c",
         "image_count": 1,
         "image_sha256": [
-          "2516a87bafb6067f03ed79f60f7149f279d5ecbd85ac2dc03d18a203827c4bbf"
+          "7d8ad8d041dd37c119011c3bbeb0845bde3a09a4345e4acd0645d3235abfda49"
         ],
         "stability_hash_expected": "3752423858a003e6fef7cfd263328f2281ed6264ca1d0188b8beff3792fcf161",
         "stability_hash_actual": "3752423858a003e6fef7cfd263328f2281ed6264ca1d0188b8beff3792fcf161",
@@ -7337,7 +7337,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_overflow_hidden_clips_absolute_child_277140_1779749237427305800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_overflow_hidden_clips_absolute_child_228040_1785658534089312100.jsonl"
           }
         }
       },
@@ -7346,7 +7346,7 @@
         "pdf_sha256": "837755e45db3fed717093d6e9303f3b27bc77be75a16119c29eb174cc82cd17b",
         "image_count": 1,
         "image_sha256": [
-          "c991b54eaad0e8ac5ba41c65c26df3038cd5e411be0238e58d030fcde0aefdfd"
+          "59d208cedec0a042d24fb8096148bbb34e317e87999fc7f99dec96409e05913d"
         ],
         "stability_hash_expected": "5eddd23d6ad0798a14e4de3b5f56f6582de0d6321c12ddc81f7e0d1949e8213d",
         "stability_hash_actual": "5eddd23d6ad0798a14e4de3b5f56f6582de0d6321c12ddc81f7e0d1949e8213d",
@@ -7572,7 +7572,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_overflow_visible_allows_absolute_bleed_277140_1779749238468586600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_overflow_visible_allows_absolute_bleed_228040_1785658534793233600.jsonl"
           }
         }
       },
@@ -7581,7 +7581,7 @@
         "pdf_sha256": "1a4c3fa527b724699b55b322381309d3f0339a7cb5ea57d24a168755c770c054",
         "image_count": 1,
         "image_sha256": [
-          "6e2424093331cbff757ac8f7e28896985d059826fceaa220dd0044e49617759b"
+          "c54812362eea08576ce570b1227ff9da693f26cc1ac46b879594557d06909cd7"
         ],
         "stability_hash_expected": "58d085a89002cf07bad8f458c910773b41d3f6deea4dfb9ecbf38ebe6f5b47d2",
         "stability_hash_actual": "58d085a89002cf07bad8f458c910773b41d3f6deea4dfb9ecbf38ebe6f5b47d2",
@@ -7742,7 +7742,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_paged_break_before_forced_block_277140_1779749239032512100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_paged_break_before_forced_block_228040_1785658534795233200.jsonl"
           }
         }
       },
@@ -7751,8 +7751,8 @@
         "pdf_sha256": "c1dd529461bafabc56a4e90154ed36be0ae02c5cc9c95f2efef7c511ff357d51",
         "image_count": 2,
         "image_sha256": [
-          "e2ae9089e4dadb9af023a3c8ebc7521e4897a12b309566f13dff1d7ba200e6f0",
-          "eba778b96ddae69d9b7a0691dea7836e040782b9cbdd50de46c0ccd07d677822"
+          "bf6d0482c2fd2e963aa84710af200b2115b85dfef0bf2dcae30f98b0b7bd0d9f",
+          "7145ed2822c8f4a3e6bdf3c95389e0fab336b8a7573d4731ff7a4d3773def699"
         ],
         "stability_hash_expected": "62e83d5eba30e961bf14d7c59af0d59b6cf6361601e0a10e64c1bc0e360004e4",
         "stability_hash_actual": "62e83d5eba30e961bf14d7c59af0d59b6cf6361601e0a10e64c1bc0e360004e4",
@@ -7969,7 +7969,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_auto_inset_static_position_fallback_277140_1779749239088260900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_auto_inset_static_position_fallback_228040_1785658535043305800.jsonl"
           }
         }
       },
@@ -7978,7 +7978,7 @@
         "pdf_sha256": "b261804bc9159626f9304f9ee47f074aca2055838e970187d6d3ff3f9e1a7f34",
         "image_count": 1,
         "image_sha256": [
-          "45bea579b1f12e501459473d13d0072054d8dd06e9b7a8dd24b656acc050cdd6"
+          "739d8836f6c8e88943fa8f5c577efaa37cfdf1d46c71fb5b381afb11e7cbad55"
         ],
         "stability_hash_expected": "127eb88ea4c41c5f7072b8a2b6883fe9258ad0fa543b3fe342935e797c6f9710",
         "stability_hash_actual": "127eb88ea4c41c5f7072b8a2b6883fe9258ad0fa543b3fe342935e797c6f9710",
@@ -8177,7 +8177,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_empty_box_background_277140_1779749239091311600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_empty_box_background_228040_1785658535364838700.jsonl"
           }
         }
       },
@@ -8186,7 +8186,7 @@
         "pdf_sha256": "2d0f6a82efbef056693953f0b49d80d416f307eb50d02ed871d534d0bc10ca4c",
         "image_count": 1,
         "image_sha256": [
-          "06ce991bcb046fa8927e7c06951b47108e19a6cabf13ce2e22aabe871a4fb85c"
+          "acfea91ee6e402ab24172ab9a206342ee8b11246d2cafffd6141efb32acc3dd6"
         ],
         "stability_hash_expected": "e8b51986b327124ecdb28d381321d8d593aba0e465b8460ad7953610e82d147d",
         "stability_hash_actual": "e8b51986b327124ecdb28d381321d8d593aba0e465b8460ad7953610e82d147d",
@@ -8442,7 +8442,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_explicit_width_overflow_no_clamp_277140_1779749239946983800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_explicit_width_overflow_no_clamp_228040_1785658535773976000.jsonl"
           }
         }
       },
@@ -8451,7 +8451,7 @@
         "pdf_sha256": "bb3e384cf7d803c88b57593b463f8b391b6e127db4b02768c4b299cb6801ff21",
         "image_count": 1,
         "image_sha256": [
-          "257a4bf813436fcc56207c7ca39060ae5761501cde68d27b1ef91b6de1e69617"
+          "1d8b5bbf3ce53c58f583e285b71d0229a6f100408098da0c0c68c15339b7bebc"
         ],
         "stability_hash_expected": "86fdf392c8800a33dee46183c4d83a622590d51e727ec9d562b9343266fc75b7",
         "stability_hash_actual": "86fdf392c8800a33dee46183c4d83a622590d51e727ec9d562b9343266fc75b7",
@@ -8668,7 +8668,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_initial_containing_block_from_static_parent_277140_1779749240150762700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_initial_containing_block_from_static_parent_228040_1785658535793935500.jsonl"
           }
         }
       },
@@ -8677,7 +8677,7 @@
         "pdf_sha256": "4d9b7a6d95ae7e0b85f651cdfffdb6cc82993bc4e1f779717c1095588d31c473",
         "image_count": 1,
         "image_sha256": [
-          "d75d47738f2bdb0274b256a7da564591f1cd68d728a17863eb33bafcbd981ac6"
+          "98aac531cd7e9ae745361f0396d94ae2f60d4a2fbcd8533b8366e50e62e09508"
         ],
         "stability_hash_expected": "a3acde17715191d23dabb69a269222b5e944db63c24e77285416480a09a63f17",
         "stability_hash_actual": "a3acde17715191d23dabb69a269222b5e944db63c24e77285416480a09a63f17",
@@ -8876,7 +8876,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_left_right_width_precedence_277140_1779749240180223800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_left_right_width_precedence_228040_1785658535819034100.jsonl"
           }
         }
       },
@@ -8885,7 +8885,7 @@
         "pdf_sha256": "0a1881db1ea55aeef18563a02a055eb730f2caf64a4d680e0190712be9542005",
         "image_count": 1,
         "image_sha256": [
-          "7ab75f5237e14a23e08c6d8669f641730af6dc00182cfd19d1df1e7fe53980c7"
+          "ad4aa938d232d0248996a3475dc6b4346f3c1e2f63b11128ce613dd263541ba3"
         ],
         "stability_hash_expected": "8aaf52ace27b691578f22a53b6b0875457ad68e9505c4a0d114488161fe35e21",
         "stability_hash_actual": "8aaf52ace27b691578f22a53b6b0875457ad68e9505c4a0d114488161fe35e21",
@@ -9103,7 +9103,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_nearest_positioned_ancestor_277140_1779749240785809200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_nearest_positioned_ancestor_228040_1785658536172464000.jsonl"
           }
         }
       },
@@ -9112,7 +9112,7 @@
         "pdf_sha256": "c557b54ea7273a9cb893858040665603c44fc307ed0e29abf10e68f403c53de9",
         "image_count": 1,
         "image_sha256": [
-          "a2001025d8019aa754788ae01d7cc50265b791fadc497a39dc4a55b2ecd3d1d2"
+          "c0665f885b72bc320ceef860f7640a068f2ef931680fe864ebd58c620072fd95"
         ],
         "stability_hash_expected": "e31a62462ac1ad4c31ff4b54330a76f79f40252c6c6b5a4a8048325d6051f19e",
         "stability_hash_actual": "e31a62462ac1ad4c31ff4b54330a76f79f40252c6c6b5a4a8048325d6051f19e",
@@ -9330,7 +9330,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_percent_nearest_positioned_ancestor_277140_1779749240913592800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_percent_nearest_positioned_ancestor_228040_1785658536253069700.jsonl"
           }
         }
       },
@@ -9339,7 +9339,7 @@
         "pdf_sha256": "ed20dedb4cd152a0121862eb5f07d346c4f6037de9545a655b218c867ed4aa40",
         "image_count": 1,
         "image_sha256": [
-          "ad4744585c7632326df4439f63e1b1586d318a2061f9edd37dc1794d9185cbd8"
+          "aa3ccb01b21e3652241d3736b6dfeece1dcc3f0c3797b5012388c51a44332d11"
         ],
         "stability_hash_expected": "885ef0e990f9fea54e34ec18cdede507ae1d66e0ef8dc8c2eb216518296f55d1",
         "stability_hash_actual": "885ef0e990f9fea54e34ec18cdede507ae1d66e0ef8dc8c2eb216518296f55d1",
@@ -9520,7 +9520,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_negative_page_one_only_277140_1779749241083952800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_negative_page_one_only_228040_1785658536393154100.jsonl"
           }
         }
       },
@@ -9529,8 +9529,8 @@
         "pdf_sha256": "04026fd5f3d190ea7e555d4bd694073f319f51091f3310e85478fa6192bbbcd0",
         "image_count": 2,
         "image_sha256": [
-          "cece394a4751d48ad5da13d2decf09894c802d131302494743434a28be21bd13",
-          "553bdbe7e182c2e6050ee4f3423f49a7077fbdbee39aca4ff3cda1a478bd6ef4"
+          "d6efdd66074172077e541e810653620789c23bc600f983b6f04ae3535daf86c8",
+          "404234cdd32f4962e936700c69b09c02db39613823851928c1597d414f7010b5"
         ],
         "stability_hash_expected": "49e946670c492c239f5617321430fa8d8739caa7b2e24c857820592d8bea0a5d",
         "stability_hash_actual": "49e946670c492c239f5617321430fa8d8739caa7b2e24c857820592d8bea0a5d",
@@ -9729,7 +9729,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_page_one_only_277140_1779749241218549400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_page_one_only_228040_1785658536395271100.jsonl"
           }
         }
       },
@@ -9738,8 +9738,8 @@
         "pdf_sha256": "56ebdb14c23c84b7b09fa9a00863218a394586c7efc8e75a5ce0c1d4db531050",
         "image_count": 2,
         "image_sha256": [
-          "505776781cac6c697ce36958846d38ddd76cc500d14ee3c659cadd98131e7136",
-          "bd89fa281f1eba5c27cbcccf9d56db4067d90f34dead0c673eb2f92d47de1634"
+          "654e5bcb62f990feb84d78c6035cf813d85e2a83d69e18874375956894513131",
+          "27b7d1b462f409cd59a34eced4b393369df5bfef2b4847c16c9cd80090058406"
         ],
         "stability_hash_expected": "4e1a0d95ca9c4766e39533f7c445e10dd90d1932a510658e00e7b67ad12c3901",
         "stability_hash_actual": "4e1a0d95ca9c4766e39533f7c445e10dd90d1932a510658e00e7b67ad12c3901",
@@ -9947,7 +9947,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_source_order_zindex_277140_1779749241668294800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_source_order_zindex_228040_1785658536610584200.jsonl"
           }
         }
       },
@@ -9956,7 +9956,7 @@
         "pdf_sha256": "350bcd3172b0fbca07a451d3f6b3be06a76c194c2ae193d922cb145342e634c3",
         "image_count": 1,
         "image_sha256": [
-          "53ee99f6f8720a7035e9a99755ec32e8304c07eafc654a7809f022bf2de48a2d"
+          "f3b4cda6dd2f36f8d752c6b3c2a8f32b1b58435392446394299ef42bdf9620e6"
         ],
         "stability_hash_expected": "404befeff2e1c8b4d21df18662cf14a586fe37c325f5286534882a80f98c290d",
         "stability_hash_actual": "404befeff2e1c8b4d21df18662cf14a586fe37c325f5286534882a80f98c290d",
@@ -10167,7 +10167,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_specificity_zindex_id_wins_277140_1779749241833046700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_specificity_zindex_id_wins_228040_1785658536749924000.jsonl"
           }
         }
       },
@@ -10176,7 +10176,7 @@
         "pdf_sha256": "350bcd3172b0fbca07a451d3f6b3be06a76c194c2ae193d922cb145342e634c3",
         "image_count": 1,
         "image_sha256": [
-          "53ee99f6f8720a7035e9a99755ec32e8304c07eafc654a7809f022bf2de48a2d"
+          "f3b4cda6dd2f36f8d752c6b3c2a8f32b1b58435392446394299ef42bdf9620e6"
         ],
         "stability_hash_expected": "404befeff2e1c8b4d21df18662cf14a586fe37c325f5286534882a80f98c290d",
         "stability_hash_actual": "404befeff2e1c8b4d21df18662cf14a586fe37c325f5286534882a80f98c290d",
@@ -10382,7 +10382,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_zindex_overlay_277140_1779749243157269900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_zindex_overlay_228040_1785658537779264500.jsonl"
           }
         }
       },
@@ -10391,7 +10391,7 @@
         "pdf_sha256": "c65e6ca28c4cb11accfd12e75c4483cc0a956f76e4733bc547562e2d37a93c32",
         "image_count": 1,
         "image_sha256": [
-          "1b5a9e346f4cf9d72eab7c0c4350644a6457c6280faed4fefc737e1a619b49b1"
+          "4b9206a2e73f5841255db90625148e5209491d679dd7244913bf3d53a1a248ac"
         ],
         "stability_hash_expected": "0b2f8b19d78f2dcae5c40e5c7c43479244ef5f483dbf9eed3e22a3d0047e3024",
         "stability_hash_actual": "0b2f8b19d78f2dcae5c40e5c7c43479244ef5f483dbf9eed3e22a3d0047e3024",
@@ -10590,7 +10590,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_top_bottom_height_precedence_277140_1779749243687622500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_top_bottom_height_precedence_228040_1785658537781596000.jsonl"
           }
         }
       },
@@ -10599,7 +10599,7 @@
         "pdf_sha256": "ad27da751717031324d1cf0de9fc7dd5b99f2a8b6ada8e56325c97464e8ce02e",
         "image_count": 1,
         "image_sha256": [
-          "734e81ec85f290aa09fc6f67a47e20a7259441d5cf07b14efc8cc4901a137c73"
+          "4dade5cedbef7a08f04b16be0856e9eabc46aca3fbd31484e72284499513edc3"
         ],
         "stability_hash_expected": "444ca97cb8167d5caf2b7308e7f7b0fa17dfea13d00c4be6572368a8d3db737b",
         "stability_hash_actual": "444ca97cb8167d5caf2b7308e7f7b0fa17dfea13d00c4be6572368a8d3db737b",
@@ -10817,7 +10817,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_transform_establishes_containing_block_277140_1779749243805355700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_transform_establishes_containing_block_228040_1785658537795207200.jsonl"
           }
         }
       },
@@ -10826,7 +10826,7 @@
         "pdf_sha256": "7f7b2437cf6fd504683b0cd862d6b91fc9c89a6fdba1d3c23c22fa6b723d152c",
         "image_count": 1,
         "image_sha256": [
-          "26c085bc21af56f807919dc5296e812bdafdaf86eb6201e83cea4397f643f2ce"
+          "82589c3e7fd4bfd77a12c603d1eca12ad0c191b5aa18d1a5a992b869d58f9e5b"
         ],
         "stability_hash_expected": "3f6fdf2924957b0646ebcfaadbeabcaec207791c9c6d370cd361f39c5500955a",
         "stability_hash_actual": "3f6fdf2924957b0646ebcfaadbeabcaec207791c9c6d370cd361f39c5500955a",
@@ -10988,7 +10988,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_negative_zindex_under_content_277140_1779749244204773300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_negative_zindex_under_content_228040_1785658537798204000.jsonl"
           }
         }
       },
@@ -10997,8 +10997,8 @@
         "pdf_sha256": "9e0b5c88359bb2298c77191b10dcca91992d74493bc9bef6ccb23a9a14218eb7",
         "image_count": 2,
         "image_sha256": [
-          "160c4f68aa9b3b025dd0e3695be73558c7e3f842dad0440e7fa7ed644b7c2949",
-          "bd89fa281f1eba5c27cbcccf9d56db4067d90f34dead0c673eb2f92d47de1634"
+          "5467d35f5f27449f2bd18e582d9ba2f349a6d135342f6c1d1b80ed41f1de1996",
+          "27b7d1b462f409cd59a34eced4b393369df5bfef2b4847c16c9cd80090058406"
         ],
         "stability_hash_expected": "32a72e35dadb80704da87e19a16d8487ca2850973ee60da6e99a4e6c4c4959dd",
         "stability_hash_actual": "32a72e35dadb80704da87e19a16d8487ca2850973ee60da6e99a4e6c4c4959dd",
@@ -11197,7 +11197,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_repeats_each_page_277140_1779749244782188000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_repeats_each_page_228040_1785658538353397500.jsonl"
           }
         }
       },
@@ -11206,8 +11206,8 @@
         "pdf_sha256": "330bca52678fa04c1974b75cb07101f03fb9200bf3ec7095f8a82380cbf4b661",
         "image_count": 2,
         "image_sha256": [
-          "1f22ec500f8d6e483cbd74e082d8df67c32049c3bf426f770906d8742b05a90c",
-          "2f73ddd82ad3235b5e3721882839bd7b9234b0c0a4e6dc40be9045d17132c44f"
+          "714061ef8affac02089f630a9d27dcd155d9410d9b90479246bc90e3f2438913",
+          "4ee510e6527343ba580ba63da15d0d6148d893af44455ee0b83dbea5c7b50847"
         ],
         "stability_hash_expected": "1c0acea57e5ac9c9a59ac28681c0ae72b470d58ee8f08ca61c7d4c329cf178aa",
         "stability_hash_actual": "1c0acea57e5ac9c9a59ac28681c0ae72b470d58ee8f08ca61c7d4c329cf178aa",
@@ -11413,7 +11413,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_zindex_front_ordering_277140_1779749244934214500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_zindex_front_ordering_228040_1785658538355930700.jsonl"
           }
         }
       },
@@ -11422,7 +11422,7 @@
         "pdf_sha256": "c65e6ca28c4cb11accfd12e75c4483cc0a956f76e4733bc547562e2d37a93c32",
         "image_count": 1,
         "image_sha256": [
-          "1b5a9e346f4cf9d72eab7c0c4350644a6457c6280faed4fefc737e1a619b49b1"
+          "4b9206a2e73f5841255db90625148e5209491d679dd7244913bf3d53a1a248ac"
         ],
         "stability_hash_expected": "0b2f8b19d78f2dcae5c40e5c7c43479244ef5f483dbf9eed3e22a3d0047e3024",
         "stability_hash_actual": "0b2f8b19d78f2dcae5c40e5c7c43479244ef5f483dbf9eed3e22a3d0047e3024",
@@ -11584,7 +11584,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_bottom_containing_height_277140_1779749245256299800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_bottom_containing_height_228040_1785658538595770000.jsonl"
           }
         }
       },
@@ -11593,7 +11593,7 @@
         "pdf_sha256": "e920dfbc0b295bee674ba57f804f48d6f7f531c411b89a362b7d17faff23ea93",
         "image_count": 1,
         "image_sha256": [
-          "c207b80ee94bce53fc9d17d922102515909ae3c8deff974d8a3311d3850b2aee"
+          "634c4a0e2d4b915de9415906307d170a5c61ccd69f8aa95f575385fab93e98ac"
         ],
         "stability_hash_expected": "a050a21d03ffa13c380c0339558306ca9bdc3af3768a8527ef2a7c5da00a2d12",
         "stability_hash_actual": "a050a21d03ffa13c380c0339558306ca9bdc3af3768a8527ef2a7c5da00a2d12",
@@ -11755,7 +11755,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_left_containing_width_277140_1779749246070805500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_left_containing_width_228040_1785658538906282600.jsonl"
           }
         }
       },
@@ -11764,7 +11764,7 @@
         "pdf_sha256": "72115d9eeaeaa0c5c6cd244ad41e7e69fa2ab80311570c0f419c241f932b1ebb",
         "image_count": 1,
         "image_sha256": [
-          "0b4de3d15ea915be822cd27f66d41aa35767d85ef1a0a2f077a1b0fb35955478"
+          "60f9dacf5faf44487a0d27fe80f24330d38e930ce190c377b2061f6279e02d59"
         ],
         "stability_hash_expected": "40ccfac0282fc3eef3275c341c9e6c603c727d918598e01f2a56fe7b9c44e7b0",
         "stability_hash_actual": "40ccfac0282fc3eef3275c341c9e6c603c727d918598e01f2a56fe7b9c44e7b0",
@@ -11926,7 +11926,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_right_containing_width_277140_1779749246509907500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_right_containing_width_228040_1785658539116117100.jsonl"
           }
         }
       },
@@ -11935,7 +11935,7 @@
         "pdf_sha256": "1da17229e40c2092811df5607f51837a907d1ece712d262a5d691b9749ebadbe",
         "image_count": 1,
         "image_sha256": [
-          "b9b56cbf17c5db3957df4ab5022258ea0603be0db5ba119b1871ce2ea9297b95"
+          "8617e5cb5003163202376513939680e17f39039309c34f3bfa94a874523d59de"
         ],
         "stability_hash_expected": "9ca46894205f00f2d5625b54a4a1d66ca51f507e10a8ca0213ce9a617239bded",
         "stability_hash_actual": "9ca46894205f00f2d5625b54a4a1d66ca51f507e10a8ca0213ce9a617239bded",
@@ -12115,7 +12115,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_inset_shorthand_uniform_277140_1779749246666383100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_inset_shorthand_uniform_228040_1785658539318425000.jsonl"
           }
         }
       },
@@ -12124,7 +12124,7 @@
         "pdf_sha256": "bba6cbc1222fa672a1c8ce33a9fb6ca7e39199f25eb4b07fd740c8d85ff74e6f",
         "image_count": 1,
         "image_sha256": [
-          "90ee28437795aaefbc0c9406d3baa428ae1b30ea5cd9b8cc0b24a9f8952426fb"
+          "cbbe43f2560589d01b2d7a6e080296d01e052b8514e69ff6160b639a2ce404ca"
         ],
         "stability_hash_expected": "b44c6116bd6eb4191edc682f16adfded41dc55c1187eed836f756ba749197ee6",
         "stability_hash_actual": "b44c6116bd6eb4191edc682f16adfded41dc55c1187eed836f756ba749197ee6",
@@ -12342,7 +12342,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_left_right_precedence_277140_1779749246995335700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_left_right_precedence_228040_1785658539389037700.jsonl"
           }
         }
       },
@@ -12351,7 +12351,7 @@
         "pdf_sha256": "02e5946b1e649e11d705032d6f8f45c3a42c61f3f7ffbb67eda22d3f02592b9a",
         "image_count": 1,
         "image_sha256": [
-          "1d840ebf3bd4495fac2f338dd91c85507c683a47350a092e4300d55aaea62c0a"
+          "abf5d5e79ebd527d9f9c588e5e826487d86e700790777f85e2f4e415651c4e4e"
         ],
         "stability_hash_expected": "f95ca53970154026e559f41df870ac469ecd53a835cca8120739b881b736874e",
         "stability_hash_actual": "f95ca53970154026e559f41df870ac469ecd53a835cca8120739b881b736874e",
@@ -12588,7 +12588,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_offset_preserves_flow_slot_277140_1779749246997323800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_offset_preserves_flow_slot_228040_1785658539390048800.jsonl"
           }
         }
       },
@@ -12597,7 +12597,7 @@
         "pdf_sha256": "4c69ea63953fe018ef00ad46e2b09d4c9e4823deb9b6015ad0b0959b2008fc6f",
         "image_count": 1,
         "image_sha256": [
-          "3b46cd67597432c7062c94cc71a5c8f1ddf0e0d27fe65fda020e169fb35f08df"
+          "ec3191b2ad5a7f934c92f6bcca0267d9894ae8c47ac09bf44102794a925734da"
         ],
         "stability_hash_expected": "08bd30e1bdaeeb1b4630a416425de346eef12e35c9de47a8125836e442eb1855",
         "stability_hash_actual": "08bd30e1bdaeeb1b4630a416425de346eef12e35c9de47a8125836e442eb1855",
@@ -12758,7 +12758,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_percent_left_containing_width_277140_1779749247060755700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_percent_left_containing_width_228040_1785658539426273400.jsonl"
           }
         }
       },
@@ -12767,7 +12767,7 @@
         "pdf_sha256": "aca11bf957cb3c5512002548a82a613edeec4fcbe26ef44c527db172ab9afe29",
         "image_count": 1,
         "image_sha256": [
-          "9d72ae0eaa71d3daa72f15fe98aa94b0d38896d614b5257e70ee216c27bd1816"
+          "d5e7505ea4cb15d6bf744c04bebf9ce2c246554b73b3805445576f138bb908be"
         ],
         "stability_hash_expected": "8fd842ed6f144e3461b4d48b788708428941b1ea6b2e0083a86e60490e52c5bc",
         "stability_hash_actual": "8fd842ed6f144e3461b4d48b788708428941b1ea6b2e0083a86e60490e52c5bc",
@@ -12928,7 +12928,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_percent_top_containing_height_277140_1779749247189559100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_percent_top_containing_height_228040_1785658539613706900.jsonl"
           }
         }
       },
@@ -12937,7 +12937,7 @@
         "pdf_sha256": "ca536cc192bb441cf667bf58a7b9658a6115698b1b5c29cebf8f62fa1a84e2a2",
         "image_count": 1,
         "image_sha256": [
-          "a96e97e086a6eb95a592da83527a889deed4b24dab89aa7e661d6e00fe968801"
+          "6af77a430d9d60ea736d1462fb1930fd36acc258d3a77a9365378562aaf8aa08"
         ],
         "stability_hash_expected": "cbf520d5cbd5e732e75eb3465ca6480703aef8cccbc30a19f39380aab0f2b9fd",
         "stability_hash_actual": "cbf520d5cbd5e732e75eb3465ca6480703aef8cccbc30a19f39380aab0f2b9fd",
@@ -13155,7 +13155,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_right_bottom_offsets_277140_1779749247560475000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_right_bottom_offsets_228040_1785658539770104400.jsonl"
           }
         }
       },
@@ -13164,7 +13164,7 @@
         "pdf_sha256": "d392f882be9851b7b5cb27ad468358231a0cb1f32b219541e91ae1aad408b5cf",
         "image_count": 1,
         "image_sha256": [
-          "24ca0dab2cee5e49599bb089c58abd03cc2601b509e82ee420452cd9282a0bfb"
+          "9bad15455df47c1a9d9498e8e19b621326ce839ea500bbecfb403f4257ecdf46"
         ],
         "stability_hash_expected": "87c602153ef4f089ae7971e69821ee01e595e52a66d73aedc59d656490c38c2f",
         "stability_hash_actual": "87c602153ef4f089ae7971e69821ee01e595e52a66d73aedc59d656490c38c2f",
@@ -13363,7 +13363,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_top_bottom_precedence_277140_1779749247591674200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_top_bottom_precedence_228040_1785658539905693800.jsonl"
           }
         }
       },
@@ -13372,7 +13372,7 @@
         "pdf_sha256": "a299e23bb1360d54022cda17420512936e13c10fcd61ba4f5967a2917851fb2c",
         "image_count": 1,
         "image_sha256": [
-          "9c38e5a0e152a81208786ed3156aabc93e0651ef98a3ecc08f50e9d9b1a20b83"
+          "ed6be3422b3e587083b745776635dad9899dca969dd2a456c8959ca0e7eb6d32"
         ],
         "stability_hash_expected": "7386ca604177d6047ce3a7b1a343db8c435101d6566e8cd23d955280458745f1",
         "stability_hash_actual": "7386ca604177d6047ce3a7b1a343db8c435101d6566e8cd23d955280458745f1",
@@ -13643,7 +13643,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_attribute_variants_277140_1779749247595177600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_attribute_variants_228040_1785658539907720800.jsonl"
           }
         }
       },
@@ -13652,7 +13652,7 @@
         "pdf_sha256": "b91b69ecc89aa61f61ce41639470b388ae73988e7fb5fab2005d0f8787daed0a",
         "image_count": 1,
         "image_sha256": [
-          "cbd197a677ac80239841f5131b00a7fc26bb5edeb046fb6682a5fe10818d8a83"
+          "64b0e1a53e305404ab992e98d4064d1a70410b45fcfa7c62236da46de05f7821"
         ],
         "stability_hash_expected": "62b81eda398b5297ed06428120cceee6dc8b77b2f20e55e62660ecec94d438a4",
         "stability_hash_actual": "62b81eda398b5297ed06428120cceee6dc8b77b2f20e55e62660ecec94d438a4",
@@ -13921,7 +13921,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_sibling_combinators_277140_1779749248193783900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_sibling_combinators_228040_1785658539978405600.jsonl"
           }
         }
       },
@@ -13930,7 +13930,7 @@
         "pdf_sha256": "fca5f61d7289c635e6bf3298ff708ca8ea480522052bad988021ce4964abe908",
         "image_count": 1,
         "image_sha256": [
-          "e8a7c9261f409c865b84609173baad23f22b571f5855bac6f645f90ce21a712d"
+          "18bf4f6fe4ec8e3007406f7f84a9df05a2b0770d0485fe0e045a977c990a0554"
         ],
         "stability_hash_expected": "47640035467eff10a7db43ebb4bec405056360e7a648c1a51134135e136b4956",
         "stability_hash_actual": "47640035467eff10a7db43ebb4bec405056360e7a648c1a51134135e136b4956",
@@ -14054,7 +14054,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_specificity_id_wins_277140_1779749248658725600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_specificity_id_wins_228040_1785658540396950700.jsonl"
           }
         }
       },
@@ -14063,7 +14063,7 @@
         "pdf_sha256": "9f05f930201750109660cb9b07387b830708e6bbd25069fcaa48941f0327c8c5",
         "image_count": 1,
         "image_sha256": [
-          "5822fa71a9dad07fc74f33bdfd4ca8f9f7cd6531a725bcd07b8a0ef3c85aa9b5"
+          "57b412fc0017673376e853609f028cd4c8d4665d1d7bd9f3c2efd42afc05ed97"
         ],
         "stability_hash_expected": "350ca6827921c18bb29dd1f5d145be2090094e869d3d1e44163b2bf723cef7be",
         "stability_hash_actual": "350ca6827921c18bb29dd1f5d145be2090094e869d3d1e44163b2bf723cef7be",
@@ -14333,7 +14333,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_structural_pseudos_277140_1779749248660736200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_structural_pseudos_228040_1785658541189632800.jsonl"
           }
         }
       },
@@ -14342,7 +14342,7 @@
         "pdf_sha256": "6f55de17c6c9289a1775c6e12ebaf376fe2791771a12cdd825d187e0ef7082d4",
         "image_count": 1,
         "image_sha256": [
-          "cfc5725ac451c1e1078bf3e9186b99edd9c347e94311f40410cd915866c74142"
+          "94256e9ec4852e6e4f76f365d24a14b1c45677f4a00de004a11a53aa44318a9f"
         ],
         "stability_hash_expected": "d094d4af6008616158842acfe301b7a8d2ded13521cb3041e051d619a7c9bf82",
         "stability_hash_actual": "d094d4af6008616158842acfe301b7a8d2ded13521cb3041e051d619a7c9bf82",
@@ -14466,7 +14466,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_solid_red_block_277140_1779749249902716600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_solid_red_block_228040_1785658541191636000.jsonl"
           }
         }
       },
@@ -14475,7 +14475,7 @@
         "pdf_sha256": "2ee0439b0277454bfec5129f2245a74f507bd3e171cae44d40ce9bbab6322e3c",
         "image_count": 1,
         "image_sha256": [
-          "2880ee4e415c1f61274d0e8948471f8437500f77a7f8519e697342d16aff5722"
+          "547be44ca651ba660b95f32b404068a83ede1f5ca955ea6e4492b0e4be1d65c5"
         ],
         "stability_hash_expected": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
         "stability_hash_actual": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
@@ -14656,7 +14656,7 @@
               "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_table_header_repeat_across_pages_277140_1779749249904701700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_table_header_repeat_across_pages_228040_1785658541267864800.jsonl"
           }
         }
       },
@@ -14665,8 +14665,8 @@
         "pdf_sha256": "0ae564477cc6ad5ae7648fc7712af0c0b0904a3f9960612d04bbd9af9b27716d",
         "image_count": 2,
         "image_sha256": [
-          "e443139fb4c0aa3a8abd2cba87952ed2d253be88907f2d6195e78d465c459d09",
-          "12af9871024d877ffa5ea97a72efc26766d649cdc03316424c233b738477952c"
+          "d17c85556c9ebed4ddb2b6eec365f52ad1fb06418a03baaf529ff31fc53f5f9f",
+          "f32a639340f5172df2cd44698578d8b6e52ac334d9ee548784cbaee04c4641e7"
         ],
         "stability_hash_expected": "94cca2c21d9073df81b584f454b631261d008e269eb2067d42865b92d00199d6",
         "stability_hash_actual": "94cca2c21d9073df81b584f454b631261d008e269eb2067d42865b92d00199d6",
@@ -14846,7 +14846,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_individual_compose_with_transform_277140_1779749250398713100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_individual_compose_with_transform_228040_1785658541349806500.jsonl"
           }
         }
       },
@@ -14855,7 +14855,7 @@
         "pdf_sha256": "9e88b8d08ca1825947fc973c592a5632e5375cc611de33e7f6ca1b7e91252677",
         "image_count": 1,
         "image_sha256": [
-          "d8c8a87803463851ed098710db95ccdb2fc24d819cc8995068cdd9d0a7a6488f"
+          "c88426e4680c7590ba36bfea8cb63aeee51feafe5dbaa80608874fbd9f904bd1"
         ],
         "stability_hash_expected": "aecdaf40522b05696cb480fd328d045b20789e4150771272f2e07277e61c0e37",
         "stability_hash_actual": "aecdaf40522b05696cb480fd328d045b20789e4150771272f2e07277e61c0e37",
@@ -15035,7 +15035,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_matrix_block_affine_277140_1779749250822088600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_matrix_block_affine_228040_1785658541772365300.jsonl"
           }
         }
       },
@@ -15044,7 +15044,7 @@
         "pdf_sha256": "651f884173c29ca4de9e5579fc334cf2aea8ab05dc0f2f9761f1740cce609cee",
         "image_count": 1,
         "image_sha256": [
-          "09346d32e74520f92c9f77fbade1a1da0e1063c175bb455432b9298949c03054"
+          "eb0dbbe0c28d70e2d877533722ada12bf54eabe4055d55f9291a375a1f53b4e1"
         ],
         "stability_hash_expected": "880c6961294074685074def2c226ccf2248500652bb8751592622fe2e9c35820",
         "stability_hash_actual": "880c6961294074685074def2c226ccf2248500652bb8751592622fe2e9c35820",
@@ -15205,7 +15205,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_origin_left_scale_anchor_277140_1779749250877608000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_origin_left_scale_anchor_228040_1785658541877058200.jsonl"
           }
         }
       },
@@ -15214,7 +15214,7 @@
         "pdf_sha256": "6d261dcd91ed3ab436141a6d4ea288e818bf12b942923c6b8c2014843b6ecf81",
         "image_count": 1,
         "image_sha256": [
-          "e37029064efdd40cceff9ee987cb20198418496f30c3686a05daa30c5d3cca52"
+          "ade1075ecbd25f34c57c484ac7af6346439694523baff7f1edb969d3e1fad611"
         ],
         "stability_hash_expected": "9ae820e906e8480d592591e503f35b709296582dc3e4e7115cfa869fc097f03e",
         "stability_hash_actual": "9ae820e906e8480d592591e503f35b709296582dc3e4e7115cfa869fc097f03e",
@@ -15375,7 +15375,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_block_centered_277140_1779749250879112600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_block_centered_228040_1785658542115126900.jsonl"
           }
         }
       },
@@ -15384,7 +15384,7 @@
         "pdf_sha256": "66e6618b952fe0abb096bb8822c5fcca688e3421244cccbc0a13d60211399be7",
         "image_count": 1,
         "image_sha256": [
-          "2205c185681f2312effea16621c34193b96d0af0a742fa905adb686681ccf6b9"
+          "60f6e2a715d7fdb23a2bbd4a05b8478bdcfb59fed3f608436fc4d99be3222405"
         ],
         "stability_hash_expected": "9ddbae61cc8e504e17e928e785092473fc986da9fa07fe8ab7d8223fbfa5f68d",
         "stability_hash_actual": "9ddbae61cc8e504e17e928e785092473fc986da9fa07fe8ab7d8223fbfa5f68d",
@@ -15546,7 +15546,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_var_fallback_missing_277140_1779749251123128700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_var_fallback_missing_228040_1785658542128742900.jsonl"
           }
         }
       },
@@ -15555,7 +15555,7 @@
         "pdf_sha256": "622c46b2c1636db45efc93fe975d96c38269c03e5068115dd53e319136076062",
         "image_count": 1,
         "image_sha256": [
-          "14800a3834b54fc58a9be4d6808ef3b2b6ec09c9afa1bd44f6c68437df5c2dd1"
+          "c94b6c3b8a681e7229b43472cc6725795f4a64ec2dcf1105020ef5dd54e313ec"
         ],
         "stability_hash_expected": "9ddbae61cc8e504e17e928e785092473fc986da9fa07fe8ab7d8223fbfa5f68d",
         "stability_hash_actual": "9ddbae61cc8e504e17e928e785092473fc986da9fa07fe8ab7d8223fbfa5f68d",
@@ -15717,7 +15717,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_var_reference_custom_angle_277140_1779749251228771800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_var_reference_custom_angle_228040_1785658542141758600.jsonl"
           }
         }
       },
@@ -15726,7 +15726,7 @@
         "pdf_sha256": "f38c2a6a818a584c69a8574acd0ad385d361832b14bb68cc97455975b6f88a7b",
         "image_count": 1,
         "image_sha256": [
-          "8c85df3fe37236a5398cea7fb5fcfab8ea8ee23c87022762c512d1d7a363b777"
+          "18e739c18331ce9befeeaccddcfcd9143c692f1208488d7d9b46bafb9dada131"
         ],
         "stability_hash_expected": "be5e4356562bfe63686edff1fd4d2afd14d3f89316a65a97320ef651c9deefa9",
         "stability_hash_actual": "be5e4356562bfe63686edff1fd4d2afd14d3f89316a65a97320ef651c9deefa9",
@@ -15887,7 +15887,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_scale_block_centered_277140_1779749251244876200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_scale_block_centered_228040_1785658542144753300.jsonl"
           }
         }
       },
@@ -15896,7 +15896,7 @@
         "pdf_sha256": "1f60d3362c6b5c1bbdb089406391940df0aeb0c4f061ab6ea98687bd97f4a367",
         "image_count": 1,
         "image_sha256": [
-          "0cf81c94855662d214a372a8a188f14385f2e26c04e558a7aaebe77a93ab400e"
+          "645848a841115c5c17d31c0c5ee2725486514dbfc62b8b63a2b22ecd8feb851a"
         ],
         "stability_hash_expected": "95e06b4ec9dc15d33a3af532cc3b6ae2391dd2b88586b4a9331a53922c70cc9e",
         "stability_hash_actual": "95e06b4ec9dc15d33a3af532cc3b6ae2391dd2b88586b4a9331a53922c70cc9e",
@@ -16057,7 +16057,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_scale_var_reference_custom_pair_277140_1779749251276483400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_scale_var_reference_custom_pair_228040_1785658542342563700.jsonl"
           }
         }
       },
@@ -16066,7 +16066,7 @@
         "pdf_sha256": "cf98d947f29658aafd103b387fa421f0705b16f8740e0c6dae2e3a324a3303e4",
         "image_count": 1,
         "image_sha256": [
-          "34e7e5850603d8af37a81eaa835b4a4199ae71d0efa68bdfe6cf6709408ce552"
+          "1dc5597598d1871a3ad92ed7c6cf2c2988b40291de5fdd418795a7162f8ca1ce"
         ],
         "stability_hash_expected": "95e06b4ec9dc15d33a3af532cc3b6ae2391dd2b88586b4a9331a53922c70cc9e",
         "stability_hash_actual": "95e06b4ec9dc15d33a3af532cc3b6ae2391dd2b88586b4a9331a53922c70cc9e",
@@ -16284,7 +16284,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_skewx_block_left_origin_277140_1779749251539809000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_skewx_block_left_origin_228040_1785658542378690400.jsonl"
           }
         }
       },
@@ -16293,7 +16293,7 @@
         "pdf_sha256": "288294ea916be0f913c703d6705ef02176c039ce1bf7cbea0bacb0c3310e8377",
         "image_count": 1,
         "image_sha256": [
-          "10d29555d1f1941d5ac3ca7b7629ccd936a70f8bd7371d518d2e88057f2c798e"
+          "4f4faf6dfed410d9c2205392e4734e9df4a95ab83b895dfa5978f5292e0e59e6"
         ],
         "stability_hash_expected": "19a381102da8c90b99ec093a18e0d4d7a82235496c3ea5f5202f6f6466ec7cd6",
         "stability_hash_actual": "19a381102da8c90b99ec093a18e0d4d7a82235496c3ea5f5202f6f6466ec7cd6",
@@ -16454,7 +16454,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_translate_block_offsets_277140_1779749251541482500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_translate_block_offsets_228040_1785658542381204400.jsonl"
           }
         }
       },
@@ -16463,7 +16463,7 @@
         "pdf_sha256": "658a65914cf3900a034793e163e51179ff05926e3a60f3b7e6fded8f4d3bfafa",
         "image_count": 1,
         "image_sha256": [
-          "c90df116ad630d62066a7b0e7383e74d0409a173f73a855e4f8e497a723165ba"
+          "16418d12e82f60f0fd239893f96317c0672ee503f92ea66e630dbcd2845133ac"
         ],
         "stability_hash_expected": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
         "stability_hash_actual": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
@@ -16625,7 +16625,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_translate_var_reference_custom_pair_277140_1779749251545494300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_translate_var_reference_custom_pair_228040_1785658542437194400.jsonl"
           }
         }
       },
@@ -16634,7 +16634,7 @@
         "pdf_sha256": "409191e08fb0c364f7586f4041c4a5d4f873e1902cf3474d80429b36ae22799d",
         "image_count": 1,
         "image_sha256": [
-          "27f96650d0d0d35dcdb70e2d0262df413da2df1a37377462cf737aa6651b9918"
+          "52022304c907d3a6dae2cdc2eaf36326e09d7baa129059b8d6e1064ae540c5dc"
         ],
         "stability_hash_expected": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
         "stability_hash_actual": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
@@ -16796,7 +16796,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_var_cycle_fallback_translate_277140_1779749251646736200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_var_cycle_fallback_translate_228040_1785658542514836600.jsonl"
           }
         }
       },
@@ -16805,7 +16805,7 @@
         "pdf_sha256": "d7e52525ea039d0fd3f3d144135ecd05b7d75cd4e2472d0607ba7d8f4cd3816a",
         "image_count": 1,
         "image_sha256": [
-          "42ee0035d807b32900efd175e6dce03fa7c90197fe1529855be2321a3361fd09"
+          "12ff4c7ee39b377e1f983f48dd87164ba49b4d4affd52d1d292914cdf4217dab"
         ],
         "stability_hash_expected": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
         "stability_hash_actual": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
@@ -16985,7 +16985,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_var_reference_custom_list_277140_1779749251808700900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_var_reference_custom_list_228040_1785658542543788800.jsonl"
           }
         }
       },
@@ -16994,7 +16994,7 @@
         "pdf_sha256": "70525d2ff32936fa5fbd0f8e3def74a85a559d50e6c94397163e0976b71e9fea",
         "image_count": 1,
         "image_sha256": [
-          "fea99c5580bff2a44c537946d53ce62c83f93373ec1a0a2a681509cfd46803ad"
+          "a0ca34791a55e8dae5293abb6ed26cd0e162bff1eb5ca5d5a71643c6e582efe5"
         ],
         "stability_hash_expected": "b354b55cfc75148a3ae8cd366d17ab5943672a1dd51395a8a2d6d897bd0eb752",
         "stability_hash_actual": "b354b55cfc75148a3ae8cd366d17ab5943672a1dd51395a8a2d6d897bd0eb752",
@@ -17164,7 +17164,7 @@
               "jit.page_break.trigger": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_two_page_break_colors_277140_1779749251932740800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_two_page_break_colors_228040_1785658542607538400.jsonl"
           }
         }
       },
@@ -17173,8 +17173,8 @@
         "pdf_sha256": "9a111ff59770736cba8d15882520fb0ec7b5dc66d850f367353ce1b9746217fd",
         "image_count": 2,
         "image_sha256": [
-          "d316b1a0517474f0b422396dd1f00fecf8179a7f2137ff75bde7bf9cc2ced52a",
-          "bd89fa281f1eba5c27cbcccf9d56db4067d90f34dead0c673eb2f92d47de1634"
+          "61b41dae501a6f133b0134b5b236f90af8e1a3df1c265dd6210181843293a3f3",
+          "27b7d1b462f409cd59a34eced4b393369df5bfef2b4847c16c9cd80090058406"
         ],
         "stability_hash_expected": "bc29dde98105c22445e93abe6d2134a9084e059437e45fe4757bfea267324a0e",
         "stability_hash_actual": "bc29dde98105c22445e93abe6d2134a9084e059437e45fe4757bfea267324a0e",
@@ -17315,7 +17315,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_calc_width_resolution_277140_1779749252025895800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_calc_width_resolution_228040_1785658542714463600.jsonl"
           }
         }
       },
@@ -17324,7 +17324,7 @@
         "pdf_sha256": "93a77941f5434529390926116cbb1e36ec0ec25f098a99658198bc4421c769b4",
         "image_count": 1,
         "image_sha256": [
-          "8a9fb3af75f9a010293e11e3ce6785f116b3ebb5afcc482ccc168bd324398ce6"
+          "ac959012ee3a6d43a110ac312872164b967564cc3ab937c3aef2e84992ec4e24"
         ],
         "stability_hash_expected": "6ef14544be6597b2a799033f2ebd110d46a2ea845c10aea00898384669cfb76e",
         "stability_hash_actual": "6ef14544be6597b2a799033f2ebd110d46a2ea845c10aea00898384669cfb76e",
@@ -17597,7 +17597,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_min_max_clamp_widths_277140_1779749252057821900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_min_max_clamp_widths_228040_1785658542761745500.jsonl"
           }
         }
       },
@@ -17606,7 +17606,7 @@
         "pdf_sha256": "e9aa768a56e7eb23405f19c97419a6f79446c0e9db227639a0400140b05ac33b",
         "image_count": 1,
         "image_sha256": [
-          "f5e849f60fb14c42f7e1eabbca9f5ed3108884b84af47fc8aa2b1d8a2533c9a7"
+          "0dcfac0fc86cd9af65bed95e6d3876a255e63be721c13585c9ac8b1df36e834a"
         ],
         "stability_hash_expected": "2692f3d7976c83633c1812281eca3ff29a68e721eb161c7502b13acf0bf9e4f0",
         "stability_hash_actual": "2692f3d7976c83633c1812281eca3ff29a68e721eb161c7502b13acf0bf9e4f0",

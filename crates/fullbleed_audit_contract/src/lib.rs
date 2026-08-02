@@ -1,5 +1,8 @@
-use serde_json::Value;
-use sha2::{Digest, Sha256};
+mod json;
+pub mod sha256;
+
+use json::Value;
+use sha256::Sha256;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
@@ -305,21 +308,21 @@ static A11Y_PROFILE_GATE_OVERRIDES: OnceLock<BTreeMap<String, BTreeMap<String, S
 
 fn audit_registry_value() -> &'static Value {
     AUDIT_REGISTRY_JSON_VALUE.get_or_init(|| {
-        serde_json::from_str(AUDIT_REGISTRY_V1_JSON)
+        json::parse(AUDIT_REGISTRY_V1_JSON)
             .expect("embedded audit registry must be valid JSON-formatted YAML")
     })
 }
 
 fn wcag20aa_registry_value() -> &'static Value {
     WCAG20AA_REGISTRY_JSON_VALUE.get_or_init(|| {
-        serde_json::from_str(WCAG20AA_REGISTRY_V1_JSON)
+        json::parse(WCAG20AA_REGISTRY_V1_JSON)
             .expect("embedded wcag20aa registry must be valid JSON-formatted YAML")
     })
 }
 
 fn section508_html_registry_value() -> &'static Value {
     SECTION508_HTML_REGISTRY_JSON_VALUE.get_or_init(|| {
-        serde_json::from_str(SECTION508_HTML_REGISTRY_V1_JSON)
+        json::parse(SECTION508_HTML_REGISTRY_V1_JSON)
             .expect("embedded section508 html registry must be valid JSON-formatted YAML")
     })
 }
@@ -856,19 +859,31 @@ pub fn metadata() -> AuditContractMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Value;
-
     fn parse_embedded_audit_registry() -> Value {
-        serde_json::from_str(AUDIT_REGISTRY_V1_JSON)
-            .expect("embedded audit registry JSON should parse")
+        json::parse(AUDIT_REGISTRY_V1_JSON).expect("embedded audit registry JSON should parse")
     }
 
     #[test]
-    fn contract_fingerprint_is_stable_and_nonempty() {
+    fn registry_hashes_and_contract_fingerprint_are_stable() {
+        assert_eq!(
+            audit_registry_v1_hash_sha256(),
+            "2347f071d9a0dfe20c36976aef94a4001381a0ff409037b927c3fda26a6c7dd0"
+        );
+        assert_eq!(
+            wcag20aa_registry_v1_hash_sha256(),
+            "3ff936a514baac7b528b2745ec88c9e8d2b4c52c56bd63b39478a897ac52f30c"
+        );
+        assert_eq!(
+            section508_html_registry_v1_hash_sha256(),
+            "3e0bfc7aa9c28beca4d8ebbcdf8663d390c03f4380a4a3959a6128a03ecfafca"
+        );
         let a = contract_fingerprint_sha256();
         let b = contract_fingerprint_sha256();
         assert_eq!(a, b);
-        assert_eq!(a.len(), 64);
+        assert_eq!(
+            a,
+            "db3f5de6ea0c6cd5b3c1828c58f2023d093cc4a46c9302c2ac3bed47c5277de5"
+        );
     }
 
     #[test]

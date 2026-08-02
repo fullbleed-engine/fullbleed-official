@@ -1,3 +1,9 @@
+use crate::css_native::ComponentValue;
+use crate::css_queries::{
+    Comparison as MediaFeatureComparison, ContainerCondition as ContainerConditionExpr,
+    ContainerFeature as ContainerSizeFeatureExpr, ContainerFeatureName as ContainerSizeFeatureName,
+    ContainerValue as ContainerFeatureValue,
+};
 use crate::debug::{DebugLogger, json_escape};
 use crate::flowable::CalcLength;
 use crate::flowable::{
@@ -13,51 +19,7 @@ use crate::flowable::{
     TableLayoutMode, TextStyle,
 };
 use crate::svg;
-use crate::types::{BoxSizingMode, Color, Margins, MixBlendMode, Pt, ShadingStop, Size};
-use fixed::types::I32F32;
-use lightningcss::media_query::{
-    MediaCondition, MediaFeature, MediaFeatureComparison, MediaFeatureId, MediaFeatureName,
-    MediaFeatureValue, MediaList, MediaQuery, MediaType, Operator, Qualifier,
-};
-use lightningcss::properties::align as css_align;
-use lightningcss::properties::background as css_background;
-use lightningcss::properties::border::{BorderSideWidth, LineStyle};
-use lightningcss::properties::contain as css_contain;
-use lightningcss::properties::custom::{CustomPropertyName, Token, TokenOrValue};
-use lightningcss::properties::display::{Display, DisplayInside, DisplayKeyword, DisplayOutside};
-use lightningcss::properties::flex as css_flex;
-use lightningcss::properties::font::{
-    AbsoluteFontSize, Font as CssFont, FontFamily, FontSize, FontStyle as CssFontStyle,
-    GenericFontFamily, LineHeight, RelativeFontSize, VerticalAlign as CssVerticalAlign,
-    VerticalAlignKeyword,
-};
-use lightningcss::properties::list::{
-    CounterStyle, ListStylePosition, ListStyleType, PredefinedCounterStyle, Symbol, SymbolsType,
-};
-use lightningcss::properties::masking as css_masking;
-use lightningcss::properties::outline as css_outline;
-use lightningcss::properties::overflow as css_overflow;
-use lightningcss::properties::position::Position as CssPosition;
-use lightningcss::properties::size as css_size;
-use lightningcss::properties::text::{
-    Direction as CssDirection, Hyphens as CssHyphens, LineBreak, OverflowWrap, TextAlign,
-    TextAlignLast as CssTextAlignLast, TextDecorationLine, TextJustify as CssTextJustify,
-    WordBreak,
-};
-use lightningcss::properties::transform as css_transform;
-use lightningcss::properties::{Property, PropertyId};
-use lightningcss::rules::container::{ContainerCondition, ContainerSizeFeatureId};
-use lightningcss::rules::{CssRule, CssRuleList};
-use lightningcss::stylesheet::{ParserOptions, PrinterOptions, StyleAttribute, StyleSheet};
-use lightningcss::traits::{Parse, ToCss, Zero};
-use lightningcss::values::calc::{Calc, MathFunction};
-use lightningcss::values::color::{ColorSpace, CssColor, SRGB};
-use lightningcss::values::image::Image as CssImage;
-use lightningcss::values::length::{LengthPercentage, LengthValue};
-use lightningcss::values::percentage::NumberOrPercentage;
-use lightningcss::values::position as css_position;
-use lightningcss::values::resolution::Resolution;
-use lightningcss::values::shape as css_shape;
+use crate::types::{BoxSizingMode, Color, I32F32, Margins, MixBlendMode, Pt, ShadingStop, Size};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -446,53 +408,6 @@ struct ScopeRuleCondition {
     ends: Vec<SelectorPattern>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-enum ContainerConditionExpr {
-    Feature(ContainerSizeFeatureExpr),
-    Not(Box<ContainerConditionExpr>),
-    And(Vec<ContainerConditionExpr>),
-    Or(Vec<ContainerConditionExpr>),
-    Unsupported,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum ContainerSizeFeatureExpr {
-    Plain {
-        name: ContainerSizeFeatureName,
-        value: ContainerFeatureValue,
-    },
-    Range {
-        name: ContainerSizeFeatureName,
-        operator: MediaFeatureComparison,
-        value: ContainerFeatureValue,
-    },
-    Interval {
-        name: ContainerSizeFeatureName,
-        start: ContainerFeatureValue,
-        start_operator: MediaFeatureComparison,
-        end: ContainerFeatureValue,
-        end_operator: MediaFeatureComparison,
-    },
-    Boolean,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ContainerSizeFeatureName {
-    Width,
-    Height,
-    InlineSize,
-    BlockSize,
-    AspectRatio,
-    Orientation,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum ContainerFeatureValue {
-    Length(Pt),
-    Ratio(f32),
-    Ident(String),
-}
-
 #[derive(Debug, Clone, Copy)]
 struct FontCalcLength {
     abs: Pt,
@@ -505,42 +420,6 @@ struct FontCalcLength {
 }
 
 impl FontCalcLength {
-    fn zero() -> Self {
-        Self {
-            abs: Pt::ZERO,
-            em: I32F32::from_bits(0),
-            rem: I32F32::from_bits(0),
-            vw: I32F32::from_bits(0),
-            vh: I32F32::from_bits(0),
-            vmin: I32F32::from_bits(0),
-            vmax: I32F32::from_bits(0),
-        }
-    }
-
-    fn add(self, other: Self) -> Self {
-        Self {
-            abs: self.abs + other.abs,
-            em: self.em + other.em,
-            rem: self.rem + other.rem,
-            vw: self.vw + other.vw,
-            vh: self.vh + other.vh,
-            vmin: self.vmin + other.vmin,
-            vmax: self.vmax + other.vmax,
-        }
-    }
-
-    fn scale(self, factor: I32F32) -> Self {
-        Self {
-            abs: self.abs.mul_fixed(factor),
-            em: self.em * factor,
-            rem: self.rem * factor,
-            vw: self.vw * factor,
-            vh: self.vh * factor,
-            vmin: self.vmin * factor,
-            vmax: self.vmax * factor,
-        }
-    }
-
     fn resolve(self, parent_font_size: Pt, root_font_size: Pt, viewport: Size) -> Pt {
         let vw = viewport.width.mul_fixed(self.vw);
         let vh = viewport.height.mul_fixed(self.vh);
@@ -1542,6 +1421,10 @@ struct StyleDelta {
     inset_inline_end: Option<LengthSpec>,
     inset_block_start: Option<LengthSpec>,
     inset_block_end: Option<LengthSpec>,
+    inset_inline_start_var: Option<String>,
+    inset_inline_end_var: Option<String>,
+    inset_block_start_var: Option<String>,
+    inset_block_end_var: Option<String>,
     inset_left_var: Option<String>,
     inset_top_var: Option<String>,
     inset_right_var: Option<String>,
@@ -2636,54 +2519,6 @@ fn set_delta_outline_style(delta: &mut StyleDelta, value: Option<OutlineLineStyl
     delta.revert_layer.outline_style = false;
 }
 
-fn apply_border_color_from_raw(
-    delta: &mut StyleDelta,
-    target: BorderColorTarget,
-    raw: &str,
-) -> bool {
-    let lowered = raw.trim().to_ascii_lowercase();
-    if should_defer_color_expr(&lowered) {
-        if let Some((color, alpha)) = parse_color_string(&lowered) {
-            set_delta_border_color_spec(
-                delta,
-                target,
-                ColorSpec::Value(blend_over_white(color, alpha)),
-            );
-        } else {
-            set_delta_border_color_var(delta, target, lowered);
-        }
-        return true;
-    }
-    if let Some((color, alpha)) = parse_color_string(&lowered) {
-        set_delta_border_color_spec(
-            delta,
-            target,
-            ColorSpec::Value(blend_over_white(color, alpha)),
-        );
-        return true;
-    }
-    if let Some(var) = var_name_from_string(&lowered) {
-        set_delta_border_color_var(delta, target, var);
-        return true;
-    }
-    false
-}
-
-fn set_delta_border_color_from_css_color(
-    delta: &mut StyleDelta,
-    target: BorderColorTarget,
-    value: &CssColor,
-) {
-    if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-        if apply_border_color_from_raw(delta, target, &raw) {
-            return;
-        }
-    }
-    if let Some(color) = css_color_to_color(value) {
-        set_delta_border_color_spec(delta, target, ColorSpec::Value(color));
-    }
-}
-
 fn border_color_target_from_property_name(property_name: &str) -> BorderColorTarget {
     match property_name {
         "border-top" | "border-top-color" | "border-top-width" | "border-top-style" => {
@@ -2714,44 +2549,6 @@ fn border_color_target_from_property_name(property_name: &str) -> BorderColorTar
         | "border-inline-start-color"
         | "border-inline-start-width"
         | "border-inline-start-style" => BorderColorTarget::InlineStart,
-        _ => BorderColorTarget::All,
-    }
-}
-
-fn border_color_target_from_property_id(property_id: &PropertyId) -> BorderColorTarget {
-    match property_id {
-        PropertyId::BorderTop
-        | PropertyId::BorderTopColor
-        | PropertyId::BorderTopWidth
-        | PropertyId::BorderTopStyle => BorderColorTarget::Top,
-        PropertyId::BorderBlockStart
-        | PropertyId::BorderBlockStartColor
-        | PropertyId::BorderBlockStartWidth
-        | PropertyId::BorderBlockStartStyle => BorderColorTarget::BlockStart,
-        PropertyId::BorderRight
-        | PropertyId::BorderRightColor
-        | PropertyId::BorderRightWidth
-        | PropertyId::BorderRightStyle => BorderColorTarget::Right,
-        PropertyId::BorderInlineEnd
-        | PropertyId::BorderInlineEndColor
-        | PropertyId::BorderInlineEndWidth
-        | PropertyId::BorderInlineEndStyle => BorderColorTarget::InlineEnd,
-        PropertyId::BorderBottom
-        | PropertyId::BorderBottomColor
-        | PropertyId::BorderBottomWidth
-        | PropertyId::BorderBottomStyle => BorderColorTarget::Bottom,
-        PropertyId::BorderBlockEnd
-        | PropertyId::BorderBlockEndColor
-        | PropertyId::BorderBlockEndWidth
-        | PropertyId::BorderBlockEndStyle => BorderColorTarget::BlockEnd,
-        PropertyId::BorderLeft
-        | PropertyId::BorderLeftColor
-        | PropertyId::BorderLeftWidth
-        | PropertyId::BorderLeftStyle => BorderColorTarget::Left,
-        PropertyId::BorderInlineStart
-        | PropertyId::BorderInlineStartColor
-        | PropertyId::BorderInlineStartWidth
-        | PropertyId::BorderInlineStartStyle => BorderColorTarget::InlineStart,
         _ => BorderColorTarget::All,
     }
 }
@@ -2957,10 +2754,6 @@ impl StyleResolver {
         let mut has_positional_selectors = false;
         let mut has_sibling_selectors = false;
 
-        fn layer_name_to_string(name: &lightningcss::rules::layer::LayerName) -> Option<String> {
-            name.to_css_string(PrinterOptions::default()).ok()
-        }
-
         fn scoped_layer_name(parent: Option<&str>, name: &str) -> String {
             if let Some(parent) = parent.filter(|value| !value.is_empty()) {
                 format!("{parent}.{name}")
@@ -2983,8 +2776,8 @@ impl StyleResolver {
             order
         }
 
-        fn append_rule_list(
-            rules: CssRuleList,
+        fn append_native_rule_list(
+            rules: &[crate::css_native::Rule],
             normal_rules: &mut Vec<RuleEntry>,
             important_rules: &mut Vec<RuleEntry>,
             order: &mut usize,
@@ -3004,32 +2797,21 @@ impl StyleResolver {
             viewport: Size,
             prefer_print: bool,
         ) {
-            for rule in rules.0 {
+            for rule in rules {
                 match rule {
-                    CssRule::Style(style) => {
+                    crate::css_native::Rule::Style(style) => {
                         let (normal_delta, important_delta) =
-                            style_from_declarations(&style.declarations);
-                        let selectors = style
-                            .selectors
-                            .to_css_string(PrinterOptions::default())
-                            .unwrap_or_default();
+                            style_from_native_declarations(&style.declarations);
+                        let selectors = crate::css_native::split_top_level(&style.selectors, ',')
+                            .unwrap_or_else(|_| vec![style.selectors.clone()]);
                         if let Some(logger) = debug {
-                            log_declaration_no_effects(&style.declarations, &selectors, logger);
-                            for selector in selectors.split(',') {
-                                let selector_trimmed = selector.trim().to_string();
-                                let parsed = parse_selector_pattern(&selector_trimmed).is_some();
-                                let json = format!(
-                                    "{{\"type\":\"css.rule\",\"selector\":{},\"parsed\":{}}}",
-                                    json_string(&selector_trimmed),
-                                    if parsed { "true" } else { "false" }
-                                );
-                                logger.log_json(&json);
-                                if !parsed {
-                                    logger.increment("css.selector_unparsed", 1);
-                                }
-                            }
+                            log_native_declaration_no_effects(
+                                &style.declarations,
+                                &style.selectors,
+                                logger,
+                            );
                             for (name, token_debug) in
-                                collect_custom_properties(&style.declarations)
+                                collect_native_custom_properties(&style.declarations)
                             {
                                 let json = format!(
                                     "{{\"type\":\"css.custom\",\"name\":{},\"value\":{},\"tokens\":{}}}",
@@ -3039,12 +2821,24 @@ impl StyleResolver {
                                 );
                                 logger.log_json(&json);
                             }
+                            for selector in &selectors {
+                                let parsed = parse_selector_pattern(selector).is_some();
+                                let json = format!(
+                                    "{{\"type\":\"css.rule\",\"selector\":{},\"parsed\":{}}}",
+                                    json_string(selector.trim()),
+                                    if parsed { "true" } else { "false" }
+                                );
+                                logger.log_json(&json);
+                                if !parsed {
+                                    logger.increment("css.selector_unparsed", 1);
+                                }
+                            }
                         }
-                        for selector in selectors.split(',') {
+                        for selector in selectors {
                             let selector_trimmed = selector.trim();
                             let is_root_selector =
                                 selector_trimmed.to_ascii_lowercase().contains(":root");
-                            if let Some(pattern) = parse_selector_pattern(selector) {
+                            if let Some(pattern) = parse_selector_pattern(selector_trimmed) {
                                 if pattern.has_positional_pseudos() {
                                     *has_positional_selectors = true;
                                 }
@@ -3060,7 +2854,7 @@ impl StyleResolver {
                                         container_conditions: container_conditions.to_vec(),
                                         scope_conditions: scope_conditions.to_vec(),
                                         delta: normal_delta.clone(),
-                                        selector_text: selector.trim().to_string(),
+                                        selector_text: selector_trimmed.to_string(),
                                     });
                                 }
                                 if !important_delta.is_empty() {
@@ -3072,7 +2866,7 @@ impl StyleResolver {
                                         container_conditions: container_conditions.to_vec(),
                                         scope_conditions: scope_conditions.to_vec(),
                                         delta: important_delta.clone(),
-                                        selector_text: selector.trim().to_string(),
+                                        selector_text: selector_trimmed.to_string(),
                                     });
                                 }
                             } else if is_root_selector
@@ -3087,270 +2881,323 @@ impl StyleResolver {
                                 }
                             }
                         }
-                        *order += 1;
+                        *order = order.saturating_add(1);
                     }
-                    CssRule::CounterStyle(counter_style) => {
-                        if let Some(symbols) = counter_style_symbols_from_rule(&counter_style) {
-                            counter_styles.insert(counter_style.name.0.to_string(), symbols);
-                        }
-                    }
-                    CssRule::Property(property) => {
-                        let name = property.name.as_ref().to_ascii_lowercase();
-                        let syntax = property
-                            .syntax
-                            .to_css_string(PrinterOptions::default())
-                            .unwrap_or_default();
-                        let initial_value = property.initial_value.as_ref().and_then(|value| {
-                            value
-                                .to_css_string(PrinterOptions::default())
-                                .ok()
-                                .map(|raw| raw.trim().to_string())
-                                .filter(|raw| !raw.is_empty())
-                        });
-                        custom_property_registrations.insert(
-                            name,
-                            RegisteredCustomProperty {
-                                syntax,
-                                inherits: property.inherits,
-                                initial_value,
-                            },
-                        );
-                        if let Some(logger) = debug {
-                            logger.increment("css.property.rules", 1);
-                            logger.increment("css.property.rules_registered", 1);
-                            if property.initial_value.is_some() {
-                                logger.increment("css.property.initial_values", 1);
+                    crate::css_native::Rule::At(at_rule) => match at_rule.name.as_str() {
+                        "counter-style" => {
+                            if let Some(crate::css_native::AtRuleBlock::Declarations(block)) =
+                                &at_rule.block
+                            {
+                                if let Some((name, symbols)) =
+                                    native_counter_style_symbols(&at_rule.prelude, block)
+                                {
+                                    counter_styles.insert(name, symbols);
+                                }
                             }
                         }
-                    }
-                    CssRule::Media(media) => {
-                        let matched =
-                            media_list_matches(&media.query, viewport, prefer_print, debug);
-                        if let Some(logger) = debug {
-                            logger.increment("css.media.rules", 1);
+                        "property" => {
+                            if let Some(crate::css_native::AtRuleBlock::Declarations(block)) =
+                                &at_rule.block
+                            {
+                                let name = at_rule.prelude.trim().to_ascii_lowercase();
+                                if name.starts_with("--") {
+                                    let descriptor = |expected: &str| {
+                                        block
+                                            .declarations
+                                            .iter()
+                                            .filter(|item| item.name_eq(expected))
+                                            .map(|item| item.value.trim().to_string())
+                                            .last()
+                                    };
+                                    let syntax = descriptor("syntax").unwrap_or_default();
+                                    let inherits = descriptor("inherits")
+                                        .is_some_and(|value| value.eq_ignore_ascii_case("true"));
+                                    let initial_value = descriptor("initial-value")
+                                        .filter(|value| !value.is_empty());
+                                    custom_property_registrations.insert(
+                                        name,
+                                        RegisteredCustomProperty {
+                                            syntax,
+                                            inherits,
+                                            initial_value: initial_value.clone(),
+                                        },
+                                    );
+                                    if let Some(logger) = debug {
+                                        logger.increment("css.property.rules", 1);
+                                        logger.increment("css.property.rules_registered", 1);
+                                        if initial_value.is_some() {
+                                            logger.increment("css.property.initial_values", 1);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        "media" => {
+                            let matched = native_media_prelude_matches(
+                                &at_rule.prelude,
+                                viewport,
+                                prefer_print,
+                                debug,
+                            );
+                            if let Some(logger) = debug {
+                                logger.increment("css.media.rules", 1);
+                                logger.increment(
+                                    if matched {
+                                        "css.media.rules_matched"
+                                    } else {
+                                        "css.media.rules_skipped"
+                                    },
+                                    1,
+                                );
+                            }
                             if matched {
-                                logger.increment("css.media.rules_matched", 1);
-                            } else {
-                                logger.increment("css.media.rules_skipped", 1);
+                                if let Some(crate::css_native::AtRuleBlock::Rules(nested)) =
+                                    &at_rule.block
+                                {
+                                    append_native_rule_list(
+                                        nested,
+                                        normal_rules,
+                                        important_rules,
+                                        order,
+                                        root_normal,
+                                        root_important,
+                                        counter_styles,
+                                        custom_property_registrations,
+                                        layer_orders,
+                                        next_layer_order,
+                                        current_layer_order,
+                                        current_layer_name.clone(),
+                                        container_conditions,
+                                        scope_conditions,
+                                        debug,
+                                        has_positional_selectors,
+                                        has_sibling_selectors,
+                                        viewport,
+                                        prefer_print,
+                                    );
+                                }
                             }
                         }
-                        if matched {
-                            append_rule_list(
-                                media.rules,
-                                normal_rules,
-                                important_rules,
-                                order,
-                                root_normal,
-                                root_important,
-                                counter_styles,
-                                custom_property_registrations,
-                                layer_orders,
-                                next_layer_order,
-                                current_layer_order,
-                                current_layer_name.clone(),
-                                container_conditions,
-                                scope_conditions,
-                                debug,
-                                has_positional_selectors,
-                                has_sibling_selectors,
-                                viewport,
-                                prefer_print,
-                            );
-                        }
-                    }
-                    CssRule::Supports(supports) => {
-                        let matched = supports_condition_matches(&supports.condition);
-                        if let Some(logger) = debug {
-                            logger.increment("css.supports.rules", 1);
+                        "supports" => {
+                            let matched = native_supports_prelude_matches(&at_rule.prelude);
+                            if let Some(logger) = debug {
+                                logger.increment("css.supports.rules", 1);
+                                logger.increment(
+                                    if matched {
+                                        "css.supports.rules_matched"
+                                    } else {
+                                        "css.supports.rules_skipped"
+                                    },
+                                    1,
+                                );
+                            }
                             if matched {
-                                logger.increment("css.supports.rules_matched", 1);
-                            } else {
-                                logger.increment("css.supports.rules_skipped", 1);
+                                if let Some(crate::css_native::AtRuleBlock::Rules(nested)) =
+                                    &at_rule.block
+                                {
+                                    append_native_rule_list(
+                                        nested,
+                                        normal_rules,
+                                        important_rules,
+                                        order,
+                                        root_normal,
+                                        root_important,
+                                        counter_styles,
+                                        custom_property_registrations,
+                                        layer_orders,
+                                        next_layer_order,
+                                        current_layer_order,
+                                        current_layer_name.clone(),
+                                        container_conditions,
+                                        scope_conditions,
+                                        debug,
+                                        has_positional_selectors,
+                                        has_sibling_selectors,
+                                        viewport,
+                                        prefer_print,
+                                    );
+                                }
                             }
                         }
-                        if matched {
-                            append_rule_list(
-                                supports.rules,
-                                normal_rules,
-                                important_rules,
-                                order,
-                                root_normal,
-                                root_important,
-                                counter_styles,
-                                custom_property_registrations,
-                                layer_orders,
-                                next_layer_order,
-                                current_layer_order,
-                                current_layer_name.clone(),
-                                container_conditions,
-                                scope_conditions,
-                                debug,
-                                has_positional_selectors,
-                                has_sibling_selectors,
-                                viewport,
-                                prefer_print,
-                            );
-                        }
-                    }
-                    CssRule::LayerStatement(statement) => {
-                        for name in statement.names {
-                            if let Some(name) = layer_name_to_string(&name) {
-                                let name = scoped_layer_name(current_layer_name.as_deref(), &name);
-                                register_layer(name, layer_orders, next_layer_order);
+                        "layer" => {
+                            if let Some(crate::css_native::AtRuleBlock::Rules(nested)) =
+                                &at_rule.block
+                            {
+                                let raw_name = at_rule.prelude.trim();
+                                let (registered_order, layer_name) = if raw_name.is_empty() {
+                                    let value = *next_layer_order;
+                                    *next_layer_order = next_layer_order.saturating_add(1);
+                                    (value, current_layer_name.clone())
+                                } else {
+                                    let name =
+                                        scoped_layer_name(current_layer_name.as_deref(), raw_name);
+                                    let value = register_layer(
+                                        name.clone(),
+                                        layer_orders,
+                                        next_layer_order,
+                                    );
+                                    (value, Some(name))
+                                };
+                                append_native_rule_list(
+                                    nested,
+                                    normal_rules,
+                                    important_rules,
+                                    order,
+                                    root_normal,
+                                    root_important,
+                                    counter_styles,
+                                    custom_property_registrations,
+                                    layer_orders,
+                                    next_layer_order,
+                                    Some(registered_order),
+                                    layer_name,
+                                    container_conditions,
+                                    scope_conditions,
+                                    debug,
+                                    has_positional_selectors,
+                                    has_sibling_selectors,
+                                    viewport,
+                                    prefer_print,
+                                );
+                            } else if let Ok(names) =
+                                crate::css_native::split_top_level(&at_rule.prelude, ',')
+                            {
+                                for name in names {
+                                    let name = name.trim();
+                                    if !name.is_empty() {
+                                        let scoped =
+                                            scoped_layer_name(current_layer_name.as_deref(), name);
+                                        register_layer(scoped, layer_orders, next_layer_order);
+                                    }
+                                }
                             }
                         }
-                    }
-                    CssRule::LayerBlock(layer) => {
-                        let (layer_order, layer_name) = if let Some(name) = layer.name {
-                            if let Some(name) = layer_name_to_string(&name) {
-                                let name = scoped_layer_name(current_layer_name.as_deref(), &name);
-                                let order =
-                                    register_layer(name.clone(), layer_orders, next_layer_order);
-                                (order, Some(name))
-                            } else {
-                                let order = *next_layer_order;
-                                *next_layer_order = next_layer_order.saturating_add(1);
-                                (order, current_layer_name.clone())
+                        "container" => {
+                            if let Some(logger) = debug {
+                                logger.increment("css.container.rules", 1);
                             }
-                        } else {
-                            let order = *next_layer_order;
-                            *next_layer_order = next_layer_order.saturating_add(1);
-                            (order, current_layer_name.clone())
-                        };
-                        append_rule_list(
-                            layer.rules,
-                            normal_rules,
-                            important_rules,
-                            order,
-                            root_normal,
-                            root_important,
-                            counter_styles,
-                            custom_property_registrations,
-                            layer_orders,
-                            next_layer_order,
-                            Some(layer_order),
-                            layer_name,
-                            container_conditions,
-                            scope_conditions,
-                            debug,
-                            has_positional_selectors,
-                            has_sibling_selectors,
-                            viewport,
-                            prefer_print,
-                        );
-                    }
-                    CssRule::Container(container) => {
-                        if let Some(logger) = debug {
-                            logger.increment("css.container.rules", 1);
+                            if let Some(crate::css_native::AtRuleBlock::Rules(nested)) =
+                                &at_rule.block
+                            {
+                                let mut conditions = container_conditions.to_vec();
+                                conditions.push(native_container_rule_condition(&at_rule.prelude));
+                                append_native_rule_list(
+                                    nested,
+                                    normal_rules,
+                                    important_rules,
+                                    order,
+                                    root_normal,
+                                    root_important,
+                                    counter_styles,
+                                    custom_property_registrations,
+                                    layer_orders,
+                                    next_layer_order,
+                                    current_layer_order,
+                                    current_layer_name.clone(),
+                                    &conditions,
+                                    scope_conditions,
+                                    debug,
+                                    has_positional_selectors,
+                                    has_sibling_selectors,
+                                    viewport,
+                                    prefer_print,
+                                );
+                            }
                         }
-                        let mut nested_container_conditions = container_conditions.to_vec();
-                        nested_container_conditions.push(container_rule_condition_from_css(
-                            container.name.as_ref(),
-                            container.condition.as_ref(),
-                        ));
-                        append_rule_list(
-                            container.rules,
-                            normal_rules,
-                            important_rules,
-                            order,
-                            root_normal,
-                            root_important,
-                            counter_styles,
-                            custom_property_registrations,
-                            layer_orders,
-                            next_layer_order,
-                            current_layer_order,
-                            current_layer_name.clone(),
-                            &nested_container_conditions,
-                            scope_conditions,
-                            debug,
-                            has_positional_selectors,
-                            has_sibling_selectors,
-                            viewport,
-                            prefer_print,
-                        );
-                    }
-                    CssRule::Scope(scope) => {
-                        if let Some(logger) = debug {
-                            logger.increment("css.scope.rules", 1);
+                        "scope" => {
+                            if let Some(logger) = debug {
+                                logger.increment("css.scope.rules", 1);
+                            }
+                            if let (
+                                Some(condition),
+                                Some(crate::css_native::AtRuleBlock::Rules(nested)),
+                            ) = (
+                                native_scope_rule_condition(&at_rule.prelude),
+                                &at_rule.block,
+                            ) {
+                                let mut conditions = scope_conditions.to_vec();
+                                conditions.push(condition);
+                                append_native_rule_list(
+                                    nested,
+                                    normal_rules,
+                                    important_rules,
+                                    order,
+                                    root_normal,
+                                    root_important,
+                                    counter_styles,
+                                    custom_property_registrations,
+                                    layer_orders,
+                                    next_layer_order,
+                                    current_layer_order,
+                                    current_layer_name.clone(),
+                                    container_conditions,
+                                    &conditions,
+                                    debug,
+                                    has_positional_selectors,
+                                    has_sibling_selectors,
+                                    viewport,
+                                    prefer_print,
+                                );
+                            } else if let Some(logger) = debug {
+                                logger.increment("css.scope.rules_skipped", 1);
+                            }
                         }
-                        if let Some(scope_condition) = scope_rule_condition_from_css(&scope) {
-                            let mut nested_scope_conditions = scope_conditions.to_vec();
-                            nested_scope_conditions.push(scope_condition);
-                            append_rule_list(
-                                scope.rules,
-                                normal_rules,
-                                important_rules,
-                                order,
-                                root_normal,
-                                root_important,
-                                counter_styles,
-                                custom_property_registrations,
-                                layer_orders,
-                                next_layer_order,
-                                current_layer_order,
-                                current_layer_name.clone(),
-                                container_conditions,
-                                &nested_scope_conditions,
-                                debug,
-                                has_positional_selectors,
-                                has_sibling_selectors,
-                                viewport,
-                                prefer_print,
-                            );
-                        } else if let Some(logger) = debug {
-                            logger.increment("css.scope.rules_skipped", 1);
+                        "starting-style" => {
+                            if let Some(logger) = debug {
+                                logger.increment("css.starting_style.rules", 1);
+                                logger.increment("css.starting_style.rules_skipped", 1);
+                            }
                         }
-                    }
-                    CssRule::StartingStyle(_) => {
-                        if let Some(logger) = debug {
-                            logger.increment("css.starting_style.rules", 1);
-                            logger.increment("css.starting_style.rules_skipped", 1);
+                        "view-transition" => {
+                            if let Some(logger) = debug {
+                                logger.increment("css.view_transition.rules", 1);
+                                logger.increment("css.view_transition.rules_skipped", 1);
+                                let count = match &at_rule.block {
+                                    Some(crate::css_native::AtRuleBlock::Declarations(block)) => {
+                                        block.declarations.len() as u64
+                                    }
+                                    _ => 0,
+                                };
+                                logger.increment("css.view_transition.descriptors_skipped", count);
+                            }
                         }
-                    }
-                    CssRule::Keyframes(keyframes) => {
-                        if let Some(logger) = debug {
-                            logger.increment("css.keyframes.rules", 1);
-                            logger.increment("css.keyframes.rules_skipped", 1);
-                            logger.increment(
-                                "css.keyframes.keyframes_skipped",
-                                keyframes.keyframes.len() as u64,
-                            );
+                        name if name.ends_with("keyframes") => {
+                            if let Some(logger) = debug {
+                                logger.increment("css.keyframes.rules", 1);
+                                logger.increment("css.keyframes.rules_skipped", 1);
+                                let count = match &at_rule.block {
+                                    Some(crate::css_native::AtRuleBlock::Raw(raw)) => {
+                                        count_native_keyframes(raw)
+                                    }
+                                    _ => 0,
+                                };
+                                logger.increment("css.keyframes.keyframes_skipped", count);
+                            }
                         }
-                    }
-                    CssRule::ViewTransition(view_transition) => {
-                        if let Some(logger) = debug {
-                            logger.increment("css.view_transition.rules", 1);
-                            logger.increment("css.view_transition.rules_skipped", 1);
-                            logger.increment(
-                                "css.view_transition.descriptors_skipped",
-                                view_transition.properties.len() as u64,
-                            );
-                        }
-                    }
-                    _ => {}
+                        _ => {}
+                    },
                 }
             }
         }
 
-        let ua_sheet = StyleSheet::parse(default_ua_css(), ParserOptions::default()).ok();
+        let ua_sheet = crate::css_native::parse_stylesheet(default_ua_css()).ok();
         let user_sheet = if css.trim().is_empty() {
             None
         } else {
-            StyleSheet::parse(css, ParserOptions::default()).ok()
+            crate::css_native::parse_stylesheet(css).ok()
         };
         let prefer_print = ua_sheet
             .as_ref()
-            .map(|sheet| stylesheet_has_print_media(&sheet.rules))
+            .map(|sheet| native_rule_list_has_print_media(&sheet.rules))
             .unwrap_or(false)
             || user_sheet
                 .as_ref()
-                .map(|sheet| stylesheet_has_print_media(&sheet.rules))
+                .map(|sheet| native_rule_list_has_print_media(&sheet.rules))
                 .unwrap_or(false);
 
         if let Some(sheet) = ua_sheet {
-            append_rule_list(
-                sheet.rules,
+            append_native_rule_list(
+                &sheet.rules,
                 &mut normal_rules,
                 &mut important_rules,
                 &mut order,
@@ -3373,8 +3220,8 @@ impl StyleResolver {
         }
 
         if let Some(sheet) = user_sheet {
-            append_rule_list(
-                sheet.rules,
+            append_native_rule_list(
+                &sheet.rules,
                 &mut normal_rules,
                 &mut important_rules,
                 &mut order,
@@ -3917,15 +3764,15 @@ impl StyleResolver {
         let mut inline_normal = StyleDelta::default();
         let mut inline_important = StyleDelta::default();
         if let Some(inline) = inline_style {
-            if let Ok(style) = StyleAttribute::parse(inline, ParserOptions::default()) {
+            if let Ok(declarations) = crate::css_native::parse_declaration_block(inline) {
                 if let Some(logger) = debug {
                     let selector = debug_node
                         .as_deref()
                         .map(|node| format!("@inline {node}"))
                         .unwrap_or_else(|| "@inline".to_string());
-                    log_declaration_no_effects(&style.declarations, &selector, logger);
+                    log_native_declaration_no_effects(&declarations, &selector, logger);
                 }
-                let (normal_delta, important_delta) = style_from_declarations(&style.declarations);
+                let (normal_delta, important_delta) = style_from_native_declarations(&declarations);
                 inline_normal = normal_delta;
                 inline_important = important_delta;
             }
@@ -4765,338 +4612,196 @@ fn parse_selector_pattern(selector: &str) -> Option<SelectorPattern> {
     Some(SelectorPattern { parts, combinators })
 }
 
-fn media_list_matches(
-    list: &MediaList,
+fn native_media_prelude_matches(
+    prelude: &str,
     viewport: Size,
     prefer_print: bool,
     debug: Option<&DebugLogger>,
 ) -> bool {
-    if viewport.width == Pt::ZERO && viewport.height == Pt::ZERO {
-        return true;
+    let result = crate::css_queries::evaluate_media_list(prelude, viewport, prefer_print);
+    if let Some(logger) = debug {
+        logger.increment("css.media.matched", result.matched_queries);
+        logger.increment("css.media.unmatched", result.unmatched_queries);
+        logger.increment("css.media.unsupported", result.unsupported_queries);
     }
-    if list.media_queries.is_empty() {
-        return true;
-    }
-    let mut matched = false;
-    for query in &list.media_queries {
-        match media_query_matches(query, viewport, prefer_print, debug) {
-            Some(true) => {
-                matched = true;
-                if let Some(logger) = debug {
-                    logger.increment("css.media.matched", 1);
-                }
-                break;
-            }
-            Some(false) => {
-                if let Some(logger) = debug {
-                    logger.increment("css.media.unmatched", 1);
-                }
-            }
-            None => {
-                if let Some(logger) = debug {
-                    logger.increment("css.media.unsupported", 1);
-                }
-            }
-        }
-    }
-    matched
+    result.matched
 }
 
-fn media_query_matches(
-    query: &MediaQuery,
-    viewport: Size,
-    prefer_print: bool,
-    debug: Option<&DebugLogger>,
-) -> Option<bool> {
-    let media_type_matches = if prefer_print {
-        matches!(query.media_type, MediaType::All | MediaType::Print)
-    } else {
-        matches!(
-            query.media_type,
-            MediaType::All | MediaType::Print | MediaType::Screen
-        )
-    };
-    if !media_type_matches {
-        return Some(false);
-    }
-    let condition_matches = match &query.condition {
-        Some(condition) => media_condition_matches(condition, viewport, debug)?,
-        None => true,
-    };
-    let mut result = condition_matches;
-    if let Some(Qualifier::Not) = query.qualifier {
-        result = !result;
-    }
-    Some(result)
-}
-
-fn media_condition_matches(
-    condition: &MediaCondition,
-    viewport: Size,
-    debug: Option<&DebugLogger>,
-) -> Option<bool> {
-    match condition {
-        MediaCondition::Feature(feature) => media_feature_matches(feature, viewport, debug),
-        MediaCondition::Not(inner) => media_condition_matches(inner, viewport, debug).map(|v| !v),
-        MediaCondition::Operation {
-            operator,
-            conditions,
-        } => match operator {
-            Operator::And => {
-                let mut any = false;
-                for cond in conditions {
-                    let value = media_condition_matches(cond, viewport, debug)?;
-                    any = true;
-                    if !value {
-                        return Some(false);
-                    }
-                }
-                Some(any)
-            }
-            Operator::Or => {
-                let mut any = false;
-                for cond in conditions {
-                    let value = media_condition_matches(cond, viewport, debug)?;
-                    any = true;
-                    if value {
-                        return Some(true);
-                    }
-                }
-                let _ = any;
-                Some(false)
-            }
+fn native_supports_prelude_matches(prelude: &str) -> bool {
+    crate::css_queries::evaluate_supports_condition(
+        prelude,
+        |name, value| {
+            let declaration = crate::css_native::Declaration {
+                name: name.to_string(),
+                value: value.to_string(),
+                important: false,
+            };
+            let mut delta = StyleDelta::default();
+            apply_raw_declaration(&declaration, &mut delta);
+            !delta.is_empty()
         },
-        MediaCondition::Unknown(_) => None,
-    }
+        |selector| parse_selector_pattern(selector).is_some(),
+    )
 }
 
-fn media_feature_matches(
-    feature: &MediaFeature,
-    viewport: Size,
-    _debug: Option<&DebugLogger>,
-) -> Option<bool> {
-    match feature {
-        MediaFeature::Plain { name, value } => {
-            media_feature_compare(name, MediaFeatureComparison::Equal, value, viewport)
-        }
-        MediaFeature::Range {
-            name,
-            operator,
-            value,
-        } => media_feature_compare(name, *operator, value, viewport),
-        MediaFeature::Interval {
-            name,
-            start,
-            start_operator,
-            end,
-            end_operator,
-        } => {
-            let left = media_feature_compare(name, *start_operator, start, viewport)?;
-            let right = media_feature_compare(name, *end_operator, end, viewport)?;
-            Some(left && right)
-        }
-        MediaFeature::Boolean { name } => media_boolean_feature_matches(name),
-    }
-}
-
-fn media_boolean_feature_matches(name: &MediaFeatureName<MediaFeatureId>) -> Option<bool> {
-    match name {
-        MediaFeatureName::Standard(id) => match id {
-            MediaFeatureId::Color
-            | MediaFeatureId::ColorGamut
-            | MediaFeatureId::DisplayMode
-            | MediaFeatureId::DynamicRange
-            | MediaFeatureId::EnvironmentBlending
-            | MediaFeatureId::HorizontalViewportSegments
-            | MediaFeatureId::MozDevicePixelRatio
-            | MediaFeatureId::Resolution
-            | MediaFeatureId::Scan
-            | MediaFeatureId::VideoColorGamut
-            | MediaFeatureId::VideoDynamicRange
-            | MediaFeatureId::WebKitDevicePixelRatio
-            | MediaFeatureId::VerticalViewportSegments => Some(true),
-            MediaFeatureId::AnyHover
-            | MediaFeatureId::AnyPointer
-            | MediaFeatureId::Hover
-            | MediaFeatureId::Pointer
-            | MediaFeatureId::ColorIndex
-            | MediaFeatureId::ForcedColors
-            | MediaFeatureId::Grid
-            | MediaFeatureId::InvertedColors
-            | MediaFeatureId::Monochrome
-            | MediaFeatureId::NavControls
-            | MediaFeatureId::OverflowInline
-            | MediaFeatureId::PrefersContrast
-            | MediaFeatureId::PrefersReducedData
-            | MediaFeatureId::PrefersReducedMotion
-            | MediaFeatureId::PrefersReducedTransparency
-            | MediaFeatureId::Scripting
-            | MediaFeatureId::Update => Some(false),
-            MediaFeatureId::OverflowBlock => Some(true),
-            _ => None,
+fn native_container_rule_condition(prelude: &str) -> ContainerRuleCondition {
+    match crate::css_queries::parse_container_prelude(prelude) {
+        Some(parsed) => ContainerRuleCondition {
+            name: parsed.name,
+            condition: parsed.condition,
         },
-        MediaFeatureName::Unknown(ident) => media_unknown_boolean_feature_matches(ident.as_ref()),
-        _ => None,
+        None => ContainerRuleCondition {
+            name: None,
+            condition: Some(ContainerConditionExpr::Unsupported),
+        },
     }
 }
 
-fn media_unknown_boolean_feature_matches(name: &str) -> Option<bool> {
-    if name.eq_ignore_ascii_case("device-posture") || name.eq_ignore_ascii_case("shape") {
-        return Some(true);
-    }
-    if name.eq_ignore_ascii_case("-webkit-transform-2d") {
-        return Some(true);
-    }
-    if name.eq_ignore_ascii_case("-webkit-transform-3d")
-        || name.eq_ignore_ascii_case("-webkit-animation")
-        || name.eq_ignore_ascii_case("-webkit-transition")
-    {
-        return Some(false);
-    }
-    None
-}
-
-fn compare_i32(lhs: i32, operator: MediaFeatureComparison, rhs: i32) -> bool {
-    match operator {
-        MediaFeatureComparison::Equal => lhs == rhs,
-        MediaFeatureComparison::GreaterThan => lhs > rhs,
-        MediaFeatureComparison::GreaterThanEqual => lhs >= rhs,
-        MediaFeatureComparison::LessThan => lhs < rhs,
-        MediaFeatureComparison::LessThanEqual => lhs <= rhs,
-    }
-}
-
-fn media_integer_feature_compare(
-    value: &MediaFeatureValue,
-    operator: MediaFeatureComparison,
-    actual: i32,
-) -> Option<bool> {
-    match value {
-        MediaFeatureValue::Integer(expected) => Some(compare_i32(actual, operator, *expected)),
-        MediaFeatureValue::Boolean(expected) => {
-            Some(matches!(operator, MediaFeatureComparison::Equal) && (actual != 0) == *expected)
-        }
-        _ => None,
-    }
-}
-
-fn media_ident_feature_compare(
-    value: &MediaFeatureValue,
-    operator: MediaFeatureComparison,
-    actual: &str,
-) -> Option<bool> {
-    match value {
-        MediaFeatureValue::Ident(ident) => {
-            Some(matches!(operator, MediaFeatureComparison::Equal) && *ident == actual)
-        }
-        _ => None,
-    }
-}
-
-fn media_number_feature_compare(
-    value: &MediaFeatureValue,
-    operator: MediaFeatureComparison,
-    actual: f32,
-) -> Option<bool> {
-    match value {
-        MediaFeatureValue::Number(expected) => Some(compare_f32(actual, operator, *expected)),
-        _ => None,
-    }
-}
-
-fn resolution_to_dpi(resolution: &Resolution) -> f32 {
-    match resolution {
-        Resolution::Dpi(value) => *value,
-        Resolution::Dpcm(value) => *value * 2.54,
-        Resolution::Dppx(value) => *value * 96.0,
-    }
-}
-
-fn media_resolution_feature_compare(
-    value: &MediaFeatureValue,
-    operator: MediaFeatureComparison,
-    actual_dpi: f32,
-) -> Option<bool> {
-    match value {
-        MediaFeatureValue::Resolution(expected) => Some(compare_f32(
-            actual_dpi,
-            operator,
-            resolution_to_dpi(expected),
-        )),
-        _ => None,
-    }
-}
-
-fn supports_condition_matches(
-    condition: &lightningcss::rules::supports::SupportsCondition,
-) -> bool {
-    match condition {
-        lightningcss::rules::supports::SupportsCondition::Not(inner) => {
-            !supports_condition_matches(inner)
-        }
-        lightningcss::rules::supports::SupportsCondition::And(items) => {
-            items.iter().all(supports_condition_matches)
-        }
-        lightningcss::rules::supports::SupportsCondition::Or(items) => {
-            items.iter().any(supports_condition_matches)
-        }
-        lightningcss::rules::supports::SupportsCondition::Declaration { property_id, value } => {
-            supports_declaration_matches(property_id, value.as_ref())
-        }
-        lightningcss::rules::supports::SupportsCondition::Selector(selector) => {
-            parse_selector_pattern(selector.as_ref()).is_some()
-        }
-        lightningcss::rules::supports::SupportsCondition::Unknown(_) => false,
-    }
-}
-
-fn supports_declaration_matches(property_id: &PropertyId, value: &str) -> bool {
-    let Ok(name) = property_id.to_css_string(PrinterOptions::default()) else {
-        return false;
-    };
-    let css = format!(".x {{ {name}: {value}; }}");
-    let Ok(sheet) = StyleSheet::parse(&css, ParserOptions::default()) else {
-        return false;
-    };
-    sheet.rules.0.iter().any(|rule| {
-        if let CssRule::Style(style) = rule {
-            let (normal, important) = style_from_declarations(&style.declarations);
-            !normal.is_empty() || !important.is_empty()
-        } else {
-            false
-        }
-    })
-}
-
-fn scope_rule_condition_from_css<R>(
-    scope: &lightningcss::rules::scope::ScopeRule<'_, R>,
-) -> Option<ScopeRuleCondition> {
-    let starts = scope
-        .scope_start
-        .as_ref()
-        .map(selector_patterns_from_selector_list)
-        .unwrap_or_default();
+fn native_scope_rule_condition(prelude: &str) -> Option<ScopeRuleCondition> {
+    let parsed = crate::css_queries::parse_scope_prelude(prelude)?;
+    let starts = parsed
+        .starts
+        .iter()
+        .filter_map(|selector| parse_selector_pattern(selector))
+        .collect::<Vec<_>>();
     if starts.is_empty() {
         return None;
     }
-    let ends = scope
-        .scope_end
-        .as_ref()
-        .map(selector_patterns_from_selector_list)
-        .unwrap_or_default();
+    let ends = parsed
+        .ends
+        .iter()
+        .filter_map(|selector| parse_selector_pattern(selector))
+        .collect::<Vec<_>>();
     Some(ScopeRuleCondition { starts, ends })
 }
 
-fn selector_patterns_from_selector_list(
-    selectors: &lightningcss::selector::SelectorList<'_>,
-) -> Vec<SelectorPattern> {
-    let Ok(raw) = selectors.to_css_string(PrinterOptions::default()) else {
-        return Vec::new();
-    };
-    split_args(&raw)
-        .into_iter()
-        .filter_map(|selector| parse_selector_pattern(&selector))
-        .collect()
+fn native_counter_style_symbols(
+    prelude: &str,
+    declarations: &crate::css_native::DeclarationBlock,
+) -> Option<(String, AnonymousListStyleSymbols)> {
+    let name = crate::css_native::parse_identifier(prelude.trim())?;
+    let mut system = AnonymousListStyleSymbolsSystem::Symbolic;
+    let mut fixed_start = 1;
+    let mut symbols: Option<Vec<String>> = None;
+    let mut suffix = ". ".to_string();
+
+    for declaration in declarations.normal().chain(declarations.important()) {
+        match declaration.name.to_ascii_lowercase().as_str() {
+            "system" => {
+                let parts = split_top_level_whitespace(&declaration.value);
+                let Some(keyword) = parts
+                    .first()
+                    .and_then(|value| crate::css_native::parse_identifier(value))
+                    .map(|value| value.to_ascii_lowercase())
+                else {
+                    continue;
+                };
+                match keyword.as_str() {
+                    "cyclic" => system = AnonymousListStyleSymbolsSystem::Cyclic,
+                    "numeric" => system = AnonymousListStyleSymbolsSystem::Numeric,
+                    "alphabetic" => system = AnonymousListStyleSymbolsSystem::Alphabetic,
+                    "symbolic" => system = AnonymousListStyleSymbolsSystem::Symbolic,
+                    "fixed" => {
+                        system = AnonymousListStyleSymbolsSystem::Fixed;
+                        fixed_start = parts
+                            .get(1)
+                            .and_then(|value| value.parse::<i32>().ok())
+                            .unwrap_or(1)
+                            .max(1);
+                    }
+                    _ => return None,
+                }
+            }
+            "symbols" => {
+                if let Some(parsed) =
+                    crate::css_native::parse_string_or_ident_list(&declaration.value)
+                {
+                    symbols = Some(parsed);
+                }
+            }
+            "suffix" => {
+                if let Some(parsed) =
+                    crate::css_native::parse_string_or_ident_list(&declaration.value)
+                {
+                    suffix = parsed.join("");
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let symbols = symbols?;
+    if symbols.is_empty()
+        || (matches!(
+            system,
+            AnonymousListStyleSymbolsSystem::Numeric | AnonymousListStyleSymbolsSystem::Alphabetic
+        ) && symbols.len() < 2)
+    {
+        return None;
+    }
+    Some((
+        name,
+        AnonymousListStyleSymbols {
+            system,
+            symbols,
+            suffix,
+            fixed_start,
+        },
+    ))
+}
+
+fn native_rule_list_has_print_media(rules: &[crate::css_native::Rule]) -> bool {
+    for rule in rules {
+        let crate::css_native::Rule::At(at_rule) = rule else {
+            continue;
+        };
+        if at_rule.name == "media"
+            && crate::css_queries::media_list_has_print_type(&at_rule.prelude)
+        {
+            return true;
+        }
+        if let Some(crate::css_native::AtRuleBlock::Rules(nested)) = &at_rule.block {
+            if native_rule_list_has_print_media(nested) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn count_native_keyframes(raw: &str) -> u64 {
+    let mut count = 0u64;
+    let mut depth = 0usize;
+    let mut quote = None;
+    let bytes = raw.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if let Some(active) = quote {
+            if byte == b'\\' {
+                index = (index + 2).min(bytes.len());
+                continue;
+            }
+            if byte == active {
+                quote = None;
+            }
+            index += 1;
+            continue;
+        }
+        match byte {
+            b'\'' | b'"' => quote = Some(byte),
+            b'{' => {
+                if depth == 0 {
+                    count = count.saturating_add(1);
+                }
+                depth = depth.saturating_add(1);
+            }
+            b'}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        index += 1;
+    }
+    count
 }
 
 fn scope_conditions_match(
@@ -5165,126 +4870,6 @@ fn element_at_chain_index<'a>(
         element
     } else {
         &ancestors[idx]
-    }
-}
-
-fn container_rule_condition_from_css(
-    name: Option<&lightningcss::rules::container::ContainerName>,
-    condition: Option<&ContainerCondition>,
-) -> ContainerRuleCondition {
-    ContainerRuleCondition {
-        name: name.and_then(|name| name.to_css_string(PrinterOptions::default()).ok()),
-        condition: condition.map(container_condition_expr_from_css),
-    }
-}
-
-fn container_condition_expr_from_css(condition: &ContainerCondition) -> ContainerConditionExpr {
-    match condition {
-        ContainerCondition::Feature(feature) => container_size_feature_from_css(feature)
-            .map(ContainerConditionExpr::Feature)
-            .unwrap_or(ContainerConditionExpr::Unsupported),
-        ContainerCondition::Not(inner) => {
-            ContainerConditionExpr::Not(Box::new(container_condition_expr_from_css(inner)))
-        }
-        ContainerCondition::Operation {
-            operator,
-            conditions,
-        } => {
-            let items = conditions
-                .iter()
-                .map(container_condition_expr_from_css)
-                .collect();
-            match operator {
-                Operator::And => ContainerConditionExpr::And(items),
-                Operator::Or => ContainerConditionExpr::Or(items),
-            }
-        }
-        ContainerCondition::Style(_) | ContainerCondition::ScrollState(_) => {
-            ContainerConditionExpr::Unsupported
-        }
-        ContainerCondition::Unknown(_) => ContainerConditionExpr::Unsupported,
-    }
-}
-
-fn container_size_feature_from_css(
-    feature: &lightningcss::media_query::QueryFeature<ContainerSizeFeatureId>,
-) -> Option<ContainerSizeFeatureExpr> {
-    match feature {
-        lightningcss::media_query::QueryFeature::Plain { name, value } => {
-            Some(ContainerSizeFeatureExpr::Plain {
-                name: container_size_feature_name(name)?,
-                value: container_feature_value(value)?,
-            })
-        }
-        lightningcss::media_query::QueryFeature::Range {
-            name,
-            operator,
-            value,
-        } => Some(ContainerSizeFeatureExpr::Range {
-            name: container_size_feature_name(name)?,
-            operator: *operator,
-            value: container_feature_value(value)?,
-        }),
-        lightningcss::media_query::QueryFeature::Interval {
-            name,
-            start,
-            start_operator,
-            end,
-            end_operator,
-        } => Some(ContainerSizeFeatureExpr::Interval {
-            name: container_size_feature_name(name)?,
-            start: container_feature_value(start)?,
-            start_operator: *start_operator,
-            end: container_feature_value(end)?,
-            end_operator: *end_operator,
-        }),
-        lightningcss::media_query::QueryFeature::Boolean { .. } => {
-            Some(ContainerSizeFeatureExpr::Boolean)
-        }
-    }
-}
-
-fn container_size_feature_name(
-    name: &MediaFeatureName<ContainerSizeFeatureId>,
-) -> Option<ContainerSizeFeatureName> {
-    match name {
-        MediaFeatureName::Standard(ContainerSizeFeatureId::Width) => {
-            Some(ContainerSizeFeatureName::Width)
-        }
-        MediaFeatureName::Standard(ContainerSizeFeatureId::Height) => {
-            Some(ContainerSizeFeatureName::Height)
-        }
-        MediaFeatureName::Standard(ContainerSizeFeatureId::InlineSize) => {
-            Some(ContainerSizeFeatureName::InlineSize)
-        }
-        MediaFeatureName::Standard(ContainerSizeFeatureId::BlockSize) => {
-            Some(ContainerSizeFeatureName::BlockSize)
-        }
-        MediaFeatureName::Standard(ContainerSizeFeatureId::AspectRatio) => {
-            Some(ContainerSizeFeatureName::AspectRatio)
-        }
-        MediaFeatureName::Standard(ContainerSizeFeatureId::Orientation) => {
-            Some(ContainerSizeFeatureName::Orientation)
-        }
-        _ => None,
-    }
-}
-
-fn container_feature_value(value: &MediaFeatureValue) -> Option<ContainerFeatureValue> {
-    match value {
-        MediaFeatureValue::Length(length) => length
-            .to_px()
-            .map(px_to_pt)
-            .map(ContainerFeatureValue::Length),
-        MediaFeatureValue::Ratio(ratio) => {
-            if ratio.1.abs() <= f32::EPSILON {
-                None
-            } else {
-                Some(ContainerFeatureValue::Ratio(ratio.0 / ratio.1))
-            }
-        }
-        MediaFeatureValue::Ident(ident) => Some(ContainerFeatureValue::Ident(ident.to_string())),
-        _ => None,
     }
 }
 
@@ -5509,171 +5094,6 @@ fn compare_f32(lhs: f32, operator: MediaFeatureComparison, rhs: f32) -> bool {
     }
 }
 
-fn media_feature_compare(
-    name: &MediaFeatureName<MediaFeatureId>,
-    operator: MediaFeatureComparison,
-    value: &MediaFeatureValue,
-    viewport: Size,
-) -> Option<bool> {
-    if let MediaFeatureName::Unknown(ident) = name {
-        if ident.as_ref().eq_ignore_ascii_case("device-posture") {
-            return media_ident_feature_compare(value, operator, "continuous");
-        }
-        if ident.as_ref().eq_ignore_ascii_case("shape") {
-            return media_ident_feature_compare(value, operator, "rect");
-        }
-    }
-
-    if let MediaFeatureName::Standard(MediaFeatureId::Orientation) = name {
-        let orientation = if viewport.width > viewport.height {
-            "landscape"
-        } else {
-            "portrait"
-        };
-        return match value {
-            MediaFeatureValue::Ident(ident) => {
-                Some(matches!(operator, MediaFeatureComparison::Equal) && *ident == orientation)
-            }
-            _ => None,
-        };
-    }
-
-    if let MediaFeatureName::Standard(
-        MediaFeatureId::AspectRatio | MediaFeatureId::DeviceAspectRatio,
-    ) = name
-    {
-        if viewport.height == Pt::ZERO {
-            return None;
-        }
-        let actual = viewport.width.to_f32() / viewport.height.to_f32();
-        return match value {
-            MediaFeatureValue::Ratio(ratio) => {
-                if ratio.1 == 0.0 {
-                    return None;
-                }
-                let expected = ratio.0 / ratio.1;
-                Some(compare_f32(actual, operator, expected))
-            }
-            _ => None,
-        };
-    }
-
-    if let MediaFeatureName::Standard(id) = name {
-        match id {
-            MediaFeatureId::PrefersColorScheme => {
-                return media_ident_feature_compare(value, operator, "light");
-            }
-            MediaFeatureId::PrefersReducedMotion
-            | MediaFeatureId::PrefersReducedTransparency
-            | MediaFeatureId::PrefersReducedData
-            | MediaFeatureId::PrefersContrast => {
-                return media_ident_feature_compare(value, operator, "no-preference");
-            }
-            MediaFeatureId::ForcedColors | MediaFeatureId::InvertedColors => {
-                return media_ident_feature_compare(value, operator, "none");
-            }
-            MediaFeatureId::OverflowBlock => {
-                return media_ident_feature_compare(value, operator, "paged");
-            }
-            MediaFeatureId::OverflowInline | MediaFeatureId::Update | MediaFeatureId::Scripting => {
-                return media_ident_feature_compare(value, operator, "none");
-            }
-            MediaFeatureId::AnyHover
-            | MediaFeatureId::AnyPointer
-            | MediaFeatureId::Hover
-            | MediaFeatureId::Pointer => {
-                return media_ident_feature_compare(value, operator, "none");
-            }
-            MediaFeatureId::ColorGamut => {
-                return media_ident_feature_compare(value, operator, "srgb");
-            }
-            MediaFeatureId::DynamicRange => {
-                return media_ident_feature_compare(value, operator, "standard");
-            }
-            MediaFeatureId::EnvironmentBlending => {
-                return media_ident_feature_compare(value, operator, "opaque");
-            }
-            MediaFeatureId::NavControls => {
-                return media_ident_feature_compare(value, operator, "none");
-            }
-            MediaFeatureId::VideoColorGamut => {
-                return media_ident_feature_compare(value, operator, "srgb");
-            }
-            MediaFeatureId::VideoDynamicRange => {
-                return media_ident_feature_compare(value, operator, "standard");
-            }
-            MediaFeatureId::DisplayMode => {
-                return media_ident_feature_compare(value, operator, "browser");
-            }
-            MediaFeatureId::Resolution => {
-                return media_resolution_feature_compare(value, operator, 96.0);
-            }
-            MediaFeatureId::WebKitDevicePixelRatio | MediaFeatureId::MozDevicePixelRatio => {
-                return media_number_feature_compare(value, operator, 1.0);
-            }
-            MediaFeatureId::Scan => {
-                return media_ident_feature_compare(value, operator, "progressive");
-            }
-            MediaFeatureId::Color => {
-                return media_integer_feature_compare(value, operator, 8);
-            }
-            MediaFeatureId::ColorIndex => {
-                return media_integer_feature_compare(value, operator, 0);
-            }
-            MediaFeatureId::HorizontalViewportSegments
-            | MediaFeatureId::VerticalViewportSegments => {
-                return media_integer_feature_compare(value, operator, 1);
-            }
-            MediaFeatureId::Monochrome | MediaFeatureId::Grid => {
-                return media_integer_feature_compare(value, operator, 0);
-            }
-            _ => {}
-        }
-    }
-
-    let target = match name {
-        MediaFeatureName::Standard(id) => match id {
-            MediaFeatureId::Width | MediaFeatureId::DeviceWidth => viewport.width,
-            MediaFeatureId::Height | MediaFeatureId::DeviceHeight => viewport.height,
-            _ => return None,
-        },
-        _ => return None,
-    };
-    let rhs = match value {
-        MediaFeatureValue::Length(length) => length.to_px().map(px_to_pt),
-        _ => None,
-    }?;
-    Some(match operator {
-        MediaFeatureComparison::GreaterThan => target > rhs,
-        MediaFeatureComparison::GreaterThanEqual => target >= rhs,
-        MediaFeatureComparison::LessThan => target < rhs,
-        MediaFeatureComparison::LessThanEqual => target <= rhs,
-        MediaFeatureComparison::Equal => target == rhs,
-    })
-}
-
-fn stylesheet_has_print_media(rules: &CssRuleList) -> bool {
-    for rule in &rules.0 {
-        match rule {
-            CssRule::Media(media) => {
-                if media
-                    .query
-                    .media_queries
-                    .iter()
-                    .any(|q| matches!(q.media_type, MediaType::Print))
-                {
-                    return true;
-                }
-                if stylesheet_has_print_media(&media.rules) {
-                    return true;
-                }
-            }
-            _ => {}
-        }
-    }
-    false
-}
-
 pub(crate) fn extract_css_page_setup(
     css: &str,
     debug: Option<&DebugLogger>,
@@ -5682,148 +5102,90 @@ pub(crate) fn extract_css_page_setup(
     if css.trim().is_empty() {
         return CssPageSetup::default();
     }
-    let Ok(sheet) = StyleSheet::parse(css, ParserOptions::default()) else {
+    let Ok(sheet) = crate::css_native::parse_stylesheet(css) else {
         return CssPageSetup::default();
     };
     let viewport = viewport.unwrap_or(Size {
         width: Pt::ZERO,
         height: Pt::ZERO,
     });
-    let prefer_print = stylesheet_has_print_media(&sheet.rules);
+    let prefer_print = native_rule_list_has_print_media(&sheet.rules);
     let mut setup = CssPageSetup::default();
-    extract_css_page_setup_from_rules(&sheet.rules, &mut setup, viewport, prefer_print, debug);
+    extract_native_css_page_setup_from_rules(
+        &sheet.rules,
+        &mut setup,
+        viewport,
+        prefer_print,
+        debug,
+    );
     setup
 }
 
-fn extract_css_page_setup_from_rules(
-    rules: &CssRuleList,
+fn extract_native_css_page_setup_from_rules(
+    rules: &[crate::css_native::Rule],
     setup: &mut CssPageSetup,
     viewport: Size,
     prefer_print: bool,
     debug: Option<&DebugLogger>,
 ) {
-    for rule in &rules.0 {
-        match rule {
-            CssRule::Page(page_rule) => {
-                if !page_rule_targets_default(page_rule) {
-                    continue;
-                }
-                apply_page_rule_declarations(page_rule, setup);
-            }
-            CssRule::Media(media) => {
-                if media_list_matches(&media.query, viewport, prefer_print, debug) {
-                    extract_css_page_setup_from_rules(
-                        &media.rules,
-                        setup,
-                        viewport,
-                        prefer_print,
-                        debug,
-                    );
+    for rule in rules {
+        let crate::css_native::Rule::At(at_rule) = rule else {
+            continue;
+        };
+        match at_rule.name.as_str() {
+            "page" if at_rule.prelude.trim().is_empty() => {
+                if let Some(crate::css_native::AtRuleBlock::Declarations(declarations)) =
+                    &at_rule.block
+                {
+                    apply_native_page_declarations(declarations, setup);
                 }
             }
-            _ => {}
-        }
-    }
-}
-
-fn page_rule_targets_default(rule: &lightningcss::rules::page::PageRule) -> bool {
-    if rule.selectors.is_empty() {
-        return true;
-    }
-    rule.selectors
-        .iter()
-        .any(|selector| selector.name.is_none() && selector.pseudo_classes.is_empty())
-}
-
-fn apply_page_rule_declarations(
-    rule: &lightningcss::rules::page::PageRule,
-    setup: &mut CssPageSetup,
-) {
-    for property in &rule.declarations.declarations {
-        apply_page_property(property, setup);
-    }
-    for property in &rule.declarations.important_declarations {
-        apply_page_property(property, setup);
-    }
-}
-
-fn apply_page_property(property: &Property, setup: &mut CssPageSetup) {
-    match property {
-        Property::Margin(value) => {
-            setup.margin_top = lpa_to_absolute_pt(&value.top);
-            setup.margin_right = lpa_to_absolute_pt(&value.right);
-            setup.margin_bottom = lpa_to_absolute_pt(&value.bottom);
-            setup.margin_left = lpa_to_absolute_pt(&value.left);
-        }
-        Property::MarginTop(value) => {
-            setup.margin_top = lpa_to_absolute_pt(value);
-        }
-        Property::MarginRight(value) => {
-            setup.margin_right = lpa_to_absolute_pt(value);
-        }
-        Property::MarginBottom(value) => {
-            setup.margin_bottom = lpa_to_absolute_pt(value);
-        }
-        Property::MarginLeft(value) => {
-            setup.margin_left = lpa_to_absolute_pt(value);
-        }
-        Property::Custom(custom) => {
-            if !matches!(custom.name, CustomPropertyName::Unknown(..)) {
-                return;
-            }
-            let name = custom.name.as_ref().to_ascii_lowercase();
-            let raw = tokens_debug_string(&custom.value.0);
-            match name.as_str() {
-                "size" => {
-                    if let Some(size) = parse_page_size_from_str(&raw) {
-                        setup.size = Some(size);
+            "media" => {
+                if native_media_prelude_matches(&at_rule.prelude, viewport, prefer_print, debug) {
+                    if let Some(crate::css_native::AtRuleBlock::Rules(nested)) = &at_rule.block {
+                        extract_native_css_page_setup_from_rules(
+                            nested,
+                            setup,
+                            viewport,
+                            prefer_print,
+                            debug,
+                        );
                     }
                 }
-                "margin" => apply_margin_shorthand_str(setup, &raw),
-                "margin-top" => setup.margin_top = parse_absolute_pt_from_str(&raw),
-                "margin-right" => setup.margin_right = parse_absolute_pt_from_str(&raw),
-                "margin-bottom" => setup.margin_bottom = parse_absolute_pt_from_str(&raw),
-                "margin-left" => setup.margin_left = parse_absolute_pt_from_str(&raw),
-                _ => {}
-            }
-        }
-        Property::Unparsed(unparsed) => match &unparsed.property_id {
-            PropertyId::Custom(name) if name.as_ref().eq_ignore_ascii_case("size") => {
-                let raw = tokens_debug_string(&unparsed.value.0);
-                if let Some(size) = parse_page_size_from_str(&raw) {
-                    setup.size = Some(size);
-                }
-            }
-            PropertyId::Margin => {
-                let raw = tokens_debug_string(&unparsed.value.0);
-                apply_margin_shorthand_str(setup, &raw);
-            }
-            PropertyId::MarginTop => {
-                let raw = tokens_debug_string(&unparsed.value.0);
-                setup.margin_top = parse_absolute_pt_from_str(&raw);
-            }
-            PropertyId::MarginRight => {
-                let raw = tokens_debug_string(&unparsed.value.0);
-                setup.margin_right = parse_absolute_pt_from_str(&raw);
-            }
-            PropertyId::MarginBottom => {
-                let raw = tokens_debug_string(&unparsed.value.0);
-                setup.margin_bottom = parse_absolute_pt_from_str(&raw);
-            }
-            PropertyId::MarginLeft => {
-                let raw = tokens_debug_string(&unparsed.value.0);
-                setup.margin_left = parse_absolute_pt_from_str(&raw);
             }
             _ => {}
-        },
-        _ => {}
+        }
     }
 }
 
-fn lpa_to_absolute_pt(value: &lightningcss::values::length::LengthPercentageOrAuto) -> Option<Pt> {
-    match length_spec_from_lpa(value) {
-        Some(LengthSpec::Absolute(value)) => Some(value),
-        _ => None,
+fn apply_native_page_declarations(
+    declarations: &crate::css_native::DeclarationBlock,
+    setup: &mut CssPageSetup,
+) {
+    for declaration in declarations.normal() {
+        apply_native_page_property(declaration, setup);
+    }
+    for declaration in declarations.important() {
+        apply_native_page_property(declaration, setup);
+    }
+}
+
+fn apply_native_page_property(
+    declaration: &crate::css_native::Declaration,
+    setup: &mut CssPageSetup,
+) {
+    match declaration.name.to_ascii_lowercase().as_str() {
+        "size" => {
+            if let Some(size) = parse_page_size_from_str(&declaration.value) {
+                setup.size = Some(size);
+            }
+        }
+        "margin" => apply_margin_shorthand_str(setup, &declaration.value),
+        "margin-top" => setup.margin_top = parse_absolute_pt_from_str(&declaration.value),
+        "margin-right" => setup.margin_right = parse_absolute_pt_from_str(&declaration.value),
+        "margin-bottom" => setup.margin_bottom = parse_absolute_pt_from_str(&declaration.value),
+        "margin-left" => setup.margin_left = parse_absolute_pt_from_str(&declaration.value),
+        _ => {}
     }
 }
 
@@ -5938,19 +5300,28 @@ fn orient_page_size(size: Size, orientation: &str) -> Size {
     }
 }
 
-fn log_declaration_no_effects(
-    declarations: &lightningcss::declaration::DeclarationBlock,
+fn collect_native_custom_properties(
+    declarations: &crate::css_native::DeclarationBlock,
+) -> Vec<(String, String)> {
+    declarations
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.name.starts_with("--"))
+        .map(|declaration| (declaration.name.clone(), declaration.value.clone()))
+        .collect()
+}
+
+fn log_native_declaration_no_effects(
+    declarations: &crate::css_native::DeclarationBlock,
     selectors: &str,
     logger: &DebugLogger,
 ) {
     let selector = selectors.trim();
-    for property in declarations
-        .declarations
-        .iter()
-        .chain(declarations.important_declarations.iter())
-    {
-        if let Some((requested, applied, reason)) = declaration_layout_mode_normalization(property)
-        {
+    for declaration in &declarations.declarations {
+        let name = declaration.name.to_ascii_lowercase();
+        let raw = declaration.value.trim();
+
+        if let Some((requested, applied, reason)) = native_layout_mode_normalization(&name, raw) {
             let json = format!(
                 "{{\"type\":\"jit.known_loss\",\"code\":\"LAYOUT_MODE_NORMALIZED\",\"property\":\"display\",\"requested\":{},\"applied\":{},\"reason\":{},\"selector\":{}}}",
                 json_string(&requested),
@@ -5962,7 +5333,7 @@ fn log_declaration_no_effects(
             logger.increment("jit.known_loss.layout_mode_normalized", 1);
         }
 
-        if let Some(name) = declaration_multicol_fallback_property_name(property) {
+        if is_multicol_fallback_property_name(&name) {
             let json = format!(
                 "{{\"type\":\"jit.known_loss\",\"code\":\"MULTICOL_SINGLE_COLUMN_FALLBACK\",\"property\":{},\"fallback\":\"single-column\",\"selector\":{}}}",
                 json_string(&name),
@@ -5970,9 +5341,10 @@ fn log_declaration_no_effects(
             );
             logger.log_json(&json);
             logger.increment("jit.known_loss.multicol_single_column_fallback", 1);
+            continue;
         }
 
-        if let Some(name) = declaration_filters_effects_fallback_property_name(property) {
+        if native_filters_effects_fallback(&name, raw) {
             let json = format!(
                 "{{\"type\":\"jit.known_loss\",\"code\":\"FILTERS_EFFECTS_FALLBACK\",\"property\":{},\"fallback\":\"effect-ignored\",\"selector\":{}}}",
                 json_string(&name),
@@ -5982,22 +5354,29 @@ fn log_declaration_no_effects(
             logger.increment("jit.known_loss.filters_effects_fallback", 1);
         }
 
-        if let Some(name) = declaration_conic_gradient_fallback_property_name(property) {
+        if name == "background"
+            && has_conic_gradient_function(raw)
+            && parse_conic_gradient_str(raw).is_none()
+            && !is_dynamic_conic_gradient_expression(raw)
+        {
             let json = format!(
-                "{{\"type\":\"jit.known_loss\",\"code\":\"CONIC_GRADIENT_FALLBACK\",\"property\":{},\"fallback\":\"gradient-ignored\",\"selector\":{}}}",
-                json_string(&name),
+                "{{\"type\":\"jit.known_loss\",\"code\":\"CONIC_GRADIENT_FALLBACK\",\"property\":\"background\",\"fallback\":\"gradient-ignored\",\"selector\":{}}}",
                 json_string(selector)
             );
             logger.log_json(&json);
             logger.increment("jit.known_loss.conic_gradient_fallback", 1);
         }
 
-        let name = declaration_no_effect_property_name(property).or_else(|| {
-            declaration_parsed_no_effect_property_name(property).map(|v| v.to_string())
-        });
-        let Some(name) = name else {
+        let parsed_no_effect = is_native_parsed_no_effect_property(&name);
+        let mut probe = StyleDelta::default();
+        let supported =
+            apply_native_raw_property(&declaration.name, &declaration.value, &mut probe);
+        if supported
+            || name.starts_with("--")
+            || !parsed_no_effect && is_filters_effects_fallback_property_name(&name)
+        {
             continue;
-        };
+        }
         let json = format!(
             "{{\"type\":\"jit.known_loss\",\"code\":\"DECLARATION_PARSED_NO_EFFECT\",\"property\":{},\"selector\":{}}}",
             json_string(&name),
@@ -6008,23 +5387,59 @@ fn log_declaration_no_effects(
     }
 }
 
-fn declaration_multicol_fallback_property_name(property: &Property) -> Option<String> {
-    let name = match property {
-        Property::Custom(custom) => match &custom.name {
-            CustomPropertyName::Unknown(name) => name.as_ref().to_ascii_lowercase(),
-            _ => return None,
-        },
-        Property::Unparsed(unparsed) => match &unparsed.property_id {
-            PropertyId::Custom(name) => name.as_ref().to_ascii_lowercase(),
-            _ => return None,
-        },
-        _ => return None,
-    };
-    if is_multicol_fallback_property_name(&name) {
-        Some(name)
-    } else {
-        None
+fn native_layout_mode_normalization(
+    property_name: &str,
+    raw: &str,
+) -> Option<(String, &'static str, &'static str)> {
+    if property_name != "display" {
+        return None;
     }
+    let lowered = raw.trim().to_ascii_lowercase();
+    let reason = if lowered.contains("ruby") {
+        if matches!(
+            lowered.as_str(),
+            "ruby-base" | "ruby-text" | "ruby-base-container" | "ruby-text-container"
+        ) {
+            "display_ruby_internal_not_supported"
+        } else {
+            "display_ruby_not_supported"
+        }
+    } else if lowered.contains("box") && lowered != "contents" {
+        "display_legacy_box_not_supported"
+    } else {
+        return None;
+    };
+    let mode = parse_display_mode_str(&lowered)?;
+    Some((lowered, display_mode_name(mode), reason))
+}
+
+fn native_filters_effects_fallback(property_name: &str, raw: &str) -> bool {
+    match property_name {
+        "opacity" => parse_opacity_spec_str(raw).is_none(),
+        "filter" => !filter_spec_or_revert_layer_is_supported(raw),
+        "backdrop-filter" => !backdrop_filter_spec_or_revert_layer_is_supported(raw),
+        "clip-path" => !clip_path_spec_or_revert_layer_is_supported(raw),
+        "mix-blend-mode" => parse_mix_blend_mode_str(raw).is_none(),
+        "isolation" => parse_isolation_spec_str(raw).is_none(),
+        name if is_filters_effects_fallback_property_name(name) => true,
+        _ => false,
+    }
+}
+
+fn is_native_parsed_no_effect_property(name: &str) -> bool {
+    matches!(
+        name,
+        "justify-items"
+            | "justify-self"
+            | "grid-auto-columns"
+            | "grid-auto-rows"
+            | "grid-auto-flow"
+            | "grid-template-areas"
+            | "grid-template"
+            | "grid"
+            | "grid-row-end"
+            | "grid-column-end"
+    )
 }
 
 fn is_multicol_fallback_property_name(name: &str) -> bool {
@@ -6040,175 +5455,6 @@ fn is_multicol_fallback_property_name(name: &str) -> bool {
             | "column-rule-style"
             | "column-rule-color"
     )
-}
-
-fn declaration_filters_effects_fallback_property_name(property: &Property) -> Option<String> {
-    match property {
-        Property::Opacity(_) => None,
-        Property::Filter(value, _) => {
-            let raw = value.to_css_string(PrinterOptions::default()).ok()?;
-            if filter_spec_or_revert_layer_is_supported(&raw) {
-                None
-            } else {
-                Some("filter".to_string())
-            }
-        }
-        Property::BackdropFilter(value, _) => {
-            let raw = value.to_css_string(PrinterOptions::default()).ok()?;
-            if backdrop_filter_spec_or_revert_layer_is_supported(&raw) {
-                None
-            } else {
-                Some("backdrop-filter".to_string())
-            }
-        }
-        Property::ClipPath(value, _) => {
-            let raw = value.to_css_string(PrinterOptions::default()).ok()?;
-            if clip_path_spec_or_revert_layer_is_supported(&raw) {
-                None
-            } else {
-                Some("clip-path".to_string())
-            }
-        }
-        Property::Custom(custom) => match &custom.name {
-            CustomPropertyName::Unknown(name) => {
-                let name = name.as_ref().to_ascii_lowercase();
-                if name == "clip-path" {
-                    let raw = tokens_debug_string(&custom.value.0);
-                    if clip_path_spec_or_revert_layer_is_supported(&raw) {
-                        None
-                    } else {
-                        Some(name)
-                    }
-                } else if name == "filter" {
-                    let raw = tokens_debug_string(&custom.value.0);
-                    if filter_spec_or_revert_layer_is_supported(&raw) {
-                        None
-                    } else {
-                        Some(name)
-                    }
-                } else if name == "backdrop-filter" {
-                    let raw = tokens_debug_string(&custom.value.0);
-                    if backdrop_filter_spec_or_revert_layer_is_supported(&raw) {
-                        None
-                    } else {
-                        Some(name)
-                    }
-                } else if name == "mix-blend-mode" {
-                    let raw = tokens_debug_string(&custom.value.0);
-                    if parse_mix_blend_mode_str(&raw).is_some() {
-                        None
-                    } else {
-                        Some(name)
-                    }
-                } else if name == "isolation" {
-                    let raw = tokens_debug_string(&custom.value.0);
-                    if parse_isolation_spec_str(&raw).is_some() {
-                        None
-                    } else {
-                        Some(name)
-                    }
-                } else if name == "opacity" {
-                    let raw = tokens_debug_string(&custom.value.0);
-                    if parse_opacity_spec_str(&raw).is_some() {
-                        None
-                    } else {
-                        Some(name)
-                    }
-                } else if is_filters_effects_fallback_property_name(&name) {
-                    Some(name)
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        },
-        Property::Unparsed(unparsed) => match &unparsed.property_id {
-            PropertyId::Opacity => {
-                let raw = tokens_debug_string(&unparsed.value.0);
-                if parse_opacity_spec_str(&raw).is_some() {
-                    None
-                } else {
-                    Some("opacity".to_string())
-                }
-            }
-            PropertyId::Filter(_) => {
-                let raw = tokens_debug_string(&unparsed.value.0);
-                if filter_spec_or_revert_layer_is_supported(&raw) {
-                    None
-                } else {
-                    Some("filter".to_string())
-                }
-            }
-            PropertyId::BackdropFilter(_) => {
-                let raw = tokens_debug_string(&unparsed.value.0);
-                if backdrop_filter_spec_or_revert_layer_is_supported(&raw) {
-                    None
-                } else {
-                    Some("backdrop-filter".to_string())
-                }
-            }
-            PropertyId::ClipPath(_) => {
-                let raw = tokens_debug_string(&unparsed.value.0);
-                if clip_path_spec_or_revert_layer_is_supported(&raw) {
-                    None
-                } else {
-                    Some("clip-path".to_string())
-                }
-            }
-            PropertyId::Custom(name) => {
-                let name = name.as_ref().to_ascii_lowercase();
-                if name == "clip-path" {
-                    let raw = tokens_debug_string(&unparsed.value.0);
-                    if clip_path_spec_or_revert_layer_is_supported(&raw) {
-                        None
-                    } else {
-                        Some(name)
-                    }
-                } else if name == "filter" {
-                    let raw = tokens_debug_string(&unparsed.value.0);
-                    if filter_spec_or_revert_layer_is_supported(&raw) {
-                        None
-                    } else {
-                        Some(name)
-                    }
-                } else if name == "backdrop-filter" {
-                    let raw = tokens_debug_string(&unparsed.value.0);
-                    if backdrop_filter_spec_or_revert_layer_is_supported(&raw) {
-                        None
-                    } else {
-                        Some(name)
-                    }
-                } else if name == "mix-blend-mode" {
-                    let raw = tokens_debug_string(&unparsed.value.0);
-                    if parse_mix_blend_mode_str(&raw).is_some() {
-                        None
-                    } else {
-                        Some(name)
-                    }
-                } else if name == "isolation" {
-                    let raw = tokens_debug_string(&unparsed.value.0);
-                    if parse_isolation_spec_str(&raw).is_some() {
-                        None
-                    } else {
-                        Some(name)
-                    }
-                } else if name == "opacity" {
-                    let raw = tokens_debug_string(&unparsed.value.0);
-                    if parse_opacity_spec_str(&raw).is_some() {
-                        None
-                    } else {
-                        Some(name)
-                    }
-                } else if is_filters_effects_fallback_property_name(&name) {
-                    Some(name)
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        },
-        _ => None,
-    }
 }
 
 fn is_filters_effects_fallback_property_name(name: &str) -> bool {
@@ -6228,37 +5474,6 @@ fn is_filters_effects_fallback_property_name(name: &str) -> bool {
     )
 }
 
-fn declaration_conic_gradient_fallback_property_name(property: &Property) -> Option<String> {
-    match property {
-        Property::Background(background) => {
-            let raw = background.to_css_string(PrinterOptions::default()).ok()?;
-            if has_conic_gradient_function(&raw)
-                && parse_conic_gradient_str(&raw).is_none()
-                && !is_dynamic_conic_gradient_expression(&raw)
-            {
-                Some("background".to_string())
-            } else {
-                None
-            }
-        }
-        Property::Unparsed(unparsed) => match &unparsed.property_id {
-            PropertyId::Background => {
-                let raw = tokens_debug_string(&unparsed.value.0);
-                if has_conic_gradient_function(&raw)
-                    && parse_conic_gradient_str(&raw).is_none()
-                    && !is_dynamic_conic_gradient_expression(&raw)
-                {
-                    Some("background".to_string())
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
 fn has_conic_gradient_function(raw: &str) -> bool {
     let lower = raw.to_ascii_lowercase();
     lower.contains("conic-gradient(") || lower.contains("repeating-conic-gradient(")
@@ -6270,257 +5485,6 @@ fn is_dynamic_conic_gradient_expression(raw: &str) -> bool {
         && (lower.contains("var(")
             || lower.contains("currentcolor")
             || lower.contains("color-mix("))
-}
-
-fn declaration_no_effect_property_name(property: &Property) -> Option<String> {
-    match property {
-        Property::Custom(custom) => match &custom.name {
-            CustomPropertyName::Unknown(name) => {
-                let name = name.as_ref().to_ascii_lowercase();
-                if name.starts_with("--") || is_engine_supported_unknown_property(&name) {
-                    None
-                } else {
-                    Some(name)
-                }
-            }
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-fn declaration_layout_mode_normalization(
-    property: &Property,
-) -> Option<(String, &'static str, &'static str)> {
-    let Property::Display(display) = property else {
-        return None;
-    };
-    let reason = match display {
-        Display::Pair(pair) => match pair.inside {
-            DisplayInside::Table => return None,
-            DisplayInside::Ruby => "display_ruby_not_supported",
-            DisplayInside::Box(_) => "display_legacy_box_not_supported",
-            _ => return None,
-        },
-        Display::Keyword(keyword) => match keyword {
-            DisplayKeyword::TableRowGroup
-            | DisplayKeyword::TableHeaderGroup
-            | DisplayKeyword::TableFooterGroup
-            | DisplayKeyword::TableRow
-            | DisplayKeyword::TableCell
-            | DisplayKeyword::TableColumnGroup
-            | DisplayKeyword::TableColumn
-            | DisplayKeyword::TableCaption => return None,
-            DisplayKeyword::RubyBase
-            | DisplayKeyword::RubyText
-            | DisplayKeyword::RubyBaseContainer
-            | DisplayKeyword::RubyTextContainer => "display_ruby_internal_not_supported",
-            _ => return None,
-        },
-    };
-    let requested = display
-        .to_css_string(PrinterOptions::default())
-        .unwrap_or_else(|_| "display".to_string());
-    let applied = display_mode_name(display_mode_from_display(display));
-    Some((requested, applied, reason))
-}
-
-fn declaration_parsed_no_effect_property_name(property: &Property) -> Option<&'static str> {
-    match property {
-        Property::JustifyItems(_) => Some("justify-items"),
-        Property::JustifySelf(_) => Some("justify-self"),
-        Property::GridTemplateRows(_) => Some("grid-template-rows"),
-        Property::GridAutoColumns(_) => Some("grid-auto-columns"),
-        Property::GridAutoRows(_) => Some("grid-auto-rows"),
-        Property::GridAutoFlow(_) => Some("grid-auto-flow"),
-        Property::GridTemplateAreas(_) => Some("grid-template-areas"),
-        Property::GridTemplate(_) => Some("grid-template"),
-        Property::Grid(_) => Some("grid"),
-        Property::GridRowStart(_) => Some("grid-row-start"),
-        Property::GridRowEnd(_) => Some("grid-row-end"),
-        Property::GridColumnStart(_) => Some("grid-column-start"),
-        Property::GridColumnEnd(_) => Some("grid-column-end"),
-        Property::GridRow(_) => Some("grid-row"),
-        Property::GridColumn(_) => Some("grid-column"),
-        Property::GridArea(_) => Some("grid-area"),
-        Property::Unparsed(unparsed) => match &unparsed.property_id {
-            PropertyId::JustifyItems => Some("justify-items"),
-            PropertyId::JustifySelf => Some("justify-self"),
-            PropertyId::GridTemplateRows => Some("grid-template-rows"),
-            PropertyId::GridAutoColumns => Some("grid-auto-columns"),
-            PropertyId::GridAutoRows => Some("grid-auto-rows"),
-            PropertyId::GridAutoFlow => Some("grid-auto-flow"),
-            PropertyId::GridTemplateAreas => Some("grid-template-areas"),
-            PropertyId::GridTemplate => Some("grid-template"),
-            PropertyId::Grid => Some("grid"),
-            PropertyId::GridRowStart => Some("grid-row-start"),
-            PropertyId::GridRowEnd => Some("grid-row-end"),
-            PropertyId::GridColumnStart => Some("grid-column-start"),
-            PropertyId::GridColumnEnd => Some("grid-column-end"),
-            PropertyId::GridRow => Some("grid-row"),
-            PropertyId::GridColumn => Some("grid-column"),
-            PropertyId::GridArea => Some("grid-area"),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-fn is_engine_supported_unknown_property(name: &str) -> bool {
-    matches!(
-        name,
-        "border-collapse"
-            | "caption-side"
-            | "border-spacing"
-            | "table-layout"
-            | "empty-cells"
-            | "border-radius"
-            | "border"
-            | "border-top"
-            | "border-right"
-            | "border-bottom"
-            | "border-left"
-            | "border-block-start"
-            | "border-block-end"
-            | "border-inline-start"
-            | "border-inline-end"
-            | "border-color"
-            | "border-top-color"
-            | "border-right-color"
-            | "border-bottom-color"
-            | "border-left-color"
-            | "border-width"
-            | "border-top-width"
-            | "border-right-width"
-            | "border-bottom-width"
-            | "border-left-width"
-            | "border-style"
-            | "border-top-style"
-            | "border-right-style"
-            | "border-bottom-style"
-            | "border-left-style"
-            | "outline"
-            | "outline-width"
-            | "outline-style"
-            | "outline-color"
-            | "outline-offset"
-            | "break-before"
-            | "break-after"
-            | "break-inside"
-            | "page-break-before"
-            | "page-break-after"
-            | "page-break-inside"
-            | "orphans"
-            | "widows"
-            | "display"
-            | "position"
-            | "z-index"
-            | "left"
-            | "right"
-            | "top"
-            | "bottom"
-            | "inset"
-            | "flex-direction"
-            | "flex-wrap"
-            | "flex-flow"
-            | "order"
-            | "justify-content"
-            | "place-content"
-            | "align-items"
-            | "align-self"
-            | "align-content"
-            | "box-sizing"
-            | "gap"
-            | "row-gap"
-            | "column-gap"
-            | "columns"
-            | "column-count"
-            | "column-width"
-            | "column-fill"
-            | "column-span"
-            | "column-rule"
-            | "column-rule-width"
-            | "column-rule-style"
-            | "column-rule-color"
-            | "writing-mode"
-            | "opacity"
-            | "filter"
-            | "backdrop-filter"
-            | "clip-path"
-            | "mix-blend-mode"
-            | "isolation"
-            | "background-image"
-            | "background-position"
-            | "background-repeat"
-            | "background-blend-mode"
-            | "background-size"
-            | "background-origin"
-            | "background-clip"
-            | "mask"
-            | "mask-image"
-            | "mask-border"
-            | "mask-border-source"
-            | "mask-composite"
-            | "box-shadow"
-            | "transform-origin"
-            | "text-shadow"
-            | "text-wrap"
-            | "text-wrap-mode"
-            | "text-wrap-style"
-            | "white-space-collapse"
-            | "overflow-inline"
-            | "overflow-block"
-            | "line-break"
-            | "hyphenate-character"
-            | "-webkit-hyphenate-character"
-            | "text-underline-offset"
-            | "text-underline-position"
-            | "content"
-            | "counter-reset"
-            | "counter-increment"
-            | "counter-set"
-            | "quotes"
-            | "list-style-image"
-            | "list-style-type"
-            | "list-style-position"
-            | "size"
-            | "margin"
-            | "margin-top"
-            | "margin-right"
-            | "margin-bottom"
-            | "margin-left"
-            | "margin-block-start"
-            | "margin-block-end"
-            | "margin-inline-start"
-            | "margin-inline-end"
-            | "margin-block"
-            | "margin-inline"
-            | "padding"
-            | "padding-top"
-            | "padding-right"
-            | "padding-bottom"
-            | "padding-left"
-            | "padding-block-start"
-            | "padding-block-end"
-            | "padding-inline-start"
-            | "padding-inline-end"
-            | "padding-block"
-            | "padding-inline"
-            | "inline-size"
-            | "block-size"
-            | "min-inline-size"
-            | "max-inline-size"
-            | "min-block-size"
-            | "max-block-size"
-            | "inset-inline-start"
-            | "inset-inline-end"
-            | "inset-block-start"
-            | "inset-block-end"
-            | "inset-inline"
-            | "inset-block"
-            | "object-fit"
-            | "object-position"
-    )
 }
 
 fn parse_simple_selector(selector: &str) -> Option<SimpleSelector> {
@@ -6860,2564 +5824,2882 @@ fn flush_selector_part(
     }
 }
 
-fn style_from_declarations(
-    declarations: &lightningcss::declaration::DeclarationBlock,
+fn style_from_native_declarations(
+    declarations: &crate::css_native::DeclarationBlock,
 ) -> (StyleDelta, StyleDelta) {
     let mut normal = StyleDelta::default();
     let mut important = StyleDelta::default();
-    apply_properties(&declarations.declarations, &mut normal);
-    apply_properties(&declarations.important_declarations, &mut important);
+    for declaration in declarations.normal() {
+        apply_raw_declaration(declaration, &mut normal);
+    }
+    for declaration in declarations.important() {
+        apply_raw_declaration(declaration, &mut important);
+    }
     (normal, important)
 }
 
-fn apply_properties(props: &[Property], delta: &mut StyleDelta) {
-    for prop in props {
-        match prop {
-            Property::Opacity(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    apply_opacity_from_raw(delta, &raw);
-                }
-            }
-            Property::ContainerType(value) => {
-                delta.container_type = Some(ContainerQueryTypeSpec::Value(
-                    container_query_type_from_css(value),
-                ));
-            }
-            Property::ContainerName(value) => {
-                delta.container_names =
-                    Some(ContainerNamesSpec::Value(container_names_from_css(value)));
-            }
-            Property::Container(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    apply_container_shorthand_from_raw(&raw, delta);
-                }
-            }
-            Property::Font(font) => {
-                apply_typed_font_shorthand(delta, font);
-            }
-            Property::FontSize(size) => {
-                if let Some(spec) = font_size_spec(size) {
-                    delta.font_size = Some(spec);
-                    delta.font_size_var = None;
-                }
-            }
-            Property::FontWeight(weight) => {
-                if let Ok(raw) = weight.to_css_string(PrinterOptions::default()) {
-                    delta.font_weight = parse_font_weight_spec_str(&raw);
-                    delta.font_weight_var = None;
-                }
-            }
-            Property::FontStyle(style) => {
-                delta.font_style = font_style_spec(style);
-                delta.font_style_var = None;
-            }
-            Property::LineHeight(line_height) => {
-                if let Some(spec) = line_height_spec(line_height) {
-                    delta.line_height = Some(spec);
-                    delta.line_height_var = None;
-                }
-            }
-            Property::Color(color) => {
-                if let Ok(raw) = color.to_css_string(PrinterOptions::default()) {
-                    if should_defer_color_expr(&raw) {
-                        if let Some((color, alpha)) = parse_color_string(&raw) {
-                            set_delta_color(
-                                delta,
-                                ColorSpec::Value(blend_over_white(color, alpha)),
-                            );
-                        } else {
-                            set_delta_color_var(delta, raw.trim().to_ascii_lowercase());
-                        }
-                        continue;
-                    }
-                    if let Some((color, alpha)) = parse_color_string(&raw) {
-                        set_delta_color(delta, ColorSpec::Value(blend_over_white(color, alpha)));
-                        continue;
-                    } else if let Some(var) = var_name_from_string(&raw) {
-                        set_delta_color_var(delta, var);
-                        continue;
-                    }
-                }
-                if let Some(color) = css_color_to_color(color) {
-                    set_delta_color(delta, ColorSpec::Value(color));
-                } else if matches!(color, CssColor::CurrentColor) {
-                    set_delta_color(delta, ColorSpec::Inherit);
-                }
-            }
-            Property::BackgroundColor(color) => {
-                if let Ok(raw) = color.to_css_string(PrinterOptions::default()) {
-                    if should_defer_color_expr(&raw) {
-                        if let Some((color, alpha)) = parse_color_string(&raw) {
-                            set_delta_background_color(
-                                delta,
-                                BackgroundSpec::Value(blend_over_white(color, alpha)),
-                            );
-                        } else {
-                            set_delta_background_color_var(delta, raw.trim().to_ascii_lowercase());
-                        }
-                        continue;
-                    }
-                    if let Some((color, alpha)) = parse_color_string(&raw) {
-                        set_delta_background_color(
-                            delta,
-                            BackgroundSpec::Value(blend_over_white(color, alpha)),
-                        );
-                        continue;
-                    } else if let Some(var) = var_name_from_string(&raw) {
-                        set_delta_background_color_var(delta, var);
-                        continue;
-                    }
-                }
-                if let Some(color) = css_color_to_color(color) {
-                    set_delta_background_color(delta, BackgroundSpec::Value(color));
-                } else if matches!(color, CssColor::CurrentColor) {
-                    set_delta_background_color(delta, BackgroundSpec::CurrentColor);
-                }
-            }
-            Property::Background(background) => {
-                if let Some(last) = background.last() {
-                    if let Some((color, alpha)) = css_color_to_color_with_alpha(&last.color) {
-                        set_delta_background_color(
-                            delta,
-                            BackgroundSpec::Value(blend_over_white(color, alpha)),
-                        );
-                    }
-                }
+fn apply_raw_declaration(declaration: &crate::css_native::Declaration, delta: &mut StyleDelta) {
+    let _ = apply_native_raw_property(&declaration.name, &declaration.value, delta);
+}
 
-                let mut paints = Vec::new();
-                let mut positions = Vec::new();
-                let mut repeats = Vec::new();
-                let mut sizes = Vec::new();
-                let mut origins = Vec::new();
-                let mut clips = Vec::new();
-                for layer in background.iter() {
-                    if let Ok(image_raw) = layer.image.to_css_string(PrinterOptions::default()) {
-                        if let Some(paint) = parse_background_paint_str(&image_raw) {
-                            paints.push(paint);
-                        }
-                    }
-                    if let Some(position) = background_position_spec_from_css(&layer.position) {
-                        positions.push(position);
-                    }
-                    if let Some(repeat) = background_repeat_spec_from_css(&layer.repeat) {
-                        repeats.push(repeat);
-                    }
-                    if let Some(size) = background_size_spec_from_css(&layer.size) {
-                        sizes.push(size);
-                    }
-                    if let Some(origin) = background_origin_spec_from_css(&layer.origin) {
-                        origins.push(origin);
-                    }
-                    if let Some(clip) = background_clip_spec_from_css(&layer.clip) {
-                        clips.push(clip);
-                    }
-                }
-                if !paints.is_empty() {
-                    delta.background_paint = paints.first().cloned();
-                    delta.background_paints = Some(paints);
-                }
-                if !positions.is_empty() {
-                    delta.background_positions = Some(positions);
-                }
-                if !repeats.is_empty() {
-                    delta.background_repeats = Some(repeats);
-                }
-                if !sizes.is_empty() {
-                    delta.background_sizes = Some(sizes);
-                }
-                if !origins.is_empty() {
-                    delta.background_origins = Some(origins);
-                }
-                if !clips.is_empty() {
-                    delta.background_clips = Some(clips);
-                }
-                if let Ok(raw) = background.to_css_string(PrinterOptions::default()) {
-                    apply_background_from_string(&raw, delta);
-                }
-            }
-            Property::BackgroundImage(images) => {
-                if let Ok(raw) = images.to_css_string(PrinterOptions::default()) {
-                    apply_background_image_from_string(&raw, delta);
-                }
-            }
-            Property::BackgroundSize(sizes) => {
-                if let Ok(raw) = sizes.to_css_string(PrinterOptions::default()) {
-                    apply_background_size_from_string(&raw, delta);
-                }
-            }
-            Property::BackgroundPosition(positions) => {
-                if let Ok(raw) = positions.to_css_string(PrinterOptions::default()) {
-                    apply_background_position_from_string(&raw, delta);
-                }
-            }
-            Property::BackgroundRepeat(repeats) => {
-                if let Ok(raw) = repeats.to_css_string(PrinterOptions::default()) {
-                    apply_background_repeat_from_string(&raw, delta);
-                }
-            }
-            Property::BackgroundOrigin(origins) => {
-                if let Ok(raw) = origins.to_css_string(PrinterOptions::default()) {
-                    apply_background_origin_from_string(&raw, delta);
-                }
-            }
-            Property::BackgroundClip(clips, _) => {
-                if let Ok(raw) = clips.to_css_string(PrinterOptions::default()) {
-                    apply_background_clip_from_string(&raw, delta);
-                }
-            }
-            Property::TextTransform(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    if let Some(transform) = parse_text_transform_str(&raw) {
-                        set_delta_text_transform(delta, TextTransformSpec::Value(transform));
-                    }
-                }
-            }
-            Property::Transform(value, _) => {
-                if let Some(ops) = transform_ops_from_transform_list(value) {
-                    delta.transform = Some(TransformSpec::Value(ops));
-                } else if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    let raw_lower = raw.trim().to_ascii_lowercase();
-                    if let Some(ops) = transform_ops_from_string(&raw) {
-                        delta.transform = Some(TransformSpec::Value(ops));
-                    } else if raw_lower.contains("var(") {
-                        delta.transform_var = Some(raw_lower);
-                    }
-                }
-            }
-            Property::TransformOrigin(value, _) => {
-                if let Some(origin) = transform_origin_from_position(value) {
-                    delta.transform_origin = Some(TransformOriginSpec::Value(origin));
-                }
-            }
-            Property::Translate(value) => {
-                if let Some(ops) = transform_ops_from_translate(value) {
-                    delta.translate = Some(TransformSpec::Value(ops));
-                } else if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    let raw_lower = raw.trim().to_ascii_lowercase();
-                    if let Some(ops) = transform_ops_from_translate_string(&raw) {
-                        delta.translate = Some(TransformSpec::Value(ops));
-                    } else if raw_lower.contains("var(") {
-                        delta.translate_var = Some(raw_lower);
-                    }
-                }
-            }
-            Property::Rotate(value) => {
-                if let Some(ops) = transform_ops_from_rotate(value) {
-                    delta.rotate = Some(TransformSpec::Value(ops));
-                } else if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    let raw_lower = raw.trim().to_ascii_lowercase();
-                    if let Some(ops) = transform_ops_from_rotate_string(&raw) {
-                        delta.rotate = Some(TransformSpec::Value(ops));
-                    } else if raw_lower.contains("var(") {
-                        delta.rotate_var = Some(raw_lower);
-                    }
-                }
-            }
-            Property::Scale(value) => {
-                if let Some(ops) = transform_ops_from_scale(value) {
-                    delta.scale = Some(TransformSpec::Value(ops));
-                } else if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    let raw_lower = raw.trim().to_ascii_lowercase();
-                    if let Some(ops) = transform_ops_from_scale_string(&raw) {
-                        delta.scale = Some(TransformSpec::Value(ops));
-                    } else if raw_lower.contains("var(") {
-                        delta.scale_var = Some(raw_lower);
-                    }
-                }
-            }
-            Property::TextDecorationLine(value, _) => {
-                set_delta_text_decoration_spec(
-                    delta,
-                    TextDecorationSpec::Value(text_decoration_from_line(value)),
-                );
-            }
-            Property::TextDecorationColor(value, _) => {
-                set_delta_text_decoration_color_from_css_color(delta, value);
-            }
-            Property::TextDecorationThickness(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    apply_text_decoration_thickness_from_raw(delta, &raw);
-                }
-            }
-            Property::TextDecorationStyle(value, _) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    apply_text_decoration_style_from_raw(delta, &raw);
-                }
-            }
-            Property::TextDecoration(value, _) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    if let Some(mode) = parse_text_decoration_str(&raw) {
-                        set_delta_text_decoration_spec(delta, TextDecorationSpec::Value(mode));
-                    }
-                    if !apply_text_decoration_color_from_shorthand(delta, &raw) {
-                        set_delta_text_decoration_color_spec(delta, ColorSpec::CurrentColor);
-                    }
-                    if !apply_text_decoration_thickness_from_shorthand(delta, &raw) {
-                        set_delta_text_decoration_thickness_spec(
-                            delta,
-                            TextDecorationThicknessSpec::Initial,
-                        );
-                    }
-                    if !apply_text_decoration_style_from_shorthand(delta, &raw) {
-                        set_delta_text_decoration_style_spec(
-                            delta,
-                            TextDecorationStyleSpec::Initial,
-                        );
-                    }
-                }
-            }
-            Property::TextShadow(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    apply_text_shadow_from_raw(delta, &raw);
-                }
-            }
-            Property::TextOverflow(value, _) => {
-                let mode = match value {
-                    css_overflow::TextOverflow::Clip => TextOverflowMode::Clip,
-                    css_overflow::TextOverflow::Ellipsis => TextOverflowMode::Ellipsis,
-                };
-                set_delta_text_overflow_spec(delta, TextOverflowSpec::Value(mode));
-            }
-            Property::TextIndent(value) => {
-                if let Some(spec) = length_spec_from_lp(&value.value) {
-                    set_delta_text_indent_value(
-                        delta,
-                        TextIndentValue {
-                            value: spec,
-                            hanging: value.hanging,
-                            each_line: value.each_line,
-                        },
-                    );
-                }
-            }
-            Property::WordBreak(value) => {
-                set_delta_word_break(delta, WordBreakSpec::Value(word_break_mode_from_css(value)));
-            }
-            Property::LineBreak(value) => {
-                set_delta_line_break(delta, LineBreakSpec::Value(line_break_mode_from_css(value)));
-            }
-            Property::OverflowWrap(value) => {
-                set_delta_word_break(
-                    delta,
-                    WordBreakSpec::Value(word_break_mode_from_overflow_wrap(value)),
-                );
-            }
-            Property::WordWrap(value) => {
-                set_delta_word_break(
-                    delta,
-                    WordBreakSpec::Value(word_break_mode_from_overflow_wrap(value)),
-                );
-            }
-            Property::LetterSpacing(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    if let Some(spec) = parse_letter_spacing_str(&raw) {
-                        set_delta_letter_spacing(delta, spec);
-                    }
-                }
-            }
-            Property::WordSpacing(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    if let Some(spec) = parse_word_spacing_str(&raw) {
-                        set_delta_word_spacing(delta, spec);
-                    }
-                }
-            }
-            Property::TabSize(value, _) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    if let Some(spec) = parse_tab_size_str(&raw) {
-                        set_delta_tab_size(delta, spec);
-                    }
-                }
-            }
-            Property::BorderRadius(value, _) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    if let Some(radius) = parse_border_radius_str(&raw) {
-                        delta.border_radius = Some(radius);
-                    }
-                }
-            }
-            Property::BorderSpacing(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    if let Some(spacing) = parse_border_spacing_str(&raw) {
-                        delta.border_spacing = Some(spacing);
-                    }
-                }
-            }
-            Property::BoxShadow(value, _) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    if let Some(shadows) = parse_box_shadow_list_str(&raw) {
-                        set_delta_box_shadows(delta, shadows);
-                    }
-                }
-            }
-            Property::ClipPath(value, _) => {
-                if let Some(spec) = clip_path_spec_from_css_value(value) {
-                    set_delta_clip_path(delta, spec);
-                }
-            }
-            Property::Filter(value, _) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    set_delta_paint_filter_from_raw(delta, &raw);
-                }
-            }
-            Property::BackdropFilter(value, _) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    set_delta_backdrop_filter_from_raw(delta, &raw);
-                }
-            }
-            Property::MaskImage(value, _) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    set_delta_mask_backdrop_root_from_raw(delta, &raw);
-                }
-            }
-            Property::Mask(value, _) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    set_delta_mask_backdrop_root_from_raw(delta, &raw);
-                }
-            }
-            Property::MaskBorderSource(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    set_delta_mask_backdrop_root_from_raw(delta, &raw);
-                }
-            }
-            Property::MaskBorder(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    set_delta_mask_backdrop_root_from_raw(delta, &raw);
-                }
-            }
-            Property::FontFamily(families) => {
-                if let Some(spec) = font_spec_from_family(families) {
-                    delta.font_name = Some(spec);
-                    delta.font_name_var = None;
-                }
-            }
-            Property::ListStyleType(value) => {
-                set_delta_list_style_type(delta, list_style_type_mode_from_css(value));
-            }
-            Property::ListStyleImage(value) => {
-                set_delta_list_style_image(delta, list_style_image_spec_from_css(value));
-            }
-            Property::ListStylePosition(value) => {
-                set_delta_list_style_position(
-                    delta,
-                    ListStylePositionSpec::Value(list_style_position_mode_from_css(value)),
-                );
-            }
-            Property::ListStyle(value) => {
-                set_delta_list_style_type(
-                    delta,
-                    list_style_type_mode_from_css(&value.list_style_type),
-                );
-                set_delta_list_style_image(delta, list_style_image_spec_from_css(&value.image));
-                set_delta_list_style_position(
-                    delta,
-                    ListStylePositionSpec::Value(list_style_position_mode_from_css(
-                        &value.position,
-                    )),
-                );
-            }
-            Property::WhiteSpace(white_space) => {
-                if let Ok(raw) = white_space.to_css_string(PrinterOptions::default()) {
-                    apply_white_space_from_raw(delta, &raw);
-                }
-            }
-            Property::Display(display) => {
-                set_delta_display(
-                    delta,
-                    DisplaySpec::Value(display_mode_from_display(display)),
-                );
-            }
-            Property::Visibility(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    apply_visibility_from_raw(delta, &raw);
-                }
-            }
-            Property::FlexDirection(direction, _) => {
-                delta.flex_direction = Some(match direction {
-                    css_flex::FlexDirection::Column => FlexDirectionMode::Column,
-                    css_flex::FlexDirection::ColumnReverse => FlexDirectionMode::Column,
-                    _ => FlexDirectionMode::Row,
-                });
-            }
-            Property::FlexWrap(value, _) => {
-                delta.flex_wrap = Some(match value {
-                    css_flex::FlexWrap::Wrap | css_flex::FlexWrap::WrapReverse => {
-                        FlexWrapMode::Wrap
-                    }
-                    _ => FlexWrapMode::NoWrap,
-                });
-            }
-            Property::FlexFlow(value, _) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    if let Some((direction, wrap)) = parse_flex_flow_str(&raw) {
-                        delta.flex_direction = Some(direction);
-                        delta.flex_wrap = Some(wrap);
-                    }
-                }
-            }
-            Property::Order(value, _) => {
-                delta.order = Some(*value);
-            }
-            Property::FlexOrder(value, _) => {
-                delta.order = Some(*value);
-            }
-            Property::JustifyContent(value, _) => {
-                delta.justify_content = Some(match value {
-                    css_align::JustifyContent::ContentDistribution(
-                        css_align::ContentDistribution::SpaceBetween,
-                    ) => JustifyContentMode::SpaceBetween,
-                    css_align::JustifyContent::ContentDistribution(
-                        css_align::ContentDistribution::SpaceAround,
-                    ) => JustifyContentMode::SpaceAround,
-                    css_align::JustifyContent::ContentDistribution(
-                        css_align::ContentDistribution::SpaceEvenly,
-                    ) => JustifyContentMode::SpaceEvenly,
-                    css_align::JustifyContent::ContentPosition {
-                        value: css_align::ContentPosition::Center,
-                        ..
-                    } => JustifyContentMode::Center,
-                    css_align::JustifyContent::ContentPosition {
-                        value: css_align::ContentPosition::End | css_align::ContentPosition::FlexEnd,
-                        ..
-                    } => JustifyContentMode::FlexEnd,
-                    _ => JustifyContentMode::FlexStart,
-                });
-            }
-            Property::AlignItems(value, _) => {
-                delta.align_items = Some(match value {
-                    css_align::AlignItems::Stretch => AlignItemsMode::Stretch,
-                    css_align::AlignItems::SelfPosition {
-                        value: css_align::SelfPosition::Center,
-                        ..
-                    } => AlignItemsMode::Center,
-                    css_align::AlignItems::SelfPosition {
-                        value: css_align::SelfPosition::End | css_align::SelfPosition::FlexEnd,
-                        ..
-                    } => AlignItemsMode::FlexEnd,
-                    _ => AlignItemsMode::FlexStart,
-                });
-            }
-            Property::AlignSelf(value, _) => {
-                delta.align_self = Some(match value {
-                    css_align::AlignSelf::Auto | css_align::AlignSelf::Normal => {
-                        AlignSelfMode::Auto
-                    }
-                    css_align::AlignSelf::Stretch => AlignSelfMode::Stretch,
-                    css_align::AlignSelf::SelfPosition {
-                        value: css_align::SelfPosition::Center,
-                        ..
-                    } => AlignSelfMode::Center,
-                    css_align::AlignSelf::SelfPosition {
-                        value:
-                            css_align::SelfPosition::End
-                            | css_align::SelfPosition::FlexEnd
-                            | css_align::SelfPosition::SelfEnd,
-                        ..
-                    } => AlignSelfMode::FlexEnd,
-                    css_align::AlignSelf::SelfPosition { .. } => AlignSelfMode::FlexStart,
-                    css_align::AlignSelf::BaselinePosition(_) => AlignSelfMode::FlexStart,
-                });
-            }
-            Property::AlignContent(value, _) => {
-                delta.align_content = Some(match value {
-                    css_align::AlignContent::ContentDistribution(
-                        css_align::ContentDistribution::SpaceBetween,
-                    ) => AlignContentMode::SpaceBetween,
-                    css_align::AlignContent::ContentDistribution(
-                        css_align::ContentDistribution::SpaceAround,
-                    ) => AlignContentMode::SpaceAround,
-                    css_align::AlignContent::ContentDistribution(
-                        css_align::ContentDistribution::SpaceEvenly,
-                    ) => AlignContentMode::SpaceEvenly,
-                    css_align::AlignContent::ContentPosition {
-                        value: css_align::ContentPosition::Center,
-                        ..
-                    } => AlignContentMode::Center,
-                    css_align::AlignContent::ContentPosition {
-                        value: css_align::ContentPosition::End | css_align::ContentPosition::FlexEnd,
-                        ..
-                    } => AlignContentMode::FlexEnd,
-                    _ => AlignContentMode::FlexStart,
-                });
-            }
-            Property::PlaceContent(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    if let Some((align, justify)) = parse_place_content_str(&raw) {
-                        delta.align_content = Some(align);
-                        delta.justify_content = Some(justify);
-                    }
-                }
-            }
-            Property::PlaceItems(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    if let Some(align) = parse_place_items_align_str(&raw) {
-                        delta.align_items = Some(align);
-                    }
-                }
-            }
-            Property::PlaceSelf(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    if let Some(align) = parse_place_self_align_str(&raw) {
-                        delta.align_self = Some(align);
-                    }
-                }
-            }
-            Property::GridTemplateColumns(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    delta.grid_columns = parse_grid_track_count(&raw);
-                }
-            }
-            Property::GridTemplateRows(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    delta.grid_rows = parse_grid_track_count(&raw);
-                }
-            }
-            Property::GridColumnStart(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    delta.grid_column_start = parse_grid_track_start(&raw);
-                }
-            }
-            Property::GridRowStart(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    delta.grid_row_start = parse_grid_track_start(&raw);
-                }
-            }
-            Property::GridColumn(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    delta.grid_column_start = parse_grid_track_start(&raw);
-                }
-            }
-            Property::GridRow(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    delta.grid_row_start = parse_grid_track_start(&raw);
-                }
-            }
-            Property::GridArea(value) => {
-                if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-                    let (row_start, col_start) = parse_grid_area_starts(&raw);
-                    if row_start.is_some() {
-                        delta.grid_row_start = row_start;
-                    }
-                    if col_start.is_some() {
-                        delta.grid_column_start = col_start;
-                    }
-                }
-            }
-            Property::Gap(value) => {
-                // Use row gap (single-value `gap:` sets both row/column the same).
-                if let Some(spec) = length_spec_from_gap_value(&value.row) {
-                    delta.gap = Some(spec);
-                    delta.gap_var = None;
-                }
-            }
-            Property::RowGap(value) => {
-                if let Some(spec) = length_spec_from_gap_value(value) {
-                    delta.gap = Some(spec);
-                    delta.gap_var = None;
-                }
-            }
-            Property::ColumnGap(value) => {
-                if let Some(spec) = length_spec_from_gap_value(value) {
-                    delta.gap = Some(spec);
-                    delta.gap_var = None;
-                }
-            }
-            Property::Flex(value, _) => {
-                // flex: <grow> <shrink> <basis>
-                delta.flex_grow = Some(value.grow);
-                delta.flex_shrink = Some(value.shrink);
-                if let Some(spec) = length_spec_from_lpa(&value.basis) {
-                    delta.flex_basis = Some(spec);
-                    delta.flex_basis_var = None;
-                }
-            }
-            Property::FlexGrow(value, _) => {
-                delta.flex_grow = Some(*value);
-            }
-            Property::FlexShrink(value, _) => {
-                delta.flex_shrink = Some(*value);
-            }
-            Property::FlexBasis(value, _) => {
-                delta.flex_basis = length_spec_from_lpa(value);
-                delta.flex_basis_var = None;
-            }
-            Property::Overflow(value) => {
-                let (x, y) = overflow_axis_modes_from_overflow(value);
+fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDelta) -> bool {
+    if property_name.starts_with("--") {
+        return apply_native_custom_property(property_name, raw, delta);
+    }
+    let name = property_name.to_ascii_lowercase();
+    match name.as_str() {
+        "color" => apply_native_color_value(delta, raw),
+        "background-color" => apply_native_background_color_value(delta, raw),
+        "background" => {
+            apply_background_from_string(raw, delta);
+            true
+        }
+        "background-image" => {
+            apply_background_image_from_string(raw, delta);
+            true
+        }
+        "background-size" => {
+            apply_background_size_from_string(raw, delta);
+            true
+        }
+        "background-position" => {
+            apply_background_position_from_string(raw, delta);
+            true
+        }
+        "background-repeat" => {
+            apply_background_repeat_from_string(raw, delta);
+            true
+        }
+        "background-blend-mode" => {
+            apply_background_blend_mode_from_string(raw, delta);
+            true
+        }
+        "background-origin" => {
+            apply_background_origin_from_string(raw, delta);
+            true
+        }
+        "background-clip" => {
+            apply_background_clip_from_string(raw, delta);
+            true
+        }
+        "font" => apply_font_shorthand_from_raw(delta, raw),
+        "font-family" => apply_font_family_from_raw(delta, raw),
+        "font-size" => apply_font_size_from_raw(delta, raw),
+        "line-height" => apply_line_height_from_raw(delta, raw),
+        "font-weight" => apply_font_weight_from_raw(delta, raw),
+        "font-style" => apply_font_style_from_raw(delta, raw),
+        "vertical-align" => apply_vertical_align_from_raw(delta, raw),
+        "opacity" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                delta.opacity = None;
+                delta.revert_layer.opacity = true;
+                true
+            } else {
+                apply_opacity_from_raw(delta, raw)
+            }
+        }
+        "display" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                delta.display = None;
+                delta.revert_layer.display = true;
+                true
+            } else {
+                apply_display_from_raw(delta, raw)
+            }
+        }
+        "visibility" => apply_visibility_from_raw(delta, raw),
+        "position" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                delta.position = None;
+                delta.revert_layer.position = true;
+                true
+            } else {
+                apply_position_from_raw(delta, raw)
+            }
+        }
+        "width" | "height" | "min-width" | "max-width" | "min-height" | "max-height"
+        | "inline-size" | "block-size" | "min-inline-size" | "max-inline-size"
+        | "min-block-size" | "max-block-size" => apply_native_size_property(&name, raw, delta),
+        "top" | "right" | "bottom" | "left" | "inset" | "inset-inline" | "inset-inline-start"
+        | "inset-inline-end" | "inset-block" | "inset-block-start" | "inset-block-end" => {
+            apply_native_inset_property(&name, raw, delta)
+        }
+        "margin"
+        | "margin-top"
+        | "margin-right"
+        | "margin-bottom"
+        | "margin-left"
+        | "margin-inline"
+        | "margin-inline-start"
+        | "margin-inline-end"
+        | "margin-block"
+        | "margin-block-start"
+        | "margin-block-end"
+        | "padding"
+        | "padding-top"
+        | "padding-right"
+        | "padding-bottom"
+        | "padding-left"
+        | "padding-inline"
+        | "padding-inline-start"
+        | "padding-inline-end"
+        | "padding-block"
+        | "padding-block-start"
+        | "padding-block-end" => apply_native_box_edge_property(&name, raw, delta),
+        "z-index" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                delta.z_index = None;
+                delta.revert_layer.z_index = true;
+                true
+            } else {
+                apply_z_index_from_raw(delta, raw)
+            }
+        }
+        "container" => {
+            apply_container_shorthand_from_raw(raw, delta);
+            true
+        }
+        "container-name" => {
+            if let Some(value) = parse_container_names_spec_str(raw) {
+                delta.container_names = Some(value);
+                true
+            } else {
+                false
+            }
+        }
+        "container-type" => {
+            if let Some(value) = parse_container_query_type_spec_str(raw) {
+                delta.container_type = Some(value);
+                true
+            } else {
+                false
+            }
+        }
+        "flex-direction" => {
+            let value = match raw.trim().to_ascii_lowercase().as_str() {
+                "row" | "row-reverse" => Some(FlexDirectionMode::Row),
+                "column" | "column-reverse" => Some(FlexDirectionMode::Column),
+                _ => None,
+            };
+            if let Some(value) = value {
+                delta.flex_direction = Some(value);
+                true
+            } else {
+                false
+            }
+        }
+        "flex-wrap" => {
+            let value = match raw.trim().to_ascii_lowercase().as_str() {
+                "nowrap" => Some(FlexWrapMode::NoWrap),
+                "wrap" | "wrap-reverse" => Some(FlexWrapMode::Wrap),
+                _ => None,
+            };
+            if let Some(value) = value {
+                delta.flex_wrap = Some(value);
+                true
+            } else {
+                false
+            }
+        }
+        "flex-flow" => {
+            if let Some((direction, wrap)) = parse_flex_flow_str(raw) {
+                delta.flex_direction = Some(direction);
+                delta.flex_wrap = Some(wrap);
+                true
+            } else {
+                false
+            }
+        }
+        "order" | "-webkit-box-ordinal-group" => {
+            if let Ok(value) = raw.trim().parse::<i32>() {
+                delta.order = Some(value);
+                true
+            } else {
+                false
+            }
+        }
+        "justify-content" => {
+            if let Some(value) = last_css_keyword(raw).and_then(justify_content_mode_from_keyword) {
+                delta.justify_content = Some(value);
+                true
+            } else {
+                false
+            }
+        }
+        "align-items" => {
+            if let Some(value) = last_css_keyword(raw).and_then(align_items_mode_from_keyword) {
+                delta.align_items = Some(value);
+                true
+            } else {
+                false
+            }
+        }
+        "align-self" => {
+            if let Some(value) = last_css_keyword(raw).and_then(align_self_mode_from_keyword) {
+                delta.align_self = Some(value);
+                true
+            } else {
+                false
+            }
+        }
+        "align-content" => {
+            if let Some(value) = last_css_keyword(raw).and_then(align_content_mode_from_keyword) {
+                delta.align_content = Some(value);
+                true
+            } else {
+                false
+            }
+        }
+        "place-content" => {
+            if let Some((align, justify)) = parse_place_content_str(raw) {
+                delta.align_content = Some(align);
+                delta.justify_content = Some(justify);
+                true
+            } else {
+                false
+            }
+        }
+        "place-items" => {
+            if let Some(value) = parse_place_items_align_str(raw) {
+                delta.align_items = Some(value);
+                true
+            } else {
+                false
+            }
+        }
+        "place-self" => {
+            if let Some(value) = parse_place_self_align_str(raw) {
+                delta.align_self = Some(value);
+                true
+            } else {
+                false
+            }
+        }
+        "grid-template-columns" => {
+            delta.grid_columns = parse_grid_track_count(raw);
+            true
+        }
+        "grid-template-rows" => {
+            delta.grid_rows = parse_grid_track_count(raw);
+            true
+        }
+        "grid-column-start" | "grid-column" => {
+            delta.grid_column_start = parse_grid_track_start(raw);
+            true
+        }
+        "grid-row-start" | "grid-row" => {
+            delta.grid_row_start = parse_grid_track_start(raw);
+            true
+        }
+        "grid-area" => {
+            let (row, column) = parse_grid_area_starts(raw);
+            if row.is_some() {
+                delta.grid_row_start = row;
+            }
+            if column.is_some() {
+                delta.grid_column_start = column;
+            }
+            true
+        }
+        "gap" | "row-gap" | "column-gap" => apply_native_gap_value(raw, delta),
+        "flex-grow" => apply_native_nonnegative_number(raw, &mut delta.flex_grow),
+        "flex-shrink" => apply_native_nonnegative_number(raw, &mut delta.flex_shrink),
+        "flex-basis" => apply_native_flex_basis(raw, delta),
+        "flex" => apply_native_flex_shorthand(raw, delta),
+        "overflow" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                set_revert_layer_overflow_axes(delta)
+            } else if let Some((x, y)) = parse_overflow_axis_modes_str(raw) {
                 set_delta_overflow_axes(delta, x, y);
+                true
+            } else {
+                false
             }
-            Property::OverflowX(value) => {
-                set_delta_overflow_x(delta, overflow_mode_from_keyword(value));
+        }
+        "overflow-x" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                set_revert_layer_overflow_x(delta)
+            } else if let Some(value) = parse_overflow_mode_str(raw) {
+                set_delta_overflow_x(delta, value);
+                true
+            } else {
+                false
             }
-            Property::OverflowY(value) => {
-                set_delta_overflow_y(delta, overflow_mode_from_keyword(value));
+        }
+        "overflow-y" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                set_revert_layer_overflow_y(delta)
+            } else if let Some(value) = parse_overflow_mode_str(raw) {
+                set_delta_overflow_y(delta, value);
+                true
+            } else {
+                false
             }
-            Property::TextAlign(align) => {
-                set_delta_text_align(delta, text_align_mode_from_css(align));
+        }
+        "overflow-inline" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                set_revert_layer_overflow_inline(delta)
+            } else if let Some(value) = parse_overflow_mode_str(raw) {
+                set_delta_overflow_inline(delta, value);
+                true
+            } else {
+                false
             }
-            Property::TextAlignLast(align, _) => {
-                set_delta_text_align_last(
-                    delta,
-                    TextAlignLastSpec::Value(text_align_last_mode_from_css(align)),
-                );
+        }
+        "overflow-block" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                set_revert_layer_overflow_block(delta)
+            } else if let Some(value) = parse_overflow_mode_str(raw) {
+                set_delta_overflow_block(delta, value);
+                true
+            } else {
+                false
             }
-            Property::TextJustify(value) => {
-                set_delta_text_justify(
-                    delta,
-                    TextJustifySpec::Value(text_justify_mode_from_css(value)),
-                );
-            }
-            Property::Hyphens(value, _) => {
-                set_delta_hyphens(delta, HyphensSpec::Value(hyphens_mode_from_css(value)));
-            }
-            Property::Direction(value) => {
-                set_delta_direction(delta, DirectionSpec::Value(direction_mode_from_css(value)));
-            }
-            Property::VerticalAlign(align) => {
-                set_delta_vertical_align(delta, vertical_align_mode_from_css(align));
-            }
-            Property::Position(position) => {
-                set_delta_position(delta, position_mode_from_css(position));
-            }
-            Property::ZIndex(value) => {
-                set_delta_z_index(
-                    delta,
-                    match value {
-                        lightningcss::properties::position::ZIndex::Auto => 0,
-                        lightningcss::properties::position::ZIndex::Integer(v) => *v,
-                    },
-                );
-            }
-            Property::BoxSizing(value, _) => {
-                set_delta_box_sizing(
-                    delta,
-                    match value {
-                        css_size::BoxSizing::BorderBox => BoxSizingMode::BorderBox,
-                        _ => BoxSizingMode::ContentBox,
-                    },
-                );
-            }
-            Property::Width(value) => {
-                if let Some(width) = length_spec_from_size(value) {
-                    set_delta_width(delta, width);
+        }
+        "box-sizing" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                delta.box_sizing = None;
+                delta.revert_layer.box_sizing = true;
+                true
+            } else {
+                let value = match raw.trim().to_ascii_lowercase().as_str() {
+                    "border-box" => Some(BoxSizingMode::BorderBox),
+                    "content-box" | "initial" | "unset" | "revert" => {
+                        Some(BoxSizingMode::ContentBox)
+                    }
+                    _ => None,
+                };
+                if let Some(value) = value {
+                    set_delta_box_sizing(delta, value);
+                    true
+                } else {
+                    false
                 }
             }
-            Property::InlineSize(value) => {
-                delta.inline_size = length_spec_from_size(value);
-                delta.inline_size_var = None;
+        }
+        "border"
+        | "border-top"
+        | "border-right"
+        | "border-bottom"
+        | "border-left"
+        | "border-inline-start"
+        | "border-inline-end"
+        | "border-block-start"
+        | "border-block-end"
+        | "border-inline"
+        | "border-block"
+        | "border-width"
+        | "border-top-width"
+        | "border-right-width"
+        | "border-bottom-width"
+        | "border-left-width"
+        | "border-inline-start-width"
+        | "border-inline-end-width"
+        | "border-block-start-width"
+        | "border-block-end-width"
+        | "border-inline-width"
+        | "border-block-width"
+        | "border-color"
+        | "border-top-color"
+        | "border-right-color"
+        | "border-bottom-color"
+        | "border-left-color"
+        | "border-inline-start-color"
+        | "border-inline-end-color"
+        | "border-block-start-color"
+        | "border-block-end-color"
+        | "border-inline-color"
+        | "border-block-color"
+        | "border-style"
+        | "border-top-style"
+        | "border-right-style"
+        | "border-bottom-style"
+        | "border-left-style"
+        | "border-inline-start-style"
+        | "border-inline-end-style"
+        | "border-block-start-style"
+        | "border-block-end-style"
+        | "border-inline-style"
+        | "border-block-style" => apply_native_border_property(&name, raw, delta),
+        "outline" | "outline-width" | "outline-style" | "outline-color" | "outline-offset" => {
+            apply_native_outline_property(&name, raw, delta)
+        }
+        "border-collapse" => {
+            delta.border_collapse = match raw.trim().to_ascii_lowercase().as_str() {
+                "collapse" => Some(BorderCollapseMode::Collapse),
+                "separate" | "initial" | "unset" | "revert" => Some(BorderCollapseMode::Separate),
+                _ => None,
+            };
+            delta.border_collapse.is_some()
+        }
+        "caption-side" => {
+            if let Some(value) = parse_caption_side_ident(&raw.trim().to_ascii_lowercase()) {
+                delta.caption_side = Some(value);
+                true
+            } else {
+                false
             }
-            Property::MinWidth(value) => {
-                delta.min_width = length_spec_from_size(value);
-                delta.min_width_var = None;
+        }
+        "table-layout" => {
+            delta.table_layout = match raw.trim().to_ascii_lowercase().as_str() {
+                "fixed" => Some(TableLayoutMode::Fixed),
+                "auto" | "initial" | "unset" | "revert" => Some(TableLayoutMode::Auto),
+                _ => None,
+            };
+            delta.table_layout.is_some()
+        }
+        "empty-cells" => match raw.trim().to_ascii_lowercase().as_str() {
+            "hide" => {
+                delta.empty_cells_hide = Some(true);
+                true
             }
-            Property::MinInlineSize(value) => {
-                delta.min_inline_size = length_spec_from_size(value);
-                delta.min_inline_size_var = None;
+            "show" | "initial" | "unset" | "revert" => {
+                delta.empty_cells_hide = Some(false);
+                true
             }
-            Property::MaxWidth(value) => {
-                delta.max_width = length_spec_from_max_size(value);
-                delta.max_width_var = None;
+            _ => false,
+        },
+        "break-before" | "page-break-before" => {
+            if let Some(value) = parse_break_before_value(&name, &raw.trim().to_ascii_lowercase()) {
+                delta.pagination.break_before = Some(value);
+                true
+            } else {
+                false
             }
-            Property::MaxInlineSize(value) => {
-                delta.max_inline_size = length_spec_from_max_size(value);
-                delta.max_inline_size_var = None;
+        }
+        "break-after" | "page-break-after" => {
+            if let Some(value) = parse_break_after_value(&name, &raw.trim().to_ascii_lowercase()) {
+                delta.pagination.break_after = Some(value);
+                true
+            } else {
+                false
             }
-            Property::Height(value) => {
-                if let Some(height) = length_spec_from_size(value) {
-                    set_delta_height(delta, height);
+        }
+        "break-inside" | "page-break-inside" => {
+            if let Some(value) = parse_break_inside_value(&name, &raw.trim().to_ascii_lowercase()) {
+                delta.pagination.break_inside = Some(value);
+                true
+            } else {
+                false
+            }
+        }
+        "orphans" | "widows" => apply_native_pagination_count(&name, raw, delta),
+        "border-radius" => {
+            if let Some(value) = parse_border_radius_str(raw) {
+                delta.border_radius = Some(value);
+                true
+            } else {
+                false
+            }
+        }
+        "border-spacing" => {
+            if let Some(value) = parse_border_spacing_str(raw) {
+                delta.border_spacing = Some(value);
+                true
+            } else {
+                false
+            }
+        }
+        "box-shadow" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                set_revert_layer_box_shadow(delta)
+            } else if let Some(value) = parse_box_shadow_list_str(raw) {
+                set_delta_box_shadows(delta, value);
+                true
+            } else {
+                false
+            }
+        }
+        "text-shadow" => apply_text_shadow_from_raw(delta, raw),
+        "clip-path" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                set_revert_layer_clip_path(delta)
+            } else if let Some(value) = parse_clip_path_spec_str(raw) {
+                set_delta_clip_path(delta, value);
+                true
+            } else {
+                false
+            }
+        }
+        "filter" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                set_revert_layer_paint_filter(delta)
+            } else {
+                set_delta_paint_filter_from_raw(delta, raw);
+                true
+            }
+        }
+        "backdrop-filter" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                set_revert_layer_backdrop_filter(delta)
+            } else {
+                set_delta_backdrop_filter_from_raw(delta, raw);
+                true
+            }
+        }
+        "will-change" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                set_revert_layer_will_change_backdrop_root(delta)
+            } else {
+                set_delta_will_change_backdrop_root_from_raw(delta, raw);
+                true
+            }
+        }
+        "mask" | "mask-image" | "mask-border" | "mask-border-source" | "-webkit-mask"
+        | "-webkit-mask-image" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                set_revert_layer_mask_backdrop_root(delta)
+            } else {
+                set_delta_mask_backdrop_root_from_raw(delta, raw);
+                true
+            }
+        }
+        "mix-blend-mode" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                set_revert_layer_mix_blend_mode(delta)
+            } else if let Some(value) = parse_mix_blend_mode_str(raw) {
+                set_delta_mix_blend_mode(delta, value);
+                true
+            } else {
+                false
+            }
+        }
+        "isolation" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                set_revert_layer_isolation(delta)
+            } else if let Some(value) = parse_isolation_spec_str(raw) {
+                set_delta_isolation(delta, value);
+                true
+            } else {
+                false
+            }
+        }
+        "object-fit" => {
+            if let Some(value) = parse_object_fit_spec_str(raw) {
+                delta.object_fit = Some(value);
+                true
+            } else {
+                false
+            }
+        }
+        "object-position" => {
+            if let Some(value) = parse_object_position_spec_str(raw) {
+                delta.object_position = Some(value);
+                true
+            } else {
+                false
+            }
+        }
+        "transform" | "translate" | "rotate" | "scale" => {
+            apply_native_transform_value(&name, raw, delta)
+        }
+        "transform-origin" => apply_native_transform_origin(raw, delta),
+        "text-transform" => {
+            let lowered = raw.trim().to_ascii_lowercase();
+            match lowered.as_str() {
+                "inherit" | "unset" => {
+                    set_delta_text_transform(delta, TextTransformSpec::Inherit);
+                    true
+                }
+                "initial" | "revert" => {
+                    set_delta_text_transform(delta, TextTransformSpec::Initial);
+                    true
+                }
+                "revert-layer" => set_revert_layer_text_transform(delta),
+                _ => {
+                    if let Some(value) = parse_text_transform_str(&lowered) {
+                        set_delta_text_transform(delta, TextTransformSpec::Value(value));
+                        true
+                    } else {
+                        false
+                    }
                 }
             }
-            Property::BlockSize(value) => {
-                delta.block_size = length_spec_from_size(value);
-                delta.block_size_var = None;
-            }
-            Property::MinHeight(value) => {
-                delta.min_height = length_spec_from_size(value);
-                delta.min_height_var = None;
-            }
-            Property::MinBlockSize(value) => {
-                delta.min_block_size = length_spec_from_size(value);
-                delta.min_block_size_var = None;
-            }
-            Property::MaxHeight(value) => {
-                delta.max_height = length_spec_from_max_size(value);
-                delta.max_height_var = None;
-            }
-            Property::MaxBlockSize(value) => {
-                delta.max_block_size = length_spec_from_max_size(value);
-                delta.max_block_size_var = None;
-            }
-            Property::Left(value) => {
-                set_delta_inset_edge_spec(delta, BoxEdgeTarget::Left, length_spec_from_lpa(value));
-            }
-            Property::InsetInlineStart(value) => {
-                delta
-                    .revert_layer
-                    .inset_logical
-                    .clear(LogicalBoxEdgeTarget::InlineStart);
-                delta.inset_inline_start = length_spec_from_lpa(value);
-            }
-            Property::Top(value) => {
-                set_delta_inset_edge_spec(delta, BoxEdgeTarget::Top, length_spec_from_lpa(value));
-            }
-            Property::InsetBlockStart(value) => {
-                delta
-                    .revert_layer
-                    .inset_logical
-                    .clear(LogicalBoxEdgeTarget::BlockStart);
-                delta.inset_block_start = length_spec_from_lpa(value);
-            }
-            Property::Right(value) => {
-                set_delta_inset_edge_spec(delta, BoxEdgeTarget::Right, length_spec_from_lpa(value));
-            }
-            Property::InsetInlineEnd(value) => {
-                delta
-                    .revert_layer
-                    .inset_logical
-                    .clear(LogicalBoxEdgeTarget::InlineEnd);
-                delta.inset_inline_end = length_spec_from_lpa(value);
-            }
-            Property::Bottom(value) => {
-                set_delta_inset_edge_spec(
-                    delta,
-                    BoxEdgeTarget::Bottom,
-                    length_spec_from_lpa(value),
-                );
-            }
-            Property::InsetBlockEnd(value) => {
-                delta
-                    .revert_layer
-                    .inset_logical
-                    .clear(LogicalBoxEdgeTarget::BlockEnd);
-                delta.inset_block_end = length_spec_from_lpa(value);
-            }
-            Property::Inset(value) => {
-                set_delta_inset_edge_spec(
-                    delta,
-                    BoxEdgeTarget::Top,
-                    length_spec_from_lpa(&value.top),
-                );
-                set_delta_inset_edge_spec(
-                    delta,
-                    BoxEdgeTarget::Right,
-                    length_spec_from_lpa(&value.right),
-                );
-                set_delta_inset_edge_spec(
-                    delta,
-                    BoxEdgeTarget::Bottom,
-                    length_spec_from_lpa(&value.bottom),
-                );
-                set_delta_inset_edge_spec(
-                    delta,
-                    BoxEdgeTarget::Left,
-                    length_spec_from_lpa(&value.left),
-                );
-            }
-            Property::InsetInline(value) => {
-                delta
-                    .revert_layer
-                    .inset_logical
-                    .clear(LogicalBoxEdgeTarget::Inline);
-                delta.inset_inline_start = length_spec_from_lpa(&value.inline_start);
-                delta.inset_inline_end = length_spec_from_lpa(&value.inline_end);
-            }
-            Property::InsetBlock(value) => {
-                delta
-                    .revert_layer
-                    .inset_logical
-                    .clear(LogicalBoxEdgeTarget::Block);
-                delta.inset_block_start = length_spec_from_lpa(&value.block_start);
-                delta.inset_block_end = length_spec_from_lpa(&value.block_end);
-            }
-            Property::MarginTop(value) => {
-                delta.revert_layer.margin.clear(BoxEdgeTarget::Top);
-                delta.margin.top = length_spec_from_lpa(value);
-            }
-            Property::MarginBlockStart(value) => {
-                delta
-                    .revert_layer
-                    .margin_logical
-                    .clear(LogicalBoxEdgeTarget::BlockStart);
-                delta.margin_block_start = length_spec_from_lpa(value);
-            }
-            Property::MarginRight(value) => {
-                delta.revert_layer.margin.clear(BoxEdgeTarget::Right);
-                delta.margin.right = length_spec_from_lpa(value);
-            }
-            Property::MarginInlineEnd(value) => {
-                delta
-                    .revert_layer
-                    .margin_logical
-                    .clear(LogicalBoxEdgeTarget::InlineEnd);
-                delta.margin_inline_end = length_spec_from_lpa(value);
-            }
-            Property::MarginBottom(value) => {
-                delta.revert_layer.margin.clear(BoxEdgeTarget::Bottom);
-                delta.margin.bottom = length_spec_from_lpa(value);
-            }
-            Property::MarginBlockEnd(value) => {
-                delta
-                    .revert_layer
-                    .margin_logical
-                    .clear(LogicalBoxEdgeTarget::BlockEnd);
-                delta.margin_block_end = length_spec_from_lpa(value);
-            }
-            Property::MarginLeft(value) => {
-                delta.revert_layer.margin.clear(BoxEdgeTarget::Left);
-                delta.margin.left = length_spec_from_lpa(value);
-            }
-            Property::MarginInlineStart(value) => {
-                delta
-                    .revert_layer
-                    .margin_logical
-                    .clear(LogicalBoxEdgeTarget::InlineStart);
-                delta.margin_inline_start = length_spec_from_lpa(value);
-            }
-            Property::Margin(value) => {
-                delta.revert_layer.margin.clear(BoxEdgeTarget::All);
-                delta.margin.top = length_spec_from_lpa(&value.top);
-                delta.margin.right = length_spec_from_lpa(&value.right);
-                delta.margin.bottom = length_spec_from_lpa(&value.bottom);
-                delta.margin.left = length_spec_from_lpa(&value.left);
-            }
-            Property::MarginBlock(value) => {
-                delta
-                    .revert_layer
-                    .margin_logical
-                    .clear(LogicalBoxEdgeTarget::Block);
-                delta.margin_block_start = length_spec_from_lpa(&value.block_start);
-                delta.margin_block_end = length_spec_from_lpa(&value.block_end);
-            }
-            Property::MarginInline(value) => {
-                delta
-                    .revert_layer
-                    .margin_logical
-                    .clear(LogicalBoxEdgeTarget::Inline);
-                delta.margin_inline_start = length_spec_from_lpa(&value.inline_start);
-                delta.margin_inline_end = length_spec_from_lpa(&value.inline_end);
-            }
-            Property::PaddingTop(value) => {
-                delta.revert_layer.padding.clear(BoxEdgeTarget::Top);
-                delta.padding.top = length_spec_from_lpa(value);
-            }
-            Property::PaddingBlockStart(value) => {
-                delta
-                    .revert_layer
-                    .padding_logical
-                    .clear(LogicalBoxEdgeTarget::BlockStart);
-                delta.padding_block_start = length_spec_from_lpa(value);
-            }
-            Property::PaddingRight(value) => {
-                delta.revert_layer.padding.clear(BoxEdgeTarget::Right);
-                delta.padding.right = length_spec_from_lpa(value);
-            }
-            Property::PaddingInlineEnd(value) => {
-                delta
-                    .revert_layer
-                    .padding_logical
-                    .clear(LogicalBoxEdgeTarget::InlineEnd);
-                delta.padding_inline_end = length_spec_from_lpa(value);
-            }
-            Property::PaddingBottom(value) => {
-                delta.revert_layer.padding.clear(BoxEdgeTarget::Bottom);
-                delta.padding.bottom = length_spec_from_lpa(value);
-            }
-            Property::PaddingBlockEnd(value) => {
-                delta
-                    .revert_layer
-                    .padding_logical
-                    .clear(LogicalBoxEdgeTarget::BlockEnd);
-                delta.padding_block_end = length_spec_from_lpa(value);
-            }
-            Property::PaddingLeft(value) => {
-                delta.revert_layer.padding.clear(BoxEdgeTarget::Left);
-                delta.padding.left = length_spec_from_lpa(value);
-            }
-            Property::PaddingInlineStart(value) => {
-                delta
-                    .revert_layer
-                    .padding_logical
-                    .clear(LogicalBoxEdgeTarget::InlineStart);
-                delta.padding_inline_start = length_spec_from_lpa(value);
-            }
-            Property::Padding(value) => {
-                delta.revert_layer.padding.clear(BoxEdgeTarget::All);
-                delta.padding.top = length_spec_from_lpa(&value.top);
-                delta.padding.right = length_spec_from_lpa(&value.right);
-                delta.padding.bottom = length_spec_from_lpa(&value.bottom);
-                delta.padding.left = length_spec_from_lpa(&value.left);
-            }
-            Property::PaddingBlock(value) => {
-                delta
-                    .revert_layer
-                    .padding_logical
-                    .clear(LogicalBoxEdgeTarget::Block);
-                delta.padding_block_start = length_spec_from_lpa(&value.block_start);
-                delta.padding_block_end = length_spec_from_lpa(&value.block_end);
-            }
-            Property::PaddingInline(value) => {
-                delta
-                    .revert_layer
-                    .padding_logical
-                    .clear(LogicalBoxEdgeTarget::Inline);
-                delta.padding_inline_start = length_spec_from_lpa(&value.inline_start);
-                delta.padding_inline_end = length_spec_from_lpa(&value.inline_end);
-            }
-            Property::BorderWidth(value) => {
-                if let Some(spec) = border_width_spec(&value.top) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::Top, spec);
-                }
-                if let Some(spec) = border_width_spec(&value.right) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::Right, spec);
-                }
-                if let Some(spec) = border_width_spec(&value.bottom) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::Bottom, spec);
-                }
-                if let Some(spec) = border_width_spec(&value.left) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::Left, spec);
-                }
-            }
-            Property::BorderTopWidth(value) => {
-                if let Some(spec) = border_width_spec(value) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::Top, spec);
-                }
-            }
-            Property::BorderRightWidth(value) => {
-                if let Some(spec) = border_width_spec(value) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::Right, spec);
-                }
-            }
-            Property::BorderBottomWidth(value) => {
-                if let Some(spec) = border_width_spec(value) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::Bottom, spec);
-                }
-            }
-            Property::BorderLeftWidth(value) => {
-                if let Some(spec) = border_width_spec(value) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::Left, spec);
-                }
-            }
-            Property::BorderBlockStartWidth(value) => {
-                if let Some(spec) = border_width_spec(value) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::BlockStart, spec);
-                }
-            }
-            Property::BorderBlockEndWidth(value) => {
-                if let Some(spec) = border_width_spec(value) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::BlockEnd, spec);
-                }
-            }
-            Property::BorderInlineStartWidth(value) => {
-                if let Some(spec) = border_width_spec(value) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::InlineStart, spec);
-                }
-            }
-            Property::BorderInlineEndWidth(value) => {
-                if let Some(spec) = border_width_spec(value) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::InlineEnd, spec);
-                }
-            }
-            Property::BorderColor(value) => {
-                set_delta_border_color_from_css_color(delta, BorderColorTarget::Top, &value.top);
-                set_delta_border_color_from_css_color(
-                    delta,
-                    BorderColorTarget::Right,
-                    &value.right,
-                );
-                set_delta_border_color_from_css_color(
-                    delta,
-                    BorderColorTarget::Bottom,
-                    &value.bottom,
-                );
-                set_delta_border_color_from_css_color(delta, BorderColorTarget::Left, &value.left);
-            }
-            Property::BorderTopColor(value) => {
-                set_delta_border_color_from_css_color(delta, BorderColorTarget::Top, value);
-            }
-            Property::BorderRightColor(value) => {
-                set_delta_border_color_from_css_color(delta, BorderColorTarget::Right, value);
-            }
-            Property::BorderBottomColor(value) => {
-                set_delta_border_color_from_css_color(delta, BorderColorTarget::Bottom, value);
-            }
-            Property::BorderLeftColor(value) => {
-                set_delta_border_color_from_css_color(delta, BorderColorTarget::Left, value);
-            }
-            Property::BorderBlockStartColor(value) => {
-                set_delta_border_color_from_css_color(delta, BorderColorTarget::BlockStart, value);
-            }
-            Property::BorderBlockEndColor(value) => {
-                set_delta_border_color_from_css_color(delta, BorderColorTarget::BlockEnd, value);
-            }
-            Property::BorderInlineStartColor(value) => {
-                set_delta_border_color_from_css_color(delta, BorderColorTarget::InlineStart, value);
-            }
-            Property::BorderInlineEndColor(value) => {
-                set_delta_border_color_from_css_color(delta, BorderColorTarget::InlineEnd, value);
-            }
-            Property::BorderStyle(value) => {
-                set_delta_border_style(
-                    delta,
-                    BorderColorTarget::Top,
-                    border_line_style_from_line_style(&value.top),
-                );
-                set_delta_border_style(
-                    delta,
-                    BorderColorTarget::Right,
-                    border_line_style_from_line_style(&value.right),
-                );
-                set_delta_border_style(
-                    delta,
-                    BorderColorTarget::Bottom,
-                    border_line_style_from_line_style(&value.bottom),
-                );
-                set_delta_border_style(
-                    delta,
-                    BorderColorTarget::Left,
-                    border_line_style_from_line_style(&value.left),
-                );
-            }
-            Property::BorderTopStyle(value) => {
-                set_delta_border_style(
-                    delta,
-                    BorderColorTarget::Top,
-                    border_line_style_from_line_style(value),
-                );
-            }
-            Property::BorderRightStyle(value) => {
-                set_delta_border_style(
-                    delta,
-                    BorderColorTarget::Right,
-                    border_line_style_from_line_style(value),
-                );
-            }
-            Property::BorderBottomStyle(value) => {
-                set_delta_border_style(
-                    delta,
-                    BorderColorTarget::Bottom,
-                    border_line_style_from_line_style(value),
-                );
-            }
-            Property::BorderLeftStyle(value) => {
-                set_delta_border_style(
-                    delta,
-                    BorderColorTarget::Left,
-                    border_line_style_from_line_style(value),
-                );
-            }
-            Property::BorderBlockStartStyle(value) => {
-                set_delta_border_style(
-                    delta,
-                    BorderColorTarget::BlockStart,
-                    border_line_style_from_line_style(value),
-                );
-            }
-            Property::BorderBlockEndStyle(value) => {
-                set_delta_border_style(
-                    delta,
-                    BorderColorTarget::BlockEnd,
-                    border_line_style_from_line_style(value),
-                );
-            }
-            Property::BorderInlineStartStyle(value) => {
-                set_delta_border_style(
-                    delta,
-                    BorderColorTarget::InlineStart,
-                    border_line_style_from_line_style(value),
-                );
-            }
-            Property::BorderInlineEndStyle(value) => {
-                set_delta_border_style(
-                    delta,
-                    BorderColorTarget::InlineEnd,
-                    border_line_style_from_line_style(value),
-                );
-            }
-            Property::Border(value) => {
-                if let Some(width) = border_width_spec(&value.width) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::All, width);
-                }
-                if let Some(color) = css_color_to_color(&value.color) {
-                    set_delta_border_color_spec(
+        }
+        "text-decoration-line" => apply_native_text_decoration_line(raw, delta),
+        "text-decoration" => apply_native_text_decoration_shorthand(raw, delta),
+        "text-decoration-color" => apply_text_decoration_color_from_raw(delta, raw),
+        "text-decoration-thickness" => apply_text_decoration_thickness_from_raw(delta, raw),
+        "text-decoration-style" => apply_text_decoration_style_from_raw(delta, raw),
+        "text-underline-offset" => apply_text_underline_offset_from_raw(delta, raw),
+        "text-underline-position" => apply_text_underline_position_from_raw(delta, raw),
+        "text-overflow" => {
+            let lowered = raw.trim().to_ascii_lowercase();
+            match lowered.as_str() {
+                "clip" => {
+                    set_delta_text_overflow_spec(
                         delta,
-                        BorderColorTarget::All,
-                        ColorSpec::Value(color),
+                        TextOverflowSpec::Value(TextOverflowMode::Clip),
                     );
+                    true
                 }
-                let style = border_line_style_from_line_style(&value.style);
-                set_delta_border_style(delta, BorderColorTarget::All, style);
-            }
-            Property::BorderTop(value) => {
-                if let Some(width) = border_width_spec(&value.width) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::Top, width);
-                }
-                if let Some(color) = css_color_to_color(&value.color) {
-                    set_delta_border_color_spec(
+                "ellipsis" => {
+                    set_delta_text_overflow_spec(
                         delta,
-                        BorderColorTarget::Top,
-                        ColorSpec::Value(color),
+                        TextOverflowSpec::Value(TextOverflowMode::Ellipsis),
                     );
+                    true
                 }
-                set_delta_border_style(
+                "inherit" | "unset" => {
+                    set_delta_text_overflow_spec(delta, TextOverflowSpec::Inherit);
+                    true
+                }
+                "initial" | "revert" => {
+                    set_delta_text_overflow_spec(delta, TextOverflowSpec::Initial);
+                    true
+                }
+                "revert-layer" => set_revert_layer_text_overflow(delta),
+                _ => false,
+            }
+        }
+        "text-indent" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                set_revert_layer_text_indent(delta)
+            } else if let Some(value) = parse_text_indent_str(raw) {
+                set_delta_text_indent_value(delta, value);
+                true
+            } else {
+                false
+            }
+        }
+        "letter-spacing" | "word-spacing" => apply_native_text_spacing(&name, raw, delta),
+        "tab-size" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                set_revert_layer_tab_size(delta)
+            } else if let Some(value) = parse_tab_size_str(raw) {
+                set_delta_tab_size(delta, value);
+                true
+            } else {
+                false
+            }
+        }
+        "line-break" => apply_line_break_from_raw(delta, raw),
+        "word-break" => apply_word_break_from_raw(delta, raw),
+        "overflow-wrap" | "word-wrap" => apply_overflow_wrap_from_raw(delta, raw),
+        "text-justify" => apply_text_justify_from_raw(delta, raw),
+        "text-wrap" => apply_text_wrap_from_raw(delta, raw),
+        "text-wrap-mode" => apply_text_wrap_mode_from_raw(delta, raw),
+        "text-wrap-style" => apply_text_wrap_style_from_raw(delta, raw),
+        "white-space" => apply_white_space_from_raw(delta, raw),
+        "white-space-collapse" => apply_white_space_collapse_from_raw(delta, raw),
+        "hyphens" | "-webkit-hyphens" => apply_hyphens_from_raw(delta, raw),
+        "hyphenate-character" | "-webkit-hyphenate-character" => {
+            apply_hyphenate_character_from_raw(delta, raw)
+        }
+        "text-align" => apply_native_text_align(raw, delta),
+        "text-align-last" => {
+            let lowered = raw.trim().to_ascii_lowercase();
+            match lowered.as_str() {
+                "inherit" | "unset" => {
+                    set_delta_text_align_last(delta, TextAlignLastSpec::Inherit);
+                    true
+                }
+                "initial" | "revert" => {
+                    set_delta_text_align_last(delta, TextAlignLastSpec::Initial);
+                    true
+                }
+                "revert-layer" => set_revert_layer_text_align_last(delta),
+                _ => {
+                    if let Some(value) = parse_text_align_last_str(&lowered) {
+                        set_delta_text_align_last(delta, TextAlignLastSpec::Value(value));
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+        }
+        "direction" => apply_native_direction(raw, delta),
+        "writing-mode" => {
+            apply_writing_mode_from_str(raw, delta);
+            true
+        }
+        "content" => {
+            if let Some(value) = content_from_raw(raw) {
+                delta.content = Some(value);
+                true
+            } else {
+                false
+            }
+        }
+        "counter-reset" => apply_native_counter_property("counter-reset", raw, delta),
+        "counter-increment" => apply_native_counter_property("counter-increment", raw, delta),
+        "counter-set" => apply_native_counter_property("counter-set", raw, delta),
+        "quotes" => {
+            if let Some(value) = quotes_from_raw(raw) {
+                delta.quotes = Some(value);
+                true
+            } else {
+                false
+            }
+        }
+        "list-style-type" => apply_native_list_style_type(raw, delta),
+        "list-style-image" => apply_native_list_style_image(raw, delta),
+        "list-style-position" => apply_native_list_style_position(raw, delta),
+        "list-style" => apply_native_list_style_shorthand(raw, delta),
+        _ => false,
+    }
+}
+
+#[derive(Debug, Clone)]
+enum NativeLengthComponent {
+    Spec(LengthSpec),
+    Var(String),
+}
+
+fn is_css_wide_keyword(raw: &str) -> bool {
+    matches!(
+        raw,
+        "inherit" | "initial" | "unset" | "revert" | "revert-layer"
+    )
+}
+
+fn css_wide_length_spec(raw: &str) -> Option<LengthSpec> {
+    match raw {
+        "inherit" => Some(LengthSpec::Inherit),
+        "initial" | "unset" | "revert" => Some(LengthSpec::Initial),
+        _ => None,
+    }
+}
+
+fn native_length_is_nonnegative(value: LengthSpec) -> bool {
+    match value {
+        LengthSpec::Absolute(value) => value >= Pt::ZERO,
+        LengthSpec::Percent(value) | LengthSpec::Em(value) | LengthSpec::Rem(value) => value >= 0.0,
+        LengthSpec::Auto | LengthSpec::Calc(_) | LengthSpec::Inherit | LengthSpec::Initial => true,
+    }
+}
+
+fn parse_native_length_component(
+    raw: &str,
+    allow_auto: bool,
+    allow_negative: bool,
+) -> Option<NativeLengthComponent> {
+    let lowered = raw.trim().to_ascii_lowercase();
+    if lowered.is_empty() || lowered == "revert-layer" {
+        return None;
+    }
+    if let Some(value) = css_wide_length_spec(&lowered) {
+        return Some(NativeLengthComponent::Spec(value));
+    }
+    if allow_auto && lowered == "auto" {
+        return Some(NativeLengthComponent::Spec(LengthSpec::Auto));
+    }
+    if lowered.contains("var(") {
+        return Some(NativeLengthComponent::Var(lowered));
+    }
+    let value = length_spec_from_string(&lowered)?;
+    if !allow_negative && !native_length_is_nonnegative(value) {
+        return None;
+    }
+    Some(NativeLengthComponent::Spec(value))
+}
+
+fn parse_native_length_components(
+    raw: &str,
+    max_parts: usize,
+    allow_auto: bool,
+    allow_negative: bool,
+) -> Option<Vec<NativeLengthComponent>> {
+    let parts = split_top_level_whitespace(raw);
+    if parts.is_empty() || parts.len() > max_parts {
+        return None;
+    }
+    if parts.len() > 1
+        && parts
+            .iter()
+            .any(|part| is_css_wide_keyword(&part.to_ascii_lowercase()))
+    {
+        return None;
+    }
+    parts
+        .iter()
+        .map(|part| parse_native_length_component(part, allow_auto, allow_negative))
+        .collect()
+}
+
+fn expand_native_four(values: &[NativeLengthComponent]) -> Option<[NativeLengthComponent; 4]> {
+    match values {
+        [all] => Some([all.clone(), all.clone(), all.clone(), all.clone()]),
+        [vertical, horizontal] => Some([
+            vertical.clone(),
+            horizontal.clone(),
+            vertical.clone(),
+            horizontal.clone(),
+        ]),
+        [top, horizontal, bottom] => Some([
+            top.clone(),
+            horizontal.clone(),
+            bottom.clone(),
+            horizontal.clone(),
+        ]),
+        [top, right, bottom, left] => {
+            Some([top.clone(), right.clone(), bottom.clone(), left.clone()])
+        }
+        _ => None,
+    }
+}
+
+fn expand_native_pair(values: &[NativeLengthComponent]) -> Option<[NativeLengthComponent; 2]> {
+    match values {
+        [both] => Some([both.clone(), both.clone()]),
+        [start, end] => Some([start.clone(), end.clone()]),
+        _ => None,
+    }
+}
+
+fn apply_native_size_property(property_name: &str, raw: &str, delta: &mut StyleDelta) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    if lowered == "revert-layer" {
+        match property_name {
+            "width" => {
+                delta.width = None;
+                delta.width_var = None;
+                delta.revert_layer.width = true;
+            }
+            "height" => {
+                delta.height = None;
+                delta.height_var = None;
+                delta.revert_layer.height = true;
+            }
+            _ => {
+                return apply_native_size_component(
+                    property_name,
+                    NativeLengthComponent::Spec(LengthSpec::Initial),
                     delta,
-                    BorderColorTarget::Top,
-                    border_line_style_from_line_style(&value.style),
                 );
             }
-            Property::BorderRight(value) => {
-                if let Some(width) = border_width_spec(&value.width) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::Right, width);
-                }
-                if let Some(color) = css_color_to_color(&value.color) {
-                    set_delta_border_color_spec(
-                        delta,
-                        BorderColorTarget::Right,
-                        ColorSpec::Value(color),
-                    );
-                }
-                set_delta_border_style(
-                    delta,
-                    BorderColorTarget::Right,
-                    border_line_style_from_line_style(&value.style),
-                );
-            }
-            Property::BorderBottom(value) => {
-                if let Some(width) = border_width_spec(&value.width) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::Bottom, width);
-                }
-                if let Some(color) = css_color_to_color(&value.color) {
-                    set_delta_border_color_spec(
-                        delta,
-                        BorderColorTarget::Bottom,
-                        ColorSpec::Value(color),
-                    );
-                }
-                set_delta_border_style(
-                    delta,
-                    BorderColorTarget::Bottom,
-                    border_line_style_from_line_style(&value.style),
-                );
-            }
-            Property::BorderLeft(value) => {
-                if let Some(width) = border_width_spec(&value.width) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::Left, width);
-                }
-                if let Some(color) = css_color_to_color(&value.color) {
-                    set_delta_border_color_spec(
-                        delta,
-                        BorderColorTarget::Left,
-                        ColorSpec::Value(color),
-                    );
-                }
-                set_delta_border_style(
-                    delta,
-                    BorderColorTarget::Left,
-                    border_line_style_from_line_style(&value.style),
-                );
-            }
-            Property::BorderBlockStart(value) => {
-                if let Some(width) = border_width_spec(&value.width) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::BlockStart, width);
-                }
-                if let Some(color) = css_color_to_color(&value.color) {
-                    set_delta_border_color_spec(
-                        delta,
-                        BorderColorTarget::BlockStart,
-                        ColorSpec::Value(color),
-                    );
-                }
-                set_delta_border_style(
-                    delta,
-                    BorderColorTarget::BlockStart,
-                    border_line_style_from_line_style(&value.style),
-                );
-            }
-            Property::BorderBlockEnd(value) => {
-                if let Some(width) = border_width_spec(&value.width) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::BlockEnd, width);
-                }
-                if let Some(color) = css_color_to_color(&value.color) {
-                    set_delta_border_color_spec(
-                        delta,
-                        BorderColorTarget::BlockEnd,
-                        ColorSpec::Value(color),
-                    );
-                }
-                set_delta_border_style(
-                    delta,
-                    BorderColorTarget::BlockEnd,
-                    border_line_style_from_line_style(&value.style),
-                );
-            }
-            Property::BorderInlineStart(value) => {
-                if let Some(width) = border_width_spec(&value.width) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::InlineStart, width);
-                }
-                if let Some(color) = css_color_to_color(&value.color) {
-                    set_delta_border_color_spec(
-                        delta,
-                        BorderColorTarget::InlineStart,
-                        ColorSpec::Value(color),
-                    );
-                }
-                set_delta_border_style(
-                    delta,
-                    BorderColorTarget::InlineStart,
-                    border_line_style_from_line_style(&value.style),
-                );
-            }
-            Property::BorderInlineEnd(value) => {
-                if let Some(width) = border_width_spec(&value.width) {
-                    set_delta_border_width_spec(delta, BorderColorTarget::InlineEnd, width);
-                }
-                if let Some(color) = css_color_to_color(&value.color) {
-                    set_delta_border_color_spec(
-                        delta,
-                        BorderColorTarget::InlineEnd,
-                        ColorSpec::Value(color),
-                    );
-                }
-                set_delta_border_style(
-                    delta,
-                    BorderColorTarget::InlineEnd,
-                    border_line_style_from_line_style(&value.style),
-                );
-            }
-            Property::Outline(value) => {
-                if let Some(width) = border_width_spec(&value.width) {
-                    set_delta_outline_width(delta, width);
-                }
-                if let Some(color) = css_color_to_color_spec(&value.color) {
-                    set_delta_outline_color(delta, color);
-                }
-                set_delta_outline_style(delta, outline_line_style_from_outline_style(&value.style));
-            }
-            Property::OutlineWidth(value) => {
-                if let Some(width) = border_width_spec(value) {
-                    set_delta_outline_width(delta, width);
-                }
-            }
-            Property::OutlineColor(value) => {
-                if let Some(color) = css_color_to_color_spec(value) {
-                    set_delta_outline_color(delta, color);
-                }
-            }
-            Property::OutlineStyle(value) => {
-                set_delta_outline_style(delta, outline_line_style_from_outline_style(value));
-            }
-            Property::Custom(custom) => {
-                let property_name = custom.name.as_ref().to_ascii_lowercase();
-                apply_custom_property(&property_name, &custom.value.0, delta);
-            }
-            Property::Unparsed(unparsed) => {
-                if apply_revert_layer_unparsed_property(
-                    &unparsed.property_id,
-                    &unparsed.value.0,
-                    delta,
-                ) {
-                    continue;
-                }
-                match &unparsed.property_id {
-                    PropertyId::Font => {
-                        let raw = tokens_raw_value_string(&unparsed.value.0);
-                        apply_font_shorthand_from_raw(delta, &raw);
-                    }
-                    PropertyId::FontSize => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        apply_font_size_from_raw(delta, &raw);
-                    }
-                    PropertyId::LineHeight => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        apply_line_height_from_raw(delta, &raw);
-                    }
-                    PropertyId::Color => {
-                        if let Some(color) = color_from_tokens(&unparsed.value.0) {
-                            set_delta_color(delta, ColorSpec::Value(color));
-                        } else {
-                            let raw = tokens_debug_string(&unparsed.value.0);
-                            if let Some((color, alpha)) = parse_color_string(&raw) {
-                                set_delta_color(
-                                    delta,
-                                    ColorSpec::Value(blend_over_white(color, alpha)),
-                                );
-                            } else if should_defer_color_expr(&raw) {
-                                set_delta_color_var(delta, raw.to_ascii_lowercase());
-                            } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
-                                set_delta_color_var(delta, var);
-                            } else {
-                                apply_inherit_initial_color(&unparsed.value.0, delta);
-                            }
-                        }
-                    }
-                    PropertyId::BackgroundColor => {
-                        if let Some(color) = color_from_tokens(&unparsed.value.0) {
-                            set_delta_background_color(delta, BackgroundSpec::Value(color));
-                        } else {
-                            let raw = tokens_debug_string(&unparsed.value.0);
-                            if let Some((color, alpha)) = parse_color_string(&raw) {
-                                set_delta_background_color(
-                                    delta,
-                                    BackgroundSpec::Value(blend_over_white(color, alpha)),
-                                );
-                            } else if should_defer_color_expr(&raw) {
-                                set_delta_background_color_var(delta, raw.to_ascii_lowercase());
-                            } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
-                                set_delta_background_color_var(delta, var);
-                            } else {
-                                apply_inherit_initial_background_color(&unparsed.value.0, delta);
-                            }
-                        }
-                    }
-                    PropertyId::Background => {
-                        if let Some(color) = color_from_tokens(&unparsed.value.0) {
-                            set_delta_background_color(delta, BackgroundSpec::Value(color));
-                        } else {
-                            let raw = tokens_debug_string(&unparsed.value.0);
-                            if let Some((color, alpha)) = parse_color_string(&raw) {
-                                set_delta_background_color(
-                                    delta,
-                                    BackgroundSpec::Value(blend_over_white(color, alpha)),
-                                );
-                            } else if should_defer_color_expr(&raw) {
-                                set_delta_background_color_var(delta, raw.to_ascii_lowercase());
-                            } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
-                                set_delta_background_color_var(delta, var);
-                            }
-                        }
-                    }
-                    PropertyId::BackgroundImage => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        apply_background_image_from_string(&raw, delta);
-                    }
-                    PropertyId::FontFamily => {
-                        let raw = tokens_raw_value_string(&unparsed.value.0);
-                        apply_font_family_from_raw(delta, &raw);
-                    }
-                    PropertyId::WhiteSpace => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        apply_white_space_from_raw(delta, &raw);
-                    }
-                    PropertyId::Direction => {
-                        apply_inherit_initial_direction(&unparsed.value.0, delta);
-                    }
-                    PropertyId::VerticalAlign => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        apply_vertical_align_from_raw(delta, &raw);
-                    }
-                    PropertyId::Display => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        apply_display_from_raw(delta, &raw);
-                    }
-                    PropertyId::Visibility => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        apply_visibility_from_raw(delta, &raw);
-                    }
-                    PropertyId::Position => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        apply_position_from_raw(delta, &raw);
-                    }
-                    PropertyId::ZIndex => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        apply_z_index_from_raw(delta, &raw);
-                    }
-                    PropertyId::Opacity => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        apply_opacity_from_raw(delta, &raw);
-                    }
-                    PropertyId::Width => {
-                        let before = delta.width;
-                        apply_inherit_initial_size(&unparsed.value.0, &mut delta.width);
-                        if delta.width != before {
-                            delta.width_var = None;
-                            delta.revert_layer.width = false;
-                        }
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        let raw_lower = raw.trim().to_ascii_lowercase();
-                        if raw_lower.contains("var(") {
-                            set_delta_width_var(delta, raw_lower);
-                        } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
-                            set_delta_width_var(delta, var);
-                        }
-                    }
-                    PropertyId::InlineSize => {
-                        delta.inline_size_var = None;
-                        apply_inherit_initial_size(&unparsed.value.0, &mut delta.inline_size);
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        let raw_lower = raw.trim().to_ascii_lowercase();
-                        if raw_lower.contains("var(") {
-                            delta.inline_size_var = Some(raw_lower);
-                        } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
-                            delta.inline_size_var = Some(var);
-                        }
-                    }
-                    PropertyId::MaxWidth => {
-                        delta.max_width_var = None;
-                        apply_inherit_initial_size(&unparsed.value.0, &mut delta.max_width);
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        let raw_lower = raw.trim().to_ascii_lowercase();
-                        if raw_lower.contains("var(") {
-                            delta.max_width_var = Some(raw_lower);
-                        } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
-                            delta.max_width_var = Some(var);
-                        }
-                    }
-                    PropertyId::MaxInlineSize => {
-                        delta.max_inline_size_var = None;
-                        apply_inherit_initial_size(&unparsed.value.0, &mut delta.max_inline_size);
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        let raw_lower = raw.trim().to_ascii_lowercase();
-                        if raw_lower.contains("var(") {
-                            delta.max_inline_size_var = Some(raw_lower);
-                        } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
-                            delta.max_inline_size_var = Some(var);
-                        }
-                    }
-                    PropertyId::Height => {
-                        let before = delta.height;
-                        apply_inherit_initial_size(&unparsed.value.0, &mut delta.height);
-                        if delta.height != before {
-                            delta.height_var = None;
-                            delta.revert_layer.height = false;
-                        }
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        let raw_lower = raw.trim().to_ascii_lowercase();
-                        if raw_lower.contains("var(") {
-                            set_delta_height_var(delta, raw_lower);
-                        } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
-                            set_delta_height_var(delta, var);
-                        }
-                    }
-                    PropertyId::BlockSize => {
-                        delta.block_size_var = None;
-                        apply_inherit_initial_size(&unparsed.value.0, &mut delta.block_size);
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        let raw_lower = raw.trim().to_ascii_lowercase();
-                        if raw_lower.contains("var(") {
-                            delta.block_size_var = Some(raw_lower);
-                        } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
-                            delta.block_size_var = Some(var);
-                        }
-                    }
-                    PropertyId::MinWidth => {
-                        delta.min_width_var = None;
-                        apply_inherit_initial_size(&unparsed.value.0, &mut delta.min_width);
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        let raw_lower = raw.trim().to_ascii_lowercase();
-                        if raw_lower.contains("var(") {
-                            delta.min_width_var = Some(raw_lower);
-                        }
-                    }
-                    PropertyId::MinInlineSize => {
-                        delta.min_inline_size_var = None;
-                        apply_inherit_initial_size(&unparsed.value.0, &mut delta.min_inline_size);
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        let raw_lower = raw.trim().to_ascii_lowercase();
-                        if raw_lower.contains("var(") {
-                            delta.min_inline_size_var = Some(raw_lower);
-                        } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
-                            delta.min_inline_size_var = Some(var);
-                        }
-                    }
-                    PropertyId::MinHeight => {
-                        delta.min_height_var = None;
-                        apply_inherit_initial_size(&unparsed.value.0, &mut delta.min_height);
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        let raw_lower = raw.trim().to_ascii_lowercase();
-                        if raw_lower.contains("var(") {
-                            delta.min_height_var = Some(raw_lower);
-                        }
-                    }
-                    PropertyId::MinBlockSize => {
-                        delta.min_block_size_var = None;
-                        apply_inherit_initial_size(&unparsed.value.0, &mut delta.min_block_size);
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        let raw_lower = raw.trim().to_ascii_lowercase();
-                        if raw_lower.contains("var(") {
-                            delta.min_block_size_var = Some(raw_lower);
-                        } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
-                            delta.min_block_size_var = Some(var);
-                        }
-                    }
-                    PropertyId::MaxHeight => {
-                        delta.max_height_var = None;
-                        apply_inherit_initial_size(&unparsed.value.0, &mut delta.max_height);
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        let raw_lower = raw.trim().to_ascii_lowercase();
-                        if raw_lower.contains("var(") {
-                            delta.max_height_var = Some(raw_lower);
-                        }
-                    }
-                    PropertyId::MaxBlockSize => {
-                        delta.max_block_size_var = None;
-                        apply_inherit_initial_size(&unparsed.value.0, &mut delta.max_block_size);
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        let raw_lower = raw.trim().to_ascii_lowercase();
-                        if raw_lower.contains("var(") {
-                            delta.max_block_size_var = Some(raw_lower);
-                        } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
-                            delta.max_block_size_var = Some(var);
-                        }
-                    }
-                    PropertyId::FontWeight => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        apply_font_weight_from_raw(delta, &raw);
-                    }
-                    PropertyId::FontStyle => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        apply_font_style_from_raw(delta, &raw);
-                    }
-                    PropertyId::TextTransform => {
-                        apply_inherit_initial_text_transform(&unparsed.value.0, delta);
-                    }
-                    PropertyId::TextAlignLast(_) => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        if let Some(mode) = parse_text_align_last_str(&raw) {
-                            set_delta_text_align_last(delta, TextAlignLastSpec::Value(mode));
-                        } else {
-                            apply_inherit_initial_text_align_last(&unparsed.value.0, delta);
-                        }
-                    }
-                    PropertyId::TextJustify => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        if !apply_text_justify_from_raw(delta, &raw) {
-                            apply_inherit_initial_text_justify(&unparsed.value.0, delta);
-                        }
-                    }
-                    PropertyId::Hyphens(_) => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        if !apply_hyphens_from_raw(delta, &raw) {
-                            apply_inherit_initial_hyphens(&unparsed.value.0, delta);
-                        }
-                    }
-                    PropertyId::Transform(_) => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        let raw_lower = raw.trim().to_ascii_lowercase();
-                        if let Some(ops) = transform_ops_from_string(&raw) {
-                            delta.transform = Some(TransformSpec::Value(ops));
-                        } else {
-                            apply_inherit_initial_transform(
-                                &unparsed.value.0,
-                                &mut delta.transform,
-                            );
-                            if raw_lower.contains("var(") {
-                                delta.transform_var = Some(raw_lower);
-                            }
-                        }
-                    }
-                    PropertyId::TransformOrigin(_) => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        if let Some(origin) = transform_origin_from_string(&raw) {
-                            delta.transform_origin = Some(TransformOriginSpec::Value(origin));
-                        } else {
-                            apply_inherit_initial_transform_origin(&unparsed.value.0, delta);
-                        }
-                    }
-                    PropertyId::Translate => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        let raw_lower = raw.trim().to_ascii_lowercase();
-                        if let Some(ops) = transform_ops_from_translate_string(&raw) {
-                            delta.translate = Some(TransformSpec::Value(ops));
-                        } else {
-                            apply_inherit_initial_transform(
-                                &unparsed.value.0,
-                                &mut delta.translate,
-                            );
-                            if raw_lower.contains("var(") {
-                                delta.translate_var = Some(raw_lower);
-                            }
-                        }
-                    }
-                    PropertyId::Rotate => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        let raw_lower = raw.trim().to_ascii_lowercase();
-                        if let Some(ops) = transform_ops_from_rotate_string(&raw) {
-                            delta.rotate = Some(TransformSpec::Value(ops));
-                        } else {
-                            apply_inherit_initial_transform(&unparsed.value.0, &mut delta.rotate);
-                            if raw_lower.contains("var(") {
-                                delta.rotate_var = Some(raw_lower);
-                            }
-                        }
-                    }
-                    PropertyId::Scale => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        let raw_lower = raw.trim().to_ascii_lowercase();
-                        if let Some(ops) = transform_ops_from_scale_string(&raw) {
-                            delta.scale = Some(TransformSpec::Value(ops));
-                        } else {
-                            apply_inherit_initial_transform(&unparsed.value.0, &mut delta.scale);
-                            if raw_lower.contains("var(") {
-                                delta.scale_var = Some(raw_lower);
-                            }
-                        }
-                    }
-                    PropertyId::TextDecorationLine(_) => {
-                        apply_inherit_initial_text_decoration(&unparsed.value.0, delta);
-                    }
-                    PropertyId::TextDecorationColor(_) => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        if !apply_text_decoration_color_from_raw(delta, &raw) {
-                            apply_inherit_initial_text_decoration_color(&unparsed.value.0, delta);
-                        }
-                    }
-                    PropertyId::TextDecorationThickness => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        if !apply_text_decoration_thickness_from_raw(delta, &raw) {
-                            apply_inherit_initial_text_decoration_thickness(
-                                &unparsed.value.0,
-                                delta,
-                            );
-                        }
-                    }
-                    PropertyId::TextDecorationStyle(_) => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        if !apply_text_decoration_style_from_raw(delta, &raw) {
-                            apply_inherit_initial_text_decoration_style(&unparsed.value.0, delta);
-                        }
-                    }
-                    PropertyId::TextDecoration(_) => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        apply_inherit_initial_text_decoration(&unparsed.value.0, delta);
-                        if !apply_text_decoration_color_from_shorthand(delta, &raw) {
-                            let global = apply_inherit_initial_text_decoration_color(
-                                &unparsed.value.0,
-                                delta,
-                            );
-                            if !global {
-                                set_delta_text_decoration_color_spec(
-                                    delta,
-                                    ColorSpec::CurrentColor,
-                                );
-                            }
-                        }
-                        if !apply_text_decoration_thickness_from_shorthand(delta, &raw) {
-                            let global = apply_inherit_initial_text_decoration_thickness(
-                                &unparsed.value.0,
-                                delta,
-                            );
-                            if !global {
-                                set_delta_text_decoration_thickness_spec(
-                                    delta,
-                                    TextDecorationThicknessSpec::Initial,
-                                );
-                            }
-                        }
-                        if !apply_text_decoration_style_from_shorthand(delta, &raw) {
-                            let global = apply_inherit_initial_text_decoration_style(
-                                &unparsed.value.0,
-                                delta,
-                            );
-                            if !global {
-                                set_delta_text_decoration_style_spec(
-                                    delta,
-                                    TextDecorationStyleSpec::Initial,
-                                );
-                            }
-                        }
-                    }
-                    PropertyId::TextShadow => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        apply_text_shadow_from_raw(delta, &raw);
-                    }
-                    PropertyId::TextOverflow(_) => {
-                        apply_inherit_initial_text_overflow(&unparsed.value.0, delta);
-                    }
-                    PropertyId::TextIndent => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        if let Some(spec) = parse_text_indent_str(&raw) {
-                            set_delta_text_indent_value(delta, spec);
-                        } else {
-                            apply_inherit_initial_text_indent(&unparsed.value.0, delta);
-                        }
-                    }
-                    PropertyId::LetterSpacing => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        if let Some(spec) = parse_letter_spacing_str(&raw) {
-                            set_delta_letter_spacing(delta, spec);
-                        } else {
-                            apply_inherit_initial_letter_spacing(&unparsed.value.0, delta);
-                        }
-                    }
-                    PropertyId::WordSpacing => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        if let Some(spec) = parse_word_spacing_str(&raw) {
-                            set_delta_word_spacing(delta, spec);
-                        } else {
-                            apply_inherit_initial_word_spacing(&unparsed.value.0, delta);
-                        }
-                    }
-                    PropertyId::WordBreak => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        apply_word_break_from_raw(delta, &raw);
-                    }
-                    PropertyId::OverflowWrap | PropertyId::WordWrap => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        apply_overflow_wrap_from_raw(delta, &raw);
-                    }
-                    PropertyId::LineBreak => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        if !apply_line_break_from_raw(delta, &raw) {
-                            apply_inherit_initial_line_break(&unparsed.value.0, delta);
-                        }
-                    }
-                    PropertyId::TabSize(_) => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        if let Some(spec) = parse_tab_size_str(&raw) {
-                            set_delta_tab_size(delta, spec);
-                        } else {
-                            apply_inherit_initial_tab_size(&unparsed.value.0, delta);
-                        }
-                    }
-                    PropertyId::Border
-                    | PropertyId::BorderTop
-                    | PropertyId::BorderRight
-                    | PropertyId::BorderBottom
-                    | PropertyId::BorderLeft
-                    | PropertyId::BorderBlockStart
-                    | PropertyId::BorderBlockEnd
-                    | PropertyId::BorderInlineStart
-                    | PropertyId::BorderInlineEnd => {
-                        let target = border_color_target_from_property_id(&unparsed.property_id);
-                        apply_inherit_initial_border_color_target(&unparsed.value.0, delta, target);
-                        if let Some(spec) = length_spec_from_custom_tokens(&unparsed.value.0) {
-                            set_delta_border_width_spec(delta, target, spec);
-                        } else if let Some(expr) = length_var_expr_from_tokens(&unparsed.value.0) {
-                            set_delta_border_width_var(delta, target, expr);
-                        }
-                        if let Some(color) = color_from_tokens(&unparsed.value.0) {
-                            set_delta_border_color_spec(delta, target, ColorSpec::Value(color));
-                        } else {
-                            let raw = tokens_debug_string(&unparsed.value.0);
-                            if let Some((color, alpha)) = parse_color_string(&raw) {
-                                set_delta_border_color_spec(
-                                    delta,
-                                    target,
-                                    ColorSpec::Value(blend_over_white(color, alpha)),
-                                );
-                            } else if raw.to_ascii_lowercase().contains("color-mix(") {
-                                set_delta_border_color_var(delta, target, raw.to_ascii_lowercase());
-                            } else if let Some(var) = last_var_name_from_tokens(&unparsed.value.0)
-                                .or_else(|| var_name_from_tokens(&unparsed.value.0))
-                            {
-                                set_delta_border_color_var(delta, target, var);
-                            }
-                        }
-                        if let Some(style) = border_line_style_from_tokens(&unparsed.value.0) {
-                            set_delta_border_style(delta, target, style);
-                        }
-                    }
-                    PropertyId::BorderColor
-                    | PropertyId::BorderTopColor
-                    | PropertyId::BorderRightColor
-                    | PropertyId::BorderBottomColor
-                    | PropertyId::BorderLeftColor
-                    | PropertyId::BorderBlockStartColor
-                    | PropertyId::BorderBlockEndColor
-                    | PropertyId::BorderInlineStartColor
-                    | PropertyId::BorderInlineEndColor => {
-                        let target = border_color_target_from_property_id(&unparsed.property_id);
-                        apply_inherit_initial_border_color_target(&unparsed.value.0, delta, target);
-                        if let Some(color) = color_from_tokens(&unparsed.value.0) {
-                            set_delta_border_color_spec(delta, target, ColorSpec::Value(color));
-                        } else {
-                            let raw = tokens_debug_string(&unparsed.value.0);
-                            if let Some((color, alpha)) = parse_color_string(&raw) {
-                                set_delta_border_color_spec(
-                                    delta,
-                                    target,
-                                    ColorSpec::Value(blend_over_white(color, alpha)),
-                                );
-                            } else if should_defer_color_expr(&raw) {
-                                set_delta_border_color_var(delta, target, raw.to_ascii_lowercase());
-                            } else if let Some(var) = last_var_name_from_tokens(&unparsed.value.0)
-                                .or_else(|| var_name_from_tokens(&unparsed.value.0))
-                            {
-                                set_delta_border_color_var(delta, target, var);
-                            }
-                        }
-                    }
-                    PropertyId::BorderWidth
-                    | PropertyId::BorderTopWidth
-                    | PropertyId::BorderRightWidth
-                    | PropertyId::BorderBottomWidth
-                    | PropertyId::BorderLeftWidth
-                    | PropertyId::BorderBlockStartWidth
-                    | PropertyId::BorderBlockEndWidth
-                    | PropertyId::BorderInlineStartWidth
-                    | PropertyId::BorderInlineEndWidth => {
-                        let target = border_color_target_from_property_id(&unparsed.property_id);
-                        if let Some(spec) = length_spec_from_custom_tokens(&unparsed.value.0) {
-                            set_delta_border_width_spec(delta, target, spec);
-                        } else if let Some(expr) = length_var_expr_from_tokens(&unparsed.value.0) {
-                            set_delta_border_width_var(delta, target, expr);
-                        }
-                    }
-                    PropertyId::BorderStyle
-                    | PropertyId::BorderTopStyle
-                    | PropertyId::BorderRightStyle
-                    | PropertyId::BorderBottomStyle
-                    | PropertyId::BorderLeftStyle
-                    | PropertyId::BorderBlockStartStyle
-                    | PropertyId::BorderBlockEndStyle
-                    | PropertyId::BorderInlineStartStyle
-                    | PropertyId::BorderInlineEndStyle => {
-                        if let Some(style) = border_line_style_from_tokens(&unparsed.value.0) {
-                            let target =
-                                border_color_target_from_property_id(&unparsed.property_id);
-                            set_delta_border_style(delta, target, style);
-                        }
-                    }
-                    PropertyId::FlexDirection(_) => {
-                        if let Some(value) = first_ident(&unparsed.value.0) {
-                            delta.flex_direction = Some(match value.as_str() {
-                                "column" => FlexDirectionMode::Column,
-                                _ => FlexDirectionMode::Row,
-                            });
-                        }
-                    }
-                    PropertyId::FlexWrap(_) => {
-                        if let Some(value) = first_ident(&unparsed.value.0) {
-                            delta.flex_wrap = Some(match value.as_str() {
-                                "wrap" | "wrap-reverse" => FlexWrapMode::Wrap,
-                                _ => FlexWrapMode::NoWrap,
-                            });
-                        }
-                    }
-                    PropertyId::FlexFlow(_) => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        if let Some((direction, wrap)) = parse_flex_flow_str(&raw) {
-                            delta.flex_direction = Some(direction);
-                            delta.flex_wrap = Some(wrap);
-                        }
-                    }
-                    PropertyId::Order(_) | PropertyId::FlexOrder(_) => {
-                        if let Some(value) = first_number(&unparsed.value.0) {
-                            delta.order = Some(value.round() as i32);
-                        }
-                    }
-                    PropertyId::JustifyContent(_) => {
-                        if let Some(value) = first_ident(&unparsed.value.0) {
-                            delta.justify_content = Some(match value.as_str() {
-                                "flex-end" | "end" => JustifyContentMode::FlexEnd,
-                                "center" => JustifyContentMode::Center,
-                                "space-between" => JustifyContentMode::SpaceBetween,
-                                "space-around" => JustifyContentMode::SpaceAround,
-                                "space-evenly" => JustifyContentMode::SpaceEvenly,
-                                _ => JustifyContentMode::FlexStart,
-                            });
-                        }
-                    }
-                    PropertyId::AlignItems(_) => {
-                        if let Some(value) = first_ident(&unparsed.value.0) {
-                            delta.align_items = Some(match value.as_str() {
-                                "flex-end" | "end" => AlignItemsMode::FlexEnd,
-                                "center" => AlignItemsMode::Center,
-                                "stretch" => AlignItemsMode::Stretch,
-                                _ => AlignItemsMode::FlexStart,
-                            });
-                        }
-                    }
-                    PropertyId::PlaceItems => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        if let Some(align) = parse_place_items_align_str(&raw) {
-                            delta.align_items = Some(align);
-                        }
-                    }
-                    PropertyId::AlignSelf(_) => {
-                        if let Some(value) = first_ident(&unparsed.value.0) {
-                            delta.align_self = Some(match value.as_str() {
-                                "auto" | "normal" => AlignSelfMode::Auto,
-                                "flex-end" | "end" | "self-end" => AlignSelfMode::FlexEnd,
-                                "center" => AlignSelfMode::Center,
-                                "stretch" => AlignSelfMode::Stretch,
-                                _ => AlignSelfMode::FlexStart,
-                            });
-                        }
-                    }
-                    PropertyId::AlignContent(_) => {
-                        if let Some(value) = first_ident(&unparsed.value.0) {
-                            delta.align_content = Some(match value.as_str() {
-                                "flex-end" | "end" => AlignContentMode::FlexEnd,
-                                "center" => AlignContentMode::Center,
-                                "space-between" => AlignContentMode::SpaceBetween,
-                                "space-around" => AlignContentMode::SpaceAround,
-                                "space-evenly" => AlignContentMode::SpaceEvenly,
-                                _ => AlignContentMode::FlexStart,
-                            });
-                        }
-                    }
-                    PropertyId::PlaceContent => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        if let Some((align, justify)) = parse_place_content_str(&raw) {
-                            delta.align_content = Some(align);
-                            delta.justify_content = Some(justify);
-                        }
-                    }
-                    PropertyId::PlaceSelf => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        if let Some(align) = parse_place_self_align_str(&raw) {
-                            delta.align_self = Some(align);
-                        }
-                    }
-                    PropertyId::GridTemplateColumns => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        delta.grid_columns = parse_grid_track_count(&raw);
-                    }
-                    PropertyId::GridTemplateRows => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        delta.grid_rows = parse_grid_track_count(&raw);
-                    }
-                    PropertyId::GridColumnStart => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        delta.grid_column_start = parse_grid_track_start(&raw);
-                    }
-                    PropertyId::GridRowStart => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        delta.grid_row_start = parse_grid_track_start(&raw);
-                    }
-                    PropertyId::GridColumn => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        delta.grid_column_start = parse_grid_track_start(&raw);
-                    }
-                    PropertyId::GridRow => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        delta.grid_row_start = parse_grid_track_start(&raw);
-                    }
-                    PropertyId::GridArea => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        let (row_start, col_start) = parse_grid_area_starts(&raw);
-                        if row_start.is_some() {
-                            delta.grid_row_start = row_start;
-                        }
-                        if col_start.is_some() {
-                            delta.grid_column_start = col_start;
-                        }
-                    }
-                    PropertyId::BoxSizing(_) => {
-                        if let Some(value) = first_ident(&unparsed.value.0) {
-                            set_delta_box_sizing(
-                                delta,
-                                match value.as_str() {
-                                    "border-box" => BoxSizingMode::BorderBox,
-                                    _ => BoxSizingMode::ContentBox,
-                                },
-                            );
-                        }
-                    }
-                    PropertyId::ContainerType => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        delta.container_type = parse_container_query_type_spec_str(&raw);
-                    }
-                    PropertyId::ContainerName => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        delta.container_names = parse_container_names_spec_str(&raw);
-                    }
-                    PropertyId::Container => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        apply_container_shorthand_from_raw(&raw, delta);
-                    }
-                    PropertyId::Gap | PropertyId::RowGap | PropertyId::ColumnGap => {
-                        apply_gap_tokens(&unparsed.value.0, delta);
-                    }
-                    PropertyId::BorderSpacing => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        if let Some(spacing) = parse_border_spacing_str(&raw) {
-                            delta.border_spacing = Some(spacing);
-                        }
-                    }
-                    PropertyId::BorderRadius(_) => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        if let Some(radius) = parse_border_radius_str(&raw) {
-                            delta.border_radius = Some(radius);
-                        }
-                    }
-                    PropertyId::BoxShadow(_) => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        if let Some(shadows) = parse_box_shadow_list_str(&raw) {
-                            set_delta_box_shadows(delta, shadows);
-                        }
-                    }
-                    PropertyId::ClipPath(_) => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        if let Some(spec) = parse_clip_path_spec_str(&raw) {
-                            set_delta_clip_path(delta, spec);
-                        }
-                    }
-                    PropertyId::Filter(_) => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        set_delta_paint_filter_from_raw(delta, &raw);
-                    }
-                    PropertyId::BackdropFilter(_) => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        set_delta_backdrop_filter_from_raw(delta, &raw);
-                    }
-                    PropertyId::MaskImage(_)
-                    | PropertyId::Mask(_)
-                    | PropertyId::MaskBorderSource
-                    | PropertyId::MaskBorder => {
-                        let raw = tokens_debug_string(&unparsed.value.0);
-                        set_delta_mask_backdrop_root_from_raw(delta, &raw);
-                    }
-                    PropertyId::Custom(name) => {
-                        let name = name.as_ref().to_ascii_lowercase();
-                        apply_custom_property(&name, &unparsed.value.0, delta);
-                    }
-                    PropertyId::Flex(_) => {
-                        if let Some(value) = first_number(&unparsed.value.0) {
-                            delta.flex_grow = Some(value);
-                        }
-                        delta.flex_basis_var = None;
-                        apply_inherit_initial_size(&unparsed.value.0, &mut delta.flex_basis);
-                        if let Some(spec) = length_spec_from_custom_tokens(&unparsed.value.0) {
-                            delta.flex_basis = Some(spec);
-                        } else if let Some(value) = first_ident(&unparsed.value.0) {
-                            if value.eq_ignore_ascii_case("auto") {
-                                delta.flex_basis = Some(LengthSpec::Auto);
-                            }
-                        } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
-                            // For shorthand we resolve against the first custom-property ref token.
-                            delta.flex_basis_var = Some(var);
-                        }
-                    }
-                    PropertyId::FlexBasis(_) => {
-                        delta.flex_basis_var = None;
-                        apply_inherit_initial_size(&unparsed.value.0, &mut delta.flex_basis);
-                        if let Some(spec) = length_spec_from_custom_tokens(&unparsed.value.0) {
-                            delta.flex_basis = Some(spec);
-                        } else if let Some(value) = first_ident(&unparsed.value.0) {
-                            if value.eq_ignore_ascii_case("auto") {
-                                delta.flex_basis = Some(LengthSpec::Auto);
-                            }
-                        } else {
-                            let raw = tokens_debug_string(&unparsed.value.0);
-                            let raw_lower = raw.trim().to_ascii_lowercase();
-                            if raw_lower.contains("var(") {
-                                delta.flex_basis_var = Some(raw_lower);
-                            } else if let Some(var) = var_name_from_tokens(&unparsed.value.0) {
-                                delta.flex_basis_var = Some(var);
-                            }
-                        }
-                    }
-                    PropertyId::Left => {
-                        apply_inset_edge_from_tokens(delta, BoxEdgeTarget::Left, &unparsed.value.0);
-                    }
-                    PropertyId::InsetInlineStart => {
-                        if apply_inset_edge_from_tokens(
-                            delta,
-                            BoxEdgeTarget::Left,
-                            &unparsed.value.0,
-                        ) {
-                            delta
-                                .revert_layer
-                                .inset_logical
-                                .clear(LogicalBoxEdgeTarget::InlineStart);
-                        }
-                    }
-                    PropertyId::Top => {
-                        apply_inset_edge_from_tokens(delta, BoxEdgeTarget::Top, &unparsed.value.0);
-                    }
-                    PropertyId::InsetBlockStart => {
-                        if apply_inset_edge_from_tokens(
-                            delta,
-                            BoxEdgeTarget::Top,
-                            &unparsed.value.0,
-                        ) {
-                            delta
-                                .revert_layer
-                                .inset_logical
-                                .clear(LogicalBoxEdgeTarget::BlockStart);
-                        }
-                    }
-                    PropertyId::Right => {
-                        apply_inset_edge_from_tokens(
-                            delta,
-                            BoxEdgeTarget::Right,
-                            &unparsed.value.0,
-                        );
-                    }
-                    PropertyId::InsetInlineEnd => {
-                        if apply_inset_edge_from_tokens(
-                            delta,
-                            BoxEdgeTarget::Right,
-                            &unparsed.value.0,
-                        ) {
-                            delta
-                                .revert_layer
-                                .inset_logical
-                                .clear(LogicalBoxEdgeTarget::InlineEnd);
-                        }
-                    }
-                    PropertyId::Bottom => {
-                        apply_inset_edge_from_tokens(
-                            delta,
-                            BoxEdgeTarget::Bottom,
-                            &unparsed.value.0,
-                        );
-                    }
-                    PropertyId::InsetBlockEnd => {
-                        if apply_inset_edge_from_tokens(
-                            delta,
-                            BoxEdgeTarget::Bottom,
-                            &unparsed.value.0,
-                        ) {
-                            delta
-                                .revert_layer
-                                .inset_logical
-                                .clear(LogicalBoxEdgeTarget::BlockEnd);
-                        }
-                    }
-                    PropertyId::Inset => {
-                        apply_inset_shorthand_from_tokens(delta, &unparsed.value.0);
-                    }
-                    PropertyId::InsetInline => {
-                        delta.inset_left_var = None;
-                        delta.inset_right_var = None;
-                        if apply_inherit_initial_edge_pair(
-                            &unparsed.value.0,
-                            &mut delta.inset_left,
-                            &mut delta.inset_right,
-                            &mut delta.inset_left_var,
-                            &mut delta.inset_right_var,
-                            true,
-                        ) {
-                            delta
-                                .revert_layer
-                                .inset_logical
-                                .clear(LogicalBoxEdgeTarget::Inline);
-                        }
-                    }
-                    PropertyId::InsetBlock => {
-                        delta.inset_top_var = None;
-                        delta.inset_bottom_var = None;
-                        if apply_inherit_initial_edge_pair(
-                            &unparsed.value.0,
-                            &mut delta.inset_top,
-                            &mut delta.inset_bottom,
-                            &mut delta.inset_top_var,
-                            &mut delta.inset_bottom_var,
-                            true,
-                        ) {
-                            delta
-                                .revert_layer
-                                .inset_logical
-                                .clear(LogicalBoxEdgeTarget::Block);
-                        }
-                    }
-                    PropertyId::Margin
-                    | PropertyId::MarginTop
-                    | PropertyId::MarginRight
-                    | PropertyId::MarginBottom
-                    | PropertyId::MarginLeft
-                    | PropertyId::MarginBlockStart
-                    | PropertyId::MarginBlockEnd
-                    | PropertyId::MarginInlineStart
-                    | PropertyId::MarginInlineEnd
-                    | PropertyId::MarginBlock
-                    | PropertyId::MarginInline => {
-                        apply_inherit_initial_edge(
-                            &unparsed.value.0,
-                            &unparsed.property_id,
-                            delta,
-                            true,
-                        );
-                    }
-                    PropertyId::Padding
-                    | PropertyId::PaddingTop
-                    | PropertyId::PaddingRight
-                    | PropertyId::PaddingBottom
-                    | PropertyId::PaddingLeft
-                    | PropertyId::PaddingBlockStart
-                    | PropertyId::PaddingBlockEnd
-                    | PropertyId::PaddingInlineStart
-                    | PropertyId::PaddingInlineEnd
-                    | PropertyId::PaddingBlock
-                    | PropertyId::PaddingInline => {
-                        apply_inherit_initial_edge(
-                            &unparsed.value.0,
-                            &unparsed.property_id,
-                            delta,
-                            false,
-                        );
-                    }
-                    _ => {
-                        if let Ok(property_name) = unparsed
-                            .property_id
-                            .to_css_string(PrinterOptions::default())
-                        {
-                            if property_name.eq_ignore_ascii_case("table-layout") {
-                                if let Some(value) = first_ident(&unparsed.value.0) {
-                                    delta.table_layout = Some(match value.as_str() {
-                                        "fixed" => TableLayoutMode::Fixed,
-                                        _ => TableLayoutMode::Auto,
-                                    });
-                                }
-                            } else if property_name.eq_ignore_ascii_case("empty-cells") {
-                                if let Some(value) = first_ident(&unparsed.value.0) {
-                                    delta.empty_cells_hide = Some(value == "hide");
-                                }
-                            } else if property_name.eq_ignore_ascii_case("background-size") {
-                                let raw = tokens_debug_string(&unparsed.value.0);
-                                apply_background_size_from_string(&raw, delta);
-                            } else if property_name.eq_ignore_ascii_case("background-position") {
-                                let raw = tokens_debug_string(&unparsed.value.0);
-                                apply_background_position_from_string(&raw, delta);
-                            } else if property_name.eq_ignore_ascii_case("background-repeat") {
-                                let raw = tokens_debug_string(&unparsed.value.0);
-                                apply_background_repeat_from_string(&raw, delta);
-                            } else if property_name.eq_ignore_ascii_case("background-blend-mode") {
-                                let raw = tokens_debug_string(&unparsed.value.0);
-                                apply_background_blend_mode_from_string(&raw, delta);
-                            } else if property_name.eq_ignore_ascii_case("background-origin") {
-                                let raw = tokens_debug_string(&unparsed.value.0);
-                                apply_background_origin_from_string(&raw, delta);
-                            } else if property_name.eq_ignore_ascii_case("background-clip") {
-                                let raw = tokens_debug_string(&unparsed.value.0);
-                                apply_background_clip_from_string(&raw, delta);
-                            } else if property_name.eq_ignore_ascii_case("hyphenate-character")
-                                || property_name.eq_ignore_ascii_case("-webkit-hyphenate-character")
-                            {
-                                let raw = tokens_raw_value_string(&unparsed.value.0);
-                                apply_hyphenate_character_from_raw(delta, &raw);
-                            } else if property_name.eq_ignore_ascii_case("white-space-collapse") {
-                                let raw = tokens_debug_string(&unparsed.value.0);
-                                apply_white_space_collapse_from_raw(delta, &raw);
-                            } else if property_name.eq_ignore_ascii_case("font") {
-                                let raw = tokens_raw_value_string(&unparsed.value.0);
-                                apply_font_shorthand_from_raw(delta, &raw);
-                            } else if property_name.eq_ignore_ascii_case("list-style-type") {
-                                apply_list_style_type_from_tokens(delta, &unparsed.value.0);
-                            } else if property_name.eq_ignore_ascii_case("list-style-image") {
-                                apply_list_style_image_from_tokens(delta, &unparsed.value.0);
-                            } else if property_name.eq_ignore_ascii_case("list-style-position") {
-                                apply_list_style_position_from_tokens(delta, &unparsed.value.0);
-                            }
-                        }
-                    }
-                }
-            }
-            _ => {}
+        }
+        return true;
+    }
+
+    let is_max = matches!(
+        property_name,
+        "max-width" | "max-height" | "max-inline-size" | "max-block-size"
+    );
+    let component = if is_max && lowered == "none" {
+        NativeLengthComponent::Spec(LengthSpec::Auto)
+    } else {
+        let Some(value) = parse_native_length_component(&lowered, !is_max, false) else {
+            return false;
+        };
+        value
+    };
+    apply_native_size_component(property_name, component, delta)
+}
+
+fn apply_native_size_component(
+    property_name: &str,
+    component: NativeLengthComponent,
+    delta: &mut StyleDelta,
+) -> bool {
+    match (property_name, component) {
+        ("width", NativeLengthComponent::Spec(value)) => set_delta_width(delta, value),
+        ("width", NativeLengthComponent::Var(value)) => set_delta_width_var(delta, value),
+        ("height", NativeLengthComponent::Spec(value)) => set_delta_height(delta, value),
+        ("height", NativeLengthComponent::Var(value)) => set_delta_height_var(delta, value),
+        ("min-width", NativeLengthComponent::Spec(value)) => {
+            delta.min_width = Some(value);
+            delta.min_width_var = None;
+        }
+        ("min-width", NativeLengthComponent::Var(value)) => {
+            delta.min_width = None;
+            delta.min_width_var = Some(value);
+        }
+        ("max-width", NativeLengthComponent::Spec(value)) => {
+            delta.max_width = Some(value);
+            delta.max_width_var = None;
+        }
+        ("max-width", NativeLengthComponent::Var(value)) => {
+            delta.max_width = None;
+            delta.max_width_var = Some(value);
+        }
+        ("min-height", NativeLengthComponent::Spec(value)) => {
+            delta.min_height = Some(value);
+            delta.min_height_var = None;
+        }
+        ("min-height", NativeLengthComponent::Var(value)) => {
+            delta.min_height = None;
+            delta.min_height_var = Some(value);
+        }
+        ("max-height", NativeLengthComponent::Spec(value)) => {
+            delta.max_height = Some(value);
+            delta.max_height_var = None;
+        }
+        ("max-height", NativeLengthComponent::Var(value)) => {
+            delta.max_height = None;
+            delta.max_height_var = Some(value);
+        }
+        ("inline-size", NativeLengthComponent::Spec(value)) => {
+            delta.inline_size = Some(value);
+            delta.inline_size_var = None;
+        }
+        ("inline-size", NativeLengthComponent::Var(value)) => {
+            delta.inline_size = None;
+            delta.inline_size_var = Some(value);
+        }
+        ("block-size", NativeLengthComponent::Spec(value)) => {
+            delta.block_size = Some(value);
+            delta.block_size_var = None;
+        }
+        ("block-size", NativeLengthComponent::Var(value)) => {
+            delta.block_size = None;
+            delta.block_size_var = Some(value);
+        }
+        ("min-inline-size", NativeLengthComponent::Spec(value)) => {
+            delta.min_inline_size = Some(value);
+            delta.min_inline_size_var = None;
+        }
+        ("min-inline-size", NativeLengthComponent::Var(value)) => {
+            delta.min_inline_size = None;
+            delta.min_inline_size_var = Some(value);
+        }
+        ("max-inline-size", NativeLengthComponent::Spec(value)) => {
+            delta.max_inline_size = Some(value);
+            delta.max_inline_size_var = None;
+        }
+        ("max-inline-size", NativeLengthComponent::Var(value)) => {
+            delta.max_inline_size = None;
+            delta.max_inline_size_var = Some(value);
+        }
+        ("min-block-size", NativeLengthComponent::Spec(value)) => {
+            delta.min_block_size = Some(value);
+            delta.min_block_size_var = None;
+        }
+        ("min-block-size", NativeLengthComponent::Var(value)) => {
+            delta.min_block_size = None;
+            delta.min_block_size_var = Some(value);
+        }
+        ("max-block-size", NativeLengthComponent::Spec(value)) => {
+            delta.max_block_size = Some(value);
+            delta.max_block_size_var = None;
+        }
+        ("max-block-size", NativeLengthComponent::Var(value)) => {
+            delta.max_block_size = None;
+            delta.max_block_size_var = Some(value);
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn apply_native_inset_property(property_name: &str, raw: &str, delta: &mut StyleDelta) -> bool {
+    let physical_target = match property_name {
+        "inset" => Some(BoxEdgeTarget::All),
+        "top" => Some(BoxEdgeTarget::Top),
+        "right" => Some(BoxEdgeTarget::Right),
+        "bottom" => Some(BoxEdgeTarget::Bottom),
+        "left" => Some(BoxEdgeTarget::Left),
+        _ => None,
+    };
+    if let Some(target) = physical_target {
+        if raw.trim().eq_ignore_ascii_case("revert-layer") {
+            clear_delta_inset_edge(delta, target);
+            delta.revert_layer.inset.set(target);
+            return true;
+        }
+        if target == BoxEdgeTarget::All {
+            let Some(values) = parse_native_length_components(raw, 4, true, true) else {
+                return false;
+            };
+            let Some([top, right, bottom, left]) = expand_native_four(&values) else {
+                return false;
+            };
+            set_delta_inset_component(delta, BoxEdgeTarget::Top, top);
+            set_delta_inset_component(delta, BoxEdgeTarget::Right, right);
+            set_delta_inset_component(delta, BoxEdgeTarget::Bottom, bottom);
+            set_delta_inset_component(delta, BoxEdgeTarget::Left, left);
+        } else {
+            let Some(value) = parse_native_length_component(raw, true, true) else {
+                return false;
+            };
+            set_delta_inset_component(delta, target, value);
+        }
+        return true;
+    }
+
+    let Some(logical_target) = (match property_name {
+        "inset-inline" => Some(LogicalBoxEdgeTarget::Inline),
+        "inset-inline-start" => Some(LogicalBoxEdgeTarget::InlineStart),
+        "inset-inline-end" => Some(LogicalBoxEdgeTarget::InlineEnd),
+        "inset-block" => Some(LogicalBoxEdgeTarget::Block),
+        "inset-block-start" => Some(LogicalBoxEdgeTarget::BlockStart),
+        "inset-block-end" => Some(LogicalBoxEdgeTarget::BlockEnd),
+        _ => None,
+    }) else {
+        return false;
+    };
+    if raw.trim().eq_ignore_ascii_case("revert-layer") {
+        clear_delta_logical_inset_edge(delta, logical_target);
+        delta.revert_layer.inset_logical.set(logical_target);
+        return true;
+    }
+    match logical_target {
+        LogicalBoxEdgeTarget::Inline | LogicalBoxEdgeTarget::Block => {
+            let Some(values) = parse_native_length_components(raw, 2, true, true) else {
+                return false;
+            };
+            let Some([start, end]) = expand_native_pair(&values) else {
+                return false;
+            };
+            let (start_target, end_target) = if logical_target == LogicalBoxEdgeTarget::Inline {
+                (
+                    LogicalBoxEdgeTarget::InlineStart,
+                    LogicalBoxEdgeTarget::InlineEnd,
+                )
+            } else {
+                (
+                    LogicalBoxEdgeTarget::BlockStart,
+                    LogicalBoxEdgeTarget::BlockEnd,
+                )
+            };
+            set_delta_logical_inset_component(delta, start_target, start);
+            set_delta_logical_inset_component(delta, end_target, end);
+        }
+        _ => {
+            let Some(value) = parse_native_length_component(raw, true, true) else {
+                return false;
+            };
+            set_delta_logical_inset_component(delta, logical_target, value);
+        }
+    }
+    true
+}
+
+fn set_delta_inset_component(
+    delta: &mut StyleDelta,
+    target: BoxEdgeTarget,
+    component: NativeLengthComponent,
+) {
+    match component {
+        NativeLengthComponent::Spec(value) => {
+            set_delta_inset_edge_spec(delta, target, Some(value));
+        }
+        NativeLengthComponent::Var(value) => set_delta_inset_edge_var(delta, target, value),
+    }
+}
+
+fn set_delta_logical_inset_component(
+    delta: &mut StyleDelta,
+    target: LogicalBoxEdgeTarget,
+    component: NativeLengthComponent,
+) {
+    delta.revert_layer.inset_logical.clear(target);
+    match (target, component) {
+        (LogicalBoxEdgeTarget::InlineStart, NativeLengthComponent::Spec(value)) => {
+            delta.inset_inline_start = Some(value);
+            delta.inset_inline_start_var = None;
+        }
+        (LogicalBoxEdgeTarget::InlineStart, NativeLengthComponent::Var(value)) => {
+            delta.inset_inline_start = None;
+            delta.inset_inline_start_var = Some(value);
+        }
+        (LogicalBoxEdgeTarget::InlineEnd, NativeLengthComponent::Spec(value)) => {
+            delta.inset_inline_end = Some(value);
+            delta.inset_inline_end_var = None;
+        }
+        (LogicalBoxEdgeTarget::InlineEnd, NativeLengthComponent::Var(value)) => {
+            delta.inset_inline_end = None;
+            delta.inset_inline_end_var = Some(value);
+        }
+        (LogicalBoxEdgeTarget::BlockStart, NativeLengthComponent::Spec(value)) => {
+            delta.inset_block_start = Some(value);
+            delta.inset_block_start_var = None;
+        }
+        (LogicalBoxEdgeTarget::BlockStart, NativeLengthComponent::Var(value)) => {
+            delta.inset_block_start = None;
+            delta.inset_block_start_var = Some(value);
+        }
+        (LogicalBoxEdgeTarget::BlockEnd, NativeLengthComponent::Spec(value)) => {
+            delta.inset_block_end = Some(value);
+            delta.inset_block_end_var = None;
+        }
+        (LogicalBoxEdgeTarget::BlockEnd, NativeLengthComponent::Var(value)) => {
+            delta.inset_block_end = None;
+            delta.inset_block_end_var = Some(value);
+        }
+        (LogicalBoxEdgeTarget::Inline, _) | (LogicalBoxEdgeTarget::Block, _) => {}
+    }
+}
+
+fn apply_native_box_edge_property(property_name: &str, raw: &str, delta: &mut StyleDelta) -> bool {
+    let is_margin = property_name.starts_with("margin");
+    let physical_target = match property_name {
+        "margin" | "padding" => Some(BoxEdgeTarget::All),
+        "margin-top" | "padding-top" => Some(BoxEdgeTarget::Top),
+        "margin-right" | "padding-right" => Some(BoxEdgeTarget::Right),
+        "margin-bottom" | "padding-bottom" => Some(BoxEdgeTarget::Bottom),
+        "margin-left" | "padding-left" => Some(BoxEdgeTarget::Left),
+        _ => None,
+    };
+    if let Some(target) = physical_target {
+        if raw.trim().eq_ignore_ascii_case("revert-layer") {
+            set_revert_layer_native_box_edge(delta, is_margin, target);
+            return true;
+        }
+        if target == BoxEdgeTarget::All {
+            let Some(values) = parse_native_length_components(raw, 4, is_margin, is_margin) else {
+                return false;
+            };
+            let Some([top, right, bottom, left]) = expand_native_four(&values) else {
+                return false;
+            };
+            set_delta_native_box_edge_component(delta, is_margin, BoxEdgeTarget::Top, top);
+            set_delta_native_box_edge_component(delta, is_margin, BoxEdgeTarget::Right, right);
+            set_delta_native_box_edge_component(delta, is_margin, BoxEdgeTarget::Bottom, bottom);
+            set_delta_native_box_edge_component(delta, is_margin, BoxEdgeTarget::Left, left);
+        } else {
+            let Some(value) = parse_native_length_component(raw, is_margin, is_margin) else {
+                return false;
+            };
+            set_delta_native_box_edge_component(delta, is_margin, target, value);
+        }
+        return true;
+    }
+
+    let Some(logical_target) = (match property_name {
+        "margin-inline" | "padding-inline" => Some(LogicalBoxEdgeTarget::Inline),
+        "margin-inline-start" | "padding-inline-start" => Some(LogicalBoxEdgeTarget::InlineStart),
+        "margin-inline-end" | "padding-inline-end" => Some(LogicalBoxEdgeTarget::InlineEnd),
+        "margin-block" | "padding-block" => Some(LogicalBoxEdgeTarget::Block),
+        "margin-block-start" | "padding-block-start" => Some(LogicalBoxEdgeTarget::BlockStart),
+        "margin-block-end" | "padding-block-end" => Some(LogicalBoxEdgeTarget::BlockEnd),
+        _ => None,
+    }) else {
+        return false;
+    };
+    if raw.trim().eq_ignore_ascii_case("revert-layer") {
+        clear_delta_logical_box_edge(delta, is_margin, logical_target);
+        if is_margin {
+            delta.revert_layer.margin_logical.set(logical_target);
+        } else {
+            delta.revert_layer.padding_logical.set(logical_target);
+        }
+        return true;
+    }
+    match logical_target {
+        LogicalBoxEdgeTarget::Inline | LogicalBoxEdgeTarget::Block => {
+            let Some(values) = parse_native_length_components(raw, 2, is_margin, is_margin) else {
+                return false;
+            };
+            let Some([start, end]) = expand_native_pair(&values) else {
+                return false;
+            };
+            let (start_target, end_target) = if logical_target == LogicalBoxEdgeTarget::Inline {
+                (
+                    LogicalBoxEdgeTarget::InlineStart,
+                    LogicalBoxEdgeTarget::InlineEnd,
+                )
+            } else {
+                (
+                    LogicalBoxEdgeTarget::BlockStart,
+                    LogicalBoxEdgeTarget::BlockEnd,
+                )
+            };
+            set_delta_native_logical_box_edge_component(delta, is_margin, start_target, start);
+            set_delta_native_logical_box_edge_component(delta, is_margin, end_target, end);
+        }
+        _ => {
+            let Some(value) = parse_native_length_component(raw, is_margin, is_margin) else {
+                return false;
+            };
+            set_delta_native_logical_box_edge_component(delta, is_margin, logical_target, value);
+        }
+    }
+    true
+}
+
+fn set_revert_layer_native_box_edge(
+    delta: &mut StyleDelta,
+    is_margin: bool,
+    target: BoxEdgeTarget,
+) {
+    if is_margin {
+        delta.margin.clear(target);
+        delta.revert_layer.margin.set(target);
+    } else {
+        delta.padding.clear(target);
+        delta.revert_layer.padding.set(target);
+    }
+}
+
+fn set_delta_native_box_edge_component(
+    delta: &mut StyleDelta,
+    is_margin: bool,
+    target: BoxEdgeTarget,
+    component: NativeLengthComponent,
+) {
+    if is_margin {
+        delta.revert_layer.margin.clear(target);
+    } else {
+        delta.revert_layer.padding.clear(target);
+    }
+    let edge = if is_margin {
+        &mut delta.margin
+    } else {
+        &mut delta.padding
+    };
+    edge.clear(target);
+    let (spec, var) = match component {
+        NativeLengthComponent::Spec(value) => (Some(value), None),
+        NativeLengthComponent::Var(value) => (
+            None,
+            Some(LengthVarExpr {
+                name: value,
+                scale: 1.0,
+            }),
+        ),
+    };
+    match target {
+        BoxEdgeTarget::All => {
+            edge.top = spec;
+            edge.right = spec;
+            edge.bottom = spec;
+            edge.left = spec;
+            edge.top_var = var.clone();
+            edge.right_var = var.clone();
+            edge.bottom_var = var.clone();
+            edge.left_var = var;
+        }
+        BoxEdgeTarget::Top => {
+            edge.top = spec;
+            edge.top_var = var;
+        }
+        BoxEdgeTarget::Right => {
+            edge.right = spec;
+            edge.right_var = var;
+        }
+        BoxEdgeTarget::Bottom => {
+            edge.bottom = spec;
+            edge.bottom_var = var;
+        }
+        BoxEdgeTarget::Left => {
+            edge.left = spec;
+            edge.left_var = var;
         }
     }
 }
 
-fn apply_revert_layer_unparsed_property(
-    property_id: &PropertyId,
-    tokens: &[TokenOrValue],
+fn set_delta_native_logical_box_edge_component(
+    delta: &mut StyleDelta,
+    is_margin: bool,
+    target: LogicalBoxEdgeTarget,
+    component: NativeLengthComponent,
+) {
+    match component {
+        NativeLengthComponent::Spec(value) => match target {
+            LogicalBoxEdgeTarget::InlineStart => {
+                set_delta_logical_inline_edge_spec(delta, is_margin, Some(value), None)
+            }
+            LogicalBoxEdgeTarget::InlineEnd => {
+                set_delta_logical_inline_edge_spec(delta, is_margin, None, Some(value))
+            }
+            LogicalBoxEdgeTarget::BlockStart => {
+                set_delta_logical_block_edge_spec(delta, is_margin, Some(value), None)
+            }
+            LogicalBoxEdgeTarget::BlockEnd => {
+                set_delta_logical_block_edge_spec(delta, is_margin, None, Some(value))
+            }
+            LogicalBoxEdgeTarget::Inline | LogicalBoxEdgeTarget::Block => {}
+        },
+        NativeLengthComponent::Var(value) => {
+            let expr = LengthVarExpr {
+                name: value,
+                scale: 1.0,
+            };
+            match target {
+                LogicalBoxEdgeTarget::InlineStart => {
+                    set_delta_logical_inline_edge_var(delta, is_margin, Some(expr), None)
+                }
+                LogicalBoxEdgeTarget::InlineEnd => {
+                    set_delta_logical_inline_edge_var(delta, is_margin, None, Some(expr))
+                }
+                LogicalBoxEdgeTarget::BlockStart => {
+                    set_delta_logical_block_edge_var(delta, is_margin, Some(expr), None)
+                }
+                LogicalBoxEdgeTarget::BlockEnd => {
+                    set_delta_logical_block_edge_var(delta, is_margin, None, Some(expr))
+                }
+                LogicalBoxEdgeTarget::Inline | LogicalBoxEdgeTarget::Block => {}
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+enum NativeBorderColorComponent {
+    Spec(ColorSpec),
+    Var(String),
+}
+
+fn native_medium_border_width() -> LengthSpec {
+    LengthSpec::Absolute(Pt::from_f32(2.25))
+}
+
+fn parse_native_border_width_component(raw: &str) -> Option<NativeLengthComponent> {
+    let lowered = raw.trim().to_ascii_lowercase();
+    match lowered.as_str() {
+        "thin" => {
+            return Some(NativeLengthComponent::Spec(LengthSpec::Absolute(
+                Pt::from_f32(0.75),
+            )));
+        }
+        "medium" | "initial" | "unset" | "revert" => {
+            return Some(NativeLengthComponent::Spec(native_medium_border_width()));
+        }
+        "thick" => {
+            return Some(NativeLengthComponent::Spec(LengthSpec::Absolute(
+                Pt::from_f32(3.75),
+            )));
+        }
+        "inherit" => return Some(NativeLengthComponent::Spec(LengthSpec::Inherit)),
+        "revert-layer" | "" => return None,
+        _ => {}
+    }
+    if lowered.contains("var(") {
+        return Some(NativeLengthComponent::Var(lowered));
+    }
+    let value = length_spec_from_string(&lowered)?;
+    native_length_is_nonnegative(value).then_some(NativeLengthComponent::Spec(value))
+}
+
+fn parse_native_border_color_component(raw: &str) -> Option<NativeBorderColorComponent> {
+    let lowered = raw.trim().to_ascii_lowercase();
+    match lowered.as_str() {
+        "inherit" => return Some(NativeBorderColorComponent::Spec(ColorSpec::Inherit)),
+        "initial" | "unset" | "revert" => {
+            return Some(NativeBorderColorComponent::Spec(ColorSpec::Initial));
+        }
+        "currentcolor" => {
+            return Some(NativeBorderColorComponent::Spec(ColorSpec::CurrentColor));
+        }
+        "revert-layer" | "" => return None,
+        _ => {}
+    }
+    if let Some((color, alpha)) = parse_color_string(&lowered) {
+        return Some(NativeBorderColorComponent::Spec(ColorSpec::Value(
+            blend_over_white(color, alpha),
+        )));
+    }
+    if should_defer_color_expr(&lowered) || lowered.contains("var(") {
+        return Some(NativeBorderColorComponent::Var(lowered));
+    }
+    None
+}
+
+fn apply_native_border_width_component(
+    delta: &mut StyleDelta,
+    target: BorderColorTarget,
+    value: NativeLengthComponent,
+) {
+    match value {
+        NativeLengthComponent::Spec(value) => set_delta_border_width_spec(delta, target, value),
+        NativeLengthComponent::Var(value) => set_delta_border_width_var(
+            delta,
+            target,
+            LengthVarExpr {
+                name: value,
+                scale: 1.0,
+            },
+        ),
+    }
+}
+
+fn apply_native_border_color_component(
+    delta: &mut StyleDelta,
+    target: BorderColorTarget,
+    value: NativeBorderColorComponent,
+) {
+    match value {
+        NativeBorderColorComponent::Spec(value) => {
+            set_delta_border_color_spec(delta, target, value)
+        }
+        NativeBorderColorComponent::Var(value) => set_delta_border_color_var(delta, target, value),
+    }
+}
+
+fn native_border_targets(property_name: &str, family: &str) -> Option<Vec<BorderColorTarget>> {
+    let all_physical = || {
+        vec![
+            BorderColorTarget::Top,
+            BorderColorTarget::Right,
+            BorderColorTarget::Bottom,
+            BorderColorTarget::Left,
+        ]
+    };
+    let inline = || vec![BorderColorTarget::InlineStart, BorderColorTarget::InlineEnd];
+    let block = || vec![BorderColorTarget::BlockStart, BorderColorTarget::BlockEnd];
+    let expected = format!("border-{family}");
+    if property_name == expected {
+        return Some(all_physical());
+    }
+    if property_name == format!("border-inline-{family}") {
+        return Some(inline());
+    }
+    if property_name == format!("border-block-{family}") {
+        return Some(block());
+    }
+    let suffix = format!("-{family}");
+    property_name
+        .strip_suffix(&suffix)
+        .filter(|base| {
+            matches!(
+                *base,
+                "border-top"
+                    | "border-right"
+                    | "border-bottom"
+                    | "border-left"
+                    | "border-inline-start"
+                    | "border-inline-end"
+                    | "border-block-start"
+                    | "border-block-end"
+            )
+        })
+        .map(|_| vec![border_color_target_from_property_name(property_name)])
+}
+
+fn expand_native_components_for_targets<T: Clone>(
+    values: &[T],
+    target_count: usize,
+) -> Option<Vec<T>> {
+    match target_count {
+        1 if values.len() == 1 => Some(vec![values[0].clone()]),
+        2 => match values {
+            [both] => Some(vec![both.clone(), both.clone()]),
+            [start, end] => Some(vec![start.clone(), end.clone()]),
+            _ => None,
+        },
+        4 => match values {
+            [all] => Some(vec![all.clone(), all.clone(), all.clone(), all.clone()]),
+            [vertical, horizontal] => Some(vec![
+                vertical.clone(),
+                horizontal.clone(),
+                vertical.clone(),
+                horizontal.clone(),
+            ]),
+            [top, horizontal, bottom] => Some(vec![
+                top.clone(),
+                horizontal.clone(),
+                bottom.clone(),
+                horizontal.clone(),
+            ]),
+            [top, right, bottom, left] => Some(vec![
+                top.clone(),
+                right.clone(),
+                bottom.clone(),
+                left.clone(),
+            ]),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn apply_native_border_property(property_name: &str, raw: &str, delta: &mut StyleDelta) -> bool {
+    if let Some(targets) = native_border_targets(property_name, "width") {
+        return apply_native_border_width_property(&targets, raw, delta);
+    }
+    if let Some(targets) = native_border_targets(property_name, "color") {
+        return apply_native_border_color_property(&targets, raw, delta);
+    }
+    if let Some(targets) = native_border_targets(property_name, "style") {
+        return apply_native_border_style_property(&targets, raw, delta);
+    }
+
+    let targets = match property_name {
+        "border" => vec![BorderColorTarget::All],
+        "border-inline" => vec![BorderColorTarget::InlineStart, BorderColorTarget::InlineEnd],
+        "border-block" => vec![BorderColorTarget::BlockStart, BorderColorTarget::BlockEnd],
+        "border-top"
+        | "border-right"
+        | "border-bottom"
+        | "border-left"
+        | "border-inline-start"
+        | "border-inline-end"
+        | "border-block-start"
+        | "border-block-end" => vec![border_color_target_from_property_name(property_name)],
+        _ => return false,
+    };
+
+    if raw.trim().eq_ignore_ascii_case("revert-layer") {
+        for target in targets {
+            set_revert_layer_border_width(delta, target);
+            set_revert_layer_border_style(delta, target);
+            set_revert_layer_border_color(delta, target);
+        }
+        return true;
+    }
+
+    let Some((width, style, color)) = parse_native_border_side_shorthand(raw) else {
+        return false;
+    };
+    for target in targets {
+        apply_native_border_width_component(delta, target, width.clone());
+        set_delta_border_style(delta, target, style);
+        apply_native_border_color_component(delta, target, color.clone());
+    }
+    true
+}
+
+fn apply_native_border_width_property(
+    targets: &[BorderColorTarget],
+    raw: &str,
     delta: &mut StyleDelta,
 ) -> bool {
-    if !tokens_debug_string(tokens)
-        .trim()
-        .eq_ignore_ascii_case("revert-layer")
+    if raw.trim().eq_ignore_ascii_case("revert-layer") {
+        for target in targets {
+            set_revert_layer_border_width(delta, *target);
+        }
+        return true;
+    }
+    let parts = split_top_level_whitespace(raw);
+    if parts.is_empty() || parts.len() > targets.len() {
+        return false;
+    }
+    if parts.len() > 1
+        && parts
+            .iter()
+            .any(|part| is_css_wide_keyword(&part.to_ascii_lowercase()))
     {
         return false;
     }
+    let Some(values) = parts
+        .iter()
+        .map(|part| parse_native_border_width_component(part))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return false;
+    };
+    let Some(values) = expand_native_components_for_targets(&values, targets.len()) else {
+        return false;
+    };
+    for (target, value) in targets.iter().copied().zip(values) {
+        apply_native_border_width_component(delta, target, value);
+    }
+    true
+}
 
-    match property_id {
-        PropertyId::Color => {
-            delta.color = None;
-            delta.color_var = None;
-            delta.revert_layer.color = true;
+fn apply_native_border_color_property(
+    targets: &[BorderColorTarget],
+    raw: &str,
+    delta: &mut StyleDelta,
+) -> bool {
+    if raw.trim().eq_ignore_ascii_case("revert-layer") {
+        for target in targets {
+            set_revert_layer_border_color(delta, *target);
+        }
+        return true;
+    }
+    let parts = split_top_level_whitespace(raw);
+    if parts.is_empty() || parts.len() > targets.len() {
+        return false;
+    }
+    if parts.len() > 1
+        && parts
+            .iter()
+            .any(|part| is_css_wide_keyword(&part.to_ascii_lowercase()))
+    {
+        return false;
+    }
+    let Some(values) = parts
+        .iter()
+        .map(|part| parse_native_border_color_component(part))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return false;
+    };
+    if targets.len() == 4 && values.len() == 1 {
+        apply_native_border_color_component(delta, BorderColorTarget::All, values[0].clone());
+        return true;
+    }
+    let Some(values) = expand_native_components_for_targets(&values, targets.len()) else {
+        return false;
+    };
+    for (target, value) in targets.iter().copied().zip(values) {
+        apply_native_border_color_component(delta, target, value);
+    }
+    true
+}
+
+fn parse_native_border_style_component(raw: &str) -> Option<BorderLineStyle> {
+    let lowered = raw.trim().to_ascii_lowercase();
+    match lowered.as_str() {
+        "initial" | "unset" | "revert" => Some(BorderLineStyle::None),
+        "inherit" | "revert-layer" | "" => None,
+        _ => border_line_style_from_ident(&lowered),
+    }
+}
+
+fn apply_native_border_style_property(
+    targets: &[BorderColorTarget],
+    raw: &str,
+    delta: &mut StyleDelta,
+) -> bool {
+    if raw.trim().eq_ignore_ascii_case("revert-layer") {
+        for target in targets {
+            set_revert_layer_border_style(delta, *target);
+        }
+        return true;
+    }
+    let parts = split_top_level_whitespace(raw);
+    if parts.is_empty() || parts.len() > targets.len() {
+        return false;
+    }
+    if parts.len() > 1
+        && parts
+            .iter()
+            .any(|part| is_css_wide_keyword(&part.to_ascii_lowercase()))
+    {
+        return false;
+    }
+    let Some(values) = parts
+        .iter()
+        .map(|part| parse_native_border_style_component(part))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return false;
+    };
+    let Some(values) = expand_native_components_for_targets(&values, targets.len()) else {
+        return false;
+    };
+    for (target, value) in targets.iter().copied().zip(values) {
+        set_delta_border_style(delta, target, value);
+    }
+    true
+}
+
+fn parse_native_border_side_shorthand(
+    raw: &str,
+) -> Option<(
+    NativeLengthComponent,
+    BorderLineStyle,
+    NativeBorderColorComponent,
+)> {
+    let lowered = raw.trim().to_ascii_lowercase();
+    if lowered.is_empty() {
+        return None;
+    }
+    match lowered.as_str() {
+        "inherit" => {
+            return Some((
+                NativeLengthComponent::Spec(LengthSpec::Inherit),
+                BorderLineStyle::None,
+                NativeBorderColorComponent::Spec(ColorSpec::Inherit),
+            ));
+        }
+        "initial" | "unset" | "revert" => {
+            return Some((
+                NativeLengthComponent::Spec(native_medium_border_width()),
+                BorderLineStyle::None,
+                NativeBorderColorComponent::Spec(ColorSpec::Initial),
+            ));
+        }
+        _ => {}
+    }
+
+    let parts = split_top_level_whitespace(&lowered);
+    let mut width: Option<NativeLengthComponent> = None;
+    let mut style: Option<BorderLineStyle> = None;
+    let mut color: Option<NativeBorderColorComponent> = None;
+    for part in parts {
+        if style.is_none() {
+            if let Some(value) = border_line_style_from_ident(&part) {
+                style = Some(value);
+                continue;
+            }
+        }
+        if width.is_none() && !part.contains("var(") {
+            if let Some(value) = parse_native_border_width_component(&part) {
+                width = Some(value);
+                continue;
+            }
+        }
+        if !part.contains("var(") {
+            if color.is_none() {
+                if let Some(value) = parse_native_border_color_component(&part) {
+                    color = Some(value);
+                    continue;
+                }
+            }
+            return None;
+        }
+
+        // A bare custom-property reference is ambiguous until substitution. Preserve both
+        // viable channels; a later color reference supersedes the color channel, matching
+        // common `var(--width) solid var(--color)` framework output.
+        if width.is_none() {
+            width = Some(NativeLengthComponent::Var(part.clone()));
+        }
+        color = Some(NativeBorderColorComponent::Var(part));
+    }
+    Some((
+        width.unwrap_or_else(|| NativeLengthComponent::Spec(native_medium_border_width())),
+        style.unwrap_or(BorderLineStyle::None),
+        color.unwrap_or(NativeBorderColorComponent::Spec(ColorSpec::CurrentColor)),
+    ))
+}
+
+fn apply_native_outline_property(property_name: &str, raw: &str, delta: &mut StyleDelta) -> bool {
+    match property_name {
+        "outline-width" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                set_revert_layer_outline(delta, true, false, false);
+                return true;
+            }
+            let Some(value) = parse_native_border_width_component(raw) else {
+                return false;
+            };
+            match value {
+                NativeLengthComponent::Spec(value) => set_delta_outline_width(delta, value),
+                NativeLengthComponent::Var(_) => return false,
+            }
             true
         }
-        PropertyId::BackgroundColor => {
-            delta.background_color = None;
-            delta.background_color_var = None;
-            delta.revert_layer.background_color = true;
+        "outline-style" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                set_revert_layer_outline(delta, false, true, false);
+                return true;
+            }
+            let lowered = raw.trim().to_ascii_lowercase();
+            let value = match lowered.as_str() {
+                "initial" | "unset" | "revert" => Some(None),
+                "inherit" => None,
+                _ => outline_line_style_from_ident(&lowered),
+            };
+            let Some(value) = value else {
+                return false;
+            };
+            set_delta_outline_style(delta, value);
             true
         }
-        PropertyId::Width => {
-            delta.width = None;
-            delta.width_var = None;
-            delta.revert_layer.width = true;
+        "outline-color" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                set_revert_layer_outline(delta, false, false, true);
+                return true;
+            }
+            let Some(value) = parse_native_border_color_component(raw) else {
+                return false;
+            };
+            match value {
+                NativeBorderColorComponent::Spec(value) => set_delta_outline_color(delta, value),
+                NativeBorderColorComponent::Var(_) => return false,
+            }
             true
         }
-        PropertyId::Height => {
-            delta.height = None;
-            delta.height_var = None;
-            delta.revert_layer.height = true;
+        "outline-offset" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                set_revert_layer_outline_offset(delta);
+                return true;
+            }
+            let Some(value) = parse_native_length_component(raw, false, true) else {
+                return false;
+            };
+            match value {
+                NativeLengthComponent::Spec(value) => set_delta_outline_offset(delta, value),
+                NativeLengthComponent::Var(value) => set_delta_outline_offset_var(delta, value),
+            }
             true
         }
-        PropertyId::BoxSizing(_) => {
-            delta.box_sizing = None;
-            delta.revert_layer.box_sizing = true;
+        "outline" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                set_revert_layer_outline(delta, true, true, true);
+                return true;
+            }
+            let Some((width, style, color)) = parse_native_outline_shorthand(raw) else {
+                return false;
+            };
+            match width {
+                NativeLengthComponent::Spec(value) => set_delta_outline_width(delta, value),
+                NativeLengthComponent::Var(_) => return false,
+            }
+            set_delta_outline_style(delta, style);
+            match color {
+                NativeBorderColorComponent::Spec(value) => set_delta_outline_color(delta, value),
+                NativeBorderColorComponent::Var(_) => return false,
+            }
             true
-        }
-        PropertyId::Display => {
-            delta.display = None;
-            delta.revert_layer.display = true;
-            true
-        }
-        PropertyId::Visibility => set_revert_layer_visibility(delta),
-        PropertyId::Position => {
-            delta.position = None;
-            delta.revert_layer.position = true;
-            true
-        }
-        PropertyId::ZIndex => {
-            delta.z_index = None;
-            delta.revert_layer.z_index = true;
-            true
-        }
-        PropertyId::Direction => set_revert_layer_direction(delta),
-        PropertyId::Opacity => {
-            delta.opacity = None;
-            delta.revert_layer.opacity = true;
-            true
-        }
-        PropertyId::Filter(_) => set_revert_layer_paint_filter(delta),
-        PropertyId::BackdropFilter(_) => set_revert_layer_backdrop_filter(delta),
-        PropertyId::MaskImage(_)
-        | PropertyId::Mask(_)
-        | PropertyId::MaskBorderSource
-        | PropertyId::MaskBorder => set_revert_layer_mask_backdrop_root(delta),
-        PropertyId::ClipPath(_) => set_revert_layer_clip_path(delta),
-        PropertyId::BoxShadow(_) => set_revert_layer_box_shadow(delta),
-        PropertyId::TextShadow => set_revert_layer_text_shadow(delta),
-        PropertyId::TextDecorationLine(_) => set_revert_layer_text_decoration_line(delta),
-        PropertyId::TextDecorationColor(_) => set_revert_layer_text_decoration_color(delta),
-        PropertyId::TextDecorationThickness => set_revert_layer_text_decoration_thickness(delta),
-        PropertyId::TextDecorationStyle(_) => set_revert_layer_text_decoration_style(delta),
-        PropertyId::TextDecoration(_) => set_revert_layer_text_decoration_shorthand(delta),
-        PropertyId::TextOverflow(_) => set_revert_layer_text_overflow(delta),
-        PropertyId::TextIndent => set_revert_layer_text_indent(delta),
-        PropertyId::LetterSpacing => set_revert_layer_letter_spacing(delta),
-        PropertyId::WordSpacing => set_revert_layer_word_spacing(delta),
-        PropertyId::TabSize(_) => set_revert_layer_tab_size(delta),
-        PropertyId::TextAlign => set_revert_layer_text_align(delta),
-        PropertyId::TextAlignLast(_) => set_revert_layer_text_align_last(delta),
-        PropertyId::TextJustify => set_revert_layer_text_justify(delta),
-        PropertyId::TextTransform => set_revert_layer_text_transform(delta),
-        PropertyId::WhiteSpace => set_revert_layer_white_space_shorthand(delta),
-        PropertyId::VerticalAlign => set_revert_layer_vertical_align(delta),
-        PropertyId::ListStyleType => set_revert_layer_list_style_type(delta),
-        PropertyId::ListStyleImage => set_revert_layer_list_style_image(delta),
-        PropertyId::ListStylePosition => set_revert_layer_list_style_position(delta),
-        PropertyId::WordBreak | PropertyId::OverflowWrap | PropertyId::WordWrap => {
-            set_revert_layer_word_break(delta)
-        }
-        PropertyId::LineBreak => set_revert_layer_line_break(delta),
-        PropertyId::Hyphens(_) => set_revert_layer_hyphens(delta),
-        PropertyId::Overflow => set_revert_layer_overflow_axes(delta),
-        PropertyId::OverflowX => set_revert_layer_overflow_x(delta),
-        PropertyId::OverflowY => set_revert_layer_overflow_y(delta),
-        PropertyId::Inset
-        | PropertyId::Top
-        | PropertyId::Right
-        | PropertyId::Bottom
-        | PropertyId::Left => set_revert_layer_inset_edge(delta, property_id),
-        PropertyId::InsetInline
-        | PropertyId::InsetInlineStart
-        | PropertyId::InsetInlineEnd
-        | PropertyId::InsetBlock
-        | PropertyId::InsetBlockStart
-        | PropertyId::InsetBlockEnd => set_revert_layer_logical_inset_edge(delta, property_id),
-        PropertyId::Outline => {
-            set_revert_layer_outline(delta, true, true, true);
-            true
-        }
-        PropertyId::OutlineWidth => {
-            set_revert_layer_outline(delta, true, false, false);
-            true
-        }
-        PropertyId::OutlineStyle => {
-            set_revert_layer_outline(delta, false, true, false);
-            true
-        }
-        PropertyId::OutlineColor => {
-            set_revert_layer_outline(delta, false, false, true);
-            true
-        }
-        PropertyId::Margin
-        | PropertyId::MarginTop
-        | PropertyId::MarginRight
-        | PropertyId::MarginBottom
-        | PropertyId::MarginLeft => set_revert_layer_box_edge(delta, true, property_id),
-        PropertyId::Padding
-        | PropertyId::PaddingTop
-        | PropertyId::PaddingRight
-        | PropertyId::PaddingBottom
-        | PropertyId::PaddingLeft => set_revert_layer_box_edge(delta, false, property_id),
-        PropertyId::MarginBlock
-        | PropertyId::MarginBlockStart
-        | PropertyId::MarginBlockEnd
-        | PropertyId::MarginInline
-        | PropertyId::MarginInlineStart
-        | PropertyId::MarginInlineEnd => {
-            set_revert_layer_logical_box_edge(delta, true, property_id)
-        }
-        PropertyId::PaddingBlock
-        | PropertyId::PaddingBlockStart
-        | PropertyId::PaddingBlockEnd
-        | PropertyId::PaddingInline
-        | PropertyId::PaddingInlineStart
-        | PropertyId::PaddingInlineEnd => {
-            set_revert_layer_logical_box_edge(delta, false, property_id)
-        }
-        PropertyId::BorderColor
-        | PropertyId::BorderTopColor
-        | PropertyId::BorderRightColor
-        | PropertyId::BorderBottomColor
-        | PropertyId::BorderLeftColor
-        | PropertyId::BorderBlockStartColor
-        | PropertyId::BorderBlockEndColor
-        | PropertyId::BorderInlineStartColor
-        | PropertyId::BorderInlineEndColor => {
-            let target = border_color_target_from_property_id(property_id);
-            set_revert_layer_border_color(delta, target)
-        }
-        PropertyId::BorderWidth
-        | PropertyId::BorderTopWidth
-        | PropertyId::BorderRightWidth
-        | PropertyId::BorderBottomWidth
-        | PropertyId::BorderLeftWidth
-        | PropertyId::BorderBlockStartWidth
-        | PropertyId::BorderBlockEndWidth
-        | PropertyId::BorderInlineStartWidth
-        | PropertyId::BorderInlineEndWidth => {
-            let target = border_color_target_from_property_id(property_id);
-            set_revert_layer_border_width(delta, target)
-        }
-        PropertyId::BorderStyle
-        | PropertyId::BorderTopStyle
-        | PropertyId::BorderRightStyle
-        | PropertyId::BorderBottomStyle
-        | PropertyId::BorderLeftStyle
-        | PropertyId::BorderBlockStartStyle
-        | PropertyId::BorderBlockEndStyle
-        | PropertyId::BorderInlineStartStyle
-        | PropertyId::BorderInlineEndStyle => {
-            let target = border_color_target_from_property_id(property_id);
-            set_revert_layer_border_style(delta, target)
         }
         _ => false,
     }
 }
 
-fn physical_box_edge_target(property_id: &PropertyId, is_margin: bool) -> Option<BoxEdgeTarget> {
-    match (is_margin, property_id) {
-        (true, PropertyId::Margin) | (false, PropertyId::Padding) => Some(BoxEdgeTarget::All),
-        (true, PropertyId::MarginTop) | (false, PropertyId::PaddingTop) => Some(BoxEdgeTarget::Top),
-        (true, PropertyId::MarginRight) | (false, PropertyId::PaddingRight) => {
-            Some(BoxEdgeTarget::Right)
+fn parse_native_outline_shorthand(
+    raw: &str,
+) -> Option<(
+    NativeLengthComponent,
+    Option<OutlineLineStyle>,
+    NativeBorderColorComponent,
+)> {
+    let lowered = raw.trim().to_ascii_lowercase();
+    if lowered.is_empty() {
+        return None;
+    }
+    match lowered.as_str() {
+        "initial" | "unset" | "revert" => {
+            return Some((
+                NativeLengthComponent::Spec(native_medium_border_width()),
+                None,
+                NativeBorderColorComponent::Spec(ColorSpec::Initial),
+            ));
         }
-        (true, PropertyId::MarginBottom) | (false, PropertyId::PaddingBottom) => {
-            Some(BoxEdgeTarget::Bottom)
+        _ => {}
+    }
+    let parts = split_top_level_whitespace(&lowered);
+    let mut width = None;
+    let mut style = None;
+    let mut saw_style = false;
+    let mut color = None;
+    for part in parts {
+        if !saw_style {
+            if let Some(value) = outline_line_style_from_ident(&part) {
+                style = value;
+                saw_style = true;
+                continue;
+            }
         }
-        (true, PropertyId::MarginLeft) | (false, PropertyId::PaddingLeft) => {
-            Some(BoxEdgeTarget::Left)
+        if width.is_none() && !part.contains("var(") {
+            if let Some(value) = parse_native_border_width_component(&part) {
+                width = Some(value);
+                continue;
+            }
+        }
+        if color.is_none() {
+            if let Some(value) = parse_native_border_color_component(&part) {
+                color = Some(value);
+                continue;
+            }
+        }
+        return None;
+    }
+    Some((
+        width.unwrap_or_else(|| NativeLengthComponent::Spec(native_medium_border_width())),
+        style,
+        color.unwrap_or(NativeBorderColorComponent::Spec(ColorSpec::CurrentColor)),
+    ))
+}
+
+fn apply_native_custom_property(property_name: &str, raw: &str, delta: &mut StyleDelta) -> bool {
+    let name = property_name.to_ascii_lowercase();
+    clear_custom_property_delta_value(delta, &name);
+    let preserved = raw.trim().to_string();
+    let lowered = preserved.to_ascii_lowercase();
+    delta
+        .custom_raw_values
+        .insert(name.clone(), preserved.clone());
+
+    if let Some((color, alpha)) = parse_color_string(&preserved) {
+        let blended = if alpha < 1.0 {
+            Color::rgb(
+                color.r * alpha + (1.0 - alpha),
+                color.g * alpha + (1.0 - alpha),
+                color.b * alpha + (1.0 - alpha),
+            )
+        } else {
+            color
+        };
+        delta.custom_colors.insert(name.clone(), blended);
+        // Direct custom-property colors are stored as their flattened PDF color, matching the
+        // former typed-token path. Alpha remains one so consumers do not blend the already
+        // flattened value a second time; expressions containing var() retain deferred alpha.
+        delta.custom_color_alpha.insert(name.clone(), 1.0);
+    } else if let Some(color) = parse_rgb_triplet_string(&preserved) {
+        delta.custom_colors.insert(name.clone(), color);
+        delta.custom_color_alpha.insert(name.clone(), 1.0);
+    } else if lowered.contains("var(") {
+        delta.custom_color_refs.insert(name.clone(), lowered);
+    } else if let Some(spec) = length_spec_from_string(&lowered) {
+        delta.custom_lengths.insert(name.clone(), spec);
+    } else if let Some(stack) = font_stack_from_string(&preserved) {
+        delta.custom_font_stacks.insert(name, stack);
+    } else {
+        // Keep an opaque expression in the same resolver channel used by var() chains. This also
+        // guarantees that a later declaration clears stale typed caches from an earlier value.
+        delta.custom_color_refs.insert(name, lowered);
+    }
+    true
+}
+
+fn content_from_raw(raw: &str) -> Option<ContentSpec> {
+    let tokens = crate::css_native::tokenize_component_values(raw)?;
+    if tokens.len() == 1 {
+        if let ComponentValue::Ident(value) = &tokens[0] {
+            return match value.to_ascii_lowercase().as_str() {
+                "none" => Some(ContentSpec::None),
+                "normal" => Some(ContentSpec::Normal),
+                "inherit" => Some(ContentSpec::Inherit),
+                "initial" | "unset" | "revert" | "revert-layer" => Some(ContentSpec::Initial),
+                _ => content_quote_keyword(value).map(|part| ContentSpec::Parts(vec![part])),
+            };
+        }
+    }
+
+    let mut parts = Vec::new();
+    for token in tokens {
+        match token {
+            ComponentValue::String(value) => parts.push(ContentPart::Text(value)),
+            ComponentValue::Ident(value) => parts.push(content_quote_keyword(&value)?),
+            ComponentValue::Function { name, arguments } if name.eq_ignore_ascii_case("attr") => {
+                parts.push(ContentPart::Attr(content_attr_name_from_raw(&arguments)?));
+            }
+            ComponentValue::Function { name, arguments }
+                if name.eq_ignore_ascii_case("counter") =>
+            {
+                parts.push(ContentPart::Counter(content_counter_from_raw(&arguments)?));
+            }
+            ComponentValue::Function { name, arguments }
+                if name.eq_ignore_ascii_case("counters") =>
+            {
+                parts.push(ContentPart::Counters(content_counters_from_raw(
+                    &arguments,
+                )?));
+            }
+            // Preserve the engine's prior treatment of the optional `/ <alt-text>` separator: it
+            // did not expose accessibility text separately and concatenated subsequent strings.
+            ComponentValue::Delim('/') => {}
+            _ => return None,
+        }
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    if parts
+        .iter()
+        .all(|part| matches!(part, ContentPart::Text(_)))
+    {
+        let mut text = String::new();
+        for part in parts {
+            if let ContentPart::Text(value) = part {
+                text.push_str(&value);
+            }
+        }
+        Some(ContentSpec::Text(text))
+    } else {
+        Some(ContentSpec::Parts(parts))
+    }
+}
+
+fn content_quote_keyword(raw: &str) -> Option<ContentPart> {
+    match raw.to_ascii_lowercase().as_str() {
+        "open-quote" => Some(ContentPart::OpenQuote),
+        "close-quote" => Some(ContentPart::CloseQuote),
+        "no-open-quote" => Some(ContentPart::NoOpenQuote),
+        "no-close-quote" => Some(ContentPart::NoCloseQuote),
+        _ => None,
+    }
+}
+
+fn content_attr_name_from_raw(raw: &str) -> Option<String> {
+    crate::css_native::tokenize_component_values(raw)?
+        .into_iter()
+        .find_map(|token| match token {
+            ComponentValue::Ident(value) => Some(value.to_ascii_lowercase()),
+            _ => None,
+        })
+}
+
+fn content_counter_from_raw(raw: &str) -> Option<GeneratedCounterContent> {
+    let args = split_args(raw);
+    let name = crate::css_native::parse_identifier(args.first()?.trim())?;
+    if !is_valid_counter_name(&name) {
+        return None;
+    }
+    let style = args
+        .get(1)
+        .and_then(|value| generated_counter_style_from_raw(value))
+        .unwrap_or_else(decimal_generated_counter_style);
+    Some(GeneratedCounterContent { name, style })
+}
+
+fn content_counters_from_raw(raw: &str) -> Option<GeneratedCountersContent> {
+    let args = split_args(raw);
+    let name = crate::css_native::parse_identifier(args.first()?.trim())?;
+    if !is_valid_counter_name(&name) {
+        return None;
+    }
+    let separator = args.get(1).and_then(|value| {
+        match crate::css_native::tokenize_component_values(value)?.as_slice() {
+            [ComponentValue::String(value)] => Some(value.clone()),
+            _ => None,
+        }
+    })?;
+    let style = args
+        .get(2)
+        .and_then(|value| generated_counter_style_from_raw(value))
+        .unwrap_or_else(decimal_generated_counter_style);
+    Some(GeneratedCountersContent {
+        name,
+        separator,
+        style,
+    })
+}
+
+fn quotes_from_raw(raw: &str) -> Option<QuotesSpec> {
+    let tokens = crate::css_native::tokenize_component_values(raw)?;
+    if tokens.len() == 1 {
+        if let ComponentValue::Ident(value) = &tokens[0] {
+            return match value.to_ascii_lowercase().as_str() {
+                "none" => Some(QuotesSpec::Value(Vec::new())),
+                "auto" | "initial" | "revert" | "revert-layer" => Some(QuotesSpec::Initial),
+                "inherit" | "unset" | "match-parent" => Some(QuotesSpec::Inherit),
+                _ => None,
+            };
+        }
+    }
+    let strings = tokens
+        .into_iter()
+        .map(|token| match token {
+            ComponentValue::String(value) => Some(value),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    if strings.len() < 2 || strings.len() % 2 != 0 {
+        return None;
+    }
+    Some(QuotesSpec::Value(
+        strings
+            .chunks_exact(2)
+            .map(|pair| (pair[0].clone(), pair[1].clone()))
+            .collect(),
+    ))
+}
+
+fn apply_native_counter_property(property_name: &str, raw: &str, delta: &mut StyleDelta) -> bool {
+    let default_value = if property_name == "counter-increment" {
+        1
+    } else {
+        0
+    };
+    let Some(mut values) = counter_mutations_from_raw(raw, default_value) else {
+        return false;
+    };
+    if property_name == "counter-reset" {
+        values = last_counter_reset_mutations(values);
+        delta.counter_reset = Some(values);
+    } else if property_name == "counter-increment" {
+        delta.counter_increment = Some(values);
+    } else {
+        delta.counter_set = Some(values);
+    }
+    true
+}
+
+fn counter_mutations_from_raw(raw: &str, default_value: i32) -> Option<Vec<CounterMutation>> {
+    let lowered = raw.trim().to_ascii_lowercase();
+    if matches!(
+        lowered.as_str(),
+        "none" | "initial" | "unset" | "revert" | "revert-layer"
+    ) {
+        return Some(Vec::new());
+    }
+    let tokens = crate::css_native::tokenize_component_values(raw)?;
+    let mut out = Vec::new();
+    let mut cursor = 0usize;
+    while cursor < tokens.len() {
+        if matches!(tokens[cursor], ComponentValue::Delim(',')) {
+            cursor += 1;
+            continue;
+        }
+        let (name, reversed) = match &tokens[cursor] {
+            ComponentValue::Ident(name) => (name.clone(), false),
+            ComponentValue::Function { name, arguments }
+                if name.eq_ignore_ascii_case("reversed") =>
+            {
+                (crate::css_native::parse_identifier(arguments.trim())?, true)
+            }
+            _ => return None,
+        };
+        if !is_valid_counter_name(&name) {
+            return None;
+        }
+        cursor += 1;
+        let explicit = tokens.get(cursor).and_then(|token| match token {
+            ComponentValue::Number(value) => parse_css_integer(value),
+            _ => None,
+        });
+        if explicit.is_some() {
+            cursor += 1;
+        }
+        out.push(CounterMutation {
+            name,
+            value: explicit.unwrap_or(default_value),
+            reversed,
+            auto_reversed_initial: reversed && explicit.is_none(),
+        });
+    }
+    Some(out)
+}
+
+fn parse_css_integer(raw: &str) -> Option<i32> {
+    let value = raw.parse::<f64>().ok()?;
+    if !value.is_finite()
+        || value.fract() != 0.0
+        || value < i32::MIN as f64
+        || value > i32::MAX as f64
+    {
+        return None;
+    }
+    Some(value as i32)
+}
+
+fn apply_native_list_style_type(raw: &str, delta: &mut StyleDelta) -> bool {
+    if raw.trim().eq_ignore_ascii_case("revert-layer") {
+        return set_revert_layer_list_style_type(delta);
+    }
+    let lowered = raw.trim().to_ascii_lowercase();
+    if matches!(lowered.as_str(), "inherit" | "unset") {
+        // The computed style starts from its parent for inherited list properties.
+        delta.list_style_type = None;
+        delta.revert_layer.list_style_type = false;
+        return true;
+    }
+    let value = if matches!(lowered.as_str(), "initial" | "revert") {
+        (ListStyleTypeMode::Disc, None, None)
+    } else {
+        let Some(value) = parse_native_list_style_type(raw) else {
+            return false;
+        };
+        value
+    };
+    set_delta_list_style_type(delta, value);
+    true
+}
+
+fn parse_native_list_style_type(
+    raw: &str,
+) -> Option<(
+    ListStyleTypeMode,
+    Option<String>,
+    Option<AnonymousListStyleSymbols>,
+)> {
+    let tokens = crate::css_native::tokenize_component_values(raw)?;
+    match tokens.as_slice() {
+        [ComponentValue::String(value)] => {
+            Some((ListStyleTypeMode::CustomString, Some(value.clone()), None))
+        }
+        [ComponentValue::Function { name, arguments }] if name.eq_ignore_ascii_case("symbols") => {
+            let symbols = parse_native_anonymous_symbols(arguments)?;
+            Some((ListStyleTypeMode::AnonymousSymbols, None, Some(symbols)))
+        }
+        [ComponentValue::Ident(value)] => {
+            let lowered = value.to_ascii_lowercase();
+            if lowered == "none" {
+                return Some((ListStyleTypeMode::None, None, None));
+            }
+            if let Some(mode) = predefined_list_style_type(&lowered) {
+                return Some((mode, None, None));
+            }
+            is_valid_counter_name(value).then(|| {
+                (
+                    ListStyleTypeMode::CustomCounterStyleName,
+                    Some(value.clone()),
+                    None,
+                )
+            })
         }
         _ => None,
     }
 }
 
-fn physical_inset_edge_target(property_id: &PropertyId) -> Option<BoxEdgeTarget> {
-    match property_id {
-        PropertyId::Inset => Some(BoxEdgeTarget::All),
-        PropertyId::Top => Some(BoxEdgeTarget::Top),
-        PropertyId::Right => Some(BoxEdgeTarget::Right),
-        PropertyId::Bottom => Some(BoxEdgeTarget::Bottom),
-        PropertyId::Left => Some(BoxEdgeTarget::Left),
+fn predefined_list_style_type(raw: &str) -> Option<ListStyleTypeMode> {
+    Some(match raw {
+        "disc" => ListStyleTypeMode::Disc,
+        "circle" => ListStyleTypeMode::Circle,
+        "square" => ListStyleTypeMode::Square,
+        "decimal" => ListStyleTypeMode::Decimal,
+        "decimal-leading-zero" => ListStyleTypeMode::DecimalLeadingZero,
+        "arabic-indic" => ListStyleTypeMode::ArabicIndic,
+        "armenian" | "upper-armenian" => ListStyleTypeMode::Armenian,
+        "bengali" => ListStyleTypeMode::Bengali,
+        "cambodian" | "khmer" => ListStyleTypeMode::Cambodian,
+        "cjk-decimal" => ListStyleTypeMode::CjkDecimal,
+        "cjk-earthly-branch" => ListStyleTypeMode::CjkEarthlyBranch,
+        "cjk-heavenly-stem" => ListStyleTypeMode::CjkHeavenlyStem,
+        "devanagari" => ListStyleTypeMode::Devanagari,
+        "ethiopic-numeric" => ListStyleTypeMode::EthiopicNumeric,
+        "georgian" => ListStyleTypeMode::Georgian,
+        "gujarati" => ListStyleTypeMode::Gujarati,
+        "gurmukhi" => ListStyleTypeMode::Gurmukhi,
+        "hebrew" => ListStyleTypeMode::Hebrew,
+        "japanese-informal" => ListStyleTypeMode::JapaneseInformal,
+        "japanese-formal" => ListStyleTypeMode::JapaneseFormal,
+        "kannada" => ListStyleTypeMode::Kannada,
+        "korean-hangul-formal" => ListStyleTypeMode::KoreanHangulFormal,
+        "korean-hanja-informal" => ListStyleTypeMode::KoreanHanjaInformal,
+        "korean-hanja-formal" => ListStyleTypeMode::KoreanHanjaFormal,
+        "lao" => ListStyleTypeMode::Lao,
+        "lower-armenian" => ListStyleTypeMode::LowerArmenian,
+        "malayalam" => ListStyleTypeMode::Malayalam,
+        "mongolian" => ListStyleTypeMode::Mongolian,
+        "myanmar" => ListStyleTypeMode::Myanmar,
+        "oriya" => ListStyleTypeMode::Oriya,
+        "persian" => ListStyleTypeMode::Persian,
+        "simp-chinese-informal" => ListStyleTypeMode::SimpChineseInformal,
+        "simp-chinese-formal" => ListStyleTypeMode::SimpChineseFormal,
+        "tamil" => ListStyleTypeMode::Tamil,
+        "telugu" => ListStyleTypeMode::Telugu,
+        "thai" => ListStyleTypeMode::Thai,
+        "tibetan" => ListStyleTypeMode::Tibetan,
+        "trad-chinese-informal" | "cjk-ideographic" => ListStyleTypeMode::TradChineseInformal,
+        "trad-chinese-formal" => ListStyleTypeMode::TradChineseFormal,
+        "lower-roman" => ListStyleTypeMode::LowerRoman,
+        "upper-roman" => ListStyleTypeMode::UpperRoman,
+        "lower-alpha" | "lower-latin" => ListStyleTypeMode::LowerAlpha,
+        "upper-alpha" | "upper-latin" => ListStyleTypeMode::UpperAlpha,
+        "lower-greek" => ListStyleTypeMode::LowerGreek,
+        "hiragana" => ListStyleTypeMode::Hiragana,
+        "hiragana-iroha" => ListStyleTypeMode::HiraganaIroha,
+        "katakana" => ListStyleTypeMode::Katakana,
+        "katakana-iroha" => ListStyleTypeMode::KatakanaIroha,
+        "disclosure-open" => ListStyleTypeMode::DisclosureOpen,
+        "disclosure-closed" => ListStyleTypeMode::DisclosureClosed,
+        _ => return None,
+    })
+}
+
+fn parse_native_anonymous_symbols(raw: &str) -> Option<AnonymousListStyleSymbols> {
+    let mut tokens = crate::css_native::tokenize_component_values(raw)?;
+    let mut system = AnonymousListStyleSymbolsSystem::Symbolic;
+    if let Some(ComponentValue::Ident(value)) = tokens.first() {
+        let parsed = match value.to_ascii_lowercase().as_str() {
+            "cyclic" => Some(AnonymousListStyleSymbolsSystem::Cyclic),
+            "numeric" => Some(AnonymousListStyleSymbolsSystem::Numeric),
+            "alphabetic" => Some(AnonymousListStyleSymbolsSystem::Alphabetic),
+            "symbolic" => Some(AnonymousListStyleSymbolsSystem::Symbolic),
+            "fixed" => Some(AnonymousListStyleSymbolsSystem::Fixed),
+            _ => None,
+        };
+        if let Some(parsed) = parsed {
+            system = parsed;
+            tokens.remove(0);
+        }
+    }
+    let symbols = tokens
+        .into_iter()
+        .map(|token| match token {
+            ComponentValue::String(value) => Some(value),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    if symbols.is_empty()
+        || matches!(
+            system,
+            AnonymousListStyleSymbolsSystem::Numeric | AnonymousListStyleSymbolsSystem::Alphabetic
+        ) && symbols.len() < 2
+    {
+        return None;
+    }
+    Some(AnonymousListStyleSymbols {
+        system,
+        symbols,
+        suffix: " ".to_string(),
+        fixed_start: 1,
+    })
+}
+
+fn apply_native_list_style_image(raw: &str, delta: &mut StyleDelta) -> bool {
+    if raw.trim().eq_ignore_ascii_case("revert-layer") {
+        return set_revert_layer_list_style_image(delta);
+    }
+    let Some(value) = parse_native_list_style_image(raw) else {
+        return false;
+    };
+    set_delta_list_style_image(delta, value);
+    true
+}
+
+fn parse_native_list_style_image(raw: &str) -> Option<ListStyleImageSpec> {
+    let trimmed = raw.trim();
+    match trimmed.to_ascii_lowercase().as_str() {
+        "none" | "initial" | "revert" => return Some(ListStyleImageSpec::Initial),
+        "inherit" | "unset" => return Some(ListStyleImageSpec::Inherit),
+        _ => {}
+    }
+    let tokens = crate::css_native::tokenize_component_values(trimmed)?;
+    match tokens.as_slice() {
+        [ComponentValue::Function { name, arguments }] if name.eq_ignore_ascii_case("url") => Some(
+            ListStyleImageSpec::Url(parse_native_url_argument(arguments)?),
+        ),
+        [ComponentValue::Function { name, .. }]
+            if name.to_ascii_lowercase().ends_with("gradient") =>
+        {
+            let paint = parse_background_paint_str(trimmed);
+            if paint.is_some() || is_supported_gradient_image_expression(trimmed) {
+                Some(ListStyleImageSpec::Image {
+                    css: trimmed.to_string(),
+                    paint,
+                })
+            } else {
+                Some(ListStyleImageSpec::None)
+            }
+        }
         _ => None,
     }
+}
+
+fn parse_native_url_argument(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    let tokens = crate::css_native::tokenize_component_values(trimmed)?;
+    match tokens.as_slice() {
+        [ComponentValue::String(value)] => Some(value.clone()),
+        _ if !trimmed.is_empty() && !trimmed.chars().any(char::is_whitespace) => {
+            Some(trimmed.to_string())
+        }
+        _ => None,
+    }
+}
+
+fn apply_native_list_style_position(raw: &str, delta: &mut StyleDelta) -> bool {
+    if raw.trim().eq_ignore_ascii_case("revert-layer") {
+        return set_revert_layer_list_style_position(delta);
+    }
+    let value = match raw.trim().to_ascii_lowercase().as_str() {
+        "inside" => ListStylePositionSpec::Value(ListStylePositionMode::Inside),
+        "outside" => ListStylePositionSpec::Value(ListStylePositionMode::Outside),
+        "inherit" | "unset" => ListStylePositionSpec::Inherit,
+        "initial" | "revert" => ListStylePositionSpec::Initial,
+        _ => return false,
+    };
+    set_delta_list_style_position(delta, value);
+    true
+}
+
+fn apply_native_list_style_shorthand(raw: &str, delta: &mut StyleDelta) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    if lowered == "revert-layer" {
+        set_revert_layer_list_style_type(delta);
+        set_revert_layer_list_style_image(delta);
+        set_revert_layer_list_style_position(delta);
+        return true;
+    }
+    if matches!(lowered.as_str(), "inherit" | "unset") {
+        delta.list_style_type = None;
+        set_delta_list_style_image(delta, ListStyleImageSpec::Inherit);
+        set_delta_list_style_position(delta, ListStylePositionSpec::Inherit);
+        return true;
+    }
+    if matches!(lowered.as_str(), "initial" | "revert") {
+        set_delta_list_style_type(delta, (ListStyleTypeMode::Disc, None, None));
+        set_delta_list_style_image(delta, ListStyleImageSpec::Initial);
+        set_delta_list_style_position(delta, ListStylePositionSpec::Initial);
+        return true;
+    }
+
+    let tokens = crate::css_native::tokenize_component_values(raw);
+    let Some(tokens) = tokens else {
+        return false;
+    };
+    let mut list_type = None;
+    let mut image = None;
+    let mut position = None;
+    for token in tokens {
+        match token {
+            ComponentValue::Ident(value) if value.eq_ignore_ascii_case("inside") => {
+                if position.replace(ListStylePositionMode::Inside).is_some() {
+                    return false;
+                }
+            }
+            ComponentValue::Ident(value) if value.eq_ignore_ascii_case("outside") => {
+                if position.replace(ListStylePositionMode::Outside).is_some() {
+                    return false;
+                }
+            }
+            ComponentValue::Ident(value) if value.eq_ignore_ascii_case("none") => {
+                if list_type.is_none() {
+                    list_type = Some((ListStyleTypeMode::None, None, None));
+                }
+                if image.is_none() {
+                    image = Some(ListStyleImageSpec::None);
+                }
+            }
+            ComponentValue::Ident(value) => {
+                if list_type.is_some() {
+                    return false;
+                }
+                let Some(parsed) = parse_native_list_style_type(&value) else {
+                    return false;
+                };
+                list_type = Some(parsed);
+            }
+            ComponentValue::String(value) => {
+                if list_type.is_some() {
+                    return false;
+                }
+                list_type = Some((ListStyleTypeMode::CustomString, Some(value), None));
+            }
+            ComponentValue::Function { name, arguments } if name.eq_ignore_ascii_case("url") => {
+                if image.is_some() {
+                    return false;
+                }
+                let Some(url) = parse_native_url_argument(&arguments) else {
+                    return false;
+                };
+                image = Some(ListStyleImageSpec::Url(url));
+            }
+            ComponentValue::Function { name, arguments }
+                if name.eq_ignore_ascii_case("symbols") =>
+            {
+                if list_type.is_some() {
+                    return false;
+                }
+                let Some(symbols) = parse_native_anonymous_symbols(&arguments) else {
+                    return false;
+                };
+                list_type = Some((ListStyleTypeMode::AnonymousSymbols, None, Some(symbols)));
+            }
+            ComponentValue::Function { name, arguments }
+                if name.to_ascii_lowercase().ends_with("gradient") =>
+            {
+                if image.is_some() {
+                    return false;
+                }
+                let css = format!("{name}({arguments})");
+                image = Some(ListStyleImageSpec::Image {
+                    paint: parse_background_paint_str(&css),
+                    css,
+                });
+            }
+            _ => return false,
+        }
+    }
+    set_delta_list_style_type(
+        delta,
+        list_type.unwrap_or((ListStyleTypeMode::Disc, None, None)),
+    );
+    set_delta_list_style_image(delta, image.unwrap_or(ListStyleImageSpec::None));
+    set_delta_list_style_position(
+        delta,
+        ListStylePositionSpec::Value(position.unwrap_or(ListStylePositionMode::Outside)),
+    );
+    true
+}
+
+fn apply_native_transform_value(property_name: &str, raw: &str, delta: &mut StyleDelta) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    let (slot, pending) = match property_name {
+        "transform" => (&mut delta.transform, &mut delta.transform_var),
+        "translate" => (&mut delta.translate, &mut delta.translate_var),
+        "rotate" => (&mut delta.rotate, &mut delta.rotate_var),
+        "scale" => (&mut delta.scale, &mut delta.scale_var),
+        _ => return false,
+    };
+    match lowered.as_str() {
+        "inherit" => {
+            *slot = Some(TransformSpec::Inherit);
+            *pending = None;
+            return true;
+        }
+        "initial" | "unset" | "revert" | "revert-layer" => {
+            *slot = Some(TransformSpec::Initial);
+            *pending = None;
+            return true;
+        }
+        "none" => {
+            *slot = Some(TransformSpec::Value(Vec::new()));
+            *pending = None;
+            return true;
+        }
+        _ => {}
+    }
+    let parsed = match property_name {
+        "transform" => transform_ops_from_string(raw),
+        "translate" => transform_ops_from_translate_string(raw),
+        "rotate" => transform_ops_from_rotate_string(raw),
+        "scale" => transform_ops_from_scale_string(raw),
+        _ => None,
+    };
+    if let Some(value) = parsed {
+        *slot = Some(TransformSpec::Value(value));
+        *pending = None;
+        return true;
+    }
+    if lowered.contains("var(") {
+        *slot = None;
+        *pending = Some(lowered);
+        return true;
+    }
+    false
+}
+
+fn apply_native_transform_origin(raw: &str, delta: &mut StyleDelta) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    match lowered.as_str() {
+        "inherit" => {
+            delta.transform_origin = Some(TransformOriginSpec::Inherit);
+            return true;
+        }
+        "initial" | "unset" | "revert" | "revert-layer" => {
+            delta.transform_origin = Some(TransformOriginSpec::Initial);
+            return true;
+        }
+        _ => {}
+    }
+    if let Some(value) = transform_origin_from_string(raw) {
+        delta.transform_origin = Some(TransformOriginSpec::Value(value));
+        true
+    } else {
+        false
+    }
+}
+
+fn apply_native_text_decoration_line(raw: &str, delta: &mut StyleDelta) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    match lowered.as_str() {
+        "inherit" => {
+            set_delta_text_decoration_spec(delta, TextDecorationSpec::Inherit);
+            true
+        }
+        "initial" | "unset" | "revert" => {
+            set_delta_text_decoration_spec(delta, TextDecorationSpec::Initial);
+            true
+        }
+        "revert-layer" => set_revert_layer_text_decoration_line(delta),
+        _ => {
+            if let Some(value) = parse_text_decoration_str(&lowered) {
+                set_delta_text_decoration_spec(delta, TextDecorationSpec::Value(value));
+                true
+            } else {
+                false
+            }
+        }
+    }
+}
+
+fn apply_native_text_decoration_shorthand(raw: &str, delta: &mut StyleDelta) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    if lowered == "revert-layer" {
+        return set_revert_layer_text_decoration_shorthand(delta);
+    }
+    if matches!(lowered.as_str(), "inherit" | "initial" | "unset" | "revert") {
+        let line = if lowered == "inherit" {
+            TextDecorationSpec::Inherit
+        } else {
+            TextDecorationSpec::Initial
+        };
+        set_delta_text_decoration_spec(delta, line);
+        set_delta_text_decoration_color_spec(delta, ColorSpec::CurrentColor);
+        set_delta_text_decoration_thickness_spec(delta, TextDecorationThicknessSpec::Initial);
+        set_delta_text_decoration_style_spec(delta, TextDecorationStyleSpec::Initial);
+        return true;
+    }
+    let Some(line) = parse_text_decoration_str(&lowered) else {
+        return false;
+    };
+    set_delta_text_decoration_spec(delta, TextDecorationSpec::Value(line));
+    if !apply_text_decoration_color_from_shorthand(delta, &lowered) {
+        set_delta_text_decoration_color_spec(delta, ColorSpec::CurrentColor);
+    }
+    if !apply_text_decoration_thickness_from_shorthand(delta, &lowered) {
+        set_delta_text_decoration_thickness_spec(delta, TextDecorationThicknessSpec::Initial);
+    }
+    if !apply_text_decoration_style_from_shorthand(delta, &lowered) {
+        set_delta_text_decoration_style_spec(delta, TextDecorationStyleSpec::Initial);
+    }
+    true
+}
+
+fn apply_native_text_spacing(property_name: &str, raw: &str, delta: &mut StyleDelta) -> bool {
+    if raw.trim().eq_ignore_ascii_case("revert-layer") {
+        return if property_name == "letter-spacing" {
+            set_revert_layer_letter_spacing(delta)
+        } else {
+            set_revert_layer_word_spacing(delta)
+        };
+    }
+    let spec = match raw.trim().to_ascii_lowercase().as_str() {
+        "inherit" | "unset" => Some(LengthSpec::Inherit),
+        "initial" | "revert" => Some(LengthSpec::Initial),
+        _ if property_name == "letter-spacing" => parse_letter_spacing_str(raw),
+        _ => parse_word_spacing_str(raw),
+    };
+    let Some(spec) = spec else {
+        return false;
+    };
+    if property_name == "letter-spacing" {
+        set_delta_letter_spacing(delta, spec);
+    } else {
+        set_delta_word_spacing(delta, spec);
+    }
+    true
+}
+
+fn apply_native_text_align(raw: &str, delta: &mut StyleDelta) -> bool {
+    let value = match raw.trim().to_ascii_lowercase().as_str() {
+        "start" | "match-parent" | "inherit" | "unset" => TextAlignMode::Start,
+        "end" => TextAlignMode::End,
+        "left" => TextAlignMode::Left,
+        "right" => TextAlignMode::Right,
+        "center" => TextAlignMode::Center,
+        "justify" => TextAlignMode::Justify,
+        "justify-all" => TextAlignMode::JustifyAll,
+        "initial" | "revert" => TextAlignMode::Start,
+        "revert-layer" => return set_revert_layer_text_align(delta),
+        _ => return false,
+    };
+    set_delta_text_align(delta, value);
+    true
+}
+
+fn apply_native_direction(raw: &str, delta: &mut StyleDelta) -> bool {
+    let spec = match raw.trim().to_ascii_lowercase().as_str() {
+        "ltr" => DirectionSpec::Value(DirectionMode::Ltr),
+        "rtl" => DirectionSpec::Value(DirectionMode::Rtl),
+        "inherit" | "unset" => DirectionSpec::Inherit,
+        "initial" | "revert" => DirectionSpec::Initial,
+        "revert-layer" => return set_revert_layer_direction(delta),
+        _ => return false,
+    };
+    set_delta_direction(delta, spec);
+    true
+}
+
+fn last_css_keyword(raw: &str) -> Option<&str> {
+    raw.split_ascii_whitespace()
+        .filter(|value| !matches!(value.to_ascii_lowercase().as_str(), "safe" | "unsafe"))
+        .next_back()
+}
+
+fn apply_native_gap_value(raw: &str, delta: &mut StyleDelta) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    delta.gap_var = None;
+    match lowered.as_str() {
+        "normal" | "initial" | "unset" | "revert" => {
+            delta.gap = Some(LengthSpec::Absolute(Pt::ZERO));
+            return true;
+        }
+        "inherit" => {
+            delta.gap = Some(LengthSpec::Inherit);
+            return true;
+        }
+        _ => {}
+    }
+    if lowered.contains("var(") {
+        delta.gap = None;
+        delta.gap_var = Some(lowered);
+        return true;
+    }
+    let first = split_top_level_whitespace(raw).into_iter().next();
+    if let Some(value) = first.and_then(|value| length_spec_from_string(&value)) {
+        delta.gap = Some(value);
+        true
+    } else {
+        false
+    }
+}
+
+fn apply_native_nonnegative_number(raw: &str, slot: &mut Option<f32>) -> bool {
+    let Ok(value) = raw.trim().parse::<f32>() else {
+        return false;
+    };
+    if !value.is_finite() || value < 0.0 {
+        return false;
+    }
+    *slot = Some(value);
+    true
+}
+
+fn apply_native_flex_basis(raw: &str, delta: &mut StyleDelta) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    delta.flex_basis_var = None;
+    let value = match lowered.as_str() {
+        "auto" | "content" => Some(LengthSpec::Auto),
+        "inherit" => Some(LengthSpec::Inherit),
+        "initial" | "unset" | "revert" => Some(LengthSpec::Initial),
+        _ => length_spec_from_string(&lowered),
+    };
+    if let Some(value) = value {
+        delta.flex_basis = Some(value);
+        return true;
+    }
+    if lowered.contains("var(") {
+        delta.flex_basis = None;
+        delta.flex_basis_var = Some(lowered);
+        return true;
+    }
+    false
+}
+
+fn apply_native_flex_shorthand(raw: &str, delta: &mut StyleDelta) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    match lowered.as_str() {
+        "none" => {
+            delta.flex_grow = Some(0.0);
+            delta.flex_shrink = Some(0.0);
+            delta.flex_basis = Some(LengthSpec::Auto);
+            delta.flex_basis_var = None;
+            return true;
+        }
+        "auto" => {
+            delta.flex_grow = Some(1.0);
+            delta.flex_shrink = Some(1.0);
+            delta.flex_basis = Some(LengthSpec::Auto);
+            delta.flex_basis_var = None;
+            return true;
+        }
+        "initial" | "unset" | "revert" => {
+            delta.flex_grow = Some(0.0);
+            delta.flex_shrink = Some(1.0);
+            delta.flex_basis = Some(LengthSpec::Auto);
+            delta.flex_basis_var = None;
+            return true;
+        }
+        _ => {}
+    }
+    let parts = split_top_level_whitespace(raw);
+    if parts.is_empty() || parts.len() > 3 {
+        return false;
+    }
+    let mut grow = None;
+    let mut shrink = None;
+    let mut basis = None;
+    let mut basis_var = None;
+    for part in parts {
+        if let Ok(number) = part.parse::<f32>() {
+            if !number.is_finite() || number < 0.0 {
+                return false;
+            }
+            if grow.is_none() {
+                grow = Some(number);
+            } else if shrink.is_none() {
+                shrink = Some(number);
+            } else {
+                return false;
+            }
+            continue;
+        }
+        if part.to_ascii_lowercase().contains("var(") {
+            basis_var = Some(part.to_ascii_lowercase());
+            continue;
+        }
+        let parsed = if part.eq_ignore_ascii_case("auto") || part.eq_ignore_ascii_case("content") {
+            Some(LengthSpec::Auto)
+        } else {
+            length_spec_from_string(&part)
+        };
+        let Some(parsed) = parsed else {
+            return false;
+        };
+        if basis.replace(parsed).is_some() {
+            return false;
+        }
+    }
+    delta.flex_grow = Some(grow.unwrap_or(1.0));
+    delta.flex_shrink = Some(shrink.unwrap_or(1.0));
+    if let Some(value) = basis {
+        delta.flex_basis = Some(value);
+        delta.flex_basis_var = None;
+    } else if let Some(value) = basis_var {
+        delta.flex_basis = None;
+        delta.flex_basis_var = Some(value);
+    } else {
+        delta.flex_basis = Some(LengthSpec::Percent(0.0));
+        delta.flex_basis_var = None;
+    }
+    true
+}
+
+fn apply_native_pagination_count(property_name: &str, raw: &str, delta: &mut StyleDelta) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    let value = match lowered.as_str() {
+        "inherit" | "unset" | "revert" | "revert-layer" => Some(PaginationLineCountSpec::Inherit),
+        "initial" => Some(PaginationLineCountSpec::Initial),
+        _ => lowered
+            .parse::<usize>()
+            .ok()
+            .filter(|value| *value >= 1)
+            .map(PaginationLineCountSpec::Value),
+    };
+    let Some(value) = value else {
+        return false;
+    };
+    if property_name == "orphans" {
+        delta.pagination.orphans = Some(value);
+    } else {
+        delta.pagination.widows = Some(value);
+    }
+    true
+}
+
+fn apply_native_color_value(delta: &mut StyleDelta, raw: &str) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    match lowered.as_str() {
+        "inherit" | "unset" | "revert" | "currentcolor" => {
+            set_delta_color(delta, ColorSpec::Inherit);
+            return true;
+        }
+        "initial" => {
+            set_delta_color(delta, ColorSpec::Initial);
+            return true;
+        }
+        "revert-layer" => {
+            delta.color = None;
+            delta.color_var = None;
+            delta.revert_layer.color = true;
+            return true;
+        }
+        _ => {}
+    }
+    if should_defer_color_expr(&lowered) {
+        if let Some((color, alpha)) = parse_color_string(&lowered) {
+            set_delta_color(delta, ColorSpec::Value(blend_over_white(color, alpha)));
+        } else {
+            set_delta_color_var(delta, lowered);
+        }
+        return true;
+    }
+    if let Some((color, alpha)) = parse_color_string(&lowered) {
+        set_delta_color(delta, ColorSpec::Value(blend_over_white(color, alpha)));
+        return true;
+    }
+    if let Some(var) = var_name_from_string(&lowered) {
+        set_delta_color_var(delta, var);
+        return true;
+    }
+    false
+}
+
+fn apply_native_background_color_value(delta: &mut StyleDelta, raw: &str) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    match lowered.as_str() {
+        "inherit" => {
+            set_delta_background_color(delta, BackgroundSpec::Inherit);
+            return true;
+        }
+        "initial" | "unset" | "revert" => {
+            set_delta_background_color(delta, BackgroundSpec::Initial);
+            return true;
+        }
+        "currentcolor" => {
+            set_delta_background_color(delta, BackgroundSpec::CurrentColor);
+            return true;
+        }
+        "revert-layer" => {
+            delta.background_color = None;
+            delta.background_color_var = None;
+            delta.revert_layer.background_color = true;
+            return true;
+        }
+        _ => {}
+    }
+    if should_defer_color_expr(&lowered) {
+        if let Some((color, alpha)) = parse_color_string(&lowered) {
+            set_delta_background_color(
+                delta,
+                BackgroundSpec::Value(blend_over_white(color, alpha)),
+            );
+        } else {
+            set_delta_background_color_var(delta, lowered);
+        }
+        return true;
+    }
+    if let Some((color, alpha)) = parse_color_string(&lowered) {
+        set_delta_background_color(delta, BackgroundSpec::Value(blend_over_white(color, alpha)));
+        return true;
+    }
+    if let Some(var) = var_name_from_string(&lowered) {
+        set_delta_background_color_var(delta, var);
+        return true;
+    }
+    false
 }
 
 fn set_revert_layer_outline(delta: &mut StyleDelta, width: bool, style: bool, color: bool) {
@@ -9732,109 +9014,6 @@ fn set_revert_layer_isolation(delta: &mut StyleDelta) -> bool {
     true
 }
 
-fn set_revert_layer_box_edge(
-    delta: &mut StyleDelta,
-    is_margin: bool,
-    property_id: &PropertyId,
-) -> bool {
-    let Some(target) = physical_box_edge_target(property_id, is_margin) else {
-        return false;
-    };
-    if is_margin {
-        delta.margin.clear(target);
-        delta.revert_layer.margin.set(target);
-    } else {
-        delta.padding.clear(target);
-        delta.revert_layer.padding.set(target);
-    }
-    true
-}
-
-fn clear_revert_layer_box_edge(delta: &mut StyleDelta, is_margin: bool, property_id: &PropertyId) {
-    let Some(target) = physical_box_edge_target(property_id, is_margin) else {
-        return;
-    };
-    if is_margin {
-        delta.revert_layer.margin.clear(target);
-    } else {
-        delta.revert_layer.padding.clear(target);
-    }
-}
-
-fn set_revert_layer_inset_edge(delta: &mut StyleDelta, property_id: &PropertyId) -> bool {
-    let Some(target) = physical_inset_edge_target(property_id) else {
-        return false;
-    };
-    clear_delta_inset_edge(delta, target);
-    delta.revert_layer.inset.set(target);
-    true
-}
-
-fn logical_box_edge_target(
-    property_id: &PropertyId,
-    is_margin: bool,
-) -> Option<LogicalBoxEdgeTarget> {
-    match (is_margin, property_id) {
-        (true, PropertyId::MarginInline) | (false, PropertyId::PaddingInline) => {
-            Some(LogicalBoxEdgeTarget::Inline)
-        }
-        (true, PropertyId::MarginInlineStart) | (false, PropertyId::PaddingInlineStart) => {
-            Some(LogicalBoxEdgeTarget::InlineStart)
-        }
-        (true, PropertyId::MarginInlineEnd) | (false, PropertyId::PaddingInlineEnd) => {
-            Some(LogicalBoxEdgeTarget::InlineEnd)
-        }
-        (true, PropertyId::MarginBlock) | (false, PropertyId::PaddingBlock) => {
-            Some(LogicalBoxEdgeTarget::Block)
-        }
-        (true, PropertyId::MarginBlockStart) | (false, PropertyId::PaddingBlockStart) => {
-            Some(LogicalBoxEdgeTarget::BlockStart)
-        }
-        (true, PropertyId::MarginBlockEnd) | (false, PropertyId::PaddingBlockEnd) => {
-            Some(LogicalBoxEdgeTarget::BlockEnd)
-        }
-        _ => None,
-    }
-}
-
-fn logical_inset_edge_target(property_id: &PropertyId) -> Option<LogicalBoxEdgeTarget> {
-    match property_id {
-        PropertyId::InsetInline => Some(LogicalBoxEdgeTarget::Inline),
-        PropertyId::InsetInlineStart => Some(LogicalBoxEdgeTarget::InlineStart),
-        PropertyId::InsetInlineEnd => Some(LogicalBoxEdgeTarget::InlineEnd),
-        PropertyId::InsetBlock => Some(LogicalBoxEdgeTarget::Block),
-        PropertyId::InsetBlockStart => Some(LogicalBoxEdgeTarget::BlockStart),
-        PropertyId::InsetBlockEnd => Some(LogicalBoxEdgeTarget::BlockEnd),
-        _ => None,
-    }
-}
-
-fn set_revert_layer_logical_box_edge(
-    delta: &mut StyleDelta,
-    is_margin: bool,
-    property_id: &PropertyId,
-) -> bool {
-    let Some(target) = logical_box_edge_target(property_id, is_margin) else {
-        return false;
-    };
-    clear_delta_logical_box_edge(delta, is_margin, target);
-    if is_margin {
-        delta.revert_layer.margin_logical.set(target);
-    } else {
-        delta.revert_layer.padding_logical.set(target);
-    }
-    true
-}
-
-fn set_revert_layer_logical_inset_edge(delta: &mut StyleDelta, property_id: &PropertyId) -> bool {
-    let Some(target) = logical_inset_edge_target(property_id) else {
-        return false;
-    };
-    clear_delta_logical_inset_edge(delta, target);
-    delta.revert_layer.inset_logical.set(target);
-    true
-}
-
 fn clear_delta_logical_box_edge(
     delta: &mut StyleDelta,
     is_margin: bool,
@@ -9905,6 +9084,8 @@ fn clear_delta_logical_inset_edge(delta: &mut StyleDelta, target: LogicalBoxEdge
         LogicalBoxEdgeTarget::Inline => {
             delta.inset_inline_start = None;
             delta.inset_inline_end = None;
+            delta.inset_inline_start_var = None;
+            delta.inset_inline_end_var = None;
             delta.inset_left = None;
             delta.inset_right = None;
             delta.inset_left_var = None;
@@ -9912,17 +9093,21 @@ fn clear_delta_logical_inset_edge(delta: &mut StyleDelta, target: LogicalBoxEdge
         }
         LogicalBoxEdgeTarget::InlineStart => {
             delta.inset_inline_start = None;
+            delta.inset_inline_start_var = None;
             delta.inset_left = None;
             delta.inset_left_var = None;
         }
         LogicalBoxEdgeTarget::InlineEnd => {
             delta.inset_inline_end = None;
+            delta.inset_inline_end_var = None;
             delta.inset_right = None;
             delta.inset_right_var = None;
         }
         LogicalBoxEdgeTarget::Block => {
             delta.inset_block_start = None;
             delta.inset_block_end = None;
+            delta.inset_block_start_var = None;
+            delta.inset_block_end_var = None;
             delta.inset_top = None;
             delta.inset_bottom = None;
             delta.inset_top_var = None;
@@ -9930,11 +9115,13 @@ fn clear_delta_logical_inset_edge(delta: &mut StyleDelta, target: LogicalBoxEdge
         }
         LogicalBoxEdgeTarget::BlockStart => {
             delta.inset_block_start = None;
+            delta.inset_block_start_var = None;
             delta.inset_top = None;
             delta.inset_top_var = None;
         }
         LogicalBoxEdgeTarget::BlockEnd => {
             delta.inset_block_end = None;
+            delta.inset_block_end_var = None;
             delta.inset_bottom = None;
             delta.inset_bottom_var = None;
         }
@@ -10447,631 +9634,6 @@ fn set_delta_inset_edge_var(delta: &mut StyleDelta, target: BoxEdgeTarget, value
     }
 }
 
-fn apply_custom_property(property_name: &str, tokens: &[TokenOrValue], delta: &mut StyleDelta) {
-    match property_name {
-        "border-collapse" => {
-            if let Some(value) = first_ident(tokens) {
-                delta.border_collapse = Some(match value.as_str() {
-                    "collapse" => BorderCollapseMode::Collapse,
-                    _ => BorderCollapseMode::Separate,
-                });
-            }
-        }
-        "caption-side" => {
-            if let Some(value) = first_ident(tokens) {
-                if let Some(side) = parse_caption_side_ident(&value) {
-                    delta.caption_side = Some(side);
-                }
-            }
-        }
-        "border-spacing" => {
-            let raw = tokens_debug_string(tokens);
-            if let Some(spacing) = parse_border_spacing_str(&raw) {
-                delta.border_spacing = Some(spacing);
-            }
-        }
-        "table-layout" => {
-            if let Some(value) = first_ident(tokens) {
-                delta.table_layout = Some(match value.as_str() {
-                    "fixed" => TableLayoutMode::Fixed,
-                    _ => TableLayoutMode::Auto,
-                });
-            }
-        }
-        "empty-cells" => {
-            if let Some(value) = first_ident(tokens) {
-                delta.empty_cells_hide = Some(value == "hide");
-            }
-        }
-        "visibility" => {
-            let raw = tokens_debug_string(tokens);
-            apply_visibility_from_raw(delta, &raw);
-        }
-        "list-style-type" => {
-            apply_list_style_type_from_tokens(delta, tokens);
-        }
-        "list-style-image" => {
-            apply_list_style_image_from_tokens(delta, tokens);
-        }
-        "list-style-position" => {
-            apply_list_style_position_from_tokens(delta, tokens);
-        }
-        "overflow" => {
-            let raw = tokens_debug_string(tokens);
-            if raw.trim().eq_ignore_ascii_case("revert-layer") {
-                set_revert_layer_overflow_axes(delta);
-            } else if let Some((x, y)) = parse_overflow_axis_modes_str(&raw) {
-                set_delta_overflow_axes(delta, x, y);
-            }
-        }
-        "overflow-x" => {
-            let raw = tokens_debug_string(tokens);
-            if raw.trim().eq_ignore_ascii_case("revert-layer") {
-                set_revert_layer_overflow_x(delta);
-            } else if let Some(mode) = parse_overflow_mode_str(&raw) {
-                set_delta_overflow_x(delta, mode);
-            }
-        }
-        "overflow-y" => {
-            let raw = tokens_debug_string(tokens);
-            if raw.trim().eq_ignore_ascii_case("revert-layer") {
-                set_revert_layer_overflow_y(delta);
-            } else if let Some(mode) = parse_overflow_mode_str(&raw) {
-                set_delta_overflow_y(delta, mode);
-            }
-        }
-        "overflow-inline" => {
-            let raw = tokens_debug_string(tokens);
-            if raw.trim().eq_ignore_ascii_case("revert-layer") {
-                set_revert_layer_overflow_inline(delta);
-            } else if let Some(mode) = parse_overflow_mode_str(&raw) {
-                set_delta_overflow_inline(delta, mode);
-            }
-        }
-        "overflow-block" => {
-            let raw = tokens_debug_string(tokens);
-            if raw.trim().eq_ignore_ascii_case("revert-layer") {
-                set_revert_layer_overflow_block(delta);
-            } else if let Some(mode) = parse_overflow_mode_str(&raw) {
-                set_delta_overflow_block(delta, mode);
-            }
-        }
-        "hyphenate-character" | "-webkit-hyphenate-character" => {
-            let raw = tokens_raw_value_string(tokens);
-            apply_hyphenate_character_from_raw(delta, &raw);
-        }
-        "background-image" => {
-            let raw = tokens_debug_string(tokens);
-            apply_background_image_from_string(&raw, delta);
-        }
-        "background-size" => {
-            let raw = tokens_debug_string(tokens);
-            apply_background_size_from_string(&raw, delta);
-        }
-        "background-position" => {
-            let raw = tokens_debug_string(tokens);
-            apply_background_position_from_string(&raw, delta);
-        }
-        "background-repeat" => {
-            let raw = tokens_debug_string(tokens);
-            apply_background_repeat_from_string(&raw, delta);
-        }
-        "background-blend-mode" => {
-            let raw = tokens_debug_string(tokens);
-            apply_background_blend_mode_from_string(&raw, delta);
-        }
-        "background-origin" => {
-            let raw = tokens_debug_string(tokens);
-            apply_background_origin_from_string(&raw, delta);
-        }
-        "background-clip" => {
-            let raw = tokens_debug_string(tokens);
-            apply_background_clip_from_string(&raw, delta);
-        }
-        "border-radius" => {
-            let raw = tokens_debug_string(tokens);
-            if let Some(radius) = parse_border_radius_str(&raw) {
-                delta.border_radius = Some(radius);
-            }
-        }
-        "border"
-        | "border-top"
-        | "border-right"
-        | "border-bottom"
-        | "border-left"
-        | "border-block-start"
-        | "border-block-end"
-        | "border-inline-start"
-        | "border-inline-end" => {
-            let target = border_color_target_from_property_name(property_name);
-            if let Some(spec) = length_spec_from_custom_tokens(tokens) {
-                set_delta_border_width_spec(delta, target, spec);
-            } else if let Some(expr) = length_var_expr_from_tokens(tokens) {
-                set_delta_border_width_var(delta, target, expr);
-            }
-            if let Some(color) = color_from_tokens(tokens) {
-                set_delta_border_color_spec(delta, target, ColorSpec::Value(color));
-            } else {
-                let raw = tokens_debug_string(tokens);
-                if let Some((color, alpha)) = parse_color_string(&raw) {
-                    set_delta_border_color_spec(
-                        delta,
-                        target,
-                        ColorSpec::Value(blend_over_white(color, alpha)),
-                    );
-                } else if raw.to_ascii_lowercase().contains("color-mix(") {
-                    set_delta_border_color_var(delta, target, raw.to_ascii_lowercase());
-                } else if let Some(var) =
-                    last_var_name_from_tokens(tokens).or_else(|| var_name_from_tokens(tokens))
-                {
-                    set_delta_border_color_var(delta, target, var);
-                }
-            }
-            if let Some(style) = border_line_style_from_tokens(tokens) {
-                set_delta_border_style(delta, target, style);
-            }
-        }
-        "border-color"
-        | "border-top-color"
-        | "border-right-color"
-        | "border-bottom-color"
-        | "border-left-color"
-        | "border-block-start-color"
-        | "border-block-end-color"
-        | "border-inline-start-color"
-        | "border-inline-end-color" => {
-            let target = border_color_target_from_property_name(property_name);
-            if let Some(color) = color_from_tokens(tokens) {
-                set_delta_border_color_spec(delta, target, ColorSpec::Value(color));
-            } else {
-                let raw = tokens_debug_string(tokens);
-                if let Some((color, alpha)) = parse_color_string(&raw) {
-                    set_delta_border_color_spec(
-                        delta,
-                        target,
-                        ColorSpec::Value(blend_over_white(color, alpha)),
-                    );
-                } else if should_defer_color_expr(&raw) {
-                    set_delta_border_color_var(delta, target, raw.to_ascii_lowercase());
-                } else if let Some(var) =
-                    last_var_name_from_tokens(tokens).or_else(|| var_name_from_tokens(tokens))
-                {
-                    set_delta_border_color_var(delta, target, var);
-                }
-            }
-        }
-        "border-width"
-        | "border-top-width"
-        | "border-right-width"
-        | "border-bottom-width"
-        | "border-left-width"
-        | "border-block-start-width"
-        | "border-block-end-width"
-        | "border-inline-start-width"
-        | "border-inline-end-width" => {
-            let target = border_color_target_from_property_name(property_name);
-            if let Some(spec) = length_spec_from_custom_tokens(tokens) {
-                set_delta_border_width_spec(delta, target, spec);
-            } else if let Some(expr) = length_var_expr_from_tokens(tokens) {
-                set_delta_border_width_var(delta, target, expr);
-            }
-        }
-        "border-style"
-        | "border-top-style"
-        | "border-right-style"
-        | "border-bottom-style"
-        | "border-left-style"
-        | "border-block-start-style"
-        | "border-block-end-style"
-        | "border-inline-start-style"
-        | "border-inline-end-style" => {
-            if let Some(style) = border_line_style_from_tokens(tokens) {
-                let target = border_color_target_from_property_name(property_name);
-                set_delta_border_style(delta, target, style);
-            }
-        }
-        "outline" => {
-            if let Some(spec) = length_spec_from_custom_tokens(tokens) {
-                set_delta_outline_width(delta, spec);
-            }
-            if let Some(color) = color_from_tokens(tokens) {
-                set_delta_outline_color(delta, ColorSpec::Value(color));
-            } else {
-                let raw = tokens_debug_string(tokens);
-                if let Some((color, alpha)) = parse_color_string(&raw) {
-                    set_delta_outline_color(
-                        delta,
-                        ColorSpec::Value(blend_over_white(color, alpha)),
-                    );
-                }
-            }
-            if let Some(style) = outline_line_style_from_tokens(tokens) {
-                set_delta_outline_style(delta, style);
-            }
-        }
-        "outline-width" => {
-            delta.revert_layer.outline_width = false;
-            apply_inherit_initial_size(tokens, &mut delta.outline_width);
-            if let Some(spec) = length_spec_from_custom_tokens(tokens) {
-                set_delta_outline_width(delta, spec);
-            }
-        }
-        "outline-color" => {
-            if let Some(color) = color_from_tokens(tokens) {
-                set_delta_outline_color(delta, ColorSpec::Value(color));
-            } else {
-                let raw = tokens_debug_string(tokens);
-                if let Some((color, alpha)) = parse_color_string(&raw) {
-                    set_delta_outline_color(
-                        delta,
-                        ColorSpec::Value(blend_over_white(color, alpha)),
-                    );
-                }
-            }
-        }
-        "outline-style" => {
-            if let Some(style) = outline_line_style_from_tokens(tokens) {
-                set_delta_outline_style(delta, style);
-            }
-        }
-        "outline-offset" => {
-            let raw = tokens_debug_string(tokens);
-            let raw_lower = raw.trim().to_ascii_lowercase();
-            if raw_lower == "revert-layer" {
-                set_revert_layer_outline_offset(delta);
-                return;
-            }
-            delta.outline_offset_var = None;
-            apply_inherit_initial_size(tokens, &mut delta.outline_offset);
-            if delta.outline_offset.is_some() {
-                delta.outline_offset_var = None;
-                delta.revert_layer.outline_offset = false;
-            }
-            if let Some(spec) = length_spec_from_custom_tokens(tokens) {
-                set_delta_outline_offset(delta, spec);
-            } else {
-                if raw_lower.contains("var(") {
-                    set_delta_outline_offset_var(delta, raw_lower);
-                } else if let Some(var) = var_name_from_tokens(tokens) {
-                    set_delta_outline_offset_var(delta, var);
-                }
-            }
-        }
-        "box-shadow" => {
-            let raw = tokens_debug_string(tokens);
-            if raw.trim().eq_ignore_ascii_case("revert-layer") {
-                set_revert_layer_box_shadow(delta);
-            } else if let Some(shadows) = parse_box_shadow_list_str(&raw) {
-                set_delta_box_shadows(delta, shadows);
-            }
-        }
-        "text-shadow" => {
-            let raw = tokens_debug_string(tokens);
-            if raw.trim().eq_ignore_ascii_case("revert-layer") {
-                set_revert_layer_text_shadow(delta);
-            } else {
-                apply_text_shadow_from_raw(delta, &raw);
-            }
-        }
-        "line-break" => {
-            let raw = tokens_debug_string(tokens);
-            apply_line_break_from_raw(delta, &raw);
-        }
-        "filter" => {
-            let raw = tokens_debug_string(tokens);
-            if raw.trim().eq_ignore_ascii_case("revert-layer") {
-                set_revert_layer_paint_filter(delta);
-            } else {
-                set_delta_paint_filter_from_raw(delta, &raw);
-            }
-        }
-        "backdrop-filter" => {
-            let raw = tokens_debug_string(tokens);
-            if raw.trim().eq_ignore_ascii_case("revert-layer") {
-                set_revert_layer_backdrop_filter(delta);
-            } else {
-                set_delta_backdrop_filter_from_raw(delta, &raw);
-            }
-        }
-        "will-change" => {
-            let raw = tokens_debug_string(tokens);
-            if raw.trim().eq_ignore_ascii_case("revert-layer") {
-                set_revert_layer_will_change_backdrop_root(delta);
-            } else {
-                set_delta_will_change_backdrop_root_from_raw(delta, &raw);
-            }
-        }
-        "mask" | "mask-image" | "mask-border" | "mask-border-source" | "-webkit-mask"
-        | "-webkit-mask-image" => {
-            let raw = tokens_debug_string(tokens);
-            if raw.trim().eq_ignore_ascii_case("revert-layer") {
-                set_revert_layer_mask_backdrop_root(delta);
-            } else {
-                set_delta_mask_backdrop_root_from_raw(delta, &raw);
-            }
-        }
-        "mix-blend-mode" => {
-            let raw = tokens_debug_string(tokens);
-            if raw.trim().eq_ignore_ascii_case("revert-layer") {
-                set_revert_layer_mix_blend_mode(delta);
-            } else if let Some(value) = first_ident(tokens) {
-                if let Some(mode) = parse_mix_blend_mode_str(&value) {
-                    set_delta_mix_blend_mode(delta, mode);
-                }
-            } else {
-                if let Some(mode) = parse_mix_blend_mode_str(&raw) {
-                    set_delta_mix_blend_mode(delta, mode);
-                }
-            }
-        }
-        "isolation" => {
-            let raw = tokens_debug_string(tokens);
-            if raw.trim().eq_ignore_ascii_case("revert-layer") {
-                set_revert_layer_isolation(delta);
-            } else if let Some(value) = first_ident(tokens) {
-                if let Some(spec) = parse_isolation_spec_str(&value) {
-                    set_delta_isolation(delta, spec);
-                }
-            } else {
-                if let Some(spec) = parse_isolation_spec_str(&raw) {
-                    set_delta_isolation(delta, spec);
-                }
-            }
-        }
-        "writing-mode" => {
-            let raw = tokens_debug_string(tokens);
-            if raw.trim().eq_ignore_ascii_case("revert-layer") {
-                set_revert_layer_writing_mode(delta);
-            } else {
-                apply_writing_mode_from_str(&raw, delta);
-            }
-        }
-        "opacity" => {
-            let raw = tokens_debug_string(tokens);
-            apply_opacity_from_raw(delta, &raw);
-        }
-        "clip-path" => {
-            let raw = tokens_debug_string(tokens);
-            if raw.trim().eq_ignore_ascii_case("revert-layer") {
-                set_revert_layer_clip_path(delta);
-            } else if let Some(spec) = parse_clip_path_spec_str(&raw) {
-                set_delta_clip_path(delta, spec);
-            }
-        }
-        "object-fit" => {
-            if let Some(value) = first_ident(tokens) {
-                if let Some(spec) = parse_object_fit_spec_str(&value) {
-                    delta.object_fit = Some(spec);
-                }
-            } else {
-                let raw = tokens_debug_string(tokens);
-                if let Some(spec) = parse_object_fit_spec_str(&raw) {
-                    delta.object_fit = Some(spec);
-                }
-            }
-        }
-        "object-position" => {
-            let raw = tokens_debug_string(tokens);
-            if let Some(spec) = parse_object_position_spec_str(&raw) {
-                delta.object_position = Some(spec);
-            }
-        }
-        "transform" => {
-            let raw = tokens_debug_string(tokens);
-            let raw_lower = raw.trim().to_ascii_lowercase();
-            if let Some(ops) = transform_ops_from_string(&raw) {
-                delta.transform = Some(TransformSpec::Value(ops));
-            } else {
-                apply_inherit_initial_transform(tokens, &mut delta.transform);
-                if raw_lower.contains("var(") {
-                    delta.transform_var = Some(raw_lower);
-                }
-            }
-        }
-        "translate" => {
-            let raw = tokens_debug_string(tokens);
-            let raw_lower = raw.trim().to_ascii_lowercase();
-            if let Some(ops) = transform_ops_from_translate_string(&raw) {
-                delta.translate = Some(TransformSpec::Value(ops));
-            } else {
-                apply_inherit_initial_transform(tokens, &mut delta.translate);
-                if raw_lower.contains("var(") {
-                    delta.translate_var = Some(raw_lower);
-                }
-            }
-        }
-        "rotate" => {
-            let raw = tokens_debug_string(tokens);
-            let raw_lower = raw.trim().to_ascii_lowercase();
-            if let Some(ops) = transform_ops_from_rotate_string(&raw) {
-                delta.rotate = Some(TransformSpec::Value(ops));
-            } else {
-                apply_inherit_initial_transform(tokens, &mut delta.rotate);
-                if raw_lower.contains("var(") {
-                    delta.rotate_var = Some(raw_lower);
-                }
-            }
-        }
-        "scale" => {
-            let raw = tokens_debug_string(tokens);
-            let raw_lower = raw.trim().to_ascii_lowercase();
-            if let Some(ops) = transform_ops_from_scale_string(&raw) {
-                delta.scale = Some(TransformSpec::Value(ops));
-            } else {
-                apply_inherit_initial_transform(tokens, &mut delta.scale);
-                if raw_lower.contains("var(") {
-                    delta.scale_var = Some(raw_lower);
-                }
-            }
-        }
-        "transform-origin" => {
-            let raw = tokens_debug_string(tokens);
-            if let Some(origin) = transform_origin_from_string(&raw) {
-                delta.transform_origin = Some(TransformOriginSpec::Value(origin));
-            } else {
-                apply_inherit_initial_transform_origin(tokens, delta);
-            }
-        }
-        "text-underline-offset" => {
-            let raw = tokens_debug_string(tokens);
-            apply_text_underline_offset_from_raw(delta, &raw);
-        }
-        "text-underline-position" => {
-            let raw = tokens_debug_string(tokens);
-            apply_text_underline_position_from_raw(delta, &raw);
-        }
-        "gap" | "row-gap" | "column-gap" => {
-            apply_gap_tokens(tokens, delta);
-        }
-        "break-before" | "page-break-before" => {
-            if let Some(value) = first_ident(tokens) {
-                if let Some(break_before) = parse_break_before_value(property_name, &value) {
-                    delta.pagination.break_before = Some(break_before);
-                }
-            }
-        }
-        "break-after" | "page-break-after" => {
-            if let Some(value) = first_ident(tokens) {
-                if let Some(break_after) = parse_break_after_value(property_name, &value) {
-                    delta.pagination.break_after = Some(break_after);
-                }
-            }
-        }
-        "break-inside" | "page-break-inside" => {
-            if let Some(value) = first_ident(tokens) {
-                if let Some(break_inside) = parse_break_inside_value(property_name, &value) {
-                    delta.pagination.break_inside = Some(break_inside);
-                }
-            }
-        }
-        "orphans" => {
-            if let Some(value) = parse_pagination_line_count(tokens) {
-                delta.pagination.orphans = Some(value);
-            }
-        }
-        "widows" => {
-            if let Some(value) = parse_pagination_line_count(tokens) {
-                delta.pagination.widows = Some(value);
-            }
-        }
-        "content" => {
-            if let Some(spec) = content_from_tokens(tokens) {
-                delta.content = Some(spec);
-            }
-        }
-        "counter-reset" => {
-            if let Some(mutations) = counter_mutations_from_tokens(tokens, 0) {
-                delta.counter_reset = Some(last_counter_reset_mutations(mutations));
-            }
-        }
-        "counter-increment" => {
-            if let Some(mutations) = counter_mutations_from_tokens(tokens, 1) {
-                delta.counter_increment = Some(mutations);
-            }
-        }
-        "counter-set" => {
-            if let Some(mutations) = counter_mutations_from_tokens(tokens, 0) {
-                delta.counter_set = Some(mutations);
-            }
-        }
-        "quotes" => {
-            if let Some(spec) = quotes_from_tokens(tokens) {
-                delta.quotes = Some(spec);
-            }
-        }
-        "white-space" => {
-            let raw = tokens_debug_string(tokens);
-            apply_white_space_from_raw(delta, &raw);
-        }
-        "white-space-collapse" => {
-            let raw = tokens_debug_string(tokens);
-            apply_white_space_collapse_from_raw(delta, &raw);
-        }
-        "text-wrap" => {
-            let raw = tokens_debug_string(tokens);
-            apply_text_wrap_from_raw(delta, &raw);
-        }
-        "text-wrap-mode" => {
-            let raw = tokens_debug_string(tokens);
-            apply_text_wrap_mode_from_raw(delta, &raw);
-        }
-        "text-wrap-style" => {
-            let raw = tokens_debug_string(tokens);
-            apply_text_wrap_style_from_raw(delta, &raw);
-        }
-        "font-family" => {
-            let raw = tokens_raw_value_string(tokens);
-            apply_font_family_from_raw(delta, &raw);
-        }
-        "font" => {
-            let raw = tokens_raw_value_string(tokens);
-            apply_font_shorthand_from_raw(delta, &raw);
-        }
-        "font-size" => {
-            let raw = tokens_debug_string(tokens);
-            apply_font_size_from_raw(delta, &raw);
-        }
-        "line-height" => {
-            let raw = tokens_debug_string(tokens);
-            apply_line_height_from_raw(delta, &raw);
-        }
-        "font-style" => {
-            let raw = tokens_debug_string(tokens);
-            apply_font_style_from_raw(delta, &raw);
-        }
-        "font-weight" => {
-            let raw = tokens_debug_string(tokens);
-            apply_font_weight_from_raw(delta, &raw);
-        }
-        "vertical-align" => {
-            let raw = tokens_debug_string(tokens);
-            apply_vertical_align_from_raw(delta, &raw);
-        }
-        _ => {
-            if property_name.starts_with("--") {
-                let name = property_name.to_string();
-                clear_custom_property_delta_value(delta, &name);
-                let raw = tokens_raw_value_string(tokens);
-                let raw_preserved = raw.trim().to_string();
-                let raw_lower = raw.trim().to_ascii_lowercase();
-                delta.custom_raw_values.insert(name.clone(), raw_preserved);
-                if let Some(color) = color_from_tokens(tokens) {
-                    delta.custom_colors.insert(name.clone(), color);
-                    delta.custom_color_alpha.insert(name.clone(), 1.0);
-                } else if let Some((color, alpha)) = parse_color_string(&raw) {
-                    let blended = if alpha < 1.0 {
-                        Color::rgb(
-                            color.r * alpha + (1.0 - alpha),
-                            color.g * alpha + (1.0 - alpha),
-                            color.b * alpha + (1.0 - alpha),
-                        )
-                    } else {
-                        color
-                    };
-                    delta.custom_colors.insert(name.clone(), blended);
-                    delta
-                        .custom_color_alpha
-                        .insert(name.clone(), alpha.clamp(0.0, 1.0));
-                } else if let Some(color) = parse_rgb_triplet_string(&raw) {
-                    delta.custom_colors.insert(name.clone(), color);
-                    delta.custom_color_alpha.insert(name.clone(), 1.0);
-                } else if raw_lower.contains("var(") {
-                    delta.custom_color_refs.insert(name.clone(), raw_lower);
-                } else if let Some(var) = var_name_from_tokens(tokens) {
-                    delta.custom_color_refs.insert(name.clone(), var);
-                } else if let Some(spec) = length_spec_from_custom_tokens(tokens) {
-                    delta.custom_lengths.insert(name.clone(), spec);
-                } else if let Some(stack) = font_stack_from_tokens(tokens) {
-                    delta.custom_font_stacks.insert(name, stack);
-                } else {
-                    // Preserve the raw stream as an unresolved expression so this declaration still overrides prior typed caches.
-                    delta.custom_color_refs.insert(name, raw_lower);
-                }
-            }
-        }
-    }
-}
-
 fn parse_caption_side_ident(value: &str) -> Option<CaptionSideMode> {
     match value {
         "top" | "initial" => Some(CaptionSideMode::Top),
@@ -11110,25 +9672,6 @@ fn clear_custom_property_delta_value(delta: &mut StyleDelta, name: &str) {
     delta.custom_font_stacks.remove(name);
 }
 
-fn overflow_mode_from_keyword(value: &css_overflow::OverflowKeyword) -> OverflowMode {
-    match value {
-        css_overflow::OverflowKeyword::Hidden
-        | css_overflow::OverflowKeyword::Clip
-        | css_overflow::OverflowKeyword::Scroll
-        | css_overflow::OverflowKeyword::Auto => OverflowMode::Hidden,
-        _ => OverflowMode::Visible,
-    }
-}
-
-fn overflow_axis_modes_from_overflow(
-    value: &css_overflow::Overflow,
-) -> (OverflowMode, OverflowMode) {
-    (
-        overflow_mode_from_keyword(&value.x),
-        overflow_mode_from_keyword(&value.y),
-    )
-}
-
 fn combine_overflow_modes(x: OverflowMode, y: OverflowMode) -> OverflowMode {
     // Static PDF output cannot expose scrollbars, so any clipped or scrollable axis clips paint.
     if matches!(x, OverflowMode::Hidden) || matches!(y, OverflowMode::Hidden) {
@@ -11157,48 +9700,6 @@ fn parse_overflow_axis_modes_str(raw: &str) -> Option<(OverflowMode, OverflowMod
         [x, y] => Some((parse_overflow_mode_str(x)?, parse_overflow_mode_str(y)?)),
         _ => None,
     }
-}
-
-fn length_spec_from_gap_value(value: &css_align::GapValue) -> Option<LengthSpec> {
-    match value {
-        css_align::GapValue::LengthPercentage(lp) => length_spec_from_lp(lp),
-        css_align::GapValue::Normal => Some(LengthSpec::Absolute(Pt::ZERO)),
-    }
-}
-
-fn apply_gap_tokens(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
-    delta.gap_var = None;
-    apply_inherit_initial_size(tokens, &mut delta.gap);
-    if let Some(value) = first_ident(tokens) {
-        if value.eq_ignore_ascii_case("normal") {
-            delta.gap = Some(LengthSpec::Absolute(Pt::ZERO));
-            return;
-        }
-    }
-    if let Some(spec) = length_spec_from_custom_tokens(tokens) {
-        delta.gap = Some(spec);
-        return;
-    }
-    let raw = tokens_debug_string(tokens);
-    let raw_lower = raw.trim().to_ascii_lowercase();
-    if raw_lower.contains("var(") {
-        delta.gap_var = Some(raw_lower);
-    } else if let Some(var) = var_name_from_tokens(tokens) {
-        delta.gap_var = Some(var);
-    }
-}
-
-fn first_ident(tokens: &[TokenOrValue]) -> Option<String> {
-    for token in tokens {
-        match token {
-            TokenOrValue::Token(Token::Ident(ident)) => {
-                return Some(ident.as_ref().to_ascii_lowercase());
-            }
-            TokenOrValue::Token(Token::WhiteSpace(_)) => continue,
-            _ => {}
-        }
-    }
-    None
 }
 
 fn parse_break_inside_value(property_name: &str, value: &str) -> Option<BreakInside> {
@@ -11279,128 +9780,6 @@ fn parse_break_after_value(property_name: &str, value: &str) -> Option<BreakAfte
     }
 }
 
-fn first_integer(tokens: &[TokenOrValue]) -> Option<i32> {
-    for token in tokens {
-        match token {
-            TokenOrValue::Token(Token::Number {
-                value, int_value, ..
-            }) => {
-                if let Some(int_value) = int_value {
-                    return Some(*int_value);
-                }
-                return Some(*value as i32);
-            }
-            TokenOrValue::Token(Token::WhiteSpace(_)) => continue,
-            _ => {}
-        }
-    }
-    None
-}
-
-fn parse_pagination_line_count(tokens: &[TokenOrValue]) -> Option<PaginationLineCountSpec> {
-    if let Some(value) = first_ident(tokens) {
-        return match value.as_str() {
-            "inherit" | "unset" | "revert" | "revert-layer" => {
-                Some(PaginationLineCountSpec::Inherit)
-            }
-            "initial" => Some(PaginationLineCountSpec::Initial),
-            _ => None,
-        };
-    }
-    match first_integer(tokens) {
-        Some(value) if value >= 1 => Some(PaginationLineCountSpec::Value(value as usize)),
-        _ => None,
-    }
-}
-
-fn first_number(tokens: &[TokenOrValue]) -> Option<f32> {
-    for token in tokens {
-        match token {
-            TokenOrValue::Token(Token::Number { value, .. }) => return Some(*value),
-            TokenOrValue::Token(Token::WhiteSpace(_)) => continue,
-            _ => {}
-        }
-    }
-    None
-}
-
-fn counter_mutations_from_tokens(
-    tokens: &[TokenOrValue],
-    default_value: i32,
-) -> Option<Vec<CounterMutation>> {
-    let raw_lower = tokens_debug_string(tokens).trim().to_ascii_lowercase();
-    if matches!(
-        raw_lower.as_str(),
-        "none" | "initial" | "unset" | "revert" | "revert-layer"
-    ) {
-        return Some(Vec::new());
-    }
-    let mut out = Vec::new();
-    let mut i = 0usize;
-    while i < tokens.len() {
-        match &tokens[i] {
-            TokenOrValue::Token(Token::WhiteSpace(_)) | TokenOrValue::Token(Token::Comma) => {
-                i += 1;
-            }
-            TokenOrValue::Token(Token::Ident(ident)) => {
-                let name = ident.as_ref();
-                if !is_valid_counter_name(name) {
-                    return None;
-                }
-                let (value, next, auto_reversed_initial) =
-                    counter_mutation_value_after(tokens, i + 1)
-                        .map(|(value, next)| (value, next, false))
-                        .unwrap_or((default_value, i + 1, false));
-                out.push(CounterMutation {
-                    name: name.to_string(),
-                    value,
-                    reversed: false,
-                    auto_reversed_initial,
-                });
-                i = next;
-            }
-            TokenOrValue::DashedIdent(ident) => {
-                let name = ident.as_ref();
-                if !is_valid_counter_name(name) {
-                    return None;
-                }
-                let (value, next, auto_reversed_initial) =
-                    counter_mutation_value_after(tokens, i + 1)
-                        .map(|(value, next)| (value, next, false))
-                        .unwrap_or((default_value, i + 1, false));
-                out.push(CounterMutation {
-                    name: name.to_string(),
-                    value,
-                    reversed: false,
-                    auto_reversed_initial,
-                });
-                i = next;
-            }
-            TokenOrValue::Function(func) if func.name.as_ref().eq_ignore_ascii_case("reversed") => {
-                let Some(name) = content_attr_name_from_tokens(&func.arguments.0) else {
-                    return None;
-                };
-                if !is_valid_counter_name(&name) {
-                    return None;
-                }
-                let (value, next, auto_reversed_initial) =
-                    counter_mutation_value_after(tokens, i + 1)
-                        .map(|(value, next)| (value, next, false))
-                        .unwrap_or((default_value, i + 1, true));
-                out.push(CounterMutation {
-                    name,
-                    value,
-                    reversed: true,
-                    auto_reversed_initial,
-                });
-                i = next;
-            }
-            _ => return None,
-        }
-    }
-    Some(out)
-}
-
 fn last_counter_reset_mutations(mutations: Vec<CounterMutation>) -> Vec<CounterMutation> {
     let mut out = Vec::new();
     for (index, mutation) in mutations.iter().enumerate() {
@@ -11415,247 +9794,8 @@ fn last_counter_reset_mutations(mutations: Vec<CounterMutation>) -> Vec<CounterM
     out
 }
 
-fn counter_mutation_value_after(tokens: &[TokenOrValue], start: usize) -> Option<(i32, usize)> {
-    let mut i = start;
-    while i < tokens.len() {
-        match &tokens[i] {
-            TokenOrValue::Token(Token::WhiteSpace(_)) => {
-                i += 1;
-            }
-            TokenOrValue::Token(Token::Number {
-                value, int_value, ..
-            }) => {
-                return integer_token_value(*value, *int_value).map(|value| (value, i + 1));
-            }
-            TokenOrValue::Token(Token::Delim('-')) => {
-                let mut j = i + 1;
-                while j < tokens.len() {
-                    match &tokens[j] {
-                        TokenOrValue::Token(Token::WhiteSpace(_)) => j += 1,
-                        TokenOrValue::Token(Token::Number {
-                            value, int_value, ..
-                        }) => {
-                            return integer_token_value(*value, *int_value)
-                                .map(|value| (-value, j + 1));
-                        }
-                        _ => break,
-                    }
-                }
-                return None;
-            }
-            _ => return None,
-        }
-    }
-    None
-}
-
-fn integer_token_value(value: f32, int_value: Option<i32>) -> Option<i32> {
-    if let Some(int_value) = int_value {
-        return Some(int_value);
-    }
-    let rounded = value.round();
-    if (value - rounded).abs() <= f32::EPSILON {
-        Some(rounded as i32)
-    } else {
-        None
-    }
-}
-
-fn content_from_tokens(tokens: &[TokenOrValue]) -> Option<ContentSpec> {
-    let mut parts = Vec::new();
-    for token in tokens {
-        match token {
-            TokenOrValue::Token(Token::Ident(ident)) => {
-                let value = ident.as_ref();
-                if value.eq_ignore_ascii_case("none") {
-                    return Some(ContentSpec::None);
-                }
-                if value.eq_ignore_ascii_case("normal") {
-                    return Some(ContentSpec::Normal);
-                }
-                if value.eq_ignore_ascii_case("inherit") {
-                    return Some(ContentSpec::Inherit);
-                }
-                if value.eq_ignore_ascii_case("initial")
-                    || value.eq_ignore_ascii_case("unset")
-                    || value.eq_ignore_ascii_case("revert")
-                    || value.eq_ignore_ascii_case("revert-layer")
-                {
-                    return Some(ContentSpec::Initial);
-                }
-                if value.eq_ignore_ascii_case("open-quote") {
-                    parts.push(ContentPart::OpenQuote);
-                } else if value.eq_ignore_ascii_case("close-quote") {
-                    parts.push(ContentPart::CloseQuote);
-                } else if value.eq_ignore_ascii_case("no-open-quote") {
-                    parts.push(ContentPart::NoOpenQuote);
-                } else if value.eq_ignore_ascii_case("no-close-quote") {
-                    parts.push(ContentPart::NoCloseQuote);
-                }
-            }
-            TokenOrValue::Token(Token::String(value)) => {
-                parts.push(ContentPart::Text(value.as_ref().to_string()));
-            }
-            TokenOrValue::Function(func) => {
-                if func.name.as_ref().eq_ignore_ascii_case("attr") {
-                    if let Some(name) = content_attr_name_from_tokens(&func.arguments.0) {
-                        parts.push(ContentPart::Attr(name));
-                    }
-                } else if func.name.as_ref().eq_ignore_ascii_case("counter") {
-                    if let Some(counter) = content_counter_from_tokens(&func.arguments.0) {
-                        parts.push(ContentPart::Counter(counter));
-                    }
-                } else if func.name.as_ref().eq_ignore_ascii_case("counters") {
-                    if let Some(counters) = content_counters_from_tokens(&func.arguments.0) {
-                        parts.push(ContentPart::Counters(counters));
-                    }
-                }
-            }
-            TokenOrValue::Token(Token::WhiteSpace(_)) => continue,
-            _ => {}
-        }
-    }
-    if parts.is_empty() {
-        return None;
-    }
-    if parts
-        .iter()
-        .all(|part| matches!(part, ContentPart::Text(_)))
-    {
-        let mut out = String::new();
-        for part in parts {
-            if let ContentPart::Text(value) = part {
-                out.push_str(&value);
-            }
-        }
-        return Some(ContentSpec::Text(out));
-    }
-    Some(ContentSpec::Parts(parts))
-}
-
 fn default_quotes() -> Vec<(String, String)> {
     vec![("\"".to_string(), "\"".to_string())]
-}
-
-fn quotes_from_tokens(tokens: &[TokenOrValue]) -> Option<QuotesSpec> {
-    let mut strings = Vec::new();
-    for token in tokens {
-        match token {
-            TokenOrValue::Token(Token::Ident(ident)) => {
-                let value = ident.as_ref();
-                if value.eq_ignore_ascii_case("none") {
-                    return Some(QuotesSpec::Value(Vec::new()));
-                }
-                if value.eq_ignore_ascii_case("auto")
-                    || value.eq_ignore_ascii_case("initial")
-                    || value.eq_ignore_ascii_case("revert")
-                    || value.eq_ignore_ascii_case("revert-layer")
-                {
-                    return Some(QuotesSpec::Initial);
-                }
-                if value.eq_ignore_ascii_case("inherit")
-                    || value.eq_ignore_ascii_case("unset")
-                    || value.eq_ignore_ascii_case("match-parent")
-                {
-                    return Some(QuotesSpec::Inherit);
-                }
-            }
-            TokenOrValue::Token(Token::String(value)) => {
-                strings.push(value.as_ref().to_string());
-            }
-            TokenOrValue::Token(Token::WhiteSpace(_)) => continue,
-            _ => {}
-        }
-    }
-    if strings.len() < 2 {
-        return None;
-    }
-    let mut pairs = Vec::new();
-    let mut iter = strings.into_iter();
-    while let Some(open) = iter.next() {
-        let Some(close) = iter.next() else {
-            break;
-        };
-        pairs.push((open, close));
-    }
-    (!pairs.is_empty()).then_some(QuotesSpec::Value(pairs))
-}
-
-fn content_attr_name_from_tokens(tokens: &[TokenOrValue]) -> Option<String> {
-    for token in tokens {
-        match token {
-            TokenOrValue::Token(Token::Ident(ident)) => {
-                return Some(ident.as_ref().to_ascii_lowercase());
-            }
-            TokenOrValue::DashedIdent(ident) => {
-                return Some(ident.as_ref().to_ascii_lowercase());
-            }
-            TokenOrValue::Token(Token::WhiteSpace(_)) => continue,
-            _ => {}
-        }
-    }
-    None
-}
-
-fn content_counter_from_tokens(tokens: &[TokenOrValue]) -> Option<GeneratedCounterContent> {
-    let raw = tokens_raw_value_string(tokens);
-    let args = split_args(&raw);
-    let name = args.first()?.trim();
-    if !is_valid_counter_name(name) {
-        return None;
-    }
-    let style = args
-        .get(1)
-        .and_then(|raw| generated_counter_style_from_raw(raw))
-        .unwrap_or_else(decimal_generated_counter_style);
-    Some(GeneratedCounterContent {
-        name: name.to_string(),
-        style,
-    })
-}
-
-fn content_counters_from_tokens(tokens: &[TokenOrValue]) -> Option<GeneratedCountersContent> {
-    let raw = tokens_raw_value_string(tokens);
-    let args = split_args(&raw);
-    let name = args.first()?.trim();
-    if !is_valid_counter_name(name) {
-        return None;
-    }
-    let separator = args.get(1).and_then(|raw| css_string_arg(raw))?;
-    let style = args
-        .get(2)
-        .and_then(|raw| generated_counter_style_from_raw(raw))
-        .unwrap_or_else(decimal_generated_counter_style);
-    Some(GeneratedCountersContent {
-        name: name.to_string(),
-        separator,
-        style,
-    })
-}
-
-fn css_string_arg(raw: &str) -> Option<String> {
-    let trimmed = raw.trim();
-    let quote = trimmed.chars().next()?;
-    if quote != '"' && quote != '\'' {
-        return None;
-    }
-    let mut chars = trimmed.chars();
-    chars.next();
-    let mut out = String::new();
-    let mut escaped = false;
-    for ch in chars {
-        if escaped {
-            out.push(ch);
-            escaped = false;
-        } else if ch == '\\' {
-            escaped = true;
-        } else if ch == quote {
-            return Some(out);
-        } else {
-            out.push(ch);
-        }
-    }
-    None
 }
 
 fn decimal_generated_counter_style() -> GeneratedCounterStyle {
@@ -11671,9 +9811,7 @@ fn generated_counter_style_from_raw(raw: &str) -> Option<GeneratedCounterStyle> 
     if trimmed.is_empty() {
         return None;
     }
-    let (list_style_type, marker, symbols) = ListStyleType::parse_string(trimmed)
-        .ok()
-        .map(|value| list_style_type_mode_from_css(&value))?;
+    let (list_style_type, marker, symbols) = parse_native_list_style_type(trimmed)?;
     let list_style_type = match list_style_type {
         ListStyleTypeMode::Auto => ListStyleTypeMode::Decimal,
         value => value,
@@ -11769,303 +9907,6 @@ fn resolve_content_spec(
             text,
         }),
         ContentSpec::Initial => None,
-    }
-}
-
-fn var_name_from_tokens(tokens: &[TokenOrValue]) -> Option<String> {
-    let mut saw_var = false;
-    for token in tokens {
-        match token {
-            TokenOrValue::Var(var) => {
-                // lightningcss often parses `var(--x)` into a dedicated Var token.
-                let name = var.name.ident.as_ref();
-                if name.starts_with("--") {
-                    return Some(name.to_ascii_lowercase());
-                }
-            }
-            TokenOrValue::Function(func) => {
-                if func.name.as_ref().eq_ignore_ascii_case("var") {
-                    // Parse var(--name[, fallback]) and extract the first custom prop name.
-                    for arg in &func.arguments.0 {
-                        if let TokenOrValue::Token(Token::Ident(ident)) = arg {
-                            let v = ident.as_ref();
-                            if v.starts_with("--") {
-                                return Some(v.to_ascii_lowercase());
-                            }
-                        }
-                    }
-                    saw_var = true;
-                }
-            }
-            TokenOrValue::Token(Token::Ident(ident)) => {
-                let v = ident.as_ref();
-                if !saw_var && v.eq_ignore_ascii_case("var") {
-                    saw_var = true;
-                    continue;
-                }
-                if saw_var && v.starts_with("--") {
-                    return Some(v.to_ascii_lowercase());
-                }
-            }
-            // Most lightningcss versions tokenize `var(...)` as a function token.
-            TokenOrValue::Token(Token::Function(name)) => {
-                if name.as_ref().eq_ignore_ascii_case("var") {
-                    saw_var = true;
-                }
-            }
-            TokenOrValue::Token(Token::WhiteSpace(_)) => continue,
-            _ => {}
-        }
-    }
-    None
-}
-
-fn last_var_name_from_tokens(tokens: &[TokenOrValue]) -> Option<String> {
-    let mut last: Option<String> = None;
-    for token in tokens {
-        match token {
-            TokenOrValue::Var(var) => {
-                let name = var.name.ident.as_ref();
-                if name.starts_with("--") {
-                    last = Some(name.to_ascii_lowercase());
-                }
-            }
-            TokenOrValue::Function(func) => {
-                if func.name.as_ref().eq_ignore_ascii_case("var") {
-                    for arg in &func.arguments.0 {
-                        if let TokenOrValue::Token(Token::Ident(ident)) = arg {
-                            let v = ident.as_ref();
-                            if v.starts_with("--") {
-                                last = Some(v.to_ascii_lowercase());
-                                break;
-                            }
-                        }
-                    }
-                } else {
-                    let nested = last_var_name_from_tokens(&func.arguments.0);
-                    if nested.is_some() {
-                        last = nested;
-                    }
-                }
-            }
-            TokenOrValue::Token(Token::Ident(ident)) => {
-                let v = ident.as_ref();
-                if v.starts_with("--") {
-                    last = Some(v.to_ascii_lowercase());
-                }
-            }
-            _ => {}
-        }
-    }
-    last
-}
-
-fn length_spec_from_custom_tokens(tokens: &[TokenOrValue]) -> Option<LengthSpec> {
-    // First attempt the canonical parser path so custom/unparsed tokens share evaluator semantics
-    // with typed declarations (calc/min/max/clamp where supported by our reducer).
-    let raw = tokens_debug_string(tokens);
-    if let Some(spec) = length_spec_from_string(raw.trim()) {
-        return Some(spec);
-    }
-
-    // Minimal parser fallback for `40%`, `20px`, `12pt`, `10mm`, etc.
-    let mut i = 0usize;
-    while i < tokens.len() {
-        match &tokens[i] {
-            TokenOrValue::Token(Token::WhiteSpace(_)) => {
-                i += 1;
-                continue;
-            }
-            TokenOrValue::Length(length) => {
-                return match length {
-                    LengthValue::Em(val) => Some(LengthSpec::Em(*val)),
-                    LengthValue::Rem(val) => Some(LengthSpec::Rem(*val)),
-                    _ => length_value_to_pt(length).map(LengthSpec::Absolute),
-                };
-            }
-            TokenOrValue::Token(Token::Percentage { unit_value, .. }) => {
-                return Some(LengthSpec::Percent(*unit_value));
-            }
-            TokenOrValue::Token(Token::Dimension { value, unit, .. }) => {
-                let unit = unit.as_ref().to_ascii_lowercase();
-                let v = *value;
-                let pt = match unit.as_str() {
-                    "px" => px_to_pt(v),
-                    "pt" => Pt::from_f32(v),
-                    "em" => return Some(LengthSpec::Em(v)),
-                    "rem" => return Some(LengthSpec::Rem(v)),
-                    "in" => Pt::from_f32(v * 72.0),
-                    "cm" => Pt::from_f32(v * (72.0 / 2.54)),
-                    "mm" => Pt::from_f32(v * (72.0 / 25.4)),
-                    _ => return None,
-                };
-                return Some(LengthSpec::Absolute(pt));
-            }
-            TokenOrValue::Token(Token::Number { value, .. }) => {
-                let v = *value;
-                // Look ahead for `%` delimiter.
-                let mut j = i + 1;
-                while j < tokens.len() {
-                    match &tokens[j] {
-                        TokenOrValue::Token(Token::WhiteSpace(_)) => {
-                            j += 1;
-                            continue;
-                        }
-                        TokenOrValue::Token(Token::Delim(c)) if *c == '%' => {
-                            return Some(LengthSpec::Percent(v / 100.0));
-                        }
-                        _ => break,
-                    }
-                }
-                // Bare numbers are uncommon for lengths; treat as px for convenience.
-                return Some(LengthSpec::Absolute(px_to_pt(v)));
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    None
-}
-
-#[derive(Debug, Clone)]
-enum VarExprToken {
-    Var(String),
-    Number(f32),
-    Op(char),
-}
-
-fn length_var_expr_from_tokens(tokens: &[TokenOrValue]) -> Option<LengthVarExpr> {
-    let mut flat: Vec<VarExprToken> = Vec::new();
-    flatten_var_expr_tokens(tokens, &mut flat);
-    if flat.is_empty() {
-        return None;
-    }
-
-    let mut var_index: Option<usize> = None;
-    let mut var_name: Option<String> = None;
-    for (idx, token) in flat.iter().enumerate() {
-        if let VarExprToken::Var(name) = token {
-            var_index = Some(idx);
-            var_name = Some(name.clone());
-            break;
-        }
-    }
-    let var_index = var_index?;
-    let name = var_name?;
-    let mut scale = 1.0f32;
-
-    if var_index >= 2 {
-        if let (VarExprToken::Number(value), VarExprToken::Op(op)) =
-            (&flat[var_index - 2], &flat[var_index - 1])
-        {
-            if *op == '*' {
-                scale *= *value;
-            }
-        }
-    }
-    if var_index + 2 < flat.len() {
-        if let (VarExprToken::Op(op), VarExprToken::Number(value)) =
-            (&flat[var_index + 1], &flat[var_index + 2])
-        {
-            match *op {
-                '*' => scale *= *value,
-                '/' => {
-                    if *value != 0.0 {
-                        scale *= 1.0 / *value;
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    if var_index > 0 {
-        if let VarExprToken::Op('-') = flat[var_index - 1] {
-            if var_index == 1 {
-                scale *= -1.0;
-            } else if matches!(flat[var_index - 2], VarExprToken::Op(_)) {
-                scale *= -1.0;
-            }
-        }
-    }
-
-    Some(LengthVarExpr { name, scale })
-}
-
-fn flatten_var_expr_tokens(tokens: &[TokenOrValue], out: &mut Vec<VarExprToken>) {
-    let mut i = 0usize;
-    while i < tokens.len() {
-        match &tokens[i] {
-            TokenOrValue::Token(Token::WhiteSpace(_)) => {
-                i += 1;
-                continue;
-            }
-            TokenOrValue::Token(Token::Comma) => {
-                i += 1;
-                continue;
-            }
-            TokenOrValue::Var(var) => {
-                out.push(VarExprToken::Var(
-                    var.name.ident.as_ref().to_ascii_lowercase(),
-                ));
-            }
-            TokenOrValue::Function(func) => {
-                let name = func.name.as_ref().to_ascii_lowercase();
-                if name == "calc" {
-                    flatten_var_expr_tokens(&func.arguments.0, out);
-                } else if name == "var" {
-                    if let Some(var_name) = var_name_from_tokens(&func.arguments.0) {
-                        out.push(VarExprToken::Var(var_name));
-                    }
-                }
-            }
-            TokenOrValue::Token(Token::Function(name)) => {
-                if name.as_ref().eq_ignore_ascii_case("calc") {
-                    // lightningcss should surface calc arguments in Function; ignore otherwise.
-                }
-            }
-            TokenOrValue::Token(Token::Ident(ident)) => {
-                let value = ident.as_ref();
-                if value.starts_with("--") {
-                    out.push(VarExprToken::Var(value.to_ascii_lowercase()));
-                }
-            }
-            TokenOrValue::Token(Token::Delim('-')) => {
-                let mut j = i + 1;
-                let mut handled = false;
-                while j < tokens.len() {
-                    match &tokens[j] {
-                        TokenOrValue::Token(Token::WhiteSpace(_)) => {
-                            j += 1;
-                            continue;
-                        }
-                        TokenOrValue::Token(Token::Number { value, .. }) => {
-                            out.push(VarExprToken::Number(-*value));
-                            i = j;
-                            handled = true;
-                            break;
-                        }
-                        _ => {
-                            out.push(VarExprToken::Op('-'));
-                            handled = true;
-                            break;
-                        }
-                    }
-                }
-                if !handled {
-                    out.push(VarExprToken::Op('-'));
-                }
-            }
-            TokenOrValue::Token(Token::Number { value, .. }) => {
-                out.push(VarExprToken::Number(*value));
-            }
-            TokenOrValue::Token(Token::Delim(op)) => {
-                if *op == '*' || *op == '/' {
-                    out.push(VarExprToken::Op(*op));
-                }
-            }
-            _ => {}
-        }
-        i += 1;
     }
 }
 
@@ -12170,270 +10011,6 @@ fn font_spec_from_raw_string(raw: &str) -> Option<FontSpec> {
         }
     }
     font_stack_from_string(trimmed).map(FontSpec::Value)
-}
-
-fn font_stack_from_tokens(tokens: &[TokenOrValue]) -> Option<Vec<Arc<str>>> {
-    let mut stack = Vec::new();
-    let mut current = String::new();
-    let mut current_quoted = false;
-    let push_current =
-        |stack: &mut Vec<Arc<str>>, current: &mut String, current_quoted: &mut bool| {
-            let raw = current.trim();
-            let is_css_wide_keyword = !*current_quoted
-                && matches!(
-                    raw.to_ascii_lowercase().as_str(),
-                    "inherit" | "initial" | "unset" | "revert" | "revert-layer"
-                );
-            if !is_css_wide_keyword {
-                if let Some(mapped) = map_font_family_name(current, *current_quoted) {
-                    stack.push(mapped);
-                }
-            }
-            *current_quoted = false;
-            current.clear();
-        };
-    for token in tokens {
-        match token {
-            TokenOrValue::Token(Token::Ident(ident)) => {
-                if !current.is_empty() {
-                    current.push(' ');
-                }
-                current.push_str(ident.as_ref());
-            }
-            TokenOrValue::Token(Token::String(s)) => {
-                if !current.is_empty() {
-                    current.push(' ');
-                }
-                current.push_str(s.as_ref());
-                current_quoted = true;
-            }
-            TokenOrValue::Token(Token::WhiteSpace(_)) => {
-                if !current.ends_with(' ') && !current.is_empty() {
-                    current.push(' ');
-                }
-            }
-            TokenOrValue::Token(Token::Comma) => {
-                push_current(&mut stack, &mut current, &mut current_quoted);
-            }
-            TokenOrValue::Token(Token::Delim(',')) => {
-                push_current(&mut stack, &mut current, &mut current_quoted);
-            }
-            _ => {}
-        }
-    }
-    if !current.trim().is_empty() {
-        push_current(&mut stack, &mut current, &mut current_quoted);
-    }
-    finalize_font_stack(stack)
-}
-
-fn color_from_tokens(tokens: &[TokenOrValue]) -> Option<Color> {
-    let mut i = 0usize;
-    while i < tokens.len() {
-        match &tokens[i] {
-            TokenOrValue::Color(color) => {
-                if let Some(c) = css_color_to_color(color) {
-                    return Some(c);
-                }
-            }
-            TokenOrValue::Function(func) => {
-                let name = func.name.as_ref().to_ascii_lowercase();
-                if name == "rgb" || name == "rgba" {
-                    let args = tokens_debug_string(&func.arguments.0);
-                    let raw = format!("{}({})", name, args);
-                    if let Some((color, alpha)) = parse_color_string(&raw) {
-                        return Some(if alpha < 1.0 {
-                            Color::rgb(
-                                color.r * alpha + (1.0 - alpha),
-                                color.g * alpha + (1.0 - alpha),
-                                color.b * alpha + (1.0 - alpha),
-                            )
-                        } else {
-                            color
-                        });
-                    }
-                }
-            }
-            TokenOrValue::Token(Token::Hash(hash)) => return parse_hex_color(hash.as_ref()),
-            TokenOrValue::Token(Token::IDHash(hash)) => return parse_hex_color(hash.as_ref()),
-            TokenOrValue::Token(Token::Delim('#')) => {
-                let mut j = i + 1;
-                while j < tokens.len() {
-                    match &tokens[j] {
-                        TokenOrValue::Token(Token::WhiteSpace(_)) => {
-                            j += 1;
-                            continue;
-                        }
-                        TokenOrValue::Token(Token::Ident(ident)) => {
-                            if let Some(color) = parse_hex_color(ident.as_ref()) {
-                                return Some(color);
-                            }
-                            break;
-                        }
-                        TokenOrValue::Token(Token::Number {
-                            value, int_value, ..
-                        }) => {
-                            let raw = if let Some(int_value) = int_value {
-                                int_value.to_string()
-                            } else {
-                                let v = *value;
-                                if v.fract() == 0.0 {
-                                    format!("{:.0}", v)
-                                } else {
-                                    format!("{v}")
-                                }
-                            };
-                            if let Some(color) = parse_hex_color(&raw) {
-                                return Some(color);
-                            }
-                            break;
-                        }
-                        _ => break,
-                    }
-                }
-            }
-            TokenOrValue::Token(Token::Ident(ident)) => {
-                let name = ident.as_ref().to_ascii_lowercase();
-                match name.as_str() {
-                    "white" => return Some(Color::rgb(1.0, 1.0, 1.0)),
-                    "black" => return Some(Color::BLACK),
-                    "transparent" => return None,
-                    "currentcolor" => return None,
-                    _ => {}
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    None
-}
-
-fn collect_custom_properties(
-    declarations: &lightningcss::declaration::DeclarationBlock,
-) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    for prop in declarations
-        .declarations
-        .iter()
-        .chain(declarations.important_declarations.iter())
-    {
-        if let Property::Custom(custom) = prop {
-            let name = custom.name.as_ref().to_string();
-            let token_debug = tokens_debug_string(&custom.value.0);
-            out.push((name, token_debug));
-        }
-    }
-    out
-}
-
-fn tokens_debug_string(tokens: &[TokenOrValue]) -> String {
-    tokens_debug_string_with_options(tokens, false)
-}
-
-fn tokens_raw_value_string(tokens: &[TokenOrValue]) -> String {
-    tokens_debug_string_with_options(tokens, true)
-}
-
-fn tokens_debug_string_with_options(tokens: &[TokenOrValue], quote_strings: bool) -> String {
-    let mut out = Vec::new();
-    for token in tokens {
-        let value = match token {
-            TokenOrValue::Color(color) => css_color_to_color(color)
-                .map(color_to_hex)
-                .unwrap_or_else(|| "color".to_string()),
-            TokenOrValue::UnresolvedColor(_) => "color".to_string(),
-            TokenOrValue::Url(url) => url
-                .to_css_string(PrinterOptions::default())
-                .unwrap_or_else(|_| "url".to_string()),
-            TokenOrValue::Var(var) => {
-                let mut rendered = format!("var({}", var.name.ident.as_ref());
-                if let Some(fallback) = &var.fallback {
-                    let fallback_css = tokens_debug_string_with_options(&fallback.0, quote_strings);
-                    if !fallback_css.is_empty() {
-                        rendered.push_str(", ");
-                        rendered.push_str(&fallback_css);
-                    }
-                }
-                rendered.push(')');
-                rendered
-            }
-            TokenOrValue::Function(func) => {
-                let args = tokens_debug_string_with_options(&func.arguments.0, quote_strings);
-                format!("{}({})", func.name.as_ref(), args)
-            }
-            TokenOrValue::Length(length) => match length {
-                LengthValue::Em(val) => format!("{val}em"),
-                LengthValue::Rem(val) => format!("{val}rem"),
-                _ => length_value_to_pt(length)
-                    .map(|pt| format!("{:.3}pt", pt.to_f32()))
-                    .unwrap_or_else(|| "length".to_string()),
-            },
-            TokenOrValue::Angle(angle) => angle
-                .to_css_string(PrinterOptions::default())
-                .unwrap_or_else(|_| "angle".to_string()),
-            TokenOrValue::Time(time) => time
-                .to_css_string(PrinterOptions::default())
-                .unwrap_or_else(|_| "time".to_string()),
-            TokenOrValue::Resolution(resolution) => resolution
-                .to_css_string(PrinterOptions::default())
-                .unwrap_or_else(|_| "resolution".to_string()),
-            TokenOrValue::DashedIdent(ident) => ident.as_ref().to_string(),
-            TokenOrValue::AnimationName(name) => name
-                .to_css_string(PrinterOptions::default())
-                .unwrap_or_else(|_| "animation-name".to_string()),
-            TokenOrValue::Env(env) => format!("env({})", env.name.name()),
-            TokenOrValue::Token(Token::Ident(ident)) => ident.as_ref().to_string(),
-            TokenOrValue::Token(Token::String(s)) => {
-                if quote_strings {
-                    format!("\"{}\"", css_string_escape(s.as_ref()))
-                } else {
-                    s.as_ref().to_string()
-                }
-            }
-            TokenOrValue::Token(Token::Hash(hash)) => format!("#{}", hash.as_ref()),
-            TokenOrValue::Token(Token::IDHash(hash)) => format!("#{}", hash.as_ref()),
-            TokenOrValue::Token(Token::Delim(ch)) => ch.to_string(),
-            TokenOrValue::Token(Token::Number { value, .. }) => format!("{value}"),
-            TokenOrValue::Token(Token::Dimension { value, unit, .. }) => {
-                format!("{}{}", value, unit.as_ref())
-            }
-            TokenOrValue::Token(Token::Percentage { unit_value, .. }) => {
-                format!("{}%", unit_value * 100.0)
-            }
-            TokenOrValue::Token(Token::Comma) => ",".to_string(),
-            TokenOrValue::Token(Token::WhiteSpace(_)) => " ".to_string(),
-            TokenOrValue::Token(_) => "token".to_string(),
-        };
-        out.push(value);
-    }
-    out.join("")
-}
-
-fn parse_hex_color(value: &str) -> Option<Color> {
-    let s = value.trim();
-    let s = s.strip_prefix('#').unwrap_or(s);
-    let hex = match s.len() {
-        3 => {
-            let mut out = String::with_capacity(6);
-            for ch in s.chars() {
-                out.push(ch);
-                out.push(ch);
-            }
-            out
-        }
-        6 => s.to_string(),
-        _ => return None,
-    };
-
-    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-    Some(Color::rgb(
-        r as f32 / 255.0,
-        g as f32 / 255.0,
-        b as f32 / 255.0,
-    ))
 }
 
 fn json_string(value: &str) -> String {
@@ -13700,7 +11277,7 @@ fn resolve_line_height_spec_to_computed(
             Some(LineHeightSpec::AbsolutePt(*value))
         }
         LineHeightSpec::AbsolutePt(_) => None,
-        LineHeightSpec::RelativeScale(scale) if *scale >= I32F32::from_num(0) => {
+        LineHeightSpec::RelativeScale(scale) if *scale >= I32F32::from_num(0.0) => {
             Some(LineHeightSpec::AbsolutePt(font_size.mul_fixed(*scale)))
         }
         LineHeightSpec::RelativeScale(_) => None,
@@ -16933,63 +14510,20 @@ fn resolve_color_mix_expr_with_alpha(
     }
     let inside = extract_function_args(expr, "color-mix(")?;
     let args = split_args(inside);
-    if args.len() < 3 {
+    if args.len() != 3 {
         return None;
     }
-    let interpolation = args[0].trim().to_ascii_lowercase();
-    if !interpolation.starts_with("in ") || !interpolation.contains("srgb") {
-        return None;
-    }
+    let (space, hue_method) = parse_color_interpolation_space(&args[0])?;
     let (left_expr, left_weight) = split_color_mix_stop(&args[1])?;
     let (right_expr, right_weight) = split_color_mix_stop(&args[2])?;
     let (left_color, left_alpha) = resolve_color_mix_component(style, &left_expr, depth + 1)?;
     let (right_color, right_alpha) = resolve_color_mix_component(style, &right_expr, depth + 1)?;
-
-    let (mut left_weight, mut right_weight, alpha_multiplier) = match (left_weight, right_weight) {
-        (Some(a), Some(b)) => {
-            let left = a.clamp(0.0, 1.0);
-            let right = b.clamp(0.0, 1.0);
-            (left, right, (left + right).clamp(0.0, 1.0))
-        }
-        (Some(a), None) => {
-            let left = a.clamp(0.0, 1.0);
-            (left, (1.0 - left).clamp(0.0, 1.0), 1.0)
-        }
-        (None, Some(b)) => {
-            let right = b.clamp(0.0, 1.0);
-            ((1.0 - right).clamp(0.0, 1.0), right, 1.0)
-        }
-        (None, None) => (0.5, 0.5, 1.0),
-    };
-    let total = left_weight + right_weight;
-    if total <= f32::EPSILON {
-        return None;
-    }
-    left_weight /= total;
-    right_weight /= total;
-
-    let mixed_alpha = (left_alpha * left_weight + right_alpha * right_weight).clamp(0.0, 1.0);
-    let out_alpha = (mixed_alpha * alpha_multiplier).clamp(0.0, 1.0);
-    let (out_r, out_g, out_b) = if mixed_alpha <= f32::EPSILON {
-        (0.0, 0.0, 0.0)
-    } else {
-        let left_factor = left_alpha * left_weight;
-        let right_factor = right_alpha * right_weight;
-        (
-            (left_color.r * left_factor + right_color.r * right_factor) / mixed_alpha,
-            (left_color.g * left_factor + right_color.g * right_factor) / mixed_alpha,
-            (left_color.b * left_factor + right_color.b * right_factor) / mixed_alpha,
-        )
-    };
-
-    Some((
-        Color::rgb(
-            out_r.clamp(0.0, 1.0),
-            out_g.clamp(0.0, 1.0),
-            out_b.clamp(0.0, 1.0),
-        ),
-        out_alpha,
-    ))
+    mix_colors_in_space(
+        &space,
+        hue_method,
+        (left_color, left_alpha, left_weight),
+        (right_color, right_alpha, right_weight),
+    )
 }
 
 fn length_spec_to_scalar(spec: &LengthSpec) -> Option<f32> {
@@ -17931,17 +15465,6 @@ fn resolve_pending_vars(style: &mut ComputedStyle) {
     }
 }
 
-fn font_size_spec(value: &FontSize) -> Option<FontSizeSpec> {
-    match value {
-        FontSize::Length(length) => font_size_from_length(length),
-        FontSize::Absolute(size) => Some(FontSizeSpec::AbsolutePt(absolute_font_size(*size))),
-        FontSize::Relative(size) => Some(FontSizeSpec::RelativeScale(match size {
-            RelativeFontSize::Smaller => I32F32::from_num(0.8),
-            RelativeFontSize::Larger => I32F32::from_num(1.2),
-        })),
-    }
-}
-
 fn parse_font_size_spec_str(raw: &str) -> Option<FontSizeSpec> {
     let raw = raw.trim().to_ascii_lowercase();
     if raw.is_empty() {
@@ -17950,149 +15473,90 @@ fn parse_font_size_spec_str(raw: &str) -> Option<FontSizeSpec> {
     match raw.as_str() {
         "inherit" | "unset" | "revert" | "revert-layer" => Some(FontSizeSpec::Inherit),
         "initial" => Some(FontSizeSpec::Initial),
-        "xx-small" => Some(FontSizeSpec::AbsolutePt(absolute_font_size(
-            AbsoluteFontSize::XXSmall,
-        ))),
-        "x-small" => Some(FontSizeSpec::AbsolutePt(absolute_font_size(
-            AbsoluteFontSize::XSmall,
-        ))),
-        "small" => Some(FontSizeSpec::AbsolutePt(absolute_font_size(
-            AbsoluteFontSize::Small,
-        ))),
-        "medium" => Some(FontSizeSpec::AbsolutePt(absolute_font_size(
-            AbsoluteFontSize::Medium,
-        ))),
-        "large" => Some(FontSizeSpec::AbsolutePt(absolute_font_size(
-            AbsoluteFontSize::Large,
-        ))),
-        "x-large" => Some(FontSizeSpec::AbsolutePt(absolute_font_size(
-            AbsoluteFontSize::XLarge,
-        ))),
-        "xx-large" => Some(FontSizeSpec::AbsolutePt(absolute_font_size(
-            AbsoluteFontSize::XXLarge,
-        ))),
-        "xxx-large" => Some(FontSizeSpec::AbsolutePt(absolute_font_size(
-            AbsoluteFontSize::XXXLarge,
-        ))),
+        "xx-small" => Some(FontSizeSpec::AbsolutePt(px_to_pt(9.0))),
+        "x-small" => Some(FontSizeSpec::AbsolutePt(px_to_pt(10.0))),
+        "small" => Some(FontSizeSpec::AbsolutePt(px_to_pt(13.0))),
+        "medium" => Some(FontSizeSpec::AbsolutePt(px_to_pt(16.0))),
+        "large" => Some(FontSizeSpec::AbsolutePt(px_to_pt(18.0))),
+        "x-large" => Some(FontSizeSpec::AbsolutePt(px_to_pt(24.0))),
+        "xx-large" => Some(FontSizeSpec::AbsolutePt(px_to_pt(32.0))),
+        "xxx-large" => Some(FontSizeSpec::AbsolutePt(px_to_pt(40.0))),
         "smaller" => Some(FontSizeSpec::RelativeScale(I32F32::from_num(0.8))),
         "larger" => Some(FontSizeSpec::RelativeScale(I32F32::from_num(1.2))),
         "0" | "+0" => Some(FontSizeSpec::AbsolutePt(Pt::ZERO)),
-        _ => LengthPercentage::parse_string(&raw)
-            .ok()
-            .and_then(|length| font_size_from_length(&length)),
+        _ => font_size_from_native_length(&raw),
     }
 }
 
-fn font_size_from_length(value: &LengthPercentage) -> Option<FontSizeSpec> {
-    match value {
-        LengthPercentage::Percentage(pct) if pct.0 >= 0.0 => {
-            Some(FontSizeSpec::RelativeScale(I32F32::from_num(pct.0)))
+fn native_font_length_math(raw: &str) -> Option<NativeLengthMath> {
+    match parse_native_length_math(raw, false)? {
+        NativeMathValue::Number(value) if native_math_component_is_zero(value) => {
+            Some(NativeLengthMath::zero())
         }
-        LengthPercentage::Percentage(_) => None,
-        LengthPercentage::Dimension(length) => match length {
-            LengthValue::Em(val) if *val >= 0.0 => {
-                Some(FontSizeSpec::RelativeScale(I32F32::from_num(*val)))
-            }
-            LengthValue::Em(_) => None,
-            LengthValue::Rem(val) if *val >= 0.0 => font_calc_from_length_value(length)
-                .map(FontSizeSpec::Calc)
-                .or_else(|| Some(FontSizeSpec::AbsolutePt(px_to_pt(val * 16.0)))),
-            LengthValue::Rem(_) => None,
-            LengthValue::Vw(_)
-            | LengthValue::Vh(_)
-            | LengthValue::Vmin(_)
-            | LengthValue::Vmax(_) => {
-                font_calc_from_length_value(length).and_then(nonnegative_font_calc)
-            }
-            _ => length_value_to_pt(length)
-                .filter(|value| *value >= Pt::ZERO)
-                .map(FontSizeSpec::AbsolutePt),
-        },
-        LengthPercentage::Calc(calc) => font_calc_from_calc(calc).map(FontSizeSpec::Calc),
+        NativeMathValue::Length(value) => Some(value),
+        NativeMathValue::Number(_) => None,
     }
 }
 
-fn nonnegative_font_calc(calc: FontCalcLength) -> Option<FontSizeSpec> {
-    if calc.abs >= Pt::ZERO
-        && calc.em >= I32F32::from_num(0)
-        && calc.rem >= I32F32::from_num(0)
-        && calc.vw >= I32F32::from_num(0)
-        && calc.vh >= I32F32::from_num(0)
-        && calc.vmin >= I32F32::from_num(0)
-        && calc.vmax >= I32F32::from_num(0)
-    {
-        Some(FontSizeSpec::Calc(calc))
-    } else {
-        None
-    }
+fn native_length_math_is_finite(value: NativeLengthMath) -> bool {
+    [
+        value.abs_pt,
+        value.percent,
+        value.em,
+        value.rem,
+        value.vw,
+        value.vh,
+        value.vmin,
+        value.vmax,
+    ]
+    .into_iter()
+    .all(f32::is_finite)
 }
 
-fn font_calc_from_length_value(length: &LengthValue) -> Option<FontCalcLength> {
-    let mut calc = FontCalcLength::zero();
-    match length {
-        LengthValue::Em(val) => {
-            calc.em = I32F32::from_num(*val);
-            Some(calc)
-        }
-        LengthValue::Rem(val) => {
-            calc.rem = I32F32::from_num(*val);
-            Some(calc)
-        }
-        LengthValue::Vw(val) => {
-            calc.vw = I32F32::from_num(*val / 100.0);
-            Some(calc)
-        }
-        LengthValue::Vh(val) => {
-            calc.vh = I32F32::from_num(*val / 100.0);
-            Some(calc)
-        }
-        LengthValue::Vmin(val) => {
-            calc.vmin = I32F32::from_num(*val / 100.0);
-            Some(calc)
-        }
-        LengthValue::Vmax(val) => {
-            calc.vmax = I32F32::from_num(*val / 100.0);
-            Some(calc)
-        }
-        _ => length_value_to_pt(length).map(|pt| FontCalcLength { abs: pt, ..calc }),
-    }
+fn native_length_math_is_nonnegative(value: NativeLengthMath) -> bool {
+    value.abs_pt >= 0.0
+        && value.percent >= 0.0
+        && value.em >= 0.0
+        && value.rem >= 0.0
+        && value.vw >= 0.0
+        && value.vh >= 0.0
+        && value.vmin >= 0.0
+        && value.vmax >= 0.0
 }
 
-fn font_calc_from_length_percentage(value: &LengthPercentage) -> Option<FontCalcLength> {
-    match value {
-        LengthPercentage::Percentage(pct) => {
-            let mut calc = FontCalcLength::zero();
-            calc.em = I32F32::from_num(pct.0);
-            Some(calc)
-        }
-        LengthPercentage::Dimension(length) => font_calc_from_length_value(length),
-        LengthPercentage::Calc(calc) => font_calc_from_calc(calc),
-    }
+fn native_length_math_has_only_abs(value: NativeLengthMath) -> bool {
+    native_math_component_is_zero(value.percent)
+        && native_math_component_is_zero(value.em)
+        && native_math_component_is_zero(value.rem)
+        && native_math_component_is_zero(value.vw)
+        && native_math_component_is_zero(value.vh)
+        && native_math_component_is_zero(value.vmin)
+        && native_math_component_is_zero(value.vmax)
 }
 
-fn font_calc_from_calc(calc: &Calc<LengthPercentage>) -> Option<FontCalcLength> {
-    match calc {
-        Calc::Value(value) => font_calc_from_length_percentage(value),
-        Calc::Sum(a, b) => Some(font_calc_from_calc(a)?.add(font_calc_from_calc(b)?)),
-        Calc::Product(value, inner) => {
-            let factor = I32F32::from_num(*value);
-            font_calc_from_calc(inner).map(|calc| calc.scale(factor))
-        }
-        Calc::Function(func) => match func.as_ref() {
-            MathFunction::Calc(inner) => font_calc_from_calc(inner),
-            _ => None,
-        },
-        Calc::Number(_) => None,
+fn font_size_from_native_length(raw: &str) -> Option<FontSizeSpec> {
+    let value = native_font_length_math(raw)?;
+    if !native_length_math_is_finite(value) {
+        return None;
     }
-}
-
-fn line_height_spec(value: &LineHeight) -> Option<LineHeightSpec> {
-    match value {
-        LineHeight::Normal => Some(LineHeightSpec::Normal),
-        LineHeight::Number(value) if *value >= 0.0 => Some(LineHeightSpec::Number(*value)),
-        LineHeight::Number(_) => None,
-        LineHeight::Length(length) => line_height_from_length(length),
+    let lowered = raw.trim().to_ascii_lowercase();
+    let is_math_function = lowered.contains('(');
+    if !is_math_function && !native_length_math_is_nonnegative(value) {
+        return None;
     }
+    if is_math_function {
+        return Some(FontSizeSpec::Calc(value.to_font_calc()));
+    }
+    if lowered.ends_with('%') {
+        return Some(FontSizeSpec::RelativeScale(I32F32::from_num(value.percent)));
+    }
+    if lowered.ends_with("em") && !lowered.ends_with("rem") {
+        return Some(FontSizeSpec::RelativeScale(I32F32::from_num(value.em)));
+    }
+    if native_length_math_has_only_abs(value) {
+        return Some(FontSizeSpec::AbsolutePt(Pt::from_f32(value.abs_pt)));
+    }
+    Some(FontSizeSpec::Calc(value.to_font_calc()))
 }
 
 fn parse_line_height_spec_str(raw: &str) -> Option<LineHeightSpec> {
@@ -18109,36 +15573,34 @@ fn parse_line_height_spec_str(raw: &str) -> Option<LineHeightSpec> {
     if let Ok(value) = raw.parse::<f32>() {
         return (value >= 0.0).then_some(LineHeightSpec::Number(value));
     }
-    LengthPercentage::parse_string(&raw)
-        .ok()
-        .and_then(|length| line_height_from_length(&length))
+    line_height_from_native_length(&raw)
 }
 
-fn line_height_from_length(value: &LengthPercentage) -> Option<LineHeightSpec> {
-    match value {
-        LengthPercentage::Percentage(pct) if pct.0 >= 0.0 => {
-            Some(LineHeightSpec::RelativeScale(I32F32::from_num(pct.0)))
-        }
-        LengthPercentage::Percentage(_) => None,
-        LengthPercentage::Dimension(length) => match length {
-            LengthValue::Em(val) if *val >= 0.0 => {
-                Some(LineHeightSpec::RelativeScale(I32F32::from_num(*val)))
-            }
-            LengthValue::Em(_) => None,
-            LengthValue::Rem(val) if *val >= 0.0 => {
-                font_calc_from_length_value(length).map(LineHeightSpec::Calc)
-            }
-            LengthValue::Rem(_) => None,
-            LengthValue::Vw(_)
-            | LengthValue::Vh(_)
-            | LengthValue::Vmin(_)
-            | LengthValue::Vmax(_) => font_calc_from_length_value(length).map(LineHeightSpec::Calc),
-            _ => length_value_to_pt(length)
-                .filter(|value| *value >= Pt::ZERO)
-                .map(LineHeightSpec::AbsolutePt),
-        },
-        LengthPercentage::Calc(calc) => font_calc_from_calc(calc).map(LineHeightSpec::Calc),
+fn line_height_from_native_length(raw: &str) -> Option<LineHeightSpec> {
+    let value = native_font_length_math(raw)?;
+    if !native_length_math_is_finite(value) {
+        return None;
     }
+    let lowered = raw.trim().to_ascii_lowercase();
+    let is_math_function = lowered.contains('(');
+    if !is_math_function && !native_length_math_is_nonnegative(value) {
+        return None;
+    }
+    if is_math_function {
+        return Some(LineHeightSpec::Calc(value.to_font_calc()));
+    }
+    if lowered.ends_with('%') {
+        return Some(LineHeightSpec::RelativeScale(I32F32::from_num(
+            value.percent,
+        )));
+    }
+    if lowered.ends_with("em") && !lowered.ends_with("rem") {
+        return Some(LineHeightSpec::RelativeScale(I32F32::from_num(value.em)));
+    }
+    if native_length_math_has_only_abs(value) {
+        return Some(LineHeightSpec::AbsolutePt(Pt::from_f32(value.abs_pt)));
+    }
+    Some(LineHeightSpec::Calc(value.to_font_calc()))
 }
 
 fn parse_flex_flow_str(raw: &str) -> Option<(FlexDirectionMode, FlexWrapMode)> {
@@ -18511,139 +15973,6 @@ fn parse_hyphenate_character_str(raw: &str) -> Option<Option<String>> {
     trailing.trim().is_empty().then_some(Some(value))
 }
 
-fn transform_ops_from_transform_list(
-    value: &css_transform::TransformList,
-) -> Option<Vec<CssTransformOp>> {
-    let mut ops = Vec::new();
-    for transform in &value.0 {
-        let op = match transform {
-            css_transform::Transform::Translate(x, y) => CssTransformOp::Translate {
-                x: length_spec_from_lp(x)?,
-                y: length_spec_from_lp(y)?,
-            },
-            css_transform::Transform::TranslateX(x) => CssTransformOp::Translate {
-                x: length_spec_from_lp(x)?,
-                y: LengthSpec::Absolute(Pt::ZERO),
-            },
-            css_transform::Transform::TranslateY(y) => CssTransformOp::Translate {
-                x: LengthSpec::Absolute(Pt::ZERO),
-                y: length_spec_from_lp(y)?,
-            },
-            css_transform::Transform::Translate3d(x, y, z) => {
-                if !z.is_zero() {
-                    return None;
-                }
-                CssTransformOp::Translate {
-                    x: length_spec_from_lp(x)?,
-                    y: length_spec_from_lp(y)?,
-                }
-            }
-            css_transform::Transform::Scale(x, y) => CssTransformOp::Scale {
-                x: scale_factor_from_number_or_percentage(x),
-                y: scale_factor_from_number_or_percentage(y),
-            },
-            css_transform::Transform::ScaleX(x) => CssTransformOp::Scale {
-                x: scale_factor_from_number_or_percentage(x),
-                y: 1.0,
-            },
-            css_transform::Transform::ScaleY(y) => CssTransformOp::Scale {
-                x: 1.0,
-                y: scale_factor_from_number_or_percentage(y),
-            },
-            css_transform::Transform::Scale3d(x, y, z) => {
-                let z = scale_factor_from_number_or_percentage(z);
-                if (z - 1.0).abs() > f32::EPSILON {
-                    return None;
-                }
-                CssTransformOp::Scale {
-                    x: scale_factor_from_number_or_percentage(x),
-                    y: scale_factor_from_number_or_percentage(y),
-                }
-            }
-            css_transform::Transform::Rotate(angle) | css_transform::Transform::RotateZ(angle) => {
-                CssTransformOp::Rotate {
-                    radians: angle.to_radians(),
-                }
-            }
-            css_transform::Transform::Rotate3d(x, y, z, angle) => {
-                if x.abs() > f32::EPSILON || y.abs() > f32::EPSILON || z.abs() <= f32::EPSILON {
-                    return None;
-                }
-                CssTransformOp::Rotate {
-                    radians: angle.to_radians() * z.signum(),
-                }
-            }
-            css_transform::Transform::Skew(x, y) => CssTransformOp::Skew {
-                x_radians: x.to_radians(),
-                y_radians: y.to_radians(),
-            },
-            css_transform::Transform::SkewX(x) => CssTransformOp::Skew {
-                x_radians: x.to_radians(),
-                y_radians: 0.0,
-            },
-            css_transform::Transform::SkewY(y) => CssTransformOp::Skew {
-                x_radians: 0.0,
-                y_radians: y.to_radians(),
-            },
-            css_transform::Transform::Matrix(m) => {
-                matrix_op_from_components(m.a, m.b, m.c, m.d, m.e, m.f)?
-            }
-            css_transform::Transform::Matrix3d(m) => matrix_op_from_matrix_3d(m)?,
-            _ => return None,
-        };
-        ops.push(op);
-    }
-    Some(ops)
-}
-
-fn transform_ops_from_translate(value: &css_transform::Translate) -> Option<Vec<CssTransformOp>> {
-    match value {
-        css_transform::Translate::None => Some(Vec::new()),
-        css_transform::Translate::XYZ { x, y, z } => {
-            if !z.is_zero() {
-                return None;
-            }
-            Some(vec![CssTransformOp::Translate {
-                x: length_spec_from_lp(x)?,
-                y: length_spec_from_lp(y)?,
-            }])
-        }
-    }
-}
-
-fn transform_ops_from_rotate(value: &css_transform::Rotate) -> Option<Vec<CssTransformOp>> {
-    if value.x.abs() > f32::EPSILON || value.y.abs() > f32::EPSILON || value.z.abs() <= f32::EPSILON
-    {
-        return None;
-    }
-    Some(vec![CssTransformOp::Rotate {
-        radians: value.angle.to_radians() * value.z.signum(),
-    }])
-}
-
-fn transform_ops_from_scale(value: &css_transform::Scale) -> Option<Vec<CssTransformOp>> {
-    match value {
-        css_transform::Scale::None => Some(Vec::new()),
-        css_transform::Scale::XYZ { x, y, z } => {
-            let z = scale_factor_from_number_or_percentage(z);
-            if (z - 1.0).abs() > f32::EPSILON {
-                return None;
-            }
-            Some(vec![CssTransformOp::Scale {
-                x: scale_factor_from_number_or_percentage(x),
-                y: scale_factor_from_number_or_percentage(y),
-            }])
-        }
-    }
-}
-
-fn scale_factor_from_number_or_percentage(value: &NumberOrPercentage) -> f32 {
-    match value {
-        NumberOrPercentage::Number(value) => *value,
-        NumberOrPercentage::Percentage(value) => value.0,
-    }
-}
-
 fn matrix_op_from_components(
     a: f32,
     b: f32,
@@ -18669,103 +15998,6 @@ fn matrix_op_from_components(
         e: px_to_pt(e_px),
         f: px_to_pt(f_px),
     })
-}
-
-fn matrix_op_from_matrix_3d(matrix: &css_transform::Matrix3d<f32>) -> Option<CssTransformOp> {
-    let m2 = matrix.to_matrix2d()?;
-    matrix_op_from_components(m2.a, m2.b, m2.c, m2.d, m2.e, m2.f)
-}
-
-fn length_spec_from_far_edge(offset: LengthSpec) -> LengthSpec {
-    match offset {
-        LengthSpec::Absolute(value) => {
-            if value == Pt::ZERO {
-                LengthSpec::Percent(1.0)
-            } else {
-                LengthSpec::Calc(CalcLength {
-                    abs: -value,
-                    percent: 1.0,
-                    em: 0.0,
-                    rem: 0.0,
-                })
-            }
-        }
-        LengthSpec::Percent(pct) => LengthSpec::Percent(1.0 - pct),
-        LengthSpec::Em(value) => LengthSpec::Calc(CalcLength {
-            abs: Pt::ZERO,
-            percent: 1.0,
-            em: -value,
-            rem: 0.0,
-        }),
-        LengthSpec::Rem(value) => LengthSpec::Calc(CalcLength {
-            abs: Pt::ZERO,
-            percent: 1.0,
-            em: 0.0,
-            rem: -value,
-        }),
-        LengthSpec::Calc(calc) => LengthSpec::Calc(CalcLength {
-            abs: -calc.abs,
-            percent: 1.0 - calc.percent,
-            em: -calc.em,
-            rem: -calc.rem,
-        }),
-        LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => LengthSpec::Percent(1.0),
-    }
-}
-
-fn transform_origin_from_position(value: &css_position::Position) -> Option<CssTransformOrigin> {
-    Some(CssTransformOrigin {
-        x: transform_origin_x_from_position_component(&value.x)?,
-        y: transform_origin_y_from_position_component(&value.y)?,
-    })
-}
-
-fn transform_origin_x_from_position_component(
-    value: &css_position::HorizontalPosition,
-) -> Option<LengthSpec> {
-    match value {
-        css_position::PositionComponent::Center => Some(LengthSpec::Percent(0.5)),
-        css_position::PositionComponent::Length(length) => length_spec_from_lp(length),
-        css_position::PositionComponent::Side { side, offset } => {
-            let offset = if let Some(offset) = offset {
-                Some(length_spec_from_lp(offset)?)
-            } else {
-                None
-            };
-            Some(match side {
-                css_position::HorizontalPositionKeyword::Left => {
-                    offset.unwrap_or(LengthSpec::Percent(0.0))
-                }
-                css_position::HorizontalPositionKeyword::Right => {
-                    length_spec_from_far_edge(offset.unwrap_or(LengthSpec::Percent(0.0)))
-                }
-            })
-        }
-    }
-}
-
-fn transform_origin_y_from_position_component(
-    value: &css_position::VerticalPosition,
-) -> Option<LengthSpec> {
-    match value {
-        css_position::PositionComponent::Center => Some(LengthSpec::Percent(0.5)),
-        css_position::PositionComponent::Length(length) => length_spec_from_lp(length),
-        css_position::PositionComponent::Side { side, offset } => {
-            let offset = if let Some(offset) = offset {
-                Some(length_spec_from_lp(offset)?)
-            } else {
-                None
-            };
-            Some(match side {
-                css_position::VerticalPositionKeyword::Top => {
-                    offset.unwrap_or(LengthSpec::Percent(0.0))
-                }
-                css_position::VerticalPositionKeyword::Bottom => {
-                    length_spec_from_far_edge(offset.unwrap_or(LengthSpec::Percent(0.0)))
-                }
-            })
-        }
-    }
 }
 
 fn transform_origin_component_from_string(
@@ -18805,8 +16037,12 @@ fn transform_origin_from_string(raw: &str) -> Option<CssTransformOrigin> {
         return None;
     }
     let parts = split_top_level_whitespace(raw);
-    if parts.is_empty() || parts.len() > 2 {
+    if parts.is_empty() || parts.len() > 4 {
         return None;
+    }
+
+    if let Some((x, y)) = parse_shape_position_pair(&parts) {
+        return Some(CssTransformOrigin { x, y });
     }
 
     let mut x: Option<LengthSpec> = None;
@@ -19316,14 +16552,6 @@ fn split_top_level_whitespace(raw: &str) -> Vec<String> {
     parts
 }
 
-fn text_decoration_from_line(value: &TextDecorationLine) -> TextDecorationMode {
-    TextDecorationMode {
-        underline: value.contains(TextDecorationLine::Underline),
-        overline: value.contains(TextDecorationLine::Overline),
-        line_through: value.contains(TextDecorationLine::LineThrough),
-    }
-}
-
 fn set_delta_text_decoration_spec(delta: &mut StyleDelta, spec: TextDecorationSpec) {
     delta.text_decoration = Some(spec);
     delta.revert_layer.text_decoration_line = false;
@@ -19534,17 +16762,6 @@ fn apply_text_decoration_color_from_raw(delta: &mut StyleDelta, raw: &str) -> bo
         return true;
     }
     false
-}
-
-fn set_delta_text_decoration_color_from_css_color(delta: &mut StyleDelta, value: &CssColor) {
-    if let Ok(raw) = value.to_css_string(PrinterOptions::default()) {
-        if apply_text_decoration_color_from_raw(delta, &raw) {
-            return;
-        }
-    }
-    if let Some(color) = css_color_to_color_spec(value) {
-        set_delta_text_decoration_color_spec(delta, color);
-    }
 }
 
 fn apply_text_decoration_color_from_shorthand(delta: &mut StyleDelta, raw: &str) -> bool {
@@ -20281,35 +17498,10 @@ fn length_spec_from_string(raw: &str) -> Option<LengthSpec> {
     if raw.is_empty() {
         return None;
     }
-    if let Ok(lp) = LengthPercentage::parse_string(raw) {
-        return length_spec_from_lp(&lp);
+    match parse_native_length_math(raw, true)? {
+        NativeMathValue::Number(value) => Some(LengthSpec::Absolute(px_to_pt(value))),
+        NativeMathValue::Length(value) => value.to_length_spec(),
     }
-    if let Some(value) = raw.strip_suffix('%') {
-        if let Ok(v) = value.trim().parse::<f32>() {
-            return Some(LengthSpec::Percent(v / 100.0));
-        }
-    }
-    let units = ["px", "pt", "in", "cm", "mm", "em", "rem"];
-    for unit in &units {
-        if let Some(value) = raw.strip_suffix(unit) {
-            if let Ok(v) = value.trim().parse::<f32>() {
-                return Some(match *unit {
-                    "px" => LengthSpec::Absolute(px_to_pt(v)),
-                    "pt" => LengthSpec::Absolute(Pt::from_f32(v)),
-                    "in" => LengthSpec::Absolute(Pt::from_f32(v * 72.0)),
-                    "cm" => LengthSpec::Absolute(Pt::from_f32(v * (72.0 / 2.54))),
-                    "mm" => LengthSpec::Absolute(Pt::from_f32(v * (72.0 / 25.4))),
-                    "em" => LengthSpec::Em(v),
-                    "rem" => LengthSpec::Rem(v),
-                    _ => return None,
-                });
-            }
-        }
-    }
-    if let Ok(v) = raw.parse::<f32>() {
-        return Some(LengthSpec::Absolute(px_to_pt(v)));
-    }
-    None
 }
 
 fn parse_length_list(raw: &str) -> Vec<LengthSpec> {
@@ -20535,12 +17727,6 @@ fn parse_border_radius_str(raw: &str) -> Option<BorderRadiiSpec> {
 }
 
 fn apply_background_from_string(raw: &str, delta: &mut StyleDelta) {
-    let paints = parse_background_paints_str(raw);
-    if !paints.is_empty() {
-        delta.background_paint = paints.first().cloned();
-        delta.background_paints = Some(paints);
-        return;
-    }
     if raw.trim().eq_ignore_ascii_case("currentcolor") {
         set_delta_background_color(delta, BackgroundSpec::CurrentColor);
         return;
@@ -20549,30 +17735,127 @@ fn apply_background_from_string(raw: &str, delta: &mut StyleDelta) {
         set_delta_background_color(delta, BackgroundSpec::Value(blend_over_white(color, alpha)));
         return;
     }
-    for token in split_ws_preserve_parens(raw) {
-        if token.trim().eq_ignore_ascii_case("currentcolor") {
-            set_delta_background_color(delta, BackgroundSpec::CurrentColor);
-            return;
+    let layers = split_args(raw);
+    let mut paints = Vec::new();
+    let mut positions = Vec::new();
+    let mut repeats = Vec::new();
+    let mut sizes = Vec::new();
+    let mut origins = Vec::new();
+    let mut clips = Vec::new();
+
+    for layer in &layers {
+        let slash_parts = split_top_level_delimited(layer, '/');
+        if slash_parts.len() > 2 {
+            continue;
         }
-        if let Some((color, alpha)) = parse_color_string(&token) {
-            set_delta_background_color(
-                delta,
-                BackgroundSpec::Value(blend_over_white(color, alpha)),
-            );
-            return;
+        let before = split_ws_preserve_parens(&slash_parts[0]);
+        let after = slash_parts
+            .get(1)
+            .map(|value| split_ws_preserve_parens(value))
+            .unwrap_or_default();
+        let mut position_parts = Vec::new();
+        let mut size_parts = Vec::new();
+        let mut repeat_parts = Vec::new();
+        let mut boxes = Vec::new();
+
+        for (is_after_slash, token) in before
+            .iter()
+            .map(|token| (false, token))
+            .chain(after.iter().map(|token| (true, token)))
+        {
+            let lowered = token.trim().to_ascii_lowercase();
+            if let Some(paint) = parse_background_layer_paint_str(token) {
+                paints.push(paint);
+                continue;
+            }
+            if lowered == "currentcolor" {
+                set_delta_background_color(delta, BackgroundSpec::CurrentColor);
+                continue;
+            }
+            if let Some((color, alpha)) = parse_color_string(token) {
+                set_delta_background_color(
+                    delta,
+                    BackgroundSpec::Value(blend_over_white(color, alpha)),
+                );
+                continue;
+            }
+            if let Some(origin) = parse_background_origin_layer(&lowered) {
+                boxes.push(origin);
+                continue;
+            }
+            if matches!(
+                lowered.as_str(),
+                "repeat"
+                    | "no-repeat"
+                    | "space"
+                    | "round"
+                    | "repeat-x"
+                    | "repeat-y"
+                    | "repeat-inline"
+                    | "repeat-block"
+            ) {
+                repeat_parts.push(lowered);
+                continue;
+            }
+            if matches!(lowered.as_str(), "scroll" | "fixed" | "local" | "none") {
+                continue;
+            }
+            if is_after_slash {
+                size_parts.push(token.clone());
+            } else {
+                position_parts.push(token.clone());
+            }
         }
+
+        positions.push(
+            (!position_parts.is_empty())
+                .then(|| parse_background_position_layer(&position_parts.join(" ")))
+                .flatten()
+                .unwrap_or_default(),
+        );
+        sizes.push(
+            (!size_parts.is_empty())
+                .then(|| parse_background_size_layer(&size_parts.join(" ")))
+                .flatten()
+                .unwrap_or_default(),
+        );
+        repeats.push(
+            (!repeat_parts.is_empty())
+                .then(|| parse_background_repeat_layer(&repeat_parts.join(" ")))
+                .flatten()
+                .unwrap_or_default(),
+        );
+        let origin = boxes.first().copied().unwrap_or_default();
+        let clip = boxes
+            .get(1)
+            .copied()
+            .or_else(|| boxes.first().copied())
+            .map(|value| match value {
+                BackgroundBox::Border => BackgroundClipBox::Border,
+                BackgroundBox::Padding => BackgroundClipBox::Padding,
+                BackgroundBox::Content => BackgroundClipBox::Content,
+            })
+            .unwrap_or_default();
+        origins.push(origin);
+        clips.push(clip);
     }
-    if has_conic_gradient_function(raw) {
-        // Preserve unresolved conic expressions (e.g. currentColor/var() stop offsets)
-        // so we can resolve them during computed-style var substitution.
+
+    if !paints.is_empty() {
+        delta.background_paint = paints.first().cloned();
+        delta.background_paints = Some(paints);
+    }
+    if !layers.is_empty() {
+        delta.background_positions = Some(positions);
+        delta.background_sizes = Some(sizes);
+        delta.background_repeats = Some(repeats);
+        delta.background_origins = Some(origins);
+        delta.background_clips = Some(clips);
+    }
+    if has_dynamic_gradient_expression(raw) {
+        // Preserve unresolved gradients so custom properties and currentColor are substituted
+        // against the eventual computed style rather than discarded during specified-value parse.
         set_delta_background_color_var(delta, raw.trim().to_ascii_lowercase());
-        return;
-    }
-    if raw.to_ascii_lowercase().contains("var(") {
-        set_delta_background_color_var(delta, raw.trim().to_ascii_lowercase());
-        return;
-    }
-    if let Some(var) = var_name_from_string(raw) {
+    } else if let Some(var) = var_name_from_string(raw) {
         set_delta_background_color_var(delta, var);
     }
 }
@@ -20627,41 +17910,6 @@ fn apply_background_clip_from_string(raw: &str, delta: &mut StyleDelta) {
     if !clips.is_empty() {
         delta.background_clips = Some(clips);
     }
-}
-
-fn background_size_spec_from_css(
-    value: &css_background::BackgroundSize,
-) -> Option<BackgroundSizeSpec> {
-    let raw = value.to_css_string(PrinterOptions::default()).ok()?;
-    parse_background_size_layer(&raw)
-}
-
-fn background_position_spec_from_css(
-    value: &css_background::BackgroundPosition,
-) -> Option<BackgroundPositionSpec> {
-    let raw = value.to_css_string(PrinterOptions::default()).ok()?;
-    parse_background_position_layer(&raw)
-}
-
-fn background_repeat_spec_from_css(
-    value: &css_background::BackgroundRepeat,
-) -> Option<BackgroundRepeatSpec> {
-    let raw = value.to_css_string(PrinterOptions::default()).ok()?;
-    parse_background_repeat_layer(&raw)
-}
-
-fn background_origin_spec_from_css(
-    value: &css_background::BackgroundOrigin,
-) -> Option<BackgroundBox> {
-    let raw = value.to_css_string(PrinterOptions::default()).ok()?;
-    parse_background_origin_layer(&raw)
-}
-
-fn background_clip_spec_from_css(
-    value: &css_background::BackgroundClip,
-) -> Option<BackgroundClipBox> {
-    let raw = value.to_css_string(PrinterOptions::default()).ok()?;
-    parse_background_clip_layer(&raw)
 }
 
 fn parse_background_size_list(raw: &str) -> Vec<BackgroundSizeSpec> {
@@ -21219,50 +18467,6 @@ fn length_spec_definitely_negative(spec: LengthSpec) -> bool {
                 && calc.abs < Pt::ZERO
         }
         _ => false,
-    }
-}
-
-fn clip_path_spec_from_css_value(value: &css_masking::ClipPath<'_>) -> Option<ClipPathSpec> {
-    let raw = value.to_css_string(PrinterOptions::default()).ok()?;
-    let mut spec = parse_clip_path_spec_str(&raw)?;
-    apply_typed_clip_path_shape_radius(&mut spec, value);
-    Some(spec)
-}
-
-fn apply_typed_clip_path_shape_radius(spec: &mut ClipPathSpec, value: &css_masking::ClipPath<'_>) {
-    let css_masking::ClipPath::Shape { shape, .. } = value else {
-        return;
-    };
-    let ClipPathSpec::Shape { shape: parsed, .. } = spec else {
-        return;
-    };
-    match (shape.as_ref(), parsed) {
-        (css_shape::BasicShape::Circle(circle), ClipPathShapeSpec::Circle(parsed)) => {
-            if let Some(radius) = clip_path_shape_radius_from_css_value(&circle.radius) {
-                parsed.radius = radius;
-            }
-        }
-        (css_shape::BasicShape::Ellipse(ellipse), ClipPathShapeSpec::Ellipse(parsed)) => {
-            if let Some(radius_x) = clip_path_shape_radius_from_css_value(&ellipse.radius_x) {
-                parsed.radius_x = radius_x;
-            }
-            if let Some(radius_y) = clip_path_shape_radius_from_css_value(&ellipse.radius_y) {
-                parsed.radius_y = radius_y;
-            }
-        }
-        _ => {}
-    }
-}
-
-fn clip_path_shape_radius_from_css_value(
-    value: &css_shape::ShapeRadius,
-) -> Option<ClipPathShapeRadius> {
-    match value {
-        css_shape::ShapeRadius::LengthPercentage(length) => {
-            length_spec_from_lp(length).map(ClipPathShapeRadius::Length)
-        }
-        css_shape::ShapeRadius::ClosestSide => Some(ClipPathShapeRadius::ClosestSide),
-        css_shape::ShapeRadius::FarthestSide => Some(ClipPathShapeRadius::FarthestSide),
     }
 }
 
@@ -21934,26 +19138,26 @@ fn parse_shape_y_position_offset(raw: &str, offset: LengthSpec) -> Option<Length
 
 fn length_spec_from_end_offset(offset: LengthSpec) -> LengthSpec {
     match offset {
-        LengthSpec::Absolute(value) => LengthSpec::Calc(CalcLength {
+        LengthSpec::Absolute(value) => length_spec_from_calc_length(CalcLength {
             abs: -value,
             percent: 1.0,
             em: 0.0,
             rem: 0.0,
         }),
         LengthSpec::Percent(value) => LengthSpec::Percent(1.0 - value),
-        LengthSpec::Em(value) => LengthSpec::Calc(CalcLength {
+        LengthSpec::Em(value) => length_spec_from_calc_length(CalcLength {
             abs: Pt::ZERO,
             percent: 1.0,
             em: -value,
             rem: 0.0,
         }),
-        LengthSpec::Rem(value) => LengthSpec::Calc(CalcLength {
+        LengthSpec::Rem(value) => length_spec_from_calc_length(CalcLength {
             abs: Pt::ZERO,
             percent: 1.0,
             em: 0.0,
             rem: -value,
         }),
-        LengthSpec::Calc(calc) => LengthSpec::Calc(CalcLength {
+        LengthSpec::Calc(calc) => length_spec_from_calc_length(CalcLength {
             abs: -calc.abs,
             percent: 1.0 - calc.percent,
             em: -calc.em,
@@ -22650,25 +19854,6 @@ fn parse_opacity_spec_str(raw: &str) -> Option<OpacitySpec> {
         "inherit" => Some(OpacitySpec::Inherit),
         "initial" | "unset" | "revert" | "revert-layer" => Some(OpacitySpec::Initial),
         _ => parse_alpha_component(&lower).map(OpacitySpec::Value),
-    }
-}
-
-fn container_query_type_from_css(value: &css_contain::ContainerType) -> ContainerQueryType {
-    match value {
-        css_contain::ContainerType::Normal => ContainerQueryType::Normal,
-        css_contain::ContainerType::InlineSize => ContainerQueryType::InlineSize,
-        css_contain::ContainerType::Size => ContainerQueryType::Size,
-        css_contain::ContainerType::ScrollState => ContainerQueryType::ScrollState,
-    }
-}
-
-fn container_names_from_css(value: &css_contain::ContainerNameList) -> Vec<String> {
-    match value {
-        css_contain::ContainerNameList::None => Vec::new(),
-        css_contain::ContainerNameList::Names(names) => names
-            .iter()
-            .filter_map(|name| name.to_css_string(PrinterOptions::default()).ok())
-            .collect(),
     }
 }
 
@@ -23566,20 +20751,199 @@ fn parse_gradient_stop_with_style(
     Some((blend_over_white(color, alpha), offset))
 }
 
-fn parse_color_string(raw: &str) -> Option<(Color, f32)> {
+fn parse_hex_color_with_alpha(value: &str) -> Option<(Color, f32)> {
+    let raw = value.trim();
+    let hex = raw.strip_prefix('#').unwrap_or(raw);
+    let expanded = match hex.len() {
+        3 | 4 => {
+            let mut out = String::with_capacity(hex.len() * 2);
+            for ch in hex.chars() {
+                out.push(ch);
+                out.push(ch);
+            }
+            out
+        }
+        6 | 8 => hex.to_string(),
+        _ => return None,
+    };
+    let r = u8::from_str_radix(&expanded[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&expanded[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&expanded[4..6], 16).ok()?;
+    let alpha = if expanded.len() == 8 {
+        u8::from_str_radix(&expanded[6..8], 16).ok()? as f32 / 255.0
+    } else {
+        1.0
+    };
+    Some((
+        Color::rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0),
+        alpha,
+    ))
+}
+
+fn parse_named_css_color(name: &str) -> Option<Color> {
+    let (r, g, b) = match name {
+        "black" => (0, 0, 0),
+        "silver" => (192, 192, 192),
+        "gray" | "grey" => (128, 128, 128),
+        "white" => (255, 255, 255),
+        "maroon" => (128, 0, 0),
+        "red" => (255, 0, 0),
+        "purple" => (128, 0, 128),
+        "fuchsia" | "magenta" => (255, 0, 255),
+        "green" => (0, 128, 0),
+        "lime" => (0, 255, 0),
+        "olive" => (128, 128, 0),
+        "yellow" => (255, 255, 0),
+        "navy" => (0, 0, 128),
+        "blue" => (0, 0, 255),
+        "teal" => (0, 128, 128),
+        "aqua" | "cyan" => (0, 255, 255),
+        "aliceblue" => (240, 248, 255),
+        "antiquewhite" => (250, 235, 215),
+        "aquamarine" => (127, 255, 212),
+        "azure" => (240, 255, 255),
+        "beige" => (245, 245, 220),
+        "bisque" => (255, 228, 196),
+        "blanchedalmond" => (255, 235, 205),
+        "blueviolet" => (138, 43, 226),
+        "brown" => (165, 42, 42),
+        "burlywood" => (222, 184, 135),
+        "cadetblue" => (95, 158, 160),
+        "chartreuse" => (127, 255, 0),
+        "chocolate" => (210, 105, 30),
+        "coral" => (255, 127, 80),
+        "cornflowerblue" => (100, 149, 237),
+        "cornsilk" => (255, 248, 220),
+        "crimson" => (220, 20, 60),
+        "darkblue" => (0, 0, 139),
+        "darkcyan" => (0, 139, 139),
+        "darkgoldenrod" => (184, 134, 11),
+        "darkgray" | "darkgrey" => (169, 169, 169),
+        "darkgreen" => (0, 100, 0),
+        "darkkhaki" => (189, 183, 107),
+        "darkmagenta" => (139, 0, 139),
+        "darkolivegreen" => (85, 107, 47),
+        "darkorange" => (255, 140, 0),
+        "darkorchid" => (153, 50, 204),
+        "darkred" => (139, 0, 0),
+        "darksalmon" => (233, 150, 122),
+        "darkseagreen" => (143, 188, 143),
+        "darkslateblue" => (72, 61, 139),
+        "darkslategray" | "darkslategrey" => (47, 79, 79),
+        "darkturquoise" => (0, 206, 209),
+        "darkviolet" => (148, 0, 211),
+        "deeppink" => (255, 20, 147),
+        "deepskyblue" => (0, 191, 255),
+        "dimgray" | "dimgrey" => (105, 105, 105),
+        "dodgerblue" => (30, 144, 255),
+        "firebrick" => (178, 34, 34),
+        "floralwhite" => (255, 250, 240),
+        "forestgreen" => (34, 139, 34),
+        "gainsboro" => (220, 220, 220),
+        "ghostwhite" => (248, 248, 255),
+        "gold" => (255, 215, 0),
+        "goldenrod" => (218, 165, 32),
+        "greenyellow" => (173, 255, 47),
+        "honeydew" => (240, 255, 240),
+        "hotpink" => (255, 105, 180),
+        "indianred" => (205, 92, 92),
+        "indigo" => (75, 0, 130),
+        "ivory" => (255, 255, 240),
+        "khaki" => (240, 230, 140),
+        "lavender" => (230, 230, 250),
+        "lavenderblush" => (255, 240, 245),
+        "lawngreen" => (124, 252, 0),
+        "lemonchiffon" => (255, 250, 205),
+        "lightblue" => (173, 216, 230),
+        "lightcoral" => (240, 128, 128),
+        "lightcyan" => (224, 255, 255),
+        "lightgoldenrodyellow" => (250, 250, 210),
+        "lightgray" | "lightgrey" => (211, 211, 211),
+        "lightgreen" => (144, 238, 144),
+        "lightpink" => (255, 182, 193),
+        "lightsalmon" => (255, 160, 122),
+        "lightseagreen" => (32, 178, 170),
+        "lightskyblue" => (135, 206, 250),
+        "lightslategray" | "lightslategrey" => (119, 136, 153),
+        "lightsteelblue" => (176, 196, 222),
+        "lightyellow" => (255, 255, 224),
+        "limegreen" => (50, 205, 50),
+        "linen" => (250, 240, 230),
+        "mediumaquamarine" => (102, 205, 170),
+        "mediumblue" => (0, 0, 205),
+        "mediumorchid" => (186, 85, 211),
+        "mediumpurple" => (147, 112, 219),
+        "mediumseagreen" => (60, 179, 113),
+        "mediumslateblue" => (123, 104, 238),
+        "mediumspringgreen" => (0, 250, 154),
+        "mediumturquoise" => (72, 209, 204),
+        "mediumvioletred" => (199, 21, 133),
+        "midnightblue" => (25, 25, 112),
+        "mintcream" => (245, 255, 250),
+        "mistyrose" => (255, 228, 225),
+        "moccasin" => (255, 228, 181),
+        "navajowhite" => (255, 222, 173),
+        "oldlace" => (253, 245, 230),
+        "olivedrab" => (107, 142, 35),
+        "orange" => (255, 165, 0),
+        "orangered" => (255, 69, 0),
+        "orchid" => (218, 112, 214),
+        "palegoldenrod" => (238, 232, 170),
+        "palegreen" => (152, 251, 152),
+        "paleturquoise" => (175, 238, 238),
+        "palevioletred" => (219, 112, 147),
+        "papayawhip" => (255, 239, 213),
+        "peachpuff" => (255, 218, 185),
+        "peru" => (205, 133, 63),
+        "pink" => (255, 192, 203),
+        "plum" => (221, 160, 221),
+        "powderblue" => (176, 224, 230),
+        "rebeccapurple" => (102, 51, 153),
+        "rosybrown" => (188, 143, 143),
+        "royalblue" => (65, 105, 225),
+        "saddlebrown" => (139, 69, 19),
+        "salmon" => (250, 128, 114),
+        "sandybrown" => (244, 164, 96),
+        "seagreen" => (46, 139, 87),
+        "seashell" => (255, 245, 238),
+        "sienna" => (160, 82, 45),
+        "skyblue" => (135, 206, 235),
+        "slateblue" => (106, 90, 205),
+        "slategray" | "slategrey" => (112, 128, 144),
+        "snow" => (255, 250, 250),
+        "springgreen" => (0, 255, 127),
+        "steelblue" => (70, 130, 180),
+        "tan" => (210, 180, 140),
+        "thistle" => (216, 191, 216),
+        "tomato" => (255, 99, 71),
+        "turquoise" => (64, 224, 208),
+        "violet" => (238, 130, 238),
+        "wheat" => (245, 222, 179),
+        "whitesmoke" => (245, 245, 245),
+        "yellowgreen" => (154, 205, 50),
+        _ => return None,
+    };
+    Some(Color::rgb(
+        r as f32 / 255.0,
+        g as f32 / 255.0,
+        b as f32 / 255.0,
+    ))
+}
+
+pub(crate) fn parse_color_string(raw: &str) -> Option<(Color, f32)> {
     let s = raw.trim().trim_end_matches(',');
     if s.is_empty() {
         return None;
     }
-    if let Some(color) = parse_hex_color(s) {
-        return Some((color, 1.0));
+    if let Some(color) = parse_hex_color_with_alpha(s) {
+        return Some(color);
     }
     let lower = s.to_ascii_lowercase();
-    match lower.as_str() {
-        "black" => return Some((Color::BLACK, 1.0)),
-        "white" => return Some((Color::rgb(1.0, 1.0, 1.0), 1.0)),
-        "transparent" => return Some((Color::rgb(1.0, 1.0, 1.0), 0.0)),
-        _ => {}
+    if lower == "transparent" {
+        return Some((Color::BLACK, 0.0));
+    }
+    if let Some(color) = parse_named_css_color(&lower) {
+        return Some((color, 1.0));
     }
     if lower.starts_with("rgb(") || lower.starts_with("rgba(") {
         if let Some(color) = parse_rgb_color_function(s) {
@@ -23596,8 +20960,25 @@ fn parse_color_string(raw: &str) -> Option<(Color, f32)> {
             return Some(color);
         }
     }
-    if let Ok(color) = CssColor::parse_string(s) {
-        return css_color_to_color_with_alpha(&color);
+    if lower.starts_with("lab(") || lower.starts_with("lch(") {
+        if let Some(color) = parse_lab_family_color_function(s, false) {
+            return Some(color);
+        }
+    }
+    if lower.starts_with("oklab(") || lower.starts_with("oklch(") {
+        if let Some(color) = parse_lab_family_color_function(s, true) {
+            return Some(color);
+        }
+    }
+    if lower.starts_with("color(") {
+        if let Some(color) = parse_css_color_function(s) {
+            return Some(color);
+        }
+    }
+    if lower.starts_with("color-mix(") {
+        if let Some(color) = parse_static_color_mix(s) {
+            return Some(color);
+        }
     }
     None
 }
@@ -23614,7 +20995,7 @@ fn parse_rgb_color_function(raw: &str) -> Option<(Color, f32)> {
     };
     let inner = inner.trim();
     if inner.to_ascii_lowercase().starts_with("from ") {
-        return None;
+        return parse_relative_rgb_color(inner);
     }
 
     let comma_parts = split_args(inner);
@@ -23671,7 +21052,7 @@ fn parse_hsl_color_function(raw: &str) -> Option<(Color, f32)> {
     };
     let inner = inner.trim();
     if inner.to_ascii_lowercase().starts_with("from ") {
-        return None;
+        return parse_relative_hsl_color(inner);
     }
 
     let comma_parts = split_args(inner);
@@ -23710,7 +21091,10 @@ fn parse_hwb_color_function(raw: &str) -> Option<(Color, f32)> {
         return None;
     }
     let inner = raw[4..raw.len().saturating_sub(1)].trim();
-    if inner.to_ascii_lowercase().starts_with("from ") || split_args(inner).len() != 1 {
+    if inner.to_ascii_lowercase().starts_with("from ") {
+        return parse_relative_hwb_color(inner);
+    }
+    if split_args(inner).len() != 1 {
         return None;
     }
 
@@ -23726,6 +21110,1083 @@ fn parse_hwb_color_function(raw: &str) -> Option<(Color, f32)> {
     let blackness = parse_hsl_percentage_component(&components[2])?;
     let alpha = alpha_raw.map(parse_alpha_component).unwrap_or(Some(1.0))?;
     Some((hwb_to_rgb(hue_deg, whiteness, blackness), alpha))
+}
+
+fn split_relative_color_origin(inner: &str) -> Option<(&str, &str)> {
+    let trimmed = inner.trim();
+    if !trimmed
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("from"))
+    {
+        return None;
+    }
+    let rest = trimmed.get(4..)?.trim_start();
+    if rest.is_empty() {
+        return None;
+    }
+
+    let mut end = 0usize;
+    if rest.starts_with('#') {
+        end = rest
+            .char_indices()
+            .find_map(|(idx, ch)| (idx > 0 && ch.is_whitespace()).then_some(idx))
+            .unwrap_or(rest.len());
+    } else {
+        for (idx, ch) in rest.char_indices() {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '\\') {
+                end = idx + ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+        if end == 0 {
+            return None;
+        }
+        if rest[end..].starts_with('(') {
+            let mut depth = 0usize;
+            let mut quote = None;
+            let mut escaped = false;
+            let mut found = None;
+            for (offset, ch) in rest[end..].char_indices() {
+                if let Some(quote_char) = quote {
+                    if escaped {
+                        escaped = false;
+                    } else if ch == '\\' {
+                        escaped = true;
+                    } else if ch == quote_char {
+                        quote = None;
+                    }
+                    continue;
+                }
+                match ch {
+                    '\'' | '"' => quote = Some(ch),
+                    '(' => depth += 1,
+                    ')' => {
+                        depth = depth.saturating_sub(1);
+                        if depth == 0 {
+                            found = Some(end + offset + ch.len_utf8());
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            end = found?;
+        }
+    }
+    let origin = rest[..end].trim();
+    let components = rest[end..].trim();
+    (!origin.is_empty() && !components.is_empty()).then_some((origin, components))
+}
+
+fn split_relative_color_components(raw: &str) -> Option<(Vec<String>, Option<&str>)> {
+    let (components_raw, alpha_raw) = split_top_level_slash_once(raw)
+        .map(|(before, after)| (before, Some(after)))
+        .unwrap_or((raw, None));
+    let components = split_top_level_whitespace(components_raw);
+    (components.len() == 3).then_some((components, alpha_raw))
+}
+
+fn replace_relative_color_identifiers(raw: &str, values: &[(&str, f32)]) -> String {
+    let mut out = String::with_capacity(raw.len() + 16);
+    let mut cursor = 0usize;
+    while cursor < raw.len() {
+        let byte = raw.as_bytes()[cursor];
+        if byte.is_ascii_alphabetic() {
+            let start = cursor;
+            cursor += 1;
+            while cursor < raw.len()
+                && (raw.as_bytes()[cursor].is_ascii_alphanumeric()
+                    || raw.as_bytes()[cursor] == b'-')
+            {
+                cursor += 1;
+            }
+            let ident = &raw[start..cursor];
+            if let Some((_, value)) = values
+                .iter()
+                .find(|(name, _)| ident.eq_ignore_ascii_case(name))
+            {
+                out.push_str(&format!("{value}"));
+            } else {
+                out.push_str(ident);
+            }
+        } else {
+            out.push(byte as char);
+            cursor += 1;
+        }
+    }
+    out
+}
+
+fn parse_relative_number_expression(raw: &str, values: &[(&str, f32)]) -> Option<f32> {
+    let substituted = replace_relative_color_identifiers(raw, values);
+    match parse_native_length_math(&substituted, true)? {
+        NativeMathValue::Number(value) if value.is_finite() => Some(value),
+        _ => None,
+    }
+}
+
+fn parse_relative_rgb_component(raw: &str, origin: Color, alpha: f32) -> Option<f32> {
+    let lowered = raw.trim().to_ascii_lowercase();
+    match lowered.as_str() {
+        "r" => return Some(origin.r),
+        "g" => return Some(origin.g),
+        "b" => return Some(origin.b),
+        "alpha" => return Some(alpha / 255.0),
+        "none" => return Some(0.0),
+        _ => {}
+    }
+    if let Some(percent) = parse_percentage_unit(&lowered) {
+        return Some(percent.clamp(0.0, 1.0));
+    }
+    if let Ok(value) = lowered.parse::<f32>() {
+        return Some((value / 255.0).clamp(0.0, 1.0));
+    }
+    parse_relative_number_expression(
+        &lowered,
+        &[
+            ("r", origin.r * 255.0),
+            ("g", origin.g * 255.0),
+            ("b", origin.b * 255.0),
+            ("alpha", alpha),
+        ],
+    )
+    .map(|value| (value / 255.0).clamp(0.0, 1.0))
+}
+
+fn parse_relative_alpha(raw: &str, origin_alpha: f32, values: &[(&str, f32)]) -> Option<f32> {
+    let lowered = raw.trim().to_ascii_lowercase();
+    match lowered.as_str() {
+        "alpha" => return Some(origin_alpha.clamp(0.0, 1.0)),
+        "none" => return Some(0.0),
+        _ => {}
+    }
+    if let Some(value) = parse_alpha_component(&lowered) {
+        return Some(value);
+    }
+    parse_relative_number_expression(&lowered, values).map(|value| value.clamp(0.0, 1.0))
+}
+
+fn parse_relative_rgb_color(inner: &str) -> Option<(Color, f32)> {
+    let (origin_raw, remainder) = split_relative_color_origin(inner)?;
+    let (origin, origin_alpha) = parse_color_string(origin_raw)?;
+    let (components, alpha_raw) = split_relative_color_components(remainder)?;
+    let r = parse_relative_rgb_component(&components[0], origin, origin_alpha)?;
+    let g = parse_relative_rgb_component(&components[1], origin, origin_alpha)?;
+    let b = parse_relative_rgb_component(&components[2], origin, origin_alpha)?;
+    let alpha = alpha_raw
+        .map(|raw| {
+            parse_relative_alpha(
+                raw,
+                origin_alpha,
+                &[
+                    ("r", origin.r * 255.0),
+                    ("g", origin.g * 255.0),
+                    ("b", origin.b * 255.0),
+                    ("alpha", origin_alpha),
+                ],
+            )
+        })
+        .unwrap_or(Some(origin_alpha))?;
+    Some((Color::rgb(r, g, b), alpha))
+}
+
+fn rgb_to_hsl(color: Color) -> (f32, f32, f32) {
+    let max = color.r.max(color.g).max(color.b);
+    let min = color.r.min(color.g).min(color.b);
+    let delta = max - min;
+    let lightness = (max + min) * 0.5;
+    if delta <= f32::EPSILON {
+        return (0.0, 0.0, lightness);
+    }
+    let hue = if max == color.r {
+        60.0 * ((color.g - color.b) / delta).rem_euclid(6.0)
+    } else if max == color.g {
+        60.0 * (((color.b - color.r) / delta) + 2.0)
+    } else {
+        60.0 * (((color.r - color.g) / delta) + 4.0)
+    };
+    let saturation = delta / (1.0 - (2.0 * lightness - 1.0).abs());
+    (hue.rem_euclid(360.0), saturation, lightness)
+}
+
+fn parse_relative_hsl_component(
+    raw: &str,
+    component: &str,
+    hue: f32,
+    saturation: f32,
+    lightness: f32,
+    alpha: f32,
+) -> Option<f32> {
+    let lowered = raw.trim().to_ascii_lowercase();
+    let direct = match lowered.as_str() {
+        "h" => Some(hue),
+        "s" => Some(saturation),
+        "l" => Some(lightness),
+        "alpha" if component == "h" => Some(alpha),
+        "none" => Some(0.0),
+        _ => None,
+    };
+    if let Some(value) = direct {
+        return Some(value);
+    }
+    if component == "h" {
+        if let Some(value) = parse_hsl_hue_component(&lowered) {
+            return Some(value);
+        }
+    } else if let Some(value) = parse_hsl_percentage_component(&lowered) {
+        return Some(value);
+    }
+    let value = parse_relative_number_expression(
+        &lowered,
+        &[
+            ("h", hue),
+            ("s", saturation * 100.0),
+            ("l", lightness * 100.0),
+            ("alpha", alpha),
+        ],
+    )?;
+    Some(if component == "h" {
+        value
+    } else {
+        (value / 100.0).clamp(0.0, 1.0)
+    })
+}
+
+fn parse_relative_hsl_color(inner: &str) -> Option<(Color, f32)> {
+    let (origin_raw, remainder) = split_relative_color_origin(inner)?;
+    let (origin, origin_alpha) = parse_color_string(origin_raw)?;
+    let (hue, saturation, lightness) = rgb_to_hsl(origin);
+    let (components, alpha_raw) = split_relative_color_components(remainder)?;
+    let h = parse_relative_hsl_component(
+        &components[0],
+        "h",
+        hue,
+        saturation,
+        lightness,
+        origin_alpha,
+    )?;
+    let s = parse_relative_hsl_component(
+        &components[1],
+        "s",
+        hue,
+        saturation,
+        lightness,
+        origin_alpha,
+    )?;
+    let l = parse_relative_hsl_component(
+        &components[2],
+        "l",
+        hue,
+        saturation,
+        lightness,
+        origin_alpha,
+    )?;
+    let alpha = alpha_raw
+        .map(|raw| {
+            parse_relative_alpha(
+                raw,
+                origin_alpha,
+                &[
+                    ("h", hue),
+                    ("s", saturation * 100.0),
+                    ("l", lightness * 100.0),
+                    ("alpha", origin_alpha),
+                ],
+            )
+        })
+        .unwrap_or(Some(origin_alpha))?;
+    Some((hsl_to_rgb(h, s, l), alpha))
+}
+
+fn rgb_to_hwb(color: Color) -> (f32, f32, f32) {
+    let (hue, _, _) = rgb_to_hsl(color);
+    (
+        hue,
+        color.r.min(color.g).min(color.b),
+        1.0 - color.r.max(color.g).max(color.b),
+    )
+}
+
+fn parse_relative_hwb_component(
+    raw: &str,
+    keyword: &str,
+    hue: f32,
+    whiteness: f32,
+    blackness: f32,
+    alpha: f32,
+) -> Option<f32> {
+    let lowered = raw.trim().to_ascii_lowercase();
+    if lowered == keyword {
+        return Some(if keyword == "w" { whiteness } else { blackness });
+    }
+    if lowered == "none" {
+        return Some(0.0);
+    }
+    if let Some(value) = parse_hsl_percentage_component(&lowered) {
+        return Some(value);
+    }
+    parse_relative_number_expression(
+        &lowered,
+        &[
+            ("h", hue),
+            ("w", whiteness * 100.0),
+            ("b", blackness * 100.0),
+            ("alpha", alpha),
+        ],
+    )
+    .map(|value| (value / 100.0).clamp(0.0, 1.0))
+}
+
+fn parse_relative_hwb_color(inner: &str) -> Option<(Color, f32)> {
+    let (origin_raw, remainder) = split_relative_color_origin(inner)?;
+    let (origin, origin_alpha) = parse_color_string(origin_raw)?;
+    let (hue, whiteness, blackness) = rgb_to_hwb(origin);
+    let (components, alpha_raw) = split_relative_color_components(remainder)?;
+    let h =
+        parse_relative_hsl_component(&components[0], "h", hue, whiteness, blackness, origin_alpha)?;
+    let w =
+        parse_relative_hwb_component(&components[1], "w", hue, whiteness, blackness, origin_alpha)?;
+    let b =
+        parse_relative_hwb_component(&components[2], "b", hue, whiteness, blackness, origin_alpha)?;
+    let alpha = alpha_raw
+        .map(|raw| {
+            parse_relative_alpha(
+                raw,
+                origin_alpha,
+                &[
+                    ("h", hue),
+                    ("w", whiteness * 100.0),
+                    ("b", blackness * 100.0),
+                    ("alpha", origin_alpha),
+                ],
+            )
+        })
+        .unwrap_or(Some(origin_alpha))?;
+    Some((hwb_to_rgb(h, w, b), alpha))
+}
+
+fn parse_lab_family_color_function(raw: &str, ok_space: bool) -> Option<(Color, f32)> {
+    let lower = raw.trim().to_ascii_lowercase();
+    let (function, cylindrical) = if ok_space {
+        if lower.starts_with("oklch(") {
+            ("oklch(", true)
+        } else if lower.starts_with("oklab(") {
+            ("oklab(", false)
+        } else {
+            return None;
+        }
+    } else if lower.starts_with("lch(") {
+        ("lch(", true)
+    } else if lower.starts_with("lab(") {
+        ("lab(", false)
+    } else {
+        return None;
+    };
+    let inner = extract_function_args(raw.trim(), function)?;
+    if inner.to_ascii_lowercase().starts_with("from ") {
+        return parse_relative_lab_color(inner, ok_space, cylindrical);
+    }
+    let (components_raw, alpha_raw) = split_top_level_slash_once(inner)
+        .map(|(before, after)| (before, Some(after)))
+        .unwrap_or((inner, None));
+    let components = split_top_level_whitespace(components_raw);
+    if components.len() != 3 {
+        return None;
+    }
+    let lightness = parse_lab_lightness(&components[0], ok_space)?;
+    let alpha = alpha_raw.map(parse_alpha_component).unwrap_or(Some(1.0))?;
+    let color = if cylindrical {
+        let chroma = parse_lab_chroma(&components[1], ok_space)?.max(0.0);
+        let hue = parse_hsl_hue_component(&components[2])?.to_radians();
+        let a = chroma * hue.cos();
+        let b = chroma * hue.sin();
+        if ok_space {
+            oklab_to_srgb(lightness, a, b)
+        } else {
+            lab_to_srgb(lightness, a, b)
+        }
+    } else {
+        let a = parse_lab_axis(&components[1], ok_space)?;
+        let b = parse_lab_axis(&components[2], ok_space)?;
+        if ok_space {
+            oklab_to_srgb(lightness, a, b)
+        } else {
+            lab_to_srgb(lightness, a, b)
+        }
+    };
+    Some((color, alpha))
+}
+
+fn parse_lab_lightness(raw: &str, ok_space: bool) -> Option<f32> {
+    let raw = raw.trim();
+    if raw.eq_ignore_ascii_case("none") {
+        return Some(0.0);
+    }
+    if let Some(percent) = parse_percentage_unit(raw) {
+        return Some(if ok_space {
+            percent.clamp(0.0, 1.0)
+        } else {
+            (percent * 100.0).clamp(0.0, 100.0)
+        });
+    }
+    let value = raw.parse::<f32>().ok()?;
+    Some(if ok_space {
+        value.clamp(0.0, 1.0)
+    } else {
+        value.clamp(0.0, 100.0)
+    })
+}
+
+fn parse_lab_axis(raw: &str, ok_space: bool) -> Option<f32> {
+    let raw = raw.trim();
+    if raw.eq_ignore_ascii_case("none") {
+        return Some(0.0);
+    }
+    if let Some(percent) = parse_percentage_unit(raw) {
+        return Some(percent * if ok_space { 0.4 } else { 125.0 });
+    }
+    raw.parse::<f32>().ok()
+}
+
+fn parse_lab_chroma(raw: &str, ok_space: bool) -> Option<f32> {
+    let raw = raw.trim();
+    if raw.eq_ignore_ascii_case("none") {
+        return Some(0.0);
+    }
+    if let Some(percent) = parse_percentage_unit(raw) {
+        return Some(percent * if ok_space { 0.4 } else { 150.0 });
+    }
+    raw.parse::<f32>().ok()
+}
+
+fn lab_to_srgb(lightness: f32, a: f32, b: f32) -> Color {
+    let f1 = (lightness + 16.0) / 116.0;
+    let f0 = a / 500.0 + f1;
+    let f2 = f1 - b / 200.0;
+    let epsilon = 216.0 / 24389.0;
+    let kappa = 24389.0 / 27.0;
+    let finv = |value: f32| {
+        let cube = value * value * value;
+        if cube > epsilon {
+            cube
+        } else {
+            (116.0 * value - 16.0) / kappa
+        }
+    };
+    let xyz_d50 = [0.96422 * finv(f0), finv(f1), 0.82521 * finv(f2)];
+    xyz_d65_to_srgb(xyz_d50_to_d65(xyz_d50))
+}
+
+fn oklab_to_srgb(lightness: f32, a: f32, b: f32) -> Color {
+    let l = (lightness + 0.396_337_78 * a + 0.215_803_76 * b).powi(3);
+    let m = (lightness - 0.105_561_346 * a - 0.063_854_17 * b).powi(3);
+    let s = (lightness - 0.089_484_18 * a - 1.291_485_5 * b).powi(3);
+    linear_srgb_to_color([
+        4.076_741_7 * l - 3.307_711_6 * m + 0.230_969_94 * s,
+        -1.268_438 * l + 2.609_757_4 * m - 0.341_319_38 * s,
+        -0.004_196_086_3 * l - 0.703_418_6 * m + 1.707_614_7 * s,
+    ])
+}
+
+fn xyz_d50_to_d65([x, y, z]: [f32; 3]) -> [f32; 3] {
+    [
+        0.955_473_4 * x - 0.023_098_5 * y + 0.063_259_3 * z,
+        -0.028_369_7 * x + 1.009_995_5 * y + 0.021_041_4 * z,
+        0.012_314 * x - 0.020_507_7 * y + 1.330_365_9 * z,
+    ]
+}
+
+fn xyz_d65_to_srgb([x, y, z]: [f32; 3]) -> Color {
+    linear_srgb_to_color([
+        3.240_97 * x - 1.537_383_2 * y - 0.498_610_76 * z,
+        -0.969_243_65 * x + 1.875_967_5 * y + 0.041_555_06 * z,
+        0.055_630_08 * x - 0.203_976_96 * y + 1.056_971_5 * z,
+    ])
+}
+
+fn linear_srgb_to_color(rgb: [f32; 3]) -> Color {
+    let encode = |value: f32| {
+        let encoded = if value.abs() <= 0.003_130_8 {
+            12.92 * value
+        } else {
+            value.signum() * (1.055 * value.abs().powf(1.0 / 2.4) - 0.055)
+        };
+        encoded.clamp(0.0, 1.0)
+    };
+    Color::rgb(encode(rgb[0]), encode(rgb[1]), encode(rgb[2]))
+}
+
+fn decode_srgb_component(value: f32) -> f32 {
+    if value.abs() <= 0.04045 {
+        value / 12.92
+    } else {
+        value.signum() * ((value.abs() + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn parse_css_color_function(raw: &str) -> Option<(Color, f32)> {
+    let inner = extract_function_args(raw.trim(), "color(")?;
+    if inner.to_ascii_lowercase().starts_with("from ") {
+        return parse_relative_css_color(inner);
+    }
+    let (components_raw, alpha_raw) = split_top_level_slash_once(inner)
+        .map(|(before, after)| (before, Some(after)))
+        .unwrap_or((inner, None));
+    let components = split_top_level_whitespace(components_raw);
+    if components.len() != 4 {
+        return None;
+    }
+    let color_space = components[0].to_ascii_lowercase();
+    let coords = [
+        parse_css_color_space_component(&components[1])?,
+        parse_css_color_space_component(&components[2])?,
+        parse_css_color_space_component(&components[3])?,
+    ];
+    let alpha = alpha_raw.map(parse_alpha_component).unwrap_or(Some(1.0))?;
+    let color = color_space_coordinates_to_srgb(&color_space, coords)?;
+    Some((color, alpha))
+}
+
+fn parse_css_color_space_component(raw: &str) -> Option<f32> {
+    let raw = raw.trim();
+    if raw.eq_ignore_ascii_case("none") {
+        return Some(0.0);
+    }
+    if let Some(percent) = parse_percentage_unit(raw) {
+        return Some(percent);
+    }
+    raw.parse::<f32>().ok().filter(|value| value.is_finite())
+}
+
+fn color_space_coordinates_to_srgb(space: &str, [r, g, b]: [f32; 3]) -> Option<Color> {
+    let color = match space {
+        "srgb" => Color::rgb(r.clamp(0.0, 1.0), g.clamp(0.0, 1.0), b.clamp(0.0, 1.0)),
+        "srgb-linear" => linear_srgb_to_color([r, g, b]),
+        "display-p3" => {
+            let r = decode_srgb_component(r);
+            let g = decode_srgb_component(g);
+            let b = decode_srgb_component(b);
+            xyz_d65_to_srgb([
+                0.486_570_95 * r + 0.265_667_7 * g + 0.198_217_29 * b,
+                0.228_974_57 * r + 0.691_738_55 * g + 0.079_286_91 * b,
+                0.0 * r + 0.045_113_38 * g + 1.043_944_4 * b,
+            ])
+        }
+        "a98-rgb" => {
+            let decode = |value: f32| value.signum() * value.abs().powf(563.0 / 256.0);
+            let r = decode(r);
+            let g = decode(g);
+            let b = decode(b);
+            xyz_d65_to_srgb([
+                0.576_730_9 * r + 0.185_554 * g + 0.188_185_2 * b,
+                0.297_376_9 * r + 0.627_349_1 * g + 0.075_274_1 * b,
+                0.027_034_3 * r + 0.070_687_2 * g + 0.991_108_5 * b,
+            ])
+        }
+        "prophoto-rgb" => {
+            let decode = |value: f32| {
+                if value.abs() <= 16.0 / 512.0 {
+                    value / 16.0
+                } else {
+                    value.signum() * value.abs().powf(1.8)
+                }
+            };
+            let r = decode(r);
+            let g = decode(g);
+            let b = decode(b);
+            xyz_d65_to_srgb(xyz_d50_to_d65([
+                0.797_766_6 * r + 0.135_181_3 * g + 0.031_347_7 * b,
+                0.288_074_8 * r + 0.711_835_2 * g,
+                0.825_104_6 * b,
+            ]))
+        }
+        "rec2020" => {
+            let decode = |value: f32| {
+                if value.abs() < 0.08145 {
+                    value / 4.5
+                } else {
+                    value.signum() * ((value.abs() + 0.0993) / 1.0993).powf(1.0 / 0.45)
+                }
+            };
+            let r = decode(r);
+            let g = decode(g);
+            let b = decode(b);
+            xyz_d65_to_srgb([
+                0.636_958_06 * r + 0.144_616_9 * g + 0.168_880_98 * b,
+                0.262_700_2 * r + 0.677_998_07 * g + 0.059_301_715 * b,
+                0.028_072_693 * g + 1.060_985_1 * b,
+            ])
+        }
+        "xyz" | "xyz-d65" => xyz_d65_to_srgb([r, g, b]),
+        "xyz-d50" => xyz_d65_to_srgb(xyz_d50_to_d65([r, g, b])),
+        _ => return None,
+    };
+    Some(color)
+}
+
+fn color_to_linear_srgb(color: Color) -> [f32; 3] {
+    [
+        decode_srgb_component(color.r),
+        decode_srgb_component(color.g),
+        decode_srgb_component(color.b),
+    ]
+}
+
+fn srgb_to_xyz_d65(color: Color) -> [f32; 3] {
+    let [r, g, b] = color_to_linear_srgb(color);
+    [
+        0.412_390_8 * r + 0.357_584_33 * g + 0.180_480_8 * b,
+        0.212_639 * r + 0.715_168_65 * g + 0.072_192_32 * b,
+        0.019_330_82 * r + 0.119_194_78 * g + 0.950_532_14 * b,
+    ]
+}
+
+fn xyz_d65_to_d50([x, y, z]: [f32; 3]) -> [f32; 3] {
+    [
+        1.047_929_8 * x + 0.022_946_8 * y - 0.050_192_2 * z,
+        0.029_627_8 * x + 0.990_434_5 * y - 0.017_073_8 * z,
+        -0.009_243 * x + 0.015_055_2 * y + 0.751_874_3 * z,
+    ]
+}
+
+fn srgb_to_lab(color: Color) -> [f32; 3] {
+    let [x, y, z] = xyz_d65_to_d50(srgb_to_xyz_d65(color));
+    let epsilon = 216.0 / 24389.0;
+    let kappa = 24389.0 / 27.0;
+    let f = |value: f32| {
+        if value > epsilon {
+            value.cbrt()
+        } else {
+            (kappa * value + 16.0) / 116.0
+        }
+    };
+    let fx = f(x / 0.96422);
+    let fy = f(y);
+    let fz = f(z / 0.82521);
+    [116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)]
+}
+
+fn srgb_to_oklab(color: Color) -> [f32; 3] {
+    let [r, g, b] = color_to_linear_srgb(color);
+    let l = (0.412_221_46 * r + 0.536_332_55 * g + 0.051_445_995 * b).cbrt();
+    let m = (0.211_903_5 * r + 0.680_699_5 * g + 0.107_396_96 * b).cbrt();
+    let s = (0.088_302_46 * r + 0.281_718_85 * g + 0.629_978_7 * b).cbrt();
+    [
+        0.210_454_26 * l + 0.793_617_8 * m - 0.004_072_047 * s,
+        1.977_998_5 * l - 2.428_592_2 * m + 0.450_593_7 * s,
+        0.025_904_037 * l + 0.782_771_77 * m - 0.808_675_77 * s,
+    ]
+}
+
+fn cartesian_to_cylindrical([lightness, a, b]: [f32; 3]) -> [f32; 3] {
+    [
+        lightness,
+        a.hypot(b),
+        b.atan2(a).to_degrees().rem_euclid(360.0),
+    ]
+}
+
+fn parse_relative_lab_component(
+    raw: &str,
+    own_keyword: &str,
+    own_value: f32,
+    percent_scale: f32,
+    hue: bool,
+    values: &[(&str, f32)],
+) -> Option<f32> {
+    let lowered = raw.trim().to_ascii_lowercase();
+    if lowered == own_keyword {
+        return Some(own_value);
+    }
+    if lowered == "none" {
+        return Some(0.0);
+    }
+    if hue {
+        if let Some(value) = parse_hsl_hue_component(&lowered) {
+            return Some(value);
+        }
+    } else if let Some(value) = parse_percentage_unit(&lowered) {
+        return Some(value * percent_scale);
+    } else if let Ok(value) = lowered.parse::<f32>() {
+        return Some(value);
+    }
+    parse_relative_number_expression(&lowered, values)
+}
+
+fn parse_relative_lab_color(
+    inner: &str,
+    ok_space: bool,
+    cylindrical: bool,
+) -> Option<(Color, f32)> {
+    let (origin_raw, remainder) = split_relative_color_origin(inner)?;
+    let (origin, origin_alpha) = parse_color_string(origin_raw)?;
+    let cartesian = if ok_space {
+        srgb_to_oklab(origin)
+    } else {
+        srgb_to_lab(origin)
+    };
+    let original = if cylindrical {
+        cartesian_to_cylindrical(cartesian)
+    } else {
+        cartesian
+    };
+    let (components, alpha_raw) = split_relative_color_components(remainder)?;
+    let lightness_scale = if ok_space { 1.0 } else { 100.0 };
+    let second_scale = if cylindrical {
+        if ok_space { 0.4 } else { 150.0 }
+    } else if ok_space {
+        0.4
+    } else {
+        125.0
+    };
+    let names = if cylindrical {
+        ["l", "c", "h"]
+    } else {
+        ["l", "a", "b"]
+    };
+    let values = [
+        (names[0], original[0]),
+        (names[1], original[1]),
+        (names[2], original[2]),
+        ("alpha", origin_alpha),
+    ];
+    let first = parse_relative_lab_component(
+        &components[0],
+        names[0],
+        original[0],
+        lightness_scale,
+        false,
+        &values,
+    )?;
+    let second = parse_relative_lab_component(
+        &components[1],
+        names[1],
+        original[1],
+        second_scale,
+        false,
+        &values,
+    )?;
+    let third = parse_relative_lab_component(
+        &components[2],
+        names[2],
+        original[2],
+        second_scale,
+        cylindrical,
+        &values,
+    )?;
+    let alpha = alpha_raw
+        .map(|raw| parse_relative_alpha(raw, origin_alpha, &values))
+        .unwrap_or(Some(origin_alpha))?;
+    let color = if cylindrical {
+        let hue = third.to_radians();
+        let a = second.max(0.0) * hue.cos();
+        let b = second.max(0.0) * hue.sin();
+        if ok_space {
+            oklab_to_srgb(first.clamp(0.0, 1.0), a, b)
+        } else {
+            lab_to_srgb(first.clamp(0.0, 100.0), a, b)
+        }
+    } else if ok_space {
+        oklab_to_srgb(first.clamp(0.0, 1.0), second, third)
+    } else {
+        lab_to_srgb(first.clamp(0.0, 100.0), second, third)
+    };
+    Some((color, alpha))
+}
+
+fn encode_srgb_component(value: f32) -> f32 {
+    if value.abs() <= 0.003_130_8 {
+        12.92 * value
+    } else {
+        value.signum() * (1.055 * value.abs().powf(1.0 / 2.4) - 0.055)
+    }
+}
+
+fn srgb_to_color_space_coordinates(space: &str, color: Color) -> Option<[f32; 3]> {
+    let xyz_d65 = srgb_to_xyz_d65(color);
+    let [x, y, z] = xyz_d65;
+    let coordinates = match space {
+        "srgb" => [color.r, color.g, color.b],
+        "srgb-linear" => color_to_linear_srgb(color),
+        "display-p3" => {
+            let linear = [
+                2.493_497 * x - 0.931_383_6 * y - 0.402_710_8 * z,
+                -0.829_489 * x + 1.762_664_1 * y + 0.023_624_686 * z,
+                0.035_845_83 * x - 0.076_172_39 * y + 0.956_884_5 * z,
+            ];
+            linear.map(encode_srgb_component)
+        }
+        "a98-rgb" => {
+            let linear = [
+                2.041_369 * x - 0.564_946_4 * y - 0.344_694_4 * z,
+                -0.969_266 * x + 1.876_010_8 * y + 0.041_556 * z,
+                0.013_447_4 * x - 0.118_389_7 * y + 1.015_409_6 * z,
+            ];
+            linear.map(|value| value.signum() * value.abs().powf(256.0 / 563.0))
+        }
+        "prophoto-rgb" => {
+            let [x, y, z] = xyz_d65_to_d50(xyz_d65);
+            let linear = [
+                1.345_943_3 * x - 0.255_607_5 * y - 0.051_111_8 * z,
+                -0.544_598_9 * x + 1.508_167_3 * y + 0.020_535_1 * z,
+                1.211_812_8 * z,
+            ];
+            linear.map(|value| {
+                if value.abs() <= 1.0 / 512.0 {
+                    value * 16.0
+                } else {
+                    value.signum() * value.abs().powf(1.0 / 1.8)
+                }
+            })
+        }
+        "rec2020" => {
+            let linear = [
+                1.716_651_2 * x - 0.355_670_78 * y - 0.253_366_3 * z,
+                -0.666_684_3 * x + 1.616_481_2 * y + 0.015_768_546 * z,
+                0.017_639_857 * x - 0.042_770_613 * y + 0.942_103_15 * z,
+            ];
+            linear.map(|value| {
+                if value.abs() < 0.0181 {
+                    value * 4.5
+                } else {
+                    value.signum() * (1.0993 * value.abs().powf(0.45) - 0.0993)
+                }
+            })
+        }
+        "xyz" | "xyz-d65" => xyz_d65,
+        "xyz-d50" => xyz_d65_to_d50(xyz_d65),
+        _ => return None,
+    };
+    Some(coordinates)
+}
+
+fn parse_relative_css_color(inner: &str) -> Option<(Color, f32)> {
+    let (origin_raw, remainder) = split_relative_color_origin(inner)?;
+    let (origin, origin_alpha) = parse_color_string(origin_raw)?;
+    let (components_raw, alpha_raw) = split_top_level_slash_once(remainder)
+        .map(|(before, after)| (before, Some(after)))
+        .unwrap_or((remainder, None));
+    let components = split_top_level_whitespace(components_raw);
+    if components.len() != 4 {
+        return None;
+    }
+    let space = components[0].to_ascii_lowercase();
+    let origin_coords = srgb_to_color_space_coordinates(&space, origin)?;
+    let names = if space.starts_with("xyz") || space == "xyz" {
+        ["x", "y", "z"]
+    } else {
+        ["r", "g", "b"]
+    };
+    let values = [
+        (names[0], origin_coords[0]),
+        (names[1], origin_coords[1]),
+        (names[2], origin_coords[2]),
+        ("alpha", origin_alpha),
+    ];
+    let mut coords = [0.0; 3];
+    for index in 0..3 {
+        let raw = components[index + 1].trim().to_ascii_lowercase();
+        coords[index] = if raw == names[index] {
+            origin_coords[index]
+        } else if raw == "none" {
+            0.0
+        } else if let Some(value) = parse_percentage_unit(&raw) {
+            value
+        } else if let Ok(value) = raw.parse::<f32>() {
+            value
+        } else {
+            parse_relative_number_expression(&raw, &values)?
+        };
+    }
+    let alpha = alpha_raw
+        .map(|raw| parse_relative_alpha(raw, origin_alpha, &values))
+        .unwrap_or(Some(origin_alpha))?;
+    Some((color_space_coordinates_to_srgb(&space, coords)?, alpha))
+}
+
+#[derive(Debug, Clone, Copy)]
+enum HueInterpolationMethod {
+    Shorter,
+    Longer,
+    Increasing,
+    Decreasing,
+}
+
+fn parse_color_interpolation_space(raw: &str) -> Option<(String, HueInterpolationMethod)> {
+    let tokens = raw.split_ascii_whitespace().collect::<Vec<_>>();
+    if tokens.len() < 2 || !tokens[0].eq_ignore_ascii_case("in") {
+        return None;
+    }
+    let space = tokens[1].to_ascii_lowercase();
+    let hue = if tokens.len() == 2 {
+        HueInterpolationMethod::Shorter
+    } else if tokens.len() == 4 && tokens[3].eq_ignore_ascii_case("hue") {
+        match tokens[2].to_ascii_lowercase().as_str() {
+            "shorter" => HueInterpolationMethod::Shorter,
+            "longer" => HueInterpolationMethod::Longer,
+            "increasing" => HueInterpolationMethod::Increasing,
+            "decreasing" => HueInterpolationMethod::Decreasing,
+            _ => return None,
+        }
+    } else {
+        return None;
+    };
+    Some((space, hue))
+}
+
+fn color_to_interpolation_coordinates(space: &str, color: Color) -> Option<([f32; 3], bool)> {
+    let result = match space {
+        "lab" => (srgb_to_lab(color), false),
+        "lch" => (cartesian_to_cylindrical(srgb_to_lab(color)), true),
+        "oklab" => (srgb_to_oklab(color), false),
+        "oklch" => (cartesian_to_cylindrical(srgb_to_oklab(color)), true),
+        "hsl" => {
+            let (h, s, l) = rgb_to_hsl(color);
+            ([s, l, h], true)
+        }
+        "hwb" => {
+            let (h, w, b) = rgb_to_hwb(color);
+            ([w, b, h], true)
+        }
+        _ => (srgb_to_color_space_coordinates(space, color)?, false),
+    };
+    Some(result)
+}
+
+fn interpolation_coordinates_to_color(space: &str, coordinates: [f32; 3]) -> Option<Color> {
+    let [first, second, third] = coordinates;
+    let color = match space {
+        "lab" => lab_to_srgb(first.clamp(0.0, 100.0), second, third),
+        "lch" => {
+            let hue = third.to_radians();
+            lab_to_srgb(
+                first.clamp(0.0, 100.0),
+                second.max(0.0) * hue.cos(),
+                second.max(0.0) * hue.sin(),
+            )
+        }
+        "oklab" => oklab_to_srgb(first.clamp(0.0, 1.0), second, third),
+        "oklch" => {
+            let hue = third.to_radians();
+            oklab_to_srgb(
+                first.clamp(0.0, 1.0),
+                second.max(0.0) * hue.cos(),
+                second.max(0.0) * hue.sin(),
+            )
+        }
+        "hsl" => hsl_to_rgb(third, first.clamp(0.0, 1.0), second.clamp(0.0, 1.0)),
+        "hwb" => hwb_to_rgb(third, first.clamp(0.0, 1.0), second.clamp(0.0, 1.0)),
+        _ => return color_space_coordinates_to_srgb(space, coordinates),
+    };
+    Some(color)
+}
+
+fn interpolate_hue(left: f32, right: f32, factor: f32, method: HueInterpolationMethod) -> f32 {
+    let mut delta = (right - left).rem_euclid(360.0);
+    match method {
+        HueInterpolationMethod::Shorter => {
+            if delta > 180.0 {
+                delta -= 360.0;
+            }
+        }
+        HueInterpolationMethod::Longer => {
+            if delta > 0.0 && delta < 180.0 {
+                delta -= 360.0;
+            }
+        }
+        HueInterpolationMethod::Increasing => {}
+        HueInterpolationMethod::Decreasing => {
+            if delta > 0.0 {
+                delta -= 360.0;
+            }
+        }
+    }
+    (left + delta * factor).rem_euclid(360.0)
+}
+
+fn normalized_color_mix_weights(left: Option<f32>, right: Option<f32>) -> Option<(f32, f32, f32)> {
+    let (mut left, mut right, alpha_multiplier) = match (left, right) {
+        (Some(left), Some(right)) => {
+            let left = left.clamp(0.0, 1.0);
+            let right = right.clamp(0.0, 1.0);
+            (left, right, (left + right).clamp(0.0, 1.0))
+        }
+        (Some(left), None) => {
+            let left = left.clamp(0.0, 1.0);
+            (left, 1.0 - left, 1.0)
+        }
+        (None, Some(right)) => {
+            let right = right.clamp(0.0, 1.0);
+            (1.0 - right, right, 1.0)
+        }
+        (None, None) => (0.5, 0.5, 1.0),
+    };
+    let total = left + right;
+    if total <= f32::EPSILON {
+        return None;
+    }
+    left /= total;
+    right /= total;
+    Some((left, right, alpha_multiplier))
+}
+
+fn mix_colors_in_space(
+    space: &str,
+    hue_method: HueInterpolationMethod,
+    left: (Color, f32, Option<f32>),
+    right: (Color, f32, Option<f32>),
+) -> Option<(Color, f32)> {
+    let (left_weight, right_weight, alpha_multiplier) =
+        normalized_color_mix_weights(left.2, right.2)?;
+    let mixed_alpha = (left.1 * left_weight + right.1 * right_weight).clamp(0.0, 1.0);
+    let output_alpha = (mixed_alpha * alpha_multiplier).clamp(0.0, 1.0);
+    let (left_coords, left_polar) = color_to_interpolation_coordinates(space, left.0)?;
+    let (right_coords, right_polar) = color_to_interpolation_coordinates(space, right.0)?;
+    if left_polar != right_polar {
+        return None;
+    }
+    if mixed_alpha <= f32::EPSILON {
+        return Some((Color::BLACK, output_alpha));
+    }
+    let left_factor = left.1 * left_weight;
+    let right_factor = right.1 * right_weight;
+    let mut coords = [0.0; 3];
+    for index in 0..if left_polar { 2 } else { 3 } {
+        coords[index] =
+            (left_coords[index] * left_factor + right_coords[index] * right_factor) / mixed_alpha;
+    }
+    if left_polar {
+        coords[2] = interpolate_hue(
+            left_coords[2],
+            right_coords[2],
+            right_factor / mixed_alpha,
+            hue_method,
+        );
+    }
+    Some((
+        interpolation_coordinates_to_color(space, coords)?,
+        output_alpha,
+    ))
+}
+
+fn parse_static_color_mix(raw: &str) -> Option<(Color, f32)> {
+    let inner = extract_function_args(raw.trim(), "color-mix(")?;
+    let args = split_args(inner);
+    if args.len() != 3 {
+        return None;
+    }
+    let (space, hue_method) = parse_color_interpolation_space(&args[0])?;
+    let (left_raw, left_weight) = split_color_mix_stop(&args[1])?;
+    let (right_raw, right_weight) = split_color_mix_stop(&args[2])?;
+    let (left_color, left_alpha) = parse_color_string(&left_raw)?;
+    let (right_color, right_alpha) = parse_color_string(&right_raw)?;
+    mix_colors_in_space(
+        &space,
+        hue_method,
+        (left_color, left_alpha, left_weight),
+        (right_color, right_alpha, right_weight),
+    )
 }
 
 fn parse_hsl_hue_component(raw: &str) -> Option<f32> {
@@ -23910,196 +22371,8 @@ fn split_ws_preserve_parens(raw: &str) -> Vec<String> {
     out
 }
 
-fn font_style_spec(value: &CssFontStyle) -> Option<FontStyleMode> {
-    let style = match value {
-        CssFontStyle::Italic => FontStyleMode::Italic,
-        CssFontStyle::Oblique(angle) => oblique_font_style(angle.to_degrees()),
-        CssFontStyle::Normal => FontStyleMode::Normal,
-    };
-    Some(style)
-}
-
-fn length_value_to_pt(value: &LengthValue) -> Option<Pt> {
-    value.to_px().map(px_to_pt)
-}
-
 fn px_to_pt(px: f32) -> Pt {
     Pt::from_f32(px * 0.75)
-}
-
-fn absolute_font_size(size: AbsoluteFontSize) -> Pt {
-    let px = match size {
-        AbsoluteFontSize::XXSmall => 9.0,
-        AbsoluteFontSize::XSmall => 10.0,
-        AbsoluteFontSize::Small => 13.0,
-        AbsoluteFontSize::Medium => 16.0,
-        AbsoluteFontSize::Large => 18.0,
-        AbsoluteFontSize::XLarge => 24.0,
-        AbsoluteFontSize::XXLarge => 32.0,
-        AbsoluteFontSize::XXXLarge => 40.0,
-    };
-    px_to_pt(px)
-}
-
-fn css_color_to_color(color: &CssColor) -> Option<Color> {
-    let (resolved, alpha) = css_color_to_color_with_alpha(color)?;
-    Some(blend_over_white(resolved, alpha))
-}
-
-fn css_color_to_color_spec(color: &CssColor) -> Option<ColorSpec> {
-    if matches!(color, CssColor::CurrentColor) {
-        return Some(ColorSpec::CurrentColor);
-    }
-    css_color_to_color(color).map(ColorSpec::Value)
-}
-
-fn css_color_to_color_with_alpha(color: &CssColor) -> Option<(Color, f32)> {
-    if let CssColor::RGBA(rgba) = color {
-        return Some((
-            Color::rgb(
-                rgba.red as f32 / 255.0,
-                rgba.green as f32 / 255.0,
-                rgba.blue as f32 / 255.0,
-            ),
-            rgba.alpha as f32 / 255.0,
-        ));
-    }
-    if let Ok(srgb) = SRGB::try_from(color) {
-        let (_, _, _, alpha) = srgb.components();
-        return Some((
-            Color::rgb(
-                srgb.r.clamp(0.0, 1.0),
-                srgb.g.clamp(0.0, 1.0),
-                srgb.b.clamp(0.0, 1.0),
-            ),
-            alpha.clamp(0.0, 1.0),
-        ));
-    }
-    None
-}
-
-fn font_spec_from_family(families: &[FontFamily]) -> Option<FontSpec> {
-    if families.is_empty() {
-        return None;
-    }
-
-    let mut stack: Vec<Arc<str>> = Vec::new();
-    for family in families {
-        match family {
-            FontFamily::FamilyName(name) => {
-                let css_name = name
-                    .to_css_string(PrinterOptions::default())
-                    .unwrap_or_default();
-                let cleaned = css_name
-                    .trim()
-                    .trim_matches('"')
-                    .trim_matches('\'')
-                    .to_string();
-                if !cleaned.is_empty() {
-                    stack.push(Arc::<str>::from(cleaned));
-                }
-            }
-            FontFamily::Generic(generic) => {
-                let mapped = match generic {
-                    GenericFontFamily::Serif => Some("Times-Roman"),
-                    GenericFontFamily::SansSerif => Some("Helvetica"),
-                    GenericFontFamily::Monospace => Some("Courier"),
-                    GenericFontFamily::Cursive => Some("Helvetica"),
-                    GenericFontFamily::Fantasy => Some("Helvetica"),
-                    GenericFontFamily::SystemUI => Some("Helvetica"),
-                    GenericFontFamily::Emoji => Some("Helvetica"),
-                    GenericFontFamily::Math => Some("Helvetica"),
-                    GenericFontFamily::FangSong => Some("Helvetica"),
-                    GenericFontFamily::UISerif => Some("Times-Roman"),
-                    GenericFontFamily::UISansSerif => Some("Helvetica"),
-                    GenericFontFamily::UIMonospace => Some("Courier"),
-                    GenericFontFamily::UIRounded => Some("Helvetica"),
-                    GenericFontFamily::Inherit => return Some(FontSpec::Inherit),
-                    GenericFontFamily::Initial
-                    | GenericFontFamily::Unset
-                    | GenericFontFamily::Default
-                    | GenericFontFamily::Revert
-                    | GenericFontFamily::RevertLayer => return Some(FontSpec::Initial),
-                };
-                if let Some(name) = mapped {
-                    stack.push(Arc::<str>::from(name));
-                }
-            }
-        }
-    }
-
-    if stack.is_empty() {
-        None
-    } else {
-        // Deduplicate while preserving order.
-        let mut seen: HashMap<Arc<str>, ()> = HashMap::new();
-        let mut deduped = Vec::new();
-        for name in stack {
-            if !seen.contains_key(&name) {
-                seen.insert(name.clone(), ());
-                deduped.push(name);
-            }
-        }
-        Some(FontSpec::Value(deduped))
-    }
-}
-
-fn text_align_mode_from_css(value: &TextAlign) -> TextAlignMode {
-    match value {
-        TextAlign::Start | TextAlign::MatchParent => TextAlignMode::Start,
-        TextAlign::End => TextAlignMode::End,
-        TextAlign::Left => TextAlignMode::Left,
-        TextAlign::Center => TextAlignMode::Center,
-        TextAlign::Right => TextAlignMode::Right,
-        TextAlign::Justify => TextAlignMode::Justify,
-        TextAlign::JustifyAll => TextAlignMode::JustifyAll,
-    }
-}
-
-fn text_align_last_mode_from_css(value: &CssTextAlignLast) -> TextAlignLastMode {
-    match value {
-        CssTextAlignLast::Auto => TextAlignLastMode::Auto,
-        CssTextAlignLast::Start | CssTextAlignLast::MatchParent => TextAlignLastMode::Start,
-        CssTextAlignLast::End => TextAlignLastMode::End,
-        CssTextAlignLast::Left => TextAlignLastMode::Left,
-        CssTextAlignLast::Center => TextAlignLastMode::Center,
-        CssTextAlignLast::Right => TextAlignLastMode::Right,
-        CssTextAlignLast::Justify => TextAlignLastMode::Justify,
-    }
-}
-
-fn text_justify_mode_from_css(value: &CssTextJustify) -> TextJustifyMode {
-    match value {
-        CssTextJustify::Auto => TextJustifyMode::Auto,
-        CssTextJustify::None => TextJustifyMode::None,
-        CssTextJustify::InterWord => TextJustifyMode::InterWord,
-        CssTextJustify::InterCharacter => TextJustifyMode::InterCharacter,
-    }
-}
-
-fn hyphens_mode_from_css(value: &CssHyphens) -> HyphensMode {
-    match value {
-        CssHyphens::None => HyphensMode::None,
-        CssHyphens::Manual => HyphensMode::Manual,
-        CssHyphens::Auto => HyphensMode::Auto,
-    }
-}
-
-fn line_break_mode_from_css(value: &LineBreak) -> LineBreakMode {
-    match value {
-        LineBreak::Auto => LineBreakMode::Auto,
-        LineBreak::Loose => LineBreakMode::Loose,
-        LineBreak::Normal => LineBreakMode::Normal,
-        LineBreak::Strict => LineBreakMode::Strict,
-        LineBreak::Anywhere => LineBreakMode::Anywhere,
-    }
-}
-
-fn direction_mode_from_css(value: &CssDirection) -> DirectionMode {
-    match value {
-        CssDirection::Rtl => DirectionMode::Rtl,
-        CssDirection::Ltr => DirectionMode::Ltr,
-    }
 }
 
 fn set_delta_direction(delta: &mut StyleDelta, spec: DirectionSpec) {
@@ -24142,159 +22415,6 @@ fn is_vertical_writing_mode(mode: WritingModeMode) -> bool {
     !matches!(mode, WritingModeMode::HorizontalTb)
 }
 
-fn word_break_mode_from_css(value: &WordBreak) -> WordBreakMode {
-    match value {
-        WordBreak::KeepAll => WordBreakMode::KeepAll,
-        WordBreak::BreakAll => WordBreakMode::BreakAll,
-        WordBreak::BreakWord => WordBreakMode::BreakWord,
-        WordBreak::Normal => WordBreakMode::Normal,
-    }
-}
-
-fn word_break_mode_from_overflow_wrap(value: &OverflowWrap) -> WordBreakMode {
-    match value {
-        OverflowWrap::BreakWord => WordBreakMode::BreakWord,
-        OverflowWrap::Anywhere => WordBreakMode::Anywhere,
-        OverflowWrap::Normal => WordBreakMode::Normal,
-    }
-}
-
-fn list_style_type_mode_from_css(
-    value: &ListStyleType,
-) -> (
-    ListStyleTypeMode,
-    Option<String>,
-    Option<AnonymousListStyleSymbols>,
-) {
-    match value {
-        ListStyleType::None => (ListStyleTypeMode::None, None, None),
-        ListStyleType::String(value) => (
-            ListStyleTypeMode::CustomString,
-            Some(value.to_string()),
-            None,
-        ),
-        ListStyleType::CounterStyle(CounterStyle::Predefined(style)) => match style {
-            PredefinedCounterStyle::Disc => (ListStyleTypeMode::Disc, None, None),
-            PredefinedCounterStyle::Circle => (ListStyleTypeMode::Circle, None, None),
-            PredefinedCounterStyle::Square => (ListStyleTypeMode::Square, None, None),
-            PredefinedCounterStyle::Decimal => (ListStyleTypeMode::Decimal, None, None),
-            PredefinedCounterStyle::DecimalLeadingZero => {
-                (ListStyleTypeMode::DecimalLeadingZero, None, None)
-            }
-            PredefinedCounterStyle::ArabicIndic => (ListStyleTypeMode::ArabicIndic, None, None),
-            PredefinedCounterStyle::Armenian | PredefinedCounterStyle::UpperArmenian => {
-                (ListStyleTypeMode::Armenian, None, None)
-            }
-            PredefinedCounterStyle::Bengali => (ListStyleTypeMode::Bengali, None, None),
-            PredefinedCounterStyle::Cambodian | PredefinedCounterStyle::Khmer => {
-                (ListStyleTypeMode::Cambodian, None, None)
-            }
-            PredefinedCounterStyle::CjkDecimal => (ListStyleTypeMode::CjkDecimal, None, None),
-            PredefinedCounterStyle::CjkEarthlyBranch => {
-                (ListStyleTypeMode::CjkEarthlyBranch, None, None)
-            }
-            PredefinedCounterStyle::CjkHeavenlyStem => {
-                (ListStyleTypeMode::CjkHeavenlyStem, None, None)
-            }
-            PredefinedCounterStyle::Devanagari => (ListStyleTypeMode::Devanagari, None, None),
-            PredefinedCounterStyle::EthiopicNumeric => {
-                (ListStyleTypeMode::EthiopicNumeric, None, None)
-            }
-            PredefinedCounterStyle::Georgian => (ListStyleTypeMode::Georgian, None, None),
-            PredefinedCounterStyle::Gujarati => (ListStyleTypeMode::Gujarati, None, None),
-            PredefinedCounterStyle::Gurmukhi => (ListStyleTypeMode::Gurmukhi, None, None),
-            PredefinedCounterStyle::Hebrew => (ListStyleTypeMode::Hebrew, None, None),
-            PredefinedCounterStyle::JapaneseInformal => {
-                (ListStyleTypeMode::JapaneseInformal, None, None)
-            }
-            PredefinedCounterStyle::JapaneseFormal => {
-                (ListStyleTypeMode::JapaneseFormal, None, None)
-            }
-            PredefinedCounterStyle::Kannada => (ListStyleTypeMode::Kannada, None, None),
-            PredefinedCounterStyle::KoreanHangulFormal => {
-                (ListStyleTypeMode::KoreanHangulFormal, None, None)
-            }
-            PredefinedCounterStyle::KoreanHanjaInformal => {
-                (ListStyleTypeMode::KoreanHanjaInformal, None, None)
-            }
-            PredefinedCounterStyle::KoreanHanjaFormal => {
-                (ListStyleTypeMode::KoreanHanjaFormal, None, None)
-            }
-            PredefinedCounterStyle::Lao => (ListStyleTypeMode::Lao, None, None),
-            PredefinedCounterStyle::LowerArmenian => (ListStyleTypeMode::LowerArmenian, None, None),
-            PredefinedCounterStyle::Malayalam => (ListStyleTypeMode::Malayalam, None, None),
-            PredefinedCounterStyle::Mongolian => (ListStyleTypeMode::Mongolian, None, None),
-            PredefinedCounterStyle::Myanmar => (ListStyleTypeMode::Myanmar, None, None),
-            PredefinedCounterStyle::Oriya => (ListStyleTypeMode::Oriya, None, None),
-            PredefinedCounterStyle::Persian => (ListStyleTypeMode::Persian, None, None),
-            PredefinedCounterStyle::SimpChineseInformal => {
-                (ListStyleTypeMode::SimpChineseInformal, None, None)
-            }
-            PredefinedCounterStyle::SimpChineseFormal => {
-                (ListStyleTypeMode::SimpChineseFormal, None, None)
-            }
-            PredefinedCounterStyle::Tamil => (ListStyleTypeMode::Tamil, None, None),
-            PredefinedCounterStyle::Telugu => (ListStyleTypeMode::Telugu, None, None),
-            PredefinedCounterStyle::Thai => (ListStyleTypeMode::Thai, None, None),
-            PredefinedCounterStyle::Tibetan => (ListStyleTypeMode::Tibetan, None, None),
-            PredefinedCounterStyle::TradChineseInformal => {
-                (ListStyleTypeMode::TradChineseInformal, None, None)
-            }
-            PredefinedCounterStyle::TradChineseFormal => {
-                (ListStyleTypeMode::TradChineseFormal, None, None)
-            }
-            PredefinedCounterStyle::LowerRoman => (ListStyleTypeMode::LowerRoman, None, None),
-            PredefinedCounterStyle::UpperRoman => (ListStyleTypeMode::UpperRoman, None, None),
-            PredefinedCounterStyle::LowerAlpha | PredefinedCounterStyle::LowerLatin => {
-                (ListStyleTypeMode::LowerAlpha, None, None)
-            }
-            PredefinedCounterStyle::UpperAlpha | PredefinedCounterStyle::UpperLatin => {
-                (ListStyleTypeMode::UpperAlpha, None, None)
-            }
-            PredefinedCounterStyle::LowerGreek => (ListStyleTypeMode::LowerGreek, None, None),
-            PredefinedCounterStyle::Hiragana => (ListStyleTypeMode::Hiragana, None, None),
-            PredefinedCounterStyle::HiraganaIroha => (ListStyleTypeMode::HiraganaIroha, None, None),
-            PredefinedCounterStyle::Katakana => (ListStyleTypeMode::Katakana, None, None),
-            PredefinedCounterStyle::KatakanaIroha => (ListStyleTypeMode::KatakanaIroha, None, None),
-            PredefinedCounterStyle::DisclosureOpen => {
-                (ListStyleTypeMode::DisclosureOpen, None, None)
-            }
-            PredefinedCounterStyle::DisclosureClosed => {
-                (ListStyleTypeMode::DisclosureClosed, None, None)
-            }
-        },
-        ListStyleType::CounterStyle(CounterStyle::Name(name))
-            if name.0.as_ref().eq_ignore_ascii_case("cjk-ideographic") =>
-        {
-            (ListStyleTypeMode::TradChineseInformal, None, None)
-        }
-        ListStyleType::CounterStyle(CounterStyle::Name(name)) => (
-            ListStyleTypeMode::CustomCounterStyleName,
-            Some(name.0.to_string()),
-            None,
-        ),
-        ListStyleType::CounterStyle(CounterStyle::Symbols { system, symbols }) => {
-            if let Some(symbols) = anonymous_list_style_symbols_from_css(system, symbols) {
-                (ListStyleTypeMode::AnonymousSymbols, None, Some(symbols))
-            } else {
-                (ListStyleTypeMode::Auto, None, None)
-            }
-        }
-    }
-}
-
-fn apply_list_style_type_from_tokens(delta: &mut StyleDelta, tokens: &[TokenOrValue]) -> bool {
-    let raw = tokens_raw_value_string(tokens);
-    if raw.trim().eq_ignore_ascii_case("revert-layer") {
-        return set_revert_layer_list_style_type(delta);
-    }
-    if let Ok(value) = ListStyleType::parse_string(raw.trim()) {
-        set_delta_list_style_type(delta, list_style_type_mode_from_css(&value));
-        return true;
-    }
-    false
-}
-
 fn set_delta_list_style_type(
     delta: &mut StyleDelta,
     value: (
@@ -24307,28 +22427,6 @@ fn set_delta_list_style_type(
     delta.revert_layer.list_style_type = false;
 }
 
-fn list_style_image_spec_from_css(value: &CssImage) -> ListStyleImageSpec {
-    match value {
-        CssImage::Url(url) => ListStyleImageSpec::Url(url.url.to_string()),
-        CssImage::None => ListStyleImageSpec::None,
-        _ => {
-            let css = value
-                .to_css_string(PrinterOptions::default())
-                .unwrap_or_default();
-            if css.trim().is_empty() {
-                ListStyleImageSpec::None
-            } else {
-                let paint = parse_background_paint_str(&css);
-                if paint.is_some() || is_supported_gradient_image_expression(&css) {
-                    ListStyleImageSpec::Image { css, paint }
-                } else {
-                    ListStyleImageSpec::None
-                }
-            }
-        }
-    }
-}
-
 fn is_supported_gradient_image_expression(raw: &str) -> bool {
     let lower = raw.to_ascii_lowercase();
     lower.contains("linear-gradient(")
@@ -24336,203 +22434,9 @@ fn is_supported_gradient_image_expression(raw: &str) -> bool {
         || lower.contains("conic-gradient(")
 }
 
-fn parse_list_style_image_tokens(tokens: &[TokenOrValue]) -> Option<ListStyleImageSpec> {
-    let raw = tokens_raw_value_string(tokens);
-    let trimmed = raw.trim();
-    match trimmed.to_ascii_lowercase().as_str() {
-        "none" | "initial" | "revert" => Some(ListStyleImageSpec::Initial),
-        "inherit" | "unset" => Some(ListStyleImageSpec::Inherit),
-        _ => CssImage::parse_string(trimmed)
-            .ok()
-            .map(|image| list_style_image_spec_from_css(&image)),
-    }
-}
-
-fn apply_list_style_image_from_tokens(delta: &mut StyleDelta, tokens: &[TokenOrValue]) -> bool {
-    let raw = tokens_raw_value_string(tokens);
-    if raw.trim().eq_ignore_ascii_case("revert-layer") {
-        return set_revert_layer_list_style_image(delta);
-    }
-    if let Some(value) = parse_list_style_image_tokens(tokens) {
-        set_delta_list_style_image(delta, value);
-        return true;
-    }
-    false
-}
-
 fn set_delta_list_style_image(delta: &mut StyleDelta, spec: ListStyleImageSpec) {
     delta.list_style_image = Some(spec);
     delta.revert_layer.list_style_image = false;
-}
-
-fn anonymous_list_style_symbols_from_css(
-    system: &SymbolsType,
-    symbols: &[Symbol],
-) -> Option<AnonymousListStyleSymbols> {
-    let symbols = symbols
-        .iter()
-        .map(|symbol| match symbol {
-            Symbol::String(value) => Some(value.to_string()),
-            Symbol::Image(_) => None,
-        })
-        .collect::<Option<Vec<_>>>()?;
-    if symbols.is_empty() {
-        return None;
-    }
-
-    let system = match system {
-        SymbolsType::Cyclic => AnonymousListStyleSymbolsSystem::Cyclic,
-        SymbolsType::Numeric => {
-            if symbols.len() < 2 {
-                return None;
-            }
-            AnonymousListStyleSymbolsSystem::Numeric
-        }
-        SymbolsType::Alphabetic => {
-            if symbols.len() < 2 {
-                return None;
-            }
-            AnonymousListStyleSymbolsSystem::Alphabetic
-        }
-        SymbolsType::Symbolic => AnonymousListStyleSymbolsSystem::Symbolic,
-        SymbolsType::Fixed => AnonymousListStyleSymbolsSystem::Fixed,
-    };
-
-    Some(AnonymousListStyleSymbols {
-        system,
-        symbols,
-        suffix: " ".to_string(),
-        fixed_start: 1,
-    })
-}
-
-fn counter_style_symbols_from_rule(
-    rule: &lightningcss::rules::counter_style::CounterStyleRule,
-) -> Option<AnonymousListStyleSymbols> {
-    let mut system = AnonymousListStyleSymbolsSystem::Symbolic;
-    let mut fixed_start = 1;
-    let mut symbols: Option<Vec<String>> = None;
-    let mut suffix = ". ".to_string();
-
-    for property in rule
-        .declarations
-        .declarations
-        .iter()
-        .chain(rule.declarations.important_declarations.iter())
-    {
-        let Some((name, tokens)) = counter_style_descriptor_tokens(property) else {
-            continue;
-        };
-        match name.as_str() {
-            "system" => match counter_style_system_from_tokens(&tokens) {
-                Some((parsed_system, parsed_fixed_start)) => {
-                    system = parsed_system;
-                    fixed_start = parsed_fixed_start;
-                }
-                None if first_ident(&tokens).is_some() => return None,
-                None => {}
-            },
-            "symbols" => {
-                if let Some(parsed_symbols) = counter_style_symbols_from_tokens(&tokens) {
-                    symbols = Some(parsed_symbols);
-                }
-            }
-            "suffix" => {
-                if let Some(parsed_suffix) = counter_style_symbols_from_tokens(&tokens) {
-                    suffix = parsed_suffix.join("");
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let symbols = symbols?;
-    if symbols.is_empty() {
-        return None;
-    }
-    if matches!(
-        system,
-        AnonymousListStyleSymbolsSystem::Numeric | AnonymousListStyleSymbolsSystem::Alphabetic
-    ) && symbols.len() < 2
-    {
-        return None;
-    }
-
-    Some(AnonymousListStyleSymbols {
-        system,
-        symbols,
-        suffix,
-        fixed_start,
-    })
-}
-
-fn counter_style_descriptor_tokens<'i>(
-    property: &Property<'i>,
-) -> Option<(String, Vec<TokenOrValue<'i>>)> {
-    match property {
-        Property::Custom(custom) => Some((
-            custom.name.as_ref().to_ascii_lowercase(),
-            custom.value.0.clone(),
-        )),
-        Property::Unparsed(unparsed) => {
-            let name = unparsed
-                .property_id
-                .to_css_string(PrinterOptions::default())
-                .ok()?
-                .to_ascii_lowercase();
-            Some((name, unparsed.value.0.clone()))
-        }
-        _ => None,
-    }
-}
-
-fn counter_style_system_from_tokens(
-    tokens: &[TokenOrValue],
-) -> Option<(AnonymousListStyleSymbolsSystem, i32)> {
-    let system = first_ident(tokens)?;
-    match system.as_str() {
-        "cyclic" => Some((AnonymousListStyleSymbolsSystem::Cyclic, 1)),
-        "numeric" => Some((AnonymousListStyleSymbolsSystem::Numeric, 1)),
-        "alphabetic" => Some((AnonymousListStyleSymbolsSystem::Alphabetic, 1)),
-        "symbolic" => Some((AnonymousListStyleSymbolsSystem::Symbolic, 1)),
-        "fixed" => Some((
-            AnonymousListStyleSymbolsSystem::Fixed,
-            first_integer_after_ident(tokens).unwrap_or(1).max(1),
-        )),
-        _ => None,
-    }
-}
-
-fn first_integer_after_ident(tokens: &[TokenOrValue]) -> Option<i32> {
-    let mut saw_ident = false;
-    for token in tokens {
-        match token {
-            TokenOrValue::Token(Token::Ident(_)) => saw_ident = true,
-            TokenOrValue::Token(Token::Number {
-                value, int_value, ..
-            }) if saw_ident => return Some(int_value.unwrap_or(*value as i32)),
-            TokenOrValue::Token(Token::WhiteSpace(_)) => {}
-            _ => {}
-        }
-    }
-    None
-}
-
-fn counter_style_symbols_from_tokens(tokens: &[TokenOrValue]) -> Option<Vec<String>> {
-    let mut symbols = Vec::new();
-    for token in tokens {
-        match token {
-            TokenOrValue::Token(Token::String(value)) => symbols.push(value.as_ref().to_string()),
-            TokenOrValue::Token(Token::Ident(value)) => symbols.push(value.as_ref().to_string()),
-            TokenOrValue::Token(Token::WhiteSpace(_)) => {}
-            _ => return None,
-        }
-    }
-    if symbols.is_empty() {
-        None
-    } else {
-        Some(symbols)
-    }
 }
 
 fn resolve_named_counter_style(
@@ -24551,35 +22455,6 @@ fn resolve_named_counter_style(
     if let Some(symbols) = counter_styles.get(name) {
         computed.list_style_symbols = Some(symbols.clone());
     }
-}
-
-fn list_style_position_mode_from_css(value: &ListStylePosition) -> ListStylePositionMode {
-    match value {
-        ListStylePosition::Inside => ListStylePositionMode::Inside,
-        ListStylePosition::Outside => ListStylePositionMode::Outside,
-    }
-}
-
-fn parse_list_style_position_tokens(tokens: &[TokenOrValue]) -> Option<ListStylePositionSpec> {
-    match first_ident(tokens)?.as_str() {
-        "inside" => Some(ListStylePositionSpec::Value(ListStylePositionMode::Inside)),
-        "outside" => Some(ListStylePositionSpec::Value(ListStylePositionMode::Outside)),
-        "inherit" | "unset" | "revert" => Some(ListStylePositionSpec::Inherit),
-        "initial" => Some(ListStylePositionSpec::Initial),
-        _ => None,
-    }
-}
-
-fn apply_list_style_position_from_tokens(delta: &mut StyleDelta, tokens: &[TokenOrValue]) -> bool {
-    let raw = tokens_debug_string(tokens);
-    if raw.trim().eq_ignore_ascii_case("revert-layer") {
-        return set_revert_layer_list_style_position(delta);
-    }
-    if let Some(value) = parse_list_style_position_tokens(tokens) {
-        set_delta_list_style_position(delta, value);
-        return true;
-    }
-    false
 }
 
 fn set_delta_list_style_position(delta: &mut StyleDelta, spec: ListStylePositionSpec) {
@@ -24614,61 +22489,10 @@ fn set_delta_vertical_align_var(delta: &mut StyleDelta, var: String) {
     delta.revert_layer.vertical_align = false;
 }
 
-fn vertical_align_mode_from_css(value: &CssVerticalAlign) -> VerticalAlignMode {
-    match value {
-        CssVerticalAlign::Keyword(VerticalAlignKeyword::Baseline) => VerticalAlignMode::Baseline,
-        CssVerticalAlign::Keyword(VerticalAlignKeyword::Sub) => VerticalAlignMode::Sub,
-        CssVerticalAlign::Keyword(VerticalAlignKeyword::Super) => VerticalAlignMode::Super,
-        CssVerticalAlign::Keyword(VerticalAlignKeyword::TextTop) => VerticalAlignMode::TextTop,
-        CssVerticalAlign::Keyword(VerticalAlignKeyword::Top) => VerticalAlignMode::Top,
-        CssVerticalAlign::Keyword(VerticalAlignKeyword::Middle) => VerticalAlignMode::Middle,
-        CssVerticalAlign::Keyword(VerticalAlignKeyword::TextBottom) => {
-            VerticalAlignMode::TextBottom
-        }
-        CssVerticalAlign::Keyword(VerticalAlignKeyword::Bottom) => VerticalAlignMode::Bottom,
-        CssVerticalAlign::Length(_) => VerticalAlignMode::Baseline,
-    }
-}
-
-fn border_line_style_from_line_style(value: &LineStyle) -> BorderLineStyle {
-    match value {
-        LineStyle::None => BorderLineStyle::None,
-        LineStyle::Hidden => BorderLineStyle::Hidden,
-        _ => BorderLineStyle::Style(
-            outline_line_style_from_line_style(value).unwrap_or(OutlineLineStyle::Solid),
-        ),
-    }
-}
-
 fn border_line_paint_style(value: BorderLineStyle) -> OutlineLineStyle {
     match value {
         BorderLineStyle::None | BorderLineStyle::Hidden => OutlineLineStyle::Solid,
         BorderLineStyle::Style(style) => style,
-    }
-}
-
-fn outline_line_style_from_outline_style(
-    value: &css_outline::OutlineStyle,
-) -> Option<OutlineLineStyle> {
-    match value {
-        css_outline::OutlineStyle::Auto => Some(OutlineLineStyle::Solid),
-        css_outline::OutlineStyle::LineStyle(line_style) => {
-            outline_line_style_from_line_style(line_style)
-        }
-    }
-}
-
-fn outline_line_style_from_line_style(value: &LineStyle) -> Option<OutlineLineStyle> {
-    match value {
-        LineStyle::None | LineStyle::Hidden => None,
-        LineStyle::Inset => Some(OutlineLineStyle::Inset),
-        LineStyle::Groove => Some(OutlineLineStyle::Groove),
-        LineStyle::Outset => Some(OutlineLineStyle::Outset),
-        LineStyle::Ridge => Some(OutlineLineStyle::Ridge),
-        LineStyle::Dotted => Some(OutlineLineStyle::Dotted),
-        LineStyle::Dashed => Some(OutlineLineStyle::Dashed),
-        LineStyle::Double => Some(OutlineLineStyle::Double),
-        _ => Some(OutlineLineStyle::Solid),
     }
 }
 
@@ -24688,22 +22512,6 @@ fn border_line_style_from_ident(value: &str) -> Option<BorderLineStyle> {
     }
 }
 
-fn border_line_style_from_tokens(tokens: &[TokenOrValue]) -> Option<BorderLineStyle> {
-    for token in tokens {
-        match token {
-            TokenOrValue::Token(Token::Ident(ident)) => {
-                let value = ident.as_ref().to_ascii_lowercase();
-                if let Some(style) = border_line_style_from_ident(&value) {
-                    return Some(style);
-                }
-            }
-            TokenOrValue::Token(Token::WhiteSpace(_)) => continue,
-            _ => {}
-        }
-    }
-    None
-}
-
 fn outline_line_style_from_ident(value: &str) -> Option<Option<OutlineLineStyle>> {
     match value {
         "none" => Some(None),
@@ -24719,92 +22527,23 @@ fn outline_line_style_from_ident(value: &str) -> Option<Option<OutlineLineStyle>
     }
 }
 
-fn outline_line_style_from_tokens(tokens: &[TokenOrValue]) -> Option<Option<OutlineLineStyle>> {
-    for token in tokens {
-        match token {
-            TokenOrValue::Token(Token::Ident(ident)) => {
-                let value = ident.as_ref().to_ascii_lowercase();
-                if let Some(style) = outline_line_style_from_ident(&value) {
-                    return Some(style);
-                }
-            }
-            TokenOrValue::Token(Token::WhiteSpace(_)) => continue,
-            _ => {}
-        }
-    }
-    None
-}
-
-fn border_width_spec(value: &BorderSideWidth) -> Option<LengthSpec> {
-    match value {
-        BorderSideWidth::Thin => Some(LengthSpec::Absolute(Pt::from_f32(0.75))),
-        BorderSideWidth::Medium => Some(LengthSpec::Absolute(Pt::from_f32(2.25))),
-        BorderSideWidth::Thick => Some(LengthSpec::Absolute(Pt::from_f32(3.75))),
-        BorderSideWidth::Length(length) => length.to_px().map(px_to_pt).map(LengthSpec::Absolute),
-    }
-}
-
-fn display_mode_from_display(display: &Display) -> DisplayMode {
-    match display {
-        Display::Keyword(keyword) => match keyword {
-            DisplayKeyword::None => DisplayMode::None,
-            DisplayKeyword::Contents => DisplayMode::Contents,
-            DisplayKeyword::TableRowGroup => DisplayMode::TableRowGroup,
-            DisplayKeyword::TableHeaderGroup => DisplayMode::TableHeaderGroup,
-            DisplayKeyword::TableFooterGroup => DisplayMode::TableFooterGroup,
-            DisplayKeyword::TableRow => DisplayMode::TableRow,
-            DisplayKeyword::TableCell => DisplayMode::TableCell,
-            DisplayKeyword::TableColumnGroup => DisplayMode::TableColumnGroup,
-            DisplayKeyword::TableColumn => DisplayMode::TableColumn,
-            DisplayKeyword::TableCaption => DisplayMode::TableCaption,
-            _ => DisplayMode::Block,
-        },
-        Display::Pair(pair) => {
-            if pair.is_list_item {
-                return if pair.outside == DisplayOutside::Inline {
-                    DisplayMode::InlineListItem
-                } else {
-                    DisplayMode::ListItem
-                };
-            }
-            if matches!(pair.inside, DisplayInside::Table) {
-                return if pair.outside == DisplayOutside::Inline {
-                    DisplayMode::InlineTable
-                } else {
-                    DisplayMode::Table
-                };
-            }
-            if matches!(pair.inside, DisplayInside::Flex(_)) {
-                return if pair.outside == DisplayOutside::Inline {
-                    DisplayMode::InlineFlex
-                } else {
-                    DisplayMode::Flex
-                };
-            }
-            if matches!(pair.inside, DisplayInside::Grid) {
-                return if pair.outside == DisplayOutside::Inline {
-                    DisplayMode::InlineGrid
-                } else {
-                    DisplayMode::Grid
-                };
-            }
-            if pair.outside == DisplayOutside::Inline {
-                if matches!(pair.inside, DisplayInside::FlowRoot) {
-                    DisplayMode::InlineBlock
-                } else {
-                    DisplayMode::Inline
-                }
-            } else {
-                DisplayMode::Block
-            }
-        }
-    }
-}
-
 fn parse_display_mode_str(raw: &str) -> Option<DisplayMode> {
     match raw.trim().to_ascii_lowercase().as_str() {
-        "block" | "flow-root" => Some(DisplayMode::Block),
-        "inline" => Some(DisplayMode::Inline),
+        "block"
+        | "flow-root"
+        | "ruby"
+        | "block ruby"
+        | "ruby block"
+        | "ruby-base"
+        | "ruby-text"
+        | "ruby-base-container"
+        | "ruby-text-container"
+        | "-webkit-box"
+        | "-moz-box"
+        | "block -webkit-box"
+        | "block -moz-box" => Some(DisplayMode::Block),
+        "inline" | "inline ruby" | "ruby inline" | "-webkit-inline-box" | "-moz-inline-box"
+        | "inline -webkit-box" | "inline -moz-box" => Some(DisplayMode::Inline),
         "inline-block" => Some(DisplayMode::InlineBlock),
         "list-item" | "block list-item" | "list-item block" | "flow list-item"
         | "list-item flow" => Some(DisplayMode::ListItem),
@@ -24936,57 +22675,548 @@ fn display_mode_name(mode: DisplayMode) -> &'static str {
     }
 }
 
-fn position_mode_from_css(position: &CssPosition) -> PositionMode {
-    match position {
-        CssPosition::Absolute => PositionMode::Absolute,
-        CssPosition::Fixed => PositionMode::Fixed,
-        CssPosition::Relative | CssPosition::Sticky(_) => PositionMode::Relative,
-        _ => PositionMode::Static,
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NativeLengthZeroHint {
+    Absolute,
+    Percent,
+    Em,
+    Rem,
+    Viewport,
+    Mixed,
 }
 
-fn length_spec_from_lpa(
-    value: &lightningcss::values::length::LengthPercentageOrAuto,
-) -> Option<LengthSpec> {
-    use lightningcss::values::length::LengthPercentageOrAuto;
-    match value {
-        LengthPercentageOrAuto::Auto => Some(LengthSpec::Auto),
-        LengthPercentageOrAuto::LengthPercentage(length) => length_spec_from_lp(length),
-    }
-}
-
-fn length_spec_from_size(value: &lightningcss::properties::size::Size) -> Option<LengthSpec> {
-    use lightningcss::properties::size::Size;
-    match value {
-        Size::Auto => Some(LengthSpec::Auto),
-        Size::LengthPercentage(length) => length_spec_from_lp(length),
-        _ => None,
-    }
-}
-
-fn length_spec_from_max_size(
-    value: &lightningcss::properties::size::MaxSize,
-) -> Option<LengthSpec> {
-    use lightningcss::properties::size::MaxSize;
-    match value {
-        MaxSize::None => Some(LengthSpec::Auto),
-        MaxSize::LengthPercentage(length) => length_spec_from_lp(length),
-        _ => None,
-    }
-}
-
-fn length_spec_from_lp(value: &LengthPercentage) -> Option<LengthSpec> {
-    match value {
-        LengthPercentage::Percentage(pct) => Some(LengthSpec::Percent(pct.0)),
-        LengthPercentage::Dimension(length) => match length {
-            LengthValue::Em(val) => Some(LengthSpec::Em(*val)),
-            LengthValue::Rem(val) => Some(LengthSpec::Rem(*val)),
-            _ => length_value_to_pt(length).map(LengthSpec::Absolute),
-        },
-        LengthPercentage::Calc(calc) => {
-            calc_length_from_calc(calc).map(length_spec_from_calc_length)
+impl NativeLengthZeroHint {
+    fn merge(left: Option<Self>, right: Option<Self>) -> Option<Self> {
+        match (left, right) {
+            (None, hint) | (hint, None) => hint,
+            (Some(left), Some(right)) if left == right => Some(left),
+            (Some(_), Some(_)) => Some(Self::Mixed),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct NativeLengthMath {
+    abs_pt: f32,
+    percent: f32,
+    em: f32,
+    rem: f32,
+    vw: f32,
+    vh: f32,
+    vmin: f32,
+    vmax: f32,
+    zero_hint: Option<NativeLengthZeroHint>,
+}
+
+impl NativeLengthMath {
+    fn zero() -> Self {
+        Self {
+            abs_pt: 0.0,
+            percent: 0.0,
+            em: 0.0,
+            rem: 0.0,
+            vw: 0.0,
+            vh: 0.0,
+            vmin: 0.0,
+            vmax: 0.0,
+            zero_hint: None,
+        }
+    }
+
+    fn from_dimension(value: f32, unit: &str) -> Option<Self> {
+        let mut result = Self::zero();
+        match unit {
+            "%" => {
+                result.percent = value / 100.0;
+                result.zero_hint = Some(NativeLengthZeroHint::Percent);
+            }
+            "px" | "pt" | "pc" | "in" | "cm" | "mm" | "q" => {
+                result.abs_pt = match unit {
+                    "px" => value * 0.75,
+                    "pt" => value,
+                    "pc" => value * 12.0,
+                    "in" => value * 72.0,
+                    "cm" => value * (72.0 / 2.54),
+                    "mm" => value * (72.0 / 25.4),
+                    "q" => value * (72.0 / 101.6),
+                    _ => unreachable!(),
+                };
+                result.zero_hint = Some(NativeLengthZeroHint::Absolute);
+            }
+            "em" => {
+                result.em = value;
+                result.zero_hint = Some(NativeLengthZeroHint::Em);
+            }
+            "rem" => {
+                result.rem = value;
+                result.zero_hint = Some(NativeLengthZeroHint::Rem);
+            }
+            "vw" | "vh" | "vmin" | "vmax" => {
+                match unit {
+                    "vw" => result.vw = value / 100.0,
+                    "vh" => result.vh = value / 100.0,
+                    "vmin" => result.vmin = value / 100.0,
+                    "vmax" => result.vmax = value / 100.0,
+                    _ => unreachable!(),
+                }
+                result.zero_hint = Some(NativeLengthZeroHint::Viewport);
+            }
+            _ => return None,
+        }
+        Some(result)
+    }
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            abs_pt: self.abs_pt + other.abs_pt,
+            percent: self.percent + other.percent,
+            em: self.em + other.em,
+            rem: self.rem + other.rem,
+            vw: self.vw + other.vw,
+            vh: self.vh + other.vh,
+            vmin: self.vmin + other.vmin,
+            vmax: self.vmax + other.vmax,
+            zero_hint: NativeLengthZeroHint::merge(self.zero_hint, other.zero_hint),
+        }
+    }
+
+    fn scale(self, factor: f32) -> Self {
+        Self {
+            abs_pt: self.abs_pt * factor,
+            percent: self.percent * factor,
+            em: self.em * factor,
+            rem: self.rem * factor,
+            vw: self.vw * factor,
+            vh: self.vh * factor,
+            vmin: self.vmin * factor,
+            vmax: self.vmax * factor,
+            zero_hint: self.zero_hint,
+        }
+    }
+
+    fn to_length_spec(self) -> Option<LengthSpec> {
+        let calc = self.to_calc_length()?;
+        if calc_length_component_is_zero(calc.abs.to_f32())
+            && calc_length_component_is_zero(calc.percent)
+            && calc_length_component_is_zero(calc.em)
+            && calc_length_component_is_zero(calc.rem)
+        {
+            return Some(match self.zero_hint {
+                Some(NativeLengthZeroHint::Percent) => LengthSpec::Percent(0.0),
+                Some(NativeLengthZeroHint::Em) => LengthSpec::Em(0.0),
+                Some(NativeLengthZeroHint::Rem) => LengthSpec::Rem(0.0),
+                _ => LengthSpec::Absolute(Pt::ZERO),
+            });
+        }
+        Some(length_spec_from_calc_length(calc))
+    }
+
+    fn to_calc_length(self) -> Option<CalcLength> {
+        if !native_math_component_is_zero(self.vw)
+            || !native_math_component_is_zero(self.vh)
+            || !native_math_component_is_zero(self.vmin)
+            || !native_math_component_is_zero(self.vmax)
+        {
+            return None;
+        }
+        Some(CalcLength {
+            abs: Pt::from_f32(self.abs_pt),
+            percent: self.percent,
+            em: self.em,
+            rem: self.rem,
+        })
+    }
+
+    fn from_calc_length(value: CalcLength) -> Self {
+        Self {
+            abs_pt: value.abs.to_f32(),
+            percent: value.percent,
+            em: value.em,
+            rem: value.rem,
+            ..Self::zero()
+        }
+    }
+
+    fn to_font_calc(self) -> FontCalcLength {
+        FontCalcLength {
+            abs: Pt::from_f32(self.abs_pt),
+            em: I32F32::from_num(self.em + self.percent),
+            rem: I32F32::from_num(self.rem),
+            vw: I32F32::from_num(self.vw),
+            vh: I32F32::from_num(self.vh),
+            vmin: I32F32::from_num(self.vmin),
+            vmax: I32F32::from_num(self.vmax),
+        }
+    }
+}
+
+fn native_math_component_is_zero(value: f32) -> bool {
+    value.abs() <= CALC_LENGTH_EPSILON
+}
+
+#[derive(Debug, Clone, Copy)]
+enum NativeMathValue {
+    Number(f32),
+    Length(NativeLengthMath),
+}
+
+impl NativeMathValue {
+    fn scale(self, factor: f32) -> Self {
+        match self {
+            Self::Number(value) => Self::Number(value * factor),
+            Self::Length(value) => Self::Length(value.scale(factor)),
+        }
+    }
+}
+
+struct NativeLengthMathParser<'a> {
+    input: &'a [u8],
+    pos: usize,
+    allow_extrema: bool,
+}
+
+impl<'a> NativeLengthMathParser<'a> {
+    fn new(raw: &'a str, allow_extrema: bool) -> Self {
+        Self {
+            input: raw.as_bytes(),
+            pos: 0,
+            allow_extrema,
+        }
+    }
+
+    fn parse(mut self) -> Option<NativeMathValue> {
+        let value = self.parse_sum()?;
+        self.skip_whitespace();
+        (self.pos == self.input.len()).then_some(value)
+    }
+
+    fn parse_sum(&mut self) -> Option<NativeMathValue> {
+        let mut value = self.parse_product()?;
+        loop {
+            self.skip_whitespace();
+            let factor = match self.peek_byte() {
+                Some(b'+') => 1.0,
+                Some(b'-') => -1.0,
+                _ => break,
+            };
+            self.pos += 1;
+            let rhs = self.parse_product()?.scale(factor);
+            value = native_math_add(value, rhs)?;
+        }
+        Some(value)
+    }
+
+    fn parse_product(&mut self) -> Option<NativeMathValue> {
+        let mut value = self.parse_unary()?;
+        loop {
+            self.skip_whitespace();
+            let operator = match self.peek_byte() {
+                Some(b'*') => b'*',
+                Some(b'/') => b'/',
+                _ => break,
+            };
+            self.pos += 1;
+            let rhs = self.parse_unary()?;
+            value = match (operator, value, rhs) {
+                (b'*', NativeMathValue::Number(left), NativeMathValue::Number(right)) => {
+                    NativeMathValue::Number(left * right)
+                }
+                (b'*', NativeMathValue::Number(scale), NativeMathValue::Length(length))
+                | (b'*', NativeMathValue::Length(length), NativeMathValue::Number(scale)) => {
+                    NativeMathValue::Length(length.scale(scale))
+                }
+                (b'/', NativeMathValue::Number(left), NativeMathValue::Number(right))
+                    if right.abs() > f32::EPSILON =>
+                {
+                    NativeMathValue::Number(left / right)
+                }
+                (b'/', NativeMathValue::Length(length), NativeMathValue::Number(divisor))
+                    if divisor.abs() > f32::EPSILON =>
+                {
+                    NativeMathValue::Length(length.scale(1.0 / divisor))
+                }
+                _ => return None,
+            };
+        }
+        Some(value)
+    }
+
+    fn parse_unary(&mut self) -> Option<NativeMathValue> {
+        self.skip_whitespace();
+        match self.peek_byte() {
+            Some(b'+') => {
+                self.pos += 1;
+                self.parse_unary()
+            }
+            Some(b'-') => {
+                self.pos += 1;
+                self.parse_unary().map(|value| value.scale(-1.0))
+            }
+            _ => self.parse_primary(),
+        }
+    }
+
+    fn parse_primary(&mut self) -> Option<NativeMathValue> {
+        self.skip_whitespace();
+        if self.consume_byte(b'(') {
+            let value = self.parse_sum()?;
+            self.skip_whitespace();
+            return self.consume_byte(b')').then_some(value);
+        }
+        if self
+            .peek_byte()
+            .is_some_and(|byte| byte.is_ascii_digit() || byte == b'.')
+        {
+            return self.parse_numeric_value();
+        }
+        let name = self.parse_identifier()?.to_ascii_lowercase();
+        self.skip_whitespace();
+        if !self.consume_byte(b'(') {
+            return None;
+        }
+        self.parse_function(&name)
+    }
+
+    fn parse_numeric_value(&mut self) -> Option<NativeMathValue> {
+        let value = self.parse_number()?;
+        let unit_start = self.pos;
+        while self
+            .peek_byte()
+            .is_some_and(|byte| byte.is_ascii_alphabetic())
+        {
+            self.pos += 1;
+        }
+        if self.consume_byte(b'%') {
+            return NativeLengthMath::from_dimension(value, "%").map(NativeMathValue::Length);
+        }
+        if self.pos == unit_start {
+            return Some(NativeMathValue::Number(value));
+        }
+        let unit = std::str::from_utf8(&self.input[unit_start..self.pos])
+            .ok()?
+            .to_ascii_lowercase();
+        NativeLengthMath::from_dimension(value, &unit).map(NativeMathValue::Length)
+    }
+
+    fn parse_function(&mut self, name: &str) -> Option<NativeMathValue> {
+        match name {
+            "calc" => {
+                let value = self.parse_sum()?;
+                self.skip_whitespace();
+                self.consume_byte(b')').then_some(value)
+            }
+            "min" | "max" if self.allow_extrema => {
+                let values = self.parse_argument_list()?;
+                native_math_extreme(&values, name == "max")
+            }
+            "clamp" if self.allow_extrema => {
+                let values = self.parse_argument_list()?;
+                if values.len() != 3 {
+                    return None;
+                }
+                native_math_clamp(values[0], values[1], values[2])
+            }
+            "abs" if self.allow_extrema => {
+                let values = self.parse_argument_list()?;
+                if values.len() != 1 {
+                    return None;
+                }
+                native_math_abs(values[0])
+            }
+            _ => None,
+        }
+    }
+
+    fn parse_argument_list(&mut self) -> Option<Vec<NativeMathValue>> {
+        let mut values = Vec::new();
+        loop {
+            values.push(self.parse_sum()?);
+            self.skip_whitespace();
+            if self.consume_byte(b')') {
+                break;
+            }
+            if !self.consume_byte(b',') {
+                return None;
+            }
+        }
+        (!values.is_empty()).then_some(values)
+    }
+
+    fn parse_number(&mut self) -> Option<f32> {
+        let start = self.pos;
+        let mut saw_digit = false;
+        while self.peek_byte().is_some_and(|byte| byte.is_ascii_digit()) {
+            saw_digit = true;
+            self.pos += 1;
+        }
+        if self.consume_byte(b'.') {
+            while self.peek_byte().is_some_and(|byte| byte.is_ascii_digit()) {
+                saw_digit = true;
+                self.pos += 1;
+            }
+        }
+        if !saw_digit {
+            self.pos = start;
+            return None;
+        }
+        if matches!(self.peek_byte(), Some(b'e' | b'E')) {
+            let exponent_start = self.pos;
+            self.pos += 1;
+            if matches!(self.peek_byte(), Some(b'+' | b'-')) {
+                self.pos += 1;
+            }
+            let digits_start = self.pos;
+            while self.peek_byte().is_some_and(|byte| byte.is_ascii_digit()) {
+                self.pos += 1;
+            }
+            if self.pos == digits_start {
+                self.pos = exponent_start;
+            }
+        }
+        std::str::from_utf8(&self.input[start..self.pos])
+            .ok()?
+            .parse::<f32>()
+            .ok()
+            .filter(|value| value.is_finite())
+    }
+
+    fn parse_identifier(&mut self) -> Option<&'a str> {
+        let start = self.pos;
+        while self
+            .peek_byte()
+            .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'-')
+        {
+            self.pos += 1;
+        }
+        (self.pos > start)
+            .then(|| std::str::from_utf8(&self.input[start..self.pos]).ok())
+            .flatten()
+    }
+
+    fn skip_whitespace(&mut self) {
+        while self
+            .peek_byte()
+            .is_some_and(|byte| byte.is_ascii_whitespace())
+        {
+            self.pos += 1;
+        }
+    }
+
+    fn peek_byte(&self) -> Option<u8> {
+        self.input.get(self.pos).copied()
+    }
+
+    fn consume_byte(&mut self, expected: u8) -> bool {
+        if self.peek_byte() == Some(expected) {
+            self.pos += 1;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+fn native_math_add(left: NativeMathValue, right: NativeMathValue) -> Option<NativeMathValue> {
+    match (left, right) {
+        (NativeMathValue::Number(left), NativeMathValue::Number(right)) => {
+            Some(NativeMathValue::Number(left + right))
+        }
+        (NativeMathValue::Length(left), NativeMathValue::Length(right)) => {
+            Some(NativeMathValue::Length(left.add(right)))
+        }
+        (NativeMathValue::Number(number), NativeMathValue::Length(length))
+        | (NativeMathValue::Length(length), NativeMathValue::Number(number))
+            if native_math_component_is_zero(number) =>
+        {
+            Some(NativeMathValue::Length(length))
+        }
+        _ => None,
+    }
+}
+
+fn native_math_lengths(values: &[NativeMathValue]) -> Option<Vec<CalcLength>> {
+    let contains_length = values
+        .iter()
+        .any(|value| matches!(value, NativeMathValue::Length(_)));
+    if !contains_length {
+        return None;
+    }
+    values
+        .iter()
+        .map(|value| match value {
+            NativeMathValue::Length(length) => length.to_calc_length(),
+            NativeMathValue::Number(number) if native_math_component_is_zero(*number) => {
+                Some(CalcLength::zero())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn native_math_extreme(values: &[NativeMathValue], pick_max: bool) -> Option<NativeMathValue> {
+    if values
+        .iter()
+        .all(|value| matches!(value, NativeMathValue::Number(_)))
+    {
+        let mut best = match values.first()? {
+            NativeMathValue::Number(value) => *value,
+            _ => return None,
+        };
+        for value in values.iter().skip(1) {
+            let NativeMathValue::Number(value) = value else {
+                return None;
+            };
+            if (pick_max && *value > best) || (!pick_max && *value < best) {
+                best = *value;
+            }
+        }
+        return Some(NativeMathValue::Number(best));
+    }
+    let lengths = native_math_lengths(values)?;
+    calc_length_from_min_max(&lengths, pick_max)
+        .map(NativeLengthMath::from_calc_length)
+        .map(NativeMathValue::Length)
+}
+
+fn native_math_clamp(
+    min: NativeMathValue,
+    preferred: NativeMathValue,
+    max: NativeMathValue,
+) -> Option<NativeMathValue> {
+    if let (
+        NativeMathValue::Number(min),
+        NativeMathValue::Number(preferred),
+        NativeMathValue::Number(max),
+    ) = (min, preferred, max)
+    {
+        let upper = if min > max { min } else { max };
+        return Some(NativeMathValue::Number(preferred.max(min).min(upper)));
+    }
+    let lengths = native_math_lengths(&[min, preferred, max])?;
+    calc_length_from_same_slope_clamp(lengths[0], lengths[1], lengths[2])
+        .or_else(|| calc_length_from_domain_clamp(lengths[0], lengths[1], lengths[2]))
+        .map(NativeLengthMath::from_calc_length)
+        .map(NativeMathValue::Length)
+}
+
+fn native_math_abs(value: NativeMathValue) -> Option<NativeMathValue> {
+    match value {
+        NativeMathValue::Number(value) => Some(NativeMathValue::Number(value.abs())),
+        NativeMathValue::Length(length) => {
+            let value = length.to_calc_length()?;
+            let domain = calc_length_domain(value)?;
+            Some(NativeMathValue::Length(NativeLengthMath::from_calc_length(
+                calc_length_from_domain_value(
+                    domain,
+                    calc_length_domain_value(value, domain).abs(),
+                ),
+            )))
+        }
+    }
+}
+
+fn parse_native_length_math(raw: &str, allow_extrema: bool) -> Option<NativeMathValue> {
+    NativeLengthMathParser::new(raw.trim(), allow_extrema).parse()
 }
 
 const CALC_LENGTH_EPSILON: f32 = 1.0e-6;
@@ -25188,114 +23418,6 @@ fn length_spec_from_calc_length(calc: CalcLength) -> LengthSpec {
         return LengthSpec::Rem(calc.rem);
     }
     LengthSpec::Calc(calc)
-}
-
-fn calc_length_from_calc(
-    calc: &lightningcss::values::calc::Calc<
-        lightningcss::values::percentage::DimensionPercentage<LengthValue>,
-    >,
-) -> Option<CalcLength> {
-    use lightningcss::values::calc::{Calc, MathFunction};
-    match calc {
-        Calc::Value(value) => calc_length_from_dimperc(value),
-        Calc::Number(_) => None,
-        Calc::Sum(a, b) => {
-            let left = calc_length_from_calc(a)?;
-            let right = calc_length_from_calc(b)?;
-            Some(CalcLength {
-                abs: left.abs + right.abs,
-                percent: left.percent + right.percent,
-                em: left.em + right.em,
-                rem: left.rem + right.rem,
-            })
-        }
-        Calc::Product(scale, inner) => {
-            let base = calc_length_from_calc(inner)?;
-            Some(CalcLength {
-                abs: base.abs * *scale,
-                percent: base.percent * *scale,
-                em: base.em * *scale,
-                rem: base.rem * *scale,
-            })
-        }
-        Calc::Function(func) => match func.as_ref() {
-            MathFunction::Calc(inner) => calc_length_from_calc(inner),
-            MathFunction::Min(values) => {
-                let mut resolved: Vec<CalcLength> = Vec::with_capacity(values.len());
-                for value in values {
-                    resolved.push(calc_length_from_calc(value)?);
-                }
-                calc_length_from_min_max(&resolved, false)
-            }
-            MathFunction::Max(values) => {
-                let mut resolved: Vec<CalcLength> = Vec::with_capacity(values.len());
-                for value in values {
-                    resolved.push(calc_length_from_calc(value)?);
-                }
-                calc_length_from_min_max(&resolved, true)
-            }
-            MathFunction::Clamp(min, preferred, max) => {
-                let min = calc_length_from_calc(min)?;
-                let preferred = calc_length_from_calc(preferred)?;
-                let max = calc_length_from_calc(max)?;
-                calc_length_from_same_slope_clamp(min, preferred, max)
-                    .or_else(|| calc_length_from_domain_clamp(min, preferred, max))
-            }
-            MathFunction::Abs(inner) => {
-                let value = calc_length_from_calc(inner)?;
-                let domain = calc_length_domain(value)?;
-                Some(calc_length_from_domain_value(
-                    domain,
-                    calc_length_domain_value(value, domain).abs(),
-                ))
-            }
-            _ => None,
-        },
-    }
-}
-
-fn calc_length_from_dimperc(
-    value: &lightningcss::values::percentage::DimensionPercentage<LengthValue>,
-) -> Option<CalcLength> {
-    match value {
-        lightningcss::values::percentage::DimensionPercentage::Dimension(length) => {
-            calc_length_from_length_value(length)
-        }
-        lightningcss::values::percentage::DimensionPercentage::Percentage(pct) => {
-            Some(CalcLength {
-                abs: Pt::ZERO,
-                percent: pct.0,
-                em: 0.0,
-                rem: 0.0,
-            })
-        }
-        lightningcss::values::percentage::DimensionPercentage::Calc(calc) => {
-            calc_length_from_calc(calc)
-        }
-    }
-}
-
-fn calc_length_from_length_value(value: &LengthValue) -> Option<CalcLength> {
-    match value {
-        LengthValue::Em(val) => Some(CalcLength {
-            abs: Pt::ZERO,
-            percent: 0.0,
-            em: *val,
-            rem: 0.0,
-        }),
-        LengthValue::Rem(val) => Some(CalcLength {
-            abs: Pt::ZERO,
-            percent: 0.0,
-            em: 0.0,
-            rem: *val,
-        }),
-        _ => length_value_to_pt(value).map(|abs| CalcLength {
-            abs,
-            percent: 0.0,
-            em: 0.0,
-            rem: 0.0,
-        }),
-    }
 }
 
 fn apply_edge_delta(target: &mut EdgeSizes, delta: &EdgeDelta, parent: &EdgeSizes) {
@@ -25641,6 +23763,35 @@ fn apply_logical_inset_delta(
     if let Some(spec) = delta.inset_block_end {
         apply_inset_to_side(style, block_end_side(style.writing_mode), spec, parent);
     }
+    if let Some(value) = &delta.inset_inline_start_var {
+        set_pending_inset_var_for_side(
+            style,
+            inline_start_side(style.writing_mode, style.direction),
+            value.clone(),
+        );
+    }
+    if let Some(value) = &delta.inset_inline_end_var {
+        set_pending_inset_var_for_side(
+            style,
+            inline_end_side(style.writing_mode, style.direction),
+            value.clone(),
+        );
+    }
+    if let Some(value) = &delta.inset_block_start_var {
+        set_pending_inset_var_for_side(style, block_start_side(style.writing_mode), value.clone());
+    }
+    if let Some(value) = &delta.inset_block_end_var {
+        set_pending_inset_var_for_side(style, block_end_side(style.writing_mode), value.clone());
+    }
+}
+
+fn set_pending_inset_var_for_side(style: &mut ComputedStyle, side: PhysicalSide, value: String) {
+    match side {
+        PhysicalSide::Left => style.pending_inset_left_var = Some(value),
+        PhysicalSide::Top => style.pending_inset_top_var = Some(value),
+        PhysicalSide::Right => style.pending_inset_right_var = Some(value),
+        PhysicalSide::Bottom => style.pending_inset_bottom_var = Some(value),
+    }
 }
 
 fn set_border_style_for_side(
@@ -25900,6 +24051,7 @@ fn set_delta_logical_inline_edge_spec(
                 .margin_logical
                 .clear(LogicalBoxEdgeTarget::InlineStart);
             delta.margin_inline_start = Some(value);
+            delta.margin_inline_start_var = None;
         }
         if let Some(value) = end {
             delta
@@ -25907,6 +24059,7 @@ fn set_delta_logical_inline_edge_spec(
                 .margin_logical
                 .clear(LogicalBoxEdgeTarget::InlineEnd);
             delta.margin_inline_end = Some(value);
+            delta.margin_inline_end_var = None;
         }
     } else {
         if let Some(value) = start {
@@ -25915,6 +24068,7 @@ fn set_delta_logical_inline_edge_spec(
                 .padding_logical
                 .clear(LogicalBoxEdgeTarget::InlineStart);
             delta.padding_inline_start = Some(value);
+            delta.padding_inline_start_var = None;
         }
         if let Some(value) = end {
             delta
@@ -25922,6 +24076,7 @@ fn set_delta_logical_inline_edge_spec(
                 .padding_logical
                 .clear(LogicalBoxEdgeTarget::InlineEnd);
             delta.padding_inline_end = Some(value);
+            delta.padding_inline_end_var = None;
         }
     }
 }
@@ -25939,6 +24094,7 @@ fn set_delta_logical_inline_edge_var(
                 .margin_logical
                 .clear(LogicalBoxEdgeTarget::InlineStart);
             delta.margin_inline_start_var = Some(value);
+            delta.margin_inline_start = None;
         }
         if let Some(value) = end {
             delta
@@ -25946,6 +24102,7 @@ fn set_delta_logical_inline_edge_var(
                 .margin_logical
                 .clear(LogicalBoxEdgeTarget::InlineEnd);
             delta.margin_inline_end_var = Some(value);
+            delta.margin_inline_end = None;
         }
     } else {
         if let Some(value) = start {
@@ -25954,6 +24111,7 @@ fn set_delta_logical_inline_edge_var(
                 .padding_logical
                 .clear(LogicalBoxEdgeTarget::InlineStart);
             delta.padding_inline_start_var = Some(value);
+            delta.padding_inline_start = None;
         }
         if let Some(value) = end {
             delta
@@ -25961,6 +24119,7 @@ fn set_delta_logical_inline_edge_var(
                 .padding_logical
                 .clear(LogicalBoxEdgeTarget::InlineEnd);
             delta.padding_inline_end_var = Some(value);
+            delta.padding_inline_end = None;
         }
     }
 }
@@ -25978,6 +24137,7 @@ fn set_delta_logical_block_edge_spec(
                 .margin_logical
                 .clear(LogicalBoxEdgeTarget::BlockStart);
             delta.margin_block_start = Some(value);
+            delta.margin_block_start_var = None;
         }
         if let Some(value) = end {
             delta
@@ -25985,6 +24145,7 @@ fn set_delta_logical_block_edge_spec(
                 .margin_logical
                 .clear(LogicalBoxEdgeTarget::BlockEnd);
             delta.margin_block_end = Some(value);
+            delta.margin_block_end_var = None;
         }
     } else {
         if let Some(value) = start {
@@ -25993,6 +24154,7 @@ fn set_delta_logical_block_edge_spec(
                 .padding_logical
                 .clear(LogicalBoxEdgeTarget::BlockStart);
             delta.padding_block_start = Some(value);
+            delta.padding_block_start_var = None;
         }
         if let Some(value) = end {
             delta
@@ -26000,6 +24162,7 @@ fn set_delta_logical_block_edge_spec(
                 .padding_logical
                 .clear(LogicalBoxEdgeTarget::BlockEnd);
             delta.padding_block_end = Some(value);
+            delta.padding_block_end_var = None;
         }
     }
 }
@@ -26017,6 +24180,7 @@ fn set_delta_logical_block_edge_var(
                 .margin_logical
                 .clear(LogicalBoxEdgeTarget::BlockStart);
             delta.margin_block_start_var = Some(value);
+            delta.margin_block_start = None;
         }
         if let Some(value) = end {
             delta
@@ -26024,6 +24188,7 @@ fn set_delta_logical_block_edge_var(
                 .margin_logical
                 .clear(LogicalBoxEdgeTarget::BlockEnd);
             delta.margin_block_end_var = Some(value);
+            delta.margin_block_end = None;
         }
     } else {
         if let Some(value) = start {
@@ -26032,6 +24197,7 @@ fn set_delta_logical_block_edge_var(
                 .padding_logical
                 .clear(LogicalBoxEdgeTarget::BlockStart);
             delta.padding_block_start_var = Some(value);
+            delta.padding_block_start = None;
         }
         if let Some(value) = end {
             delta
@@ -26039,439 +24205,7 @@ fn set_delta_logical_block_edge_var(
                 .padding_logical
                 .clear(LogicalBoxEdgeTarget::BlockEnd);
             delta.padding_block_end_var = Some(value);
-        }
-    }
-}
-
-fn apply_inherit_initial_edge(
-    tokens: &[TokenOrValue],
-    property_id: &PropertyId,
-    delta: &mut StyleDelta,
-    is_margin: bool,
-) {
-    if let Some(ident) = first_ident(tokens) {
-        let value = match ident.as_str() {
-            "inherit" => Some(LengthSpec::Inherit),
-            "initial" | "unset" | "revert" | "revert-layer" => Some(LengthSpec::Initial),
-            _ => None,
-        };
-        if let Some(value) = value {
-            match property_id {
-                PropertyId::MarginBlock | PropertyId::PaddingBlock => {
-                    set_delta_logical_block_edge_spec(delta, is_margin, Some(value), Some(value));
-                    return;
-                }
-                PropertyId::MarginBlockStart | PropertyId::PaddingBlockStart => {
-                    set_delta_logical_block_edge_spec(delta, is_margin, Some(value), None);
-                    return;
-                }
-                PropertyId::MarginBlockEnd | PropertyId::PaddingBlockEnd => {
-                    set_delta_logical_block_edge_spec(delta, is_margin, None, Some(value));
-                    return;
-                }
-                PropertyId::MarginInline | PropertyId::PaddingInline => {
-                    set_delta_logical_inline_edge_spec(delta, is_margin, Some(value), Some(value));
-                    return;
-                }
-                PropertyId::MarginInlineStart | PropertyId::PaddingInlineStart => {
-                    set_delta_logical_inline_edge_spec(delta, is_margin, Some(value), None);
-                    return;
-                }
-                PropertyId::MarginInlineEnd | PropertyId::PaddingInlineEnd => {
-                    set_delta_logical_inline_edge_spec(delta, is_margin, None, Some(value));
-                    return;
-                }
-                _ => {}
-            }
-            clear_revert_layer_box_edge(delta, is_margin, property_id);
-            let target = if is_margin {
-                &mut delta.margin
-            } else {
-                &mut delta.padding
-            };
-            match property_id {
-                PropertyId::Margin | PropertyId::Padding => {
-                    target.top = Some(value);
-                    target.right = Some(value);
-                    target.bottom = Some(value);
-                    target.left = Some(value);
-                }
-                PropertyId::MarginBlock | PropertyId::PaddingBlock => {}
-                PropertyId::MarginInline | PropertyId::PaddingInline => {}
-                PropertyId::MarginTop | PropertyId::PaddingTop => target.top = Some(value),
-                PropertyId::MarginRight | PropertyId::PaddingRight => target.right = Some(value),
-                PropertyId::MarginBottom | PropertyId::PaddingBottom => target.bottom = Some(value),
-                PropertyId::MarginLeft | PropertyId::PaddingLeft => target.left = Some(value),
-                PropertyId::MarginBlockStart | PropertyId::PaddingBlockStart => {}
-                PropertyId::MarginBlockEnd | PropertyId::PaddingBlockEnd => {}
-                PropertyId::MarginInlineStart | PropertyId::PaddingInlineStart => {}
-                PropertyId::MarginInlineEnd | PropertyId::PaddingInlineEnd => {}
-                _ => {}
-            }
-            return;
-        }
-    }
-    if let Some(expr) = length_var_expr_from_tokens(tokens) {
-        match property_id {
-            PropertyId::MarginBlock | PropertyId::PaddingBlock => {
-                set_delta_logical_block_edge_var(delta, is_margin, Some(expr.clone()), Some(expr));
-                return;
-            }
-            PropertyId::MarginBlockStart | PropertyId::PaddingBlockStart => {
-                set_delta_logical_block_edge_var(delta, is_margin, Some(expr), None);
-                return;
-            }
-            PropertyId::MarginBlockEnd | PropertyId::PaddingBlockEnd => {
-                set_delta_logical_block_edge_var(delta, is_margin, None, Some(expr));
-                return;
-            }
-            PropertyId::MarginInline | PropertyId::PaddingInline => {
-                set_delta_logical_inline_edge_var(delta, is_margin, Some(expr.clone()), Some(expr));
-                return;
-            }
-            PropertyId::MarginInlineStart | PropertyId::PaddingInlineStart => {
-                set_delta_logical_inline_edge_var(delta, is_margin, Some(expr), None);
-                return;
-            }
-            PropertyId::MarginInlineEnd | PropertyId::PaddingInlineEnd => {
-                set_delta_logical_inline_edge_var(delta, is_margin, None, Some(expr));
-                return;
-            }
-            _ => {}
-        }
-        clear_revert_layer_box_edge(delta, is_margin, property_id);
-        let target = if is_margin {
-            &mut delta.margin
-        } else {
-            &mut delta.padding
-        };
-        match property_id {
-            PropertyId::Margin | PropertyId::Padding => {
-                target.top_var = Some(expr.clone());
-                target.right_var = Some(expr.clone());
-                target.bottom_var = Some(expr.clone());
-                target.left_var = Some(expr);
-            }
-            PropertyId::MarginBlock | PropertyId::PaddingBlock => {}
-            PropertyId::MarginInline | PropertyId::PaddingInline => {}
-            PropertyId::MarginTop | PropertyId::PaddingTop => target.top_var = Some(expr),
-            PropertyId::MarginRight | PropertyId::PaddingRight => target.right_var = Some(expr),
-            PropertyId::MarginBottom | PropertyId::PaddingBottom => target.bottom_var = Some(expr),
-            PropertyId::MarginLeft | PropertyId::PaddingLeft => target.left_var = Some(expr),
-            PropertyId::MarginBlockStart | PropertyId::PaddingBlockStart => {}
-            PropertyId::MarginBlockEnd | PropertyId::PaddingBlockEnd => {}
-            PropertyId::MarginInlineStart | PropertyId::PaddingInlineStart => {}
-            PropertyId::MarginInlineEnd | PropertyId::PaddingInlineEnd => {}
-            _ => {}
-        }
-        return;
-    }
-    if let Some(spec) = length_spec_from_custom_tokens(tokens) {
-        match property_id {
-            PropertyId::MarginBlock | PropertyId::PaddingBlock => {
-                set_delta_logical_block_edge_spec(delta, is_margin, Some(spec), Some(spec));
-                return;
-            }
-            PropertyId::MarginBlockStart | PropertyId::PaddingBlockStart => {
-                set_delta_logical_block_edge_spec(delta, is_margin, Some(spec), None);
-                return;
-            }
-            PropertyId::MarginBlockEnd | PropertyId::PaddingBlockEnd => {
-                set_delta_logical_block_edge_spec(delta, is_margin, None, Some(spec));
-                return;
-            }
-            PropertyId::MarginInline | PropertyId::PaddingInline => {
-                set_delta_logical_inline_edge_spec(delta, is_margin, Some(spec), Some(spec));
-                return;
-            }
-            PropertyId::MarginInlineStart | PropertyId::PaddingInlineStart => {
-                set_delta_logical_inline_edge_spec(delta, is_margin, Some(spec), None);
-                return;
-            }
-            PropertyId::MarginInlineEnd | PropertyId::PaddingInlineEnd => {
-                set_delta_logical_inline_edge_spec(delta, is_margin, None, Some(spec));
-                return;
-            }
-            _ => {}
-        }
-        clear_revert_layer_box_edge(delta, is_margin, property_id);
-        let target = if is_margin {
-            &mut delta.margin
-        } else {
-            &mut delta.padding
-        };
-        match property_id {
-            PropertyId::Margin | PropertyId::Padding => {
-                target.top = Some(spec);
-                target.right = Some(spec);
-                target.bottom = Some(spec);
-                target.left = Some(spec);
-            }
-            PropertyId::MarginBlock | PropertyId::PaddingBlock => {}
-            PropertyId::MarginInline | PropertyId::PaddingInline => {}
-            PropertyId::MarginTop | PropertyId::PaddingTop => target.top = Some(spec),
-            PropertyId::MarginRight | PropertyId::PaddingRight => target.right = Some(spec),
-            PropertyId::MarginBottom | PropertyId::PaddingBottom => target.bottom = Some(spec),
-            PropertyId::MarginLeft | PropertyId::PaddingLeft => target.left = Some(spec),
-            PropertyId::MarginBlockStart | PropertyId::PaddingBlockStart => {}
-            PropertyId::MarginBlockEnd | PropertyId::PaddingBlockEnd => {}
-            PropertyId::MarginInlineStart | PropertyId::PaddingInlineStart => {}
-            PropertyId::MarginInlineEnd | PropertyId::PaddingInlineEnd => {}
-            _ => {}
-        }
-        return;
-    }
-
-    let raw = tokens_debug_string(tokens);
-    if let Some([start, end]) = parse_logical_edge_pair_components(raw.trim(), is_margin) {
-        if matches!(
-            property_id,
-            PropertyId::MarginBlock | PropertyId::PaddingBlock
-        ) {
-            set_delta_logical_block_edge_spec(delta, is_margin, Some(start), Some(end));
-            return;
-        }
-        if matches!(
-            property_id,
-            PropertyId::MarginInline | PropertyId::PaddingInline
-        ) {
-            set_delta_logical_inline_edge_spec(delta, is_margin, Some(start), Some(end));
-            return;
-        }
-        return;
-    }
-}
-
-fn apply_inset_edge_from_tokens(
-    delta: &mut StyleDelta,
-    target: BoxEdgeTarget,
-    tokens: &[TokenOrValue],
-) -> bool {
-    if let Some(ident) = first_ident(tokens) {
-        let value = match ident.as_str() {
-            "inherit" => Some(LengthSpec::Inherit),
-            "initial" | "unset" | "revert" | "revert-layer" => Some(LengthSpec::Initial),
-            "auto" => Some(LengthSpec::Auto),
-            _ => None,
-        };
-        if let Some(value) = value {
-            set_delta_inset_edge_spec(delta, target, Some(value));
-            return true;
-        }
-    }
-    if let Some(spec) = length_spec_from_custom_tokens(tokens) {
-        set_delta_inset_edge_spec(delta, target, Some(spec));
-        return true;
-    }
-    let raw = tokens_debug_string(tokens);
-    let raw_lower = raw.trim().to_ascii_lowercase();
-    if raw_lower.contains("var(") {
-        set_delta_inset_edge_var(delta, target, raw_lower);
-        return true;
-    }
-    if let Some(var) = var_name_from_tokens(tokens) {
-        set_delta_inset_edge_var(delta, target, var);
-        return true;
-    }
-    false
-}
-
-fn apply_inset_shorthand_from_tokens(delta: &mut StyleDelta, tokens: &[TokenOrValue]) -> bool {
-    if let Some(ident) = first_ident(tokens) {
-        let value = match ident.as_str() {
-            "inherit" => Some(LengthSpec::Inherit),
-            "initial" | "unset" | "revert" | "revert-layer" => Some(LengthSpec::Initial),
-            "auto" => Some(LengthSpec::Auto),
-            _ => None,
-        };
-        if let Some(value) = value {
-            set_delta_inset_edge_spec(delta, BoxEdgeTarget::All, Some(value));
-            return true;
-        }
-    }
-    if let Some(spec) = length_spec_from_custom_tokens(tokens) {
-        set_delta_inset_edge_spec(delta, BoxEdgeTarget::All, Some(spec));
-        return true;
-    }
-    if let Some(expr) = length_var_expr_from_tokens(tokens) {
-        set_delta_inset_edge_var(delta, BoxEdgeTarget::All, expr.name);
-        return true;
-    }
-    let raw = tokens_debug_string(tokens);
-    if let Some([top, right, bottom, left]) = parse_inset_shorthand_components(raw.trim()) {
-        set_delta_inset_edge_spec(delta, BoxEdgeTarget::Top, Some(top));
-        set_delta_inset_edge_spec(delta, BoxEdgeTarget::Right, Some(right));
-        set_delta_inset_edge_spec(delta, BoxEdgeTarget::Bottom, Some(bottom));
-        set_delta_inset_edge_spec(delta, BoxEdgeTarget::Left, Some(left));
-        return true;
-    }
-    let raw_lower = raw.trim().to_ascii_lowercase();
-    if raw_lower.contains("var(") {
-        set_delta_inset_edge_var(delta, BoxEdgeTarget::All, raw_lower);
-        return true;
-    }
-    if let Some(var) = var_name_from_tokens(tokens) {
-        set_delta_inset_edge_var(delta, BoxEdgeTarget::All, var);
-        return true;
-    }
-    false
-}
-
-fn apply_inherit_initial_edge_pair(
-    tokens: &[TokenOrValue],
-    start: &mut Option<LengthSpec>,
-    end: &mut Option<LengthSpec>,
-    start_var: &mut Option<String>,
-    end_var: &mut Option<String>,
-    allow_auto: bool,
-) -> bool {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" => {
-                *start = Some(LengthSpec::Inherit);
-                *end = Some(LengthSpec::Inherit);
-                return true;
-            }
-            "initial" | "unset" | "revert" | "revert-layer" => {
-                *start = Some(LengthSpec::Initial);
-                *end = Some(LengthSpec::Initial);
-                return true;
-            }
-            _ => {}
-        }
-    }
-    if let Some(expr) = length_var_expr_from_tokens(tokens) {
-        let name = expr.name;
-        *start_var = Some(name.clone());
-        *end_var = Some(name);
-        return true;
-    }
-    if let Some(spec) = length_spec_from_custom_tokens(tokens) {
-        *start = Some(spec);
-        *end = Some(spec);
-        return true;
-    }
-    let raw = tokens_debug_string(tokens);
-    if let Some([first, second]) = parse_logical_edge_pair_components(raw.trim(), allow_auto) {
-        *start = Some(first);
-        *end = Some(second);
-        return true;
-    }
-    let raw_lower = raw.trim().to_ascii_lowercase();
-    if raw_lower.contains("var(") {
-        *start_var = Some(raw_lower.clone());
-        *end_var = Some(raw_lower);
-        return true;
-    } else if let Some(var) = var_name_from_tokens(tokens) {
-        *start_var = Some(var.clone());
-        *end_var = Some(var);
-        return true;
-    }
-    false
-}
-
-fn parse_logical_edge_pair_components(raw: &str, allow_auto: bool) -> Option<[LengthSpec; 2]> {
-    let parts = split_top_level_whitespace(raw);
-    if parts.is_empty() || parts.len() > 2 {
-        return None;
-    }
-    let mut values: Vec<LengthSpec> = Vec::with_capacity(parts.len());
-    for part in parts {
-        let part = part.trim();
-        let spec = if allow_auto && part.eq_ignore_ascii_case("auto") {
-            LengthSpec::Auto
-        } else {
-            length_spec_from_string(part)?
-        };
-        values.push(spec);
-    }
-    match values.len() {
-        1 => {
-            let v = values[0];
-            Some([v, v])
-        }
-        2 => Some([values[0], values[1]]),
-        _ => None,
-    }
-}
-
-fn apply_inherit_initial_size(tokens: &[TokenOrValue], target: &mut Option<LengthSpec>) {
-    if let Some(ident) = first_ident(tokens) {
-        *target = match ident.as_str() {
-            "inherit" => Some(LengthSpec::Inherit),
-            "initial" | "unset" | "revert" | "revert-layer" => Some(LengthSpec::Initial),
-            _ => *target,
-        };
-    }
-}
-
-fn parse_inset_shorthand_components(raw: &str) -> Option<[LengthSpec; 4]> {
-    let parts = split_top_level_whitespace(raw);
-    if parts.is_empty() || parts.len() > 4 {
-        return None;
-    }
-    let mut values: Vec<LengthSpec> = Vec::with_capacity(parts.len());
-    for part in parts {
-        let part = part.trim();
-        let spec = if part.eq_ignore_ascii_case("auto") {
-            LengthSpec::Auto
-        } else {
-            length_spec_from_string(part)?
-        };
-        values.push(spec);
-    }
-    let result = match values.len() {
-        1 => {
-            let v = values[0];
-            [v, v, v, v]
-        }
-        2 => [values[0], values[1], values[0], values[1]],
-        3 => [values[0], values[1], values[2], values[1]],
-        4 => [values[0], values[1], values[2], values[3]],
-        _ => return None,
-    };
-    Some(result)
-}
-
-fn apply_inherit_initial_color(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" | "unset" | "revert" | "revert-layer" => {
-                set_delta_color(delta, ColorSpec::Inherit)
-            }
-            "initial" => set_delta_color(delta, ColorSpec::Initial),
-            "currentcolor" => set_delta_color(delta, ColorSpec::CurrentColor),
-            _ => {}
-        }
-    }
-}
-
-fn apply_inherit_initial_background_color(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" => set_delta_background_color(delta, BackgroundSpec::Inherit),
-            "initial" | "unset" | "revert" | "revert-layer" => {
-                set_delta_background_color(delta, BackgroundSpec::Initial)
-            }
-            "currentcolor" => set_delta_background_color(delta, BackgroundSpec::CurrentColor),
-            _ => {}
-        }
-    }
-}
-
-fn apply_inherit_initial_border_color_target(
-    tokens: &[TokenOrValue],
-    delta: &mut StyleDelta,
-    target: BorderColorTarget,
-) {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" => set_delta_border_color_spec(delta, target, ColorSpec::Inherit),
-            "initial" | "unset" | "revert" | "revert-layer" => {
-                set_delta_border_color_spec(delta, target, ColorSpec::Initial)
-            }
-            "currentcolor" => set_delta_border_color_spec(delta, target, ColorSpec::CurrentColor),
-            _ => {}
+            delta.padding_block_end = None;
         }
     }
 }
@@ -26798,27 +24532,6 @@ fn apply_font_shorthand_from_raw(delta: &mut StyleDelta, raw: &str) -> bool {
     true
 }
 
-fn apply_typed_font_shorthand(delta: &mut StyleDelta, font: &CssFont<'_>) {
-    if let Some(spec) = font_size_spec(&font.size) {
-        delta.font_size = Some(spec);
-        delta.font_size_var = None;
-    }
-    if let Some(spec) = line_height_spec(&font.line_height) {
-        delta.line_height = Some(spec);
-        delta.line_height_var = None;
-    }
-    delta.font_style = font_style_spec(&font.style);
-    delta.font_style_var = None;
-    if let Ok(raw) = font.weight.to_css_string(PrinterOptions::default()) {
-        delta.font_weight = parse_font_weight_spec_str(&raw);
-        delta.font_weight_var = None;
-    }
-    if let Some(spec) = font_spec_from_family(&font.family) {
-        delta.font_name = Some(spec);
-        delta.font_name_var = None;
-    }
-}
-
 fn apply_font_family_from_raw(delta: &mut StyleDelta, raw: &str) -> bool {
     let trimmed = raw.trim();
     let lowered = trimmed.to_ascii_lowercase();
@@ -26957,334 +24670,6 @@ fn apply_vertical_align_from_raw(delta: &mut StyleDelta, raw: &str) -> bool {
         return true;
     }
     false
-}
-
-fn apply_inherit_initial_text_transform(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" | "unset" | "revert" => {
-                set_delta_text_transform(delta, TextTransformSpec::Inherit);
-            }
-            "revert-layer" => {
-                set_revert_layer_text_transform(delta);
-            }
-            "initial" | "none" => set_delta_text_transform(delta, TextTransformSpec::Initial),
-            "uppercase" => set_delta_text_transform(
-                delta,
-                TextTransformSpec::Value(TextTransformMode::Uppercase),
-            ),
-            "lowercase" => set_delta_text_transform(
-                delta,
-                TextTransformSpec::Value(TextTransformMode::Lowercase),
-            ),
-            "capitalize" => set_delta_text_transform(
-                delta,
-                TextTransformSpec::Value(TextTransformMode::Capitalize),
-            ),
-            _ => {}
-        }
-    }
-}
-
-fn apply_inherit_initial_text_align_last(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" | "unset" | "revert" => {
-                set_delta_text_align_last(delta, TextAlignLastSpec::Inherit)
-            }
-            "revert-layer" => {
-                set_revert_layer_text_align_last(delta);
-            }
-            "initial" => set_delta_text_align_last(delta, TextAlignLastSpec::Initial),
-            _ => {
-                if let Some(mode) = parse_text_align_last_str(ident.as_str()) {
-                    set_delta_text_align_last(delta, TextAlignLastSpec::Value(mode));
-                }
-            }
-        }
-    }
-}
-
-fn apply_inherit_initial_text_justify(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" | "unset" | "revert" => {
-                set_delta_text_justify(delta, TextJustifySpec::Inherit);
-            }
-            "revert-layer" => {
-                set_revert_layer_text_justify(delta);
-            }
-            "initial" => set_delta_text_justify(delta, TextJustifySpec::Initial),
-            _ => {
-                if let Some(mode) = parse_text_justify_mode_str(ident.as_str()) {
-                    set_delta_text_justify(delta, TextJustifySpec::Value(mode));
-                }
-            }
-        }
-    }
-}
-
-fn apply_inherit_initial_hyphens(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" | "unset" | "revert" => {
-                set_delta_hyphens(delta, HyphensSpec::Inherit);
-            }
-            "revert-layer" => {
-                set_revert_layer_hyphens(delta);
-            }
-            "initial" => set_delta_hyphens(delta, HyphensSpec::Initial),
-            _ => {
-                if let Some(mode) = parse_hyphens_mode_str(ident.as_str()) {
-                    set_delta_hyphens(delta, HyphensSpec::Value(mode));
-                }
-            }
-        }
-    }
-}
-
-fn apply_inherit_initial_transform(tokens: &[TokenOrValue], slot: &mut Option<TransformSpec>) {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" => *slot = Some(TransformSpec::Inherit),
-            "initial" | "unset" | "revert" | "revert-layer" => *slot = Some(TransformSpec::Initial),
-            "none" => *slot = Some(TransformSpec::Value(Vec::new())),
-            _ => {}
-        }
-    }
-}
-
-fn apply_inherit_initial_transform_origin(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" => delta.transform_origin = Some(TransformOriginSpec::Inherit),
-            "initial" | "unset" | "revert" | "revert-layer" => {
-                delta.transform_origin = Some(TransformOriginSpec::Initial)
-            }
-            _ => {}
-        }
-    }
-}
-
-fn apply_inherit_initial_text_decoration(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" => set_delta_text_decoration_spec(delta, TextDecorationSpec::Inherit),
-            "initial" | "unset" | "revert" => {
-                set_delta_text_decoration_spec(delta, TextDecorationSpec::Initial)
-            }
-            "revert-layer" => {
-                set_revert_layer_text_decoration_line(delta);
-            }
-            "none" => set_delta_text_decoration_spec(
-                delta,
-                TextDecorationSpec::Value(TextDecorationMode::default()),
-            ),
-            _ => {
-                if let Some(mode) = parse_text_decoration_str(ident.as_str()) {
-                    set_delta_text_decoration_spec(delta, TextDecorationSpec::Value(mode));
-                }
-            }
-        }
-    }
-}
-
-fn apply_inherit_initial_text_decoration_color(
-    tokens: &[TokenOrValue],
-    delta: &mut StyleDelta,
-) -> bool {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" => {
-                set_delta_text_decoration_color_spec(delta, ColorSpec::Inherit);
-                return true;
-            }
-            "initial" | "unset" | "revert" | "revert-layer" => {
-                set_delta_text_decoration_color_spec(delta, ColorSpec::Initial);
-                return true;
-            }
-            "currentcolor" => {
-                set_delta_text_decoration_color_spec(delta, ColorSpec::CurrentColor);
-                return true;
-            }
-            _ => {}
-        }
-    }
-    false
-}
-
-fn apply_inherit_initial_text_decoration_thickness(
-    tokens: &[TokenOrValue],
-    delta: &mut StyleDelta,
-) -> bool {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" => {
-                set_delta_text_decoration_thickness_spec(
-                    delta,
-                    TextDecorationThicknessSpec::Inherit,
-                );
-                return true;
-            }
-            "initial" | "unset" | "revert" => {
-                set_delta_text_decoration_thickness_spec(
-                    delta,
-                    TextDecorationThicknessSpec::Initial,
-                );
-                return true;
-            }
-            "revert-layer" => return set_revert_layer_text_decoration_thickness(delta),
-            _ => {}
-        }
-    }
-    false
-}
-
-fn apply_inherit_initial_text_decoration_style(
-    tokens: &[TokenOrValue],
-    delta: &mut StyleDelta,
-) -> bool {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" => {
-                set_delta_text_decoration_style_spec(delta, TextDecorationStyleSpec::Inherit);
-                return true;
-            }
-            "initial" | "unset" | "revert" => {
-                set_delta_text_decoration_style_spec(delta, TextDecorationStyleSpec::Initial);
-                return true;
-            }
-            "revert-layer" => return set_revert_layer_text_decoration_style(delta),
-            _ => {
-                if let Some(value) = text_decoration_style_value_from_raw(ident.as_str()) {
-                    set_delta_text_decoration_style_spec(
-                        delta,
-                        TextDecorationStyleSpec::Value(value),
-                    );
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-fn apply_inherit_initial_text_overflow(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" => set_delta_text_overflow_spec(delta, TextOverflowSpec::Inherit),
-            "initial" | "unset" | "revert" => {
-                set_delta_text_overflow_spec(delta, TextOverflowSpec::Initial)
-            }
-            "revert-layer" => {
-                set_revert_layer_text_overflow(delta);
-            }
-            "clip" => {
-                set_delta_text_overflow_spec(delta, TextOverflowSpec::Value(TextOverflowMode::Clip))
-            }
-            "ellipsis" => set_delta_text_overflow_spec(
-                delta,
-                TextOverflowSpec::Value(TextOverflowMode::Ellipsis),
-            ),
-            _ => {}
-        }
-    }
-}
-
-fn apply_inherit_initial_text_indent(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" | "unset" | "revert" => set_delta_text_indent_value(
-                delta,
-                TextIndentValue {
-                    value: LengthSpec::Inherit,
-                    hanging: false,
-                    each_line: false,
-                },
-            ),
-            "revert-layer" => {
-                set_revert_layer_text_indent(delta);
-            }
-            "initial" => set_delta_text_indent_value(
-                delta,
-                TextIndentValue {
-                    value: LengthSpec::Initial,
-                    hanging: false,
-                    each_line: false,
-                },
-            ),
-            _ => {}
-        }
-    }
-}
-
-fn apply_inherit_initial_direction(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" => set_delta_direction(delta, DirectionSpec::Inherit),
-            "initial" | "unset" | "revert" => set_delta_direction(delta, DirectionSpec::Initial),
-            "revert-layer" => {
-                set_revert_layer_direction(delta);
-            }
-            "ltr" => set_delta_direction(delta, DirectionSpec::Value(DirectionMode::Ltr)),
-            "rtl" => set_delta_direction(delta, DirectionSpec::Value(DirectionMode::Rtl)),
-            _ => {}
-        }
-    }
-}
-
-fn apply_inherit_initial_letter_spacing(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" | "unset" | "revert" => set_delta_letter_spacing(delta, LengthSpec::Inherit),
-            "revert-layer" => {
-                set_revert_layer_letter_spacing(delta);
-            }
-            "initial" | "normal" => set_delta_letter_spacing(delta, LengthSpec::Absolute(Pt::ZERO)),
-            _ => {}
-        }
-    }
-}
-
-fn apply_inherit_initial_word_spacing(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" | "unset" | "revert" => set_delta_word_spacing(delta, LengthSpec::Inherit),
-            "revert-layer" => {
-                set_revert_layer_word_spacing(delta);
-            }
-            "initial" | "normal" => set_delta_word_spacing(delta, LengthSpec::Absolute(Pt::ZERO)),
-            _ => {}
-        }
-    }
-}
-
-fn apply_inherit_initial_line_break(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" | "unset" | "revert" => {
-                set_delta_line_break(delta, LineBreakSpec::Inherit);
-            }
-            "revert-layer" => {
-                set_revert_layer_line_break(delta);
-            }
-            "initial" => set_delta_line_break(delta, LineBreakSpec::Initial),
-            _ => {}
-        }
-    }
-}
-
-fn apply_inherit_initial_tab_size(tokens: &[TokenOrValue], delta: &mut StyleDelta) {
-    if let Some(ident) = first_ident(tokens) {
-        match ident.as_str() {
-            "inherit" | "unset" | "revert" => set_delta_tab_size(delta, TabSizeSpec::Inherit),
-            "revert-layer" => {
-                set_revert_layer_tab_size(delta);
-            }
-            "initial" => set_delta_tab_size(delta, TabSizeSpec::Initial),
-            _ => {}
-        }
-    }
 }
 
 fn apply_white_space_from_raw(delta: &mut StyleDelta, raw: &str) -> bool {
@@ -27573,6 +24958,10 @@ impl StyleDelta {
             && self.inset_inline_end.is_none()
             && self.inset_block_start.is_none()
             && self.inset_block_end.is_none()
+            && self.inset_inline_start_var.is_none()
+            && self.inset_inline_end_var.is_none()
+            && self.inset_block_start_var.is_none()
+            && self.inset_block_end_var.is_none()
             && self.inset_left_var.is_none()
             && self.inset_top_var.is_none()
             && self.inset_right_var.is_none()
@@ -33316,6 +30705,43 @@ mod tests {
     }
 
     #[test]
+    fn unsupported_ruby_and_legacy_box_layouts_are_normalized_and_logged() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "fullbleed_style_layout_normalized_{}_{}.jsonl",
+            std::process::id(),
+            nanos
+        ));
+        let logger = Arc::new(DebugLogger::new(&path).expect("debug logger"));
+        let resolver = StyleResolver::new_with_debug(
+            ".ruby { display: inline ruby; } .legacy { display: -webkit-box; }",
+            Some(logger.clone()),
+        );
+        drop(resolver);
+        drop(logger);
+        let log = std::fs::read_to_string(&path).expect("read debug log");
+        assert_eq!(
+            log.matches("\"LAYOUT_MODE_NORMALIZED\"").count(),
+            2,
+            "{log}"
+        );
+        assert!(
+            log.contains("\"requested\":\"inline ruby\",\"applied\":\"inline\"")
+                && log.contains("\"reason\":\"display_ruby_not_supported\""),
+            "missing ruby normalization: {log}"
+        );
+        assert!(
+            log.contains("\"requested\":\"-webkit-box\",\"applied\":\"block\"")
+                && log.contains("\"reason\":\"display_legacy_box_not_supported\""),
+            "missing legacy-box normalization: {log}"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn grid_template_columns_sets_column_count() {
         let resolver =
             StyleResolver::new(".menu { display: grid; grid-template-columns: 1fr 1fr 1fr; }");
@@ -34793,6 +32219,24 @@ mod tests {
         assert_eq!(style.inset_bottom, LengthSpec::Absolute(Pt::from_f32(36.0)));
         assert_eq!(style.inset_right, LengthSpec::Absolute(Pt::from_f32(54.0)));
         assert_eq!(style.inset_left, LengthSpec::Absolute(Pt::from_f32(72.0)));
+    }
+
+    #[test]
+    fn logical_inset_variables_follow_vertical_rtl_axes() {
+        let css = ".parent { writing-mode: vertical-rl; direction: rtl; --is: 1px; --ie: 2px; --bs: 3px; --be: 4px; } .child { position: absolute; inset-inline-start: var(--is); inset-inline-end: var(--ie); inset-block-start: var(--bs); inset-block-end: var(--be); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let parent_info = element("div", None, &["parent"]);
+        let parent_style = resolver.compute_style(&parent_info, &root, None, &[]);
+        let child_info = element("div", None, &["child"]);
+        let style = resolver.compute_style(&child_info, &parent_style, None, &[parent_info]);
+
+        assert_eq!(style.writing_mode, WritingModeMode::VerticalRl);
+        assert_eq!(style.direction, DirectionMode::Rtl);
+        assert_eq!(style.inset_bottom, LengthSpec::Absolute(px_to_pt(1.0)));
+        assert_eq!(style.inset_top, LengthSpec::Absolute(px_to_pt(2.0)));
+        assert_eq!(style.inset_right, LengthSpec::Absolute(px_to_pt(3.0)));
+        assert_eq!(style.inset_left, LengthSpec::Absolute(px_to_pt(4.0)));
     }
 
     #[test]
@@ -36668,6 +34112,39 @@ mod tests {
     }
 
     #[test]
+    fn alpha_hex_named_and_standard_color_spaces_parse_natively() {
+        let (hex, alpha) = parse_color_string("#33669980").expect("alpha hex");
+        assert!((hex.r - 0.2).abs() < 0.001);
+        assert!((hex.g - 0.4).abs() < 0.001);
+        assert!((hex.b - 0.6).abs() < 0.001);
+        assert!((alpha - (128.0 / 255.0)).abs() < 0.001);
+
+        let (named, alpha) = parse_color_string("ReBeCcApUrPlE").expect("named color");
+        assert!((named.r - (102.0 / 255.0)).abs() < 0.001);
+        assert!((named.g - (51.0 / 255.0)).abs() < 0.001);
+        assert!((named.b - (153.0 / 255.0)).abs() < 0.001);
+        assert_eq!(alpha, 1.0);
+
+        for raw in [
+            "color(srgb 0 0 0)",
+            "color(srgb-linear 0 0 0)",
+            "color(display-p3 0 0 0)",
+            "color(a98-rgb 0 0 0)",
+            "color(prophoto-rgb 0 0 0)",
+            "color(rec2020 0 0 0)",
+            "color(xyz 0 0 0)",
+            "color(xyz-d65 0 0 0)",
+            "color(xyz-d50 0 0 0)",
+        ] {
+            let (color, alpha) = parse_color_string(raw).expect(raw);
+            assert!(color.r.abs() < 0.001, "unexpected {raw}: {color:?}");
+            assert!(color.g.abs() < 0.001, "unexpected {raw}: {color:?}");
+            assert!(color.b.abs() < 0.001, "unexpected {raw}: {color:?}");
+            assert_eq!(alpha, 1.0);
+        }
+    }
+
+    #[test]
     fn lab_family_custom_property_alpha_blends_background() {
         let css = ":root { --tone: lab(0 0 0 / 50%); } .x { background-color: var(--tone); }";
         let resolver = StyleResolver::new(css);
@@ -36709,6 +34186,24 @@ mod tests {
                 (alpha - 0.5).abs() < 0.003,
                 "unexpected {raw} alpha={alpha:?}"
             );
+        }
+    }
+
+    #[test]
+    fn relative_lab_and_color_space_functions_preserve_origin_and_alpha() {
+        for raw in [
+            "lab(from rebeccapurple l a b / 50%)",
+            "lch(from rebeccapurple l c h / 50%)",
+            "oklab(from rebeccapurple l a b / 50%)",
+            "oklch(from rebeccapurple l c h / 50%)",
+            "color(from rebeccapurple srgb r g b / 50%)",
+            "color(from rebeccapurple display-p3 r g b / 50%)",
+        ] {
+            let (color, alpha) = parse_color_string(raw).expect(raw);
+            assert!((color.r - (102.0 / 255.0)).abs() < 0.02, "{raw}: {color:?}");
+            assert!((color.g - (51.0 / 255.0)).abs() < 0.02, "{raw}: {color:?}");
+            assert!((color.b - (153.0 / 255.0)).abs() < 0.02, "{raw}: {color:?}");
+            assert!((alpha - 0.5).abs() < 0.003, "{raw}: {alpha}");
         }
     }
 
@@ -36833,6 +34328,46 @@ mod tests {
         assert!((bg.r - 0.8).abs() < 0.01, "unexpected background={bg:?}");
         assert!((bg.g - 0.6).abs() < 0.01, "unexpected background={bg:?}");
         assert!((bg.b - 0.8).abs() < 0.01, "unexpected background={bg:?}");
+    }
+
+    #[test]
+    fn color_mix_supports_linear_rgb_and_polar_hue_interpolation() {
+        let (linear, alpha) =
+            parse_color_string("color-mix(in srgb-linear, black, white)").expect("linear mix");
+        assert!((linear.r - 0.735).abs() < 0.01, "{linear:?}");
+        assert!((linear.g - 0.735).abs() < 0.01, "{linear:?}");
+        assert!((linear.b - 0.735).abs() < 0.01, "{linear:?}");
+        assert_eq!(alpha, 1.0);
+
+        let (longer, alpha) =
+            parse_color_string("color-mix(in hsl longer hue, hsl(0 100% 50%), hsl(240 100% 50%))")
+                .expect("longer hue mix");
+        assert!(longer.r < 0.01, "{longer:?}");
+        assert!(longer.g > 0.99, "{longer:?}");
+        assert!(longer.b < 0.01, "{longer:?}");
+        assert_eq!(alpha, 1.0);
+    }
+
+    #[test]
+    fn color_mix_non_srgb_space_resolves_custom_properties() {
+        let css = ":root { --left: hsl(0 100% 50%); --mixed: color-mix(in hsl longer hue, var(--left), hsl(240 100% 50%)); } .x { background-color: var(--mixed); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let mut root_info = element("html", None, &[]);
+        root_info.is_root = true;
+        let root_style = resolver.compute_style(&root_info, &root, None, &[]);
+        let style = resolver.compute_style(
+            &element("div", None, &["x"]),
+            &root_style,
+            None,
+            &[root_info],
+        );
+        let bg = style
+            .background_color
+            .expect("expected dynamic non-sRGB mix");
+        assert!(bg.r < 0.01, "{bg:?}");
+        assert!(bg.g > 0.99, "{bg:?}");
+        assert!(bg.b < 0.01, "{bg:?}");
     }
 
     #[test]

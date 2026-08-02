@@ -51,13 +51,14 @@ Additional focused references are in `docs/`:
 - Remote project template registry workflows (`new list`, `new search`, `new remote`).
 - Python-first extension surface for hackability and custom workflows.
 - Python render calls release the GIL while Rust rendering executes.
-- Rayon-backed parallelism for batch rendering and selected internal engine workloads.
+- Ordered standard-library worker pools for batch rendering and selected internal workloads.
+- No third-party Rust crate graph and no required third-party Python runtime or build packages.
 
 ## Concurrency Model
 
-- Python binding render methods release the GIL during Rust execution (`py.allow_threads(...)` in the bridge).
-- Parallel batch APIs are explicitly Rayon-backed (`render_pdf_batch_parallel(...)` and parallel-to-file variants).
-- The engine also uses Rayon in selected internal hotspots (for example table layout and JIT paint paths).
+- Python binding render methods release the GIL during Rust execution through the Stable ABI bridge.
+- Parallel batch APIs use Fullbleed's ordered standard-library worker pool (`render_pdf_batch_parallel(...)` and parallel-to-file variants).
+- The same bounded worker implementation serves selected internal hotspots such as table layout and JIT paint paths.
 - Do not assume every single-document render path will fully saturate all cores end-to-end.
 
 ## Install
@@ -71,7 +72,20 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-1.6.2-cp310-abi3-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-2.0.0-cp310-abi3-win_amd64.whl
+```
+
+From a source checkout with Rust installed, no Python build package is needed:
+
+```bash
+python -m pip install --no-build-isolation --no-deps --editable .
+```
+
+To create deterministic release artifacts directly:
+
+```bash
+python build_backend/fullbleed_build_backend.py wheel --out dist
+python build_backend/fullbleed_build_backend.py sdist --out dist
 ```
 
 Platform artifact policy:
@@ -1272,7 +1286,6 @@ print(payload["outputs"]["pdf"])
 - Roofing invoice parity example: `examples/roofing_invoice/README.md`
 - Iconography smoke example: `examples/iconography_test/README.md`
 - Public golden regression suite: `goldens/README.md`
-- Escambia ledger API: `_escambia/sqlite_ledger_api.md`
 
 ## License
 

@@ -1,4 +1,83 @@
-use fixed::types::I32F32;
+/// Signed Q32.32 fixed-point value used for deterministic layout scale factors.
+///
+/// Arithmetic saturates at the representable range instead of changing behavior between debug
+/// and release builds on overflow.
+#[derive(Debug, Clone, Copy, Default, Eq, Ord, PartialEq, PartialOrd)]
+pub struct I32F32(i64);
+
+impl I32F32 {
+    const FRACTION_BITS: u32 = 32;
+    const SCALE: i128 = 1i128 << Self::FRACTION_BITS;
+
+    pub const fn from_bits(bits: i64) -> Self {
+        Self(bits)
+    }
+
+    pub const fn to_bits(self) -> i64 {
+        self.0
+    }
+
+    pub fn from_num(value: f32) -> Self {
+        if !value.is_finite() {
+            return Self::default();
+        }
+        let scaled = (f64::from(value) * Self::SCALE as f64).round_ties_even();
+        Self(scaled.clamp(i64::MIN as f64, i64::MAX as f64) as i64)
+    }
+
+    pub fn to_f32(self) -> f32 {
+        (self.0 as f64 / Self::SCALE as f64) as f32
+    }
+
+    pub fn round(self) -> Self {
+        let fraction_mask = (Self::SCALE - 1) as i64;
+        let floor = self.0 & !fraction_mask;
+        let fraction = self.0 & fraction_mask;
+        let half = (Self::SCALE / 2) as i64;
+        if fraction < half || (fraction == half && self.0 < 0) {
+            Self(floor)
+        } else {
+            Self(floor.saturating_add(Self::SCALE as i64))
+        }
+    }
+
+    pub const fn to_i64_floor(self) -> i64 {
+        self.0 >> Self::FRACTION_BITS
+    }
+}
+
+impl std::ops::Add for I32F32 {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self {
+        Self(self.0.saturating_add(rhs.0))
+    }
+}
+
+impl std::ops::Sub for I32F32 {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self {
+        Self(self.0.saturating_sub(rhs.0))
+    }
+}
+
+impl std::ops::Mul for I32F32 {
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self {
+        let product = (self.0 as i128 * rhs.0 as i128) >> Self::FRACTION_BITS;
+        Self(product.clamp(i64::MIN as i128, i64::MAX as i128) as i64)
+    }
+}
+
+impl std::ops::Neg for I32F32 {
+    type Output = Self;
+
+    fn neg(self) -> Self {
+        Self(self.0.saturating_neg())
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Pt(I32F32);
@@ -20,7 +99,7 @@ impl Pt {
     }
 
     pub fn to_f32(self) -> f32 {
-        self.0.to_num()
+        self.0.to_f32()
     }
 
     pub fn to_milli_i64(self) -> i64 {
@@ -348,4 +427,45 @@ pub enum Shading {
         r1: f32,
         stops: Vec<ShadingStop>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn q32_32_rounds_ties_away_from_zero() {
+        assert_eq!(I32F32::from_num(2.5).round().to_i64_floor(), 3);
+        assert_eq!(I32F32::from_num(-2.5).round().to_i64_floor(), -3);
+        assert_eq!(I32F32::from_num(2.49).round().to_i64_floor(), 2);
+        assert_eq!(I32F32::from_num(-2.49).round().to_i64_floor(), -2);
+    }
+
+    #[test]
+    fn q32_32_multiplication_preserves_fractional_scales() {
+        let result = I32F32::from_num(12.5) * I32F32::from_num(0.8);
+        assert!((result.to_f32() - 10.0).abs() <= f32::EPSILON);
+    }
+
+    #[test]
+    fn q32_32_arithmetic_saturates_deterministically() {
+        assert_eq!(
+            (I32F32::from_bits(i64::MAX) + I32F32::from_bits(1)).to_bits(),
+            i64::MAX
+        );
+        assert_eq!(
+            (I32F32::from_bits(i64::MIN) - I32F32::from_bits(1)).to_bits(),
+            i64::MIN
+        );
+    }
+
+    #[test]
+    fn point_quantization_remains_symmetric_at_millipoint_precision() {
+        for milli in [-12_345, -1, 0, 1, 12_345] {
+            let point = Pt::from_milli_i64(milli);
+            assert_eq!(point.to_milli_i64(), milli);
+        }
+        assert_eq!(Pt::from_f32(1.2345).to_milli_i64(), 1_235);
+        assert_eq!(Pt::from_f32(-1.2345).to_milli_i64(), -1_235);
+    }
 }

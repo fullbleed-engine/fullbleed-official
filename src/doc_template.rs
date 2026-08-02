@@ -7,7 +7,6 @@ use crate::frame::{AddResult, AddTrace};
 use crate::metrics::{DocumentMetrics, PageMetrics};
 use crate::page_template::PageTemplate;
 use crate::types::Pt;
-use base64::Engine;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
@@ -17,7 +16,7 @@ fn bool_to_flag(value: bool) -> u8 {
 }
 
 fn trace_b64(value: &str) -> String {
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(value.as_bytes())
+    crate::base64::encode_url_safe_no_pad(value.as_bytes())
 }
 
 fn owner_trace_fields(owner_meta: &[(String, String)]) -> String {

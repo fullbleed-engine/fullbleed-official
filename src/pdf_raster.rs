@@ -1,17 +1,17 @@
 use crate::canvas::{Command, Document, Page};
 use crate::error::FullBleedError;
 use crate::font::FontRegistry;
+use crate::pdf_native::content::{Content, Operation};
+use crate::pdf_native::{
+    Dictionary as LoDictionary, Document as LoDocument, Error as PdfError, Object as LoObject,
+    ObjectId, Result as PdfResult, Stream as LoStream,
+};
 use crate::raster;
+use crate::sfnt::Face;
 use crate::types::{Color, Pt, Size};
-use base64::Engine;
-use image::codecs::png::PngEncoder;
-use image::{ColorType, ImageEncoder};
-use lopdf::content::{Content, Operation};
-use lopdf::{Dictionary as LoDictionary, Document as LoDocument, Object as LoObject, ObjectId};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
-use ttf_parser::Face;
 
 #[derive(Clone, Copy, Debug)]
 struct Matrix {
@@ -80,10 +80,79 @@ impl Matrix {
 #[derive(Clone, Default)]
 struct PdfFontResource {
     font_name: String,
-    to_unicode: HashMap<u16, String>,
+    to_unicode: PdfToUnicodeMap,
     embedded_font: Option<Arc<Vec<u8>>>,
     metrics: PdfFontMetrics,
     code_to_gid: PdfCodeToGlyphMap,
+}
+
+#[derive(Clone, Default)]
+struct PdfToUnicodeMap {
+    direct: HashMap<(u8, u32), String>,
+    ranges: Vec<PdfUnicodeRange>,
+}
+
+#[derive(Clone)]
+struct PdfUnicodeRange {
+    code_len: u8,
+    start: u32,
+    end: u32,
+    target: PdfUnicodeRangeTarget,
+}
+
+#[derive(Clone)]
+enum PdfUnicodeRangeTarget {
+    Sequential(Vec<u16>),
+    Array(Vec<String>),
+}
+
+impl PdfToUnicodeMap {
+    fn is_empty(&self) -> bool {
+        self.direct.is_empty() && self.ranges.is_empty()
+    }
+
+    fn has_multibyte_codes(&self) -> bool {
+        self.direct.keys().any(|(length, _)| *length > 1)
+            || self.ranges.iter().any(|range| range.code_len > 1)
+    }
+
+    fn insert(&mut self, code_len: u8, code: u32, text: String) {
+        if (1..=4).contains(&code_len) {
+            self.direct.insert((code_len, code), text);
+        }
+    }
+
+    fn get(&self, code_len: u8, code: u32) -> Option<String> {
+        if let Some(text) = self.direct.get(&(code_len, code)) {
+            return Some(text.clone());
+        }
+        for range in self.ranges.iter().rev() {
+            if range.code_len != code_len || code < range.start || code > range.end {
+                continue;
+            }
+            let offset = code - range.start;
+            return match &range.target {
+                PdfUnicodeRangeTarget::Sequential(base) => {
+                    let mut units = base.clone();
+                    let last = units.last_mut()?;
+                    *last = last.wrapping_add(offset as u16);
+                    Some(String::from_utf16_lossy(&units))
+                }
+                PdfUnicodeRangeTarget::Array(values) => values.get(offset as usize).cloned(),
+            };
+        }
+        None
+    }
+
+    fn get_u16(&self, code: u16, encoding: PdfCharCodeWidthEncoding) -> Option<String> {
+        let length = match encoding {
+            PdfCharCodeWidthEncoding::SingleByte => 1,
+            PdfCharCodeWidthEncoding::TwoByteBigEndian => 2,
+        };
+        self.get(length, u32::from(code))
+            .or_else(|| self.get(1, u32::from(code)))
+            .or_else(|| self.get(2, u32::from(code)))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,13 +169,39 @@ impl Default for PdfCharCodeWidthEncoding {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PdfSingleByteTextEncoding {
-    PdfDoc,
+    Standard,
+    MacRoman,
+    MacExpert,
     WinAnsi,
+    PdfDoc,
 }
 
 impl Default for PdfSingleByteTextEncoding {
     fn default() -> Self {
-        Self::PdfDoc
+        Self::Standard
+    }
+}
+
+impl PdfSingleByteTextEncoding {
+    fn from_pdf_name(name: &[u8]) -> Option<Self> {
+        match name {
+            b"StandardEncoding" => Some(Self::Standard),
+            b"MacRomanEncoding" => Some(Self::MacRoman),
+            b"MacExpertEncoding" => Some(Self::MacExpert),
+            b"WinAnsiEncoding" => Some(Self::WinAnsi),
+            b"PDFDocEncoding" => Some(Self::PdfDoc),
+            _ => None,
+        }
+    }
+
+    fn decode_byte(self, byte: u8) -> Option<char> {
+        match self {
+            Self::Standard => crate::pdf_encodings::standard_encoding_byte(byte),
+            Self::MacRoman => crate::pdf_encodings::mac_roman_encoding_byte(byte),
+            Self::MacExpert => crate::pdf_encodings::mac_expert_encoding_byte(byte),
+            Self::WinAnsi => crate::pdf_encodings::win_ansi_encoding_byte(byte),
+            Self::PdfDoc => crate::pdf_encodings::pdf_doc_encoding_byte(byte),
+        }
     }
 }
 
@@ -228,7 +323,7 @@ pub(crate) fn pdf_bytes_to_png_pages(
     registry: Option<&FontRegistry>,
     shape_text: bool,
 ) -> Result<Vec<Vec<u8>>, FullBleedError> {
-    let doc = LoDocument::load_mem(bytes).map_err(lopdf_err)?;
+    let doc = LoDocument::load_mem(bytes).map_err(pdf_err)?;
     let (pages, embedded_fonts) = parse_pdf_pages(&doc)?;
     if pages.is_empty() {
         return Err(FullBleedError::InvalidConfiguration(
@@ -287,13 +382,8 @@ fn parse_page(
     embedded_fonts: &mut HashMap<String, Arc<Vec<u8>>>,
 ) -> Result<ParsedPage, FullBleedError> {
     let size = page_size_for_id(doc, page_id)?;
-    let page_dict = doc
-        .get_object(page_id)
-        .map_err(lopdf_err)?
-        .as_dict()
-        .map_err(lopdf_err)?;
-    let resources = resources_from_page(doc, page_dict, embedded_fonts)?;
-    let content_bytes = doc.get_page_content(page_id).map_err(lopdf_err)?;
+    let resources = resources_from_page(doc, page_id, embedded_fonts)?;
+    let content_bytes = doc.get_page_content(page_id).map_err(pdf_err)?;
     let content = decode_content_with_fallback(&content_bytes)?;
 
     let mut state = ParseState::default();
@@ -607,7 +697,7 @@ fn parse_operations(
                             .cloned()
                             .unwrap_or_else(|| PdfFontResource {
                                 font_name: font_res_name.clone(),
-                                to_unicode: HashMap::new(),
+                                to_unicode: PdfToUnicodeMap::default(),
                                 embedded_font: None,
                                 metrics: PdfFontMetrics::default(),
                                 code_to_gid: PdfCodeToGlyphMap::default(),
@@ -763,9 +853,9 @@ fn parse_xobject(
 ) -> Result<(), FullBleedError> {
     let stream = doc
         .get_object(obj_id)
-        .map_err(lopdf_err)?
+        .map_err(pdf_err)?
         .as_stream()
-        .map_err(lopdf_err)?;
+        .map_err(pdf_err)?;
     let subtype = stream
         .dict
         .get(b"Subtype")
@@ -987,8 +1077,8 @@ fn emit_text_by_codes(
 }
 
 fn decode_single_code(code: u16, font: &PdfFontResource) -> String {
-    if let Some(mapped) = font.to_unicode.get(&code) {
-        return mapped.clone();
+    if let Some(mapped) = font.to_unicode.get_u16(code, font.metrics.code_encoding) {
+        return mapped;
     }
 
     if font.metrics.code_encoding == PdfCharCodeWidthEncoding::SingleByte {
@@ -996,11 +1086,12 @@ fn decode_single_code(code: u16, font: &PdfFontResource) -> String {
         if let Some(mapped) = font.metrics.single_byte_code_map.get(&b) {
             return mapped.clone();
         }
-        let ch = match font.metrics.single_byte_text_encoding {
-            PdfSingleByteTextEncoding::WinAnsi => winansi_byte_to_char(b),
-            PdfSingleByteTextEncoding::PdfDoc => b as char,
-        };
-        return ch.to_string();
+        return font
+            .metrics
+            .single_byte_text_encoding
+            .decode_byte(b)
+            .map(|ch| ch.to_string())
+            .unwrap_or_default();
     }
 
     char::from_u32(code as u32)
@@ -1106,8 +1197,8 @@ fn code_is_space(font: &PdfFontResource, code: u16) -> bool {
         }
     }
     font.to_unicode
-        .get(&code)
-        .map(|mapped| mapped.as_str() == " ")
+        .get_u16(code, font.metrics.code_encoding)
+        .map(|mapped| mapped == " ")
         .unwrap_or(false)
 }
 
@@ -1152,7 +1243,7 @@ fn estimate_glyph_advance_fallback(
     let mut out = Vec::with_capacity(chars.len());
     for ch in chars {
         let adv = face
-            .glyph_index(ch)
+            .glyph_index(ch as u32)
             .and_then(|gid| face.glyph_hor_advance(gid))
             .map(|w| (w as f32) * scale)
             .unwrap_or(fallback);
@@ -1182,6 +1273,126 @@ fn effective_font_size(state: &ParseState) -> f32 {
     (state.font_size.to_f32() * matrix_scale).max(0.01)
 }
 
+pub(crate) fn extract_text_chunks(
+    document: &LoDocument,
+    page_numbers: &[u32],
+) -> Vec<PdfResult<String>> {
+    let pages = document.get_pages();
+    let mut output = Vec::new();
+    for page_number in page_numbers {
+        let Some(page_id) = pages.get(page_number).copied() else {
+            output.push(Err(PdfError::Parse(format!(
+                "page {page_number} not found"
+            ))));
+            continue;
+        };
+        match extract_page_text_chunks(document, page_id) {
+            Ok(chunks) => output.extend(chunks.into_iter().map(Ok)),
+            Err(error) => output.push(Err(error)),
+        }
+    }
+    output
+}
+
+fn extract_page_text_chunks(document: &LoDocument, page_id: ObjectId) -> PdfResult<Vec<String>> {
+    let mut embedded_fonts = HashMap::new();
+    let resources = resources_from_page(document, page_id, &mut embedded_fonts)
+        .map_err(text_extraction_error)?;
+    let content_bytes = document.get_page_content(page_id)?;
+    let content = decode_content_with_fallback(&content_bytes).map_err(text_extraction_error)?;
+    let mut output = Vec::new();
+    let mut current_font_name: Option<String> = None;
+    let mut current_text = String::new();
+
+    for operation in &content.operations {
+        match operation.operator.as_str() {
+            "Tf" => {
+                flush_text_chunk(&mut output, &mut current_text);
+                current_font_name = operation
+                    .operands
+                    .first()
+                    .and_then(|object| object.as_name().ok())
+                    .map(name_bytes_to_string);
+            }
+            "Tj" => {
+                if let Some(object) = operation.operands.first() {
+                    collect_extracted_text(
+                        &mut current_text,
+                        object,
+                        current_font_name
+                            .as_ref()
+                            .and_then(|name| resources.fonts.get(name)),
+                    );
+                }
+            }
+            "TJ" => {
+                if let Some(object) = operation.operands.first() {
+                    collect_extracted_text(
+                        &mut current_text,
+                        object,
+                        current_font_name
+                            .as_ref()
+                            .and_then(|name| resources.fonts.get(name)),
+                    );
+                    if !current_text.ends_with(' ') {
+                        current_text.push(' ');
+                    }
+                }
+            }
+            "'" | "\"" => {
+                if !current_text.is_empty() && !current_text.ends_with('\n') {
+                    current_text.push('\n');
+                }
+                if let Some(object) = operation.operands.last() {
+                    collect_extracted_text(
+                        &mut current_text,
+                        object,
+                        current_font_name
+                            .as_ref()
+                            .and_then(|name| resources.fonts.get(name)),
+                    );
+                }
+            }
+            "ET" => {
+                if !current_text.is_empty() && !current_text.ends_with('\n') {
+                    current_text.push('\n');
+                }
+            }
+            _ => {}
+        }
+    }
+    flush_text_chunk(&mut output, &mut current_text);
+    Ok(output)
+}
+
+fn collect_extracted_text(output: &mut String, object: &LoObject, font: Option<&PdfFontResource>) {
+    match object {
+        LoObject::String(_, _) => {
+            if let Some(text) = decode_text_operand(Some(object), font) {
+                output.push_str(&text);
+            }
+        }
+        LoObject::Array(items) => {
+            for item in items {
+                collect_extracted_text(output, item, font);
+            }
+        }
+        LoObject::Integer(adjustment) if *adjustment < -100 => output.push(' '),
+        LoObject::Real(adjustment) if *adjustment < -100.0 => output.push(' '),
+        _ => {}
+    }
+}
+
+fn flush_text_chunk(output: &mut Vec<String>, current: &mut String) {
+    if !current.is_empty() {
+        output.push(std::mem::take(current));
+    }
+}
+
+fn text_extraction_error(error: FullBleedError) -> PdfError {
+    PdfError::Parse(format!("text extraction failed: {error}"))
+}
+
 fn decode_text_operand(obj: Option<&LoObject>, font: Option<&PdfFontResource>) -> Option<String> {
     let obj = obj?;
     if let Some(bytes) = obj.as_str().ok() {
@@ -1196,7 +1407,7 @@ fn decode_text_operand(obj: Option<&LoObject>, font: Option<&PdfFontResource>) -
             }
         }
     }
-    if let Ok(decoded) = lopdf::decode_text_string(obj) {
+    if let Ok(decoded) = crate::pdf_native::decode_text_string(obj) {
         return Some(decoded);
     }
     if let Ok(bytes) = obj.as_str() {
@@ -1217,40 +1428,34 @@ fn decode_operand_codes(
     pdf_string_codes(bytes, encoding)
 }
 
-fn decode_with_to_unicode(bytes: &[u8], cmap: &HashMap<u16, String>) -> Option<String> {
+fn decode_with_to_unicode(bytes: &[u8], cmap: &PdfToUnicodeMap) -> Option<String> {
     if bytes.is_empty() {
         return Some(String::new());
     }
-    if bytes.len() % 2 == 0 {
-        let mut out = String::new();
-        let mut mapped_any = false;
-        for chunk in bytes.chunks_exact(2) {
-            let code = u16::from_be_bytes([chunk[0], chunk[1]]);
-            if let Some(mapped) = cmap.get(&code) {
-                out.push_str(mapped);
-                mapped_any = true;
-            } else if let Some(ch) = char::from_u32(code as u32) {
-                out.push(ch);
-            } else {
-                out.push('?');
-            }
-        }
-        if mapped_any {
-            return Some(out);
-        }
-    }
-
     let mut out = String::new();
     let mut mapped_any = false;
-    for b in bytes {
-        let code = *b as u16;
-        if let Some(mapped) = cmap.get(&code) {
-            out.push_str(mapped);
+    let mut code = 0u32;
+    let mut code_len = 0u8;
+    for byte in bytes {
+        code = (code << 8) | u32::from(*byte);
+        code_len += 1;
+        if let Some(mapped) = cmap.get(code_len, code) {
+            out.push_str(&mapped);
             mapped_any = true;
-        } else if let Some(ch) = char::from_u32(code as u32) {
-            out.push(ch);
+            code = 0;
+            code_len = 0;
+        } else if code_len == 4 {
+            out.push('\u{fffd}');
+            code = 0;
+            code_len = 0;
+        }
+    }
+    if code_len > 0 {
+        if let Some(mapped) = cmap.get(code_len, code) {
+            out.push_str(&mapped);
+            mapped_any = true;
         } else {
-            out.push('?');
+            out.push('\u{fffd}');
         }
     }
     if mapped_any {
@@ -1266,52 +1471,18 @@ fn decode_single_byte_text(bytes: &[u8], metrics: &PdfFontMetrics) -> String {
             out.push_str(mapped);
             continue;
         }
-        match metrics.single_byte_text_encoding {
-            PdfSingleByteTextEncoding::WinAnsi => out.push(winansi_byte_to_char(*b)),
-            PdfSingleByteTextEncoding::PdfDoc => out.push(*b as char),
+        if let Some(decoded) = metrics.single_byte_text_encoding.decode_byte(*b) {
+            out.push(decoded);
         }
     }
     out
 }
-
-fn winansi_byte_to_char(b: u8) -> char {
-    match b {
-        0x80 => '\u{20AC}',
-        0x82 => '\u{201A}',
-        0x83 => '\u{0192}',
-        0x84 => '\u{201E}',
-        0x85 => '\u{2026}',
-        0x86 => '\u{2020}',
-        0x87 => '\u{2021}',
-        0x88 => '\u{02C6}',
-        0x89 => '\u{2030}',
-        0x8A => '\u{0160}',
-        0x8B => '\u{2039}',
-        0x8C => '\u{0152}',
-        0x8E => '\u{017D}',
-        0x91 => '\u{2018}',
-        0x92 => '\u{2019}',
-        0x93 => '\u{201C}',
-        0x94 => '\u{201D}',
-        0x95 => '\u{2022}',
-        0x96 => '\u{2013}',
-        0x97 => '\u{2014}',
-        0x98 => '\u{02DC}',
-        0x99 => '\u{2122}',
-        0x9A => '\u{0161}',
-        0x9B => '\u{203A}',
-        0x9C => '\u{0153}',
-        0x9E => '\u{017E}',
-        0x9F => '\u{0178}',
-        _ => b as char,
-    }
-}
 fn resources_from_page(
     doc: &LoDocument,
-    page_dict: &LoDictionary,
+    page_id: ObjectId,
     embedded_fonts: &mut HashMap<String, Arc<Vec<u8>>>,
 ) -> Result<PdfResources, FullBleedError> {
-    match page_dict.get(b"Resources") {
+    match doc.get_page_attribute(page_id, b"Resources") {
         Ok(obj) => resources_from_object(doc, obj, embedded_fonts),
         Err(_) => Ok(PdfResources::default()),
     }
@@ -1400,7 +1571,7 @@ fn resolve_font_resource(
         _ => {
             return Ok(PdfFontResource {
                 font_name: "Helvetica".to_string(),
-                to_unicode: HashMap::new(),
+                to_unicode: PdfToUnicodeMap::default(),
                 embedded_font: None,
                 metrics: PdfFontMetrics::default(),
                 code_to_gid: PdfCodeToGlyphMap::default(),
@@ -1430,7 +1601,7 @@ fn resolve_font_resource(
 fn parse_font_metrics(
     doc: &LoDocument,
     font_dict: &LoDictionary,
-    to_unicode: &HashMap<u16, String>,
+    to_unicode: &PdfToUnicodeMap,
 ) -> PdfFontMetrics {
     let subtype = font_dict
         .get(b"Subtype")
@@ -1448,7 +1619,7 @@ fn parse_font_metrics(
 fn parse_type0_font_metrics(
     doc: &LoDocument,
     font_dict: &LoDictionary,
-    to_unicode: &HashMap<u16, String>,
+    to_unicode: &PdfToUnicodeMap,
 ) -> PdfFontMetrics {
     let encoding_name = font_dict
         .get(b"Encoding")
@@ -1459,7 +1630,7 @@ fn parse_type0_font_metrics(
         .unwrap_or_default();
     let code_encoding = if encoding_name == "Identity-H" || encoding_name == "Identity-V" {
         PdfCharCodeWidthEncoding::TwoByteBigEndian
-    } else if to_unicode.keys().any(|code| *code > 0x00FF) {
+    } else if to_unicode.has_multibyte_codes() {
         PdfCharCodeWidthEncoding::TwoByteBigEndian
     } else {
         PdfCharCodeWidthEncoding::SingleByte
@@ -1607,33 +1778,30 @@ fn parse_simple_font_text_encoding(
 ) -> PdfSingleByteTextEncoding {
     let encoding_obj = match font_dict.get(b"Encoding") {
         Ok(obj) => obj,
-        Err(_) => return PdfSingleByteTextEncoding::PdfDoc,
+        Err(_) => return PdfSingleByteTextEncoding::default(),
     };
     let resolved = match resolve_object(doc, encoding_obj) {
         Ok(obj) => obj,
-        Err(_) => return PdfSingleByteTextEncoding::PdfDoc,
+        Err(_) => return PdfSingleByteTextEncoding::default(),
     };
 
     if let Ok(name) = resolved.as_name() {
-        return match name {
-            b"WinAnsiEncoding" => PdfSingleByteTextEncoding::WinAnsi,
-            _ => PdfSingleByteTextEncoding::PdfDoc,
-        };
+        return PdfSingleByteTextEncoding::from_pdf_name(name).unwrap_or_default();
     }
 
     if let Ok(dict) = resolved.as_dict() {
         if let Ok(base) = dict.get(b"BaseEncoding") {
             if let Ok(base_name_obj) = resolve_object(doc, base) {
                 if let Ok(base_name) = base_name_obj.as_name() {
-                    if base_name == b"WinAnsiEncoding" {
-                        return PdfSingleByteTextEncoding::WinAnsi;
+                    if let Some(encoding) = PdfSingleByteTextEncoding::from_pdf_name(base_name) {
+                        return encoding;
                     }
                 }
             }
         }
     }
 
-    PdfSingleByteTextEncoding::PdfDoc
+    PdfSingleByteTextEncoding::default()
 }
 
 fn parse_simple_font_code_map(
@@ -1949,22 +2117,14 @@ fn font_descriptor_file_bytes(doc: &LoDocument, descriptor_obj: &LoObject) -> Op
     None
 }
 
-fn page_size_for_id(doc: &LoDocument, mut id: ObjectId) -> Result<Size, FullBleedError> {
-    loop {
-        let dict = doc
-            .get_object(id)
-            .map_err(lopdf_err)?
-            .as_dict()
-            .map_err(lopdf_err)?;
-        if let Ok(arr) = dict.get(b"MediaBox").and_then(LoObject::as_array) {
-            if let Some(size) = parse_media_box_array(arr) {
-                return Ok(size);
-            }
+fn page_size_for_id(doc: &LoDocument, id: ObjectId) -> Result<Size, FullBleedError> {
+    if let Ok(array) = doc
+        .get_page_attribute(id, b"MediaBox")
+        .and_then(LoObject::as_array)
+    {
+        if let Some(size) = parse_media_box_array(array) {
+            return Ok(size);
         }
-        id = match dict.get(b"Parent").and_then(LoObject::as_reference) {
-            Ok(parent_id) => parent_id,
-            Err(_) => break,
-        };
     }
     Ok(Size::letter())
 }
@@ -2349,7 +2509,7 @@ fn lookup_table_bytes(doc: &LoDocument, obj: &LoObject) -> Option<Vec<u8>> {
     }
 }
 
-fn image_stream_to_data_uri(doc: &LoDocument, stream: &lopdf::Stream) -> Option<String> {
+fn image_stream_to_data_uri(doc: &LoDocument, stream: &LoStream) -> Option<String> {
     let filters = stream.filters().unwrap_or_default();
     let has_dct = filters.iter().any(|f| *f == b"DCTDecode");
     if has_dct {
@@ -2357,11 +2517,10 @@ fn image_stream_to_data_uri(doc: &LoDocument, stream: &lopdf::Stream) -> Option<
     }
 
     if filters.is_empty() {
-        if let Ok(fmt) = image::guess_format(&stream.content) {
+        if let Ok(fmt) = crate::image_native::guess_format(&stream.content) {
             let mime = match fmt {
-                image::ImageFormat::Png => Some("image/png"),
-                image::ImageFormat::Jpeg => Some("image/jpeg"),
-                _ => None,
+                crate::image_native::ImageFormat::Png => Some("image/png"),
+                crate::image_native::ImageFormat::Jpeg => Some("image/jpeg"),
             }?;
             return Some(data_uri(mime, stream.content.as_slice()));
         }
@@ -2373,11 +2532,10 @@ fn image_stream_to_data_uri(doc: &LoDocument, stream: &lopdf::Stream) -> Option<
         return Some(uri);
     }
 
-    if let Ok(fmt) = image::guess_format(&plain) {
+    if let Ok(fmt) = crate::image_native::guess_format(&plain) {
         let mime = match fmt {
-            image::ImageFormat::Png => Some("image/png"),
-            image::ImageFormat::Jpeg => Some("image/jpeg"),
-            _ => None,
+            crate::image_native::ImageFormat::Png => Some("image/png"),
+            crate::image_native::ImageFormat::Jpeg => Some("image/jpeg"),
         }?;
         return Some(data_uri(mime, plain.as_slice()));
     }
@@ -2385,11 +2543,7 @@ fn image_stream_to_data_uri(doc: &LoDocument, stream: &lopdf::Stream) -> Option<
     None
 }
 
-fn raw_image_data_to_png_uri(
-    doc: &LoDocument,
-    stream: &lopdf::Stream,
-    plain: &[u8],
-) -> Option<String> {
+fn raw_image_data_to_png_uri(doc: &LoDocument, stream: &LoStream, plain: &[u8]) -> Option<String> {
     let width = stream
         .dict
         .get(b"Width")
@@ -2484,14 +2638,7 @@ fn raw_image_data_to_png_uri(
         }
     }
 
-    let mut png = Vec::new();
-    let encoder = PngEncoder::new(&mut png);
-    if encoder
-        .write_image(&rgba, width, height, ColorType::Rgba8.into())
-        .is_err()
-    {
-        return None;
-    }
+    let png = crate::image_native::encode_png_rgba8(&rgba, width, height).ok()?;
     Some(data_uri("image/png", &png))
 }
 
@@ -2669,7 +2816,7 @@ fn decode_content_with_fallback(bytes: &[u8]) -> Result<Content, FullBleedError>
                     return Ok(content);
                 }
             }
-            Err(lopdf_err(primary_err))
+            Err(pdf_err(primary_err))
         }
     }
 }
@@ -2770,7 +2917,7 @@ fn resolve_object<'a>(
     loop {
         match obj {
             LoObject::Reference(id) => {
-                obj = doc.get_object(*id).map_err(lopdf_err)?;
+                obj = doc.get_object(*id).map_err(pdf_err)?;
             }
             _ => return Ok(obj),
         }
@@ -2984,8 +3131,8 @@ fn normalize_pdf_font_name(name: &str) -> String {
     trimmed.to_string()
 }
 
-fn parse_to_unicode_cmap(doc: &LoDocument, font_dict: &LoDictionary) -> HashMap<u16, String> {
-    let mut map = HashMap::new();
+fn parse_to_unicode_cmap(doc: &LoDocument, font_dict: &LoDictionary) -> PdfToUnicodeMap {
+    let mut map = PdfToUnicodeMap::default();
     let to_unicode_obj = match font_dict.get(b"ToUnicode") {
         Ok(obj) => obj,
         Err(_) => return map,
@@ -3001,131 +3148,217 @@ fn parse_to_unicode_cmap(doc: &LoDocument, font_dict: &LoDictionary) -> HashMap<
         Ok(data) => data,
         Err(_) => return map,
     };
-    let text = String::from_utf8_lossy(&bytes);
-
-    let mut in_bfchar = false;
-    let mut in_bfrange = false;
-    for raw_line in text.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        if line.ends_with("beginbfchar") {
-            in_bfchar = true;
-            in_bfrange = false;
-            continue;
-        }
-        if line.ends_with("endbfchar") {
-            in_bfchar = false;
-            continue;
-        }
-        if line.ends_with("beginbfrange") {
-            in_bfrange = true;
-            in_bfchar = false;
-            continue;
-        }
-        if line.ends_with("endbfrange") {
-            in_bfrange = false;
-            continue;
-        }
-        if in_bfchar {
-            let tokens = extract_hex_tokens(line);
-            if tokens.len() >= 2 {
-                if let Some(src) = hex_bytes_to_u16(&tokens[0]) {
-                    let dst = hex_bytes_to_unicode(&tokens[1]);
-                    map.insert(src, dst);
-                }
-            }
-            continue;
-        }
-        if in_bfrange {
-            let tokens = extract_hex_tokens(line);
-            if tokens.len() < 3 {
-                continue;
-            }
-            let start = match hex_bytes_to_u16(&tokens[0]) {
-                Some(v) => v,
-                None => continue,
-            };
-            let end = match hex_bytes_to_u16(&tokens[1]) {
-                Some(v) => v,
-                None => continue,
-            };
-            if start > end {
-                continue;
-            }
-            if line.contains('[') {
-                for (idx, token) in tokens.iter().skip(2).enumerate() {
-                    let code = start.saturating_add(idx as u16);
-                    if code > end {
-                        break;
-                    }
-                    map.insert(code, hex_bytes_to_unicode(token));
-                }
-            } else if let Some(base) = hex_bytes_to_u16(&tokens[2]) {
-                for code in start..=end {
-                    let dst = base.saturating_add(code.saturating_sub(start));
-                    if let Some(ch) = char::from_u32(dst as u32) {
-                        map.insert(code, ch.to_string());
+    let tokens = tokenize_to_unicode_cmap(&bytes);
+    let mut index = 0usize;
+    while index < tokens.len() {
+        match tokens.get(index) {
+            Some(CMapToken::Word(word)) if word == b"beginbfchar" => {
+                index += 1;
+                while index < tokens.len() && !token_is_word(&tokens[index], b"endbfchar") {
+                    match (tokens.get(index), tokens.get(index + 1)) {
+                        (Some(CMapToken::Hex(source)), Some(CMapToken::Hex(target))) => {
+                            if let Some((code_len, code)) = cmap_source_code(source) {
+                                map.insert(code_len, code, hex_bytes_to_unicode(target));
+                            }
+                            index += 2;
+                        }
+                        _ => index += 1,
                     }
                 }
             }
+            Some(CMapToken::Word(word)) if word == b"beginbfrange" => {
+                index += 1;
+                while index < tokens.len() && !token_is_word(&tokens[index], b"endbfrange") {
+                    let (Some(CMapToken::Hex(start_bytes)), Some(CMapToken::Hex(end_bytes))) =
+                        (tokens.get(index), tokens.get(index + 1))
+                    else {
+                        index += 1;
+                        continue;
+                    };
+                    let (Some((code_len, start)), Some((end_len, end))) =
+                        (cmap_source_code(start_bytes), cmap_source_code(end_bytes))
+                    else {
+                        index += 2;
+                        continue;
+                    };
+                    if code_len != end_len || start > end {
+                        index += 2;
+                        continue;
+                    }
+                    index += 2;
+                    match tokens.get(index) {
+                        Some(CMapToken::Hex(target)) => {
+                            if let Some(units) = hex_bytes_to_utf16_units(target) {
+                                map.ranges.push(PdfUnicodeRange {
+                                    code_len,
+                                    start,
+                                    end,
+                                    target: PdfUnicodeRangeTarget::Sequential(units),
+                                });
+                            }
+                            index += 1;
+                        }
+                        Some(CMapToken::ArrayStart) => {
+                            index += 1;
+                            let mut values = Vec::new();
+                            while index < tokens.len()
+                                && !matches!(tokens[index], CMapToken::ArrayEnd)
+                            {
+                                if let CMapToken::Hex(target) = &tokens[index] {
+                                    values.push(hex_bytes_to_unicode(target));
+                                }
+                                index += 1;
+                            }
+                            if matches!(tokens.get(index), Some(CMapToken::ArrayEnd)) {
+                                index += 1;
+                            }
+                            if !values.is_empty() {
+                                map.ranges.push(PdfUnicodeRange {
+                                    code_len,
+                                    start,
+                                    end,
+                                    target: PdfUnicodeRangeTarget::Array(values),
+                                });
+                            }
+                        }
+                        _ => index += 1,
+                    }
+                }
+            }
+            _ => {}
         }
+        index += 1;
     }
     map
 }
 
-fn extract_hex_tokens(line: &str) -> Vec<Vec<u8>> {
-    let mut out = Vec::new();
-    let bytes = line.as_bytes();
-    let mut i = 0usize;
-    while i < bytes.len() {
-        if bytes[i] == b'<' {
-            i += 1;
-            let start = i;
-            while i < bytes.len() && bytes[i] != b'>' {
-                i += 1;
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum CMapToken {
+    Word(Vec<u8>),
+    Hex(Vec<u8>),
+    ArrayStart,
+    ArrayEnd,
+}
+
+fn tokenize_to_unicode_cmap(data: &[u8]) -> Vec<CMapToken> {
+    let mut output = Vec::new();
+    let mut index = 0usize;
+    while index < data.len() {
+        match data[index] {
+            byte if byte.is_ascii_whitespace() => index += 1,
+            b'%' => {
+                while index < data.len() && !matches!(data[index], b'\r' | b'\n') {
+                    index += 1;
+                }
             }
-            if i <= bytes.len() {
-                let token = &line[start..i];
-                if let Some(decoded) = parse_hex(token) {
-                    out.push(decoded);
+            b'(' => {
+                index += 1;
+                let mut depth = 1usize;
+                while index < data.len() && depth > 0 {
+                    match data[index] {
+                        b'\\' => index = (index + 2).min(data.len()),
+                        b'(' => {
+                            depth += 1;
+                            index += 1;
+                        }
+                        b')' => {
+                            depth -= 1;
+                            index += 1;
+                        }
+                        _ => index += 1,
+                    }
+                }
+            }
+            b'<' if data.get(index + 1) == Some(&b'<') => index += 2,
+            b'>' if data.get(index + 1) == Some(&b'>') => index += 2,
+            b'<' => {
+                let start = index + 1;
+                let Some(relative_end) = data[start..].iter().position(|byte| *byte == b'>') else {
+                    break;
+                };
+                let end = start + relative_end;
+                if let Some(bytes) = parse_cmap_hex(&data[start..end]) {
+                    output.push(CMapToken::Hex(bytes));
+                }
+                index = end + 1;
+            }
+            b'[' => {
+                output.push(CMapToken::ArrayStart);
+                index += 1;
+            }
+            b']' => {
+                output.push(CMapToken::ArrayEnd);
+                index += 1;
+            }
+            _ => {
+                let start = index;
+                while index < data.len()
+                    && !data[index].is_ascii_whitespace()
+                    && !matches!(data[index], b'%' | b'(' | b')' | b'<' | b'>' | b'[' | b']')
+                {
+                    index += 1;
+                }
+                if index > start {
+                    output.push(CMapToken::Word(data[start..index].to_vec()));
+                } else {
+                    index += 1;
                 }
             }
         }
-        i += 1;
     }
-    out
+    output
 }
 
-fn parse_hex(token: &str) -> Option<Vec<u8>> {
-    let mut bytes = Vec::new();
+fn parse_cmap_hex(token: &[u8]) -> Option<Vec<u8>> {
     let mut nibbles = Vec::new();
-    for ch in token.chars() {
-        if ch.is_whitespace() {
+    for byte in token {
+        if byte.is_ascii_whitespace() {
             continue;
         }
-        let val = ch.to_digit(16)? as u8;
-        nibbles.push(val);
-    }
-    if nibbles.is_empty() {
-        return Some(bytes);
+        nibbles.push(match byte {
+            b'0'..=b'9' => byte - b'0',
+            b'a'..=b'f' => byte - b'a' + 10,
+            b'A'..=b'F' => byte - b'A' + 10,
+            _ => return None,
+        });
     }
     if nibbles.len() % 2 != 0 {
         nibbles.push(0);
     }
+    let mut bytes = Vec::with_capacity(nibbles.len() / 2);
     for pair in nibbles.chunks_exact(2) {
         bytes.push((pair[0] << 4) | pair[1]);
     }
     Some(bytes)
 }
 
-fn hex_bytes_to_u16(bytes: &[u8]) -> Option<u16> {
-    match bytes.len() {
-        1 => Some(bytes[0] as u16),
-        2 => Some(u16::from_be_bytes([bytes[0], bytes[1]])),
-        _ => None,
+fn token_is_word(token: &CMapToken, expected: &[u8]) -> bool {
+    matches!(token, CMapToken::Word(word) if word == expected)
+}
+
+fn cmap_source_code(bytes: &[u8]) -> Option<(u8, u32)> {
+    let code_len = u8::try_from(bytes.len()).ok()?;
+    if !(1..=4).contains(&code_len) {
+        return None;
     }
+    Some((
+        code_len,
+        bytes
+            .iter()
+            .fold(0u32, |code, byte| (code << 8) | u32::from(*byte)),
+    ))
+}
+
+fn hex_bytes_to_utf16_units(bytes: &[u8]) -> Option<Vec<u16>> {
+    if bytes.is_empty() || bytes.len() % 2 != 0 {
+        return None;
+    }
+    Some(
+        bytes
+            .chunks_exact(2)
+            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+            .collect(),
+    )
 }
 
 fn hex_bytes_to_unicode(bytes: &[u8]) -> String {
@@ -3133,17 +3366,13 @@ fn hex_bytes_to_unicode(bytes: &[u8]) -> String {
         return String::new();
     }
     if bytes.len() % 2 == 0 {
-        let mut units = Vec::with_capacity(bytes.len() / 2);
-        for chunk in bytes.chunks_exact(2) {
-            units.push(u16::from_be_bytes([chunk[0], chunk[1]]));
-        }
-        return String::from_utf16_lossy(&units);
+        return String::from_utf16_lossy(&hex_bytes_to_utf16_units(bytes).unwrap_or_default());
     }
     String::from_utf8_lossy(bytes).to_string()
 }
 
 fn data_uri(mime: &str, data: &[u8]) -> String {
-    let b64 = base64::engine::general_purpose::STANDARD.encode(data);
+    let b64 = crate::base64::encode_standard(data);
     format!("data:{mime};base64,{b64}")
 }
 
@@ -3158,17 +3387,16 @@ fn cmyk_to_rgb(c: f32, m: f32, y: f32, k: f32) -> (f32, f32, f32) {
     (r, g, b)
 }
 
-fn lopdf_err(err: lopdf::Error) -> FullBleedError {
+fn pdf_err(err: crate::pdf_native::Error) -> FullBleedError {
     FullBleedError::InvalidConfiguration(format!("pdf raster error: {err}"))
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pdf_native::{Dictionary as LoDictionary, Stream as LoStream, dictionary};
     use crate::{
         ComposePagePlan, TemplateAsset, TemplateCatalog, compose_overlay_with_template_catalog,
     };
-    use lopdf::{Dictionary as LoDictionary, Stream as LoStream, dictionary};
-    use std::collections::HashMap;
 
     fn write_text_pdf(path: &Path, fill_rgb: (f32, f32, f32), text: &str, width: i64, height: i64) {
         let mut doc = LoDocument::with_version("1.7");
@@ -3215,14 +3443,14 @@ mod tests {
         doc.save(path).expect("save");
     }
 
-    fn has_non_white_pixel(img: &image::RgbaImage) -> bool {
+    fn has_non_white_pixel(img: &crate::image_native::RgbaImage) -> bool {
         img.pixels().any(|p| {
             let [r, g, b, _a] = p.0;
             !(r == 255 && g == 255 && b == 255)
         })
     }
 
-    fn non_white_bounds(img: &image::RgbaImage) -> Option<(u32, u32, u32, u32)> {
+    fn non_white_bounds(img: &crate::image_native::RgbaImage) -> Option<(u32, u32, u32, u32)> {
         let mut min_x = u32::MAX;
         let mut min_y = u32::MAX;
         let mut max_x = 0u32;
@@ -3262,7 +3490,9 @@ mod tests {
 
         let pages = pdf_path_to_png_pages(&pdf_path, 120, None, true).expect("raster");
         assert_eq!(pages.len(), 1);
-        let img = image::load_from_memory(&pages[0]).expect("png").to_rgba8();
+        let img = crate::image_native::load_from_memory(&pages[0])
+            .expect("png")
+            .into_rgba8();
         assert!(has_non_white_pixel(&img));
     }
 
@@ -3306,7 +3536,9 @@ mod tests {
 
         let pages = pdf_path_to_png_pages(&composed, 120, None, true).expect("raster composed");
         assert_eq!(pages.len(), 1);
-        let img = image::load_from_memory(&pages[0]).expect("png").to_rgba8();
+        let img = crate::image_native::load_from_memory(&pages[0])
+            .expect("png")
+            .into_rgba8();
         let px = img.get_pixel(10, 10).0;
         assert!(
             px[2] > 180,
@@ -3364,7 +3596,9 @@ mod tests {
 
         let pages = pdf_path_to_png_pages(&pdf_path, 144, None, true).expect("raster");
         assert_eq!(pages.len(), 1);
-        let img = image::load_from_memory(&pages[0]).expect("png").to_rgba8();
+        let img = crate::image_native::load_from_memory(&pages[0])
+            .expect("png")
+            .into_rgba8();
         let (_min_x, min_y, _max_x, max_y) = non_white_bounds(&img).expect("ink bounds");
         let span = max_y.saturating_sub(min_y);
         assert!(
@@ -3401,12 +3635,10 @@ mod tests {
 
         let uri = image_stream_to_data_uri(&doc, &image_stream).expect("indexed image to data uri");
         let b64 = uri.split_once(',').expect("data uri").1;
-        let png = base64::engine::general_purpose::STANDARD
-            .decode(b64)
-            .expect("base64 decode");
-        let img = image::load_from_memory(&png)
+        let png = crate::base64::decode_standard(b64).expect("base64 decode");
+        let img = crate::image_native::load_from_memory(&png)
             .expect("decode png")
-            .to_rgba8();
+            .into_rgba8();
 
         assert_eq!(img.width(), 2);
         assert_eq!(img.height(), 1);
@@ -3449,12 +3681,10 @@ mod tests {
 
         let uri = image_stream_to_data_uri(&doc, &image_stream).expect("icc image to data uri");
         let b64 = uri.split_once(',').expect("data uri").1;
-        let png = base64::engine::general_purpose::STANDARD
-            .decode(b64)
-            .expect("base64 decode");
-        let img = image::load_from_memory(&png)
+        let png = crate::base64::decode_standard(b64).expect("base64 decode");
+        let img = crate::image_native::load_from_memory(&png)
             .expect("decode png")
-            .to_rgba8();
+            .into_rgba8();
 
         assert_eq!(img.width(), 8);
         assert_eq!(img.height(), 1);
@@ -3499,12 +3729,10 @@ mod tests {
 
         let uri = image_stream_to_data_uri(&doc, &image_stream).expect("separation image to uri");
         let b64 = uri.split_once(',').expect("data uri").1;
-        let png = base64::engine::general_purpose::STANDARD
-            .decode(b64)
-            .expect("base64 decode");
-        let img = image::load_from_memory(&png)
+        let png = crate::base64::decode_standard(b64).expect("base64 decode");
+        let img = crate::image_native::load_from_memory(&png)
             .expect("decode png")
-            .to_rgba8();
+            .into_rgba8();
 
         assert_eq!(img.width(), 2);
         let left = img.get_pixel(0, 0).0;
@@ -3557,12 +3785,10 @@ mod tests {
 
         let uri = image_stream_to_data_uri(&doc, &image_stream).expect("separation image to uri");
         let b64 = uri.split_once(',').expect("data uri").1;
-        let png = base64::engine::general_purpose::STANDARD
-            .decode(b64)
-            .expect("base64 decode");
-        let img = image::load_from_memory(&png)
+        let png = crate::base64::decode_standard(b64).expect("base64 decode");
+        let img = crate::image_native::load_from_memory(&png)
             .expect("decode png")
-            .to_rgba8();
+            .into_rgba8();
 
         let left = img.get_pixel(0, 0).0;
         let right = img.get_pixel(1, 0).0;
@@ -3605,12 +3831,10 @@ mod tests {
 
         let uri = image_stream_to_data_uri(&doc, &image_stream).expect("image to uri");
         let b64 = uri.split_once(',').expect("data uri").1;
-        let png = base64::engine::general_purpose::STANDARD
-            .decode(b64)
-            .expect("base64 decode");
-        let img = image::load_from_memory(&png)
+        let png = crate::base64::decode_standard(b64).expect("base64 decode");
+        let img = crate::image_native::load_from_memory(&png)
             .expect("decode png")
-            .to_rgba8();
+            .into_rgba8();
 
         let p0 = img.get_pixel(0, 0).0;
         let p1 = img.get_pixel(1, 0).0;
@@ -3674,13 +3898,13 @@ mod tests {
 
     #[test]
     fn decode_with_to_unicode_handles_utf16be_codes() {
-        let mut cmap = HashMap::new();
-        cmap.insert(0x0026u16, "C".to_string());
-        cmap.insert(0x004Bu16, "h".to_string());
-        cmap.insert(0x0048u16, "e".to_string());
-        cmap.insert(0x0046u16, "c".to_string());
-        cmap.insert(0x004Eu16, "k".to_string());
-        cmap.insert(0x0003u16, " ".to_string());
+        let mut cmap = PdfToUnicodeMap::default();
+        cmap.insert(2, 0x0026, "C".to_string());
+        cmap.insert(2, 0x004B, "h".to_string());
+        cmap.insert(2, 0x0048, "e".to_string());
+        cmap.insert(2, 0x0046, "c".to_string());
+        cmap.insert(2, 0x004E, "k".to_string());
+        cmap.insert(2, 0x0003, " ".to_string());
         let bytes = vec![
             0x00, 0x26, 0x00, 0x4B, 0x00, 0x48, 0x00, 0x46, 0x00, 0x4E, 0x00, 0x03,
         ];
@@ -3690,9 +3914,9 @@ mod tests {
 
     #[test]
     fn decode_with_to_unicode_handles_single_byte_codes() {
-        let mut cmap = HashMap::new();
-        cmap.insert(0x0048u16, "H".to_string());
-        cmap.insert(0x0069u16, "i".to_string());
+        let mut cmap = PdfToUnicodeMap::default();
+        cmap.insert(1, 0x48, "H".to_string());
+        cmap.insert(1, 0x69, "i".to_string());
         let decoded = decode_with_to_unicode(b"Hi", &cmap).expect("decode");
         assert_eq!(decoded, "Hi");
     }
@@ -3704,10 +3928,71 @@ mod tests {
         font.metrics.single_byte_text_encoding = PdfSingleByteTextEncoding::WinAnsi;
         let obj = LoObject::String(
             vec![b'E', b'm', b'p', b'l', b'o', b'y', b'e', b'e', 0x92, b's'],
-            lopdf::StringFormat::Literal,
+            crate::pdf_native::StringFormat::Literal,
         );
         let decoded = decode_text_operand(Some(&obj), Some(&font)).expect("decode");
         assert_eq!(decoded, "Employee\u{2019}s");
+    }
+
+    #[test]
+    fn standardized_single_byte_font_encodings_decode_canonical_bytes() {
+        let cases = [
+            (PdfSingleByteTextEncoding::Standard, b'A', "A"),
+            (PdfSingleByteTextEncoding::MacRoman, 0x80, "\u{00c4}"),
+            (PdfSingleByteTextEncoding::MacExpert, 0x21, "\u{f721}"),
+            (PdfSingleByteTextEncoding::WinAnsi, 0x80, "\u{20ac}"),
+            (PdfSingleByteTextEncoding::PdfDoc, 0x80, "\u{2022}"),
+        ];
+
+        for (encoding, byte, expected) in cases {
+            let metrics = PdfFontMetrics {
+                single_byte_text_encoding: encoding,
+                ..PdfFontMetrics::default()
+            };
+            assert_eq!(decode_single_byte_text(&[byte], &metrics), expected);
+        }
+
+        assert_eq!(
+            PdfSingleByteTextEncoding::default(),
+            PdfSingleByteTextEncoding::Standard
+        );
+        assert_eq!(
+            decode_single_byte_text(&[0], &PdfFontMetrics::default()),
+            ""
+        );
+    }
+
+    #[test]
+    fn simple_font_encoding_names_and_base_encoding_are_recognized() {
+        let doc = LoDocument::with_version("1.7");
+        let direct_cases: &[(&[u8], PdfSingleByteTextEncoding)] = &[
+            (b"StandardEncoding", PdfSingleByteTextEncoding::Standard),
+            (b"MacRomanEncoding", PdfSingleByteTextEncoding::MacRoman),
+            (b"MacExpertEncoding", PdfSingleByteTextEncoding::MacExpert),
+            (b"WinAnsiEncoding", PdfSingleByteTextEncoding::WinAnsi),
+            (b"PDFDocEncoding", PdfSingleByteTextEncoding::PdfDoc),
+        ];
+
+        for (name, expected) in direct_cases {
+            let font_dict = dictionary! {
+                "Encoding" => LoObject::Name(name.to_vec()),
+            };
+            assert_eq!(parse_simple_font_text_encoding(&doc, &font_dict), *expected);
+        }
+
+        let font_dict = dictionary! {
+            "Encoding" => LoObject::Dictionary(dictionary! {
+                "BaseEncoding" => LoObject::Name(b"MacRomanEncoding".to_vec()),
+            }),
+        };
+        assert_eq!(
+            parse_simple_font_text_encoding(&doc, &font_dict),
+            PdfSingleByteTextEncoding::MacRoman
+        );
+        assert_eq!(
+            parse_simple_font_text_encoding(&doc, &LoDictionary::new()),
+            PdfSingleByteTextEncoding::Standard
+        );
     }
 
     #[test]
@@ -3721,7 +4006,10 @@ mod tests {
         font.metrics
             .single_byte_code_map
             .insert(0x15, "N".to_string());
-        let obj = LoObject::String(vec![0x14, 0x15, b' '], lopdf::StringFormat::Literal);
+        let obj = LoObject::String(
+            vec![0x14, 0x15, b' '],
+            crate::pdf_native::StringFormat::Literal,
+        );
         let decoded = decode_text_operand(Some(&obj), Some(&font)).expect("decode");
         assert_eq!(decoded, "MN ");
     }
@@ -3758,9 +4046,40 @@ end
             "ToUnicode" => LoObject::Reference(tu_id),
         };
         let parsed = parse_to_unicode_cmap(&doc, &font_dict);
-        assert_eq!(parsed.get(&0x0001).map(String::as_str), Some("F"));
-        assert_eq!(parsed.get(&0x0002).map(String::as_str), Some("A"));
-        assert_eq!(parsed.get(&0x0003).map(String::as_str), Some("C"));
+        assert_eq!(parsed.get(1, 0x01).as_deref(), Some("F"));
+        assert_eq!(parsed.get(1, 0x02).as_deref(), Some("A"));
+        assert_eq!(parsed.get(1, 0x03).as_deref(), Some("C"));
+    }
+
+    #[test]
+    fn parse_to_unicode_cmap_supports_multiline_ranges_and_four_byte_codes() {
+        let mut doc = LoDocument::with_version("1.7");
+        let cmap = br#"1 beginbfchar
+<01020304> <D83DDE00>
+endbfchar
+2 beginbfrange
+<0001> <0003> <0041>
+<10> <12> [
+  <0061>
+  <0062>
+  <0063>
+]
+endbfrange
+"#;
+        let to_unicode_id = doc.add_object(LoStream::new(dictionary! {}, cmap.to_vec()));
+        let font_dict = dictionary! {
+            "ToUnicode" => LoObject::Reference(to_unicode_id),
+        };
+        let parsed = parse_to_unicode_cmap(&doc, &font_dict);
+        assert_eq!(parsed.get(4, 0x0102_0304).as_deref(), Some("😀"));
+        assert_eq!(parsed.get(2, 0x0001).as_deref(), Some("A"));
+        assert_eq!(parsed.get(2, 0x0003).as_deref(), Some("C"));
+        assert_eq!(parsed.get(1, 0x10).as_deref(), Some("a"));
+        assert_eq!(parsed.get(1, 0x12).as_deref(), Some("c"));
+        assert_eq!(
+            decode_with_to_unicode(&[1, 2, 3, 4], &parsed).as_deref(),
+            Some("😀")
+        );
     }
 
     #[test]
@@ -3775,7 +4094,7 @@ end
         font.metrics.code_encoding = PdfCharCodeWidthEncoding::TwoByteBigEndian;
         font.metrics.widths.insert(0x0041, 600.0); // 'A'
         font.metrics.widths.insert(0x0003, 250.0); // mapped space
-        font.to_unicode.insert(0x0003, " ".to_string());
+        font.to_unicode.insert(2, 0x0003, " ".to_string());
 
         let bytes = [0x00, 0x41, 0x00, 0x03, 0x00, 0x41];
         let tx = advance_from_pdf_codes(&bytes, &state, &font).expect("advance");
@@ -3878,7 +4197,10 @@ end
 
     #[test]
     fn decode_operand_codes_uses_two_byte_encoding() {
-        let obj = LoObject::String(vec![0x00, 0x41, 0x00, 0x42], lopdf::StringFormat::Literal);
+        let obj = LoObject::String(
+            vec![0x00, 0x41, 0x00, 0x42],
+            crate::pdf_native::StringFormat::Literal,
+        );
         let mut font = PdfFontResource::default();
         font.metrics.code_encoding = PdfCharCodeWidthEncoding::TwoByteBigEndian;
         let codes = decode_operand_codes(Some(&obj), Some(&font)).expect("codes");
@@ -3933,7 +4255,9 @@ end
 
         let pages = pdf_path_to_png_pages(&pdf_path, 120, None, true).expect("raster");
         assert_eq!(pages.len(), 1);
-        let img = image::load_from_memory(&pages[0]).expect("png").to_rgba8();
+        let img = crate::image_native::load_from_memory(&pages[0])
+            .expect("png")
+            .into_rgba8();
         assert!(
             !has_non_white_pixel(&img),
             "expected no visible text for Tr=3 mode"

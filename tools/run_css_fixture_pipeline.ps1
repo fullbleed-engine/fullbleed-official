@@ -18,12 +18,7 @@ function Sync-LocalPythonModule {
     Copy-Item -Force "target/release/fullbleed.dll" $targetPath
 }
 
-function Test-CommandAvailable {
-    param([Parameter(Mandatory = $true)][string]$Name)
-    return $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
-}
-
-function Test-MaturinDevelopEnv {
+function Test-EditableInstallEnv {
     if (-not [string]::IsNullOrWhiteSpace($env:VIRTUAL_ENV)) {
         return $true
     }
@@ -36,25 +31,14 @@ function Test-MaturinDevelopEnv {
     return $false
 }
 
-function Build-WithMaturinOrFallback {
-    $useFallback = $false
-
-    if (-not (Test-CommandAvailable -Name "maturin")) {
-        Write-Host "maturin not found on PATH; falling back to cargo release build with python feature."
-        $useFallback = $true
-    } elseif (-not (Test-MaturinDevelopEnv)) {
-        Write-Host "No active virtualenv/conda environment for maturin develop; using cargo release build with python feature."
-        $useFallback = $true
-    } else {
-        # Prefer maturin when possible, but it requires an active venv/conda environment.
-        & maturin develop --release --features python,svg_raster
+function Build-WithNativeBackendOrFallback {
+    if (Test-EditableInstallEnv) {
+        & python -m pip install --no-build-isolation --no-deps --editable .
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "maturin develop exited with code $LASTEXITCODE; falling back to cargo release build with python and svg_raster features."
-            $useFallback = $true
+            throw "native editable install failed with exit code $LASTEXITCODE"
         }
-    }
-
-    if ($useFallback) {
+    } else {
+        Write-Host "No active virtualenv/conda environment; syncing a Cargo release build into python/fullbleed."
         & cargo build -q --release --features python,svg_raster
         if ($LASTEXITCODE -ne 0) {
             throw "cargo build failed with exit code $LASTEXITCODE"
@@ -64,7 +48,7 @@ function Build-WithMaturinOrFallback {
 }
 
 if ($Build) {
-    Build-WithMaturinOrFallback
+    Build-WithNativeBackendOrFallback
 } else {
     Write-Host "Skipping build sync (use -Build to rebuild the Python extension)."
 }

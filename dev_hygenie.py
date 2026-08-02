@@ -52,7 +52,6 @@ GROUPS: dict[str, CleanupGroup] = {
         patterns=(
             "target",
             "crates/**/target",
-            ".maturin",
             "build",
             "dist/preflight_*",
         ),

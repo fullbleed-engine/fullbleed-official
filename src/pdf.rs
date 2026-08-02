@@ -3,13 +3,8 @@ use crate::debug::json_escape;
 use crate::font::{FontProgramKind, FontRegistry, RegisteredFont};
 use crate::metrics::{DocumentMetrics, PageMetrics};
 use crate::perf::PerfLogger;
-use crate::types::{Color, ColorSpace, MixBlendMode, Pt, Shading, ShadingStop, Size};
-use base64::Engine;
-use fixed::types::I32F32;
-use image::GenericImageView;
-use rustybuzz::{
-    Face as HbFace, Language as HbLanguage, Script as HbScript, ShapePlan, UnicodeBuffer,
-};
+use crate::sfnt::{Face as SfntFace, GlyphId};
+use crate::types::{Color, ColorSpace, I32F32, MixBlendMode, Pt, Shading, ShadingStop, Size};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{self, Write};
 use std::path::Path;
@@ -269,8 +264,7 @@ struct StreamFont<'a> {
     start_id: usize,
     kind: StreamFontKind,
     glyph_map: BTreeMap<u16, String>,
-    face: Option<HbFace<'a>>,
-    plans: HashMap<(rustybuzz::Direction, HbScript, Option<HbLanguage>), ShapePlan>,
+    font_data: Option<&'a [u8]>,
 }
 
 impl StreamFont<'_> {
@@ -1141,8 +1135,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     out.push_str(&format!("{} 0 0 {} 0 0 cm\n", fmt(*x), fmt(*y)));
                 }
                 Command::Rotate(angle) => {
-                    let sin = libm::sinf(*angle);
-                    let cos = libm::cosf(*angle);
+                    let (sin, cos) = crate::math::sin_cos(*angle);
                     out.push_str(&format!(
                         "{} {} {} {} 0 0 cm\n",
                         fmt(cos),
@@ -1615,13 +1608,18 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         let smask = smask_id
             .map(|id| format!(" /SMask {} 0 R", id))
             .unwrap_or_default();
+        let decode = image
+            .decode
+            .map(|value| format!(" /Decode {value}"))
+            .unwrap_or_default();
         let dict = format!(
-            "/Type /XObject /Subtype /Image /Width {} /Height {} /ColorSpace {} /BitsPerComponent {} /Filter {}{}",
+            "/Type /XObject /Subtype /Image /Width {} /Height {} /ColorSpace {} /BitsPerComponent {} /Filter {}{}{}",
             image.width,
             image.height,
             image.color_space,
             image.bits_per_component,
             image.filter,
+            decode,
             smask
         );
         self.write_stream_object_bytes(obj_id, &dict, &image.data)
@@ -1705,7 +1703,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
 
         let mut kind = StreamFontKind::Type1;
         let mut encoding = FontEncoding::WinAnsi;
-        let mut face = None;
+        let mut font_data = None;
 
         if self.options.pdf_profile.requires_embedded_fonts() {
             let Some(registry) = self.registry else {
@@ -1732,7 +1730,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             {
                 kind = StreamFontKind::TrueTypeIdentityH;
                 encoding = FontEncoding::IdentityH;
-                face = HbFace::from_slice(&font.data, 0);
+                font_data = Some(font.data.as_slice());
             } else {
                 kind = StreamFontKind::TrueTypeWinAnsi;
                 encoding = FontEncoding::WinAnsi;
@@ -1746,7 +1744,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                         if matches!(font.program_kind, FontProgramKind::TrueType) {
                             kind = StreamFontKind::TrueTypeIdentityH;
                             encoding = FontEncoding::IdentityH;
-                            face = HbFace::from_slice(&font.data, 0);
+                            font_data = Some(font.data.as_slice());
                         } else {
                             // OpenType CFF: keep WinAnsi for now (no full Unicode CFF path yet).
                             kind = StreamFontKind::TrueTypeWinAnsi;
@@ -1772,8 +1770,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 start_id,
                 kind,
                 glyph_map: BTreeMap::new(),
-                face,
-                plans: HashMap::new(),
+                font_data,
             },
         );
         self.record_doc_font_usage(&logical_name);
@@ -2009,8 +2006,8 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         if !self.shaped_cache.contains_key(&key) {
             let shaped = {
                 let font_state = self.fonts.get_mut(font_key)?;
-                let face = font_state.face.as_ref()?;
-                let shaped = shape_text_with_plans(face, &mut font_state.plans, text)?;
+                let font_data = font_state.font_data?;
+                let shaped = shape_text_native(font_data, text)?;
                 for (gid, s) in &shaped.glyph_map {
                     font_state
                         .glyph_map
@@ -2082,37 +2079,21 @@ fn is_base14_font(name: &str) -> bool {
     )
 }
 
-fn shape_text_with_plans(
-    face: &HbFace<'_>,
-    plans: &mut HashMap<(rustybuzz::Direction, HbScript, Option<HbLanguage>), ShapePlan>,
-    text: &str,
-) -> Option<ShapedText> {
-    use rustybuzz::ttf_parser::GlyphId;
-
-    let units_per_em = face.units_per_em().max(1);
+fn shape_text_native(font_data: &[u8], text: &str) -> Option<ShapedText> {
+    let face = SfntFace::parse(font_data, 0).ok()?;
+    let shaped = crate::text_shape::shape(font_data, text)?;
+    let units_per_em = shaped.units_per_em.max(1);
     let scale = 1000.0 / units_per_em as f32;
-
-    let mut buffer = UnicodeBuffer::new();
-    buffer.push_str(text);
-    buffer.guess_segment_properties();
-
-    let dir = buffer.direction();
-    let script = buffer.script();
-    let lang = buffer.language();
-
-    let plan = plans
-        .entry((dir, script, lang.clone()))
-        .or_insert_with(|| ShapePlan::new(face, dir, Some(script), lang.as_ref(), &[]));
-
-    let output = rustybuzz::shape_with_plan(face, plan, buffer);
-    let infos = output.glyph_infos();
-    let positions = output.glyph_positions();
-    if infos.is_empty() || infos.len() != positions.len() {
+    if shaped.glyphs.is_empty() {
         return None;
     }
 
     // Build a map from glyph id -> source unicode string (cluster range).
-    let mut boundaries: Vec<usize> = infos.iter().map(|g| g.cluster as usize).collect();
+    let mut boundaries: Vec<usize> = shaped
+        .glyphs
+        .iter()
+        .map(|glyph| glyph.cluster as usize)
+        .collect();
     boundaries.sort_unstable();
     boundaries.dedup();
     if boundaries.last().copied() != Some(text.len()) {
@@ -2120,8 +2101,8 @@ fn shape_text_with_plans(
     }
 
     let mut glyph_map: BTreeMap<u16, String> = BTreeMap::new();
-    for info in infos {
-        let start = (info.cluster as usize).min(text.len());
+    for glyph in &shaped.glyphs {
+        let start = (glyph.cluster as usize).min(text.len());
         let idx = match boundaries.binary_search(&start) {
             Ok(i) => i,
             Err(i) => i,
@@ -2133,24 +2114,20 @@ fn shape_text_with_plans(
             .min(text.len());
         if start < end {
             glyph_map
-                .entry(info.glyph_id as u16)
+                .entry(glyph.glyph_id)
                 .or_insert_with(|| text[start..end].to_string());
         }
     }
 
     // Build a TJ array.
     let mut parts: Vec<String> = Vec::new();
-    for (info, pos) in output
-        .glyph_infos()
-        .iter()
-        .zip(output.glyph_positions().iter())
-    {
-        let gid = info.glyph_id as u16;
+    for glyph in &shaped.glyphs {
+        let gid = glyph.glyph_id;
         if gid == 0 {
             continue;
         }
 
-        let x_offset = (pos.x_offset as f32 * scale).round() as i32;
+        let x_offset = (glyph.x_offset as f32 * scale).round() as i32;
         if x_offset != 0 {
             parts.push(format!("{}", -x_offset));
         }
@@ -2158,7 +2135,7 @@ fn shape_text_with_plans(
 
         let adv_default = face.glyph_hor_advance(GlyphId(gid)).unwrap_or(0) as f32;
         let adv_default = (adv_default * scale).round() as i32;
-        let adv_shaped = (pos.x_advance as f32 * scale).round() as i32;
+        let adv_shaped = (glyph.x_advance as f32 * scale).round() as i32;
         let adjust = adv_default - adv_shaped;
         if adjust != 0 {
             parts.push(format!("{}", adjust));
@@ -2713,6 +2690,7 @@ struct ImageData {
     color_space: &'static str,
     bits_per_component: u8,
     filter: &'static str,
+    decode: Option<&'static str>,
     data: Vec<u8>,
     alpha: Option<AlphaData>,
 }
@@ -2738,22 +2716,25 @@ fn load_image(source: &str) -> Option<ImageData> {
 fn decode_image_bytes(data: &[u8], mime: Option<&str>) -> Option<ImageData> {
     let format = if let Some(mime) = mime {
         if mime.contains("png") {
-            Some(image::ImageFormat::Png)
+            Some(crate::image_native::ImageFormat::Png)
         } else if mime.contains("jpeg") || mime.contains("jpg") {
-            Some(image::ImageFormat::Jpeg)
+            Some(crate::image_native::ImageFormat::Jpeg)
         } else {
             None
         }
     } else {
-        image::guess_format(data).ok()
+        crate::image_native::guess_format(data).ok()
     };
 
-    let decoded = image::load_from_memory(data).ok()?;
+    let decoded = crate::image_native::load_from_memory(data).ok()?;
     let (width, height) = decoded.dimensions();
 
-    if matches!(format, Some(image::ImageFormat::Jpeg)) {
+    if matches!(format, Some(crate::image_native::ImageFormat::Jpeg)) {
         let color_space = match decoded.color() {
-            image::ColorType::L8 | image::ColorType::La8 => "/DeviceGray",
+            crate::image_native::ImageColor::Gray | crate::image_native::ImageColor::GrayAlpha => {
+                "/DeviceGray"
+            }
+            crate::image_native::ImageColor::Cmyk => "/DeviceCMYK",
             _ => "/DeviceRGB",
         };
         return Some(ImageData {
@@ -2762,6 +2743,9 @@ fn decode_image_bytes(data: &[u8], mime: Option<&str>) -> Option<ImageData> {
             color_space,
             bits_per_component: 8,
             filter: "/DCTDecode",
+            decode: (matches!(decoded.color(), crate::image_native::ImageColor::Cmyk)
+                && decoded.jpeg_adobe_transform().is_some())
+            .then_some("[1 0 1 0 1 0 1 0]"),
             data: data.to_vec(),
             alpha: None,
         });
@@ -2798,6 +2782,7 @@ fn decode_image_bytes(data: &[u8], mime: Option<&str>) -> Option<ImageData> {
         color_space: "/DeviceRGB",
         bits_per_component: 8,
         filter: "/FlateDecode",
+        decode: None,
         data: compressed,
         alpha,
     })
@@ -2820,9 +2805,7 @@ fn parse_data_uri(uri: &str) -> Option<(String, Vec<u8>)> {
         .unwrap_or("application/octet-stream")
         .to_string();
     let data = if header.contains("base64") {
-        base64::engine::general_purpose::STANDARD
-            .decode(data_part)
-            .ok()?
+        crate::base64::decode_standard(data_part).ok()?
     } else {
         data_part.as_bytes().to_vec()
     };
@@ -3039,8 +3022,7 @@ fn render_page(
                 out.push_str(&format!("{} 0 0 {} 0 0 cm\n", fmt(*x), fmt(*y)));
             }
             Command::Rotate(angle) => {
-                let sin = libm::sinf(*angle);
-                let cos = libm::cosf(*angle);
+                let (sin, cos) = crate::math::sin_cos(*angle);
                 out.push_str(&format!(
                     "{} {} {} {} 0 0 cm\n",
                     fmt(cos),
@@ -4111,26 +4093,34 @@ fn encode_cid_hex(text: &str, glyph_map: Option<&BTreeMap<u16, String>>) -> Stri
 
 #[allow(dead_code)]
 fn shape_text_to_glyph_map(font_data: &[u8], text: &str) -> Option<BTreeMap<u16, String>> {
-    let face = HbFace::from_slice(font_data, 0)?;
-    let mut buffer = UnicodeBuffer::new();
-    buffer.set_direction(detect_direction(text));
-    buffer.push_str(text);
-    let output = rustybuzz::shape(&face, &[], buffer);
-    let infos = output.glyph_infos();
-    if infos.is_empty() {
+    let shaped = crate::text_shape::shape(font_data, text)?;
+    if shaped.glyphs.is_empty() {
         return None;
     }
     let mut map: BTreeMap<u16, String> = BTreeMap::new();
-    let mut clusters: Vec<usize> = infos.iter().map(|g| g.cluster as usize).collect();
-    clusters.push(text.len());
-    for i in 0..infos.len() {
-        let start = clusters[i].min(text.len());
-        let end = clusters[i + 1].min(text.len());
+    let mut clusters: Vec<usize> = shaped
+        .glyphs
+        .iter()
+        .map(|glyph| glyph.cluster as usize)
+        .collect();
+    clusters.sort_unstable();
+    clusters.dedup();
+    if clusters.last().copied() != Some(text.len()) {
+        clusters.push(text.len());
+    }
+    for glyph in &shaped.glyphs {
+        let start = (glyph.cluster as usize).min(text.len());
+        let boundary = clusters.binary_search(&start).unwrap_or_else(|index| index);
+        let end = clusters
+            .get(boundary + 1)
+            .copied()
+            .unwrap_or(text.len())
+            .min(text.len());
         if start >= end {
             continue;
         }
         let s = text[start..end].to_string();
-        let gid = infos[i].glyph_id as u16;
+        let gid = glyph.glyph_id;
         if gid != 0 {
             map.entry(gid).or_insert(s);
         }
@@ -4146,34 +4136,27 @@ fn shape_text_to_tj(
     text: &str,
 ) -> Option<String> {
     let font = registry.resolve(font_name)?;
-    let face = HbFace::from_slice(&font.data, 0)?;
-    let units_per_em = face.units_per_em().max(1);
+    let shaped = crate::text_shape::shape(&font.data, text)?;
+    let units_per_em = shaped.units_per_em.max(1);
     let scale = 1000.0 / units_per_em as f32;
-
-    let mut buffer = UnicodeBuffer::new();
-    buffer.set_direction(detect_direction(text));
-    buffer.push_str(text);
-    let output = rustybuzz::shape(&face, &[], buffer);
-    let infos = output.glyph_infos();
-    let positions = output.glyph_positions();
-    if infos.is_empty() || infos.len() != positions.len() {
+    if shaped.glyphs.is_empty() {
         return None;
     }
 
     let mut parts: Vec<String> = Vec::new();
-    for (info, pos) in infos.iter().zip(positions.iter()) {
-        let gid = info.glyph_id as u16;
+    for glyph in &shaped.glyphs {
+        let gid = glyph.glyph_id;
         if gid == 0 {
             continue;
         }
-        let x_offset = (pos.x_offset as f32 * scale).round() as i32;
+        let x_offset = (glyph.x_offset as f32 * scale).round() as i32;
         if x_offset != 0 {
             parts.push(format!("{}", -x_offset));
         }
         parts.push(format!("<{:04X}>", gid));
 
         let adv_default = registry.glyph_advance(font_name, gid) as i32;
-        let adv_shaped = (pos.x_advance as f32 * scale).round() as i32;
+        let adv_shaped = (glyph.x_advance as f32 * scale).round() as i32;
         let adjust = adv_default - adv_shaped;
         if adjust != 0 {
             parts.push(format!("{}", adjust));
@@ -4186,31 +4169,13 @@ fn shape_text_to_tj(
     Some(format!("[{}] TJ\n", parts.join(" ")))
 }
 
-#[allow(dead_code)]
-fn detect_direction(text: &str) -> rustybuzz::Direction {
-    for ch in text.chars() {
-        let code = ch as u32;
-        let rtl = matches!(
-            code,
-            0x0590..=0x08FF
-                | 0xFB1D..=0xFDFF
-                | 0xFE70..=0xFEFF
-                | 0x1EE00..=0x1EEFF
-        );
-        if rtl {
-            return rustybuzz::Direction::RightToLeft;
-        }
-    }
-    rustybuzz::Direction::LeftToRight
-}
-
 fn fmt(value: f32) -> String {
     if !value.is_finite() {
         return "0".to_string();
     }
     let fixed = I32F32::from_num(value);
-    let scaled = (fixed * I32F32::from_num(1000)).round();
-    let milli: i64 = scaled.to_num();
+    let scaled = (fixed * I32F32::from_num(1000.0)).round();
+    let milli = scaled.to_i64_floor();
     format_milli(milli)
 }
 
@@ -4300,6 +4265,7 @@ fn color_to_pdf_stroke(color: Color, space: ColorSpace) -> String {
 mod tests {
     use super::*;
     use crate::canvas::Page;
+    use crate::pdf_native::{Document as LoDocument, Object as LoObject};
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -4329,7 +4295,7 @@ mod tests {
     }
 
     fn page_content_bytes(bytes: &[u8]) -> Vec<u8> {
-        let doc = lopdf::Document::load_mem(bytes).expect("load pdf");
+        let doc = LoDocument::load_mem(bytes).expect("load pdf");
         let mut out = Vec::new();
         for (_, page_id) in doc.get_pages() {
             let content = doc.get_page_content(page_id).expect("page content");
@@ -4345,7 +4311,7 @@ mod tests {
     }
 
     fn first_page_content_filter(bytes: &[u8]) -> Option<Vec<u8>> {
-        let doc = lopdf::Document::load_mem(bytes).expect("load pdf");
+        let doc = LoDocument::load_mem(bytes).expect("load pdf");
         let page_id = *doc
             .get_pages()
             .values()
@@ -4353,12 +4319,12 @@ mod tests {
             .expect("at least one page expected");
         let page = doc
             .get_object(page_id)
-            .and_then(lopdf::Object::as_dict)
+            .and_then(LoObject::as_dict)
             .expect("page dict");
         let contents = page.get(b"Contents").expect("page contents");
         let content_id = match contents {
-            lopdf::Object::Reference(id) => *id,
-            lopdf::Object::Array(arr) => arr
+            LoObject::Reference(id) => *id,
+            LoObject::Array(arr) => arr
                 .first()
                 .and_then(|o| o.as_reference().ok())
                 .expect("content array has reference"),
@@ -4366,11 +4332,11 @@ mod tests {
         };
         let stream = doc
             .get_object(content_id)
-            .and_then(lopdf::Object::as_stream)
+            .and_then(LoObject::as_stream)
             .expect("content stream");
         match stream.dict.get(b"Filter") {
-            Ok(lopdf::Object::Name(name)) => Some(name.clone()),
-            Ok(lopdf::Object::Array(arr)) => arr
+            Ok(LoObject::Name(name)) => Some(name.clone()),
+            Ok(LoObject::Array(arr)) => arr
                 .first()
                 .and_then(|o| o.as_name().ok())
                 .map(|n| n.to_vec()),

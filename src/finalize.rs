@@ -1,10 +1,10 @@
+use crate::pdf_native::{
+    Dictionary as LoDictionary, Document as LoDocument, Error as LoError, Object as LoObject,
+    ObjectId as LoObjectId, Stream as LoStream, dictionary,
+};
 use crate::{
     Command, Document, FullBleedError, PdfInspectError, PdfInspectErrorCode,
     composition_compatibility_issues, inspect_pdf_path,
-};
-use lopdf::{
-    Document as LoDocument, Object as LoObject, ObjectId as LoObjectId, Stream as LoStream,
-    dictionary,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -86,7 +86,7 @@ pub enum ComposeAnnotationMode {
     CarryWidgets,
 }
 
-fn lopdf_err(err: lopdf::Error) -> FullBleedError {
+fn pdf_err(err: LoError) -> FullBleedError {
     FullBleedError::InvalidConfiguration(format!("pdf compose error: {err}"))
 }
 
@@ -128,32 +128,38 @@ fn preflight_finalize_pdf(
     Ok(report)
 }
 
-fn page_box(page: &lopdf::Dictionary) -> Vec<LoObject> {
-    if let Ok(arr) = page.get(b"CropBox").and_then(LoObject::as_array) {
+fn page_box(doc: &LoDocument, page_id: LoObjectId) -> Vec<LoObject> {
+    if let Ok(arr) = doc
+        .get_page_attribute(page_id, b"CropBox")
+        .and_then(LoObject::as_array)
+    {
         return arr.clone();
     }
-    if let Ok(arr) = page.get(b"MediaBox").and_then(LoObject::as_array) {
+    if let Ok(arr) = doc
+        .get_page_attribute(page_id, b"MediaBox")
+        .and_then(LoObject::as_array)
+    {
         return arr.clone();
     }
     vec![0.into(), 0.into(), 612.into(), 792.into()]
 }
 
-fn page_resources_object(doc: &LoDocument, page: &lopdf::Dictionary) -> LoObject {
-    match page.get(b"Resources") {
+fn page_resources_object(doc: &LoDocument, page_id: LoObjectId) -> LoObject {
+    match doc.get_page_attribute(page_id, b"Resources") {
         Ok(obj) => match obj {
             LoObject::Reference(id) => doc
                 .get_object(*id)
                 .map(|o| o.clone())
-                .unwrap_or_else(|_| LoObject::Dictionary(lopdf::Dictionary::new())),
+                .unwrap_or_else(|_| LoObject::Dictionary(LoDictionary::new())),
             LoObject::Dictionary(d) => LoObject::Dictionary(d.clone()),
-            _ => LoObject::Dictionary(lopdf::Dictionary::new()),
+            _ => LoObject::Dictionary(LoDictionary::new()),
         },
-        Err(_) => LoObject::Dictionary(lopdf::Dictionary::new()),
+        Err(_) => LoObject::Dictionary(LoDictionary::new()),
     }
 }
 
-fn page_resources_dict(page: &lopdf::Dictionary, doc: &LoDocument) -> lopdf::Dictionary {
-    match page.get(b"Resources") {
+fn page_resources_dict(doc: &LoDocument, page_id: LoObjectId) -> LoDictionary {
+    match doc.get_page_attribute(page_id, b"Resources") {
         Ok(LoObject::Dictionary(d)) => d.clone(),
         Ok(LoObject::Reference(id)) => doc
             .get_object(*id)
@@ -161,11 +167,11 @@ fn page_resources_dict(page: &lopdf::Dictionary, doc: &LoDocument) -> lopdf::Dic
             .and_then(|o| o.as_dict().ok())
             .cloned()
             .unwrap_or_default(),
-        _ => lopdf::Dictionary::new(),
+        _ => LoDictionary::new(),
     }
 }
 
-fn page_xobject_dict(resources: &lopdf::Dictionary, doc: &LoDocument) -> lopdf::Dictionary {
+fn page_xobject_dict(resources: &LoDictionary, doc: &LoDocument) -> LoDictionary {
     match resources.get(b"XObject") {
         Ok(LoObject::Dictionary(d)) => d.clone(),
         Ok(LoObject::Reference(id)) => doc
@@ -174,7 +180,7 @@ fn page_xobject_dict(resources: &lopdf::Dictionary, doc: &LoDocument) -> lopdf::
             .and_then(|o| o.as_dict().ok())
             .cloned()
             .unwrap_or_default(),
-        _ => lopdf::Dictionary::new(),
+        _ => LoDictionary::new(),
     }
 }
 
@@ -185,7 +191,7 @@ fn resolve_finalize_object<'a>(
     loop {
         match obj {
             LoObject::Reference(id) => {
-                obj = doc.get_object(*id).map_err(lopdf_err)?;
+                obj = doc.get_object(*id).map_err(pdf_err)?;
             }
             _ => return Ok(obj),
         }
@@ -205,7 +211,7 @@ fn object_is_name(doc: &LoDocument, obj: &LoObject, expected: &[u8]) -> bool {
 fn annotation_allowed_for_mode(
     mode: ComposeAnnotationMode,
     doc: &LoDocument,
-    annot_dict: &lopdf::Dictionary,
+    annot_dict: &LoDictionary,
 ) -> bool {
     let subtype_obj = match annot_dict.get(b"Subtype") {
         Ok(obj) => obj,
@@ -222,7 +228,7 @@ fn annotation_allowed_for_mode(
 
 fn clone_template_annotations_for_output_page(
     doc: &mut LoDocument,
-    template_page: &lopdf::Dictionary,
+    template_page: &LoDictionary,
     output_page_id: LoObjectId,
     mode: ComposeAnnotationMode,
 ) -> Result<Option<LoObject>, FullBleedError> {
@@ -290,8 +296,8 @@ pub fn stamp_overlay_on_template_pdf(
     let template_meta = preflight_finalize_pdf(template_pdf, "template")?;
     let overlay_meta = preflight_finalize_pdf(overlay_pdf, "overlay")?;
 
-    let mut template = LoDocument::load(template_pdf).map_err(lopdf_err)?;
-    let mut overlay = LoDocument::load(overlay_pdf).map_err(lopdf_err)?;
+    let mut template = LoDocument::load(template_pdf).map_err(pdf_err)?;
+    let mut overlay = LoDocument::load(overlay_pdf).map_err(pdf_err)?;
 
     let template_pages = template.get_pages();
     let template_count = template_meta.page_count;
@@ -317,16 +323,11 @@ pub fn stamp_overlay_on_template_pdf(
         let template_page_id = template_ids[*tpl_i];
         let overlay_page_id = overlay_ids[*ovl_i];
 
-        let overlay_page = template
-            .get_object(overlay_page_id)
-            .and_then(LoObject::as_dict)
-            .map_err(lopdf_err)?
-            .clone();
         let overlay_content = template
             .get_page_content(overlay_page_id)
-            .map_err(lopdf_err)?;
-        let bbox = page_box(&overlay_page);
-        let overlay_resources = page_resources_object(&template, &overlay_page);
+            .map_err(pdf_err)?;
+        let bbox = page_box(&template, overlay_page_id);
+        let overlay_resources = page_resources_object(&template, overlay_page_id);
 
         let form_stream = LoStream::new(
             dictionary! {
@@ -341,12 +342,7 @@ pub fn stamp_overlay_on_template_pdf(
         let form_id = template.add_object(form_stream);
         let form_name = format!("FB_OVL_{}", out_idx + 1);
 
-        let page_dict = template
-            .get_object(template_page_id)
-            .and_then(LoObject::as_dict)
-            .map_err(lopdf_err)?
-            .clone();
-        let mut resources = page_resources_dict(&page_dict, &template);
+        let mut resources = page_resources_dict(&template, template_page_id);
         let mut xobjects = page_xobject_dict(&resources, &template);
         xobjects.set(form_name.as_bytes().to_vec(), LoObject::Reference(form_id));
         resources.set("XObject", LoObject::Dictionary(xobjects));
@@ -355,20 +351,20 @@ pub fn stamp_overlay_on_template_pdf(
             let page_mut = template
                 .get_object_mut(template_page_id)
                 .and_then(LoObject::as_dict_mut)
-                .map_err(lopdf_err)?;
+                .map_err(pdf_err)?;
             page_mut.set("Resources", LoObject::Dictionary(resources));
         }
 
         let do_content = format!("q 1 0 0 1 {} {} cm /{} Do Q\n", dx, dy, form_name).into_bytes();
         template
             .add_page_contents(template_page_id, do_content)
-            .map_err(lopdf_err)?;
+            .map_err(pdf_err)?;
     }
 
     template.prune_objects();
     template.renumber_objects();
     template.compress();
-    template.save(out_pdf)?;
+    template.save(out_pdf).map_err(pdf_err)?;
 
     Ok(FinalizeStampSummary {
         pages_written: mapping.len(),
@@ -422,7 +418,7 @@ pub fn compose_overlay_with_template_catalog_with_annotation_mode(
             }
         }
 
-        let src = LoDocument::load(&asset.pdf_path).map_err(lopdf_err)?;
+        let src = LoDocument::load(&asset.pdf_path).map_err(pdf_err)?;
         let page_ids = import_document_objects(&mut composed, src)?;
         if let Some(expected) = asset.page_count {
             if expected != page_ids.len() {
@@ -438,7 +434,7 @@ pub fn compose_overlay_with_template_catalog_with_annotation_mode(
     }
 
     preflight_finalize_pdf(overlay_pdf, "overlay")?;
-    let overlay_src = LoDocument::load(overlay_pdf).map_err(lopdf_err)?;
+    let overlay_src = LoDocument::load(overlay_pdf).map_err(pdf_err)?;
     let overlay_pages = import_document_objects(&mut composed, overlay_src)?;
 
     for (idx, item) in plan.iter().enumerate() {
@@ -476,24 +472,18 @@ pub fn compose_overlay_with_template_catalog_with_annotation_mode(
         let template_page = composed
             .get_object(template_page_id)
             .and_then(LoObject::as_dict)
-            .map_err(lopdf_err)?
+            .map_err(pdf_err)?
             .clone();
-        let overlay_page = composed
-            .get_object(overlay_page_id)
-            .and_then(LoObject::as_dict)
-            .map_err(lopdf_err)?
-            .clone();
-
         let template_content = composed
             .get_page_content(template_page_id)
-            .map_err(lopdf_err)?;
+            .map_err(pdf_err)?;
         let overlay_content = composed
             .get_page_content(overlay_page_id)
-            .map_err(lopdf_err)?;
-        let template_bbox = page_box(&template_page);
-        let overlay_bbox = page_box(&overlay_page);
-        let template_resources = page_resources_object(&composed, &template_page);
-        let overlay_resources = page_resources_object(&composed, &overlay_page);
+            .map_err(pdf_err)?;
+        let template_bbox = page_box(&composed, template_page_id);
+        let overlay_bbox = page_box(&composed, overlay_page_id);
+        let template_resources = page_resources_object(&composed, template_page_id);
+        let overlay_resources = page_resources_object(&composed, overlay_page_id);
 
         let template_form_id = composed.add_object(LoStream::new(
             dictionary! {
@@ -570,7 +560,7 @@ pub fn compose_overlay_with_template_catalog_with_annotation_mode(
     composed.prune_objects();
     composed.renumber_objects();
     composed.compress();
-    composed.save(out_pdf)?;
+    composed.save(out_pdf).map_err(pdf_err)?;
 
     Ok(FinalizeComposeSummary {
         pages_written: plan.len(),
@@ -831,13 +821,13 @@ mod tests {
             "Type" => "Page",
             "Parent" => pages_id,
             "Contents" => content_id,
-            "Resources" => resources_id,
-            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
         });
         let pages = dictionary! {
             "Type" => "Pages",
             "Kids" => vec![page_id.into()],
             "Count" => 1,
+            "Resources" => resources_id,
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
         };
         doc.objects.insert(pages_id, LoObject::Dictionary(pages));
         let catalog_id = doc.add_object(dictionary! {

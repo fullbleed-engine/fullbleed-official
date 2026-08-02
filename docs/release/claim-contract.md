@@ -40,15 +40,17 @@ Claim:
 - SVG document input, inline SVG in HTML, and SVG assets are supported for
   common static vector content.
 - Distributed Python wheels enable `svg_raster`, so fallback-only SVG features
-  can rasterize in wheel builds.
+  rasterize through Fullbleed's dependency-free SVG compiler/Canvas pipeline.
 - `fullbleed capabilities --json` reports the compiled SVG raster feature and a
   native/fallback/known-loss feature matrix.
 
 Boundary:
 
 - Native vector support is not full browser SVG.
-- SVG text, filters, masks, patterns, markers, symbols, `foreignObject`, and
-  transformed embedded SVG images require raster fallback or are known-loss.
+- Filters, masks, patterns, and markers require raster fallback.
+- SVG text/tspan runs, symbol/use viewports, and affine-transformed embedded
+  images use the native vector display list. `foreignObject` content remains
+  known-loss, matching the current static fallback renderer's behavior.
 
 ## Images
 

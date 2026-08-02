@@ -1,11 +1,15 @@
-#![allow(unsafe_op_in_unsafe_fn)]
-
 use crate::assets::{is_supported_font_path, resolve_image_asset};
 use crate::canvas::{
     META_DIAGNOSTIC_SCOPE_BEGIN_KEY, META_DIAGNOSTIC_SCOPE_END_KEY, META_FLOWABLE_BBOX_KEY,
     META_PAGINATION_EVENT_KEY,
 };
+use crate::html_dom::parse_html;
 use crate::jit::Transform;
+use crate::pdf_native::{Document as LoDocument, Error as LoError, Object as LoObject};
+use crate::python_abi::{
+    Bound, Py, PyAny, PyBytes, PyDict, PyErr, PyList, PyObject, PyRef, PyResult, PyValueError,
+    Python,
+};
 use crate::{
     A11yVerifierCoreReport, A11yVerifierEvidence, A11yVerifierFinding, Asset, AssetBundle,
     AssetKind, Color, ColorSpace, Command, Document, FullBleed, FullBleedBuilder, FullBleedError,
@@ -15,50 +19,17 @@ use crate::{
     composition_compatibility_issues, inspect_pdf_bytes, inspect_pdf_path,
     require_pdf_composition_compatibility,
 };
-use base64::Engine;
 use fullbleed_audit_contract as audit_contract;
-use kuchiki::traits::TendrilSink;
-use lopdf::{Document as LoDocument, Object as LoObject};
-use pyo3::exceptions::PyValueError;
-use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyBytes, PyDict, PyList, PyModule};
-use sha2::{Digest, Sha256};
+use fullbleed_audit_contract::sha256::Sha256;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-#[pyclass(name = "AssetKind")]
-struct PyAssetKind;
-
-#[pymethods]
-impl PyAssetKind {
-    #[allow(non_upper_case_globals)]
-    #[classattr]
-    const Css: &'static str = "css";
-    #[allow(non_upper_case_globals)]
-    #[classattr]
-    const Font: &'static str = "font";
-    #[allow(non_upper_case_globals)]
-    #[classattr]
-    const Image: &'static str = "image";
-    #[allow(non_upper_case_globals)]
-    #[classattr]
-    const Pdf: &'static str = "pdf";
-    #[allow(non_upper_case_globals)]
-    #[classattr]
-    const Svg: &'static str = "svg";
-    #[allow(non_upper_case_globals)]
-    #[classattr]
-    const Other: &'static str = "other";
-}
-
-#[pyclass(name = "Asset")]
 #[derive(Clone)]
 struct PyAsset {
     asset: Asset,
 }
 
-#[pymethods]
 impl PyAsset {
     fn info(&self, py: Python<'_>) -> PyResult<PyObject> {
         let info = PyDict::new(py);
@@ -140,15 +111,12 @@ impl PyAsset {
     }
 }
 
-#[pyclass(name = "AssetBundle")]
 #[derive(Clone, Default)]
 struct PyAssetBundle {
     bundle: AssetBundle,
 }
 
-#[pymethods]
 impl PyAssetBundle {
-    #[new]
     fn new() -> Self {
         Self {
             bundle: AssetBundle::default(),
@@ -159,7 +127,6 @@ impl PyAssetBundle {
         self.bundle.add(asset.asset.clone());
     }
 
-    #[pyo3(signature = (path, kind, name=None, trusted=false, remote=false))]
     fn add_file(
         &mut self,
         py: Python<'_>,
@@ -168,15 +135,14 @@ impl PyAssetBundle {
         name: Option<String>,
         trusted: bool,
         remote: bool,
-    ) -> PyResult<PyObject> {
+    ) -> PyResult<PyAsset> {
         let kind = parse_asset_kind(kind)?;
         let asset = build_asset(py, path, kind, name, trusted, remote)?;
         let wrapper = PyAsset {
             asset: asset.clone(),
         };
         self.bundle.add(asset);
-        let py_obj = Py::new(py, wrapper)?;
-        Ok(py_obj.into_any())
+        Ok(wrapper)
     }
 
     fn css(&self) -> String {
@@ -477,7 +443,6 @@ fn template_catalog_entries_to_py(
     Ok(out.unbind().into_any())
 }
 
-#[pyfunction]
 fn build_features(py: Python<'_>) -> PyResult<PyObject> {
     let out = PyDict::new(py);
     out.set_item("schema", "fullbleed.build_features.v1")?;
@@ -486,7 +451,6 @@ fn build_features(py: Python<'_>) -> PyResult<PyObject> {
     Ok(out.unbind().into_any())
 }
 
-#[pyfunction]
 fn inspect_pdf(py: Python<'_>, path: &str) -> PyResult<PyObject> {
     let report = inspect_pdf_path(Path::new(path)).map_err(pdf_inspect_err_to_py)?;
     let out = inspect_report_to_py(py, path, &report)?;
@@ -495,7 +459,6 @@ fn inspect_pdf(py: Python<'_>, path: &str) -> PyResult<PyObject> {
     Ok(out)
 }
 
-#[pyfunction]
 fn extract_pdf_page_texts(py: Python<'_>, pdf_path: &str) -> PyResult<PyObject> {
     let path = Path::new(pdf_path);
     let out = PyDict::new(py);
@@ -587,10 +550,10 @@ fn extract_pdf_page_texts(py: Python<'_>, pdf_path: &str) -> PyResult<PyObject> 
     Ok(out.unbind().into_any())
 }
 
-fn resolve_lopdf_obj<'a>(
+fn resolve_pdf_obj<'a>(
     doc: &'a LoDocument,
     mut obj: &'a LoObject,
-) -> Result<&'a LoObject, lopdf::Error> {
+) -> Result<&'a LoObject, LoError> {
     loop {
         match obj {
             LoObject::Reference(id) => {
@@ -603,7 +566,7 @@ fn resolve_lopdf_obj<'a>(
 
 fn read_pdf_catalog_flags(
     path: &Path,
-) -> Result<(LoDocument, bool, bool, bool, bool, bool, usize), lopdf::Error> {
+) -> Result<(LoDocument, bool, bool, bool, bool, bool, usize), LoError> {
     let doc = LoDocument::load(path)?;
     let page_count = doc.get_pages().len();
     let mut struct_tree_root_present = false;
@@ -613,7 +576,7 @@ fn read_pdf_catalog_flags(
     let mut title_token_present = false;
 
     if let Ok(root_obj) = doc.trailer.get(b"Root") {
-        let root_obj = resolve_lopdf_obj(&doc, root_obj)?;
+        let root_obj = resolve_pdf_obj(&doc, root_obj)?;
         if let Ok(root_dict) = root_obj.as_dict() {
             if root_dict.get(b"StructTreeRoot").is_ok() {
                 struct_tree_root_present = true;
@@ -623,7 +586,7 @@ fn read_pdf_catalog_flags(
             }
             if let Ok(mark_info_obj) = root_dict.get(b"MarkInfo") {
                 mark_info_present = true;
-                let mark_info_obj = resolve_lopdf_obj(&doc, mark_info_obj)?;
+                let mark_info_obj = resolve_pdf_obj(&doc, mark_info_obj)?;
                 if let Ok(mark_info_dict) = mark_info_obj.as_dict() {
                     if let Ok(LoObject::Boolean(v)) = mark_info_dict.get(b"Marked") {
                         marked_true_present = *v;
@@ -633,7 +596,7 @@ fn read_pdf_catalog_flags(
         }
     }
     if let Ok(info_obj) = doc.trailer.get(b"Info") {
-        let info_obj = resolve_lopdf_obj(&doc, info_obj)?;
+        let info_obj = resolve_pdf_obj(&doc, info_obj)?;
         if let Ok(info_dict) = info_obj.as_dict() {
             if info_dict.get(b"Title").is_ok() {
                 title_token_present = true;
@@ -651,7 +614,6 @@ fn read_pdf_catalog_flags(
     ))
 }
 
-#[pyfunction]
 fn export_pdf_reading_order_trace(py: Python<'_>, pdf_path: &str) -> PyResult<PyObject> {
     let path = Path::new(pdf_path);
     let out = PyDict::new(py);
@@ -739,7 +701,6 @@ fn export_pdf_reading_order_trace(py: Python<'_>, pdf_path: &str) -> PyResult<Py
     Ok(out.unbind().into_any())
 }
 
-#[pyfunction]
 fn export_pdf_structure_trace(py: Python<'_>, pdf_path: &str) -> PyResult<PyObject> {
     let path = Path::new(pdf_path);
     let out = PyDict::new(py);
@@ -823,8 +784,6 @@ fn export_pdf_structure_trace(py: Python<'_>, pdf_path: &str) -> PyResult<PyObje
     Ok(out.unbind().into_any())
 }
 
-#[pyfunction]
-#[pyo3(signature = (pdf_path, mode="error"))]
 fn verify_pdf_ua_seed(py: Python<'_>, pdf_path: &str, mode: &str) -> PyResult<PyObject> {
     let structure = export_pdf_structure_trace(py, pdf_path)?;
     let reading = export_pdf_reading_order_trace(py, pdf_path)?;
@@ -1038,7 +997,6 @@ fn verify_pdf_ua_seed(py: Python<'_>, pdf_path: &str, mode: &str) -> PyResult<Py
     Ok(out.unbind().into_any())
 }
 
-#[pyfunction]
 fn inspect_template_catalog(
     py: Python<'_>,
     templates: Vec<(String, String)>,
@@ -1047,8 +1005,6 @@ fn inspect_template_catalog(
     template_catalog_entries_to_py(py, &entries)
 }
 
-#[pyfunction]
-#[pyo3(signature = (source, kind, name=None, trusted=false, remote=false))]
 fn vendored_asset(
     py: Python<'_>,
     source: &str,
@@ -1062,7 +1018,6 @@ fn vendored_asset(
     Ok(PyAsset { asset })
 }
 
-#[pyfunction]
 fn fetch_asset(py: Python<'_>, url: &str) -> PyResult<Py<PyBytes>> {
     let urllib = py.import("urllib.request")?;
     let response = urllib.call_method1("urlopen", (url,))?;
@@ -1071,13 +1026,10 @@ fn fetch_asset(py: Python<'_>, url: &str) -> PyResult<Py<PyBytes>> {
     Ok(bytes.clone().unbind())
 }
 
-#[pyfunction]
 fn concat_css(parts: Vec<String>) -> PyResult<String> {
     Ok(parts.join("\n"))
 }
 
-#[pyfunction]
-#[pyo3(signature = (template, overlay, out, page_map=None, dx=0.0, dy=0.0))]
 fn finalize_stamp_pdf(
     template: &str,
     overlay: &str,
@@ -1103,8 +1055,6 @@ fn finalize_stamp_pdf(
     })
 }
 
-#[pyfunction]
-#[pyo3(signature = (templates, plan, overlay, out, annotation_mode=None))]
 fn finalize_compose_pdf(
     templates: Vec<(String, String)>,
     plan: Vec<(String, usize, usize, f32, f32)>,
@@ -1458,7 +1408,6 @@ fn parse_layout_strategy(raw: &str) -> PyResult<LayoutStrategy> {
     }
 }
 
-#[pyclass(name = "WatermarkSpec")]
 #[derive(Clone)]
 struct PyWatermarkSpec {
     kind: String,
@@ -1472,20 +1421,7 @@ struct PyWatermarkSpec {
     color: Option<String>,
 }
 
-#[pymethods]
 impl PyWatermarkSpec {
-    #[new]
-    #[pyo3(signature = (
-        kind,
-        value,
-        layer="overlay",
-        semantics=None,
-        opacity=0.15,
-        rotation_deg=0.0,
-        font_name=None,
-        font_size=None,
-        color=None
-    ))]
     fn new(
         kind: String,
         value: String,
@@ -1540,13 +1476,11 @@ fn load_output_intent_profile(source: &str) -> PyResult<Vec<u8>> {
             PyValueError::new_err("output_intent_icc data URI is missing payload")
         })?;
         if header.contains("base64") {
-            return base64::engine::general_purpose::STANDARD
-                .decode(payload)
-                .map_err(|err| {
-                    PyValueError::new_err(format!(
-                        "failed to decode base64 output_intent_icc data URI: {err}"
-                    ))
-                });
+            return crate::base64::decode_standard(payload).map_err(|err| {
+                PyValueError::new_err(format!(
+                    "failed to decode base64 output_intent_icc data URI: {err}"
+                ))
+            });
         }
         return Ok(payload.as_bytes().to_vec());
     }
@@ -3072,7 +3006,7 @@ fn build_render_time_asset_resolution_trace_py(
     out.set_item("extractor", "html_image_sources")?;
     out.set_item("source", "engine_render_time")?;
 
-    let document = kuchiki::parse_html().one(html);
+    let document = parse_html(html);
     let mut references: BTreeMap<String, usize> = BTreeMap::new();
     if let Ok(images) = document.select("img[src]") {
         for image in images {
@@ -3192,9 +3126,7 @@ fn parse_trace_fields(raw: &str) -> HashMap<&str, &str> {
 
 fn trace_b64_string(fields: &HashMap<&str, &str>, key: &str) -> Option<String> {
     let raw = *fields.get(key)?;
-    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(raw)
-        .ok()?;
+    let bytes = crate::base64::decode_url_safe_no_pad(raw).ok()?;
     String::from_utf8(bytes).ok()
 }
 
@@ -4130,7 +4062,6 @@ fn glyph_report_to_py(py: Python<'_>, report: &GlyphCoverageReport) -> PyResult<
     Ok(list.unbind().into_any())
 }
 
-#[pyclass]
 struct PdfEngine {
     engine: FullBleed,
     builder: FullBleedBuilder,
@@ -4419,7 +4350,6 @@ fn section508_html_coverage_summary_to_py(
     Ok(out.unbind().into_any())
 }
 
-#[pyfunction]
 fn audit_contract_metadata(py: Python<'_>) -> PyResult<PyObject> {
     let meta = audit_contract::metadata();
     let out = PyDict::new(py);
@@ -4459,14 +4389,12 @@ fn audit_contract_metadata(py: Python<'_>) -> PyResult<PyObject> {
     Ok(out.unbind().into_any())
 }
 
-#[pyfunction]
 fn audit_contract_registry(name: &str) -> PyResult<String> {
     audit_contract::registry_json(name)
         .map(|s| s.to_string())
         .ok_or_else(|| PyValueError::new_err(format!("unknown audit contract registry: {name}")))
 }
 
-#[pyfunction]
 fn audit_contract_wcag20aa_coverage(
     py: Python<'_>,
     findings: &Bound<'_, PyAny>,
@@ -4501,7 +4429,6 @@ fn audit_contract_wcag20aa_coverage(
     wcag20aa_coverage_summary_to_py(py, &summary)
 }
 
-#[pyfunction]
 fn audit_contract_section508_html_coverage(
     py: Python<'_>,
     findings: &Bound<'_, PyAny>,
@@ -4595,17 +4522,14 @@ fn _percentile(sorted: &[f64], q: f64) -> f64 {
     sorted[idx.min(sorted.len() - 1)]
 }
 
-fn _load_preview_luma_image(path: &str) -> Result<image::GrayImage, String> {
-    image::ImageReader::open(path)
-        .map_err(|e| format!("failed to open preview PNG: {e}"))?
-        .with_guessed_format()
-        .map_err(|e| format!("failed to detect preview image format: {e}"))?
-        .decode()
+fn _load_preview_luma_image(path: &str) -> Result<crate::image_native::GrayImage, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("failed to open preview PNG: {e}"))?;
+    crate::image_native::load_from_memory(&bytes)
         .map_err(|e| format!("failed to decode preview image: {e}"))
-        .map(|img| img.to_luma8())
+        .map(|image| image.to_luma8())
 }
 
-fn _ink_ratio(gray: &image::GrayImage, threshold: u8) -> f64 {
+fn _ink_ratio(gray: &crate::image_native::GrayImage, threshold: u8) -> f64 {
     let (width, height) = gray.dimensions();
     let total = (width as u64) * (height as u64);
     if total == 0 {
@@ -4615,7 +4539,12 @@ fn _ink_ratio(gray: &image::GrayImage, threshold: u8) -> f64 {
     ink as f64 / total as f64
 }
 
-fn _band_ink_ratio(gray: &image::GrayImage, top: u32, bottom: u32, threshold: u8) -> f64 {
+fn _band_ink_ratio(
+    gray: &crate::image_native::GrayImage,
+    top: u32,
+    bottom: u32,
+    threshold: u8,
+) -> f64 {
     let (width, height) = gray.dimensions();
     if width == 0 || height == 0 || top >= bottom || top >= height {
         return 0.0;
@@ -4637,7 +4566,7 @@ fn _band_ink_ratio(gray: &image::GrayImage, top: u32, bottom: u32, threshold: u8
 }
 
 fn _grid_occupancy(
-    gray: &image::GrayImage,
+    gray: &crate::image_native::GrayImage,
     cols: u32,
     rows: u32,
     threshold: u8,
@@ -4686,22 +4615,12 @@ fn analyze_sparse_page_visual_pair(
     let source = if source.dimensions() == (target_width, target_height) {
         source
     } else {
-        image::imageops::resize(
-            &source,
-            target_width,
-            target_height,
-            image::imageops::FilterType::Triangle,
-        )
+        crate::image_native::resize_triangle_gray(&source, target_width, target_height)
     };
     let render = if render.dimensions() == (target_width, target_height) {
         render
     } else {
-        image::imageops::resize(
-            &render,
-            target_width,
-            target_height,
-            image::imageops::FilterType::Triangle,
-        )
+        crate::image_native::resize_triangle_gray(&render, target_width, target_height)
     };
 
     let ink_threshold = 245u8;
@@ -4823,13 +4742,11 @@ fn analyze_sparse_page_visual_pair(
 }
 
 fn analyze_render_contrast_seed_png(path: &str) -> Result<RenderContrastSeedAnalysis, String> {
-    let img = image::ImageReader::open(path)
-        .map_err(|e| format!("failed to open render preview PNG: {e}"))?
-        .with_guessed_format()
-        .map_err(|e| format!("failed to detect render preview image format: {e}"))?
-        .decode()
-        .map_err(|e| format!("failed to decode render preview image: {e}"))?;
-    let rgba = img.to_rgba8();
+    let bytes =
+        std::fs::read(path).map_err(|e| format!("failed to open render preview PNG: {e}"))?;
+    let rgba = crate::image_native::load_from_memory(&bytes)
+        .map_err(|e| format!("failed to decode render preview image: {e}"))?
+        .into_rgba8();
     let (width, height) = rgba.dimensions();
     let mut lumas: Vec<f64> = Vec::with_capacity((width as usize) * (height as usize));
     for px in rgba.pixels() {
@@ -4980,13 +4897,11 @@ fn sparse_page_visual_pair_analysis_to_py(
     Ok(out.unbind().into_any())
 }
 
-#[pyfunction]
 fn audit_contrast_render_png(py: Python<'_>, png_path: &str) -> PyResult<PyObject> {
     let analysis = analyze_render_contrast_seed_png(png_path).map_err(PyValueError::new_err)?;
     render_contrast_seed_analysis_to_py(py, &analysis)
 }
 
-#[pyfunction]
 fn audit_sparse_page_visual_pair(
     py: Python<'_>,
     source_png_path: &str,
@@ -9227,79 +9142,7 @@ fn build_pmr_report_py(
     Ok(report.unbind().into_any())
 }
 
-#[pymethods]
 impl PdfEngine {
-    #[new]
-    #[pyo3(
-        signature = (
-            page_width=None,
-            page_height=None,
-            margin=None,
-            page_margins=None,
-            font_dirs=None,
-            font_files=None,
-            reuse_xobjects=true,
-            svg_form_xobjects=false,
-            svg_raster_fallback=false,
-            unicode_support=true,
-            shape_text=true,
-            unicode_metrics=true,
-            pdf_version=None,
-            pdf_profile=None,
-            output_intent_icc=None,
-            output_intent_identifier=None,
-            output_intent_info=None,
-            output_intent_components=None,
-            color_space=None,
-            document_lang=None,
-            document_title=None,
-            header_first=None,
-            header_each=None,
-            header_last=None,
-            header_x=None,
-            header_y_from_top=None,
-            header_font_name=None,
-            header_font_size=None,
-            header_color=None,
-            header_html_first=None,
-            header_html_each=None,
-            header_html_last=None,
-            header_html_x=None,
-            header_html_y_from_top=None,
-            header_html_width=None,
-            header_html_height=None,
-            footer_first=None,
-            footer_each=None,
-            footer_last=None,
-            footer_x=None,
-            footer_y_from_bottom=None,
-            footer_font_name=None,
-            footer_font_size=None,
-            footer_color=None,
-            watermark=None,
-            watermark_text=None,
-            watermark_html=None,
-            watermark_image=None,
-            watermark_layer="overlay",
-            watermark_semantics="artifact",
-            watermark_opacity=0.15,
-            watermark_rotation=0.0,
-            watermark_font_name=None,
-            watermark_font_size=None,
-            watermark_color=None,
-            paginated_context=None,
-            template_binding=None,
-            layout_strategy=None,
-            accept_lazy_layout_cost=false,
-            lazy_max_passes=4,
-            lazy_budget_ms=50.0,
-            jit_mode=None,
-            debug=false,
-            debug_out=None,
-            perf=false,
-            perf_out=None
-        )
-    )]
     fn new(
         page_width: Option<&Bound<'_, PyAny>>,
         page_height: Option<&Bound<'_, PyAny>>,
@@ -9648,14 +9491,12 @@ impl PdfEngine {
         self.rebuild_from_builder()
     }
 
-    #[getter]
     fn document_lang(&self) -> Option<String> {
         self.builder
             .document_lang_value()
             .map(std::string::ToString::to_string)
     }
 
-    #[setter(document_lang)]
     fn set_document_lang(&mut self, value: Option<String>) -> PyResult<()> {
         self.builder = match value {
             Some(lang) => self.builder.clone().document_lang(lang),
@@ -9664,14 +9505,12 @@ impl PdfEngine {
         self.rebuild_from_builder()
     }
 
-    #[getter]
     fn document_title(&self) -> Option<String> {
         self.builder
             .document_title_value()
             .map(std::string::ToString::to_string)
     }
 
-    #[setter(document_title)]
     fn set_document_title(&mut self, value: Option<String>) -> PyResult<()> {
         self.builder = match value {
             Some(title) => self.builder.clone().document_title(title),
@@ -9680,12 +9519,10 @@ impl PdfEngine {
         self.rebuild_from_builder()
     }
 
-    #[getter]
     fn document_css_href(&self) -> Option<String> {
         self.normalized_css_href()
     }
 
-    #[setter(document_css_href)]
     fn set_document_css_href(&mut self, value: Option<String>) -> PyResult<()> {
         self.document_css_href = value
             .as_deref()
@@ -9695,7 +9532,6 @@ impl PdfEngine {
         Ok(())
     }
 
-    #[getter]
     fn document_css_source_path(&self) -> Option<String> {
         self.document_css_source_path
             .as_deref()
@@ -9704,7 +9540,6 @@ impl PdfEngine {
             .map(|s| s.to_string())
     }
 
-    #[setter(document_css_source_path)]
     fn set_document_css_source_path(&mut self, value: Option<String>) -> PyResult<()> {
         self.document_css_source_path = value
             .as_deref()
@@ -9714,12 +9549,10 @@ impl PdfEngine {
         Ok(())
     }
 
-    #[getter]
     fn document_css_media(&self) -> Option<String> {
         self.normalized_css_media()
     }
 
-    #[setter(document_css_media)]
     fn set_document_css_media(&mut self, value: Option<String>) -> PyResult<()> {
         self.document_css_media = value
             .as_deref()
@@ -9729,12 +9562,10 @@ impl PdfEngine {
         Ok(())
     }
 
-    #[getter]
     fn document_css_required(&self) -> bool {
         self.document_css_required
     }
 
-    #[setter(document_css_required)]
     fn set_document_css_required(&mut self, value: bool) -> PyResult<()> {
         self.document_css_required = value;
         Ok(())
@@ -9751,7 +9582,6 @@ impl PdfEngine {
         Ok(out.unbind().into_any())
     }
 
-    #[pyo3(signature = (html, out_path, wrap_document=true))]
     fn emit_html(&self, html: &str, out_path: &str, wrap_document: bool) -> PyResult<String> {
         let html_text = self
             .engine
@@ -9780,7 +9610,6 @@ impl PdfEngine {
             .map_err(to_py_err)
     }
 
-    #[pyo3(signature = (html, css, html_path, css_path, wrap_document=true))]
     fn emit_artifacts(
         &self,
         py: Python<'_>,
@@ -9819,7 +9648,6 @@ impl PdfEngine {
         Ok(out.unbind().into_any())
     }
 
-    #[pyo3(signature = (html, css="", profile="strict", mode="error", render_preview_png_path=None, a11y_report=None, claim_evidence=None, pagination_trace_summary=None, diagnostic_signals=None))]
     fn verify_accessibility_html(
         &self,
         py: Python<'_>,
@@ -9873,7 +9701,6 @@ impl PdfEngine {
         report
     }
 
-    #[pyo3(signature = (html_path, css_path, profile="strict", mode="error", render_preview_png_path=None, a11y_report=None, claim_evidence=None, pagination_trace_summary=None, diagnostic_signals=None))]
     fn verify_accessibility_artifacts(
         &self,
         py: Python<'_>,
@@ -9918,19 +9745,6 @@ impl PdfEngine {
         )
     }
 
-    #[pyo3(signature = (
-        html,
-        css="",
-        profile="strict",
-        mode="error",
-        overflow_count=None,
-        known_loss_count=None,
-        source_page_count=None,
-        render_page_count=None,
-        review_queue_items=None,
-        pagination_trace_summary=None,
-        diagnostic_signals=None
-    ))]
     fn verify_paged_media_rank_html(
         &self,
         py: Python<'_>,
@@ -9995,19 +9809,6 @@ impl PdfEngine {
         report
     }
 
-    #[pyo3(signature = (
-        html_path,
-        css_path,
-        profile="strict",
-        mode="error",
-        overflow_count=None,
-        known_loss_count=None,
-        source_page_count=None,
-        render_page_count=None,
-        review_queue_items=None,
-        pagination_trace_summary=None,
-        diagnostic_signals=None
-    ))]
     fn verify_paged_media_rank_artifacts(
         &self,
         py: Python<'_>,
@@ -10061,7 +9862,6 @@ impl PdfEngine {
         )
     }
 
-    #[pyo3(signature = (html, css, deterministic_hash=None))]
     fn render_pdf(
         &self,
         py: Python<'_>,
@@ -10078,7 +9878,6 @@ impl PdfEngine {
         Ok(PyBytes::new(py, &bytes).unbind())
     }
 
-    #[pyo3(signature = (html, css, dpi=150))]
     fn render_image_pages(
         &self,
         py: Python<'_>,
@@ -10096,7 +9895,6 @@ impl PdfEngine {
         Ok(out.unbind().into_any())
     }
 
-    #[pyo3(signature = (html, css, out_dir, dpi=150, stem=None))]
     fn render_image_pages_to_dir(
         &self,
         py: Python<'_>,
@@ -10120,7 +9918,6 @@ impl PdfEngine {
         Ok(out.unbind().into_any())
     }
 
-    #[pyo3(signature = (pdf_path, dpi=150))]
     fn render_finalized_pdf_image_pages(
         &self,
         py: Python<'_>,
@@ -10137,7 +9934,6 @@ impl PdfEngine {
         Ok(out.unbind().into_any())
     }
 
-    #[pyo3(signature = (pdf_path, out_dir, dpi=150, stem=None))]
     fn render_finalized_pdf_image_pages_to_dir(
         &self,
         py: Python<'_>,
@@ -10340,7 +10136,6 @@ impl PdfEngine {
         ))
     }
 
-    #[pyo3(signature = (html, css, templates, dx=0.0, dy=0.0))]
     fn plan_template_compose(
         &self,
         py: Python<'_>,
@@ -10414,7 +10209,6 @@ impl PdfEngine {
         Ok(out.unbind().into_any())
     }
 
-    #[pyo3(signature = (html, css))]
     fn render_pdf_with_glyph_report(
         &self,
         py: Python<'_>,
@@ -10428,7 +10222,6 @@ impl PdfEngine {
         Ok((PyBytes::new(py, &bytes).unbind(), report_obj))
     }
 
-    #[pyo3(signature = (html, css))]
     fn render_pdf_with_glyph_report_and_render_time_reading_order_trace(
         &self,
         py: Python<'_>,
@@ -10443,7 +10236,6 @@ impl PdfEngine {
         Ok((PyBytes::new(py, &bytes).unbind(), report_obj, trace_obj))
     }
 
-    #[pyo3(signature = (html, css, path, deterministic_hash=None))]
     fn render_pdf_to_file(
         &self,
         html: &str,
@@ -10462,7 +10254,6 @@ impl PdfEngine {
         Ok(written)
     }
 
-    #[pyo3(signature = (html_list, css, deterministic_hash=None))]
     fn render_pdf_batch(
         &self,
         py: Python<'_>,
@@ -10479,7 +10270,6 @@ impl PdfEngine {
         Ok(PyBytes::new(py, &bytes).unbind())
     }
 
-    #[pyo3(signature = (html_list, css, path, deterministic_hash=None))]
     fn render_pdf_batch_to_file(
         &self,
         html_list: Vec<String>,
@@ -10498,7 +10288,6 @@ impl PdfEngine {
         Ok(written)
     }
 
-    #[pyo3(signature = (jobs, deterministic_hash=None))]
     fn render_pdf_batch_with_css(
         &self,
         py: Python<'_>,
@@ -10514,7 +10303,6 @@ impl PdfEngine {
         Ok(PyBytes::new(py, &bytes).unbind())
     }
 
-    #[pyo3(signature = (jobs, path, deterministic_hash=None))]
     fn render_pdf_batch_with_css_to_file(
         &self,
         jobs: Vec<(String, String)>,
@@ -10533,7 +10321,6 @@ impl PdfEngine {
     }
 
     // Parallel batch (common CSS). Uses Rust threads; releases the GIL for the duration.
-    #[pyo3(signature = (html_list, css, deterministic_hash=None))]
     fn render_pdf_batch_parallel(
         &self,
         py: Python<'_>,
@@ -10550,7 +10337,6 @@ impl PdfEngine {
         Ok(PyBytes::new(py, &bytes).unbind())
     }
 
-    #[pyo3(signature = (html_list, css, path, deterministic_hash=None))]
     fn render_pdf_batch_to_file_parallel_with_page_data(
         &self,
         html_list: Vec<String>,
@@ -10582,7 +10368,6 @@ impl PdfEngine {
         })
     }
 
-    #[pyo3(signature = (html_list, css, path, deterministic_hash=None))]
     fn render_pdf_batch_to_file_parallel(
         &self,
         html_list: Vec<String>,
@@ -10603,37 +10388,6 @@ impl PdfEngine {
         }
         Ok(written)
     }
-}
-
-#[pymodule]
-fn _fullbleed(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
-    module.add_class::<PdfEngine>()?;
-    module.add_class::<PyAssetKind>()?;
-    module.add_class::<PyAsset>()?;
-    module.add_class::<PyAssetBundle>()?;
-    module.add_class::<PyWatermarkSpec>()?;
-    module.add_function(wrap_pyfunction!(inspect_pdf, module)?)?;
-    module.add_function(wrap_pyfunction!(build_features, module)?)?;
-    module.add_function(wrap_pyfunction!(inspect_template_catalog, module)?)?;
-    module.add_function(wrap_pyfunction!(vendored_asset, module)?)?;
-    module.add_function(wrap_pyfunction!(fetch_asset, module)?)?;
-    module.add_function(wrap_pyfunction!(concat_css, module)?)?;
-    module.add_function(wrap_pyfunction!(audit_contract_metadata, module)?)?;
-    module.add_function(wrap_pyfunction!(audit_contract_registry, module)?)?;
-    module.add_function(wrap_pyfunction!(audit_contract_wcag20aa_coverage, module)?)?;
-    module.add_function(wrap_pyfunction!(
-        audit_contract_section508_html_coverage,
-        module
-    )?)?;
-    module.add_function(wrap_pyfunction!(audit_contrast_render_png, module)?)?;
-    module.add_function(wrap_pyfunction!(audit_sparse_page_visual_pair, module)?)?;
-    module.add_function(wrap_pyfunction!(extract_pdf_page_texts, module)?)?;
-    module.add_function(wrap_pyfunction!(export_pdf_reading_order_trace, module)?)?;
-    module.add_function(wrap_pyfunction!(export_pdf_structure_trace, module)?)?;
-    module.add_function(wrap_pyfunction!(verify_pdf_ua_seed, module)?)?;
-    module.add_function(wrap_pyfunction!(finalize_stamp_pdf, module)?)?;
-    module.add_function(wrap_pyfunction!(finalize_compose_pdf, module)?)?;
-    Ok(())
 }
 
 fn to_py_err(err: FullBleedError) -> PyErr {
@@ -10658,3 +10412,5 @@ fn pdf_asset_inspect_err_to_py(err: crate::PdfInspectError) -> PyErr {
 fn pdf_inspect_err_to_py(err: crate::PdfInspectError) -> PyErr {
     PyValueError::new_err(format!("{}: {}", err.code.as_str(), err.message))
 }
+
+mod abi_exports;

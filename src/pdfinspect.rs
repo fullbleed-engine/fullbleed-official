@@ -1,4 +1,4 @@
-use lopdf::{
+use crate::pdf_native::{
     Dictionary as LoDictionary, Document as LoDocument, Object as LoObject, ObjectId as LoObjectId,
 };
 use std::path::Path;
@@ -531,8 +531,8 @@ mod tests {
     use crate::pdf::{
         OutputIntent, PdfOptions, PdfProfile, document_to_pdf_with_metrics_and_registry,
     };
+    use crate::pdf_native::{Object as LoObject, Stream as LoStream, dictionary};
     use crate::types::Size;
-    use lopdf::{Object as LoObject, Stream as LoStream, dictionary};
     use std::io::Write;
 
     fn make_single_page_pdf_bytes(text: &str) -> Vec<u8> {

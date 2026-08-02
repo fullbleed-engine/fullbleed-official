@@ -1,5 +1,8 @@
 mod assets;
+mod base64;
 mod canvas;
+mod css_native;
+mod css_queries;
 mod debug;
 mod doc_context;
 mod doc_template;
@@ -11,22 +14,40 @@ mod font;
 mod frame;
 mod glyph_report;
 mod html;
+mod html_dom;
+mod html_entities;
+mod image_native;
 mod jit;
+mod jpeg_native;
+mod math;
 mod metrics;
+mod native_shape;
 mod page_data;
 mod page_template;
+mod parallel;
 mod pdf;
+mod pdf_encodings;
+mod pdf_native;
 mod pdf_raster;
 mod pdfinspect;
 mod perf;
 mod plan;
 #[cfg(feature = "python")]
 mod python;
+#[cfg(feature = "python")]
+mod python_abi;
 mod raster;
+mod raster_native;
+mod sfnt;
+mod sfnt_cff;
+mod sfnt_outline;
 mod spill;
 mod style;
 mod svg;
+mod text_shape;
 mod types;
+mod unicode_data;
+mod xml;
 
 pub use assets::{Asset, AssetBundle, AssetKind};
 pub use canvas::{Canvas, Command, Document, Page};
@@ -54,10 +75,8 @@ use font::RegisteredFontTrace;
 pub use frame::{AddResult, Frame};
 use fullbleed_audit_contract as audit_contract;
 pub use glyph_report::{GlyphCoverageReport, MissingGlyph};
-use image::GenericImageView;
+use html_dom::NodeData;
 pub use jit::JitMode;
-use kuchiki::NodeData;
-use kuchiki::traits::TendrilSink;
 pub use metrics::{DocumentMetrics, PageMetrics};
 pub use page_data::{PageDataContext, PageDataOp, PageDataValue, PaginatedContextSpec};
 pub use page_template::{FrameSpec, PageTemplate};
@@ -71,7 +90,7 @@ pub use pdfinspect::{
 use perf::PerfLogger;
 use std::f32::consts::PI;
 use std::sync::Arc;
-pub use types::{Color, ColorSpace, Margins, Pt, Rect, Size};
+pub use types::{Color, ColorSpace, I32F32, Margins, Pt, Rect, Size};
 
 pub struct FullBleed {
     default_page_size: Size,
@@ -996,8 +1015,7 @@ fn watermark_image_size(
     page_size: Size,
 ) -> Option<Size> {
     let bytes = watermark_image_bytes(bundle, source)?;
-    let decoded = image::load_from_memory(&bytes).ok()?;
-    let (w, h) = decoded.dimensions();
+    let (w, h) = image_native::dimensions(&bytes).ok()?;
     if w == 0 || h == 0 {
         return None;
     }
@@ -1464,7 +1482,7 @@ impl FullBleed {
     }
 
     fn verify_accessibility_html_facts(&self, html: &str) -> A11yVerifierFacts {
-        let document = kuchiki::parse_html().one(html);
+        let document = html_dom::parse_html(html);
 
         let mut html_lang: Option<String> = None;
         if let Ok(mut html_nodes) = document.select("html") {
@@ -5423,13 +5441,9 @@ impl FullBleed {
         html_list: &[String],
         css: &str,
     ) -> Result<Vec<u8>, FullBleedError> {
-        use rayon::prelude::*;
-
         let context = self.build_render_context(css, None);
-        let mut results: Vec<(usize, Result<Document, FullBleedError>)> = html_list
-            .par_iter()
-            .enumerate()
-            .map(|(idx, html)| {
+        let mut results: Vec<(usize, Result<Document, FullBleedError>)> =
+            crate::parallel::map_indexed_ordered(html_list, |idx, html| {
                 let res = self
                     .render_to_document_and_page_data_with_resolver_and_report_at(
                         idx,
@@ -5440,8 +5454,7 @@ impl FullBleed {
                     )
                     .map(|(doc, _page_data)| doc);
                 (idx, res)
-            })
-            .collect();
+            });
         results.sort_by_key(|(idx, _)| *idx);
 
         let mut documents = Vec::with_capacity(results.len());
@@ -5465,26 +5478,20 @@ impl FullBleed {
         html_list: &[String],
         css: &str,
     ) -> Result<(Vec<u8>, Vec<Option<PageDataContext>>), FullBleedError> {
-        use rayon::prelude::*;
-
         let context = self.build_render_context(css, None);
         let mut results: Vec<(
             usize,
             Result<(Document, Option<PageDataContext>), FullBleedError>,
-        )> = html_list
-            .par_iter()
-            .enumerate()
-            .map(|(idx, html)| {
-                let res = self.render_to_document_and_page_data_with_resolver_and_report_at(
-                    idx,
-                    html,
-                    &context.page_templates,
-                    &context.resolver,
-                    None,
-                );
-                (idx, res)
-            })
-            .collect();
+        )> = crate::parallel::map_indexed_ordered(html_list, |idx, html| {
+            let res = self.render_to_document_and_page_data_with_resolver_and_report_at(
+                idx,
+                html,
+                &context.page_templates,
+                &context.resolver,
+                None,
+            );
+            (idx, res)
+        });
         results.sort_by_key(|(idx, _)| *idx);
 
         let mut documents = Vec::with_capacity(results.len());
@@ -5533,7 +5540,6 @@ impl FullBleed {
         )?;
 
         if matches!(self.jit_mode, JitMode::PlanAndReplay) {
-            use rayon::prelude::*;
             use std::collections::BTreeMap;
             use std::path::PathBuf;
             use std::sync::mpsc;
@@ -5565,7 +5571,8 @@ impl FullBleed {
             };
 
             // Bound in-flight documents to keep memory stable.
-            let buffer_cap = (rayon::current_num_threads().max(1) * 4).min(256);
+            let parallelism = crate::parallel::current_num_threads();
+            let buffer_cap = (parallelism * 4).min(256);
             let (tx, rx) =
                 mpsc::sync_channel::<(usize, Result<Document, FullBleedError>)>(buffer_cap);
             let mut render_error: Option<FullBleedError> = None;
@@ -5576,10 +5583,8 @@ impl FullBleed {
 
                 // Producer: plan + paint in parallel.
                 scope.spawn(|| {
-                    html_list
-                        .par_iter()
-                        .enumerate()
-                        .for_each_with(tx, |tx, (idx, html)| {
+                    crate::parallel::with_thread_count(parallelism, || {
+                        crate::parallel::for_each_indexed(html_list, |idx, html| {
                             let res = self
                                 .render_to_planned_doc_with_resolver_and_report_at(
                                     idx,
@@ -5600,6 +5605,7 @@ impl FullBleed {
                                 });
                             let _ = tx.send((idx, res));
                         });
+                    });
                 });
 
                 // Consumer: write in order with backpressure.
@@ -5699,9 +5705,8 @@ impl FullBleed {
             return Ok(pdf_stream.finish()?);
         }
 
-        // Pipeline: render HTML->Document on Rayon threads while a single writer thread
+        // Pipeline: render HTML->Document on scoped worker threads while a single writer thread
         // serializes to PDF in input order. This keeps memory bounded and keeps CPU busy.
-        use rayon::prelude::*;
         use std::collections::BTreeMap;
         use std::sync::atomic::{AtomicU64, Ordering};
         use std::sync::mpsc;
@@ -5714,7 +5719,8 @@ impl FullBleed {
         }
 
         // Bound the number of in-flight Documents so we don’t blow up memory on huge batches.
-        let buffer_cap = (rayon::current_num_threads().max(1) * 4).min(256);
+        let parallelism = crate::parallel::current_num_threads();
+        let buffer_cap = (parallelism * 4).min(256);
         let (tx, rx) = mpsc::sync_channel::<(usize, Result<Document, FullBleedError>)>(buffer_cap);
 
         let mut render_error: Option<FullBleedError> = None;
@@ -5738,10 +5744,8 @@ impl FullBleed {
                 let send_wait = send_wait.clone();
                 let send_count = send_count.clone();
                 let send_blocked = send_blocked.clone();
-                html_list
-                    .par_iter()
-                    .enumerate()
-                    .for_each_with(tx, |tx, (idx, html)| {
+                crate::parallel::with_thread_count(parallelism, || {
+                    crate::parallel::for_each_indexed(html_list, |idx, html| {
                         let res = self
                             .render_to_document_and_page_data_with_resolver_and_report_at(
                                 idx,
@@ -5761,6 +5765,7 @@ impl FullBleed {
                             send_blocked.fetch_add(1, Ordering::Relaxed);
                         }
                     });
+                });
             });
 
             // Consumer: write in order.
@@ -5853,26 +5858,20 @@ impl FullBleed {
         css: &str,
         writer: &mut W,
     ) -> Result<(usize, Vec<Option<PageDataContext>>), FullBleedError> {
-        use rayon::prelude::*;
-
         let context = self.build_render_context(css, None);
         let mut results: Vec<(
             usize,
             Result<(Document, Option<PageDataContext>), FullBleedError>,
-        )> = html_list
-            .par_iter()
-            .enumerate()
-            .map(|(idx, html)| {
-                let res = self.render_to_document_and_page_data_with_resolver_and_report_at(
-                    idx,
-                    html,
-                    &context.page_templates,
-                    &context.resolver,
-                    None,
-                );
-                (idx, res)
-            })
-            .collect();
+        )> = crate::parallel::map_indexed_ordered(html_list, |idx, html| {
+            let res = self.render_to_document_and_page_data_with_resolver_and_report_at(
+                idx,
+                html,
+                &context.page_templates,
+                &context.resolver,
+                None,
+            );
+            (idx, res)
+        });
         results.sort_by_key(|(idx, _)| *idx);
 
         let mut documents = Vec::with_capacity(results.len());
@@ -6016,8 +6015,8 @@ impl FullBleedBuilder {
         self
     }
 
-    // Toggle shaping for complex scripts. Disabling skips rustybuzz shaping and uses
-    // direct codepoint->gid mapping for Identity-H fonts.
+    // Toggle shaping for complex scripts. Disabling skips native OpenType shaping and
+    // uses direct codepoint->gid mapping for Identity-H fonts.
     pub fn shape_text(mut self, enabled: bool) -> Self {
         self.pdf_options.shape_text = enabled;
         self
@@ -6113,7 +6112,7 @@ impl FullBleedBuilder {
         self.pdf_options.document_title.as_deref()
     }
 
-    // Toggle Unicode-aware layout measurements (rustybuzz-based).
+    // Toggle Unicode-aware layout measurements (native OpenType shaping).
     // When disabled, layout uses basic metrics for speed.
     pub fn unicode_metrics(mut self, enabled: bool) -> Self {
         self.unicode_metrics = enabled;
@@ -7763,11 +7762,7 @@ mod tests {
         ];
 
         let render_with_threads = |threads: usize| -> Vec<u8> {
-            let pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(threads)
-                .build()
-                .expect("thread pool");
-            pool.install(|| {
+            crate::parallel::with_thread_count(threads, || {
                 let mut out = Vec::new();
                 engine
                     .render_many_to_writer_parallel(&html_list, css, &mut out)

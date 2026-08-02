@@ -13,7 +13,26 @@ from pathlib import Path
 from typing import Any
 
 
-PINNED_TRANSITIVE_DEPENDENCIES = ("lightningcss", "parcel_selectors", "time")
+FORBIDDEN_CONSUMER_DEPENDENCIES = (
+    "base64",
+    "fixed",
+    "image",
+    "kuchiki",
+    "libm",
+    "lightningcss",
+    "lopdf",
+    "parcel_selectors",
+    "pyo3",
+    "rayon",
+    "resvg",
+    "roxmltree",
+    "rustybuzz",
+    "serde_json",
+    "sha2",
+    "tiny-skia",
+    "time",
+    "ttf-parser",
+)
 
 
 class SmokeFailure(RuntimeError):
@@ -113,13 +132,16 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
             f"Cargo package version is {package_version}, expected {expected_version}"
         )
 
-    expected_dependencies = {
-        dependency: _exact_dependency_version(manifest, dependency)
-        for dependency in PINNED_TRANSITIVE_DEPENDENCIES
-    }
     audit_version = _dependency_requirement(
         manifest, "fullbleed_audit_contract"
     ).lstrip("=")
+    audit_root = repo_root / "crates" / "fullbleed_audit_contract"
+    audit_manifest = _read_toml(audit_root / "Cargo.toml")
+    if audit_manifest["package"]["version"] != audit_version:
+        raise SmokeFailure(
+            "Root dependency and audit-contract package versions disagree: "
+            f"{audit_version} != {audit_manifest['package']['version']}"
+        )
 
     _run(
         [
@@ -128,6 +150,28 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
             "--locked",
             "--no-verify",
             "--allow-dirty",
+        ],
+        cwd=audit_root,
+    )
+    audit_archive = (
+        audit_root
+        / "target"
+        / "package"
+        / f"fullbleed_audit_contract-{audit_version}.crate"
+    )
+    if not audit_archive.is_file():
+        raise SmokeFailure(f"Cargo package was not created: {audit_archive}")
+
+    _run(
+        [
+            "cargo",
+            "package",
+            "--locked",
+            "--no-verify",
+            "--allow-dirty",
+            "--config",
+            "patch.crates-io.fullbleed_audit_contract.path="
+            + json.dumps(audit_root.as_posix()),
         ],
         cwd=repo_root,
     )
@@ -146,9 +190,21 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
                 f"Extracted Cargo package is missing Cargo.toml: {packaged_crate}"
             )
 
+        extracted_audit_root = temp_root / "audit-package"
+        extracted_audit_root.mkdir()
+        _safe_extract(audit_archive, extracted_audit_root)
+        packaged_audit = (
+            extracted_audit_root / f"fullbleed_audit_contract-{audit_version}"
+        )
+        if not (packaged_audit / "Cargo.toml").is_file():
+            raise SmokeFailure(
+                f"Extracted audit package is missing Cargo.toml: {packaged_audit}"
+            )
+
         consumer = temp_root / "consumer"
         (consumer / "src").mkdir(parents=True)
         packaged_path = json.dumps(packaged_crate.as_posix())
+        packaged_audit_path = json.dumps(packaged_audit.as_posix())
         (consumer / "Cargo.toml").write_text(
             "\n".join(
                 (
@@ -160,6 +216,10 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
                     "",
                     "[dependencies]",
                     f"fullbleed = {{ path = {packaged_path} }}",
+                    "",
+                    "[patch.crates-io]",
+                    "fullbleed_audit_contract = "
+                    f"{{ path = {packaged_audit_path} }}",
                     "",
                 )
             ),
@@ -186,24 +246,31 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
         )
 
         consumer_lock = _read_toml(consumer / "Cargo.lock")
+        package_names = {
+            package.get("name") for package in consumer_lock.get("package", [])
+        }
+        unexpected = sorted(package_names.intersection(FORBIDDEN_CONSUMER_DEPENDENCIES))
+        if unexpected:
+            raise SmokeFailure(
+                "Removed dependencies reappeared in the fresh consumer lockfile: "
+                + ", ".join(unexpected)
+            )
+        expected_package_names = {
+            "fullbleed",
+            "fullbleed_audit_contract",
+            "fullbleed_external_consumer_smoke",
+        }
+        if package_names != expected_package_names:
+            raise SmokeFailure(
+                "Fresh consumer graph is not dependency-free: expected "
+                f"{sorted(expected_package_names)}, observed {sorted(package_names)}"
+            )
         resolved = {
             "fullbleed": _locked_package(consumer_lock, "fullbleed")["version"],
             "fullbleed_audit_contract": _locked_package(
                 consumer_lock, "fullbleed_audit_contract"
             )["version"],
         }
-        for dependency, expected in expected_dependencies.items():
-            package = _locked_package(consumer_lock, dependency)
-            if package["version"] != expected:
-                raise SmokeFailure(
-                    f"{dependency} resolved to {package['version']}, expected {expected}"
-                )
-            if not str(package.get("source", "")).startswith("registry+"):
-                raise SmokeFailure(
-                    f"{dependency} did not resolve from a Cargo registry"
-                )
-            resolved[dependency] = package["version"]
-
         if resolved["fullbleed"] != package_version:
             raise SmokeFailure(
                 f"Consumer resolved fullbleed {resolved['fullbleed']}, "
@@ -219,8 +286,10 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
         "schema": "fullbleed.crates_consumer_smoke.v1",
         "ok": True,
         "package": f"fullbleed-{package_version}.crate",
+        "audit_package": f"fullbleed_audit_contract-{audit_version}.crate",
         "consumer_lockfile": "fresh",
         "repository_lockfile_used_by_consumer": False,
+        "removed_dependencies_absent": True,
         "resolved": resolved,
     }
 

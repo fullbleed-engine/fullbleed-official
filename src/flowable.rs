@@ -4,9 +4,6 @@ use crate::perf::PerfLogger;
 use crate::style::{DirectionMode, ObjectFitMode};
 use crate::svg;
 use crate::types::{BoxSizingMode, Color, MixBlendMode, Pt, Rect, Shading, ShadingStop, Size};
-use base64::Engine;
-use image::GenericImageView;
-use rayon::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path as FsPath;
@@ -52,8 +49,7 @@ fn image_intrinsic_size_pt(source: &str) -> Option<(Pt, Pt)> {
     } else {
         std::fs::read(FsPath::new(source)).ok()?
     };
-    let image = image::load_from_memory(&bytes).ok()?;
-    let (width, height) = image.dimensions();
+    let (width, height) = crate::image_native::dimensions(&bytes).ok()?;
     if width == 0 || height == 0 {
         return None;
     }
@@ -73,9 +69,7 @@ fn parse_image_data_uri(uri: &str) -> Option<(String, Vec<u8>)> {
         .unwrap_or("application/octet-stream")
         .to_string();
     let data = if header.contains(";base64") {
-        base64::engine::general_purpose::STANDARD
-            .decode(payload)
-            .ok()?
+        crate::base64::decode_standard(payload).ok()?
     } else {
         payload.as_bytes().to_vec()
     };
@@ -6333,58 +6327,36 @@ impl TableFlowableData {
                 }
                 a
             };
-            let (min_h, max_h, pref_h) = self
-                .header_rows
-                .par_iter()
-                .fold(
-                    || {
-                        (
-                            vec![0i64; columns],
-                            vec![0i64; columns],
-                            vec![0i64; columns],
-                        )
-                    },
-                    |mut acc, row| {
-                        update_row("header", 0, row, &mut acc.0, &mut acc.1, &mut acc.2);
-                        acc
-                    },
-                )
-                .reduce(
-                    || {
-                        (
-                            vec![0i64; columns],
-                            vec![0i64; columns],
-                            vec![0i64; columns],
-                        )
-                    },
-                    merge,
-                );
-            let (min_b, max_b, pref_b) = self
-                .body_rows
-                .par_iter()
-                .fold(
-                    || {
-                        (
-                            vec![0i64; columns],
-                            vec![0i64; columns],
-                            vec![0i64; columns],
-                        )
-                    },
-                    |mut acc, row| {
-                        update_row("body", 0, row, &mut acc.0, &mut acc.1, &mut acc.2);
-                        acc
-                    },
-                )
-                .reduce(
-                    || {
-                        (
-                            vec![0i64; columns],
-                            vec![0i64; columns],
-                            vec![0i64; columns],
-                        )
-                    },
-                    merge,
-                );
+            let (min_h, max_h, pref_h) = crate::parallel::fold_reduce(
+                &self.header_rows,
+                || {
+                    (
+                        vec![0i64; columns],
+                        vec![0i64; columns],
+                        vec![0i64; columns],
+                    )
+                },
+                |mut acc, row| {
+                    update_row("header", 0, row, &mut acc.0, &mut acc.1, &mut acc.2);
+                    acc
+                },
+                &merge,
+            );
+            let (min_b, max_b, pref_b) = crate::parallel::fold_reduce(
+                &self.body_rows,
+                || {
+                    (
+                        vec![0i64; columns],
+                        vec![0i64; columns],
+                        vec![0i64; columns],
+                    )
+                },
+                |mut acc, row| {
+                    update_row("body", 0, row, &mut acc.0, &mut acc.1, &mut acc.2);
+                    acc
+                },
+                &merge,
+            );
             for i in 0..columns {
                 min_widths[i] = min_h[i].max(min_b[i]);
                 max_widths[i] = max_h[i].max(max_b[i]);
@@ -6760,10 +6732,9 @@ impl TableLayoutCache {
         let mut header_row_lines = Vec::with_capacity(data.header_rows.len());
         let mut header_total = Pt::ZERO;
         let header_results: Vec<(Pt, Vec<Arc<Vec<LineLayout>>>)> = if data.header_rows.len() >= 32 {
-            data.header_rows
-                .par_iter()
-                .map(|row| TableLayoutCache::row_height_and_lines(row, &col_widths))
-                .collect()
+            crate::parallel::map_ordered(&data.header_rows, |row| {
+                TableLayoutCache::row_height_and_lines(row, &col_widths)
+            })
         } else {
             data.header_rows
                 .iter()
@@ -6777,10 +6748,9 @@ impl TableLayoutCache {
         }
 
         let body_results: Vec<(Pt, Vec<Arc<Vec<LineLayout>>>)> = if data.body_rows.len() >= 32 {
-            data.body_rows
-                .par_iter()
-                .map(|row| TableLayoutCache::row_height_and_lines(row, &col_widths))
-                .collect()
+            crate::parallel::map_ordered(&data.body_rows, |row| {
+                TableLayoutCache::row_height_and_lines(row, &col_widths)
+            })
         } else {
             data.body_rows
                 .iter()

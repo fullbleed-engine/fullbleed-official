@@ -27,11 +27,28 @@ REQUIRED_WHEEL_TARGETS = (
     "macos-x86_64",
     "macos-aarch64",
 )
-REQUIRED_CARGO_PINS = {
-    "lightningcss": "=1.0.0-alpha.70",
-    "parcel_selectors": "=0.28.2",
-    "time": "=0.3.45",
-}
+REQUIRED_CARGO_PINS: dict[str, str] = {}
+BANNED_PYTHON_DISTRIBUTIONS = ("fastapi", "uvicorn", "httpx", "maturin")
+BANNED_DIRECT_RUST_DEPENDENCIES = (
+    "base64",
+    "fixed",
+    "image",
+    "kuchiki",
+    "libm",
+    "lightningcss",
+    "lopdf",
+    "parcel_selectors",
+    "pyo3",
+    "rayon",
+    "resvg",
+    "roxmltree",
+    "rustybuzz",
+    "serde_json",
+    "sha2",
+    "tiny-skia",
+    "time",
+    "ttf-parser",
+)
 
 
 def _read(path: Path) -> str:
@@ -79,6 +96,25 @@ def _lock_version(text: str, package: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _lock_package_names(text: str) -> set[str]:
+    return set(re.findall(r'(?m)^name = "([^"]+)"$', text))
+
+
+def _dependency_names(text: str) -> set[str]:
+    names: set[str] = set()
+    current_table = ""
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if line.startswith("[") and line.endswith("]"):
+            current_table = line[1:-1].strip()
+            continue
+        if current_table == "dependencies":
+            match = re.match(r'([A-Za-z0-9_-]+)\s*=', line)
+            if match:
+                names.add(match.group(1))
+    return names
+
+
 def _flag(flags: list[dict[str, str]], code: str, target: str, message: str) -> None:
     flags.append({"code": code, "target": target, "message": message})
 
@@ -89,6 +125,7 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
     audit_path = repo_root / "crates" / "fullbleed_audit_contract" / "Cargo.toml"
     lock_path = repo_root / "Cargo.lock"
     workflow_path = repo_root / ".github" / "workflows" / "release.yml"
+    ci_workflow_path = repo_root / ".github" / "workflows" / "ci.yml"
     crates_workflow_path = (
         repo_root / ".github" / "workflows" / "publish-crates.yml"
     )
@@ -98,6 +135,7 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
     audit = _read(audit_path)
     lock = _read(lock_path)
     workflow = _read(workflow_path) if workflow_path.exists() else ""
+    ci_workflow = _read(ci_workflow_path) if ci_workflow_path.exists() else ""
     crates_workflow = (
         _read(crates_workflow_path) if crates_workflow_path.exists() else ""
     )
@@ -112,6 +150,13 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
     flags: list[dict[str, str]] = []
     if not expected_version:
         _flag(flags, "REL_VERSION_MISSING", "Cargo.toml", "Main package version is missing")
+    elif f'FULLBLEED_CI_VERSION: "{expected_version}"' not in ci_workflow:
+        _flag(
+            flags,
+            "REL_CI_VERSION_MISMATCH",
+            ".github/workflows/ci.yml",
+            f"CI wheel smoke version does not match {expected_version}",
+        )
     for target, observed in (
         ("Cargo.toml", cargo_version),
         ("pyproject.toml", python_version),
@@ -156,6 +201,47 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
                 f"{dependency} expected {expected_requirement}, observed {observed}",
             )
 
+    for dependency in BANNED_DIRECT_RUST_DEPENDENCIES:
+        for target, manifest in (
+            ("Cargo.toml", cargo),
+            ("crates/fullbleed_audit_contract/Cargo.toml", audit),
+        ):
+            if _dependency_requirement(manifest, dependency) is not None:
+                _flag(
+                    flags,
+                    "REL_RUST_DEPENDENCY_PRESENT",
+                    target,
+                    f"Removed direct Rust dependency is declared: {dependency}",
+                )
+
+    expected_manifest_dependencies = {
+        "Cargo.toml": {"fullbleed_audit_contract"},
+        "crates/fullbleed_audit_contract/Cargo.toml": set(),
+    }
+    for target, manifest in (
+        ("Cargo.toml", cargo),
+        ("crates/fullbleed_audit_contract/Cargo.toml", audit),
+    ):
+        observed = _dependency_names(manifest)
+        expected = expected_manifest_dependencies[target]
+        if observed != expected:
+            _flag(
+                flags,
+                "REL_RUST_GRAPH_MISMATCH",
+                target,
+                f"Expected dependencies {sorted(expected)}, observed {sorted(observed)}",
+            )
+
+    lock_packages = _lock_package_names(lock)
+    expected_lock_packages = {"fullbleed", "fullbleed_audit_contract"}
+    if lock_packages != expected_lock_packages:
+        _flag(
+            flags,
+            "REL_LOCK_GRAPH_MISMATCH",
+            "Cargo.lock",
+            f"Expected packages {sorted(expected_lock_packages)}, observed {sorted(lock_packages)}",
+        )
+
     for package, expected in (
         ("fullbleed", expected_version),
         ("fullbleed_audit_contract", audit_version),
@@ -177,6 +263,47 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
             "pyproject.toml",
             f"Expected >=3.10, observed {requires_python}",
         )
+    build_backend = _table_string(pyproject, "build-system", "build-backend")
+    if build_backend != "fullbleed_build_backend":
+        _flag(
+            flags,
+            "REL_BUILD_BACKEND_MISMATCH",
+            "pyproject.toml",
+            f"Expected fullbleed_build_backend, observed {build_backend}",
+        )
+    if not re.search(r"(?m)^requires\s*=\s*\[\s*\]\s*$", pyproject):
+        _flag(
+            flags,
+            "REL_BUILD_REQUIREMENTS_PRESENT",
+            "pyproject.toml",
+            "Python build-system requirements must remain empty",
+        )
+    if not re.search(
+        r'(?m)^backend-path\s*=\s*\[\s*["\']build_backend["\']\s*\]\s*$',
+        pyproject,
+    ):
+        _flag(
+            flags,
+            "REL_BUILD_BACKEND_PATH_MISSING",
+            "pyproject.toml",
+            "The in-tree build backend path is missing",
+        )
+    abi_tag = _table_string(pyproject, "tool.fullbleed-build", "abi-tag")
+    if abi_tag != "cp310-abi3":
+        _flag(
+            flags,
+            "REL_PYTHON_ABI_TAG_MISMATCH",
+            "pyproject.toml",
+            f"Expected cp310-abi3, observed {abi_tag}",
+        )
+    for distribution in BANNED_PYTHON_DISTRIBUTIONS:
+        if re.search(rf'(?i)["\']{re.escape(distribution)}(?:[<>=!~;\s"\']|$)', pyproject):
+            _flag(
+                flags,
+                "REL_PYTHON_DEPENDENCY_PRESENT",
+                "pyproject.toml",
+                f"Removed Python dependency is declared: {distribution}",
+            )
     for python_version_supported in SUPPORTED_PYTHONS:
         marker = f'"Programming Language :: Python :: {python_version_supported}"'
         if marker not in pyproject:
@@ -217,16 +344,16 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
             )
 
     for marker in (
-        "abi3-py310",
         'environment: "pypi"',
         "publish_pypi:",
-        "maturin-version: v1.14.1",
-        'manylinux: "2014"',
-        "manylinux: musllinux_1_2",
+        "build_backend/fullbleed_build_backend.py",
+        "tools/build_linux_wheel_container.sh",
+        "compatibility: manylinux2014",
+        "compatibility: musllinux_1_2",
         "windows-11-arm",
-        "target: s390x",
-        "target: ppc64le",
-        "PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b",
+        "target: s390x-unknown-linux-gnu",
+        "target: powerpc64le-unknown-linux-gnu",
+        "ghcr.io/rust-cross/manylinux2014-cross:armv7",
         "docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130",
         "pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b",
         "tools/check_release_worktree.py",
@@ -235,13 +362,11 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
         "tools/smoke_crates_consumer.py",
         "rustup toolchain install 1.85.0",
     ):
-        target_text = cargo if marker == "abi3-py310" else workflow
-        target_name = "Cargo.toml" if marker == "abi3-py310" else ".github/workflows/release.yml"
-        if marker not in target_text:
+        if marker not in workflow:
             _flag(
                 flags,
                 "REL_AUTOMATION_MARKER_MISSING",
-                target_name,
+                ".github/workflows/release.yml",
                 f"Missing release marker: {marker}",
             )
 

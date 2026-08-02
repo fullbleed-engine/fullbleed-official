@@ -1,73 +1,93 @@
-# Fullbleed Release Notes - 1.6.2
+# Fullbleed Release Notes - 2.0.0
 
-Status: released
+Status: release candidate
 
-Release date: July 29, 2026
+Target date: August 1, 2026
 
 ## Summary
 
-Fullbleed 1.6.2 is a compatibility and packaging patch for Cargo consumers. It
-prevents a fresh consumer lockfile from selecting mutually incompatible alpha
-releases in the Lightning CSS dependency family and preserves the declared
-Rust 1.85 floor. Rendering behavior, public APIs, the MIT license, and the
-supported Python/platform matrix are unchanged from 1.6.1.
+Fullbleed 2.0 removes every third-party software dependency from the shipped
+Rust, Python runtime, and Python build graphs while preserving the documented
+rendering, inspection, composition, accessibility, CLI, and packaging
+capabilities. The root Rust crate now depends only on the Fullbleed-authored
+`fullbleed_audit_contract` crate; that crate has no dependencies of its own.
+Optional features add no packages.
 
-## Cargo Packaging
+Redistributed fonts, CSS, and icon artwork remain third-party assets under
+their existing licenses. They are not linked software dependencies and are
+still covered by `THIRD_PARTY_LICENSES.md` and the font-license audit.
 
-- Exact-pinned `lightningcss` to the tested `1.0.0-alpha.70` release.
-- Added an exact compatibility constraint for `parcel_selectors 0.28.2`.
-- Exact-pinned `time 0.3.45`, the newest tested release in that line whose
-  declared MSRV remains below Fullbleed's Rust 1.85 floor.
-- Replaced six post-1.85 `let` chains with behavior-equivalent nested
-  conditionals.
-- Added a release gate that packages Fullbleed, extracts the exact `.crate`,
-  consumes it from a temporary project with no repository lockfile, and runs
-  `cargo check` using Rust 1.85.
-- Verifies that the fresh consumer resolves `fullbleed 1.6.2`,
-  `fullbleed_audit_contract 0.1.1`, and the intended CSS and time dependencies.
-- Keeps the already-published audit-contract crate at version 0.1.1.
+## Native Replacements
 
-## Python Packaging
+- Replaced external hashing, Base64, fixed-point, math, compression, ordered
+  parallelism, JSON, XML, HTML, image, JPEG, PDF, SVG, CSS, font, shaping, and
+  raster libraries with bounded in-repo implementations.
+- Replaced the external Python binding generator with a CPython 3.10+ Stable
+  ABI boundary and a standard-library-only compatibility facade.
+- Replaced the external Python build backend with the in-tree
+  `fullbleed_build_backend`, including deterministic wheel/sdist creation,
+  editable installs, `RECORD`, license files, runtime resources, and CycloneDX
+  SBOM generation.
+- Retained `python` and `svg_raster` as compatibility feature names; neither
+  feature adds a Cargo package.
 
-- Keeps `abi3-py310` and CPython 3.10 through 3.14 support.
-- Keeps the existing 15-wheel platform matrix and source distribution.
-- Aligns the Python distribution version with the patched Rust crate at 1.6.2.
+The detailed replacement/evidence matrix is in
+`docs/2.0-dependency-removal.md`.
 
-## Licensing
+## Compatibility
 
-Both Fullbleed-authored crates and the Python distribution remain MIT
-licensed. Third-party dependencies retain their own licenses.
+- Preserves the public `PdfEngine`, `AssetKind`, `Asset`, `AssetBundle`, and
+  `WatermarkSpec` classes, free functions, explicit signatures, properties,
+  batch methods, and `fullbleed._fullbleed` import surface.
+- Preserves `cp310-abi3` packaging for standard CPython 3.10 through 3.14 and
+  the 15-platform wheel matrix.
+- Preserves the Rust 1.85 minimum toolchain, deterministic output contracts,
+  PDF profile behavior, SVG raster fallback, native image emission, and the
+  validated CSS fixture surface.
+- Keeps the `fullbleed[api]` compatibility extra valid with no required
+  packages; the ignored Escambia HTTP prototype was never shipped.
 
-## Publication
+## Package Versions
 
-- Published `fullbleed 1.6.2` to crates.io through trusted publishing after
-  the Rust 1.85 packaged-consumer gate passed.
-- Published 15 `cp310-abi3` platform wheels and one source distribution to
-  PyPI after every build and installed-wheel smoke job passed.
-- Published the same 16 distributions as assets on the GitHub `v1.6.2`
-  Release.
-- PyPI rejected the configured OpenID Connect publisher with
-  `invalid-publisher`; the validated `release-dists` artifact was uploaded
-  with the project-scoped API token instead. Repair the PyPI trusted-publisher
-  record before the next release.
+- `fullbleed 2.0.0` on crates.io and PyPI.
+- `fullbleed_audit_contract 0.1.2` on crates.io. This dependency-free patch
+  must be published before the main crate.
 
-## Release Gates
+## Verification Baseline
 
-The exact `v1.6.2` release commit must pass:
+The release candidate has a 658-test all-feature Rust suite and a 247-test
+Python suite. The Rust suite reports 657 passed and one explicit local-font
+opt-in ignored. It also carries the complete 376-test style module and all 86
+full CSS parity fixtures. Local release validation passes the Rust 1.85
+packaged consumer, both Cargo publication dry runs, a clean isolated wheel
+install/render, and byte-identical checkout/sdist wheels. Final release
+validation uses:
 
 ```powershell
 cargo fmt --all --check
 cargo test --locked
 cargo test --locked --features python,svg_raster
+cargo check --locked --all-targets --all-features
+cargo tree -e normal --all-features
 python -m pytest -q
-python tools/check_license_integrity.py --json
-python tools/check_release_metadata.py --expected-version 1.6.2 --json
-rustup toolchain install 1.85.0 --profile minimal
-rustup run 1.85.0 python tools/smoke_crates_consumer.py --expected-version 1.6.2 --json
+python tools\generate_css_parity_status.py --check --json
+python tools\check_license_integrity.py --json
+python tools\check_release_metadata.py --expected-version 2.0.0 --json
+rustup run 1.85.0 python tools\smoke_crates_consumer.py --expected-version 2.0.0 --json
+cargo publish --locked --dry-run --manifest-path crates\fullbleed_audit_contract\Cargo.toml
+# Before audit-contract 0.1.2 reaches crates.io, supply its local path through
+# Cargo's patch.crates-io configuration; after propagation, run this normally.
 cargo publish --locked --dry-run
-python -m maturin build --release --locked
-python -m maturin sdist
-python -m twine check target/wheels/*
+python build_backend\fullbleed_build_backend.py wheel --out dist
+python build_backend\fullbleed_build_backend.py sdist --out dist
 ```
 
-All release gates passed before registry and GitHub publication.
+The exact `v2.0.0` commit must also pass the installed-wheel matrix, package
+metadata/tag checks, golden renders, PDF profile validation, and clean-worktree
+gate before publication.
+
+## Publication
+
+Publication is intentionally pending. The release workflows publish the audit
+contract first, wait for registry propagation, then publish the main Rust crate,
+15 ABI3 wheels, one source distribution, and matching GitHub release assets.

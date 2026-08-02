@@ -12,6 +12,7 @@ use crate::flowable::{
 };
 use crate::font::FontRegistry;
 use crate::glyph_report::GlyphCoverageReport;
+use crate::html_dom::{NodeData, NodeRef, parse_html};
 use crate::style::{
     AlignContentMode, AlignItemsMode, AlignSelfMode, ComputedStyle, DirectionMode, DisplayMode,
     ElementInfo, FlexDirectionMode, FlexWrapMode, GeneratedContentPart, GeneratedCounterContent,
@@ -21,8 +22,6 @@ use crate::style::{
 };
 use crate::types::Pt;
 use crate::{BreakAfter, BreakBefore, BreakInside, Flowable};
-use kuchiki::traits::TendrilSink;
-use kuchiki::{NodeData, NodeRef};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -343,7 +342,7 @@ fn vertical_align_from_style(style: &ComputedStyle) -> VerticalAlign {
 }
 
 pub fn scan_html_asset_warnings(html: &str) -> Vec<HtmlAssetWarning> {
-    let document = kuchiki::parse_html().one(html);
+    let document = parse_html(html);
     let mut warnings: Vec<HtmlAssetWarning> = Vec::new();
 
     let mut stylesheet_links: Vec<String> = Vec::new();
@@ -611,7 +610,7 @@ pub fn html_to_story_with_resolver_and_fonts_and_report(
     doc_id: Option<usize>,
 ) -> Vec<Box<dyn Flowable>> {
     let t_parse = std::time::Instant::now();
-    let document = kuchiki::parse_html().one(html);
+    let document = parse_html(html);
     if let Some(perf_logger) = perf {
         let ms = t_parse.elapsed().as_secs_f64() * 1000.0;
         perf_logger.log_span_ms("story.parse_html", doc_id, ms);
@@ -756,7 +755,7 @@ pub fn html_to_story_with_resolver_and_fonts_and_report(
 }
 
 pub fn template_uses_attribute_placeholders(html: &str) -> bool {
-    let document = kuchiki::parse_html().one(html);
+    let document = parse_html(html);
     for node in document.descendants() {
         let Some(element) = node.as_element() else {
             continue;
@@ -2256,9 +2255,8 @@ fn node_to_flowables(
 }
 
 fn serialize_svg_node(node: &NodeRef) -> String {
-    // kuchiki parses HTML, and `NodeRef::to_string()` produces HTML serialization which is not
-    // necessarily well-formed XML (SVG void-ish children, attribute quoting, etc). roxmltree
-    // expects well-formed XML, so we do a minimal XML serialization for the SVG subtree.
+    // The HTML parser applies HTML recovery semantics, while the SVG compiler expects well-formed
+    // XML. Emit a minimal XML serialization for the foreign-content subtree.
     let mut out = String::new();
     write_svg_xml(node, &mut out);
     out
@@ -2862,7 +2860,6 @@ fn node_has_renderable_content(node: &NodeRef) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::Engine;
 
     fn approx_eq_pt(value: Pt, expected: f32) -> bool {
         (value.to_f32() - expected).abs() <= 0.01
@@ -2940,8 +2937,7 @@ mod tests {
 
     #[test]
     fn element_info_marks_only_html_element_as_root() {
-        let document =
-            kuchiki::parse_html().one("<!doctype html><html><body><p>root</p></body></html>");
+        let document = parse_html("<!doctype html><html><body><p>root</p></body></html>");
         let html = document.select_first("html").expect("html element");
         let body = document.select_first("body").expect("body element");
         let paragraph = document.select_first("p").expect("paragraph element");
@@ -2988,7 +2984,7 @@ mod tests {
           </body>
         </html>
         "##;
-        let doc = kuchiki::parse_html().one(html);
+        let doc = parse_html(html);
         let svg = doc.select_first("svg").expect("svg");
         let xml = serialize_svg_node(svg.as_node());
         let compiled = crate::svg::compile_svg(&xml, Pt::from_f32(24.0), Pt::from_f32(24.0));
@@ -3000,8 +2996,51 @@ mod tests {
     }
 
     #[test]
+    fn svg_serialization_preserves_text_content_for_native_compilation() {
+        let html = r##"
+        <html><body>
+          <svg width="160" height="64" viewBox="0 0 160 64">
+            <text x="8" y="46" font-family="Arial, sans-serif" font-size="44" fill="#cc0000">SVG</text>
+          </svg>
+        </body></html>
+        "##;
+        let document = parse_html(html);
+        let svg = document.select_first("svg").expect("svg");
+        let xml = serialize_svg_node(svg.as_node());
+        let compiled = crate::svg::compile_svg(&xml, Pt::from_f32(160.0), Pt::from_f32(64.0));
+        assert!(
+            compiled
+                .iter()
+                .any(|item| matches!(item, crate::svg::CompiledItem::Text(_))),
+            "serialized inline SVG text should compile: {xml}"
+        );
+    }
+
+    #[test]
+    fn svg_serialization_preserves_native_filter_attributes() {
+        let html = r##"
+        <html><body>
+          <svg width="80" height="40" viewBox="0 0 80 40">
+            <defs><filter id="blur"><feGaussianBlur stdDeviation="2" /></filter></defs>
+            <rect x="10" y="8" width="40" height="20" fill="red" filter="url(#blur)" />
+          </svg>
+        </body></html>
+        "##;
+        let document = parse_html(html);
+        let svg = document.select_first("svg").expect("svg");
+        let xml = serialize_svg_node(svg.as_node());
+        let compiled = crate::svg::compile_svg(&xml, Pt::from_f32(80.0), Pt::from_f32(40.0));
+        assert!(
+            compiled
+                .iter()
+                .any(|item| matches!(item, crate::svg::CompiledItem::Group(_))),
+            "serialized inline SVG filter should compile: {xml}"
+        );
+    }
+
+    #[test]
     fn inline_children_only_excludes_img_and_svg_replaced_content() {
-        let doc = kuchiki::parse_html().one(
+        let doc = parse_html(
             r##"
             <html>
               <body>
@@ -3030,7 +3069,7 @@ mod tests {
 
     #[test]
     fn inline_children_only_respects_display_block_on_span_children() {
-        let doc = kuchiki::parse_html().one(
+        let doc = parse_html(
             r##"
             <html>
               <body>
@@ -3115,7 +3154,7 @@ mod tests {
     #[test]
     fn load_svg_from_data_uri_image_source() {
         let xml = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 4'><rect width='4' height='4' fill='#000'/></svg>";
-        let payload = base64::engine::general_purpose::STANDARD.encode(xml.as_bytes());
+        let payload = crate::base64::encode_standard(xml.as_bytes());
         let uri = format!("data:image/svg+xml;base64,{payload}");
         let decoded = load_svg_xml_from_image_source(None, &uri).expect("svg xml from data uri");
         assert!(
@@ -3126,7 +3165,7 @@ mod tests {
 
     #[test]
     fn non_svg_data_uri_image_source_is_not_treated_as_svg() {
-        let payload = base64::engine::general_purpose::STANDARD.encode([0u8, 1u8, 2u8]);
+        let payload = crate::base64::encode_standard([0u8, 1u8, 2u8]);
         let uri = format!("data:image/png;base64,{payload}");
         assert!(
             load_svg_xml_from_image_source(None, &uri).is_none(),
@@ -3271,7 +3310,9 @@ mod tests {
 
     #[test]
     fn ordered_list_start_attribute_sets_initial_marker_index() {
-        let doc = kuchiki::parse_html().one("<!doctype html><html><body><ol start='101'><li>one</li></ol><ul start='9'><li>bullet</li></ul></body></html>");
+        let doc = parse_html(
+            "<!doctype html><html><body><ol start='101'><li>one</li></ol><ul start='9'><li>bullet</li></ul></body></html>",
+        );
         let ordered = doc.select_first("ol").expect("ordered list");
         let unordered = doc.select_first("ul").expect("unordered list");
 
@@ -7739,48 +7780,54 @@ fn inline_dimensions(style: Option<&str>) -> (Option<Pt>, Option<Pt>) {
         Some(value) => value,
         None => return (None, None),
     };
-    let style_attr = match lightningcss::stylesheet::StyleAttribute::parse(
-        style,
-        lightningcss::stylesheet::ParserOptions::default(),
-    ) {
+    let declarations = match crate::css_native::parse_declaration_block(style) {
         Ok(value) => value,
         Err(_) => return (None, None),
     };
     let mut width = None;
     let mut height = None;
-    for prop in style_attr.declarations.declarations.iter() {
-        match prop {
-            lightningcss::properties::Property::Width(size) => {
-                width = size_to_points(size);
-            }
-            lightningcss::properties::Property::Height(size) => {
-                height = size_to_points(size);
-            }
-            _ => {}
-        }
-    }
-    for prop in style_attr.declarations.important_declarations.iter() {
-        match prop {
-            lightningcss::properties::Property::Width(size) => {
-                width = size_to_points(size);
-            }
-            lightningcss::properties::Property::Height(size) => {
-                height = size_to_points(size);
-            }
-            _ => {}
+    for declaration in declarations.normal().chain(declarations.important()) {
+        let slot = if declaration.name_eq("width") {
+            &mut width
+        } else if declaration.name_eq("height") {
+            &mut height
+        } else {
+            continue;
+        };
+        if let Some(value) = inline_dimension_to_points(&declaration.value) {
+            *slot = value;
         }
     }
     (width, height)
 }
 
-fn size_to_points(size: &lightningcss::properties::size::Size) -> Option<Pt> {
-    match size {
-        lightningcss::properties::size::Size::LengthPercentage(value) => match value {
-            lightningcss::values::length::LengthPercentage::Dimension(length) => {
-                length.to_px().map(|px| Pt::from_f32(px * 0.75))
-            }
-            _ => None,
-        },
-        _ => None,
+fn inline_dimension_to_points(value: &str) -> Option<Option<Pt>> {
+    let value = value.trim();
+    if let Some(px) = crate::css_native::parse_absolute_length_px(value) {
+        if px < 0.0 {
+            return None;
+        }
+        return Some(Some(Pt::from_f32(px * 0.75)));
     }
+    let lower = value.to_ascii_lowercase();
+    if matches!(
+        lower.as_str(),
+        "auto" | "min-content" | "max-content" | "stretch" | "contain"
+    ) || lower.ends_with('%')
+        || [
+            "em", "rem", "ex", "rex", "cap", "rcap", "ch", "rch", "ic", "ric", "lh", "rlh", "vw",
+            "vh", "vi", "vb", "vmin", "vmax", "svw", "svh", "lvw", "lvh", "dvw", "dvh", "cqw",
+            "cqh", "cqi", "cqb", "cqmin", "cqmax",
+        ]
+        .iter()
+        .any(|unit| lower.ends_with(unit))
+        || ["calc(", "min(", "max(", "clamp(", "fit-content("]
+            .iter()
+            .any(|prefix| lower.starts_with(prefix) && lower.ends_with(')'))
+    {
+        // These are valid CSS sizes but cannot be resolved without layout context. The previous
+        // typed path likewise returned no intrinsic point override for them.
+        return Some(None);
+    }
+    None
 }

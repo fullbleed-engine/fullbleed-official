@@ -20,6 +20,9 @@ def _root() -> Path:
 
 
 def _specs() -> Path:
+    packaged = Path(__file__).resolve().with_name("specs")
+    if packaged.is_dir():
+        return packaged
     return _root() / "docs" / "specs"
 
 
@@ -130,7 +133,9 @@ def _text_similarity(a: str | None, b: str | None) -> float:
 
 def _dl_fragmentation_metrics(html: str) -> tuple[int, int, int]:
     blocks: list[dict[str, int]] = []
-    for match in re.finditer(r"<dl\b[^>]*>(.*?)</dl>", html, flags=re.IGNORECASE | re.DOTALL):
+    for match in re.finditer(
+        r"<dl\b[^>]*>(.*?)</dl>", html, flags=re.IGNORECASE | re.DOTALL
+    ):
         block = str(match.group(1) or "")
         dt_count = len(re.findall(r"<dt\b", block, flags=re.IGNORECASE))
         dd_count = len(re.findall(r"<dd\b", block, flags=re.IGNORECASE))
@@ -179,7 +184,11 @@ def _lang_ok(lang: str | None) -> bool:
     if not text:
         return False
     allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-")
-    return all(ch in allowed for ch in text) and not text.startswith("-") and not text.endswith("-")
+    return (
+        all(ch in allowed for ch in text)
+        and not text.startswith("-")
+        and not text.endswith("-")
+    )
 
 
 def _trueish(value: str | None) -> bool:
@@ -313,7 +322,9 @@ class _P(HTMLParser):
     def handle_starttag(self, tag: str, attrs_in: list[tuple[str, str | None]]) -> None:
         self._tag(tag, attrs_in)
 
-    def handle_startendtag(self, tag: str, attrs_in: list[tuple[str, str | None]]) -> None:
+    def handle_startendtag(
+        self, tag: str, attrs_in: list[tuple[str, str | None]]
+    ) -> None:
         self._tag(tag, attrs_in)
 
     def handle_endtag(self, tag: str) -> None:
@@ -333,7 +344,9 @@ class _P(HTMLParser):
             informative_image_count = int(fig.get("informative_image_count") or 0)
             if informative_image_count > 0:
                 self.figure_informative_count += 1
-                caption_text = _normalize_text("".join(fig.get("figcaption_chunks") or []))
+                caption_text = _normalize_text(
+                    "".join(fig.get("figcaption_chunks") or [])
+                )
                 alt_texts = [t for t in fig.get("alt_texts", []) if t]
                 max_alt_len = int(fig.get("max_alt_len") or 0)
                 self.figure_max_alt_len = max(self.figure_max_alt_len, max_alt_len)
@@ -366,12 +379,23 @@ class _P(HTMLParser):
                     self.empty_label_count += 1
                 elif item.get("kind") == "link":
                     aria_label_nonempty = bool(item.get("aria_label_nonempty"))
-                    aria_labelledby_nonempty = bool(item.get("aria_labelledby_nonempty"))
+                    aria_labelledby_nonempty = bool(
+                        item.get("aria_labelledby_nonempty")
+                    )
                     norm = " ".join(text.split()).strip().lower()
                     text_nonempty = bool(norm)
-                    if not (aria_label_nonempty or aria_labelledby_nonempty or text_nonempty):
+                    if not (
+                        aria_label_nonempty or aria_labelledby_nonempty or text_nonempty
+                    ):
                         self.unnamed_link_count += 1
-                    elif norm in {"click here", "here", "read more", "learn more", "more", "more..."}:
+                    elif norm in {
+                        "click here",
+                        "here",
+                        "read more",
+                        "learn more",
+                        "more",
+                        "more...",
+                    }:
                         self.generic_link_text_count += 1
                 self._text_capture_stack.pop(idx)
                 break
@@ -431,7 +455,9 @@ class _P(HTMLParser):
             1 for name in attrs if len(name) > 2 and name.startswith("on")
         )
         has_onclick = "onclick" in attrs
-        has_keyboard_handler = any(name in attrs for name in ("onkeydown", "onkeyup", "onkeypress"))
+        has_keyboard_handler = any(
+            name in attrs for name in ("onkeydown", "onkeyup", "onkeypress")
+        )
         has_tabindex_attr = "tabindex" in attrs
         if t != "html" and "lang" in attrs:
             self.part_lang_attr_count += 1
@@ -439,7 +465,10 @@ class _P(HTMLParser):
                 self.invalid_part_lang_attr_count += 1
         if t in {"audio", "video"} and "autoplay" in attrs:
             self.autoplay_media_count += 1
-        if t == "meta" and str(attrs.get("http-equiv", "")).strip().lower() == "refresh":
+        if (
+            t == "meta"
+            and str(attrs.get("http-equiv", "")).strip().lower() == "refresh"
+        ):
             self.meta_refresh_count += 1
 
         if "aria-label" in attrs and not attrs.get("aria-label", "").strip():
@@ -480,11 +509,17 @@ class _P(HTMLParser):
             self.redundant_state_native_count += 1
         if t == "input":
             input_type = attrs.get("type", "").strip().lower()
-            if input_type in {"checkbox", "radio"} and "checked" in attrs and _trueish(
-                attrs.get("aria-checked")
+            if (
+                input_type in {"checkbox", "radio"}
+                and "checked" in attrs
+                and _trueish(attrs.get("aria-checked"))
             ):
                 self.redundant_state_native_count += 1
-        if t == "option" and "selected" in attrs and _trueish(attrs.get("aria-selected")):
+        if (
+            t == "option"
+            and "selected" in attrs
+            and _trueish(attrs.get("aria-selected"))
+        ):
             self.redundant_state_native_count += 1
         is_native_keyboard_interactive = (
             (t == "a" and bool(attrs.get("href", "").strip()))
@@ -524,7 +559,10 @@ class _P(HTMLParser):
             self.sig_count += 1
         if t in {"img", "svg"}:
             self.image_count += 1
-            role_decorative = attrs.get("role", "").strip().lower() in {"presentation", "none"}
+            role_decorative = attrs.get("role", "").strip().lower() in {
+                "presentation",
+                "none",
+            }
             aria_hidden = _trueish(attrs.get("aria-hidden"))
             explicit_decorative = _trueish(attrs.get("data-fb-a11y-decorative"))
             aria_label = attrs.get("aria-label")
@@ -538,7 +576,9 @@ class _P(HTMLParser):
                 or (alt_value is not None and alt_value.strip())
             )
             alt_empty = alt_present and (alt_value == "")
-            decorative = explicit_decorative or aria_hidden or role_decorative or alt_empty
+            decorative = (
+                explicit_decorative or aria_hidden or role_decorative or alt_empty
+            )
             if decorative and has_informative_name:
                 self.image_semantic_conflict_count += 1
             elif not decorative and not has_informative_name:
@@ -555,7 +595,9 @@ class _P(HTMLParser):
                 alt_text = _normalize_text(alt_value) if alt_value is not None else ""
                 if alt_text:
                     fig["alt_texts"].append(alt_text)
-                    fig["max_alt_len"] = max(int(fig.get("max_alt_len") or 0), len(alt_text))
+                    fig["max_alt_len"] = max(
+                        int(fig.get("max_alt_len") or 0), len(alt_text)
+                    )
         if t in {"input", "select", "textarea"}:
             input_type = attrs.get("type", "").strip().lower()
             if not (t == "input" and input_type == "hidden"):
@@ -582,11 +624,15 @@ class _P(HTMLParser):
                     "kind": "link",
                     "chunks": [],
                     "aria_label_nonempty": bool(attrs.get("aria-label", "").strip()),
-                    "aria_labelledby_nonempty": bool(_idrefs(attrs.get("aria-labelledby"))),
+                    "aria_labelledby_nonempty": bool(
+                        _idrefs(attrs.get("aria-labelledby"))
+                    ),
                 }
             )
         if t == "table":
-            self.table_stack.append({"has_caption": False, "th_count": 0, "th_scope_count": 0})
+            self.table_stack.append(
+                {"has_caption": False, "th_count": 0, "th_scope_count": 0}
+            )
         elif self.table_stack:
             tbl = self.table_stack[-1]
             if t == "caption":
@@ -622,12 +668,16 @@ def parse_html_facts(html: str) -> HtmlFacts:
         if not _invalidish(str(ctl.get("aria_invalid") or "")):
             continue
         invalid_controls += 1
-        describedby_ok = any(tok in ids for tok in _idrefs(str(ctl.get("aria_describedby") or "")))
-        errormessage_ok = any(tok in ids for tok in _idrefs(str(ctl.get("aria_errormessage") or "")))
+        describedby_ok = any(
+            tok in ids for tok in _idrefs(str(ctl.get("aria_describedby") or ""))
+        )
+        errormessage_ok = any(
+            tok in ids for tok in _idrefs(str(ctl.get("aria_errormessage") or ""))
+        )
         if not (describedby_ok or errormessage_ok):
             unidentified_error_controls += 1
-    dl_block_count, dl_fragmentation_count, dl_group_consistency_count = _dl_fragmentation_metrics(
-        html
+    dl_block_count, dl_fragmentation_count, dl_group_consistency_count = (
+        _dl_fragmentation_metrics(html)
     )
     return HtmlFacts(
         html_lang=p.html_lang,
@@ -686,7 +736,9 @@ def parse_html_facts(html: str) -> HtmlFacts:
     )
 
 
-def _indexes(registry: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+def _indexes(
+    registry: dict[str, Any],
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
     return (
         {e["id"]: e for e in registry.get("entries", [])},
         {c["id"]: c for c in registry.get("pmr_categories", [])},
@@ -703,13 +755,22 @@ def _profile_override_levels(registry: dict[str, Any], profile: str) -> dict[str
     return out
 
 
-def _gate_level(entry_id: str, entries: dict[str, dict[str, Any]], overrides: dict[str, str]) -> str:
+def _gate_level(
+    entry_id: str, entries: dict[str, dict[str, Any]], overrides: dict[str, str]
+) -> str:
     if entry_id in overrides:
         return overrides[entry_id]
     return str(entries.get(entry_id, {}).get("default_gate_level", "warn"))
 
 
-def _gate(rows: list[dict[str, Any]], *, id_key: str, mode: str, entries: dict[str, dict[str, Any]], overrides: dict[str, str]) -> dict[str, Any]:
+def _gate(
+    rows: list[dict[str, Any]],
+    *,
+    id_key: str,
+    mode: str,
+    entries: dict[str, dict[str, Any]],
+    overrides: dict[str, str],
+) -> dict[str, Any]:
     mode = str(mode or "error").strip().lower()
     if mode not in {"off", "warn", "error"}:
         raise ValueError(f"Unsupported gate mode {mode!r}")
@@ -735,7 +796,13 @@ def _gate(rows: list[dict[str, Any]], *, id_key: str, mode: str, entries: dict[s
         else:
             wc += 1
     suffix = "rule" if id_key == "rule_id" else "audit"
-    return {"ok": ec == 0, "mode": mode, "error_count": ec, "warn_count": wc, f"failed_{suffix}_ids": failed}
+    return {
+        "ok": ec == 0,
+        "mode": mode,
+        "error_count": ec,
+        "warn_count": wc,
+        f"failed_{suffix}_ids": failed,
+    }
 
 
 def _manual_debt(parity_report: dict[str, Any] | None) -> dict[str, Any]:
@@ -822,7 +889,9 @@ def _wcag20aa_claim_readiness_scaffold(
     if int(wcag20aa_coverage.get("unmapped_entry_count", 0)) > 0:
         notes.append("WCAG target registry still contains unmapped entries.")
     if int(wcag20aa_coverage.get("implemented_mapped_entry_pending_count", 0)) > 0:
-        notes.append("Implemented mapped WCAG entries remain unevaluated in this report.")
+        notes.append(
+            "Implemented mapped WCAG entries remain unevaluated in this report."
+        )
     notes.append("Manual claim evidence is required for WCAG conformance assertions.")
     return {
         "target": "wcag20aa",
@@ -832,7 +901,9 @@ def _wcag20aa_claim_readiness_scaffold(
         "manual_review_debt_count": int(manual_review_debt_count),
         "machine_blocker_count": machine_blocker_count,
         "coverage_gap_count": coverage_gap_count,
-        "implemented_mapped_entry_count": int(wcag20aa_coverage.get("implemented_mapped_entry_count", 0)),
+        "implemented_mapped_entry_count": int(
+            wcag20aa_coverage.get("implemented_mapped_entry_count", 0)
+        ),
         "implemented_mapped_entry_evaluated_count": int(
             wcag20aa_coverage.get("implemented_mapped_entry_evaluated_count", 0)
         ),
@@ -844,7 +915,9 @@ def _wcag20aa_claim_readiness_scaffold(
     }
 
 
-def _contrast_render_seed_analysis(render_preview_png_path: str | Path) -> dict[str, Any]:
+def _contrast_render_seed_analysis(
+    render_preview_png_path: str | Path,
+) -> dict[str, Any]:
     try:
         import fullbleed  # type: ignore
 
@@ -953,7 +1026,7 @@ def _confidence_rank(v: str) -> int:
 
 
 def _finding_ref(f: dict[str, Any], idx: int) -> str:
-    return f"{f.get('rule_id','unknown')}:{f.get('stage','unknown')}:{f.get('source','unknown')}:{idx}"
+    return f"{f.get('rule_id', 'unknown')}:{f.get('stage', 'unknown')}:{f.get('source', 'unknown')}:{idx}"
 
 
 def _annotated_correlation_evidence(
@@ -1033,14 +1106,24 @@ def _dedup_and_correlate_findings(
         peers = [original[i] for i in peer_idxs]
         group = [row] + peers
 
-        worst_verdict = max((str(g.get("verdict") or "") for g in group), key=_verdict_rank)
-        worst_severity = max((str(g.get("severity") or "") for g in group), key=_severity_rank)
-        lowest_confidence = min((str(g.get("confidence") or "") for g in group), key=_confidence_rank)
+        worst_verdict = max(
+            (str(g.get("verdict") or "") for g in group), key=_verdict_rank
+        )
+        worst_severity = max(
+            (str(g.get("severity") or "") for g in group), key=_severity_rank
+        )
+        lowest_confidence = min(
+            (str(g.get("confidence") or "") for g in group), key=_confidence_rank
+        )
 
         primary["verdict"] = worst_verdict
-        if _severity_rank(worst_severity) > _severity_rank(str(primary.get("severity") or "")):
+        if _severity_rank(worst_severity) > _severity_rank(
+            str(primary.get("severity") or "")
+        ):
             primary["severity"] = worst_severity
-        if _confidence_rank(lowest_confidence) < _confidence_rank(str(primary.get("confidence") or "")):
+        if _confidence_rank(lowest_confidence) < _confidence_rank(
+            str(primary.get("confidence") or "")
+        ):
             primary["confidence"] = lowest_confidence
 
         if any(str(g.get("applicability")) == "applicable" for g in group):
@@ -1059,7 +1142,9 @@ def _dedup_and_correlate_findings(
         merged_evidence.extend(_annotated_correlation_evidence(row, idx, primary=True))
         for peer_idx in peer_idxs:
             merged_evidence.extend(
-                _annotated_correlation_evidence(original[peer_idx], peer_idx, primary=False)
+                _annotated_correlation_evidence(
+                    original[peer_idx], peer_idx, primary=False
+                )
             )
         if merged_evidence:
             primary["evidence"] = merged_evidence
@@ -1070,7 +1155,9 @@ def _dedup_and_correlate_findings(
             f"{str(primary.get('message') or '').rstrip()} "
             f"(Correlated {len(peer_idxs)} pre-render diagnostic(s) into canonical {primary.get('stage')} finding.)"
         ).strip()
-        primary.setdefault("fix_hint", "Review correlated pre-render and post-emit evidence together.")
+        primary.setdefault(
+            "fix_hint", "Review correlated pre-render and post-emit evidence together."
+        )
         # Keep detailed correlation summary in a synthetic evidence row so schema changes are minimal.
         primary.setdefault("evidence", [])
         primary["evidence"].append(
@@ -1158,7 +1245,9 @@ def prototype_verify_accessibility(
     )
     findings: list[dict[str, Any]] = []
 
-    lang_pass = _lang_ok(facts.html_lang) and (expected_lang is None or facts.html_lang == expected_lang)
+    lang_pass = _lang_ok(facts.html_lang) and (
+        expected_lang is None or facts.html_lang == expected_lang
+    )
     findings.append(
         _vf(
             "fb.a11y.html.lang_present_valid",
@@ -1166,7 +1255,9 @@ def prototype_verify_accessibility(
             "high",
             "post-emit",
             "fullbleed",
-            "HTML lang attribute is present and valid." if lang_pass else "HTML lang missing/invalid or metadata mismatch.",
+            "HTML lang attribute is present and valid."
+            if lang_pass
+            else "HTML lang missing/invalid or metadata mismatch.",
             evidence=[{"selector": "html", "values": {"lang": facts.html_lang or ""}}],
         )
     )
@@ -1218,7 +1309,9 @@ def prototype_verify_accessibility(
                 confidence="high",
             )
         )
-    title_pass = bool(facts.title.strip()) and (expected_title is None or facts.title == expected_title)
+    title_pass = bool(facts.title.strip()) and (
+        expected_title is None or facts.title == expected_title
+    )
     findings.append(
         _vf(
             "fb.a11y.html.title_present_nonempty",
@@ -1226,7 +1319,9 @@ def prototype_verify_accessibility(
             "high",
             "post-emit",
             "fullbleed",
-            "Document title is present and non-empty." if title_pass else "Document title missing/empty or metadata mismatch.",
+            "Document title is present and non-empty."
+            if title_pass
+            else "Document title missing/empty or metadata mismatch.",
             evidence=[{"selector": "head > title", "values": {"title": facts.title}}],
         )
     )
@@ -1238,12 +1333,16 @@ def prototype_verify_accessibility(
             "medium",
             "post-emit",
             "fullbleed",
-            "Single primary content root detected." if main_pass else f"Expected exactly one <main>; found {facts.main_count}.",
+            "Single primary content root detected."
+            if main_pass
+            else f"Expected exactly one <main>; found {facts.main_count}.",
             evidence=[{"selector": "main", "values": {"count": facts.main_count}}],
         )
     )
     hl_fail = (
-        facts.empty_heading_count + facts.empty_label_count + facts.empty_aria_label_count
+        facts.empty_heading_count
+        + facts.empty_label_count
+        + facts.empty_aria_label_count
     ) > 0
     hl_warn = facts.unlabeled_region_count > 0
     findings.append(
@@ -1291,7 +1390,9 @@ def prototype_verify_accessibility(
             )
         )
     else:
-        img_fail = facts.image_missing_alt_count > 0 or facts.image_semantic_conflict_count > 0
+        img_fail = (
+            facts.image_missing_alt_count > 0 or facts.image_semantic_conflict_count > 0
+        )
         img_warn = facts.image_title_only_count > 0
         findings.append(
             _vf(
@@ -1361,7 +1462,9 @@ def prototype_verify_accessibility(
                             "figure_informative_count": facts.figure_informative_count,
                             "figure_caption_redundancy_threshold": facts.figure_caption_redundancy_threshold,
                             "figure_caption_redundancy_count": facts.figure_caption_redundancy_count,
-                            "figure_max_caption_similarity": round(facts.figure_max_caption_similarity, 3),
+                            "figure_max_caption_similarity": round(
+                                facts.figure_max_caption_similarity, 3
+                            ),
                         }
                     }
                 ],
@@ -1438,7 +1541,9 @@ def prototype_verify_accessibility(
                             "figure_informative_count": facts.figure_informative_count,
                             "figure_caption_redundancy_threshold": facts.figure_caption_redundancy_threshold,
                             "figure_caption_redundancy_count": facts.figure_caption_redundancy_count,
-                            "figure_max_caption_similarity": round(facts.figure_max_caption_similarity, 3),
+                            "figure_max_caption_similarity": round(
+                                facts.figure_max_caption_similarity, 3
+                            ),
                         }
                     }
                 ],
@@ -1738,7 +1843,9 @@ def prototype_verify_accessibility(
     focus_css = _focus_visible_css_seed_signals(css_text)
     interactive_focus_target_count = facts.link_count + facts.form_control_count
     has_focus_selector_signal = int(focus_css["focus_selector_signal_count"]) > 0
-    has_outline_suppression_signal = int(focus_css["outline_suppression_signal_count"]) > 0
+    has_outline_suppression_signal = (
+        int(focus_css["outline_suppression_signal_count"]) > 0
+    )
     findings.append(
         _vf(
             "fb.a11y.focus.visible_seed",
@@ -1789,20 +1896,62 @@ def prototype_verify_accessibility(
             confidence=(
                 "high"
                 if interactive_focus_target_count == 0
-                else ("medium" if (has_focus_selector_signal or has_outline_suppression_signal) else "low")
+                else (
+                    "medium"
+                    if (has_focus_selector_signal or has_outline_suppression_signal)
+                    else "low"
+                )
             ),
         )
     )
     if facts.dup_ids:
         for dup in facts.dup_ids:
-            findings.append(_vf("fb.a11y.ids.duplicate_id", "fail", "critical", "post-emit", "fullbleed", f"Duplicate id {dup!r} detected.", evidence=[{"values": {"id": dup}}]))
+            findings.append(
+                _vf(
+                    "fb.a11y.ids.duplicate_id",
+                    "fail",
+                    "critical",
+                    "post-emit",
+                    "fullbleed",
+                    f"Duplicate id {dup!r} detected.",
+                    evidence=[{"values": {"id": dup}}],
+                )
+            )
     else:
-        findings.append(_vf("fb.a11y.ids.duplicate_id", "pass", "critical", "post-emit", "fullbleed", "No duplicate IDs detected."))
+        findings.append(
+            _vf(
+                "fb.a11y.ids.duplicate_id",
+                "pass",
+                "critical",
+                "post-emit",
+                "fullbleed",
+                "No duplicate IDs detected.",
+            )
+        )
     if facts.missing_idrefs:
         for attr, target in facts.missing_idrefs:
-            findings.append(_vf("fb.a11y.aria.reference_target_exists", "fail", "critical", "post-emit", "fullbleed", f"{attr} references missing id {target!r}.", evidence=[{"values": {"attr": attr, "target_id": target}}]))
+            findings.append(
+                _vf(
+                    "fb.a11y.aria.reference_target_exists",
+                    "fail",
+                    "critical",
+                    "post-emit",
+                    "fullbleed",
+                    f"{attr} references missing id {target!r}.",
+                    evidence=[{"values": {"attr": attr, "target_id": target}}],
+                )
+            )
     else:
-        findings.append(_vf("fb.a11y.aria.reference_target_exists", "pass", "critical", "post-emit", "fullbleed", "No broken ARIA ID references detected."))
+        findings.append(
+            _vf(
+                "fb.a11y.aria.reference_target_exists",
+                "pass",
+                "critical",
+                "post-emit",
+                "fullbleed",
+                "No broken ARIA ID references detected.",
+            )
+        )
     findings.append(
         _vf(
             "fb.a11y.aria.redundant_role_native_seed",
@@ -1855,7 +2004,13 @@ def prototype_verify_accessibility(
         if not rid:
             continue
         err = str(diag.get("severity")) == "error"
-        sev = "critical" if err and rid in {"fb.a11y.ids.duplicate_id", "fb.a11y.aria.reference_target_exists"} else ("high" if err else "medium")
+        sev = (
+            "critical"
+            if err
+            and rid
+            in {"fb.a11y.ids.duplicate_id", "fb.a11y.aria.reference_target_exists"}
+            else ("high" if err else "medium")
+        )
         findings.append(
             _vf(
                 rid,
@@ -1864,7 +2019,12 @@ def prototype_verify_accessibility(
                 "pre-render",
                 "a11y_contract",
                 str(diag.get("message") or diag.get("code") or "A11y diagnostic"),
-                evidence=[{"dom_path": str(diag.get("path") or ""), "values": {"code": diag.get("code")}}],
+                evidence=[
+                    {
+                        "dom_path": str(diag.get("path") or ""),
+                        "values": {"code": diag.get("code")},
+                    }
+                ],
                 confidence="high",
             )
         )
@@ -1879,7 +2039,15 @@ def prototype_verify_accessibility(
             (
                 "pass"
                 if sig_pass
-                else ("not_applicable" if sig_na else ("fail" if profile in {"cav", "transactional"} else "not_applicable"))
+                else (
+                    "not_applicable"
+                    if sig_na
+                    else (
+                        "fail"
+                        if profile in {"cav", "transactional"}
+                        else "not_applicable"
+                    )
+                )
             ),
             "medium",
             "post-emit",
@@ -1893,9 +2061,18 @@ def prototype_verify_accessibility(
                     else "No text-first signature semantics detected."
                 )
             ),
-            evidence=[{"values": {"signature_semantic_count": facts.sig_count, "signature_cue_text_present": sig_cue_present}}],
+            evidence=[
+                {
+                    "values": {
+                        "signature_semantic_count": facts.sig_count,
+                        "signature_cue_text_present": sig_cue_present,
+                    }
+                }
+            ],
             verification_mode="machine",
-            applicability="not_applicable" if (profile not in {"cav", "transactional"} or sig_na) else "applicable",
+            applicability="not_applicable"
+            if (profile not in {"cav", "transactional"} or sig_na)
+            else "applicable",
             confidence="high",
         )
     )
@@ -1957,14 +2134,18 @@ def prototype_verify_accessibility(
                 }
             ],
             verification_mode="hybrid",
-            applicability="applicable" if complete_processes_applicable else "not_applicable",
+            applicability="applicable"
+            if complete_processes_applicable
+            else "not_applicable",
             confidence="medium" if complete_processes_applicable else "high",
         )
     )
     keyboard_target_count = facts.link_count + facts.form_control_count
     keyboard_custom_click_target_count = facts.custom_click_handler_count
     keyboard_pointer_only_signal_count = facts.pointer_only_click_handler_count
-    keyboard_applicable = keyboard_target_count > 0 or keyboard_custom_click_target_count > 0
+    keyboard_applicable = (
+        keyboard_target_count > 0 or keyboard_custom_click_target_count > 0
+    )
     keyboard_assessed = _claim_bool(claim_evidence, "wcag20", "keyboard_assessed")
     keyboard_basis_recorded = _claim_bool(
         claim_evidence, "wcag20", "keyboard_basis_recorded"
@@ -1977,13 +2158,11 @@ def prototype_verify_accessibility(
                 "not_applicable"
                 if not keyboard_applicable
                 else (
-                    (
-                        "warn"
-                        if keyboard_claim_evidence_satisfied
-                        else "manual_needed"
-                    )
+                    ("warn" if keyboard_claim_evidence_satisfied else "manual_needed")
                     if keyboard_pointer_only_signal_count > 0
-                    else ("pass" if keyboard_claim_evidence_satisfied else "manual_needed")
+                    else (
+                        "pass" if keyboard_claim_evidence_satisfied else "manual_needed"
+                    )
                 )
             ),
             "medium",
@@ -2032,7 +2211,9 @@ def prototype_verify_accessibility(
             ),
         )
     )
-    keyboard_trap_assessed = _claim_bool(claim_evidence, "wcag20", "keyboard_trap_assessed")
+    keyboard_trap_assessed = _claim_bool(
+        claim_evidence, "wcag20", "keyboard_trap_assessed"
+    )
     keyboard_trap_basis_recorded = _claim_bool(
         claim_evidence, "wcag20", "keyboard_trap_basis_recorded"
     )
@@ -2045,7 +2226,11 @@ def prototype_verify_accessibility(
             (
                 "not_applicable"
                 if keyboard_target_count == 0
-                else ("pass" if keyboard_trap_claim_evidence_satisfied else "manual_needed")
+                else (
+                    "pass"
+                    if keyboard_trap_claim_evidence_satisfied
+                    else "manual_needed"
+                )
             ),
             "medium",
             "adapter",
@@ -2070,7 +2255,9 @@ def prototype_verify_accessibility(
                     }
                 }
             ],
-            applicability="not_applicable" if keyboard_target_count == 0 else "applicable",
+            applicability="not_applicable"
+            if keyboard_target_count == 0
+            else "applicable",
             verification_mode="hybrid",
             confidence=(
                 "high"
@@ -2229,7 +2416,9 @@ def prototype_verify_accessibility(
                     }
                 }
             ],
-            applicability="not_applicable" if on_input_target_count == 0 else "applicable",
+            applicability="not_applicable"
+            if on_input_target_count == 0
+            else "applicable",
             verification_mode="hybrid",
             confidence=(
                 "high"
@@ -2276,7 +2465,9 @@ def prototype_verify_accessibility(
                     }
                 }
             ],
-            applicability="not_applicable" if on_focus_target_count == 0 else "applicable",
+            applicability="not_applicable"
+            if on_focus_target_count == 0
+            else "applicable",
             verification_mode="hybrid",
             confidence=(
                 "high"
@@ -2355,7 +2546,9 @@ def prototype_verify_accessibility(
     pause_stop_hide_claim_evidence_satisfied = (
         pause_stop_hide_assessed and pause_stop_hide_basis_recorded
     )
-    pause_stop_hide_signal_count = facts.autoplay_media_count + facts.blink_marquee_count
+    pause_stop_hide_signal_count = (
+        facts.autoplay_media_count + facts.blink_marquee_count
+    )
     findings.append(
         _vf(
             "fb.a11y.timing.pause_stop_hide_seed",
@@ -2423,7 +2616,11 @@ def prototype_verify_accessibility(
             (
                 "not_applicable"
                 if not three_flashes_scope_declared
-                else ("pass" if three_flashes_claim_evidence_satisfied else "manual_needed")
+                else (
+                    "pass"
+                    if three_flashes_claim_evidence_satisfied
+                    else "manual_needed"
+                )
             ),
             "medium",
             "adapter",
@@ -2479,7 +2676,11 @@ def prototype_verify_accessibility(
             (
                 "not_applicable"
                 if not audio_control_scope_declared
-                else ("pass" if audio_control_claim_evidence_satisfied else "manual_needed")
+                else (
+                    "pass"
+                    if audio_control_claim_evidence_satisfied
+                    else "manual_needed"
+                )
             ),
             "medium",
             "adapter",
@@ -2533,7 +2734,9 @@ def prototype_verify_accessibility(
             (
                 "not_applicable"
                 if not use_of_color_scope_declared
-                else ("pass" if use_of_color_claim_evidence_satisfied else "manual_needed")
+                else (
+                    "pass" if use_of_color_claim_evidence_satisfied else "manual_needed"
+                )
             ),
             "medium",
             "adapter",
@@ -2571,9 +2774,7 @@ def prototype_verify_accessibility(
     resize_text_scope_declared = _claim_bool(
         claim_evidence, "wcag20", "resize_text_scope_declared"
     )
-    resize_text_assessed = _claim_bool(
-        claim_evidence, "wcag20", "resize_text_assessed"
-    )
+    resize_text_assessed = _claim_bool(claim_evidence, "wcag20", "resize_text_assessed")
     resize_text_basis_recorded = _claim_bool(
         claim_evidence, "wcag20", "resize_text_basis_recorded"
     )
@@ -2586,7 +2787,9 @@ def prototype_verify_accessibility(
             (
                 "not_applicable"
                 if not resize_text_scope_declared
-                else ("pass" if resize_text_claim_evidence_satisfied else "manual_needed")
+                else (
+                    "pass" if resize_text_claim_evidence_satisfied else "manual_needed"
+                )
             ),
             "medium",
             "adapter",
@@ -2641,7 +2844,11 @@ def prototype_verify_accessibility(
             (
                 "not_applicable"
                 if not images_of_text_scope_declared
-                else ("pass" if images_of_text_claim_evidence_satisfied else "manual_needed")
+                else (
+                    "pass"
+                    if images_of_text_claim_evidence_satisfied
+                    else "manual_needed"
+                )
             ),
             "medium",
             "adapter",
@@ -2796,9 +3003,7 @@ def prototype_verify_accessibility(
                 "high"
                 if not prerecorded_captions_scope_declared
                 else (
-                    "medium"
-                    if prerecorded_captions_claim_evidence_satisfied
-                    else "low"
+                    "medium" if prerecorded_captions_claim_evidence_satisfied else "low"
                 )
             ),
         )
@@ -2875,7 +3080,9 @@ def prototype_verify_accessibility(
     live_captions_scope_declared = _claim_bool(
         claim_evidence, "wcag20", "live_captions_scope_declared"
     )
-    live_captions_assessed = _claim_bool(claim_evidence, "wcag20", "live_captions_assessed")
+    live_captions_assessed = _claim_bool(
+        claim_evidence, "wcag20", "live_captions_assessed"
+    )
     live_captions_basis_recorded = _claim_bool(
         claim_evidence, "wcag20", "live_captions_basis_recorded"
     )
@@ -2888,7 +3095,11 @@ def prototype_verify_accessibility(
             (
                 "not_applicable"
                 if not live_captions_scope_declared
-                else ("pass" if live_captions_claim_evidence_satisfied else "manual_needed")
+                else (
+                    "pass"
+                    if live_captions_claim_evidence_satisfied
+                    else "manual_needed"
+                )
             ),
             "medium",
             "adapter",
@@ -2913,7 +3124,9 @@ def prototype_verify_accessibility(
                     }
                 }
             ],
-            applicability="applicable" if live_captions_scope_declared else "not_applicable",
+            applicability="applicable"
+            if live_captions_scope_declared
+            else "not_applicable",
             verification_mode="hybrid",
             confidence=(
                 "high"
@@ -3003,7 +3216,11 @@ def prototype_verify_accessibility(
             (
                 "not_applicable"
                 if not meaningful_sequence_scope_declared
-                else ("pass" if meaningful_sequence_claim_evidence_satisfied else "manual_needed")
+                else (
+                    "pass"
+                    if meaningful_sequence_claim_evidence_satisfied
+                    else "manual_needed"
+                )
             ),
             "medium",
             "adapter",
@@ -3036,14 +3253,18 @@ def prototype_verify_accessibility(
             confidence=(
                 "high"
                 if not meaningful_sequence_scope_declared
-                else ("medium" if meaningful_sequence_claim_evidence_satisfied else "low")
+                else (
+                    "medium" if meaningful_sequence_claim_evidence_satisfied else "low"
+                )
             ),
         )
     )
     multiple_ways_scope_declared = _claim_bool(
         claim_evidence, "wcag20", "multiple_ways_scope_declared"
     )
-    multiple_ways_assessed = _claim_bool(claim_evidence, "wcag20", "multiple_ways_assessed")
+    multiple_ways_assessed = _claim_bool(
+        claim_evidence, "wcag20", "multiple_ways_assessed"
+    )
     multiple_ways_basis_recorded = _claim_bool(
         claim_evidence, "wcag20", "multiple_ways_basis_recorded"
     )
@@ -3056,7 +3277,11 @@ def prototype_verify_accessibility(
             (
                 "not_applicable"
                 if not multiple_ways_scope_declared
-                else ("pass" if multiple_ways_claim_evidence_satisfied else "manual_needed")
+                else (
+                    "pass"
+                    if multiple_ways_claim_evidence_satisfied
+                    else "manual_needed"
+                )
             ),
             "medium",
             "adapter",
@@ -3080,7 +3305,9 @@ def prototype_verify_accessibility(
                     }
                 }
             ],
-            applicability="applicable" if multiple_ways_scope_declared else "not_applicable",
+            applicability="applicable"
+            if multiple_ways_scope_declared
+            else "not_applicable",
             verification_mode="hybrid",
             confidence=(
                 "high"
@@ -3143,7 +3370,9 @@ def prototype_verify_accessibility(
                 "high"
                 if not consistent_navigation_scope_declared
                 else (
-                    "medium" if consistent_navigation_claim_evidence_satisfied else "low"
+                    "medium"
+                    if consistent_navigation_claim_evidence_satisfied
+                    else "low"
                 )
             ),
         )
@@ -3156,15 +3385,21 @@ def prototype_verify_accessibility(
         + facts.inline_event_handler_attr_count
         + facts.meta_refresh_count
     )
-    tech_support_assessed = _claim_bool(claim_evidence, "technology_support", "assessed")
+    tech_support_assessed = _claim_bool(
+        claim_evidence, "technology_support", "assessed"
+    )
     tech_support_basis_recorded = _claim_bool(
         claim_evidence, "technology_support", "basis_recorded"
     )
-    tech_claim_evidence_satisfied = tech_support_assessed and tech_support_basis_recorded
+    tech_claim_evidence_satisfied = (
+        tech_support_assessed and tech_support_basis_recorded
+    )
     findings.append(
         _vf(
             "fb.a11y.claim.accessibility_supported_technologies_seed",
-            "warn" if ast_signal_count > 0 else ("pass" if tech_claim_evidence_satisfied else "manual_needed"),
+            "warn"
+            if ast_signal_count > 0
+            else ("pass" if tech_claim_evidence_satisfied else "manual_needed"),
             "medium",
             "adapter",
             "adapter",
@@ -3194,7 +3429,9 @@ def prototype_verify_accessibility(
             ],
             verification_mode="hybrid",
             applicability="applicable",
-            confidence="medium" if (ast_signal_count > 0 or tech_claim_evidence_satisfied) else "low",
+            confidence="medium"
+            if (ast_signal_count > 0 or tech_claim_evidence_satisfied)
+            else "low",
         )
     )
     consistent_identification_target_count = facts.link_count + facts.form_control_count
@@ -3249,7 +3486,11 @@ def prototype_verify_accessibility(
             confidence=(
                 "high"
                 if consistent_identification_target_count == 0
-                else ("medium" if consistent_identification_claim_evidence_satisfied else "low")
+                else (
+                    "medium"
+                    if consistent_identification_claim_evidence_satisfied
+                    else "low"
+                )
             ),
         )
     )
@@ -3266,7 +3507,9 @@ def prototype_verify_accessibility(
     findings.append(
         _vf(
             "fb.a11y.claim.section508.public_facing_content_applicability_seed",
-            "pass" if (s508_scope_declared and s508_public_recorded) else "manual_needed",
+            "pass"
+            if (s508_scope_declared and s508_public_recorded)
+            else "manual_needed",
             "medium",
             "adapter",
             "adapter",
@@ -3286,13 +3529,17 @@ def prototype_verify_accessibility(
             ],
             verification_mode="hybrid",
             applicability="applicable",
-            confidence="medium" if (s508_scope_declared and s508_public_recorded) else "low",
+            confidence="medium"
+            if (s508_scope_declared and s508_public_recorded)
+            else "low",
         )
     )
     findings.append(
         _vf(
             "fb.a11y.claim.section508.official_communications_applicability_seed",
-            "pass" if (s508_scope_declared and s508_official_recorded) else "manual_needed",
+            "pass"
+            if (s508_scope_declared and s508_official_recorded)
+            else "manual_needed",
             "medium",
             "adapter",
             "adapter",
@@ -3312,7 +3559,9 @@ def prototype_verify_accessibility(
             ],
             verification_mode="hybrid",
             applicability="applicable",
-            confidence="medium" if (s508_scope_declared and s508_official_recorded) else "low",
+            confidence="medium"
+            if (s508_scope_declared and s508_official_recorded)
+            else "low",
         )
     )
     findings.append(
@@ -3377,11 +3626,19 @@ def prototype_verify_accessibility(
                             "render_preview_png_path": str(render_preview_png_path),
                             "width": contrast.get("width", ""),
                             "height": contrast.get("height", ""),
-                            "opaque_pixel_count": contrast.get("opaque_pixel_count", ""),
+                            "opaque_pixel_count": contrast.get(
+                                "opaque_pixel_count", ""
+                            ),
                             "ink_pixel_count": contrast.get("ink_pixel_count", ""),
-                            "background_luminance": contrast.get("background_luminance", ""),
-                            "foreground_luminance": contrast.get("foreground_luminance", ""),
-                            "estimated_contrast_ratio": contrast.get("estimated_contrast_ratio", ""),
+                            "background_luminance": contrast.get(
+                                "background_luminance", ""
+                            ),
+                            "foreground_luminance": contrast.get(
+                                "foreground_luminance", ""
+                            ),
+                            "estimated_contrast_ratio": contrast.get(
+                                "estimated_contrast_ratio", ""
+                            ),
                         }
                     }
                 ],
@@ -3399,13 +3656,25 @@ def prototype_verify_accessibility(
                 "critical",
                 "post-emit",
                 "fullbleed",
-                "No remediation notes detected in CAV deliverable body." if not hits else "Potential remediation/provenance note leakage detected in CAV deliverable body.",
+                "No remediation notes detected in CAV deliverable body."
+                if not hits
+                else "Potential remediation/provenance note leakage detected in CAV deliverable body.",
                 evidence=[{"values": {"hits": hits}}],
                 confidence="high" if not hits else "medium",
             )
         )
     else:
-        findings.append(_vf("fb.a11y.cav.document_only_content", "not_applicable", "low", "post-emit", "fullbleed", "CAV-only rule not applicable.", applicability="not_applicable"))
+        findings.append(
+            _vf(
+                "fb.a11y.cav.document_only_content",
+                "not_applicable",
+                "low",
+                "post-emit",
+                "fullbleed",
+                "CAV-only rule not applicable.",
+                applicability="not_applicable",
+            )
+        )
 
     manual = _manual_debt(parity_report)
     if manual["item_count"] > 0:
@@ -3423,7 +3692,9 @@ def prototype_verify_accessibility(
             )
         )
 
-    counts_pre = {k: 0 for k in ("pass", "fail", "warn", "manual_needed", "not_applicable")}
+    counts_pre = {
+        k: 0 for k in ("pass", "fail", "warn", "manual_needed", "not_applicable")
+    }
     for f in findings:
         counts_pre[str(f.get("verdict"))] = counts_pre.get(str(f.get("verdict")), 0) + 1
     wcag20aa_coverage_pre = wcag20aa_coverage_from_findings(findings)
@@ -3436,7 +3707,8 @@ def prototype_verify_accessibility(
         _vf(
             "fb.a11y.claim.wcag20aa_level_readiness",
             "warn"
-            if claim_readiness_pre["status"] in {"blocked_machine_failures", "blocked_coverage_gaps"}
+            if claim_readiness_pre["status"]
+            in {"blocked_machine_failures", "blocked_coverage_gaps"}
             else "manual_needed",
             "high"
             if claim_readiness_pre["status"] == "blocked_machine_failures"
@@ -3448,7 +3720,9 @@ def prototype_verify_accessibility(
                 {
                     "values": {
                         "status": claim_readiness_pre["status"],
-                        "machine_blocker_count": claim_readiness_pre["machine_blocker_count"],
+                        "machine_blocker_count": claim_readiness_pre[
+                            "machine_blocker_count"
+                        ],
                         "coverage_gap_count": claim_readiness_pre["coverage_gap_count"],
                     }
                 }
@@ -3468,26 +3742,50 @@ def prototype_verify_accessibility(
     }
     if pagination_summary:
         if "page_count" in pagination_summary:
-            observability["signal_counts"]["pagination_page_count"] = pagination_summary["page_count"]
+            observability["signal_counts"]["pagination_page_count"] = (
+                pagination_summary["page_count"]
+            )
         if "overflow_event_count" in pagination_summary:
-            observability["signal_counts"]["pagination_overflow_event_count"] = pagination_summary["overflow_event_count"]
+            observability["signal_counts"]["pagination_overflow_event_count"] = (
+                pagination_summary["overflow_event_count"]
+            )
         if "low_coverage_page_count" in pagination_summary:
-            observability["signal_counts"]["pagination_low_coverage_page_count"] = pagination_summary["low_coverage_page_count"]
+            observability["signal_counts"]["pagination_low_coverage_page_count"] = (
+                pagination_summary["low_coverage_page_count"]
+            )
         if "flowable_overlap_count" in pagination_summary:
-            observability["signal_counts"]["pagination_flowable_overlap_count"] = pagination_summary["flowable_overlap_count"]
+            observability["signal_counts"]["pagination_flowable_overlap_count"] = (
+                pagination_summary["flowable_overlap_count"]
+            )
         if "text_overlap_count" in pagination_summary:
-            observability["signal_counts"]["pagination_text_overlap_count"] = pagination_summary["text_overlap_count"]
+            observability["signal_counts"]["pagination_text_overlap_count"] = (
+                pagination_summary["text_overlap_count"]
+            )
         if "transition_count" in pagination_summary:
-            observability["signal_counts"]["pagination_transition_count"] = pagination_summary["transition_count"]
-    gate = _gate(findings, id_key="rule_id", mode=mode, entries=entries, overrides=overrides)
+            observability["signal_counts"]["pagination_transition_count"] = (
+                pagination_summary["transition_count"]
+            )
+    gate = _gate(
+        findings, id_key="rule_id", mode=mode, entries=entries, overrides=overrides
+    )
     counts = {k: 0 for k in ("pass", "fail", "warn", "manual_needed", "not_applicable")}
     for f in findings:
         counts[str(f.get("verdict"))] = counts.get(str(f.get("verdict")), 0) + 1
-    reg_rules = [e["id"] for e in reg.get("entries", []) if e.get("system") == "a11y_verifier"]
+    reg_rules = [
+        e["id"] for e in reg.get("entries", []) if e.get("system") == "a11y_verifier"
+    ]
     evaluated = {f["rule_id"] for f in findings}
     conformance_status = {
-        "status": "fail_machine_subset" if counts["fail"] else ("manual_review_required" if (manual["item_count"] or counts["manual_needed"]) else "pass_machine_subset"),
-        "claim_scope": "manual_required" if (manual["item_count"] or counts["manual_needed"]) else "machine_subset",
+        "status": "fail_machine_subset"
+        if counts["fail"]
+        else (
+            "manual_review_required"
+            if (manual["item_count"] or counts["manual_needed"])
+            else "pass_machine_subset"
+        ),
+        "claim_scope": "manual_required"
+        if (manual["item_count"] or counts["manual_needed"])
+        else "machine_subset",
         "manual_review_required": bool(manual["item_count"] or counts["manual_needed"]),
     }
     wcag20aa_coverage = wcag20aa_coverage_from_findings(findings)
@@ -3499,7 +3797,11 @@ def prototype_verify_accessibility(
     )
     report = {
         "schema": "fullbleed.a11y.verify.v1",
-        "target": {"html_path": str(html_p), "css_path": str(css_p), "target_hash": _sha(html_p)},
+        "target": {
+            "html_path": str(html_p),
+            "css_path": str(css_p),
+            "target_hash": _sha(html_p),
+        },
         "profile": profile,
         "conformance_status": conformance_status,
         "gate": gate,
@@ -3514,11 +3816,19 @@ def prototype_verify_accessibility(
         "observability": observability,
         "coverage": {
             "evaluated_rule_count": len(evaluated),
-            "applicable_rule_count": sum(1 for f in findings if f["applicability"] == "applicable"),
-            "machine_rule_count": sum(1 for f in findings if f["verification_mode"] == "machine"),
-            "manual_rule_count": sum(1 for f in findings if f["verification_mode"] == "manual"),
+            "applicable_rule_count": sum(
+                1 for f in findings if f["applicability"] == "applicable"
+            ),
+            "machine_rule_count": sum(
+                1 for f in findings if f["verification_mode"] == "machine"
+            ),
+            "manual_rule_count": sum(
+                1 for f in findings if f["verification_mode"] == "manual"
+            ),
             "manual_needed_count": counts["manual_needed"],
-            "not_evaluated_rule_count": max(0, len(reg_rules) - len(evaluated & set(reg_rules))),
+            "not_evaluated_rule_count": max(
+                0, len(reg_rules) - len(evaluated & set(reg_rules))
+            ),
             "rule_pack_coverage": [
                 {
                     "pack_id": "fullbleed.a11y_verifier.registry.v1",
@@ -3527,12 +3837,16 @@ def prototype_verify_accessibility(
                 },
                 {
                     "pack_id": "wcag20aa.implemented_map.v1",
-                    "evaluated": wcag20aa_coverage["implemented_mapped_entry_evaluated_count"],
+                    "evaluated": wcag20aa_coverage[
+                        "implemented_mapped_entry_evaluated_count"
+                    ],
                     "total": wcag20aa_coverage["implemented_mapped_entry_count"],
                 },
                 {
                     "pack_id": "section508_html.implemented_map.v1",
-                    "evaluated": section508_coverage["implemented_mapped_entry_evaluated_count"],
+                    "evaluated": section508_coverage[
+                        "implemented_mapped_entry_evaluated_count"
+                    ],
                     "total": section508_coverage["implemented_mapped_entry_count"],
                 },
             ],
@@ -3540,7 +3854,11 @@ def prototype_verify_accessibility(
             "section508": section508_coverage,
         },
         "wcag20aa_claim_readiness": wcag20aa_claim_readiness,
-        "tooling": {"fullbleed_version": runtime_fullbleed_version, "report_schema_version": "1.0.0-draft", "generated_at": generated_at or _now()},
+        "tooling": {
+            "fullbleed_version": runtime_fullbleed_version,
+            "report_schema_version": "1.0.0-draft",
+            "generated_at": generated_at or _now(),
+        },
         "artifacts": {
             "html_hash": _sha(html_p),
             "css_hash": _sha(css_p),
@@ -3643,33 +3961,155 @@ def prototype_verify_paged_media_rank(
 
     # Document semantics
     e = E("pmr.doc.lang_present_valid")
-    lang_pass = _lang_ok(facts.html_lang) and (expected_lang is None or facts.html_lang == expected_lang)
-    audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="pass" if lang_pass else "fail", message="HTML lang is present and valid." if lang_pass else "HTML lang missing/invalid or metadata mismatch.", scored=e.get("scored", True), evidence=[{"selector": "html", "values": {"lang": facts.html_lang or ""}}]))
+    lang_pass = _lang_ok(facts.html_lang) and (
+        expected_lang is None or facts.html_lang == expected_lang
+    )
+    audits.append(
+        _pa(
+            e["id"],
+            category=e["category"],
+            weight=e["weight"],
+            audit_class=e["class"],
+            verification_mode=e["verification_mode"],
+            severity=e["severity"],
+            stage=e["stage"],
+            source="fullbleed",
+            verdict="pass" if lang_pass else "fail",
+            message="HTML lang is present and valid."
+            if lang_pass
+            else "HTML lang missing/invalid or metadata mismatch.",
+            scored=e.get("scored", True),
+            evidence=[{"selector": "html", "values": {"lang": facts.html_lang or ""}}],
+        )
+    )
     e = E("pmr.doc.title_present_nonempty")
-    title_pass = bool(facts.title.strip()) and (expected_title is None or facts.title == expected_title)
-    audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="pass" if title_pass else "fail", message="Document title is present and non-empty." if title_pass else "Document title missing/empty or metadata mismatch.", scored=e.get("scored", True), evidence=[{"selector": "head > title", "values": {"title": facts.title}}]))
+    title_pass = bool(facts.title.strip()) and (
+        expected_title is None or facts.title == expected_title
+    )
+    audits.append(
+        _pa(
+            e["id"],
+            category=e["category"],
+            weight=e["weight"],
+            audit_class=e["class"],
+            verification_mode=e["verification_mode"],
+            severity=e["severity"],
+            stage=e["stage"],
+            source="fullbleed",
+            verdict="pass" if title_pass else "fail",
+            message="Document title is present and non-empty."
+            if title_pass
+            else "Document title missing/empty or metadata mismatch.",
+            scored=e.get("scored", True),
+            evidence=[{"selector": "head > title", "values": {"title": facts.title}}],
+        )
+    )
     e = E("pmr.doc.metadata_engine_persistence")
     if expected_lang is None and expected_title is None:
-        audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode="manual", severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="manual_needed", message="Expected metadata not supplied; cannot verify engine persistence.", scored=False))
+        audits.append(
+            _pa(
+                e["id"],
+                category=e["category"],
+                weight=e["weight"],
+                audit_class=e["class"],
+                verification_mode="manual",
+                severity=e["severity"],
+                stage=e["stage"],
+                source="fullbleed",
+                verdict="manual_needed",
+                message="Expected metadata not supplied; cannot verify engine persistence.",
+                scored=False,
+            )
+        )
     else:
-        audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="pass" if (lang_pass and title_pass) else "fail", message="Engine metadata persisted into emitted HTML." if (lang_pass and title_pass) else "Engine metadata persistence check failed.", scored=e.get("scored", True)))
+        audits.append(
+            _pa(
+                e["id"],
+                category=e["category"],
+                weight=e["weight"],
+                audit_class=e["class"],
+                verification_mode=e["verification_mode"],
+                severity=e["severity"],
+                stage=e["stage"],
+                source="fullbleed",
+                verdict="pass" if (lang_pass and title_pass) else "fail",
+                message="Engine metadata persisted into emitted HTML."
+                if (lang_pass and title_pass)
+                else "Engine metadata persistence check failed.",
+                scored=e.get("scored", True),
+            )
+        )
 
     # Paged layout integrity
     e = E("pmr.layout.overflow_none")
-    pagination_overflow = None if not pagination_summary else pagination_summary.get("overflow_event_count")
+    pagination_overflow = (
+        None
+        if not pagination_summary
+        else pagination_summary.get("overflow_event_count")
+    )
     overflow = _i(
-        pagination_overflow if pagination_overflow is not None else comp.get("overflow_count"),
+        pagination_overflow
+        if pagination_overflow is not None
+        else comp.get("overflow_count"),
         0,
     )
     overflow_values = {"overflow_count": overflow}
     if pagination_overflow is not None:
         overflow_values["pagination_overflow_event_count"] = pagination_overflow
     if comp.get("overflow_count") is not None:
-        overflow_values["component_validation_overflow_count"] = _i(comp.get("overflow_count"), 0)
-    audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="pass" if overflow == 0 else "fail", message="No overflow placements detected." if overflow == 0 else f"Overflow placements detected ({overflow}).", scored=e.get("scored", True), evidence=[{"diagnostic_ref": "pagination_trace_summary.overflow_event_count" if pagination_overflow is not None else "component_validation.overflow_count", "values": overflow_values}]))
+        overflow_values["component_validation_overflow_count"] = _i(
+            comp.get("overflow_count"), 0
+        )
+    audits.append(
+        _pa(
+            e["id"],
+            category=e["category"],
+            weight=e["weight"],
+            audit_class=e["class"],
+            verification_mode=e["verification_mode"],
+            severity=e["severity"],
+            stage=e["stage"],
+            source="fullbleed",
+            verdict="pass" if overflow == 0 else "fail",
+            message="No overflow placements detected."
+            if overflow == 0
+            else f"Overflow placements detected ({overflow}).",
+            scored=e.get("scored", True),
+            evidence=[
+                {
+                    "diagnostic_ref": "pagination_trace_summary.overflow_event_count"
+                    if pagination_overflow is not None
+                    else "component_validation.overflow_count",
+                    "values": overflow_values,
+                }
+            ],
+        )
+    )
     e = E("pmr.layout.known_loss_none_critical")
     known_loss = _i(comp.get("known_loss_count"), 0)
-    audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="pass" if known_loss == 0 else "fail", message="No critical known-loss events detected." if known_loss == 0 else f"Known-loss events detected ({known_loss}).", scored=e.get("scored", True), evidence=[{"diagnostic_ref": "component_validation.known_loss_count", "values": {"known_loss_count": known_loss}}]))
+    audits.append(
+        _pa(
+            e["id"],
+            category=e["category"],
+            weight=e["weight"],
+            audit_class=e["class"],
+            verification_mode=e["verification_mode"],
+            severity=e["severity"],
+            stage=e["stage"],
+            source="fullbleed",
+            verdict="pass" if known_loss == 0 else "fail",
+            message="No critical known-loss events detected."
+            if known_loss == 0
+            else f"Known-loss events detected ({known_loss}).",
+            scored=e.get("scored", True),
+            evidence=[
+                {
+                    "diagnostic_ref": "component_validation.known_loss_count",
+                    "values": {"known_loss_count": known_loss},
+                }
+            ],
+        )
+    )
     e = E("pmr.layout.page_count_target")
     src_pages = None
     rnd_pages = None
@@ -3682,76 +4122,330 @@ def prototype_verify_paged_media_rank(
     if pagination_summary and pagination_summary.get("page_count") is not None:
         rnd_pages = pagination_summary.get("page_count")
     if src_pages is None or rnd_pages is None:
-        audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode="manual", severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="manual_needed", message="Page-count target could not be evaluated.", scored=False))
+        audits.append(
+            _pa(
+                e["id"],
+                category=e["category"],
+                weight=e["weight"],
+                audit_class=e["class"],
+                verification_mode="manual",
+                severity=e["severity"],
+                stage=e["stage"],
+                source="fullbleed",
+                verdict="manual_needed",
+                message="Page-count target could not be evaluated.",
+                scored=False,
+            )
+        )
     else:
         pp = _i(src_pages) == _i(rnd_pages)
-        page_count_values = {"source_page_count": src_pages, "render_page_count": rnd_pages}
+        page_count_values = {
+            "source_page_count": src_pages,
+            "render_page_count": rnd_pages,
+        }
         if pagination_summary and pagination_summary.get("page_count") is not None:
-            page_count_values["pagination_trace_page_count"] = pagination_summary["page_count"]
-        audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="pass" if pp else "fail", message="Page-count target satisfied." if pp else f"Page-count parity mismatch (source={src_pages}, render={rnd_pages}).", scored=e.get("scored", True), evidence=[{"diagnostic_ref": "pagination_trace_summary.page_count" if pagination_summary and pagination_summary.get("page_count") is not None else None, "values": page_count_values}]))
+            page_count_values["pagination_trace_page_count"] = pagination_summary[
+                "page_count"
+            ]
+        audits.append(
+            _pa(
+                e["id"],
+                category=e["category"],
+                weight=e["weight"],
+                audit_class=e["class"],
+                verification_mode=e["verification_mode"],
+                severity=e["severity"],
+                stage=e["stage"],
+                source="fullbleed",
+                verdict="pass" if pp else "fail",
+                message="Page-count target satisfied."
+                if pp
+                else f"Page-count parity mismatch (source={src_pages}, render={rnd_pages}).",
+                scored=e.get("scored", True),
+                evidence=[
+                    {
+                        "diagnostic_ref": "pagination_trace_summary.page_count"
+                        if pagination_summary
+                        and pagination_summary.get("page_count") is not None
+                        else None,
+                        "values": page_count_values,
+                    }
+                ],
+            )
+        )
 
     # Field/table/form integrity
     e = E("pmr.forms.id_ref_integrity")
     ids_ok = (not facts.dup_ids) and (not facts.missing_idrefs)
-    audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="pass" if ids_ok else "fail", message="ID and IDREF integrity checks passed." if ids_ok else "Duplicate IDs or missing IDREF targets detected.", scored=e.get("scored", True), evidence=[{"values": {"duplicate_ids": facts.dup_ids, "missing_idrefs": facts.missing_idrefs}}]))
+    audits.append(
+        _pa(
+            e["id"],
+            category=e["category"],
+            weight=e["weight"],
+            audit_class=e["class"],
+            verification_mode=e["verification_mode"],
+            severity=e["severity"],
+            stage=e["stage"],
+            source="fullbleed",
+            verdict="pass" if ids_ok else "fail",
+            message="ID and IDREF integrity checks passed."
+            if ids_ok
+            else "Duplicate IDs or missing IDREF targets detected.",
+            scored=e.get("scored", True),
+            evidence=[
+                {
+                    "values": {
+                        "duplicate_ids": facts.dup_ids,
+                        "missing_idrefs": facts.missing_idrefs,
+                    }
+                }
+            ],
+        )
+    )
     e = E("pmr.tables.semantic_table_headers")
     if not facts.tables:
-        audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="not_applicable", message="No table elements detected.", scored=False))
+        audits.append(
+            _pa(
+                e["id"],
+                category=e["category"],
+                weight=e["weight"],
+                audit_class=e["class"],
+                verification_mode=e["verification_mode"],
+                severity=e["severity"],
+                stage=e["stage"],
+                source="fullbleed",
+                verdict="not_applicable",
+                message="No table elements detected.",
+                scored=False,
+            )
+        )
     else:
         ok = True
         ev = []
         for idx, tbl in enumerate(facts.tables):
             if _i(tbl.get("th_count")) > 0:
-                this_ok = bool(tbl.get("has_caption")) or _i(tbl.get("th_scope_count")) > 0
+                this_ok = (
+                    bool(tbl.get("has_caption")) or _i(tbl.get("th_scope_count")) > 0
+                )
                 ok = ok and this_ok
                 ev.append({"values": {"table_index": idx, **tbl}})
-        audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="pass" if ok else "fail", message="Semantic table header checks passed." if ok else "Semantic table header checks failed.", scored=e.get("scored", True), evidence=ev or [{"values": {"table_count": len(facts.tables)}}]))
+        audits.append(
+            _pa(
+                e["id"],
+                category=e["category"],
+                weight=e["weight"],
+                audit_class=e["class"],
+                verification_mode=e["verification_mode"],
+                severity=e["severity"],
+                stage=e["stage"],
+                source="fullbleed",
+                verdict="pass" if ok else "fail",
+                message="Semantic table header checks passed."
+                if ok
+                else "Semantic table header checks failed.",
+                scored=e.get("scored", True),
+                evidence=ev or [{"values": {"table_count": len(facts.tables)}}],
+            )
+        )
     e = E("pmr.signatures.text_semantics_present")
     if profile in {"cav", "transactional"}:
         sig_ok = facts.sig_count > 0
         body_text_l = (facts.body_text or "").lower()
         sig_cue_present = ("signature" in body_text_l) or ("signed" in body_text_l)
         sig_na = (not sig_ok) and (not sig_cue_present)
-        audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict=("pass" if sig_ok else ("not_applicable" if sig_na else "fail")), message=("Text signature semantics detected." if sig_ok else ("No signature-bearing content cues detected; signature semantics check not applicable." if sig_na else "No text signature semantics detected.")), scored=(False if sig_na else e.get("scored", True)), evidence=[{"values": {"signature_semantic_count": facts.sig_count, "signature_cue_text_present": sig_cue_present}}]))
+        audits.append(
+            _pa(
+                e["id"],
+                category=e["category"],
+                weight=e["weight"],
+                audit_class=e["class"],
+                verification_mode=e["verification_mode"],
+                severity=e["severity"],
+                stage=e["stage"],
+                source="fullbleed",
+                verdict=(
+                    "pass" if sig_ok else ("not_applicable" if sig_na else "fail")
+                ),
+                message=(
+                    "Text signature semantics detected."
+                    if sig_ok
+                    else (
+                        "No signature-bearing content cues detected; signature semantics check not applicable."
+                        if sig_na
+                        else "No text signature semantics detected."
+                    )
+                ),
+                scored=(False if sig_na else e.get("scored", True)),
+                evidence=[
+                    {
+                        "values": {
+                            "signature_semantic_count": facts.sig_count,
+                            "signature_cue_text_present": sig_cue_present,
+                        }
+                    }
+                ],
+            )
+        )
     else:
-        audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="not_applicable", message="Not applicable for this profile.", scored=False))
+        audits.append(
+            _pa(
+                e["id"],
+                category=e["category"],
+                weight=e["weight"],
+                audit_class=e["class"],
+                verification_mode=e["verification_mode"],
+                severity=e["severity"],
+                stage=e["stage"],
+                source="fullbleed",
+                verdict="not_applicable",
+                message="Not applicable for this profile.",
+                scored=False,
+            )
+        )
     e = E("pmr.cav.document_only_content")
     if profile == "cav":
         hits = _cav_note_hits(facts.body_text)
-        audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="pass" if not hits else "fail", message="CAV deliverable body contains document-only content." if not hits else "Potential remediation/provenance note leakage detected in CAV deliverable body.", scored=e.get("scored", True), evidence=[{"values": {"hits": hits}}]))
+        audits.append(
+            _pa(
+                e["id"],
+                category=e["category"],
+                weight=e["weight"],
+                audit_class=e["class"],
+                verification_mode=e["verification_mode"],
+                severity=e["severity"],
+                stage=e["stage"],
+                source="fullbleed",
+                verdict="pass" if not hits else "fail",
+                message="CAV deliverable body contains document-only content."
+                if not hits
+                else "Potential remediation/provenance note leakage detected in CAV deliverable body.",
+                scored=e.get("scored", True),
+                evidence=[{"values": {"hits": hits}}],
+            )
+        )
     else:
-        audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="not_applicable", message="Not a CAV profile.", scored=False))
+        audits.append(
+            _pa(
+                e["id"],
+                category=e["category"],
+                weight=e["weight"],
+                audit_class=e["class"],
+                verification_mode=e["verification_mode"],
+                severity=e["severity"],
+                stage=e["stage"],
+                source="fullbleed",
+                verdict="not_applicable",
+                message="Not a CAV profile.",
+                scored=False,
+            )
+        )
 
     # Artifact packaging
     e = E("pmr.artifacts.html_emitted")
     html_ok = html_p.exists() and html_p.stat().st_size > 0
-    audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="pass" if html_ok else "fail", message="HTML artifact emitted." if html_ok else "HTML artifact missing or empty.", scored=e.get("scored", True)))
+    audits.append(
+        _pa(
+            e["id"],
+            category=e["category"],
+            weight=e["weight"],
+            audit_class=e["class"],
+            verification_mode=e["verification_mode"],
+            severity=e["severity"],
+            stage=e["stage"],
+            source="fullbleed",
+            verdict="pass" if html_ok else "fail",
+            message="HTML artifact emitted."
+            if html_ok
+            else "HTML artifact missing or empty.",
+            scored=e.get("scored", True),
+        )
+    )
     e = E("pmr.artifacts.css_emitted")
     css_ok = css_p.exists() and css_p.stat().st_size > 0
-    audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="pass" if css_ok else "fail", message="CSS artifact emitted." if css_ok else "CSS artifact missing or empty.", scored=e.get("scored", True)))
+    audits.append(
+        _pa(
+            e["id"],
+            category=e["category"],
+            weight=e["weight"],
+            audit_class=e["class"],
+            verification_mode=e["verification_mode"],
+            severity=e["severity"],
+            stage=e["stage"],
+            source="fullbleed",
+            verdict="pass" if css_ok else "fail",
+            message="CSS artifact emitted."
+            if css_ok
+            else "CSS artifact missing or empty.",
+            scored=e.get("scored", True),
+        )
+    )
     e = E("pmr.artifacts.linked_css_reference")
-    audits.append(_pa(e["id"], category=e["category"], weight=e["weight"], audit_class=e["class"], verification_mode=e["verification_mode"], severity=e["severity"], stage=e["stage"], source="fullbleed", verdict="pass" if facts.has_css_link else "warn", message="HTML artifact includes linked CSS reference." if facts.has_css_link else "HTML artifact does not include linked CSS reference (separate artifact mode).", scored=False, evidence=[{"selector": "link[rel~=stylesheet]", "values": {"hrefs": facts.css_hrefs}}], fix_hint=None if facts.has_css_link else "Enable CSS link injection packaging mode for standalone HTML artifacts."))
+    audits.append(
+        _pa(
+            e["id"],
+            category=e["category"],
+            weight=e["weight"],
+            audit_class=e["class"],
+            verification_mode=e["verification_mode"],
+            severity=e["severity"],
+            stage=e["stage"],
+            source="fullbleed",
+            verdict="pass" if facts.has_css_link else "warn",
+            message="HTML artifact includes linked CSS reference."
+            if facts.has_css_link
+            else "HTML artifact does not include linked CSS reference (separate artifact mode).",
+            scored=False,
+            evidence=[
+                {
+                    "selector": "link[rel~=stylesheet]",
+                    "values": {"hrefs": facts.css_hrefs},
+                }
+            ],
+            fix_hint=None
+            if facts.has_css_link
+            else "Enable CSS link injection packaging mode for standalone HTML artifacts.",
+        )
+    )
 
     manual = _manual_debt(parity_report)
     cat_rows: list[dict[str, Any]] = []
     for cat in reg.get("pmr_categories", []):
         cid = cat["id"]
         subset = [a for a in audits if a["category"] == cid]
-        scored = [(float(a.get("score")), float(a["weight"])) for a in subset if a.get("scored") and a.get("score") is not None]
+        scored = [
+            (float(a.get("score")), float(a["weight"]))
+            for a in subset
+            if a.get("scored") and a.get("score") is not None
+        ]
         denom = sum(w for _, w in scored) or 1.0
         cat_score = 100.0 * (sum(s * w for s, w in scored) / denom) if scored else 100.0
         warn_n = sum(1 for a in subset if a["verdict"] == "warn")
         fail_n = sum(1 for a in subset if a["verdict"] == "fail")
         manual_n = sum(1 for a in subset if a["verdict"] == "manual_needed")
-        conf = _clamp(100.0 - (10.0 * manual_n) - (3.0 * warn_n) - (5.0 * fail_n), 0.0, 100.0)
-        cat_rows.append({"id": cid, "name": cat["name"], "weight": float(cat["weight"]), "score": round(cat_score, 2), "confidence": round(conf, 2), "audit_count": len(subset), "fail_count": fail_n, "warn_count": warn_n})
+        conf = _clamp(
+            100.0 - (10.0 * manual_n) - (3.0 * warn_n) - (5.0 * fail_n), 0.0, 100.0
+        )
+        cat_rows.append(
+            {
+                "id": cid,
+                "name": cat["name"],
+                "weight": float(cat["weight"]),
+                "score": round(cat_score, 2),
+                "confidence": round(conf, 2),
+                "audit_count": len(subset),
+                "fail_count": fail_n,
+                "warn_count": warn_n,
+            }
+        )
     denom = sum(float(c["weight"]) for c in cat_rows) or 1.0
     score = sum(float(c["score"]) * float(c["weight"]) for c in cat_rows) / denom
     conf = sum(float(c["confidence"]) * float(c["weight"]) for c in cat_rows) / denom
     if manual["item_count"] > 0:
         conf = _clamp(conf - min(25.0, 3.0 * manual["item_count"]), 0.0, 100.0)
 
-    gate = _gate(audits, id_key="audit_id", mode=mode, entries=entries, overrides=overrides)
+    gate = _gate(
+        audits, id_key="audit_id", mode=mode, entries=entries, overrides=overrides
+    )
     failed_ids = set(gate.get("failed_audit_ids") or [])
     correlation_index = []
     for audit in audits:
@@ -3769,7 +4463,8 @@ def prototype_verify_paged_media_rank(
             "source": str(audit.get("source") or ""),
             "gate_failed": str(audit.get("audit_id") or "") in failed_ids,
             "gate_relevant": verdict in {"fail", "warn"},
-            "opportunity": bool(fix_hint) or str(audit.get("class") or "") == "opportunity",
+            "opportunity": bool(fix_hint)
+            or str(audit.get("class") or "") == "opportunity",
             "scored": bool(audit.get("scored")),
             "has_fix_hint": bool(fix_hint),
         }
@@ -3799,22 +4494,39 @@ def prototype_verify_paged_media_rank(
     }
     if pagination_summary:
         if "page_count" in pagination_summary:
-            observability["signal_counts"]["pagination_page_count"] = pagination_summary["page_count"]
+            observability["signal_counts"]["pagination_page_count"] = (
+                pagination_summary["page_count"]
+            )
         if "overflow_event_count" in pagination_summary:
-            observability["signal_counts"]["pagination_overflow_event_count"] = pagination_summary["overflow_event_count"]
+            observability["signal_counts"]["pagination_overflow_event_count"] = (
+                pagination_summary["overflow_event_count"]
+            )
         if "low_coverage_page_count" in pagination_summary:
-            observability["signal_counts"]["pagination_low_coverage_page_count"] = pagination_summary["low_coverage_page_count"]
+            observability["signal_counts"]["pagination_low_coverage_page_count"] = (
+                pagination_summary["low_coverage_page_count"]
+            )
         if "flowable_overlap_count" in pagination_summary:
-            observability["signal_counts"]["pagination_flowable_overlap_count"] = pagination_summary["flowable_overlap_count"]
+            observability["signal_counts"]["pagination_flowable_overlap_count"] = (
+                pagination_summary["flowable_overlap_count"]
+            )
         if "text_overlap_count" in pagination_summary:
-            observability["signal_counts"]["pagination_text_overlap_count"] = pagination_summary["text_overlap_count"]
+            observability["signal_counts"]["pagination_text_overlap_count"] = (
+                pagination_summary["text_overlap_count"]
+            )
         if "transition_count" in pagination_summary:
-            observability["signal_counts"]["pagination_transition_count"] = pagination_summary["transition_count"]
+            observability["signal_counts"]["pagination_transition_count"] = (
+                pagination_summary["transition_count"]
+            )
     report = {
         "schema": "fullbleed.pmr.v1",
         "target": {"html_path": str(html_p), "css_path": str(css_p)},
         "profile": profile,
-        "rank": {"score": round(score, 2), "confidence": round(conf, 2), "band": _pmr_band(score), "raw_score": round(score, 2)},
+        "rank": {
+            "score": round(score, 2),
+            "confidence": round(conf, 2),
+            "band": _pmr_band(score),
+            "raw_score": round(score, 2),
+        },
         "gate": gate,
         "categories": cat_rows,
         "audits": audits,
@@ -3822,13 +4534,26 @@ def prototype_verify_paged_media_rank(
         "manual_debt": manual,
         "coverage": {
             "evaluated_audit_count": len(audits),
-            "applicable_audit_count": sum(1 for a in audits if a["verdict"] != "not_applicable"),
+            "applicable_audit_count": sum(
+                1 for a in audits if a["verdict"] != "not_applicable"
+            ),
             "scored_audit_count": sum(1 for a in audits if a.get("scored")),
-            "manual_needed_count": sum(1 for a in audits if a["verdict"] == "manual_needed"),
+            "manual_needed_count": sum(
+                1 for a in audits if a["verdict"] == "manual_needed"
+            ),
             "not_evaluated_audit_count": 0,
         },
-        "tooling": {"fullbleed_version": runtime_fullbleed_version, "report_schema_version": "1.0.0-draft", "generated_at": generated_at or _now()},
-        "artifacts": {"html_hash": _sha(html_p), "css_hash": _sha(css_p), "css_linked": facts.has_css_link, "packaging_mode": "linked-css" if facts.has_css_link else "separate-files"},
+        "tooling": {
+            "fullbleed_version": runtime_fullbleed_version,
+            "report_schema_version": "1.0.0-draft",
+            "generated_at": generated_at or _now(),
+        },
+        "artifacts": {
+            "html_hash": _sha(html_p),
+            "css_hash": _sha(css_p),
+            "css_linked": facts.has_css_link,
+            "packaging_mode": "linked-css" if facts.has_css_link else "separate-files",
+        },
     }
     if pagination_summary:
         report["pagination_trace_summary"] = pagination_summary
@@ -3855,7 +4580,9 @@ def run_prototype_bundle(
     render_preview_png_path = None
     if run_report:
         try:
-            previews = list((run_report.get("deliverables") or {}).get("render_preview_pngs") or [])
+            previews = list(
+                (run_report.get("deliverables") or {}).get("render_preview_pngs") or []
+            )
             if previews:
                 render_preview_png_path = previews[0]
         except Exception:
@@ -3896,12 +4623,18 @@ def _write_json(path: str | Path, obj: dict[str, Any]) -> None:
 def _validate_outputs(verifier: dict[str, Any], pmr: dict[str, Any]) -> None:
     import jsonschema  # type: ignore
 
-    jsonschema.Draft202012Validator(_j(_specs() / "fullbleed.a11y.verify.v1.schema.json")).validate(verifier)
-    jsonschema.Draft202012Validator(_j(_specs() / "fullbleed.pmr.v1.schema.json")).validate(pmr)
+    jsonschema.Draft202012Validator(
+        _j(_specs() / "fullbleed.a11y.verify.v1.schema.json")
+    ).validate(verifier)
+    jsonschema.Draft202012Validator(
+        _j(_specs() / "fullbleed.pmr.v1.schema.json")
+    ).validate(pmr)
 
 
 def _parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="FullBleed prototype accessibility verifier + PMR")
+    p = argparse.ArgumentParser(
+        description="FullBleed prototype accessibility verifier + PMR"
+    )
     p.add_argument("--html", required=True)
     p.add_argument("--css", required=True)
     p.add_argument("--profile", default="strict")

@@ -292,13 +292,8 @@ pub fn paint_plan(plan: &DocPlan, debug: Option<Arc<DebugLogger>>) -> Vec<PageOp
 }
 
 pub fn paint_plan_parallel(plan: &DocPlan, debug: Option<Arc<DebugLogger>>) -> Vec<PageOps> {
-    use rayon::prelude::*;
-
-    let mut results: Vec<(usize, PageOps)> = plan
-        .pages
-        .par_iter()
-        .enumerate()
-        .map(|(page_index, page)| {
+    let mut results: Vec<(usize, PageOps)> =
+        crate::parallel::map_indexed_ordered(&plan.pages, |page_index, page| {
             let mut commands = Vec::new();
             let mut placements = page.placements.clone();
             sort_placements(&mut placements);
@@ -319,8 +314,7 @@ pub fn paint_plan_parallel(plan: &DocPlan, debug: Option<Arc<DebugLogger>>) -> V
                 logger.log_json(&json);
             }
             (page_index, PageOps { commands })
-        })
-        .collect();
+        });
 
     results.sort_by_key(|(idx, _)| *idx);
     results.into_iter().map(|(_, ops)| ops).collect()

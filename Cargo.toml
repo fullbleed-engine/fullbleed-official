@@ -1,6 +1,6 @@
 [package]
 name = "fullbleed"
-version = "1.6.2"
+version = "2.0.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -14,6 +14,7 @@ categories = ["text-processing", "multimedia"]
 include = [
     "/Cargo.toml",
     "/Cargo.lock",
+    "/build.rs",
     "/README.md",
     "/LICENSE",
     "/COPYRIGHT",
@@ -26,32 +27,14 @@ include = [
 crate-type = ["rlib", "cdylib"]
 
 [features]
-python = ["pyo3"]
-svg_raster = ["resvg"]
+python = []
+# Compatibility feature: enables SVG-to-PNG fallback through Fullbleed's native
+# compiler/raster pipeline without adding a separate SVG renderer dependency.
+svg_raster = []
 
 [profile.profiling]
 inherits = "release"
 debug = true
 
 [dependencies]
-fullbleed_audit_contract = { version = "0.1.1", path = "crates/fullbleed_audit_contract" }
-kuchiki = "0.8.1"
-# These dependency families have shipped either breaking alpha changes or
-# MSRV increases within Cargo-compatible ranges. Exact pins keep lockfile-free
-# consumers on the tested Rust 1.85-compatible graph.
-lightningcss = "=1.0.0-alpha.70"
-parcel_selectors = "=0.28.2"
-time = "=0.3.45"
-ttf-parser = "0.20.0"
-pyo3 = { version = "0.25.1", optional = true, features = ["extension-module", "abi3-py310"] }
-image = { version = "0.25.5", default-features = false, features = ["png", "jpeg"] }
-base64 = "0.22.1"
-rayon = "1.10.0"
-roxmltree = "0.20.0"
-resvg = { version = "0.39.0", optional = true }
-rustybuzz = "0.14.1"
-fixed = "1.29"
-libm = "0.2"
-tiny-skia = "0.11.4"
-lopdf = "0.35.0"
-sha2 = "0.10.8"
+fullbleed_audit_contract = { version = "0.1.2", path = "crates/fullbleed_audit_contract" }

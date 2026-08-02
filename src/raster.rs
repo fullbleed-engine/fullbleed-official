@@ -2,18 +2,19 @@ use crate::canvas::{Command, Document};
 use crate::error::FullBleedError;
 use crate::flowable::{FilterDropShadowSpec, PaintFilterSpec};
 use crate::font::FontRegistry;
+use crate::raster_native::{
+    BlendMode as SkBlendMode, Color as RasterColor, FillRule, FilterQuality, GradientStop, IntSize,
+    LineCap, LineJoin, LinearGradient, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint,
+    PixmapRef, Point, RadialGradient, Rect, Shader, SpreadMode, Stroke, StrokeDash, Transform,
+};
+use crate::sfnt::{Face as SfntFace, GlyphId as SfntGlyphId};
+use crate::sfnt_cff::{Cff2Outlines, CffOutlines};
+use crate::sfnt_outline::OutlineBuilder as NativeOutlineBuilder;
+use crate::text_shape;
 use crate::types::{Color, MixBlendMode, Pt, Shading, ShadingStop};
-use base64::Engine;
-use rustybuzz::{Direction as HbDirection, Face as HbFace, UnicodeBuffer};
 use std::collections::HashMap;
 use std::path::Path as FsPath;
 use std::sync::{Arc, Mutex, OnceLock};
-use tiny_skia::{
-    BlendMode as SkBlendMode, FillRule, FilterQuality, GradientStop, IntSize, LineCap, LineJoin,
-    LinearGradient, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint, PixmapRef, Point,
-    RadialGradient, Rect, Shader, SpreadMode, Stroke, StrokeDash, Transform,
-};
-use ttf_parser::{GlyphId, OutlineBuilder};
 
 #[derive(Clone)]
 struct RasterState {
@@ -89,7 +90,7 @@ pub(crate) fn document_to_png_pages(
                 width_px, height_px, dpi
             ))
         })?;
-        pixmap.fill(tiny_skia::Color::from_rgba8(255, 255, 255, 255));
+        pixmap.fill(RasterColor::from_rgba8(255, 255, 255, 255));
 
         let mut state = RasterState::default();
         let mut stack: Vec<RasterState> = Vec::new();
@@ -112,9 +113,12 @@ pub(crate) fn document_to_png_pages(
             shape_text,
         )?;
 
-        let png = pixmap
-            .encode_png()
-            .map_err(|e| FullBleedError::Asset(format!("png encode failed: {e}")))?;
+        let png = crate::image_native::encode_png_premultiplied_rgba8(
+            pixmap.data(),
+            pixmap.width(),
+            pixmap.height(),
+        )
+        .map_err(|error| FullBleedError::Asset(format!("png encode failed: {error}")))?;
         png_pages.push(png);
     }
 
@@ -912,14 +916,14 @@ fn apply_backdrop_filter(
         }
     }
 
-    let base_img = match image::RgbaImage::from_raw(roi_w, roi_h, src_rgba.clone()) {
+    let base_img = match crate::image_native::RgbaImage::from_raw(roi_w, roi_h, src_rgba.clone()) {
         Some(img) => img,
         None => return,
     };
 
     let blur_px = backdrop_blur_sigma_px(filter.blur_radius, device_transform);
     let filtered_img = if blur_px > 0.05 {
-        image::imageops::blur(&base_img, blur_px)
+        crate::image_native::blur_rgba(&base_img, blur_px)
     } else {
         base_img.clone()
     };
@@ -1054,10 +1058,11 @@ fn draw_backdrop_filter_drop_shadow(
 
     let blur_px = backdrop_blur_sigma_px(shadow.blur_radius, device_transform);
     if blur_px > 0.05 {
-        let Some(base_img) = image::RgbaImage::from_raw(width, height, shadow_data) else {
+        let Some(base_img) = crate::image_native::RgbaImage::from_raw(width, height, shadow_data)
+        else {
             return;
         };
-        shadow_data = image::imageops::blur(&base_img, blur_px).into_raw();
+        shadow_data = crate::image_native::blur_rgba(&base_img, blur_px).into_raw();
     }
     premultiply_rgba(&mut shadow_data);
 
@@ -1111,10 +1116,11 @@ fn apply_foreground_filter_group(
     let mut filtered_data = offscreen.data().to_vec();
     let blur_px = backdrop_blur_sigma_px(filter.blur_radius, device_transform);
     if blur_px > 0.05 {
-        let Some(base_img) = image::RgbaImage::from_raw(width, height, filtered_data) else {
+        let Some(base_img) = crate::image_native::RgbaImage::from_raw(width, height, filtered_data)
+        else {
             return;
         };
-        filtered_data = image::imageops::blur(&base_img, blur_px).into_raw();
+        filtered_data = crate::image_native::blur_rgba(&base_img, blur_px).into_raw();
     }
 
     apply_filter_to_premul_rgba(&mut filtered_data, filter);
@@ -1201,10 +1207,11 @@ fn draw_filter_drop_shadow(
 
     let blur_px = backdrop_blur_sigma_px(shadow.blur_radius, device_transform);
     if blur_px > 0.05 {
-        let Some(base_img) = image::RgbaImage::from_raw(width, height, shadow_data) else {
+        let Some(base_img) = crate::image_native::RgbaImage::from_raw(width, height, shadow_data)
+        else {
             return;
         };
-        shadow_data = image::imageops::blur(&base_img, blur_px).into_raw();
+        shadow_data = crate::image_native::blur_rgba(&base_img, blur_px).into_raw();
     }
     premultiply_rgba(&mut shadow_data);
 
@@ -1563,9 +1570,10 @@ fn draw_string(
     let paint = fill_paint(state.fill_color, state.fill_opacity, state.blend_mode);
     let device_transform = base_transform.pre_concat(state.transform);
     let mut try_draw = |font_data: &[u8], used_system_fallback: bool| -> Result<(), &'static str> {
-        let Ok(face) = ttf_parser::Face::parse(font_data, 0) else {
+        let Ok(face) = SfntFace::parse(font_data, 0) else {
             return Err("parse_failed");
         };
+        let outlines = raster_outline_source(&face)?;
 
         let placements = layout_text_glyphs(
             font_data, text, font_size, baseline_x, baseline_y, shape_text,
@@ -1582,10 +1590,7 @@ fn draw_string(
         for placement in placements {
             let mut builder =
                 GlyphPathBuilder::new(placement.origin_x, placement.origin_y, placement.scale);
-            if face
-                .outline_glyph(GlyphId(placement.glyph_id), &mut builder)
-                .is_none()
-            {
+            if !outline_raster_glyph(&face, &outlines, placement.glyph_id, &mut builder) {
                 continue;
             }
             let Some(path) = builder.finish() else {
@@ -1702,9 +1707,10 @@ fn draw_string_transformed(
     let run_transform = Transform::from_row(m00, m01, m10, m11, x, y);
 
     let mut try_draw = |font_data: &[u8]| -> Result<(), &'static str> {
-        let Ok(face) = ttf_parser::Face::parse(font_data, 0) else {
+        let Ok(face) = SfntFace::parse(font_data, 0) else {
             return Err("parse_failed");
         };
+        let outlines = raster_outline_source(&face)?;
         let placements = layout_text_glyphs(font_data, text, font_size, 0.0, 0.0, shape_text);
         if placements.is_empty() {
             return Err("no_placements");
@@ -1713,10 +1719,7 @@ fn draw_string_transformed(
         for placement in placements {
             let mut builder =
                 GlyphPathBuilder::new(placement.origin_x, placement.origin_y, placement.scale);
-            if face
-                .outline_glyph(GlyphId(placement.glyph_id), &mut builder)
-                .is_none()
-            {
+            if !outline_raster_glyph(&face, &outlines, placement.glyph_id, &mut builder) {
                 continue;
             }
             let Some(path) = builder.finish() else {
@@ -1786,9 +1789,10 @@ fn draw_glyph_run(
     let device_transform = base_transform.pre_concat(state.transform);
 
     let mut try_draw = |font_data: &[u8], used_system_fallback: bool| -> Result<(), &'static str> {
-        let Ok(face) = ttf_parser::Face::parse(font_data, 0) else {
+        let Ok(face) = SfntFace::parse(font_data, 0) else {
             return Err("parse_failed");
         };
+        let outlines = raster_outline_source(&face)?;
         let upem = face.units_per_em().max(1) as f32;
         let scale = font_size / upem;
 
@@ -1800,7 +1804,7 @@ fn draw_glyph_run(
         for (idx, gid) in glyph_ids.iter().enumerate() {
             if *gid != 0 {
                 let mut builder = GlyphPathBuilder::new(0.0, 0.0, scale);
-                if face.outline_glyph(GlyphId(*gid), &mut builder).is_some() {
+                if outline_raster_glyph(&face, &outlines, *gid, &mut builder) {
                     if let Some(path) = builder.finish() {
                         let local = Transform::from_row(m00, m01, m10, m11, pen_x, pen_y);
                         fill_path_blended(
@@ -1814,7 +1818,7 @@ fn draw_glyph_run(
                         );
                         drawn += 1;
                     }
-                } else if face.glyph_hor_advance(GlyphId(*gid)).is_some() {
+                } else if face.glyph_hor_advance(SfntGlyphId(*gid)).is_some() {
                     // Some valid glyphs (e.g. spaces) intentionally have no outline.
                     blank_glyphs += 1;
                 } else {
@@ -1826,7 +1830,7 @@ fn draw_glyph_run(
                 .get(idx)
                 .map(|(dx, dy)| (dx.to_f32(), dy.to_f32()))
                 .or_else(|| {
-                    face.glyph_hor_advance(GlyphId(*gid)).map(|w| {
+                    face.glyph_hor_advance(SfntGlyphId(*gid)).map(|w| {
                         let adv = (w as f32) * scale;
                         (m00 * adv, m01 * adv)
                     })
@@ -1924,41 +1928,35 @@ fn layout_text_glyphs(
         return layout_text_glyphs_unshaped(font_data, text, font_size, baseline_x, baseline_y);
     }
 
-    let Some(face) = HbFace::from_slice(font_data, 0) else {
+    let Some(shaped) = text_shape::shape(font_data, text) else {
         return layout_text_glyphs_unshaped(font_data, text, font_size, baseline_x, baseline_y);
     };
-    let hb_units = face.units_per_em().max(1) as f32;
+    let hb_units = shaped.units_per_em as f32;
     let scale = font_size / hb_units;
-    let mut buffer = UnicodeBuffer::new();
-    buffer.set_direction(detect_direction(text));
-    buffer.push_str(text);
-    let output = rustybuzz::shape(&face, &[], buffer);
-    let infos = output.glyph_infos();
-    let positions = output.glyph_positions();
-    if infos.is_empty() || infos.len() != positions.len() {
+    if shaped.glyphs.is_empty() {
         return layout_text_glyphs_unshaped(font_data, text, font_size, baseline_x, baseline_y);
     }
 
-    let mut out = Vec::with_capacity(infos.len());
+    let mut out = Vec::with_capacity(shaped.glyphs.len());
     let mut pen_x = 0.0f32;
     let mut pen_y = 0.0f32;
-    for (info, pos) in infos.iter().zip(positions.iter()) {
-        let gid = info.glyph_id as u16;
+    for glyph in shaped.glyphs {
+        let gid = glyph.glyph_id;
         if gid == 0 {
-            pen_x += (pos.x_advance as f32 / hb_units) * font_size;
-            pen_y += (pos.y_advance as f32 / hb_units) * font_size;
+            pen_x += (glyph.x_advance as f32 / hb_units) * font_size;
+            pen_y += (glyph.y_advance as f32 / hb_units) * font_size;
             continue;
         }
-        let x_off = (pos.x_offset as f32 / hb_units) * font_size;
-        let y_off = (pos.y_offset as f32 / hb_units) * font_size;
+        let x_off = (glyph.x_offset as f32 / hb_units) * font_size;
+        let y_off = (glyph.y_offset as f32 / hb_units) * font_size;
         out.push(GlyphPlacement {
             glyph_id: gid,
             origin_x: baseline_x + pen_x + x_off,
             origin_y: baseline_y + pen_y + y_off,
             scale,
         });
-        pen_x += (pos.x_advance as f32 / hb_units) * font_size;
-        pen_y += (pos.y_advance as f32 / hb_units) * font_size;
+        pen_x += (glyph.x_advance as f32 / hb_units) * font_size;
+        pen_y += (glyph.y_advance as f32 / hb_units) * font_size;
     }
     out
 }
@@ -1970,7 +1968,7 @@ fn layout_text_glyphs_unshaped(
     baseline_x: f32,
     baseline_y: f32,
 ) -> Vec<GlyphPlacement> {
-    let Ok(face) = ttf_parser::Face::parse(font_data, 0) else {
+    let Ok(face) = SfntFace::parse(font_data, 0) else {
         return Vec::new();
     };
     let units_per_em = face.units_per_em().max(1) as f32;
@@ -1979,7 +1977,7 @@ fn layout_text_glyphs_unshaped(
     let mut out = Vec::new();
     let mut pen_x = 0.0f32;
     for ch in text.chars() {
-        let gid = face.glyph_index(ch).map(|id| id.0).unwrap_or(0);
+        let gid = face.glyph_index(ch as u32).map(|id| id.0).unwrap_or(0);
         if gid == 0 {
             pen_x += font_size * 0.5;
             continue;
@@ -1990,7 +1988,7 @@ fn layout_text_glyphs_unshaped(
             origin_y: baseline_y,
             scale,
         });
-        let advance_units = face.glyph_hor_advance(GlyphId(gid)).unwrap_or(0) as f32;
+        let advance_units = face.glyph_hor_advance(SfntGlyphId(gid)).unwrap_or(0) as f32;
         let mut adv = (advance_units / units_per_em) * font_size;
         if adv <= 0.0 {
             adv = font_size * 0.5;
@@ -2146,7 +2144,7 @@ fn load_system_font_from_candidates(font_name: &str) -> Option<SystemFontCacheEn
             let Ok(bytes) = std::fs::read(&path) else {
                 continue;
             };
-            if ttf_parser::Face::parse(&bytes, 0).is_ok() {
+            if SfntFace::parse(&bytes, 0).is_ok() {
                 return Some(SystemFontCacheEntry {
                     bytes: Arc::new(bytes),
                     path,
@@ -2688,20 +2686,6 @@ fn extend_style_candidates(
     }
 }
 
-fn detect_direction(text: &str) -> HbDirection {
-    for ch in text.chars() {
-        let code = ch as u32;
-        let rtl = matches!(
-            code,
-            0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF | 0x1EE00..=0x1EEFF
-        );
-        if rtl {
-            return HbDirection::RightToLeft;
-        }
-    }
-    HbDirection::LeftToRight
-}
-
 struct GlyphPathBuilder {
     builder: PathBuilder,
     origin_x: f32,
@@ -2724,7 +2708,44 @@ impl GlyphPathBuilder {
     }
 }
 
-impl OutlineBuilder for GlyphPathBuilder {
+enum RasterOutlineSource<'a> {
+    TrueType,
+    Cff1(CffOutlines<'a>),
+    Cff2(Cff2Outlines<'a>),
+}
+
+fn raster_outline_source<'a>(face: &SfntFace<'a>) -> Result<RasterOutlineSource<'a>, &'static str> {
+    if face.has_true_type_outlines() {
+        Ok(RasterOutlineSource::TrueType)
+    } else if face.has_cff1_outlines() {
+        CffOutlines::parse(face)
+            .map(RasterOutlineSource::Cff1)
+            .ok_or("parse_failed")
+    } else if face.has_cff2_outlines() {
+        Cff2Outlines::parse(face)
+            .map(RasterOutlineSource::Cff2)
+            .ok_or("parse_failed")
+    } else {
+        Err("missing_outlines")
+    }
+}
+
+fn outline_raster_glyph(
+    face: &SfntFace<'_>,
+    outlines: &RasterOutlineSource<'_>,
+    glyph_id: u16,
+    builder: &mut GlyphPathBuilder,
+) -> bool {
+    match outlines {
+        RasterOutlineSource::TrueType => {
+            face.outline_glyph(SfntGlyphId(glyph_id), builder).is_some()
+        }
+        RasterOutlineSource::Cff1(cff) => cff.outline(SfntGlyphId(glyph_id), builder).is_some(),
+        RasterOutlineSource::Cff2(cff) => cff.outline(SfntGlyphId(glyph_id), builder).is_some(),
+    }
+}
+
+impl NativeOutlineBuilder for GlyphPathBuilder {
     fn move_to(&mut self, x: f32, y: f32) {
         self.builder.move_to(
             self.origin_x + x * self.scale,
@@ -2839,13 +2860,12 @@ fn sk_blend_mode(mode: MixBlendMode) -> SkBlendMode {
     }
 }
 
-fn to_sk_color(color: Color, opacity: f32) -> tiny_skia::Color {
+fn to_sk_color(color: Color, opacity: f32) -> RasterColor {
     let r = color.r.clamp(0.0, 1.0);
     let g = color.g.clamp(0.0, 1.0);
     let b = color.b.clamp(0.0, 1.0);
     let a = opacity.clamp(0.0, 1.0);
-    tiny_skia::Color::from_rgba(r, g, b, a)
-        .unwrap_or_else(|| tiny_skia::Color::from_rgba8(0, 0, 0, 255))
+    RasterColor::from_rgba(r, g, b, a).unwrap_or_else(|| RasterColor::from_rgba8(0, 0, 0, 255))
 }
 
 fn pt_milli_to_px_u32(pt_milli: i64, dpi: u32) -> Result<u32, FullBleedError> {
@@ -2896,20 +2916,20 @@ fn load_image_pixmap(source: &str) -> Option<Pixmap> {
 fn decode_image_to_pixmap(data: &[u8], mime: Option<&str>) -> Option<Pixmap> {
     let guessed_format = if let Some(mime) = mime {
         if mime.contains("png") {
-            Some(image::ImageFormat::Png)
+            Some(crate::image_native::ImageFormat::Png)
         } else if mime.contains("jpeg") || mime.contains("jpg") {
-            Some(image::ImageFormat::Jpeg)
+            Some(crate::image_native::ImageFormat::Jpeg)
         } else {
             None
         }
     } else {
-        image::guess_format(data).ok()
+        crate::image_native::guess_format(data).ok()
     };
 
     let decoded = if let Some(fmt) = guessed_format {
-        image::load_from_memory_with_format(data, fmt).ok()?
+        crate::image_native::load_from_memory_with_format(data, fmt).ok()?
     } else {
-        image::load_from_memory(data).ok()?
+        crate::image_native::load_from_memory(data).ok()?
     };
     let rgba = decoded.to_rgba8();
     let (width, height) = rgba.dimensions();
@@ -2947,9 +2967,7 @@ fn parse_data_uri(uri: &str) -> Option<(String, Vec<u8>)> {
         .unwrap_or("application/octet-stream")
         .to_string();
     let data = if header.contains(";base64") {
-        base64::engine::general_purpose::STANDARD
-            .decode(payload)
-            .ok()?
+        crate::base64::decode_standard(payload).ok()?
     } else {
         payload.as_bytes().to_vec()
     };
@@ -2959,10 +2977,9 @@ fn parse_data_uri(uri: &str) -> Option<(String, Vec<u8>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::Engine;
-    use image::RgbaImage;
+    use crate::image_native::{Rgba, RgbaImage};
 
-    fn has_non_white_pixel(img: &image::RgbaImage) -> bool {
+    fn has_non_white_pixel(img: &RgbaImage) -> bool {
         img.pixels().any(|p| {
             let [r, g, b, _a] = p.0;
             !(r == 255 && g == 255 && b == 255)
@@ -2989,13 +3006,8 @@ mod tests {
     #[test]
     fn decode_image_to_pixmap_handles_png() {
         let mut src = RgbaImage::new(1, 1);
-        src.put_pixel(0, 0, image::Rgba([255, 0, 0, 128]));
-        let mut bytes = Vec::new();
-        src.write_to(
-            &mut std::io::Cursor::new(&mut bytes),
-            image::ImageFormat::Png,
-        )
-        .unwrap();
+        src.put_pixel(0, 0, Rgba([255, 0, 0, 128]));
+        let bytes = crate::image_native::encode_png_rgba8(src.as_bytes(), 1, 1).unwrap();
         let pixmap = decode_image_to_pixmap(&bytes, Some("image/png")).unwrap();
         assert_eq!(pixmap.width(), 1);
         assert_eq!(pixmap.height(), 1);
@@ -3020,7 +3032,9 @@ mod tests {
         };
         let pngs = document_to_png_pages(&doc, 150, None, true).unwrap();
         assert_eq!(pngs.len(), 1);
-        let img = image::load_from_memory(&pngs[0]).unwrap().to_rgba8();
+        let img = crate::image_native::load_from_memory(&pngs[0])
+            .unwrap()
+            .into_rgba8();
         assert!(
             has_non_white_pixel(&img),
             "expected text to produce non-white pixels"
@@ -3121,7 +3135,9 @@ mod tests {
 
         let pngs = document_to_png_pages(&doc, 72, None, true).unwrap();
         assert_eq!(pngs.len(), 1);
-        let img = image::load_from_memory(&pngs[0]).unwrap().to_rgba8();
+        let img = crate::image_native::load_from_memory(&pngs[0])
+            .unwrap()
+            .into_rgba8();
         let px = img.get_pixel(40, 35).0;
         assert_eq!(px, [255, 255, 255, 255]);
     }
@@ -3166,7 +3182,9 @@ mod tests {
 
         let pngs = document_to_png_pages(&doc, 144, None, true).unwrap();
         assert_eq!(pngs.len(), 1);
-        let img = image::load_from_memory(&pngs[0]).unwrap().to_rgba8();
+        let img = crate::image_native::load_from_memory(&pngs[0])
+            .unwrap()
+            .into_rgba8();
         assert!(
             has_non_white_pixel(&img),
             "expected DrawForm containing DrawImage to render non-white pixels"
@@ -3176,17 +3194,12 @@ mod tests {
     #[test]
     fn draw_image_preserves_top_to_bottom_source_orientation() {
         let mut src = RgbaImage::new(1, 2);
-        src.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));
-        src.put_pixel(0, 1, image::Rgba([0, 0, 255, 255]));
-        let mut bytes = Vec::new();
-        src.write_to(
-            &mut std::io::Cursor::new(&mut bytes),
-            image::ImageFormat::Png,
-        )
-        .unwrap();
+        src.put_pixel(0, 0, Rgba([255, 0, 0, 255]));
+        src.put_pixel(0, 1, Rgba([0, 0, 255, 255]));
+        let bytes = crate::image_native::encode_png_rgba8(src.as_bytes(), 1, 2).unwrap();
         let data_uri = format!(
             "data:image/png;base64,{}",
-            base64::engine::general_purpose::STANDARD.encode(bytes)
+            crate::base64::encode_standard(bytes)
         );
 
         let doc = Document {
@@ -3207,7 +3220,9 @@ mod tests {
 
         let pngs = document_to_png_pages(&doc, 72, None, true).unwrap();
         assert_eq!(pngs.len(), 1);
-        let img = image::load_from_memory(&pngs[0]).unwrap().to_rgba8();
+        let img = crate::image_native::load_from_memory(&pngs[0])
+            .unwrap()
+            .into_rgba8();
         let top = img.get_pixel(20, 13).0;
         let bottom = img.get_pixel(20, 27).0;
         assert!(

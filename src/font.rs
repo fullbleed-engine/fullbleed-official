@@ -1,12 +1,12 @@
 use crate::error::FullBleedError;
 use crate::glyph_report::GlyphCoverageReport;
+use crate::sfnt::{self, CmapSubtable, Face as SfntFace, GlyphId, PlatformId};
+use crate::text_shape;
 use crate::types::Pt;
-use rustybuzz::{Direction as HbDirection, Face as HbFace, UnicodeBuffer};
 use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use ttf_parser::GlyphId;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 struct TextWidthKey {
@@ -198,7 +198,7 @@ impl FontRegistry {
         let Ok(data) = fs::read(path) else {
             return;
         };
-        let Ok(face) = ttf_parser::Face::parse(&data, 0) else {
+        let Ok(face) = SfntFace::parse(&data, 0) else {
             return;
         };
 
@@ -255,7 +255,7 @@ impl FontRegistry {
         source_kind: RegisteredFontSourceKind,
     ) -> Result<String, FullBleedError> {
         let source = source_name.unwrap_or("EmbeddedFont");
-        let Ok(face) = ttf_parser::Face::parse(&data, 0) else {
+        let Ok(face) = SfntFace::parse(&data, 0) else {
             return Err(FullBleedError::Asset(format!(
                 "invalid font data for {source}"
             )));
@@ -374,7 +374,7 @@ impl FontRegistry {
         let Some(font) = self.resolve(name) else {
             return 0;
         };
-        if let Ok(face) = ttf_parser::Face::parse(&font.data, 0) {
+        if let Ok(face) = SfntFace::parse(&font.data, 0) {
             let (_symbolic, symbol_subtable) = select_symbol_subtable(&face);
             if let Some(gid) = glyph_index_for_codepoint(&face, ch as u32, symbol_subtable) {
                 return gid.0;
@@ -387,7 +387,7 @@ impl FontRegistry {
         let Some(font) = self.resolve(name) else {
             return false;
         };
-        if let Ok(face) = ttf_parser::Face::parse(&font.data, 0) {
+        if let Ok(face) = SfntFace::parse(&font.data, 0) {
             let (_symbolic, symbol_subtable) = select_symbol_subtable(&face);
             return glyph_index_for_codepoint(&face, ch as u32, symbol_subtable).is_some();
         }
@@ -519,7 +519,7 @@ impl FontRegistry {
         let Some(font) = self.resolve(name) else {
             return 0;
         };
-        if let Ok(face) = ttf_parser::Face::parse(&font.data, 0) {
+        if let Ok(face) = SfntFace::parse(&font.data, 0) {
             let advance = face.glyph_hor_advance(GlyphId(gid)).unwrap_or(0);
             let units = face.units_per_em().max(1) as i64;
             let scaled = ((advance as i64) * 1000 + (units / 2)) / units;
@@ -530,7 +530,7 @@ impl FontRegistry {
 }
 
 impl FontMetrics {
-    fn from_face(face: &ttf_parser::Face<'_>) -> (Self, FontProgramKind) {
+    fn from_face(face: &SfntFace<'_>) -> (Self, FontProgramKind) {
         let units_per_em = face.units_per_em().max(1);
         let scale = 1000.0 / units_per_em as f32;
         let first_char = 32u8;
@@ -571,7 +571,7 @@ impl FontMetrics {
             .map(|value| value.round() as i16)
             .unwrap_or(0);
 
-        let program_kind = if face.tables().cff.is_some() {
+        let program_kind = if face.has_cff_outlines() {
             FontProgramKind::OpenTypeCff
         } else {
             FontProgramKind::TrueType
@@ -669,22 +669,15 @@ impl FontMetrics {
     }
 }
 
-fn select_symbol_subtable<'a>(
-    face: &'a ttf_parser::Face<'a>,
-) -> (bool, Option<ttf_parser::cmap::Subtable<'a>>) {
-    let Some(cmap) = face.tables().cmap else {
-        return (false, None);
-    };
+fn select_symbol_subtable<'a>(face: &'a SfntFace<'a>) -> (bool, Option<CmapSubtable<'a>>) {
     let mut first = None;
     let mut symbol = None;
     let mut has_unicode = false;
-    for subtable in cmap.subtables {
+    for subtable in face.cmap_subtables() {
         if first.is_none() {
             first = Some(subtable);
         }
-        if subtable.platform_id == ttf_parser::name::PlatformId::Windows
-            && subtable.encoding_id == 0
-        {
+        if subtable.platform_id == PlatformId::Windows && subtable.encoding_id == 0 {
             symbol = Some(subtable);
         }
         if subtable.is_unicode() {
@@ -699,10 +692,10 @@ fn select_symbol_subtable<'a>(
 }
 
 fn build_glyph_ids(
-    face: &ttf_parser::Face<'_>,
+    face: &SfntFace<'_>,
     first: u8,
     last: u8,
-    fallback: Option<ttf_parser::cmap::Subtable<'_>>,
+    fallback: Option<CmapSubtable<'_>>,
 ) -> Vec<u16> {
     let mut glyphs = Vec::with_capacity((last - first + 1) as usize);
     for code in first..=last {
@@ -715,12 +708,12 @@ fn build_glyph_ids(
 }
 
 fn glyph_index_for_codepoint<'a>(
-    face: &'a ttf_parser::Face<'a>,
+    face: &'a SfntFace<'a>,
     codepoint: u32,
-    fallback: Option<ttf_parser::cmap::Subtable<'a>>,
-) -> Option<ttf_parser::GlyphId> {
-    if let Some(ch) = char::from_u32(codepoint) {
-        if let Some(id) = face.glyph_index(ch) {
+    fallback: Option<CmapSubtable<'a>>,
+) -> Option<GlyphId> {
+    if char::from_u32(codepoint).is_some() {
+        if let Some(id) = face.glyph_index(codepoint) {
             return Some(id);
         }
     }
@@ -735,11 +728,11 @@ fn glyph_index_for_codepoint<'a>(
 }
 
 fn build_widths(
-    face: &ttf_parser::Face<'_>,
+    face: &SfntFace<'_>,
     scale: f32,
     first: u8,
     last: u8,
-    fallback: Option<ttf_parser::cmap::Subtable<'_>>,
+    fallback: Option<CmapSubtable<'_>>,
 ) -> Vec<u16> {
     let mut widths = Vec::with_capacity((last - first + 1) as usize);
     for code in first..=last {
@@ -753,23 +746,11 @@ fn build_widths(
 }
 
 fn build_kerning_pairs(
-    face: &ttf_parser::Face<'_>,
+    face: &SfntFace<'_>,
     glyph_ids: &[u16],
     scale: f32,
 ) -> HashMap<(u16, u16), i16> {
     let mut out = HashMap::new();
-    let Some(kern) = face.tables().kern else {
-        return out;
-    };
-
-    let subtables: Vec<_> = kern
-        .subtables
-        .into_iter()
-        .filter(|s| s.horizontal && !s.has_cross_stream && !s.has_state_machine)
-        .collect();
-    if subtables.is_empty() {
-        return out;
-    }
 
     for &left in glyph_ids {
         if left == 0 {
@@ -779,14 +760,9 @@ fn build_kerning_pairs(
             if right == 0 {
                 continue;
             }
-            let mut total: i32 = 0;
             let left_id = GlyphId(left);
             let right_id = GlyphId(right);
-            for sub in &subtables {
-                if let Some(v) = sub.glyphs_kerning(left_id, right_id) {
-                    total = total.saturating_add(v as i32);
-                }
-            }
+            let total = i32::from(face.legacy_kerning(left_id, right_id));
             if total != 0 {
                 let clamped = total.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
                 let scaled = scale_i16(clamped, scale);
@@ -800,20 +776,15 @@ fn build_kerning_pairs(
 }
 
 fn measure_text_width_full(font: &RegisteredFont, font_size: Pt, text: &str) -> Option<Pt> {
-    let face = HbFace::from_slice(&font.data, 0)?;
-    let units_per_em = face.units_per_em().max(1) as i64;
-
-    let mut buffer = UnicodeBuffer::new();
-    buffer.set_direction(detect_direction(text));
-    buffer.push_str(text);
-    let output = rustybuzz::shape(&face, &[], buffer);
-    let positions = output.glyph_positions();
-    if positions.is_empty() {
+    let shaped = text_shape::shape(&font.data, text)?;
+    if shaped.glyphs.is_empty() {
         return None;
     }
+    let units_per_em = i64::from(shaped.units_per_em);
     let mut total_units: i32 = 0;
-    for pos in positions {
-        let adv = (((pos.x_advance as i64) * 1000 + (units_per_em / 2)) / units_per_em) as i32;
+    for glyph in shaped.glyphs {
+        let adv =
+            (((i64::from(glyph.x_advance)) * 1000 + (units_per_em / 2)) / units_per_em) as i32;
         total_units = total_units.saturating_add(adv);
     }
     if total_units <= 0 {
@@ -822,37 +793,20 @@ fn measure_text_width_full(font: &RegisteredFont, font_size: Pt, text: &str) -> 
     Some(font_size.mul_ratio(total_units, 1000))
 }
 
-fn detect_direction(text: &str) -> HbDirection {
-    for ch in text.chars() {
-        let code = ch as u32;
-        let rtl = matches!(
-            code,
-            0x0590..=0x08FF
-                | 0xFB1D..=0xFDFF
-                | 0xFE70..=0xFEFF
-                | 0x1EE00..=0x1EEFF
-        );
-        if rtl {
-            return HbDirection::RightToLeft;
-        }
-    }
-    HbDirection::LeftToRight
-}
-
 fn scale_i16(value: i16, scale: f32) -> i16 {
     let scaled = (value as f32 * scale).round() as i32;
     scaled.clamp(i16::MIN as i32, i16::MAX as i32) as i16
 }
 
-fn font_names(face: &ttf_parser::Face<'_>, path: &Path) -> (String, Vec<String>) {
-    use ttf_parser::name::name_id;
+fn font_names(face: &SfntFace<'_>, path: &Path) -> (String, Vec<String>) {
+    use sfnt::name_id;
 
     let mut family = None;
     let mut full = None;
     let mut post = None;
 
     for entry in face.names() {
-        let Some(name) = entry.to_string() else {
+        let Some(name) = decode_font_name(entry) else {
             continue;
         };
         match entry.name_id {
@@ -896,17 +850,52 @@ fn font_names(face: &ttf_parser::Face<'_>, path: &Path) -> (String, Vec<String>)
     (primary, aliases)
 }
 
+fn decode_font_name(entry: sfnt::NameRecord<'_>) -> Option<String> {
+    entry.to_unicode_string()
+}
+
 #[cfg(feature = "python")]
 pub(crate) fn font_primary_name_from_bytes(
     data: &[u8],
     source_name: Option<&str>,
 ) -> Option<String> {
-    let Ok(face) = ttf_parser::Face::parse(data, 0) else {
+    let Ok(face) = SfntFace::parse(data, 0) else {
         return None;
     };
     let source = source_name.unwrap_or("EmbeddedFont");
     let (primary, _) = font_names(&face, Path::new(source));
     Some(primary)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_font_name;
+    use crate::sfnt::{NameRecord, PlatformId};
+
+    fn name(platform_id: PlatformId, encoding_id: u16, bytes: &[u8]) -> NameRecord<'_> {
+        NameRecord {
+            platform_id,
+            encoding_id,
+            language_id: 0,
+            name_id: 1,
+            data: bytes,
+        }
+    }
+
+    #[test]
+    fn font_name_decoder_matches_unicode_name_table_contract() {
+        let unicode = [
+            0x00, 0x46, 0x00, 0x75, 0x00, 0x6c, 0x00, 0x6c, 0x00, 0x42, 0x00, 0x6c, 0x00, 0x65,
+            0x00, 0x65, 0x00, 0x64, 0xd8, 0x3d, 0xde, 0x00,
+        ];
+        assert_eq!(
+            decode_font_name(name(PlatformId::Unicode, 4, &unicode)).as_deref(),
+            Some("FullBleed😀")
+        );
+        assert!(decode_font_name(name(PlatformId::Unicode, 4, &[0, 65, 0])).is_none());
+        assert!(decode_font_name(name(PlatformId::Unicode, 4, &[0xd8, 0x00])).is_none());
+        assert!(decode_font_name(name(PlatformId::Macintosh, 0, b"FullBleed")).is_none());
+    }
 }
 
 fn normalize_name(name: &str) -> String {
