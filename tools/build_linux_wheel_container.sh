@@ -56,9 +56,28 @@ case "$fullbleed_target" in
             *" target-feature=-crt-static "*) ;;
             *)
                 RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C target-feature=-crt-static"
-                export RUSTFLAGS
                 ;;
         esac
+        export RUSTFLAGS
+
+        # A dynamic musl cdylib makes rustc request libgcc_s explicitly. The
+        # Alpine runtime images do not include it, so route that one argument
+        # through the static unwind archives shipped by the cross toolchain.
+        FULLBLEED_MUSL_REAL_LINKER="${fullbleed_target}-gcc"
+        export FULLBLEED_MUSL_REAL_LINKER
+        if ! command -v "$FULLBLEED_MUSL_REAL_LINKER" >/dev/null 2>&1; then
+            echo "fullbleed-build: musl linker is unavailable: $FULLBLEED_MUSL_REAL_LINKER" >&2
+            exit 1
+        fi
+        fullbleed_linker_wrapper=$(pwd)/tools/fullbleed_musl_linker.py
+        if [ ! -x "$fullbleed_linker_wrapper" ]; then
+            echo "fullbleed-build: musl linker wrapper is not executable: $fullbleed_linker_wrapper" >&2
+            exit 1
+        fi
+        fullbleed_linker_target=$(printf '%s' "$fullbleed_target" \
+            | tr '[:lower:]-' '[:upper:]_')
+        fullbleed_linker_variable="CARGO_TARGET_${fullbleed_linker_target}_LINKER"
+        export "$fullbleed_linker_variable=$fullbleed_linker_wrapper"
         ;;
 esac
 
