@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.0.0"
+  FULLBLEED_CI_VERSION: "2.1.0"
 
 on:
   push:

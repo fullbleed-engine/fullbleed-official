@@ -4,10 +4,11 @@ use crate::sfnt::{self, CmapSubtable, Face as SfntFace, GlyphId, PlatformId};
 use crate::sfnt_outline::OutlineBuilder;
 use crate::text_shape;
 use crate::types::Pt;
-use std::collections::{HashMap, VecDeque};
+use fullbleed_audit_contract::sha256::Sha256;
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::fs;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 struct TextWidthKey {
@@ -21,6 +22,89 @@ struct TextWidthCache {
     map: HashMap<TextWidthKey, Pt>,
     order: VecDeque<TextWidthKey>,
     max_entries: usize,
+}
+
+const FONT_SUBSET_CACHE_MAX_ENTRIES: usize = 128;
+const FONT_SUBSET_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+struct FontSubsetKey {
+    font_fingerprint: [u8; 32],
+    glyphs: Vec<u16>,
+}
+
+#[derive(Debug, Clone)]
+enum FontSubsetCacheValue {
+    Subset(Arc<CachedTrueTypeSubset>),
+    Unsupported,
+}
+
+#[derive(Debug)]
+struct FontSubsetCache {
+    map: HashMap<FontSubsetKey, FontSubsetCacheValue>,
+    order: VecDeque<FontSubsetKey>,
+    bytes: usize,
+}
+
+static GLOBAL_FONT_SUBSET_CACHE: OnceLock<Mutex<FontSubsetCache>> = OnceLock::new();
+
+fn global_font_subset_cache() -> &'static Mutex<FontSubsetCache> {
+    GLOBAL_FONT_SUBSET_CACHE.get_or_init(|| Mutex::new(FontSubsetCache::new()))
+}
+
+impl FontSubsetCache {
+    fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+            order: VecDeque::new(),
+            bytes: 0,
+        }
+    }
+
+    fn get(&self, key: &FontSubsetKey) -> Option<FontSubsetCacheValue> {
+        self.map.get(key).cloned()
+    }
+
+    fn insert(&mut self, key: FontSubsetKey, value: FontSubsetCacheValue) {
+        if self.map.contains_key(&key) {
+            return;
+        }
+        self.bytes = self
+            .bytes
+            .saturating_add(font_subset_cache_value_bytes(&value));
+        self.order.push_back(key.clone());
+        self.map.insert(key, value);
+        while self.map.len() > FONT_SUBSET_CACHE_MAX_ENTRIES
+            || self.bytes > FONT_SUBSET_CACHE_MAX_BYTES
+        {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            if let Some(removed) = self.map.remove(&oldest) {
+                self.bytes = self
+                    .bytes
+                    .saturating_sub(font_subset_cache_value_bytes(&removed));
+            }
+        }
+    }
+}
+
+fn font_subset_cache_value_bytes(value: &FontSubsetCacheValue) -> usize {
+    match value {
+        FontSubsetCacheValue::Subset(subset) => subset
+            .data
+            .len()
+            .saturating_add(subset.compressed.as_ref().map_or(0, |data| data.len())),
+        FontSubsetCacheValue::Unsupported => 0,
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct CachedTrueTypeSubset {
+    pub(crate) data: Vec<u8>,
+    pub(crate) compressed: Option<Vec<u8>>,
+    pub(crate) tag: [u8; 6],
+    pub(crate) glyph_count: usize,
 }
 
 impl TextWidthCache {
@@ -58,6 +142,7 @@ pub(crate) struct FontRegistry {
     lookup: HashMap<String, usize>,
     use_full_unicode_metrics: bool,
     text_width_cache: Mutex<TextWidthCache>,
+    font_subset_cache: Mutex<FontSubsetCache>,
 }
 
 #[derive(Debug, Clone)]
@@ -160,6 +245,7 @@ pub(crate) struct RegisteredFontSourceInfo {
 pub(crate) struct RegisteredFont {
     pub(crate) name: String,
     pub(crate) data: Vec<u8>,
+    fingerprint: [u8; 32],
     pub(crate) metrics: FontMetrics,
     pub(crate) program_kind: FontProgramKind,
     #[cfg_attr(not(feature = "python"), allow(dead_code))]
@@ -227,6 +313,7 @@ impl FontRegistry {
             lookup: HashMap::new(),
             use_full_unicode_metrics: true,
             text_width_cache: Mutex::new(TextWidthCache::new(20_000)),
+            font_subset_cache: Mutex::new(FontSubsetCache::new()),
         }
     }
 
@@ -289,6 +376,7 @@ impl FontRegistry {
             };
             self.fonts.push(RegisteredFont {
                 name: name.clone(),
+                fingerprint: sfnt_cache_fingerprint(&face_data),
                 data: face_data,
                 metrics,
                 program_kind,
@@ -349,6 +437,7 @@ impl FontRegistry {
         let index = self.fonts.len();
         self.fonts.push(RegisteredFont {
             name: name.clone(),
+            fingerprint: sfnt_cache_fingerprint(&data),
             data,
             metrics,
             program_kind,
@@ -377,6 +466,65 @@ impl FontRegistry {
         self.lookup
             .get(&key)
             .and_then(|index| self.fonts.get(*index))
+    }
+
+    pub(crate) fn cached_truetype_subset(
+        &self,
+        name: &str,
+        glyphs: &BTreeSet<u16>,
+    ) -> Option<Arc<CachedTrueTypeSubset>> {
+        let normalized = normalize_name(name);
+        let font_index = *self.lookup.get(&normalized)?;
+        let font = self.fonts.get(font_index)?;
+        if !matches!(font.program_kind, FontProgramKind::TrueType) {
+            return None;
+        }
+        let key = FontSubsetKey {
+            font_fingerprint: font.fingerprint,
+            glyphs: glyphs.iter().copied().collect(),
+        };
+        if let Ok(cache) = self.font_subset_cache.lock() {
+            if let Some(value) = cache.get(&key) {
+                return match value {
+                    FontSubsetCacheValue::Subset(subset) => Some(subset),
+                    FontSubsetCacheValue::Unsupported => None,
+                };
+            }
+        }
+
+        if let Ok(cache) = global_font_subset_cache().lock() {
+            if let Some(value) = cache.get(&key) {
+                if let Ok(mut local_cache) = self.font_subset_cache.lock() {
+                    local_cache.insert(key, value.clone());
+                }
+                return match value {
+                    FontSubsetCacheValue::Subset(subset) => Some(subset),
+                    FontSubsetCacheValue::Unsupported => None,
+                };
+            }
+        }
+
+        let computed = crate::font_subset::subset_truetype(&font.data, glyphs).map(|subset| {
+            let compressed = crate::flate_native::zlib_deflate_parallel(&subset.data);
+            let compressed = (compressed.len() < subset.data.len()).then_some(compressed);
+            Arc::new(CachedTrueTypeSubset {
+                data: subset.data,
+                compressed,
+                tag: subset.tag,
+                glyph_count: subset.glyph_count,
+            })
+        });
+        let value = computed
+            .as_ref()
+            .map(|subset| FontSubsetCacheValue::Subset(subset.clone()))
+            .unwrap_or(FontSubsetCacheValue::Unsupported);
+        if let Ok(mut cache) = global_font_subset_cache().lock() {
+            cache.insert(key.clone(), value.clone());
+        }
+        if let Ok(mut cache) = self.font_subset_cache.lock() {
+            cache.insert(key, value);
+        }
+        computed
     }
 
     pub(crate) fn is_opentype_cff(&self, name: &str) -> bool {
@@ -1066,6 +1214,39 @@ fn align_font_table(value: usize) -> Option<usize> {
     value.checked_add(3).map(|value| value & !3)
 }
 
+fn sfnt_cache_fingerprint(data: &[u8]) -> [u8; 32] {
+    // Every SFNT table record carries the checksum of its table contents. Hashing
+    // the header plus (tag, checksum, length) records therefore identifies a
+    // well-formed font without rescanning multi-megabyte glyph programs whenever
+    // a short-lived engine registers the same asset. Offsets are intentionally
+    // omitted: repacking identical tables must not defeat the process cache.
+    let Some(table_count) = font_be_u16(data, 4).map(usize::from) else {
+        return Sha256::digest(data);
+    };
+    let Some(directory_end) = table_count
+        .checked_mul(16)
+        .and_then(|length| 12usize.checked_add(length))
+    else {
+        return Sha256::digest(data);
+    };
+    let Some(header) = data.get(..12) else {
+        return Sha256::digest(data);
+    };
+    let Some(directory) = data.get(12..directory_end) else {
+        return Sha256::digest(data);
+    };
+
+    let mut identity = Vec::with_capacity(32 + table_count.saturating_mul(12));
+    identity.extend_from_slice(b"fullbleed.sfnt-cache.v1\0");
+    identity.extend_from_slice(&(data.len() as u64).to_be_bytes());
+    identity.extend_from_slice(header);
+    for record in directory.chunks_exact(16) {
+        identity.extend_from_slice(&record[..8]);
+        identity.extend_from_slice(&record[12..16]);
+    }
+    Sha256::digest(&identity)
+}
+
 fn font_be_u16(data: &[u8], offset: usize) -> Option<u16> {
     let bytes = data.get(offset..offset.checked_add(2)?)?;
     Some(u16::from_be_bytes([bytes[0], bytes[1]]))
@@ -1167,12 +1348,16 @@ pub(crate) fn font_primary_name_from_bytes(
 #[cfg(test)]
 mod tests {
     use super::{
-        decode_font_name, extract_collection_faces, font_be_u16, font_be_u32, font_checksum,
-        font_write_u32,
+        FontRegistry, decode_font_name, extract_collection_faces, font_be_u16, font_be_u32,
+        font_checksum, font_write_u32,
     };
     use crate::sfnt::{Face, NameRecord, PlatformId};
+    use std::collections::BTreeSet;
+    use std::sync::Arc;
 
     const NOTO: &[u8] = include_bytes!("../python/fullbleed_assets/fonts/NotoSans-Regular.ttf");
+    const NOTO_MATH: &[u8] =
+        include_bytes!("../python/fullbleed_assets/fonts/NotoSansMath-Regular.ttf");
 
     fn name(platform_id: PlatformId, encoding_id: u16, bytes: &[u8]) -> NameRecord<'_> {
         NameRecord {
@@ -1197,6 +1382,37 @@ mod tests {
         assert!(decode_font_name(name(PlatformId::Unicode, 4, &[0, 65, 0])).is_none());
         assert!(decode_font_name(name(PlatformId::Unicode, 4, &[0xd8, 0x00])).is_none());
         assert!(decode_font_name(name(PlatformId::Macintosh, 0, b"FullBleed")).is_none());
+    }
+
+    #[test]
+    fn repeated_glyph_sets_reuse_compiled_font_subset() {
+        let mut registry = FontRegistry::new();
+        let name = registry
+            .register_bytes(NOTO_MATH.to_vec(), Some("NotoSansMath-Regular.ttf"))
+            .expect("register static TrueType");
+        let face = Face::parse(NOTO_MATH, 0).expect("parse font");
+        let glyphs = BTreeSet::from([
+            face.glyph_index('A' as u32).expect("A glyph").0,
+            face.glyph_index('z' as u32).expect("z glyph").0,
+        ]);
+
+        let first = registry
+            .cached_truetype_subset(&name, &glyphs)
+            .expect("first subset");
+        let second = registry
+            .cached_truetype_subset(&name, &glyphs)
+            .expect("cached subset");
+        assert!(Arc::ptr_eq(&first, &second));
+        assert!(first.compressed.is_some());
+
+        let mut other_registry = FontRegistry::new();
+        let other_name = other_registry
+            .register_bytes(NOTO_MATH.to_vec(), Some("same-font-different-engine.ttf"))
+            .expect("register same font in another engine");
+        let process_cached = other_registry
+            .cached_truetype_subset(&other_name, &glyphs)
+            .expect("process-wide cached subset");
+        assert!(Arc::ptr_eq(&first, &process_cached));
     }
 
     #[test]

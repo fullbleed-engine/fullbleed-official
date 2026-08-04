@@ -11,6 +11,7 @@ import fullbleed._fullbleed as native
 
 PUBLIC_NATIVE_NAMES = {
     "PdfEngine",
+    "CompiledDocument",
     "AssetKind",
     "Asset",
     "AssetBundle",
@@ -42,7 +43,14 @@ def test_stable_abi_facade_preserves_native_import_surface() -> None:
     assert PUBLIC_NATIVE_NAMES < set(fullbleed.__all__)
     assert fullbleed.PdfEngine is native.PdfEngine
     assert fullbleed.AssetBundle is native.AssetBundle
-    classes = {"PdfEngine", "AssetKind", "Asset", "AssetBundle", "WatermarkSpec"}
+    classes = {
+        "PdfEngine",
+        "CompiledDocument",
+        "AssetKind",
+        "Asset",
+        "AssetBundle",
+        "WatermarkSpec",
+    }
     assert all(getattr(fullbleed, name).__module__ == "builtins" for name in classes)
     assert all(
         getattr(fullbleed, name).__module__ == "fullbleed._fullbleed"
@@ -127,6 +135,12 @@ def test_pdf_engine_constructor_and_method_signatures_remain_explicit() -> None:
     assert str(inspect.signature(fullbleed.PdfEngine.render_pdf)) == (
         "(self, /, html, css, deterministic_hash=None)"
     )
+    assert str(inspect.signature(fullbleed.PdfEngine.compile_pdf)) == (
+        "(self, /, html, css)"
+    )
+    assert str(inspect.signature(fullbleed.CompiledDocument.render_pdf)) == (
+        "(self, /, deterministic_hash=None)"
+    )
     assert str(inspect.signature(fullbleed.PdfEngine.verify_accessibility_html)) == (
         "(self, /, html, css='', profile='strict', mode='error', "
         "render_preview_png_path=None, a11y_report=None, claim_evidence=None, "
@@ -145,6 +159,8 @@ def test_value_wrappers_preserve_construction_and_validation_contracts() -> None
         fullbleed.AssetKind()
     with pytest.raises(TypeError, match="No constructor defined"):
         fullbleed.Asset()
+    with pytest.raises(TypeError, match="No constructor defined"):
+        fullbleed.CompiledDocument()
     with pytest.raises(TypeError, match="not an acceptable base type"):
         class AssetSubclass(fullbleed.Asset):
             pass
@@ -178,9 +194,19 @@ def test_facade_routes_assets_and_pdf_rendering_through_capsules(tmp_path) -> No
         watermark=fullbleed.WatermarkSpec("text", "DRAFT"),
     )
     engine.register_bundle(bundle)
-    rendered = engine.render_pdf("<main><p>Facade</p></main>", "p { color: #123456; }")
+    html = "<main><p>Facade</p></main>"
+    css = "p { color: #123456; }"
+    rendered = engine.render_pdf(html, css)
     assert rendered.startswith(b"%PDF-")
     assert engine.document_metadata()["document_title"] == "Stable ABI"
+
+    compiled = engine.compile_pdf(html, css)
+    assert isinstance(compiled, fullbleed.CompiledDocument)
+    assert type(compiled._handle).__name__ == "PyCapsule"
+    assert compiled.render_pdf() == rendered
+    assert compiled.stats()["page_count"] == 1
+    assert compiled.stats()["command_count"] > 0
+    assert compiled.render_pdf_batch(2).count(b"/Type /Page ") == 2
 
 
 def test_capsule_reentry_raises_instead_of_aliasing_native_state(monkeypatch) -> None:

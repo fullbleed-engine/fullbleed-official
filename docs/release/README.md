@@ -4,13 +4,22 @@ This directory is the release-operations layer for Fullbleed. It is separate
 from feature documentation so release decisions can be audited without reading
 engine internals.
 
+## 2.1.0 Documents
+
+- `docs/release/2.1.0-runbook.md`: current Cargo, PyPI, wheel-matrix, and GitHub
+  release procedure.
+- `docs/performance-pass-2026-08-04.md`: measured font-subsetting, compiled-link,
+  and fixed-copy virtualization results.
+- `docs/performance-architecture.md`: performance scope and the vector compiler,
+  typed binding, linker, and shader roadmap.
+- `ReleaseNotes.MD`: current 2.1.0 release summary and gate list.
+
 ## 2.0.0 Documents
 
-- `docs/release/2.0.0-runbook.md`: current MIT, Cargo, PyPI, wheel-build, and
+- `docs/release/2.0.0-runbook.md`: historical MIT, Cargo, PyPI, wheel-build, and
   registry publication procedure.
 - `docs/2.0-dependency-removal.md`: dependency-removal implementation and
   evidence ledger.
-- `ReleaseNotes.MD`: current 2.0.0 release summary and gate list.
 
 ## 1.6.2 Documents
 

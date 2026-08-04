@@ -77,6 +77,7 @@ Common constructor options:
 Key methods:
 
 - `register_bundle(bundle)`
+- `compile_pdf(html, css) -> CompiledDocument`
 - `render_pdf(html, css, deterministic_hash=None) -> bytes`
 - `render_pdf_to_file(html, css, path, deterministic_hash=None) -> int`
 - `render_pdf_with_page_data(html, css) -> (bytes, dict|None)`
@@ -98,6 +99,35 @@ Key methods:
   - `render_pdf_batch_to_file_parallel_with_page_data(..., deterministic_hash=None)`
 
 `deterministic_hash` writes SHA-256 of the produced PDF bytes to the given file path.
+
+## `CompiledDocument`
+
+`PdfEngine.compile_pdf(html, css)` runs HTML parsing, style resolution, layout, pagination, and JIT
+planning once. It returns an immutable document containing the fixed-point display commands and the
+linker resources captured from that engine.
+
+```python
+compiled = engine.compile_pdf(html, css)
+pdf = compiled.render_pdf()
+print(compiled.stats())
+
+# One ordered PDF containing 1,000 identical compiled copies. Untagged output
+# virtualizes each source page to one shared content stream.
+print_run = compiled.render_pdf_batch(1_000)
+```
+
+Methods:
+
+- `stats() -> dict` with `page_count`, `command_count`, and `compile_ms`
+- `render_pdf(deterministic_hash=None) -> bytes`
+- `render_pdf_to_file(path, deterministic_hash=None) -> int`
+- `render_pdf_batch(copies, deterministic_hash=None) -> bytes`
+
+`render_pdf_batch` is a fixed-copy virtualization API, not a dynamic template-binding API. Each
+page dictionary is distinct and ordered, while identical untagged page content/resources are
+linked once and referenced by every copy. Tagged profiles deliberately use page-specific streams
+so their structure-parent records remain correct. A compiled object is immutable and may be
+rendered concurrently from multiple Python threads.
 
 ## `AssetBundle`
 

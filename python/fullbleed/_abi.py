@@ -160,6 +160,47 @@ class WatermarkSpec(metaclass=_NativeFacadeType):
         }
 
 
+class CompiledDocument(metaclass=_NativeFacadeType):
+    """Immutable fixed-point display document produced by ``PdfEngine.compile_pdf``."""
+
+    __slots__ = ("_handle",)
+
+    def __init__(self, /):
+        raise TypeError("No constructor defined for CompiledDocument")
+
+    @classmethod
+    def _from_handle(cls, /, handle):
+        instance = object.__new__(cls)
+        instance._handle = handle
+        return instance
+
+    def stats(self, /):
+        return _call(self._handle, "CompiledDocument.stats")
+
+    def render_pdf(self, /, deterministic_hash=None):
+        return _call(
+            self._handle,
+            "CompiledDocument.render_pdf",
+            deterministic_hash,
+        )
+
+    def render_pdf_to_file(self, /, path, deterministic_hash=None):
+        return _call(
+            self._handle,
+            "CompiledDocument.render_pdf_to_file",
+            path,
+            deterministic_hash,
+        )
+
+    def render_pdf_batch(self, /, copies, deterministic_hash=None):
+        return _call(
+            self._handle,
+            "CompiledDocument.render_pdf_batch",
+            copies,
+            deterministic_hash,
+        )
+
+
 class PdfEngine(metaclass=_NativeFacadeType):
     __slots__ = ("_handle",)
 
@@ -500,6 +541,10 @@ class PdfEngine(metaclass=_NativeFacadeType):
     def render_pdf(self, /, html, css, deterministic_hash=None):
         return _call(self._handle, "PdfEngine.render_pdf", html, css, deterministic_hash)
 
+    def compile_pdf(self, /, html, css):
+        handle = _call(self._handle, "PdfEngine.compile_pdf", html, css)
+        return CompiledDocument._from_handle(handle)
+
     def render_image_pages(self, /, html, css, dpi=150):
         return _call(self._handle, "PdfEngine.render_image_pages", html, css, dpi)
 
@@ -811,6 +856,7 @@ def audit_sparse_page_visual_pair(source_png_path, render_png_path):
 
 __all__ = [
     "PdfEngine",
+    "CompiledDocument",
     "AssetKind",
     "Asset",
     "AssetBundle",
@@ -836,7 +882,14 @@ __all__ = [
 ]
 
 
-_CLASS_NAMES = {"PdfEngine", "AssetKind", "Asset", "AssetBundle", "WatermarkSpec"}
+_CLASS_NAMES = {
+    "PdfEngine",
+    "CompiledDocument",
+    "AssetKind",
+    "Asset",
+    "AssetBundle",
+    "WatermarkSpec",
+}
 for _name in __all__:
     globals()[_name].__module__ = (
         "builtins" if _name in _CLASS_NAMES else "fullbleed._fullbleed"

@@ -161,6 +161,7 @@ pub fn plan_document_with_overlay(
         width: document.page_size.width,
         height: document.page_size.height,
     };
+    let capture_precise_bounds = debug.is_some();
 
     for (page_index, page) in document.pages.iter().enumerate() {
         let mut placements = Vec::new();
@@ -170,7 +171,9 @@ pub fn plan_document_with_overlay(
 
         if !page.commands.is_empty() {
             let paintable_id = paintables.len();
-            let bbox = commands_bbox(&page.commands, font_registry);
+            let bbox = capture_precise_bounds
+                .then(|| commands_bbox(&page.commands, font_registry))
+                .flatten();
             paintables.push(Paintable::PageCommands {
                 commands: page.commands.clone(),
             });
@@ -186,7 +189,9 @@ pub fn plan_document_with_overlay(
             if let Some(bg_page) = bg_doc.pages.get(page_index) {
                 if !bg_page.commands.is_empty() {
                     let paintable_id = paintables.len();
-                    let bbox = commands_bbox(&bg_page.commands, font_registry);
+                    let bbox = capture_precise_bounds
+                        .then(|| commands_bbox(&bg_page.commands, font_registry))
+                        .flatten();
                     paintables.push(Paintable::PageCommands {
                         commands: bg_page.commands.clone(),
                     });
@@ -204,7 +209,9 @@ pub fn plan_document_with_overlay(
             if let Some(overlay_page) = overlay_doc.pages.get(page_index) {
                 if !overlay_page.commands.is_empty() {
                     let paintable_id = paintables.len();
-                    let bbox = commands_bbox(&overlay_page.commands, font_registry);
+                    let bbox = capture_precise_bounds
+                        .then(|| commands_bbox(&overlay_page.commands, font_registry))
+                        .flatten();
                     paintables.push(Paintable::PageCommands {
                         commands: overlay_page.commands.clone(),
                     });
@@ -266,12 +273,10 @@ pub fn paint_plan(plan: &DocPlan, debug: Option<Arc<DebugLogger>>) -> Vec<PageOp
 
     for (page_index, page) in plan.pages.iter().enumerate() {
         let mut commands = Vec::new();
-        let mut placements = page.placements.clone();
-        sort_placements(&mut placements);
-        for placement in placements {
+        for placement in &page.placements {
             match &plan.paintables[placement.paintable_id] {
                 Paintable::PageCommands { commands: cmds } => {
-                    commands.extend(cmds.clone());
+                    commands.extend_from_slice(cmds);
                 }
             }
         }
@@ -292,15 +297,13 @@ pub fn paint_plan(plan: &DocPlan, debug: Option<Arc<DebugLogger>>) -> Vec<PageOp
 }
 
 pub fn paint_plan_parallel(plan: &DocPlan, debug: Option<Arc<DebugLogger>>) -> Vec<PageOps> {
-    let mut results: Vec<(usize, PageOps)> =
+    let results: Vec<(usize, PageOps)> =
         crate::parallel::map_indexed_ordered(&plan.pages, |page_index, page| {
             let mut commands = Vec::new();
-            let mut placements = page.placements.clone();
-            sort_placements(&mut placements);
-            for placement in placements {
+            for placement in &page.placements {
                 match &plan.paintables[placement.paintable_id] {
                     Paintable::PageCommands { commands: cmds } => {
-                        commands.extend(cmds.clone());
+                        commands.extend_from_slice(cmds);
                     }
                 }
             }
@@ -316,7 +319,6 @@ pub fn paint_plan_parallel(plan: &DocPlan, debug: Option<Arc<DebugLogger>>) -> V
             (page_index, PageOps { commands })
         });
 
-    results.sort_by_key(|(idx, _)| *idx);
     results.into_iter().map(|(_, ops)| ops).collect()
 }
 

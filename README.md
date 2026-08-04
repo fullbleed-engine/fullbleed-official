@@ -32,6 +32,8 @@ Additional focused references are in `docs/`:
 - `docs/css-coverage.md` (validated CSS coverage, parity status, and active gaps)
 - `docs/README.md`
 - `docs/engine.md`
+- `docs/performance-architecture.md`
+- `docs/performance-pass-2026-08-04.md`
 - `docs/python-api.md`
 - `docs/ui-accessibility.md`
 - `docs/cli.md`
@@ -61,6 +63,25 @@ Additional focused references are in `docs/`:
 - The same bounded worker implementation serves selected internal hotspots such as table layout and JIT paint paths.
 - Do not assume every single-document render path will fully saturate all cores end-to-end.
 
+## Performance in 2.1
+
+Fullbleed 2.1 embeds exact TrueType glyph subsets instead of complete source font programs. Across
+the five independent benchmark fixtures, PDFs are 95.5-97.3% smaller and ordinary warm rendering
+is 2.90x faster by geometric mean than released 2.0.0.
+
+The new compile-once API freezes an immutable Q32.32 display document and can link it repeatedly
+without rerunning HTML parsing, selector matching, layout, pagination, or command planning. For
+identical untagged copies in one ordered PDF, `CompiledDocument.render_pdf_batch(...)` shares each
+source page's content stream across the copied page dictionaries. The measured 20-copy lane is
+200.7x faster per page by geometric mean than the released 2.0.0 warm renderer; a 1,000-page stress
+run sustained 304,479-666,622 pages/s.
+
+That result is deliberately scoped to fixed compiled copies. It is not a claim that arbitrary new
+HTML or varying records render 200x faster. See
+[`docs/performance-pass-2026-08-04.md`](docs/performance-pass-2026-08-04.md) for measurements and
+[`docs/performance-architecture.md`](docs/performance-architecture.md) for the packed vector IR,
+typed-binding, virtual-linker, and shader roadmap.
+
 ## Install
 
 New to Python or setting up on a fresh machine? Start with `docs/install-non-technical.md`.
@@ -72,7 +93,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-2.0.0-cp310-abi3-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-2.1.0-cp310-abi3-win_amd64.whl
 ```
 
 From a source checkout with Rust installed, no Python build package is needed:
@@ -867,6 +888,7 @@ PdfEngine(
 Module exports:
 
 - `PdfEngine`
+- `CompiledDocument`
 - `AssetBundle`
 - `Asset`
 - `AssetKind`
@@ -884,6 +906,7 @@ Module exports:
 | Method | Return shape |
 | --- | --- |
 | `register_bundle(bundle)` | `None` |
+| `compile_pdf(html, css)` | `CompiledDocument` |
 | `render_pdf(html, css, deterministic_hash=None)` | `bytes` |
 | `render_pdf_to_file(html, css, path, deterministic_hash=None)` | `int` (bytes written) |
 | `render_image_pages(html, css, dpi=150)` | `list[bytes]` |
@@ -903,6 +926,18 @@ Module exports:
 | `render_pdf_batch_to_file_parallel_with_page_data(html_list, css, path, deterministic_hash=None)` | `(bytes_written, page_data_list)` |
 | `render_pdf_batch_with_css(jobs, deterministic_hash=None)` | `bytes` |
 | `render_pdf_batch_with_css_to_file(jobs, path, deterministic_hash=None)` | `int` |
+
+`CompiledDocument` methods:
+
+| Method | Return shape |
+| --- | --- |
+| `stats()` | `dict` |
+| `render_pdf(deterministic_hash=None)` | `bytes` |
+| `render_pdf_to_file(path, deterministic_hash=None)` | `int` |
+| `render_pdf_batch(copies, deterministic_hash=None)` | `bytes` |
+
+The compiled lane runs parsing/layout once. Its batch method writes one ordered PDF and virtualizes
+identical untagged page content to a shared stream; it is not a dynamic template-binding API.
 
 When `deterministic_hash` is set, engine writes PDF SHA-256 to the provided file path.
 

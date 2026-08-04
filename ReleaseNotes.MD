@@ -1,93 +1,97 @@
-# Fullbleed Release Notes - 2.0.0
+# Fullbleed Release Notes - 2.1.0
 
-Status: release candidate
+Status: release
 
-Target date: August 1, 2026
+Release date: August 4, 2026
 
 ## Summary
 
-Fullbleed 2.0 removes every third-party software dependency from the shipped
-Rust, Python runtime, and Python build graphs while preserving the documented
-rendering, inspection, composition, accessibility, CLI, and packaging
-capabilities. The root Rust crate now depends only on the Fullbleed-authored
-`fullbleed_audit_contract` crate; that crate has no dependencies of its own.
-Optional features add no packages.
+Fullbleed 2.1 is the first compiler and resource-virtualization performance release. It fixes the
+largest material output-size problem in 2.0 by embedding exact TrueType glyph subsets, introduces
+an immutable compile-once rendering API, and gives fixed compiled batches a shared-content PDF
+linking path.
 
-Redistributed fonts, CSS, and icon artwork remain third-party assets under
-their existing licenses. They are not linked software dependencies and are
-still covered by `THIRD_PARTY_LICENSES.md` and the font-license audit.
+The authoritative layout and geometry representation remains signed Q32.32 fixed point. The
+release preserves the dependency-free Rust, Python runtime, and Python build graphs introduced in
+2.0.
 
-## Native Replacements
+## Font Subsetting and Output Size
 
-- Replaced external hashing, Base64, fixed-point, math, compression, ordered
-  parallelism, JSON, XML, HTML, image, JPEG, PDF, SVG, CSS, font, shaping, and
-  raster libraries with bounded in-repo implementations.
-- Replaced the external Python binding generator with a CPython 3.10+ Stable
-  ABI boundary and a standard-library-only compatibility facade.
-- Replaced the external Python build backend with the in-tree
-  `fullbleed_build_backend`, including deterministic wheel/sdist creation,
-  editable installs, `RECORD`, license files, runtime resources, and CycloneDX
-  SBOM generation.
-- Retained `python` and `svg_raster` as compatibility feature names; neither
-  feature adds a Cargo package.
+- Embeds deterministic six-letter subset names and only the TrueType glyph closure used by a PDF.
+- Recursively retains composite glyph components and rebuilds `glyf`, `loca`, the SFNT directory,
+  table checksums, and `head.checksumAdjustment`.
+- Flate-compresses embedded subset streams and caches raw and compressed programs in bounded
+  per-engine and process-wide caches.
+- Resolves shaping before subsetting, allowing unused shaping and variable-font tables to be
+  omitted while the default TrueType instance remains valid.
+- Retains a safe full-font fallback for unsupported CFF/color/bitmap/SVG programs.
 
-The detailed replacement/evidence matrix is in
-`docs/2.0-dependency-removal.md`.
+Across the five independent benchmark fixtures, generated PDFs are 95.5-97.3% smaller than
+released 2.0.0 while decoded subset programs remain parseable and expected text remains
+extractable.
+
+## Compiled Rendering
+
+- Adds Rust `FullBleed::compile_document(...)` and immutable `CompiledDocument` rendering APIs.
+- Adds Python `PdfEngine.compile_pdf(...)` plus `CompiledDocument.stats()`, `render_pdf()`,
+  `render_pdf_to_file()`, and `render_pdf_batch()`.
+- Reuses immutable compiled CSS and page-template contexts through a bounded engine cache.
+- Releases the Python GIL during compilation and linking; the same immutable compiled document can
+  be rendered concurrently from multiple Python threads.
+- Virtualizes identical untagged page copies so distinct ordered page dictionaries reference one
+  content stream. Tagged profiles deliberately retain page-specific streams and structure-parent
+  records.
+- Removes redundant compatibility-JIT bounds scans, placement clones, and result sorting from
+  production paths.
+
+## Measured Performance
+
+On the independent Windows AMD64 benchmark host:
+
+- ordinary warm rendering is 2.90x faster by geometric mean than released 2.0.0;
+- link-only compiled rendering is 10.71x faster than released 2.0.0 and 3.69x faster than warm
+  2.1.0;
+- a 20-copy virtualized batch reaches 200.7x per-page geometric-mean throughput versus the released
+  2.0.0 warm renderer;
+- a 1,000-page fixed-copy stress run sustains 304,479-666,622 pages/s while producing 174-270 KB
+  PDFs.
+
+The 200.7x result applies to identical compiled copies in one ordered PDF. It is not a claim for
+arbitrary unseen HTML or records with varying layout. The current `PlanAndReplay` mode remains a
+compatibility planner; packed vector bytecode, typed binding slots, dependency-based partial
+reflow, and SIMD/GPU filter acceleration remain subsequent compiler phases.
+
+See `docs/performance-pass-2026-08-04.md` for the measurement ledger and
+`docs/performance-architecture.md` for the compiler and shader roadmap.
 
 ## Compatibility
 
-- Preserves the public `PdfEngine`, `AssetKind`, `Asset`, `AssetBundle`, and
-  `WatermarkSpec` classes, free functions, explicit signatures, properties,
-  batch methods, and `fullbleed._fullbleed` import surface.
-- Preserves `cp310-abi3` packaging for standard CPython 3.10 through 3.14 and
-  the 15-platform wheel matrix.
-- Preserves the Rust 1.85 minimum toolchain, deterministic output contracts,
-  PDF profile behavior, SVG raster fallback, native image emission, and the
-  validated CSS fixture surface.
-- Keeps the `fullbleed[api]` compatibility extra valid with no required
-  packages; the ignored Escambia HTTP prototype was never shipped.
+- Adds API without removing the 2.0 `PdfEngine`, asset, batch, CLI, and Stable ABI surfaces.
+- Preserves `cp310-abi3` wheels for standard CPython 3.10 through 3.14 across the 15-platform
+  matrix.
+- Preserves Rust 1.85 as the minimum supported toolchain.
+- Preserves deterministic bytes for ordinary and compiled single-document renders.
+- Preserves PDF profile behavior; tagged output bypasses content-stream sharing when structure
+  semantics require page-local records.
+- Keeps both shipped Rust crates and the Python distribution MIT licensed.
 
 ## Package Versions
 
-- `fullbleed 2.0.0` on crates.io and PyPI.
-- `fullbleed_audit_contract 0.1.2` on crates.io. This dependency-free patch
-  must be published before the main crate.
+- `fullbleed 2.1.0` on crates.io and PyPI.
+- `fullbleed_audit_contract 0.1.2` on crates.io, unchanged from 2.0.
 
 ## Verification Baseline
 
-The release candidate has a 658-test all-feature Rust suite and a 248-test
-Python suite. The Rust suite reports 657 passed and one explicit local-font
-opt-in ignored. It also carries the complete 376-test style module and all 86
-full CSS parity fixtures. Local release validation passes the Rust 1.85
-packaged consumer, both Cargo publication dry runs, a clean isolated wheel
-install/render, and byte-identical checkout/sdist wheels. Final release
-validation uses:
+- Rust library suite: 824 passed, zero failed.
+- Repository Python suite: 254 passed and four skipped.
+- Independent Python benchmark/coverage suite: 31 applicable tests passed; one 2.0 assertion that
+  required complete source-font embedding is intentionally superseded by subset-program validation.
+- Python Stable ABI compiled-document tests: seven passed.
+- PyMuPDF and ImageMagick visual comparison of simple and full-document outputs: zero differing
+  pixels against released 2.0.0.
+- A 1,000-page virtualized PDF reports one shared content stream; pages 1, 500, and 1,000 have
+  identical raster hashes, and page 1,000 retains expected extractable text.
 
-```powershell
-cargo fmt --all --check
-cargo test --locked
-cargo test --locked --features python,svg_raster
-cargo check --locked --all-targets --all-features
-cargo tree -e normal --all-features
-python -m pytest -q
-python tools\generate_css_parity_status.py --check --json
-python tools\check_license_integrity.py --json
-python tools\check_release_metadata.py --expected-version 2.0.0 --json
-rustup run 1.85.0 python tools\smoke_crates_consumer.py --expected-version 2.0.0 --json
-cargo publish --locked --dry-run --manifest-path crates\fullbleed_audit_contract\Cargo.toml
-# Before audit-contract 0.1.2 reaches crates.io, supply its local path through
-# Cargo's patch.crates-io configuration; after propagation, run this normally.
-cargo publish --locked --dry-run
-python build_backend\fullbleed_build_backend.py wheel --out dist
-python build_backend\fullbleed_build_backend.py sdist --out dist
-```
-
-The exact `v2.0.0` commit must also pass the installed-wheel matrix, package
-metadata/tag checks, golden renders, PDF profile validation, and clean-worktree
-gate before publication.
-
-## Publication
-
-Publication is intentionally pending. The release workflows publish the audit
-contract first, wait for registry propagation, then publish the main Rust crate,
-15 ABI3 wheels, one source distribution, and matching GitHub release assets.
+The exact `v2.1.0` source is validated by the release workflows before registry publication. The
+release set contains 15 `cp310-abi3` wheels, one source distribution, Cargo package evidence, and
+matching GitHub release assets.

@@ -11,6 +11,7 @@ mod finalize;
 mod flate_native;
 mod flowable;
 mod font;
+mod font_subset;
 mod frame;
 mod glyph_report;
 mod html;
@@ -89,8 +90,9 @@ pub use pdfinspect::{
     require_pdf_composition_compatibility,
 };
 use perf::PerfLogger;
+use std::collections::{HashMap, VecDeque};
 use std::f32::consts::PI;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 pub use types::{Color, ColorSpace, I32F32, Margins, Pt, Rect, Size};
 
 pub struct FullBleed {
@@ -117,6 +119,101 @@ pub struct FullBleed {
     watermark: Option<WatermarkSpec>,
     asset_css: String,
     asset_bundle: Arc<AssetBundle>,
+    render_context_cache: Mutex<RenderContextCache>,
+}
+
+/// Immutable output of the HTML/CSS frontend and layout pipeline.
+///
+/// A compiled document owns the fixed-point display commands and every linker resource required
+/// to render them. It can therefore be linked repeatedly, or from multiple threads, without
+/// reparsing HTML/CSS or rebuilding layout. This is the fixed-document compilation lane; typed
+/// template slots and partial reflow are a separate, future layer.
+pub struct CompiledDocument {
+    document: Arc<Document>,
+    font_registry: Arc<FontRegistry>,
+    pdf_options: PdfOptions,
+    debug: Option<Arc<DebugLogger>>,
+    perf: Option<Arc<PerfLogger>>,
+    compile_nanos: u64,
+    command_count: usize,
+}
+
+impl CompiledDocument {
+    pub fn page_count(&self) -> usize {
+        self.document.pages.len()
+    }
+
+    pub fn command_count(&self) -> usize {
+        self.command_count
+    }
+
+    pub fn compile_time_ms(&self) -> f64 {
+        self.compile_nanos as f64 / 1_000_000.0
+    }
+
+    pub fn render_to_buffer(&self) -> Result<Vec<u8>, FullBleedError> {
+        Ok(pdf::document_to_pdf_with_metrics_and_registry_with_logs(
+            &self.document,
+            None,
+            Some(self.font_registry.as_ref()),
+            &self.pdf_options,
+            self.debug.clone(),
+            self.perf.clone(),
+        )?)
+    }
+
+    pub fn render_to_writer<W: std::io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> Result<usize, FullBleedError> {
+        Ok(
+            pdf::document_to_pdf_with_metrics_and_registry_to_writer_with_logs(
+                &self.document,
+                None,
+                Some(self.font_registry.as_ref()),
+                &self.pdf_options,
+                writer,
+                self.debug.clone(),
+                self.perf.clone(),
+            )?,
+        )
+    }
+
+    pub fn render_to_file(
+        &self,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<usize, FullBleedError> {
+        let mut file = std::fs::File::create(path)?;
+        self.render_to_writer(&mut file)
+    }
+
+    /// Link `copies` of the compiled document into one ordered PDF without cloning the display
+    /// command tree. For a one-page document this is the compiled pages-per-second lane.
+    pub fn render_many_to_buffer(&self, copies: usize) -> Result<Vec<u8>, FullBleedError> {
+        let mut out = Vec::new();
+        self.render_many_to_writer(copies, &mut out)?;
+        Ok(out)
+    }
+
+    pub fn render_many_to_writer<W: std::io::Write>(
+        &self,
+        copies: usize,
+        writer: &mut W,
+    ) -> Result<usize, FullBleedError> {
+        if copies == 0 {
+            return Err(FullBleedError::EmptyDocumentSet);
+        }
+        let mut pdf_stream = pdf::PdfStreamWriter::new(
+            writer,
+            self.document.page_size,
+            Some(self.font_registry.as_ref()),
+            self.pdf_options.clone(),
+            self.debug.clone(),
+            self.perf.clone(),
+        )?;
+        pdf_stream.add_compiled_document_copies(0, &self.document, copies)?;
+        Ok(pdf_stream.finish()?)
+    }
 }
 
 #[derive(Clone)]
@@ -149,9 +246,44 @@ pub struct FullBleedBuilder {
     asset_bundle: AssetBundle,
 }
 
+#[derive(Clone)]
 struct RenderContext {
-    resolver: style::StyleResolver,
-    page_templates: Vec<PageTemplate>,
+    resolver: Arc<style::StyleResolver>,
+    page_templates: Arc<[PageTemplate]>,
+}
+
+const RENDER_CONTEXT_CACHE_MAX_ENTRIES: usize = 32;
+
+struct RenderContextCache {
+    map: HashMap<String, RenderContext>,
+    order: VecDeque<String>,
+}
+
+impl RenderContextCache {
+    fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+            order: VecDeque::new(),
+        }
+    }
+
+    fn get(&self, css: &str) -> Option<RenderContext> {
+        self.map.get(css).cloned()
+    }
+
+    fn insert(&mut self, css: String, context: RenderContext) {
+        if self.map.contains_key(&css) {
+            return;
+        }
+        self.order.push_back(css.clone());
+        self.map.insert(css, context);
+        while self.map.len() > RENDER_CONTEXT_CACHE_MAX_ENTRIES {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            self.map.remove(&oldest);
+        }
+    }
 }
 
 struct LayoutBuildResult {
@@ -4533,17 +4665,41 @@ impl FullBleed {
 
     fn build_render_context(&self, css: &str, doc_id: Option<usize>) -> RenderContext {
         let t_css = std::time::Instant::now();
+        let cached_context = self
+            .render_context_cache
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(css));
+        if let Some(context) = cached_context {
+            let lookup_ms = t_css.elapsed().as_secs_f64() * 1000.0;
+            if let Some(logger) = self.debug.as_deref() {
+                let doc_id = doc_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| "null".to_string());
+                logger.log_json(&format!(
+                    "{{\"type\":\"jit.css\",\"doc_id\":{},\"css_ms\":{:.3},\"bytes\":{},\"cache_hit\":true}}",
+                    doc_id,
+                    lookup_ms,
+                    css.len()
+                ));
+            }
+            if let Some(logger) = self.perf.as_deref() {
+                logger.log_span_ms("css.cache_lookup", doc_id, lookup_ms);
+                logger.log_counts("css.cache", doc_id, &[("hits", 1), ("misses", 0)]);
+            }
+            return context;
+        }
         let merged_css = self.merge_css(css);
         let page_templates = self.resolve_page_templates_for_css(&merged_css, doc_id);
         let page_size = page_templates.get(0).map(|t| t.page_size).unwrap_or(Size {
             width: Pt::ZERO,
             height: Pt::ZERO,
         });
-        let resolver = style::StyleResolver::new_with_debug_and_viewport(
+        let resolver = Arc::new(style::StyleResolver::new_with_debug_and_viewport(
             &merged_css,
             self.debug.clone(),
             Some(page_size),
-        );
+        ));
         if let Some(logger) = self.debug.as_deref() {
             let css_ms = t_css.elapsed().as_secs_f64() * 1000.0;
             let doc_id = doc_id
@@ -4561,11 +4717,16 @@ impl FullBleed {
             let css_ms = t_css.elapsed().as_secs_f64() * 1000.0;
             logger.log_span_ms("css.parse", doc_id, css_ms);
             logger.log_counts("css.parse", doc_id, &[("bytes", merged_css.len() as u64)]);
+            logger.log_counts("css.cache", doc_id, &[("hits", 0), ("misses", 1)]);
         }
-        RenderContext {
+        let context = RenderContext {
             resolver,
-            page_templates,
+            page_templates: page_templates.into(),
+        };
+        if let Ok(mut cache) = self.render_context_cache.lock() {
+            cache.insert(css.to_string(), context.clone());
         }
+        context
     }
 
     fn merge_overlay_commands(base: &mut Document, overlay: &Document) {
@@ -4987,6 +5148,40 @@ impl FullBleed {
     pub fn render_to_document(&self, html: &str, css: &str) -> Result<Document, FullBleedError> {
         let context = self.build_render_context(css, Some(0));
         self.render_to_document_with_resolver(html, &context.page_templates, &context.resolver)
+    }
+
+    /// Compile HTML/CSS through layout and planning once, retaining an immutable fixed-point
+    /// display document that can be linked repeatedly without rerunning the frontend.
+    pub fn compile_document(
+        &self,
+        html: &str,
+        css: &str,
+    ) -> Result<CompiledDocument, FullBleedError> {
+        let started = std::time::Instant::now();
+        let document = Arc::new(self.render_to_document(html, css)?);
+        let command_count = document.pages.iter().map(|page| page.commands.len()).sum();
+        let elapsed = started.elapsed();
+        let compile_nanos = u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX);
+        if let Some(logger) = self.perf.as_deref() {
+            logger.log_span_ms("compile.document", Some(0), elapsed.as_secs_f64() * 1000.0);
+            logger.log_counts(
+                "compile.document",
+                Some(0),
+                &[
+                    ("pages", document.pages.len() as u64),
+                    ("commands", command_count as u64),
+                ],
+            );
+        }
+        Ok(CompiledDocument {
+            document,
+            font_registry: self.font_registry.clone(),
+            pdf_options: self.pdf_options.clone(),
+            debug: self.debug.clone(),
+            perf: self.perf.clone(),
+            compile_nanos,
+            command_count,
+        })
     }
 
     pub fn render_to_buffer(&self, html: &str, css: &str) -> Result<Vec<u8>, FullBleedError> {
@@ -6426,6 +6621,7 @@ impl FullBleedBuilder {
             watermark: self.watermark,
             asset_css,
             asset_bundle: Arc::new(self.asset_bundle),
+            render_context_cache: Mutex::new(RenderContextCache::new()),
         })
     }
 }
@@ -6788,6 +6984,26 @@ mod tests {
             .lazy_layout_limits(4, 50.0)
             .build()
             .expect("valid lazy config should build");
+    }
+
+    #[test]
+    fn repeated_css_reuses_compiled_render_context() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let css = "@page { size: letter; margin: 0.5in } body { color: #123456 }";
+        let first = engine.build_render_context(css, Some(0));
+        let second = engine.build_render_context(css, Some(1));
+
+        assert!(Arc::ptr_eq(&first.resolver, &second.resolver));
+        assert!(Arc::ptr_eq(&first.page_templates, &second.page_templates));
+        assert_eq!(
+            engine
+                .render_context_cache
+                .lock()
+                .expect("render context cache")
+                .map
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -8617,6 +8833,73 @@ mod tests {
             bytes_a, bytes_b,
             "render_to_buffer should be byte deterministic for identical input"
         );
+    }
+
+    #[test]
+    fn compiled_document_skips_frontend_and_links_deterministically() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let html = "<!doctype html><html><body><h1>Compiled</h1><p>fixed point</p></body></html>";
+        let css = "@page { size: letter; margin: 0.5in; } body { margin: 0; font-size: 12pt; }";
+        let expected = engine.render_to_buffer(html, css).expect("ordinary render");
+        let compiled = engine
+            .compile_document(html, css)
+            .expect("compile document");
+
+        assert_eq!(compiled.page_count(), 1);
+        assert!(compiled.command_count() > 0);
+        let first = compiled.render_to_buffer().expect("compiled render");
+        let second = compiled.render_to_buffer().expect("compiled rerender");
+        assert_eq!(first, expected);
+        assert_eq!(second, expected);
+
+        let batch = compiled.render_many_to_buffer(3).expect("compiled batch");
+        let inspection = inspect_pdf_bytes(&batch).expect("inspect compiled batch");
+        assert_eq!(inspection.page_count, 3);
+        let parsed = crate::pdf_native::Document::load_mem(&batch).expect("parse compiled batch");
+        let content_ids: std::collections::BTreeSet<_> = parsed
+            .get_pages()
+            .values()
+            .map(|page_id| {
+                parsed
+                    .get_object(*page_id)
+                    .and_then(crate::pdf_native::Object::as_dict)
+                    .and_then(|page| page.get(b"Contents"))
+                    .and_then(crate::pdf_native::Object::as_reference)
+                    .expect("page content reference")
+            })
+            .collect();
+        assert_eq!(content_ids.len(), 1, "compiled copies share one stream");
+        assert!(matches!(
+            compiled.render_many_to_buffer(0),
+            Err(FullBleedError::EmptyDocumentSet)
+        ));
+    }
+
+    #[test]
+    fn compiled_tagged_copies_keep_page_specific_content_streams() {
+        let engine = FullBleed::builder()
+            .pdf_profile(PdfProfile::Tagged)
+            .build()
+            .expect("tagged engine");
+        let compiled = engine
+            .compile_document("<main><p>Tagged copy</p></main>", "")
+            .expect("compile tagged document");
+        let batch = compiled.render_many_to_buffer(2).expect("tagged batch");
+        let parsed = crate::pdf_native::Document::load_mem(&batch).expect("parse tagged batch");
+        let content_ids: std::collections::BTreeSet<_> = parsed
+            .get_pages()
+            .values()
+            .map(|page_id| {
+                parsed
+                    .get_object(*page_id)
+                    .and_then(crate::pdf_native::Object::as_dict)
+                    .and_then(|page| page.get(b"Contents"))
+                    .and_then(crate::pdf_native::Object::as_reference)
+                    .expect("tagged page content reference")
+            })
+            .collect();
+        assert_eq!(content_ids.len(), 2);
+        assert_eq!(count_token(&batch, b"/StructParents "), 2);
     }
 
     #[test]

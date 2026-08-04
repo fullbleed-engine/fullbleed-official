@@ -1,7 +1,8 @@
 use crate::canvas::{Command, Document, Page};
 use crate::debug::json_escape;
 use crate::font::{
-    FontProgramKind, FontRegistry, GlyphOutlineCommand, RegisteredFont, RegisteredGlyphOutline,
+    CachedTrueTypeSubset, FontProgramKind, FontRegistry, GlyphOutlineCommand, RegisteredFont,
+    RegisteredGlyphOutline,
 };
 use crate::metrics::{DocumentMetrics, PageMetrics};
 use crate::perf::PerfLogger;
@@ -347,9 +348,17 @@ pub(crate) struct PdfStreamWriter<'a, W: Write> {
     tag_records: Vec<TagRecord>,
     page_ids: Vec<usize>,
     page_content_bytes: Vec<usize>,
+    page_content_stream_count: usize,
+    page_content_reused_references: usize,
     content_stream_raw_bytes: usize,
     content_stream_encoded_bytes: usize,
     content_stream_compressed_count: usize,
+    font_program_source_bytes: usize,
+    font_program_subset_bytes: usize,
+    font_program_encoded_bytes: usize,
+    font_program_subset_count: usize,
+    font_program_compressed_count: usize,
+    font_program_subset_glyphs: usize,
     pdfvt_dpart_root_id: Option<usize>,
     pdfvt_dpart_node_id: Option<usize>,
 }
@@ -424,9 +433,17 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             tag_records: Vec::new(),
             page_ids: Vec::new(),
             page_content_bytes: Vec::new(),
+            page_content_stream_count: 0,
+            page_content_reused_references: 0,
             content_stream_raw_bytes: 0,
             content_stream_encoded_bytes: 0,
             content_stream_compressed_count: 0,
+            font_program_source_bytes: 0,
+            font_program_subset_bytes: 0,
+            font_program_encoded_bytes: 0,
+            font_program_subset_count: 0,
+            font_program_compressed_count: 0,
+            font_program_subset_glyphs: 0,
             pdfvt_dpart_root_id,
             pdfvt_dpart_node_id,
         };
@@ -453,6 +470,77 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         Ok(())
     }
 
+    /// Add identical copies of one already-compiled document while writing each unique page
+    /// content stream only once. Page dictionaries remain distinct and ordered, but point at the
+    /// shared immutable stream and global resource dictionary.
+    pub(crate) fn add_compiled_document_copies(
+        &mut self,
+        doc_id: usize,
+        document: &Document,
+        copies: usize,
+    ) -> io::Result<()> {
+        if copies == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "compiled document copy count must be greater than zero",
+            ));
+        }
+        if copies == 1 {
+            return self.add_document(doc_id, document);
+        }
+        // Tagged content uses page-specific structure records. Keep the fully general path until
+        // structure-record virtualization is implemented.
+        if self.options.pdf_profile.emits_tagged_structure() {
+            for copy in 0..copies {
+                self.add_document(doc_id.saturating_add(copy), document)?;
+            }
+            return Ok(());
+        }
+        if (document.page_size.width - self.page_size.width).abs() > Pt::from_f32(0.01)
+            || (document.page_size.height - self.page_size.height).abs() > Pt::from_f32(0.01)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "mixed page sizes are not supported in a single PDF stream",
+            ));
+        }
+        validate_profile_font_embedding(document, self.registry, &self.options)?;
+        self.current_doc_id = doc_id;
+        self.shaped_cache.clear();
+        self.ensure_page_node();
+
+        let first_page_index = self.page_ids.len();
+        let mut shared_contents = Vec::with_capacity(document.pages.len());
+        for (source_index, page) in document.pages.iter().enumerate() {
+            let content_id = self.alloc_ids(1);
+            let content_stream = self.render_page(page, first_page_index + source_index)?;
+            let content_len = content_stream.len();
+            self.write_content_stream_object(content_id, "", content_stream.as_bytes())?;
+            self.page_content_stream_count = self.page_content_stream_count.saturating_add(1);
+            shared_contents.push((content_id, content_len));
+        }
+
+        self.page_content_reused_references = self.page_content_reused_references.saturating_add(
+            document
+                .pages
+                .len()
+                .saturating_mul(copies.saturating_sub(1)),
+        );
+
+        if let Some(usage) = self.doc_font_usage.get(&doc_id).cloned() {
+            for copy in 1..copies {
+                self.doc_font_usage
+                    .insert(doc_id.saturating_add(copy), usage.clone());
+            }
+        }
+        for _copy in 0..copies {
+            for (content_id, content_len) in &shared_contents {
+                self.add_page_reference(*content_id, *content_len)?;
+            }
+        }
+        Ok(())
+    }
+
     fn add_page(&mut self, page: &Page) -> io::Result<()> {
         let page_index = self.page_ids.len();
         let parent_id = self.ensure_page_node();
@@ -465,9 +553,30 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         }
 
         let content_stream = self.render_page(page, page_index)?;
-        self.page_content_bytes
-            .push(content_stream.as_bytes().len());
+        self.page_content_bytes.push(content_stream.len());
         self.write_content_stream_object(content_id, "", content_stream.as_bytes())?;
+        self.page_content_stream_count = self.page_content_stream_count.saturating_add(1);
+        self.write_page_reference(parent_id, content_id, page_id, page_index)
+    }
+
+    fn add_page_reference(&mut self, content_id: usize, content_len: usize) -> io::Result<()> {
+        let page_index = self.page_ids.len();
+        let parent_id = self.ensure_page_node();
+        let page_id = self.alloc_ids(1);
+        if let Some(node) = self.current_node.as_mut() {
+            node.kids.push(page_id);
+        }
+        self.page_content_bytes.push(content_len);
+        self.write_page_reference(parent_id, content_id, page_id, page_index)
+    }
+
+    fn write_page_reference(
+        &mut self,
+        parent_id: usize,
+        content_id: usize,
+        page_id: usize,
+        page_index: usize,
+    ) -> io::Result<()> {
         self.page_ids.push(page_id);
 
         let (struct_parents, tabs) = if self.options.pdf_profile.emits_tagged_structure() {
@@ -492,8 +601,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             struct_parents,
             tabs
         );
-        self.write_object(page_id, &page_obj)?;
-        Ok(())
+        self.write_object(page_id, &page_obj)
     }
 
     pub(crate) fn finish(&mut self) -> io::Result<usize> {
@@ -570,16 +678,37 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                         let font_file_id = font_state.start_id;
                         let descriptor_id = font_state.start_id + 1;
                         let font_id = font_state.start_id + 2;
+                        let used_gids: BTreeSet<u16> = font
+                            .metrics
+                            .glyph_ids
+                            .iter()
+                            .copied()
+                            .filter(|glyph| *glyph != 0)
+                            .collect();
+                        let subset = registry.cached_truetype_subset(&font.name, &used_gids);
+                        let base_name = subset_font_name(font, subset.as_deref());
+                        let program = subset
+                            .as_ref()
+                            .map(|value| value.data.as_slice())
+                            .unwrap_or(font.data.as_slice());
                         self.write_font_file_stream_object(
                             font_file_id,
-                            &font.data,
+                            program,
+                            subset
+                                .as_ref()
+                                .and_then(|value| value.compressed.as_deref()),
                             font.program_kind,
+                            font.data.len(),
+                            subset.as_ref().map(|value| value.glyph_count),
                         )?;
                         self.write_object(
                             descriptor_id,
-                            &font_descriptor_object(font, font_file_id),
+                            &font_descriptor_object(font, font_file_id, &base_name),
                         )?;
-                        self.write_object(font_id, &truetype_font_object(font, descriptor_id))?;
+                        self.write_object(
+                            font_id,
+                            &truetype_font_object(font, descriptor_id, &base_name),
+                        )?;
                     }
                     StreamFontKind::TrueTypeIdentityH => {
                         let Some(font) = registry.resolve(&font_state.logical_name) else {
@@ -594,16 +723,6 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                         let to_unicode_id = font_state.start_id + 3;
                         let type0_font_id = font_state.start_id + 4;
 
-                        self.write_font_file_stream_object(
-                            font_file_id,
-                            &font.data,
-                            font.program_kind,
-                        )?;
-                        self.write_object(
-                            descriptor_id,
-                            &font_descriptor_object(font, font_file_id),
-                        )?;
-
                         let mut glyph_map = font_state.glyph_map.clone();
                         if glyph_map.is_empty() {
                             let gid = registry.map_glyph_id_for_char(&font.name, ' ');
@@ -612,6 +731,27 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             }
                         }
                         let used_gids: BTreeSet<u16> = glyph_map.keys().copied().collect();
+                        let subset = registry.cached_truetype_subset(&font.name, &used_gids);
+                        let base_name = subset_font_name(font, subset.as_deref());
+                        let program = subset
+                            .as_ref()
+                            .map(|value| value.data.as_slice())
+                            .unwrap_or(font.data.as_slice());
+                        self.write_font_file_stream_object(
+                            font_file_id,
+                            program,
+                            subset
+                                .as_ref()
+                                .and_then(|value| value.compressed.as_deref()),
+                            font.program_kind,
+                            font.data.len(),
+                            subset.as_ref().map(|value| value.glyph_count),
+                        )?;
+                        self.write_object(
+                            descriptor_id,
+                            &font_descriptor_object(font, font_file_id, &base_name),
+                        )?;
+
                         let mut w_entries: Vec<String> = Vec::new();
                         for gid in &used_gids {
                             let adv = registry.glyph_advance(&font.name, *gid);
@@ -636,7 +776,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             &format!(
                                 "<< /Type /Font /Subtype /{} /BaseFont /{} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor {} 0 R {} {} >>",
                                 cid_subtype,
-                                sanitize_font_name(&font.name),
+                                base_name,
                                 descriptor_id,
                                 w_array,
                                 cid_to_gid_map,
@@ -649,7 +789,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             type0_font_id,
                             &format!(
                                 "<< /Type /Font /Subtype /Type0 /BaseFont /{} /Encoding /Identity-H /DescendantFonts [{} 0 R] /ToUnicode {} 0 R >>",
-                                sanitize_font_name(&font.name),
+                                base_name,
                                 cid_font_id,
                                 to_unicode_id
                             ),
@@ -1045,7 +1185,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         let finish_ms = t_finish.elapsed().as_secs_f64() * 1000.0;
         if let Some(logger) = self.debug.as_deref() {
             let json = format!(
-                "{{\"type\":\"jit.link\",\"ms\":{:.3},\"bytes\":{},\"pages\":{},\"fonts\":{},\"images\":{},\"forms\":{},\"shadings\":{},\"extgstates\":{},\"image_bytes\":{},\"content_stream_raw_bytes\":{},\"content_stream_encoded_bytes\":{},\"content_stream_compressed\":{},\"content_stream_ratio_ppm\":{}}}",
+                "{{\"type\":\"jit.link\",\"ms\":{:.3},\"bytes\":{},\"pages\":{},\"fonts\":{},\"images\":{},\"forms\":{},\"shadings\":{},\"extgstates\":{},\"image_bytes\":{},\"content_stream_raw_bytes\":{},\"content_stream_encoded_bytes\":{},\"content_stream_compressed\":{},\"content_stream_ratio_ppm\":{},\"page_content_streams\":{},\"page_content_reused_references\":{},\"font_program_source_bytes\":{},\"font_program_subset_bytes\":{},\"font_program_encoded_bytes\":{},\"font_program_subsets\":{},\"font_program_compressed\":{},\"font_program_subset_glyphs\":{}}}",
                 finish_ms,
                 bytes_written,
                 self.page_ids.len(),
@@ -1058,7 +1198,15 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 self.content_stream_raw_bytes,
                 self.content_stream_encoded_bytes,
                 self.content_stream_compressed_count,
-                content_ratio_ppm
+                content_ratio_ppm,
+                self.page_content_stream_count,
+                self.page_content_reused_references,
+                self.font_program_source_bytes,
+                self.font_program_subset_bytes,
+                self.font_program_encoded_bytes,
+                self.font_program_subset_count,
+                self.font_program_compressed_count,
+                self.font_program_subset_glyphs,
             );
             logger.log_json(&json);
             let profile_json = format!(
@@ -1111,6 +1259,38 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                         self.content_stream_compressed_count as u64,
                     ),
                     ("content_stream_ratio_ppm", content_ratio_ppm),
+                    (
+                        "page_content_streams",
+                        self.page_content_stream_count as u64,
+                    ),
+                    (
+                        "page_content_reused_references",
+                        self.page_content_reused_references as u64,
+                    ),
+                    (
+                        "font_program_source_bytes",
+                        self.font_program_source_bytes as u64,
+                    ),
+                    (
+                        "font_program_subset_bytes",
+                        self.font_program_subset_bytes as u64,
+                    ),
+                    (
+                        "font_program_encoded_bytes",
+                        self.font_program_encoded_bytes as u64,
+                    ),
+                    (
+                        "font_program_subsets",
+                        self.font_program_subset_count as u64,
+                    ),
+                    (
+                        "font_program_compressed",
+                        self.font_program_compressed_count as u64,
+                    ),
+                    (
+                        "font_program_subset_glyphs",
+                        self.font_program_subset_glyphs as u64,
+                    ),
                     (
                         "profile_metadata",
                         if metadata_id.is_some() { 1 } else { 0 },
@@ -1864,12 +2044,33 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         &mut self,
         obj_id: usize,
         data: &[u8],
+        compressed: Option<&[u8]>,
         kind: FontProgramKind,
+        source_len: usize,
+        subset_glyphs: Option<usize>,
     ) -> io::Result<()> {
         let mut dict = format!("/Length1 {}", data.len());
         if matches!(kind, FontProgramKind::OpenTypeCff) {
             dict.push_str(" /Subtype /OpenType");
         }
+        self.font_program_source_bytes = self.font_program_source_bytes.saturating_add(source_len);
+        self.font_program_subset_bytes = self.font_program_subset_bytes.saturating_add(data.len());
+        if let Some(glyphs) = subset_glyphs {
+            self.font_program_subset_count = self.font_program_subset_count.saturating_add(1);
+            self.font_program_subset_glyphs =
+                self.font_program_subset_glyphs.saturating_add(glyphs);
+            if let Some(compressed) = compressed.filter(|encoded| encoded.len() < data.len()) {
+                dict.push_str(" /Filter /FlateDecode");
+                self.font_program_encoded_bytes = self
+                    .font_program_encoded_bytes
+                    .saturating_add(compressed.len());
+                self.font_program_compressed_count =
+                    self.font_program_compressed_count.saturating_add(1);
+                return self.write_stream_object_bytes(obj_id, &dict, compressed);
+            }
+        }
+        self.font_program_encoded_bytes =
+            self.font_program_encoded_bytes.saturating_add(data.len());
         self.write_stream_object_bytes(obj_id, &dict, data)
     }
 
@@ -3291,8 +3492,16 @@ fn hash_image(image: &ImageData) -> u64 {
     hasher.finish()
 }
 
-fn truetype_font_object(font: &RegisteredFont, descriptor_id: usize) -> String {
+fn subset_font_name(font: &RegisteredFont, subset: Option<&CachedTrueTypeSubset>) -> String {
     let base = sanitize_font_name(&font.name);
+    let Some(subset) = subset else {
+        return base;
+    };
+    let tag = std::str::from_utf8(&subset.tag).unwrap_or("AAAAAA");
+    format!("{}+{}", tag, base)
+}
+
+fn truetype_font_object(font: &RegisteredFont, descriptor_id: usize, base_name: &str) -> String {
     let metrics = &font.metrics;
     let subtype = match font.program_kind {
         FontProgramKind::OpenTypeCff => "Type1",
@@ -3311,12 +3520,11 @@ fn truetype_font_object(font: &RegisteredFont, descriptor_id: usize) -> String {
     };
     format!(
         "<< /Type /Font /Subtype /{} /BaseFont /{} /FirstChar {} /LastChar {} /Widths [{}] /FontDescriptor {} 0 R{} >>",
-        subtype, base, metrics.first_char, metrics.last_char, widths, descriptor_id, encoding
+        subtype, base_name, metrics.first_char, metrics.last_char, widths, descriptor_id, encoding
     )
 }
 
-fn font_descriptor_object(font: &RegisteredFont, font_file_id: usize) -> String {
-    let base = sanitize_font_name(&font.name);
+fn font_descriptor_object(font: &RegisteredFont, font_file_id: usize, base_name: &str) -> String {
     let metrics = &font.metrics;
     let mut flags = if metrics.is_symbolic() { 4 } else { 32 };
     if metrics.is_fixed_pitch {
@@ -3328,7 +3536,7 @@ fn font_descriptor_object(font: &RegisteredFont, font_file_id: usize) -> String 
     };
     format!(
         "<< /Type /FontDescriptor /FontName /{} /Flags {} /FontBBox [{} {} {} {}] /ItalicAngle {} /Ascent {} /Descent {} /CapHeight {} /StemV {} /MissingWidth {} /{} {} 0 R >>",
-        base,
+        base_name,
         flags,
         metrics.bbox.0,
         metrics.bbox.1,
@@ -5974,6 +6182,58 @@ mod tests {
         .expect("pdf bytes");
         assert_eq!(count_token(&bytes, b"/FontFile2"), 1);
         assert_eq!(count_token(&bytes, b"/ASCIIHexDecode"), 0);
+    }
+
+    #[test]
+    fn static_truetype_fonts_are_subset_named_compressed_and_parseable() {
+        let source =
+            include_bytes!("../python/fullbleed_assets/fonts/NotoSansMath-Regular.ttf").to_vec();
+        let mut registry = FontRegistry::new();
+        let name = registry
+            .register_bytes(source.clone(), Some("NotoSansMath-Regular.ttf"))
+            .expect("register static TrueType");
+        let doc = text_page(&name, "Subset ABC xyz 0123");
+
+        let bytes = document_to_pdf_with_metrics_and_registry(
+            &doc,
+            None,
+            Some(&registry),
+            &PdfOptions::default(),
+        )
+        .expect("subset PDF");
+        let pdf = String::from_utf8_lossy(&bytes);
+        let marker = "+NotoSansMath-Regular";
+        let marker_offset = pdf.find(marker).expect("subset base font name");
+        let tag = pdf
+            .get(marker_offset.saturating_sub(6)..marker_offset)
+            .expect("six-character subset tag");
+        assert_eq!(tag.len(), 6);
+        assert!(tag.bytes().all(|byte| byte.is_ascii_uppercase()));
+
+        let parsed_pdf = LoDocument::load_mem(&bytes).expect("parse PDF");
+        let font_stream = parsed_pdf
+            .objects
+            .values()
+            .filter_map(|object| match object {
+                LoObject::Stream(stream) if stream.dict.get(b"Length1").is_ok() => Some(stream),
+                _ => None,
+            })
+            .find(|stream| {
+                stream
+                    .get_plain_content()
+                    .is_ok_and(|data| data.starts_with(b"\0\x01\0\0"))
+            })
+            .expect("embedded TrueType stream");
+        assert_eq!(
+            font_stream.filters().expect("font filters"),
+            vec![b"FlateDecode".as_slice()]
+        );
+        let program = font_stream
+            .get_plain_content()
+            .expect("inflate font program");
+        assert!(program.len() < source.len() / 2);
+        assert!(SfntFace::parse(&program, 0).is_ok());
+        assert!(bytes.len() < source.len() / 2);
     }
 
     #[test]

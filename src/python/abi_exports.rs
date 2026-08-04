@@ -3,9 +3,10 @@ use crate::python_abi::{self, FromPyObject, IntoPyValue, ffi};
 use std::ffi::{CStr, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
-use std::sync::{Mutex, MutexGuard, TryLockError};
+use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 
 const ENGINE_CAPSULE: &[u8] = b"fullbleed.PdfEngine\0";
+const COMPILED_CAPSULE: &[u8] = b"fullbleed.CompiledDocument\0";
 const ASSET_CAPSULE: &[u8] = b"fullbleed.Asset\0";
 const BUNDLE_CAPSULE: &[u8] = b"fullbleed.AssetBundle\0";
 
@@ -136,6 +137,19 @@ unsafe extern "C" fn drop_engine(capsule: *mut ffi::PyObject) {
         drop(PyErr::fetch());
     } else {
         unsafe { drop(Box::from_raw(pointer.cast::<Mutex<PdfEngine>>())) };
+    }
+}
+
+unsafe extern "C" fn drop_compiled(capsule: *mut ffi::PyObject) {
+    let pointer = unsafe { ffi::PyCapsule_GetPointer(capsule, COMPILED_CAPSULE.as_ptr().cast()) };
+    if pointer.is_null() {
+        drop(PyErr::fetch());
+    } else {
+        unsafe {
+            drop(Box::from_raw(
+                pointer.cast::<Mutex<Arc<crate::CompiledDocument>>>(),
+            ))
+        };
     }
 }
 
@@ -611,6 +625,15 @@ fn dispatch_engine(
                 optional_object(payload, 10)?,
             )
         }
+        "PdfEngine.compile_pdf" => {
+            expect_arity(payload, 2)?;
+            let html: String = argument(payload, 0)?;
+            let css: String = argument(payload, 1)?;
+            let compiled = py
+                .allow_threads(|| engine.engine.compile_document(&html, &css))
+                .map_err(to_py_err)?;
+            capsule(Arc::new(compiled), COMPILED_CAPSULE, drop_compiled)
+        }
         "PdfEngine.render_pdf" => {
             expect_arity(payload, 3)?;
             let html: String = argument(payload, 0)?;
@@ -830,6 +853,66 @@ fn dispatch_engine(
     }
 }
 
+fn dispatch_compiled(
+    py: Python<'_>,
+    handle: &Bound<'_, PyAny>,
+    operation: &str,
+    payload: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    // Clone the immutable Arc while holding the capsule lock, then release the lock before the
+    // GIL. Separate Python threads may therefore render one compiled document concurrently.
+    let compiled = {
+        let guard =
+            unsafe { capsule_lock::<Arc<crate::CompiledDocument>>(handle, COMPILED_CAPSULE)? };
+        guard.clone()
+    };
+    match operation {
+        "CompiledDocument.stats" => {
+            expect_arity(payload, 0)?;
+            let out = PyDict::new(py);
+            out.set_item("page_count", compiled.page_count())?;
+            out.set_item("command_count", compiled.command_count())?;
+            out.set_item("compile_ms", compiled.compile_time_ms())?;
+            Ok(out.unbind().into_any())
+        }
+        "CompiledDocument.render_pdf" => {
+            expect_arity(payload, 1)?;
+            let bytes = py
+                .allow_threads(|| compiled.render_to_buffer())
+                .map_err(to_py_err)?;
+            if let Some(path) = optional_argument::<String>(payload, 0)? {
+                write_hash_file(&path, &sha256_hex(&bytes))?;
+            }
+            Ok(PyBytes::new(py, &bytes).unbind().into_any())
+        }
+        "CompiledDocument.render_pdf_to_file" => {
+            expect_arity(payload, 2)?;
+            let path: String = argument(payload, 0)?;
+            let written = py
+                .allow_threads(|| compiled.render_to_file(&path))
+                .map_err(to_py_err)?;
+            if let Some(hash_path) = optional_argument::<String>(payload, 1)? {
+                write_hash_file(&hash_path, &sha256_file_hex(&path)?)?;
+            }
+            written.into_py_value()
+        }
+        "CompiledDocument.render_pdf_batch" => {
+            expect_arity(payload, 2)?;
+            let copies: usize = argument(payload, 0)?;
+            let bytes = py
+                .allow_threads(|| compiled.render_many_to_buffer(copies))
+                .map_err(to_py_err)?;
+            if let Some(path) = optional_argument::<String>(payload, 1)? {
+                write_hash_file(&path, &sha256_hex(&bytes))?;
+            }
+            Ok(PyBytes::new(py, &bytes).unbind().into_any())
+        }
+        _ => Err(PyValueError::new_err(format!(
+            "unknown CompiledDocument operation: {operation}"
+        ))),
+    }
+}
+
 fn dispatch(
     py: Python<'_>,
     handle: &Bound<'_, PyAny>,
@@ -850,6 +933,9 @@ fn dispatch(
         }
         operation if operation.starts_with("PdfEngine.") => {
             dispatch_engine(py, handle, operation, payload)
+        }
+        operation if operation.starts_with("CompiledDocument.") => {
+            dispatch_compiled(py, handle, operation, payload)
         }
         _ => dispatch_free_function(py, operation, payload),
     }
