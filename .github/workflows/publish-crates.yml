@@ -126,7 +126,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo package --locked --list | tee target/fullbleed-package-files.txt
-          test "$(wc -l < target/fullbleed-package-files.txt)" -eq 66
+          test "$(wc -l < target/fullbleed-package-files.txt)" -eq 67
           ! grep -E '(^|/)(target|dist|secrets?)(/|$)|(^|/)\.env$' target/fullbleed-package-files.txt
 
       - name: Install declared Rust MSRV
