@@ -1,6 +1,6 @@
 {
   "id": "diagnostics_multicol_single_column_fallback",
-  "description": "Multi-column properties should deterministically degrade to single-column layout with explicit known-loss diagnostics.",
+  "description": "Supported column-count and column-rule should render while unsupported multicolumn properties emit explicit fallback diagnostics.",
   "labels": [
     "full",
     "diagnostics"
@@ -51,7 +51,7 @@
       {
         "type": "jit.known_loss",
         "code": "MULTICOL_SINGLE_COLUMN_FALLBACK",
-        "property": "column-count"
+        "property": "column-width"
       }
     ]
   },

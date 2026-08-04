@@ -356,8 +356,21 @@ impl Color {
         b: 0.0,
     };
 
+    /// Internal paint sentinel for a fully transparent CSS border color.
+    /// Border geometry still participates in layout and conflict resolution,
+    /// while the paint layer leaves the cell background visible underneath.
+    pub const TRANSPARENT: Color = Color {
+        r: -1.0,
+        g: -1.0,
+        b: -1.0,
+    };
+
     pub fn rgb(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b }
+    }
+
+    pub(crate) fn is_transparent(self) -> bool {
+        self == Self::TRANSPARENT
     }
 }
 
@@ -405,6 +418,7 @@ impl Default for MixBlendMode {
 pub struct ShadingStop {
     pub offset: f32, // 0..=1
     pub color: Color,
+    pub alpha: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]

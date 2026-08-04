@@ -153,7 +153,7 @@ pub fn parse_data_uri_bytes(uri: &str) -> Option<(String, Vec<u8>)> {
     let data = if header.contains(";base64") {
         crate::base64::decode_standard(payload).ok()?
     } else {
-        payload.as_bytes().to_vec()
+        percent_decode_lossy(payload).into_bytes()
     };
     Some((mime, data))
 }
@@ -525,6 +525,14 @@ mod tests {
         let (mime, bytes) = parse_data_uri_bytes(&uri).expect("data uri");
         assert_eq!(mime, "image/png");
         assert_eq!(bytes, b"png-bytes");
+    }
+
+    #[test]
+    fn parse_data_uri_decodes_percent_encoded_payload() {
+        let uri = "data:image/svg+xml,%3Csvg%20viewBox='0%200%2080%2040'%3E%3C/svg%3E";
+        let (mime, bytes) = parse_data_uri_bytes(uri).expect("data uri");
+        assert_eq!(mime, "image/svg+xml");
+        assert_eq!(bytes, b"<svg viewBox='0 0 80 40'></svg>");
     }
 
     #[test]

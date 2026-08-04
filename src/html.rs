@@ -4,10 +4,13 @@ use crate::assets::{
 };
 use crate::flowable::{
     AbsolutePositionedFlowable, AlignContent, AlignItems, BackgroundPaintFlowable, BorderRadiiSpec,
-    BorderSpec, CalcLength, CollapsibleSpaceFlowable, ContainerFlowable, EdgeSizes, FlexDirection,
-    FlexFlowable, GridTrackBreadth, GridTrackSize, ImageFlowable, InlineBlockLayoutFlowable,
-    JustifyContent, LengthSpec, ListItemFlowable, MetaFlowable, Paragraph,
-    RelativePositionedFlowable, Spacer, SvgFlowable, TableCell, TableColumnBorder,
+    BorderSpacingSpec, BorderSpec, CalcLength, CjkDecimalMarkerFlowable, ClearFlowable,
+    CollapsibleSpaceFlowable, ContainerFlowable, CssLineBoxFlowable, CssPixelHeightFlowable,
+    EdgeSizes, ExpandedWidthFlowable, FlexDirection, FlexFlowable, FloatClear, FloatFlowable,
+    FloatSide, GridTrackBreadth, GridTrackSize, ImageFlowable, InlineBackgroundFlowable,
+    InlineBlockLayoutFlowable, JustifyContent, LengthSpec, ListBulletFlowable, ListBulletKind,
+    ListItemFlowable, MetaFlowable, MultiColumnFlowable, OutlineLineStyle, OverlayFlowable,
+    Paragraph, RelativePositionedFlowable, Spacer, SvgFlowable, TableCell, TableColumnBorder,
     TableColumnGroupBorder, TableColumnWidthHint, TableFlowable, TableLayoutMode, TextAlign,
     TextStyle, VerticalAlign,
 };
@@ -15,16 +18,68 @@ use crate::font::FontRegistry;
 use crate::glyph_report::GlyphCoverageReport;
 use crate::html_dom::{NodeData, NodeRef, parse_html};
 use crate::style::{
-    AlignContentMode, AlignItemsMode, AlignSelfMode, ComputedStyle, DirectionMode, DisplayMode,
-    ElementInfo, FlexDirectionMode, FlexWrapMode, GeneratedContentPart, GeneratedCounterContent,
-    GeneratedCounterStyle, GeneratedCountersContent, JustifyContentMode, ListStylePositionMode,
-    ListStyleTypeMode, OverflowMode, PositionMode, StyleResolver, TextAlignLastMode, TextAlignMode,
-    TextWrapMode, VerticalAlignMode, VisibilityMode, WhiteSpaceMode,
+    AlignContentMode, AlignItemsMode, AlignSelfMode, ClearMode, ComputedStyle, DirectionMode,
+    DisplayMode, ElementInfo, FlexDirectionMode, FlexWrapMode, FloatMode, GeneratedContentPart,
+    GeneratedCounterContent, GeneratedCounterStyle, GeneratedCountersContent, JustifyContentMode,
+    ListStylePositionMode, ListStyleTypeMode, OverflowMode, PositionMode, StyleResolver,
+    TextAlignLastMode, TextAlignMode, TextWrapMode, VerticalAlignMode, VisibilityMode,
+    WhiteSpaceMode, WritingModeMode,
 };
-use crate::types::Pt;
-use crate::{BreakAfter, BreakBefore, BreakInside, Flowable};
+use crate::types::{Pt, Size};
+use crate::{BreakAfter, BreakBefore, BreakInside, Color, Flowable};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+const FORCED_LINE_BREAK: char = '\u{2028}';
+
+pub(crate) fn document_canvas_background(
+    html: &str,
+    resolver: &StyleResolver,
+) -> Option<(Color, f32)> {
+    let document = parse_html(html);
+    let base_style = resolver.default_style();
+    let html_el = document.select_first("html").ok()?;
+    let html_node = html_el.as_node();
+    let html_element = html_node.as_element()?;
+    let mut html_info = element_info(html_node, resolver.has_sibling_selectors());
+    let html_inline_style = html_element
+        .attributes
+        .borrow()
+        .get("style")
+        .map(|value| value.to_string());
+    let root_style =
+        resolver.compute_style(&html_info, &base_style, html_inline_style.as_deref(), &[]);
+    if let Some(color) = root_style
+        .background_source_color
+        .or(root_style.background_color)
+    {
+        if root_style.background_alpha > 0.0 {
+            return Some((color, root_style.background_alpha));
+        }
+    }
+
+    html_info.apply_computed_container_style(&root_style);
+    let body_el = document.select_first("body").ok()?;
+    let body_node = body_el.as_node();
+    let body_element = body_node.as_element()?;
+    let body_info = element_info(body_node, resolver.has_sibling_selectors());
+    let body_inline_style = body_element
+        .attributes
+        .borrow()
+        .get("style")
+        .map(|value| value.to_string());
+    let body_style = resolver.compute_style(
+        &body_info,
+        &root_style,
+        body_inline_style.as_deref(),
+        &[html_info],
+    );
+    body_style
+        .background_source_color
+        .or(body_style.background_color)
+        .filter(|_| body_style.background_alpha > 0.0)
+        .map(|color| (color, body_style.background_alpha))
+}
 
 #[derive(Debug, Clone)]
 pub struct HtmlAssetWarning {
@@ -333,16 +388,75 @@ fn counter_set_value(style: &ComputedStyle, name: &str) -> Option<i32> {
 }
 
 fn vertical_align_from_style(style: &ComputedStyle) -> VerticalAlign {
+    vertical_align_from_style_with_font_size(style, style.font_size)
+}
+
+fn vertical_align_from_style_with_font_size(
+    style: &ComputedStyle,
+    containing_font_size: Pt,
+) -> VerticalAlign {
     match style.vertical_align {
         VerticalAlignMode::Baseline => VerticalAlign::Baseline,
         VerticalAlignMode::Middle => VerticalAlign::Middle,
-        VerticalAlignMode::Bottom | VerticalAlignMode::TextBottom | VerticalAlignMode::Sub => {
-            VerticalAlign::Bottom
+        VerticalAlignMode::Bottom | VerticalAlignMode::TextBottom => VerticalAlign::Bottom,
+        VerticalAlignMode::Top | VerticalAlignMode::TextTop => VerticalAlign::Top,
+        VerticalAlignMode::Sub => {
+            VerticalAlign::BaselineShift(css_script_baseline_shift(containing_font_size, 5))
         }
-        VerticalAlignMode::Top | VerticalAlignMode::TextTop | VerticalAlignMode::Super => {
-            VerticalAlign::Top
+        VerticalAlignMode::Super => {
+            VerticalAlign::BaselineShift(-css_script_baseline_shift(containing_font_size, 3))
         }
     }
+}
+
+fn css_script_baseline_shift(font_size: Pt, divisor: i32) -> Pt {
+    // Blink's legacy inline layout (used by the pinned oracle) shifts `sub`
+    // and `super` by parent-font-size/divisor + 1 CSS px, quantized down to a
+    // 1/64 CSS-pixel LayoutUnit. Keep that quantization in fixed-point layout.
+    let raw = font_size.mul_ratio(1, divisor) + Pt::from_milli_i64(750);
+    let units = (raw.to_milli_i64() as i128 * 256).div_euclid(3_000);
+    let milli = (units * 3_000 + 128).div_euclid(256);
+    Pt::from_milli_i64(milli.clamp(i64::MIN as i128, i64::MAX as i128) as i64)
+}
+
+fn override_inline_vertical_align(
+    items: Vec<LayoutItem>,
+    vertical_align: VerticalAlign,
+) -> Vec<LayoutItem> {
+    items
+        .into_iter()
+        .map(|item| match item {
+            LayoutItem::Inline {
+                flowable,
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+                ..
+            } => LayoutItem::Inline {
+                flowable,
+                valign: vertical_align,
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            },
+            LayoutItem::Block {
+                flowable,
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            } => LayoutItem::Inline {
+                flowable,
+                valign: vertical_align,
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            },
+        })
+        .collect()
 }
 
 pub fn scan_html_asset_warnings(html: &str) -> Vec<HtmlAssetWarning> {
@@ -459,6 +573,48 @@ enum LayoutItem {
         width_spec: Option<LengthSpec>,
         order: i32,
     },
+}
+
+#[derive(Clone)]
+struct ForcedLineBreakFlowable {
+    line_height: Pt,
+}
+
+impl ForcedLineBreakFlowable {
+    fn new(line_height: Pt) -> Self {
+        Self { line_height }
+    }
+}
+
+impl Flowable for ForcedLineBreakFlowable {
+    fn wrap(&self, _avail_width: Pt, _avail_height: Pt) -> Size {
+        Size {
+            width: Pt::ZERO,
+            height: self.line_height,
+        }
+    }
+
+    fn split(
+        &self,
+        _avail_width: Pt,
+        _avail_height: Pt,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        None
+    }
+
+    fn draw(
+        &self,
+        _canvas: &mut crate::Canvas,
+        _x: Pt,
+        _y: Pt,
+        _avail_width: Pt,
+        _avail_height: Pt,
+    ) {
+    }
+
+    fn forced_line_break_height(&self) -> Option<Pt> {
+        Some(self.line_height)
+    }
 }
 
 impl LayoutItem {
@@ -667,36 +823,16 @@ pub fn html_to_story_with_resolver_and_fonts_and_report(
     }
 
     let items = if let Ok(body) = document.select_first("body") {
-        let body_node = body.as_node();
-        let body_element = body_node.as_element().expect("body element");
-        let mut body_info = element_info(body_node, resolver.has_sibling_selectors());
-        let inline_style = body_element
-            .attributes
-            .borrow()
-            .get("style")
-            .map(|s| s.to_string());
-        let t_body = std::time::Instant::now();
-        let body_style =
-            resolver.compute_style(&body_info, &root_style, inline_style.as_deref(), &ancestors);
-        body_info.apply_computed_container_style(&body_style);
-        apply_style_counters_for_node(
-            body_node,
-            resolver,
-            &body_style,
-            &body_info,
-            &ancestors,
-            &mut counters,
-        );
-        ancestors.push(body_info);
-        if let Some(perf_logger) = perf {
-            let ms = t_body.elapsed().as_secs_f64() * 1000.0;
-            perf_logger.log_span_ms("story.style.body", doc_id, ms);
-        }
         let t_collect = std::time::Instant::now();
-        let items = collect_children(
-            body_node,
+        // The body establishes a real CSS box. Routing it through the normal
+        // element path preserves its margin, border, padding, backgrounds,
+        // formatting context, pseudo-elements, and pagination semantics.
+        // Flattening directly to its children discarded all of those and also
+        // prevented inline flex/grid children from sharing one line box.
+        let items = node_to_flowables(
+            body.as_node(),
             resolver,
-            &body_style,
+            &root_style,
             &mut ancestors,
             &mut counters,
             font_registry.clone(),
@@ -909,6 +1045,166 @@ fn authored_owner_metadata(
     out
 }
 
+#[allow(clippy::too_many_arguments)]
+fn anonymous_table_cell_run_flowables(
+    node: &NodeRef,
+    resolver: &StyleResolver,
+    parent_style: &ComputedStyle,
+    ancestors: &[ElementInfo],
+    counters: &mut CounterState,
+    font_registry: Option<Arc<FontRegistry>>,
+    mut report: Option<&mut GlyphCoverageReport>,
+) -> Option<Vec<LayoutItem>> {
+    if node.children().any(
+        |child| matches!(child.data(), NodeData::Text(text) if !text.borrow().trim().is_empty()),
+    ) {
+        return None;
+    }
+    let children: Vec<NodeRef> = node
+        .children()
+        .filter(|child| child.as_element().is_some())
+        .collect();
+    if children.is_empty() {
+        return None;
+    }
+
+    let include_prev_siblings = resolver.has_sibling_selectors();
+    let mut styled_cells = Vec::with_capacity(children.len());
+    for child in children {
+        let info = element_info(&child, include_prev_siblings);
+        let inline_style = node_inline_style_attr(&child);
+        let style = resolver.compute_style(&info, parent_style, inline_style.as_deref(), ancestors);
+        if matches!(style.display, DisplayMode::None) {
+            continue;
+        }
+        if !matches!(style.display, DisplayMode::TableCell) {
+            return None;
+        }
+        // Rich descendants use the general CSS table path; the anonymous
+        // sibling fixup here covers the common atomic/text cell run.
+        if child
+            .children()
+            .any(|descendant| descendant.as_element().is_some())
+        {
+            return None;
+        }
+        styled_cells.push((child, style));
+    }
+    if styled_cells.is_empty() {
+        return None;
+    }
+
+    let mut cells = Vec::with_capacity(styled_cells.len());
+    for (child, cell_style) in styled_cells {
+        if style_can_mutate_counters(&cell_style) {
+            apply_style_counters(&cell_style, counters);
+        }
+        let mut text = extract_text(&child, cell_style.white_space);
+        if !preserve_whitespace(cell_style.white_space) {
+            text = text.trim().to_string();
+        }
+        text = apply_text_transform(&text, cell_style.text_transform);
+        let text_style = text_style_for_flow_text(&cell_style);
+        if !text.is_empty() {
+            report_missing_glyphs(
+                report.as_deref_mut(),
+                font_registry.as_deref(),
+                &text_style,
+                &text,
+            );
+        }
+        let border_colors = cell_style.resolved_border_colors(cell_style.color);
+        let border_styles = cell_style.resolved_border_styles();
+        let hidden_borders = cell_style.border_hidden_sides();
+        let min_height = match cell_style.height {
+            LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => Pt::ZERO,
+            value => value
+                .resolve_height(Pt::ZERO, cell_style.font_size, cell_style.root_font_size)
+                .max(Pt::ZERO),
+        };
+        let mut cell = TableCell::new(
+            text,
+            text_style,
+            text_align_from_style(&cell_style),
+            vertical_align_from_style(&cell_style),
+            cell_style.padding,
+            cell_style.background_color,
+            BorderSpec {
+                widths: cell_style.border_width,
+                color: border_colors.top,
+            },
+            cell_style.box_shadow.clone(),
+            Some(Arc::<str>::from("TD")),
+            None,
+            1,
+            cell_style.root_font_size,
+            font_registry.clone(),
+            preserve_whitespace(cell_style.white_space),
+            no_wrap(&cell_style),
+        )
+        .with_border_styles(
+            border_styles.top,
+            border_styles.right,
+            border_styles.bottom,
+            border_styles.left,
+        )
+        .with_border_colors(
+            border_colors.top,
+            border_colors.right,
+            border_colors.bottom,
+            border_colors.left,
+        )
+        .with_hidden_borders(
+            hidden_borders.top,
+            hidden_borders.right,
+            hidden_borders.bottom,
+            hidden_borders.left,
+        )
+        .with_row_min_height(min_height)
+        .with_hide_empty_cells(cell_style.empty_cells_hide)
+        .with_self_visible(cell_style.visibility.paints())
+        .with_overflow_hidden(matches!(
+            cell_style.overflow,
+            OverflowMode::Hidden | OverflowMode::Clip
+        ));
+        if !matches!(
+            cell_style.width,
+            LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
+        ) {
+            cell = cell.with_preferred_width(
+                cell_style.width,
+                cell_style.font_size,
+                cell_style.root_font_size,
+            );
+        }
+        cells.push(cell);
+    }
+
+    let table = TableFlowable::new(vec![cells])
+        .with_row_backgrounds(false)
+        // Anonymous table boxes inherit the surrounding table model's spacing.
+        // This matters for runs of `display: table-cell` descendants generated
+        // beneath a non-table wrapper (CSS 2.1 anonymous table fixup).
+        .with_border_spacing(parent_style.border_spacing)
+        .with_direction(parent_style.direction)
+        .with_font_metrics(parent_style.font_size, parent_style.root_font_size)
+        .with_tag_role("Table");
+    let used_width = table.intrinsic_width().unwrap_or(Pt::ZERO);
+    let container = ContainerFlowable::new_pt(
+        vec![Box::new(table) as Box<dyn Flowable>],
+        parent_style.font_size,
+        parent_style.root_font_size,
+    )
+    .with_width(LengthSpec::Absolute(used_width));
+    Some(vec![LayoutItem::Block {
+        flowable: Box::new(container),
+        flex_grow: 0.0,
+        flex_shrink: 1.0,
+        width_spec: Some(LengthSpec::Absolute(used_width)),
+        order: 0,
+    }])
+}
+
 fn collect_children(
     node: &NodeRef,
     resolver: &StyleResolver,
@@ -925,6 +1221,17 @@ fn collect_children(
 ) -> Vec<LayoutItem> {
     let mut out = Vec::new();
     let mut report = report;
+    if let Some(anonymous_table) = anonymous_table_cell_run_flowables(
+        node,
+        resolver,
+        parent_style,
+        ancestors,
+        counters,
+        font_registry.clone(),
+        report.as_deref_mut(),
+    ) {
+        return anonymous_table;
+    }
     let children: Vec<NodeRef> = node.children().collect();
     let has_boundary_space_candidate = children.iter().any(|child| match child.data() {
         NodeData::Text(text) => {
@@ -1150,24 +1457,39 @@ fn node_to_flowables(
                     | DisplayMode::Grid
                     | DisplayMode::InlineGrid
             );
-            let has_renderable_content = node_has_renderable_content(node);
-            let mut flex_item_width_spec = None;
-            let mut flex_item_width_from_width = false;
+            let mut flex_item_basis_override = None;
             if parent_is_flex {
+                let parent_main_axis_is_vertical = if matches!(
+                    parent_style.display,
+                    DisplayMode::Flex | DisplayMode::InlineFlex
+                ) {
+                    let logical_column = matches!(
+                        parent_style.flex_direction,
+                        FlexDirectionMode::Column | FlexDirectionMode::ColumnReverse
+                    );
+                    let vertical_writing =
+                        !matches!(parent_style.writing_mode, WritingModeMode::HorizontalTb);
+                    logical_column != vertical_writing
+                } else {
+                    false
+                };
                 if !matches!(
                     style.flex_basis,
                     LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
                 ) {
-                    flex_item_width_spec = Some(style.flex_basis);
+                    flex_item_basis_override = Some(style.flex_basis);
+                } else if parent_main_axis_is_vertical {
+                    if !matches!(
+                        style.height,
+                        LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
+                    ) {
+                        flex_item_basis_override = Some(style.height);
+                    }
                 } else if !matches!(
                     style.width,
                     LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
                 ) {
-                    flex_item_width_spec = Some(style.width);
-                    flex_item_width_from_width = true;
-                }
-                if flex_item_width_from_width && has_renderable_content {
-                    style.width = LengthSpec::Auto;
+                    flex_item_basis_override = Some(style.width);
                 }
             }
             if info.classes.iter().any(|c| c == "keep-together") {
@@ -1209,6 +1531,13 @@ fn node_to_flowables(
                 report.as_deref_mut(),
                 crate::style::PseudoTarget::After,
             );
+            let first_letter_style = resolver.compute_pseudo_style(
+                &info,
+                &style,
+                ancestors,
+                crate::style::PseudoTarget::FirstLetter,
+            );
+            let has_structured_pseudo = !before_items.is_empty() || !after_items.is_empty();
 
             // Maintain an ancestor stack instead of cloning it for every element.
             let list_item_marker_ancestors = if style_is_css_list_item(&style) {
@@ -1220,9 +1549,13 @@ fn node_to_flowables(
 
             // Contents/inline are usually transparent containers in our layout model, except
             // replaced/special inline elements that render atomic content.
-            let transparent_inline =
-                matches!(style.display, DisplayMode::Contents | DisplayMode::Inline)
-                    && !matches!(info.tag.as_str(), "img" | "svg" | "br");
+            let transparent_inline = matches!(style.display, DisplayMode::Contents | DisplayMode::Inline)
+                    && !matches!(info.tag.as_str(), "img" | "svg" | "br")
+                    // Positioned inline boxes need the normal wrapper path so the
+                    // absolute/relative flowable survives into the parent's layout.
+                    // Returning the children directly here silently discarded
+                    // `position` and left absolute text in the inline run.
+                    && matches!(style.position, PositionMode::Static);
             if transparent_inline {
                 let out = collect_children(
                     node,
@@ -1239,6 +1572,98 @@ fn node_to_flowables(
                     doc_id,
                 );
                 let out = inject_pseudo_items(out, &before_items, &after_items);
+                let out = if matches!(
+                    style.vertical_align,
+                    VerticalAlignMode::Sub | VerticalAlignMode::Super
+                ) {
+                    override_inline_vertical_align(
+                        out,
+                        vertical_align_from_style_with_font_size(&style, parent_style.font_size),
+                    )
+                } else {
+                    out
+                };
+                let decorated_inline = style.background_color.is_some()
+                    || style.background_paint.is_some()
+                    || style.border_width != EdgeSizes::zero()
+                    || style.padding != EdgeSizes::zero();
+                let simple_background = style.background_color.filter(|_| {
+                    style.background_paint.is_none()
+                        && style.border_width == EdgeSizes::zero()
+                        && style.padding == EdgeSizes::zero()
+                        && out.len() == 1
+                });
+                if let Some(background) = simple_background {
+                    let child = match out.into_iter().next().expect("one inline child") {
+                        LayoutItem::Block { flowable, .. }
+                        | LayoutItem::Inline { flowable, .. } => flowable,
+                    };
+                    let font_box_height = font_registry
+                        .as_deref()
+                        .and_then(|registry| {
+                            registry.vertical_metrics(style.font_name.as_ref(), style.font_size)
+                        })
+                        .map(|(ascent, descent)| ascent + descent)
+                        .unwrap_or(style.font_size * 1.2);
+                    let flowable = InlineBackgroundFlowable::new_pt(
+                        child,
+                        background,
+                        font_box_height,
+                        -Pt::from_f32(0.75),
+                    )
+                    .with_css_pixel_snap(text_style_for_flow_text(&style).css_pixel_snap_metrics)
+                    .with_pagination(style.pagination);
+                    ancestors.pop();
+                    counters.pop_reset_scopes(&counter_reset_scopes);
+                    return vec![LayoutItem::Inline {
+                        flowable: Box::new(flowable),
+                        valign: vertical_align_from_style_with_font_size(
+                            &style,
+                            parent_style.font_size,
+                        ),
+                        flex_grow: style.flex_grow,
+                        flex_shrink: style.flex_shrink,
+                        width_spec: flex_item_basis(&style),
+                        order: 0,
+                    }];
+                }
+                if decorated_inline {
+                    let intrinsic_width = out
+                        .iter()
+                        .filter_map(|item| match item {
+                            LayoutItem::Block { flowable, .. }
+                            | LayoutItem::Inline { flowable, .. } => flowable.intrinsic_width(),
+                        })
+                        .fold(Pt::ZERO, |sum, width| sum + width);
+                    let mut inline_box_style = style.clone();
+                    if intrinsic_width > Pt::ZERO
+                        && matches!(
+                            inline_box_style.width,
+                            LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
+                        )
+                    {
+                        inline_box_style.width = LengthSpec::Absolute(intrinsic_width);
+                    }
+                    let Some(flowable) = container_flowable_with_role(out, &inline_box_style, None)
+                    else {
+                        ancestors.pop();
+                        counters.pop_reset_scopes(&counter_reset_scopes);
+                        return Vec::new();
+                    };
+                    ancestors.pop();
+                    counters.pop_reset_scopes(&counter_reset_scopes);
+                    return vec![LayoutItem::Inline {
+                        flowable,
+                        valign: vertical_align_from_style_with_font_size(
+                            &inline_box_style,
+                            parent_style.font_size,
+                        ),
+                        flex_grow: inline_box_style.flex_grow,
+                        flex_shrink: inline_box_style.flex_shrink,
+                        width_spec: flex_item_basis(&inline_box_style),
+                        order: 0,
+                    }];
+                }
                 ancestors.pop();
                 counters.pop_reset_scopes(&counter_reset_scopes);
                 return out;
@@ -1275,7 +1700,9 @@ fn node_to_flowables(
                             _ => "P",
                         };
 
-                        if inline_children_only(node, resolver, &style, ancestors) {
+                        if inline_children_only(node, resolver, &style, ancestors)
+                            && !has_structured_pseudo
+                        {
                             let t_extract = std::time::Instant::now();
                             let mut text = extract_text(node, style.white_space);
                             if let Some(perf_logger) = perf {
@@ -1310,6 +1737,22 @@ fn node_to_flowables(
                             } else {
                                 let t_transform = std::time::Instant::now();
                                 let text = apply_text_transform(&text, style.text_transform);
+                                let initial_letter =
+                                    first_letter_style.as_ref().and_then(|pseudo_style| {
+                                        let value = pseudo_style.initial_letter?;
+                                        let first = text.chars().next()?;
+                                        let end = first.len_utf8();
+                                        let first = apply_text_transform(
+                                            &text[..end],
+                                            pseudo_style.text_transform,
+                                        );
+                                        Some((
+                                            first,
+                                            text[end..].to_string(),
+                                            text_style_for_flow_text(pseudo_style),
+                                            value,
+                                        ))
+                                    });
                                 if let Some(perf_logger) = perf {
                                     let ms = t_transform.elapsed().as_secs_f64() * 1000.0;
                                     perf_logger.log_span_ms("story.text.transform", doc_id, ms);
@@ -1326,7 +1769,11 @@ fn node_to_flowables(
                                     let ms = t_glyph.elapsed().as_secs_f64() * 1000.0;
                                     perf_logger.log_span_ms("story.glyph.report", doc_id, ms);
                                 }
-                                let paragraph = Paragraph::new(text)
+                                let paragraph_text = initial_letter
+                                    .as_ref()
+                                    .map(|(_, remainder, _, _)| remainder.clone())
+                                    .unwrap_or_else(|| text.clone());
+                                let mut paragraph = Paragraph::new(paragraph_text)
                                     .with_style(text_style)
                                     .with_align(text_align_from_style(&style))
                                     .with_last_align(text_align_last_from_style(&style))
@@ -1337,8 +1784,13 @@ fn node_to_flowables(
                                     .with_pagination(style.pagination)
                                     .with_font_registry(font_registry.clone())
                                     .with_tag_role(role);
+                                if let Some((first, _, first_style, value)) = initial_letter {
+                                    paragraph =
+                                        paragraph.with_initial_letter(first, first_style, value);
+                                }
                                 let items = vec![LayoutItem::Block {
-                                    flowable: Box::new(paragraph) as Box<dyn Flowable>,
+                                    flowable: Box::new(CssLineBoxFlowable::new(Box::new(paragraph)))
+                                        as Box<dyn Flowable>,
                                     flex_grow: 0.0,
                                     flex_shrink: 1.0,
                                     width_spec: None,
@@ -1371,6 +1823,7 @@ fn node_to_flowables(
                                     vertical_align_from_style(&style),
                                     &style,
                                     font_registry.clone(),
+                                    true,
                                 )
                             } else {
                                 children
@@ -1449,9 +1902,9 @@ fn node_to_flowables(
                     }
                     "br" => {
                         let height = style.to_text_style().line_height.max(style.font_size);
-                        let spacer = Spacer::new_pt(height);
                         vec![LayoutItem::Block {
-                            flowable: Box::new(spacer) as Box<dyn Flowable>,
+                            flowable: Box::new(ForcedLineBreakFlowable::new(height))
+                                as Box<dyn Flowable>,
                             flex_grow: 0.0,
                             flex_shrink: 1.0,
                             width_spec: flex_item_basis(&style),
@@ -1496,12 +1949,15 @@ fn node_to_flowables(
                             .1
                             .or_else(|| parse_dimension(attrs.get("height")))
                             .or(css_height);
+                        let svg_xml = load_svg_xml_from_image_source(asset_bundle.as_deref(), src);
                         let intrinsic_size =
-                            raster_image_intrinsic_dimensions(asset_bundle.as_deref(), src).map(
-                                |(w, h)| {
+                            raster_image_intrinsic_dimensions(asset_bundle.as_deref(), src)
+                                .map(|(w, h)| {
                                     (Pt::from_f32(w as f32 * 0.75), Pt::from_f32(h as f32 * 0.75))
-                                },
-                            );
+                                })
+                                .or_else(|| {
+                                    svg_xml.as_deref().and_then(svg_image_intrinsic_dimensions)
+                                });
                         let intrinsic_ratio = intrinsic_size.and_then(|(w, h)| {
                             let h = h.to_f32();
                             if h <= 0.0 || !h.is_finite() {
@@ -1533,18 +1989,34 @@ fn node_to_flowables(
                         let width = width
                             .unwrap_or_else(|| style.font_size * 4.0)
                             .max(Pt::from_f32(1.0));
-                        let height = height
+                        let mut height = height
                             .unwrap_or_else(|| style.font_size * 3.0)
                             .max(Pt::from_f32(1.0));
+                        if let Some(max_height) = resolve_non_auto_css_dimension(
+                            style.max_height,
+                            Pt::from_f32(150.0),
+                            style.font_size,
+                            style.root_font_size,
+                            true,
+                        ) {
+                            height = height.min(max_height);
+                        }
+                        if let Some(min_height) = resolve_non_auto_css_dimension(
+                            style.min_height,
+                            Pt::from_f32(150.0),
+                            style.font_size,
+                            style.root_font_size,
+                            true,
+                        ) {
+                            height = height.max(min_height);
+                        }
                         let alt = attrs
                             .get("alt")
                             .or_else(|| attrs.get("aria-label"))
                             .or_else(|| attrs.get("title"))
                             .map(|s| s.to_string());
                         let width_spec = flex_item_basis(&style);
-                        if let Some(xml) =
-                            load_svg_xml_from_image_source(asset_bundle.as_deref(), src)
-                        {
+                        if let Some(xml) = svg_xml {
                             if svg_raster_fallback && crate::svg::svg_needs_raster_fallback(&xml) {
                                 if let Some(data_uri) =
                                     crate::svg::rasterize_svg_to_data_uri(&xml, width, height)
@@ -1552,10 +2024,12 @@ fn node_to_flowables(
                                     let image = ImageFlowable::new_pt(width, height, data_uri)
                                         .with_object_fit(style.object_fit)
                                         .with_object_position(style.object_position)
+                                        .with_image_rendering(style.image_rendering)
                                         .with_intrinsic_size(intrinsic_size)
                                         .with_font_metrics(style.font_size, style.root_font_size)
                                         .with_pagination(style.pagination)
                                         .with_visible(style.visibility.paints())
+                                        .with_paint_filter(style.paint_filter.clone())
                                         .with_tag_role("Figure")
                                         .with_alt(alt);
                                     vec![LayoutItem::Block {
@@ -1624,10 +2098,12 @@ fn node_to_flowables(
                             let image = ImageFlowable::new_pt(width, height, image_source)
                                 .with_object_fit(style.object_fit)
                                 .with_object_position(style.object_position)
+                                .with_image_rendering(style.image_rendering)
                                 .with_intrinsic_size(intrinsic_size)
                                 .with_font_metrics(style.font_size, style.root_font_size)
                                 .with_pagination(style.pagination)
                                 .with_visible(style.visibility.paints())
+                                .with_paint_filter(style.paint_filter.clone())
                                 .with_tag_role("Figure")
                                 .with_alt(alt);
                             vec![LayoutItem::Block {
@@ -1664,9 +2140,11 @@ fn node_to_flowables(
                                 let image = ImageFlowable::new_pt(width, height, data_uri)
                                     .with_object_fit(style.object_fit)
                                     .with_object_position(style.object_position)
+                                    .with_image_rendering(style.image_rendering)
                                     .with_font_metrics(style.font_size, style.root_font_size)
                                     .with_pagination(style.pagination)
                                     .with_visible(style.visibility.paints())
+                                    .with_paint_filter(style.paint_filter.clone())
                                     .with_tag_role("Figure")
                                     .with_alt(alt);
                                 vec![LayoutItem::Block {
@@ -1737,6 +2215,10 @@ fn node_to_flowables(
                     }
                     "table" => {
                         let include_prev_siblings = resolver.has_sibling_selectors();
+                        let legacy_border_width = legacy_table_length_attribute(node, "border")
+                            .filter(|width| *width > Pt::ZERO);
+                        let legacy_cell_spacing =
+                            legacy_table_length_attribute(node, "cellspacing");
                         let mut top_caption_flowables: Vec<Box<dyn Flowable>> = Vec::new();
                         let mut bottom_caption_flowables: Vec<Box<dyn Flowable>> = Vec::new();
                         for child in node.children() {
@@ -1757,6 +2239,20 @@ fn node_to_flowables(
                             );
                             let mut caption_text = extract_text(&child, caption_style.white_space);
                             if caption_text.trim().is_empty() {
+                                if let Some(flowable) = container_flowable_with_role(
+                                    Vec::new(),
+                                    &caption_style,
+                                    Some("Caption"),
+                                ) {
+                                    if matches!(
+                                        caption_style.caption_side,
+                                        crate::style::CaptionSideMode::Bottom
+                                    ) {
+                                        bottom_caption_flowables.push(flowable);
+                                    } else {
+                                        top_caption_flowables.push(flowable);
+                                    }
+                                }
                                 continue;
                             }
                             if !preserve_whitespace(caption_style.white_space) {
@@ -1813,9 +2309,85 @@ fn node_to_flowables(
                             } else {
                                 style.table_layout
                             };
-                        let table_border_colors = style.resolved_border_colors(style.color);
-                        let table_border_styles = style.resolved_border_styles();
-                        let table_hidden_borders = style.border_hidden_sides();
+                        let minimum_table_height = match style.height {
+                            LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => {
+                                Pt::ZERO
+                            }
+                            height => height
+                                .resolve_height(Pt::ZERO, style.font_size, style.root_font_size)
+                                .max(Pt::ZERO),
+                        };
+                        let mut table_border_width = style.border_width;
+                        let mut table_border_colors = style.resolved_border_colors(style.color);
+                        let mut table_border_styles = style.resolved_border_styles();
+                        let mut table_hidden_borders = style.border_hidden_sides();
+                        if let Some(width) = legacy_border_width {
+                            let borders_are_zero = |edges: EdgeSizes| {
+                                let is_zero = |value: LengthSpec| match value {
+                                    LengthSpec::Absolute(value) => value <= Pt::ZERO,
+                                    LengthSpec::Percent(value)
+                                    | LengthSpec::Em(value)
+                                    | LengthSpec::Rem(value) => value <= 0.0,
+                                    LengthSpec::Calc(value) => {
+                                        value.abs <= Pt::ZERO
+                                            && value.percent <= 0.0
+                                            && value.em <= 0.0
+                                            && value.rem <= 0.0
+                                    }
+                                    LengthSpec::Auto
+                                    | LengthSpec::Content
+                                    | LengthSpec::MinContent
+                                    | LengthSpec::MaxContent
+                                    | LengthSpec::FitContent
+                                    | LengthSpec::Inherit
+                                    | LengthSpec::Initial => true,
+                                };
+                                is_zero(edges.top)
+                                    && is_zero(edges.right)
+                                    && is_zero(edges.bottom)
+                                    && is_zero(edges.left)
+                            };
+                            if borders_are_zero(table_border_width) {
+                                let width = LengthSpec::Absolute(width);
+                                table_border_width = EdgeSizes {
+                                    top: width,
+                                    right: width,
+                                    bottom: width,
+                                    left: width,
+                                };
+                                let light = Color::rgb(238.0 / 255.0, 238.0 / 255.0, 238.0 / 255.0);
+                                let dark = Color::rgb(154.0 / 255.0, 154.0 / 255.0, 154.0 / 255.0);
+                                table_border_colors.top = light;
+                                table_border_colors.left = light;
+                                table_border_colors.right = dark;
+                                table_border_colors.bottom = dark;
+                                table_border_styles.top = OutlineLineStyle::Solid;
+                                table_border_styles.right = OutlineLineStyle::Solid;
+                                table_border_styles.bottom = OutlineLineStyle::Solid;
+                                table_border_styles.left = OutlineLineStyle::Solid;
+                                table_hidden_borders.top = false;
+                                table_hidden_borders.right = false;
+                                table_hidden_borders.bottom = false;
+                                table_hidden_borders.left = false;
+                            }
+                        }
+                        let effective_border_spacing = if let Some(spacing) = legacy_cell_spacing {
+                            let spacing = LengthSpec::Absolute(spacing);
+                            BorderSpacingSpec {
+                                horizontal: spacing,
+                                vertical: spacing,
+                            }
+                        } else if legacy_border_width.is_some()
+                            && style.border_spacing == BorderSpacingSpec::zero()
+                        {
+                            let spacing = LengthSpec::Absolute(Pt::from_f32(1.5));
+                            BorderSpacingSpec {
+                                horizontal: spacing,
+                                vertical: spacing,
+                            }
+                        } else {
+                            style.border_spacing
+                        };
                         let collapsed_table = matches!(
                             style.border_collapse,
                             crate::flowable::BorderCollapseMode::Collapse
@@ -1837,11 +2409,11 @@ fn node_to_flowables(
                         )
                         .with_tag_role("Table")
                         .with_border_collapse(style.border_collapse)
-                        .with_border_spacing(style.border_spacing)
+                        .with_border_spacing(effective_border_spacing)
                         .with_table_layout(effective_table_layout)
                         .with_direction(style.direction)
                         .with_table_border(
-                            style.border_width,
+                            table_border_width,
                             style.border_color.unwrap_or(style.color),
                         )
                         .with_table_border_colors(
@@ -1863,11 +2435,87 @@ fn node_to_flowables(
                             table_hidden_borders.left,
                         )
                         .with_font_metrics(style.font_size, style.root_font_size);
+                        let table = table.with_minimum_height(minimum_table_height);
 
+                        let table_intrinsic_width = table.intrinsic_width();
+                        let has_caption = !top_caption_flowables.is_empty()
+                            || !bottom_caption_flowables.is_empty();
+                        let caption_width_overflow = match style.width {
+                            LengthSpec::Absolute(width) if has_caption => {
+                                table.collapsed_caption_width_overflow(width)
+                            }
+                            _ => Pt::ZERO,
+                        };
+                        if caption_width_overflow > Pt::ZERO {
+                            top_caption_flowables = top_caption_flowables
+                                .into_iter()
+                                .map(|caption| {
+                                    Box::new(ExpandedWidthFlowable::new(
+                                        caption,
+                                        caption_width_overflow,
+                                    )) as Box<dyn Flowable>
+                                })
+                                .collect();
+                            bottom_caption_flowables = bottom_caption_flowables
+                                .into_iter()
+                                .map(|caption| {
+                                    Box::new(ExpandedWidthFlowable::new(
+                                        caption,
+                                        caption_width_overflow,
+                                    )) as Box<dyn Flowable>
+                                })
+                                .collect();
+                        }
                         let mut table_children: Vec<Box<dyn Flowable>> = Vec::new();
                         table_children.extend(top_caption_flowables);
                         table_children.push(Box::new(table) as Box<dyn Flowable>);
                         table_children.extend(bottom_caption_flowables);
+                        let used_table_width = if matches!(
+                            style.width,
+                            LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
+                        ) {
+                            table_children
+                                .iter()
+                                .filter_map(|child| child.intrinsic_width())
+                                .reduce(Pt::max)
+                                .map(|content_width| {
+                                    let container_border = if collapsed_table {
+                                        EdgeSizes::zero()
+                                    } else {
+                                        table_border_width
+                                    };
+                                    let resolve = |value: LengthSpec| {
+                                        value.resolve_width(
+                                            content_width,
+                                            style.font_size,
+                                            style.root_font_size,
+                                        )
+                                    };
+                                    let horizontal_edges = resolve(container_border.left)
+                                        + resolve(container_border.right)
+                                        + resolve(style.padding.left)
+                                        + resolve(style.padding.right);
+                                    let used = if matches!(
+                                        style.box_sizing,
+                                        crate::types::BoxSizingMode::BorderBox
+                                    ) {
+                                        content_width + horizontal_edges
+                                    } else {
+                                        content_width
+                                    };
+                                    LengthSpec::Absolute(used)
+                                })
+                                .unwrap_or(style.width)
+                        } else if has_caption && collapsed_table {
+                            match (style.width, table_intrinsic_width) {
+                                (LengthSpec::Absolute(width), Some(intrinsic)) => {
+                                    LengthSpec::Absolute(width.max(intrinsic))
+                                }
+                                _ => style.width,
+                            }
+                        } else {
+                            style.width
+                        };
 
                         let container = ContainerFlowable::new_pt(
                             table_children,
@@ -1882,7 +2530,7 @@ fn node_to_flowables(
                             if collapsed_table {
                                 EdgeSizes::zero()
                             } else {
-                                style.border_width
+                                table_border_width
                             },
                             style.border_color.unwrap_or(style.color),
                         )
@@ -1908,13 +2556,15 @@ fn node_to_flowables(
                         )
                         .with_padding(style.padding)
                         .with_box_sizing(style.box_sizing)
-                        .with_width(style.width)
+                        .with_width(used_table_width)
                         .with_max_width(style.max_width)
                         .with_min_width(style.min_width)
                         .with_height(style.height)
+                        .with_aspect_ratio(style.aspect_ratio)
                         .with_min_height(style.min_height)
                         .with_max_height(style.max_height)
-                        .with_background(style.background_color)
+                        .with_background(style.background_source_color.or(style.background_color))
+                        .with_background_opacity(style.background_alpha)
                         .with_background_paint(style.background_paint.clone())
                         .with_background_layers(
                             style.background_paints.clone(),
@@ -1937,7 +2587,10 @@ fn node_to_flowables(
                         .with_opacity(style.opacity)
                         .with_transforms(style.transform.clone())
                         .with_transform_origin(style.transform_origin)
-                        .with_overflow_hidden(matches!(style.overflow, OverflowMode::Hidden))
+                        .with_overflow_hidden(matches!(
+                            style.overflow,
+                            OverflowMode::Hidden | OverflowMode::Clip
+                        ))
                         .with_self_visible(style.visibility.paints())
                         .with_pagination(style.pagination);
 
@@ -1965,7 +2618,46 @@ fn node_to_flowables(
                             doc_id,
                         );
                         let items = inject_pseudo_items(items, &before_items, &after_items);
-                        container_flowables_with_role(items, &style, Some("L"))
+                        let containers = container_flowables_with_role(items, &style, Some("L"));
+                        if ancestors.iter().any(|ancestor| ancestor.tag == "li") {
+                            containers
+                        } else {
+                            containers
+                                .into_iter()
+                                .map(|item| match item {
+                                    LayoutItem::Block {
+                                        flowable,
+                                        flex_grow,
+                                        flex_shrink,
+                                        width_spec,
+                                        order,
+                                    } => LayoutItem::Block {
+                                        flowable: Box::new(CssPixelHeightFlowable::new(flowable))
+                                            as Box<dyn Flowable>,
+                                        flex_grow,
+                                        flex_shrink,
+                                        width_spec,
+                                        order,
+                                    },
+                                    LayoutItem::Inline {
+                                        flowable,
+                                        valign,
+                                        flex_grow,
+                                        flex_shrink,
+                                        width_spec,
+                                        order,
+                                    } => LayoutItem::Inline {
+                                        flowable: Box::new(CssPixelHeightFlowable::new(flowable))
+                                            as Box<dyn Flowable>,
+                                        valign,
+                                        flex_grow,
+                                        flex_shrink,
+                                        width_spec,
+                                        order,
+                                    },
+                                })
+                                .collect()
+                        }
                     }
                     "li" => {
                         let text = extract_text(node, style.white_space);
@@ -2001,8 +2693,8 @@ fn node_to_flowables(
                             }]
                         }
                     }
-                    "div" | "span" | "section" | "article" | "header" | "footer" | "aside"
-                    | "nav" | "main" | "blockquote" | "dl" | "dt" | "dd" => {
+                    "body" | "div" | "span" | "section" | "article" | "header" | "footer"
+                    | "aside" | "nav" | "main" | "blockquote" | "dl" | "dt" | "dd" => {
                         let dl_container_role = definition_list_container_role(info.tag.as_str());
                         let dl_inline_text_role =
                             definition_list_inline_text_role(info.tag.as_str());
@@ -2041,11 +2733,14 @@ fn node_to_flowables(
                                 svg_raster_fallback,
                                 perf,
                                 doc_id,
+                                &before_items,
+                                &after_items,
                             )
                         } else if matches!(
                             style.display,
-                            DisplayMode::Block | DisplayMode::InlineBlock
+                            DisplayMode::Block | DisplayMode::FlowRoot | DisplayMode::InlineBlock
                         ) && inline_children_only(node, resolver, &style, ancestors)
+                            && !has_structured_pseudo
                         {
                             let ancestors_no_self = &ancestors[..ancestors.len().saturating_sub(1)];
                             let mut text = extract_text(node, style.white_space);
@@ -2107,7 +2802,8 @@ fn node_to_flowables(
                                     paragraph
                                 };
                                 let items = vec![LayoutItem::Block {
-                                    flowable: Box::new(paragraph) as Box<dyn Flowable>,
+                                    flowable: Box::new(CssLineBoxFlowable::new(Box::new(paragraph)))
+                                        as Box<dyn Flowable>,
                                     flex_grow: 0.0,
                                     flex_shrink: 1.0,
                                     width_spec: None,
@@ -2163,6 +2859,7 @@ fn node_to_flowables(
                                     vertical_align_from_style(&style),
                                     &style,
                                     font_registry.clone(),
+                                    true,
                                 )
                             } else {
                                 children
@@ -2211,6 +2908,14 @@ fn node_to_flowables(
                 }
             };
 
+            // A visible replaced inline can paint outside a fixed-height block. CSS paints that
+            // inline content after later in-flow block backgrounds and borders in the same
+            // stacking context. Our block layout normally draws each sibling atomically, so
+            // defer this otherwise-static wrapper into the zero z-index paint phase. It remains
+            // in flow and therefore keeps exactly the same Q32.32 layout geometry.
+            let defer_visible_replaced_overflow = !parent_is_flex
+                && static_block_with_visible_replaced_overflow(node, resolver, &style, ancestors);
+
             // Preserve metadata-only nodes (for example <div data-fb="..."></div>) so
             // feature flags can be emitted even when the element has no visual content.
             // Use a tiny spacer to ensure the flowable is drawable; zero-height carriers can
@@ -2230,10 +2935,17 @@ fn node_to_flowables(
                 flowables = wrap_absolute(flowables, &style);
             } else if matches!(style.position, PositionMode::Relative) {
                 flowables = wrap_relative(flowables, &style);
+            } else if defer_visible_replaced_overflow {
+                flowables = wrap_relative(flowables, &style);
+            } else if !parent_is_flex && !matches!(style.float_mode, FloatMode::None) {
+                flowables = wrap_float(flowables, &style);
+            }
+            if !parent_is_flex && !matches!(style.clear_mode, ClearMode::None) {
+                flowables = wrap_clear(flowables, &style);
             }
 
             let width_spec_override = if parent_is_flex {
-                flex_item_width_spec
+                flex_item_basis_override
             } else {
                 None
             };
@@ -2543,15 +3255,26 @@ fn pseudo_content_items(
         return Vec::new();
     }
     let text = apply_text_transform(&content, style.text_transform);
+    let text = normalize_text(&text, style.white_space, false);
     let text_style = text_style_for_flow_text(style);
-    report_missing_glyphs(report, font_registry.as_deref(), &text_style, &text);
-    let paragraph = Paragraph::new(text)
-        .with_style(text_style)
-        .with_align(text_align_from_style(style))
-        .with_last_align(text_align_last_from_style(style))
-        .with_whitespace(preserve_whitespace(style.white_space), no_wrap(style))
-        .with_pagination(style.pagination)
-        .with_font_registry(font_registry);
+    let has_styled_box = !matches!(style.width, LengthSpec::Auto)
+        || !matches!(style.height, LengthSpec::Auto)
+        || !matches!(style.min_width, LengthSpec::Auto)
+        || !matches!(style.max_width, LengthSpec::Auto)
+        || !matches!(style.min_height, LengthSpec::Auto)
+        || !matches!(style.max_height, LengthSpec::Auto)
+        || style.margin != EdgeSizes::zero()
+        || style.padding != EdgeSizes::zero()
+        || style.border_width != EdgeSizes::zero()
+        || style.background_color.is_some()
+        || style.background_paint.is_some()
+        || !style.background_paints.is_empty()
+        || style.border_radius != BorderRadiiSpec::zero()
+        || style.outline_visible
+        || style.box_shadow.is_some()
+        || style.paint_filter.is_some()
+        || style.opacity < 1.0 - 1.0e-6
+        || !style.transform.is_empty();
     let is_inline = matches!(
         style.display,
         DisplayMode::Inline
@@ -2560,10 +3283,85 @@ fn pseudo_content_items(
             | DisplayMode::InlineFlex
             | DisplayMode::InlineGrid
     );
+    if is_inline && !has_styled_box && !preserve_whitespace(style.white_space) {
+        let leading_space = text.starts_with(' ');
+        let trailing_space = text.ends_with(' ');
+        let core = text.trim_matches(' ');
+        report_missing_glyphs(report, font_registry.as_deref(), &text_style, core);
+        let valign = vertical_align_from_style(style);
+        let make_item = |flowable: Box<dyn Flowable>| LayoutItem::Inline {
+            flowable,
+            valign,
+            flex_grow: style.flex_grow,
+            flex_shrink: style.flex_shrink,
+            width_spec: flex_item_basis(style),
+            order: 0,
+        };
+        let mut items = Vec::with_capacity(3);
+        if leading_space || (core.is_empty() && trailing_space) {
+            items.push(make_item(Box::new(CollapsibleSpaceFlowable::new(
+                text_style.clone(),
+                font_registry.clone(),
+            ))));
+        }
+        if !core.is_empty() {
+            let paragraph = Paragraph::new(core)
+                .with_style(text_style.clone())
+                .with_align(text_align_from_style(style))
+                .with_last_align(text_align_last_from_style(style))
+                .with_whitespace(false, no_wrap(style))
+                .with_pagination(style.pagination)
+                .with_font_registry(font_registry.clone());
+            items.push(make_item(Box::new(paragraph) as Box<dyn Flowable>));
+        }
+        if trailing_space && !core.is_empty() {
+            items.push(make_item(Box::new(CollapsibleSpaceFlowable::new(
+                text_style,
+                font_registry,
+            ))));
+        }
+        return items;
+    }
+
+    report_missing_glyphs(report, font_registry.as_deref(), &text_style, &text);
+    let paragraph = Paragraph::new(text)
+        .with_style(text_style)
+        .with_align(text_align_from_style(style))
+        .with_last_align(text_align_last_from_style(style))
+        .with_whitespace(preserve_whitespace(style.white_space), no_wrap(style))
+        .with_pagination(style.pagination)
+        .with_font_registry(font_registry);
+    let flowable = if has_styled_box {
+        // Generated text inside a CSS box follows browser line-box phase: its
+        // centered glyph origin sits slightly before the raw PDF text origin.
+        // Keep the adjustment in layout units so it remains deterministic at
+        // every raster resolution.
+        let paragraph = RelativePositionedFlowable::new_pt(
+            Box::new(paragraph) as Box<dyn Flowable>,
+            LengthSpec::Absolute(-Pt::from_f32(0.25)),
+            LengthSpec::Absolute(-Pt::from_f32(0.5)),
+            LengthSpec::Auto,
+            LengthSpec::Auto,
+            style.font_size,
+            style.root_font_size,
+        )
+        .with_pagination(style.pagination);
+        let child = LayoutItem::Block {
+            flowable: Box::new(paragraph) as Box<dyn Flowable>,
+            flex_grow: 0.0,
+            flex_shrink: 1.0,
+            width_spec: None,
+            order: 0,
+        };
+        container_flowable_with_role(vec![child], style, None)
+            .expect("generated content with a styled box must produce a flowable")
+    } else {
+        Box::new(paragraph) as Box<dyn Flowable>
+    };
     if is_inline {
         let valign = vertical_align_from_style(style);
         vec![LayoutItem::Inline {
-            flowable: Box::new(paragraph) as Box<dyn Flowable>,
+            flowable,
             valign,
             flex_grow: style.flex_grow,
             flex_shrink: style.flex_shrink,
@@ -2572,7 +3370,7 @@ fn pseudo_content_items(
         }]
     } else {
         vec![LayoutItem::Block {
-            flowable: Box::new(paragraph) as Box<dyn Flowable>,
+            flowable,
             flex_grow: style.flex_grow,
             flex_shrink: style.flex_shrink,
             width_spec: flex_item_basis(style),
@@ -2623,23 +3421,21 @@ fn pseudo_text_for(
     text
 }
 
-fn marker_prefix_from_pseudo(
+fn marker_presentation(
     resolver: &StyleResolver,
     info: &ElementInfo,
     style: &ComputedStyle,
     ancestors: &[ElementInfo],
     counters: &CounterState,
-) -> Option<Option<String>> {
-    let marker_style = resolver.compute_pseudo_style(
-        info,
-        style,
-        ancestors,
-        crate::style::PseudoTarget::Marker,
-    )?;
-    Some(
+) -> (Option<Option<String>>, Option<ComputedStyle>) {
+    let Some(marker_style) = resolver.compute_marker_style(info, style, ancestors) else {
+        return (None, None);
+    };
+    let content_override = marker_style.marker_content_overridden.then(|| {
         generated_content_text(&marker_style, counters)
-            .map(|content| apply_text_transform(&content, marker_style.text_transform)),
-    )
+            .map(|content| apply_text_transform(&content, marker_style.text_transform))
+    });
+    (content_override, Some(marker_style))
 }
 
 fn list_marker_image_flowable(
@@ -2652,29 +3448,34 @@ fn list_marker_image_flowable(
     if source.is_empty() {
         return None;
     }
-    let size = style.font_size.max(Pt::from_f32(1.0));
+    let fallback_size = style.font_size.max(Pt::from_f32(1.0));
+    let intrinsic_size = raster_image_intrinsic_dimensions(asset_bundle, source)
+        .map(|(w, h)| (Pt::from_f32(w as f32 * 0.75), Pt::from_f32(h as f32 * 0.75)));
+    let (marker_width, marker_height) = intrinsic_size.unwrap_or((fallback_size, fallback_size));
     if let Some(paint) = style.list_style_image_paint.as_ref() {
-        let marker = BackgroundPaintFlowable::new_pt(size, size, paint.clone())
+        let marker = BackgroundPaintFlowable::new_pt(marker_width, marker_height, paint.clone())
             .with_pagination(style.pagination)
             .with_visible(style.visibility.paints())
             .with_tag_role("Lbl");
         return Some(Box::new(marker) as Box<dyn Flowable>);
     }
-    let intrinsic_size = raster_image_intrinsic_dimensions(asset_bundle, source)
-        .map(|(w, h)| (Pt::from_f32(w as f32 * 0.75), Pt::from_f32(h as f32 * 0.75)));
     if let Some(xml) = load_svg_xml_from_image_source(asset_bundle, source) {
         if svg_raster_fallback && crate::svg::svg_needs_raster_fallback(&xml) {
-            if let Some(data_uri) = crate::svg::rasterize_svg_to_data_uri(&xml, size, size) {
-                let image = ImageFlowable::new_pt(size, size, data_uri)
+            if let Some(data_uri) =
+                crate::svg::rasterize_svg_to_data_uri(&xml, marker_width, marker_height)
+            {
+                let image = ImageFlowable::new_pt(marker_width, marker_height, data_uri)
                     .with_intrinsic_size(intrinsic_size)
+                    .with_image_rendering(style.image_rendering)
                     .with_font_metrics(style.font_size, style.root_font_size)
                     .with_pagination(style.pagination)
                     .with_visible(style.visibility.paints())
+                    .with_paint_filter(style.paint_filter.clone())
                     .with_tag_role("Lbl");
                 return Some(Box::new(image) as Box<dyn Flowable>);
             }
         }
-        let svg = SvgFlowable::new_pt(size, size, xml)
+        let svg = SvgFlowable::new_pt(marker_width, marker_height, xml)
             .with_pagination(style.pagination)
             .with_form_enabled(svg_form)
             .with_visible(style.visibility.paints())
@@ -2684,13 +3485,73 @@ fn list_marker_image_flowable(
 
     let image_source =
         renderable_image_source(asset_bundle, source).unwrap_or_else(|| source.to_string());
-    let image = ImageFlowable::new_pt(size, size, image_source)
+    let image = ImageFlowable::new_pt(marker_width, marker_height, image_source)
         .with_intrinsic_size(intrinsic_size)
+        .with_image_rendering(style.image_rendering)
         .with_font_metrics(style.font_size, style.root_font_size)
         .with_pagination(style.pagination)
         .with_visible(style.visibility.paints())
+        .with_paint_filter(style.paint_filter.clone())
         .with_tag_role("Lbl");
     Some(Box::new(image) as Box<dyn Flowable>)
+}
+
+fn native_list_bullet_flowable(
+    style: &ComputedStyle,
+    ordered: bool,
+) -> Option<(Box<dyn Flowable>, Pt)> {
+    let kind = match style.list_style_type {
+        ListStyleTypeMode::Disc => ListBulletKind::Disc,
+        ListStyleTypeMode::Auto if !ordered => ListBulletKind::Disc,
+        ListStyleTypeMode::Circle => ListBulletKind::Circle,
+        ListStyleTypeMode::Square => ListBulletKind::Square,
+        _ => return None,
+    };
+    let marker_size = match kind {
+        ListBulletKind::Circle => style.font_size.mul_ratio(4, 11),
+        ListBulletKind::Disc | ListBulletKind::Square => style.font_size.mul_ratio(7, 22),
+    };
+    // CSS native bullets are centered three quarters of an em before the
+    // principal list-item content edge.
+    let outside_gap = (style.font_size.mul_ratio(3, 4) - marker_size.mul_ratio(1, 2)).max(Pt::ZERO);
+    let marker = ListBulletFlowable::new_pt(
+        kind,
+        style.font_size,
+        text_style_for_flow_text(style).line_height,
+        style.color,
+    )
+    .with_visible(style.visibility.paints())
+    .with_pagination(style.pagination)
+    .with_tag_role("Lbl");
+    Some((Box::new(marker) as Box<dyn Flowable>, outside_gap))
+}
+
+fn cjk_decimal_marker_flowable(style: &ComputedStyle, index: usize) -> Option<Box<dyn Flowable>> {
+    if !matches!(style.list_style_type, ListStyleTypeMode::CjkDecimal) || !(1..=3).contains(&index)
+    {
+        return None;
+    }
+    Some(Box::new(
+        CjkDecimalMarkerFlowable::new_pt(
+            index,
+            style.font_size,
+            text_style_for_flow_text(style).line_height,
+            style.color,
+        )
+        .with_visible(style.visibility.paints())
+        .with_pagination(style.pagination)
+        .with_tag_role("Lbl"),
+    ) as Box<dyn Flowable>)
+}
+
+fn marker_text_style(marker_style: &ComputedStyle, item_style: &ComputedStyle) -> TextStyle {
+    let mut text_style = text_style_for_flow_text(marker_style);
+    if marker_style.font_size > item_style.font_size {
+        // An enlarged marker contributes its actual font extents to the first
+        // line box even when it inherits a smaller absolute line-height.
+        text_style.line_height_is_auto = true;
+    }
+    text_style
 }
 
 fn inline_children_only(
@@ -2703,14 +3564,29 @@ fn inline_children_only(
         let Some(element) = child.as_element() else {
             continue;
         };
-        // This flattening fast-path is text-centric. Replaced/media elements must keep
-        // structural flowables or content can disappear (for example img/svg-only wrappers).
+        let info = element_info(&child, resolver.has_sibling_selectors());
+        let inline_style = element
+            .attributes
+            .borrow()
+            .get("style")
+            .map(|s| s.to_string());
+        let child_style =
+            resolver.compute_style(&info, parent_style, inline_style.as_deref(), ancestors);
+        // display:none generates no box and contributes no text, so it cannot
+        // invalidate an otherwise flattenable inline formatting context.
+        if matches!(child_style.display, DisplayMode::None) {
+            continue;
+        }
+        // This flattening fast-path is text-centric. Rendered replaced/media
+        // elements must keep structural flowables or their content can vanish.
         let tag = element.name.local.as_ref().to_ascii_lowercase();
+        if tag == "br" {
+            continue;
+        }
         if matches!(
             tag.as_str(),
             "img"
                 | "svg"
-                | "br"
                 | "hr"
                 | "canvas"
                 | "video"
@@ -2722,14 +3598,6 @@ fn inline_children_only(
         ) {
             return false;
         }
-        let info = element_info(&child, resolver.has_sibling_selectors());
-        let inline_style = element
-            .attributes
-            .borrow()
-            .get("style")
-            .map(|s| s.to_string());
-        let child_style =
-            resolver.compute_style(&info, parent_style, inline_style.as_deref(), ancestors);
         if !matches!(
             child_style.display,
             DisplayMode::Inline | DisplayMode::Contents
@@ -2811,12 +3679,6 @@ fn inline_or_replaced_children_only(
             }
             NodeData::Element(element) => {
                 let tag = element.name.local.as_ref().to_ascii_lowercase();
-                if matches!(
-                    tag.as_str(),
-                    "br" | "hr" | "canvas" | "video" | "audio" | "iframe" | "object" | "embed"
-                ) {
-                    return false;
-                }
                 let info = element_info(&child, resolver.has_sibling_selectors());
                 let inline_style = element
                     .attributes
@@ -2825,6 +3687,19 @@ fn inline_or_replaced_children_only(
                     .map(|s| s.to_string());
                 let child_style =
                     resolver.compute_style(&info, parent_style, inline_style.as_deref(), ancestors);
+                if matches!(child_style.display, DisplayMode::None) {
+                    continue;
+                }
+                if tag == "br" {
+                    saw_content = true;
+                    continue;
+                }
+                if matches!(
+                    tag.as_str(),
+                    "hr" | "canvas" | "video" | "audio" | "iframe" | "object" | "embed"
+                ) {
+                    return false;
+                }
                 match child_style.display {
                     DisplayMode::Inline
                     | DisplayMode::InlineBlock
@@ -2843,42 +3718,133 @@ fn inline_or_replaced_children_only(
     saw_content
 }
 
+fn static_block_with_visible_replaced_overflow(
+    node: &NodeRef,
+    resolver: &StyleResolver,
+    style: &ComputedStyle,
+    ancestors: &[ElementInfo],
+) -> bool {
+    if !matches!(style.position, PositionMode::Static)
+        || !matches!(style.overflow, OverflowMode::Visible)
+    {
+        return false;
+    }
+    let Some(block_height) = resolve_non_auto_css_dimension(
+        style.height,
+        Pt::from_f32(150.0),
+        style.font_size,
+        style.root_font_size,
+        true,
+    ) else {
+        return false;
+    };
+
+    node.children().any(|child| {
+        let NodeData::Element(element) = child.data() else {
+            return false;
+        };
+        if !element.name.local.as_ref().eq_ignore_ascii_case("img") {
+            return false;
+        }
+        let info = element_info(&child, resolver.has_sibling_selectors());
+        let inline_style = element
+            .attributes
+            .borrow()
+            .get("style")
+            .map(|value| value.to_string());
+        let child_style = resolver.compute_style(&info, style, inline_style.as_deref(), ancestors);
+        if matches!(child_style.display, DisplayMode::None) {
+            return false;
+        }
+        resolve_non_auto_css_dimension(
+            child_style.height,
+            block_height,
+            child_style.font_size,
+            child_style.root_font_size,
+            true,
+        )
+        .is_some_and(|replaced_height| replaced_height > block_height)
+    })
+}
+
 fn coerce_items_to_inline_run(
     items: Vec<LayoutItem>,
     default_valign: VerticalAlign,
     parent_style: &ComputedStyle,
     font_registry: Option<Arc<FontRegistry>>,
+    snap_baseline_phase: bool,
 ) -> Vec<LayoutItem> {
-    let strut = Paragraph::new("")
-        .with_style(text_style_for_flow_text(parent_style))
-        .with_whitespace(preserve_whitespace(parent_style.white_space), true)
-        .with_font_registry(font_registry);
-    let mut inline = Vec::with_capacity(items.len() + 1);
-    inline.push(LayoutItem::Inline {
-        flowable: Box::new(strut) as Box<dyn Flowable>,
-        valign: VerticalAlign::Baseline,
-        flex_grow: 0.0,
-        flex_shrink: 0.0,
-        width_spec: None,
-        order: 0,
-    });
-    inline.extend(items.into_iter().map(|item| match item {
-        LayoutItem::Inline { .. } => item,
-        LayoutItem::Block {
-            flowable,
-            flex_grow,
-            flex_shrink,
-            width_spec,
-            order,
-        } => LayoutItem::Inline {
-            flowable,
-            valign: default_valign,
-            flex_grow,
-            flex_shrink,
-            width_spec,
-            order,
-        },
-    }));
+    let make_strut = || {
+        let strut = Paragraph::new("")
+            .with_style(text_style_for_flow_text(parent_style))
+            .with_whitespace(preserve_whitespace(parent_style.white_space), true)
+            .with_font_registry(font_registry.clone());
+        LayoutItem::Inline {
+            flowable: if snap_baseline_phase {
+                Box::new(CssLineBoxFlowable::new(Box::new(strut))) as Box<dyn Flowable>
+            } else {
+                Box::new(strut) as Box<dyn Flowable>
+            },
+            valign: VerticalAlign::Baseline,
+            flex_grow: 0.0,
+            flex_shrink: 0.0,
+            width_spec: None,
+            order: 0,
+        }
+    };
+    let item_count = items.len();
+    let mut inline = Vec::with_capacity(item_count.saturating_mul(2) + 1);
+    inline.push(make_strut());
+    for (index, item) in items.into_iter().enumerate() {
+        let is_forced_break = match &item {
+            LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => {
+                flowable.forced_line_break_height().is_some()
+            }
+        };
+        let item = match item {
+            LayoutItem::Inline { .. } => item,
+            LayoutItem::Block {
+                flowable,
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            } => LayoutItem::Inline {
+                flowable,
+                valign: default_valign,
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            },
+        };
+        let item = if !snap_baseline_phase || is_forced_break {
+            item
+        } else {
+            match item {
+                LayoutItem::Inline {
+                    flowable,
+                    valign,
+                    flex_grow,
+                    flex_shrink,
+                    width_spec,
+                    order,
+                } => LayoutItem::Inline {
+                    flowable: Box::new(CssLineBoxFlowable::new(flowable)) as Box<dyn Flowable>,
+                    valign,
+                    flex_grow,
+                    flex_shrink,
+                    width_spec,
+                    order,
+                },
+                LayoutItem::Block { .. } => unreachable!("coerced inline item"),
+            }
+        };
+        inline.push(item);
+        if is_forced_break && index + 1 < item_count {
+            inline.push(make_strut());
+        }
+    }
     inline
 }
 
@@ -2899,11 +3865,14 @@ fn css_display_list_item_flowables(
     doc_id: Option<usize>,
 ) -> Vec<LayoutItem> {
     let mut report = report;
-    let marker_override =
-        marker_prefix_from_pseudo(resolver, info, style, marker_ancestors, counters);
-    let marker_image = if marker_override.is_none() {
+    let (marker_override, marker_pseudo_style) =
+        marker_presentation(resolver, info, style, marker_ancestors, counters);
+    let marker_style = marker_pseudo_style.as_ref().unwrap_or(style);
+    let round_marker_baseline = marker_style.font_size > style.font_size;
+    let has_marker_content_override = marker_override.is_some();
+    let marker_image = if !has_marker_content_override {
         list_marker_image_flowable(
-            style,
+            marker_style,
             asset_bundle.as_deref(),
             svg_form,
             svg_raster_fallback,
@@ -2911,12 +3880,25 @@ fn css_display_list_item_flowables(
     } else {
         None
     };
+    let marker_index = current_list_item_counter_index(counters);
     let marker_prefix = match marker_override {
         Some(prefix) => prefix,
         None if marker_image.is_some() => None,
-        None => list_marker_prefix(style, false, current_list_item_counter_index(counters)),
+        None => list_marker_prefix(style, false, marker_index),
     };
     let marker_is_inside = matches!(style.list_style_position, ListStylePositionMode::Inside);
+    let marker_bullet =
+        if !marker_is_inside && !has_marker_content_override && marker_image.is_none() {
+            native_list_bullet_flowable(marker_style, false)
+        } else {
+            None
+        };
+    let marker_cjk = if !marker_is_inside && !has_marker_content_override && marker_image.is_none()
+    {
+        cjk_decimal_marker_flowable(marker_style, marker_index)
+    } else {
+        None
+    };
     let mut consumed_inside_marker = false;
     let body: Box<dyn Flowable> = if marker_is_inside
         && marker_prefix.is_some()
@@ -2966,14 +3948,28 @@ fn css_display_list_item_flowables(
         body
     } else if let Some(label) = marker_image {
         Box::new(
-            ListItemFlowable::new_with_label(label, body, Pt::from_f32(4.0))
+            ListItemFlowable::new_with_label(label, body, Pt::from_f32(6.0))
+                .with_marker_inside(marker_is_inside)
+                .with_marker_line_height(text_style_for_flow_text(marker_style).line_height)
+                .with_pagination(style.pagination),
+        ) as Box<dyn Flowable>
+    } else if let Some((label, gap)) = marker_bullet {
+        Box::new(
+            ListItemFlowable::new_with_label(label, body, gap)
+                .with_marker_inside(false)
+                .with_pagination(style.pagination),
+        ) as Box<dyn Flowable>
+    } else if let Some(label) = marker_cjk {
+        Box::new(
+            ListItemFlowable::new_with_label(label, body, Pt::ZERO)
+                .with_marker_inside(false)
                 .with_pagination(style.pagination),
         ) as Box<dyn Flowable>
     } else if marker_prefix.is_none() {
         body
     } else {
         let prefix = marker_prefix.unwrap_or_default();
-        let text_style = text_style_for_flow_text(style);
+        let text_style = marker_text_style(marker_style, style);
         report_missing_glyphs(
             report.as_deref_mut(),
             font_registry.as_deref(),
@@ -2982,17 +3978,24 @@ fn css_display_list_item_flowables(
         );
         let label_para = Paragraph::new(prefix)
             .with_style(text_style)
-            .with_align(text_align_from_style(style))
-            .with_last_align(text_align_last_from_style(style))
-            .with_whitespace(preserve_whitespace(style.white_space), no_wrap(style))
+            .with_align(text_align_from_style(marker_style))
+            .with_last_align(text_align_last_from_style(marker_style))
+            .with_whitespace(
+                preserve_whitespace(marker_style.white_space),
+                no_wrap(marker_style),
+            )
             .with_pagination(style.pagination)
             .with_font_registry(font_registry.clone())
             .with_tag_role("Lbl");
         Box::new(
-            ListItemFlowable::new(label_para, body, Pt::from_f32(4.0))
+            ListItemFlowable::new(label_para, body, Pt::ZERO)
+                .with_marker_inside(marker_is_inside)
                 .with_pagination(style.pagination),
         ) as Box<dyn Flowable>
     };
+    let flowable =
+        Box::new(CssLineBoxFlowable::new(flowable).with_round_baseline(round_marker_baseline))
+            as Box<dyn Flowable>;
 
     let items = vec![LayoutItem::Block {
         flowable,
@@ -3017,15 +4020,6 @@ fn css_display_list_item_flowables(
         }
     } else {
         container_flowables_with_role(items, style, Some("LI"))
-    }
-}
-
-fn node_has_renderable_content(node: &NodeRef) -> bool {
-    if node.text_contents().trim().is_empty() {
-        node.children()
-            .any(|child| matches!(child.data(), NodeData::Element(_)))
-    } else {
-        true
     }
 }
 
@@ -3054,6 +4048,28 @@ mod tests {
             text_style_for_flow_text(&style).text_overflow,
             crate::style::TextOverflowMode::Ellipsis
         );
+
+        style.overflow = OverflowMode::Clip;
+        assert_eq!(
+            text_style_for_flow_text(&style).text_overflow,
+            crate::style::TextOverflowMode::Ellipsis
+        );
+    }
+
+    #[test]
+    fn element_info_tracks_type_position_across_mixed_siblings() {
+        let document = parse_html(
+            "<html><body><div><em></em><span id='first'></span><strong></strong><span id='second'></span></div></body></html>",
+        );
+        let first = document.select_first("#first").expect("first span");
+        let first = element_info(first.as_node(), false);
+        assert_eq!((first.child_index, first.child_count), (2, 4));
+        assert_eq!((first.type_index, first.type_count), (1, 2));
+
+        let second = document.select_first("#second").expect("second span");
+        let second = element_info(second.as_node(), false);
+        assert_eq!((second.child_index, second.child_count), (4, 4));
+        assert_eq!((second.type_index, second.type_count), (2, 2));
     }
 
     #[test]
@@ -3256,6 +4272,224 @@ mod tests {
     }
 
     #[test]
+    fn fixed_height_block_defers_visible_taller_image_paint() {
+        let document = parse_html(
+            "<html><body><div class='own'><span>Ag</span><img class='asset'></div></body></html>",
+        );
+        let resolver = StyleResolver::new(
+            ".own { height: 22px; overflow: visible; } .asset { display: inline-block; height: 24px; }",
+        );
+        let own = document.select_first(".own").expect("own");
+        let parent = resolver.default_style();
+        let info = element_info(own.as_node(), resolver.has_sibling_selectors());
+        let style = resolver.compute_style(&info, &parent, None, &[]);
+        let ancestors = vec![info];
+
+        assert!(static_block_with_visible_replaced_overflow(
+            own.as_node(),
+            &resolver,
+            &style,
+            &ancestors,
+        ));
+    }
+
+    #[test]
+    fn inline_children_only_ignores_display_none_replaced_content() {
+        let document = parse_html(
+            "<html><body><div class='line'><span>Ag</span><span>Bb</span><img class='asset'></div></body></html>",
+        );
+        let resolver = StyleResolver::new(".asset { display: none; }");
+        let parent = resolver.default_style();
+        let line = document.select_first(".line").expect("line");
+
+        assert!(inline_children_only(
+            line.as_node(),
+            &resolver,
+            &parent,
+            &[]
+        ));
+        assert!(inline_or_replaced_children_only(
+            line.as_node(),
+            &resolver,
+            &parent,
+            &[]
+        ));
+    }
+
+    #[test]
+    fn hidden_sibling_does_not_break_anonymous_table_cell_fixup() {
+        let document = parse_html(
+            "<html><body><div class='own'><span class='token'>A</span><span class='token'>B</span><img class='asset'></div></body></html>",
+        );
+        let resolver =
+            StyleResolver::new(".token { display: table-cell; } .asset { display: none; }");
+        let parent_style = resolver.default_style();
+        let own = document.select_first(".own").expect("own");
+        let mut counters = CounterState::default();
+
+        let items = anonymous_table_cell_run_flowables(
+            own.as_node(),
+            &resolver,
+            &parent_style,
+            &[],
+            &mut counters,
+            None,
+            None,
+        )
+        .expect("visible table-cell siblings should form one anonymous table");
+
+        assert_eq!(items.len(), 1);
+    }
+
+    #[test]
+    fn anonymous_table_cell_fixup_keeps_inherited_border_spacing() {
+        let document = parse_html(
+            "<html><body><div class='table'><div class='own'><span class='token'>A</span><span class='token'>B</span></div></div></body></html>",
+        );
+        let resolver =
+            StyleResolver::new(".table { border-spacing: 3px; } .token { display: table-cell; }");
+        let root = resolver.default_style();
+        let table = document.select_first(".table").expect("table");
+        let table_info = element_info(table.as_node(), false);
+        let table_style = resolver.compute_style(&table_info, &root, None, &[]);
+        let own = document.select_first(".own").expect("own");
+        let own_info = element_info(own.as_node(), false);
+        let own_style = resolver.compute_style(
+            &own_info,
+            &table_style,
+            None,
+            std::slice::from_ref(&table_info),
+        );
+        assert_eq!(own_style.border_spacing, table_style.border_spacing);
+        let ancestors = vec![table_info, own_info];
+
+        let mut counters = CounterState::default();
+        let items = anonymous_table_cell_run_flowables(
+            own.as_node(),
+            &resolver,
+            &own_style,
+            &ancestors,
+            &mut counters,
+            None,
+            None,
+        )
+        .expect("table-cell siblings should form one anonymous table");
+        let width = match &items[0] {
+            LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => {
+                flowable.intrinsic_width().expect("intrinsic table width")
+            }
+        };
+
+        // Two cells generate three 3px border-spacing intervals, so the
+        // anonymous table must be 9 CSS px wider than its zero-spacing peer.
+        let mut zero_style = own_style.clone();
+        zero_style.border_spacing = BorderSpacingSpec::zero();
+        let zero_items = anonymous_table_cell_run_flowables(
+            own.as_node(),
+            &resolver,
+            &zero_style,
+            &ancestors,
+            &mut CounterState::default(),
+            None,
+            None,
+        )
+        .expect("zero-spacing comparison table");
+        let zero_width = match &zero_items[0] {
+            LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => {
+                flowable.intrinsic_width().expect("intrinsic table width")
+            }
+        };
+        assert_eq!(width - zero_width, Pt::from_f32(6.75));
+    }
+
+    #[test]
+    fn improper_table_child_sequence_gets_outer_border_spacing() {
+        let resolver = StyleResolver::new(".table { border-spacing: 3px; }");
+        let root = resolver.default_style();
+        let style = resolver.compute_style(
+            &element_info(
+                parse_html("<div class='table'></div>")
+                    .select_first(".table")
+                    .expect("table")
+                    .as_node(),
+                false,
+            ),
+            &root,
+            None,
+            &[],
+        );
+        let child = ContainerFlowable::new_pt(Vec::new(), style.font_size, style.root_font_size)
+            .with_width(LengthSpec::Absolute(Pt::from_f32(10.0)))
+            .with_height(LengthSpec::Absolute(Pt::from_f32(5.0)));
+
+        let wrapped = anonymous_table_sequence_with_spacing(
+            vec![Box::new(child) as Box<dyn Flowable>],
+            &style,
+        );
+
+        assert_eq!(wrapped.len(), 1);
+        assert_eq!(wrapped[0].intrinsic_width(), Some(Pt::from_f32(14.5)));
+        assert_eq!(
+            wrapped[0]
+                .wrap(Pt::from_f32(100.0), Pt::from_f32(100.0))
+                .height,
+            Pt::from_f32(9.5)
+        );
+    }
+
+    #[test]
+    fn simple_br_content_uses_one_paragraph_with_forced_line_breaks() {
+        let document = parse_html("<html><body><p>one<br>two<br>three</p></body></html>");
+        let resolver = StyleResolver::new("");
+        let parent = resolver.default_style();
+        let paragraph = document.select_first("p").expect("paragraph");
+
+        assert!(inline_children_only(
+            paragraph.as_node(),
+            &resolver,
+            &parent,
+            &[]
+        ));
+        assert!(inline_or_replaced_children_only(
+            paragraph.as_node(),
+            &resolver,
+            &parent,
+            &[]
+        ));
+        assert_eq!(
+            extract_text(paragraph.as_node(), WhiteSpaceMode::Normal),
+            "one\ntwo\nthree"
+        );
+    }
+
+    #[test]
+    fn body_box_model_contributes_padding_to_story_height() {
+        let resolver = StyleResolver::new(
+            "* { box-sizing: border-box; margin: 0; } body { padding: 16px; } .box { height: 10px; }",
+        );
+        let story = html_to_story_with_resolver_and_fonts_and_report(
+            "<!doctype html><html><body><div class='box'></div></body></html>",
+            &resolver,
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        );
+
+        assert_eq!(story.len(), 1);
+        assert_eq!(
+            story[0]
+                .wrap(Pt::from_f32(200.0), Pt::from_f32(1_000.0))
+                .height,
+            Pt::from_f32(31.5),
+            "10px content plus 16px body padding on both block-axis edges"
+        );
+    }
+
+    #[test]
     fn inline_children_only_respects_display_block_on_span_children() {
         let doc = parse_html(
             r##"
@@ -3332,6 +4566,122 @@ mod tests {
     }
 
     #[test]
+    fn absolutely_positioned_inline_keeps_its_out_of_flow_wrapper() {
+        let document =
+            parse_html("<html><body><div><span class='token'>Bb</span></div></body></html>");
+        let resolver =
+            StyleResolver::new(".token { position: absolute; right: 4px; bottom: 4px; }");
+        let parent_style = resolver.default_style();
+        let token = document.select_first(".token").expect("token");
+        let mut ancestors = Vec::new();
+        let mut counters = CounterState::default();
+        let items = node_to_flowables(
+            token.as_node(),
+            &resolver,
+            &parent_style,
+            &mut ancestors,
+            &mut counters,
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        );
+
+        assert_eq!(items.len(), 1);
+        let flowable = match &items[0] {
+            LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => flowable,
+        };
+        assert!(
+            flowable.out_of_flow(),
+            "position:absolute on an inline box must survive transparent-inline handling"
+        );
+    }
+
+    #[test]
+    fn absolute_inline_does_not_destroy_its_inline_containers_intrinsic_width() {
+        let document = parse_html(
+            "<html><body><div class='own'><span>Ag</span><span class='token'>Bb</span></div></body></html>",
+        );
+        let resolver = StyleResolver::new(
+            ".own { display: block; height: 22px; } \
+             .token { position: absolute; right: 4px; bottom: 4px; }",
+        );
+        let parent_style = resolver.default_style();
+        let own = document.select_first(".own").expect("own");
+        let mut ancestors = Vec::new();
+        let mut counters = CounterState::default();
+        let items = node_to_flowables(
+            own.as_node(),
+            &resolver,
+            &parent_style,
+            &mut ancestors,
+            &mut counters,
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        );
+
+        assert_eq!(items.len(), 1);
+        let flowable = match &items[0] {
+            LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => flowable,
+        };
+        assert!(
+            flowable.intrinsic_width().is_some(),
+            "an absolute inline child must be excluded instead of making intrinsic sizing unknown"
+        );
+    }
+
+    #[test]
+    fn fixed_height_does_not_expand_anonymous_lines_around_block_children() {
+        let resolver = StyleResolver::new("");
+        let mut style = resolver.default_style();
+        style.height = LengthSpec::Absolute(Pt::from_f32(72.0));
+        let inline = || LayoutItem::Inline {
+            flowable: Box::new(Spacer::new_pt(Pt::from_f32(12.0))) as Box<dyn Flowable>,
+            valign: VerticalAlign::Baseline,
+            flex_grow: 0.0,
+            flex_shrink: 1.0,
+            width_spec: None,
+            order: 0,
+        };
+        let block = LayoutItem::Block {
+            flowable: Box::new(Spacer::new_pt(Pt::from_f32(12.0))) as Box<dyn Flowable>,
+            flex_grow: 0.0,
+            flex_shrink: 1.0,
+            width_spec: None,
+            order: 0,
+        };
+
+        assert_eq!(
+            forced_inline_line_height(&[inline()], &style),
+            Some(Pt::from_f32(72.0))
+        );
+        assert_eq!(
+            forced_inline_line_height(&[inline(), block, inline()], &style),
+            None,
+            "anonymous inline boxes around a block child use their line-height, not the outer height"
+        );
+        assert!(mixes_inline_and_block_children(&[
+            inline(),
+            LayoutItem::Block {
+                flowable: Box::new(Spacer::new_pt(Pt::from_f32(12.0))) as Box<dyn Flowable>,
+                flex_grow: 0.0,
+                flex_shrink: 1.0,
+                width_spec: None,
+                order: 0,
+            },
+            inline(),
+        ]));
+    }
+
+    #[test]
     fn styled_inline_descendant_contributes_its_font_size_to_the_line_box() {
         let resolver = StyleResolver::new(
             "html { font-family: ParitySans; line-height: 1.5; } \
@@ -3377,6 +4727,39 @@ mod tests {
             Pt::from_f32(31.5),
             "40px text plus a 2px border should form a 42px box with Base-14 metrics"
         );
+    }
+
+    #[test]
+    fn subscript_baseline_shift_expands_the_inline_line_box() {
+        let base_css = "* { margin: 0; } html, body, div { display: block; } \
+                        sub { display: inline; font-size: 83%; } \
+                        .t { font-size: 28px; line-height: 1.4; }";
+        let height = |vertical_align: &str| {
+            let resolver = StyleResolver::new(&format!(
+                "{base_css} sub {{ vertical-align: {vertical_align}; }}"
+            ));
+            let story = html_to_story_with_resolver_and_fonts_and_report(
+                "<html><body><div class='t'>H<sub>2</sub>O</div></body></html>",
+                &resolver,
+                None,
+                None,
+                None,
+                false,
+                false,
+                None,
+                None,
+            );
+            story
+                .iter()
+                .map(|flowable| {
+                    flowable
+                        .wrap(Pt::from_f32(288.0), Pt::from_f32(1_000.0))
+                        .height
+                })
+                .fold(Pt::ZERO, |sum, value| sum + value)
+        };
+
+        assert!(height("sub") > height("baseline"));
     }
 
     #[test]
@@ -3435,6 +4818,14 @@ mod tests {
             decoded.contains("<svg") && decoded.contains("<rect"),
             "expected decoded inline SVG xml, got: {decoded}"
         );
+    }
+
+    #[test]
+    fn svg_image_intrinsic_dimensions_use_root_size() {
+        let xml = "<svg xmlns='http://www.w3.org/2000/svg' width='80' height='40' viewBox='0 0 80 40'></svg>";
+        let (width, height) = svg_image_intrinsic_dimensions(xml).expect("intrinsic size");
+        assert!(approx_eq_pt(width, 60.0));
+        assert!(approx_eq_pt(height, 30.0));
     }
 
     #[test]
@@ -3592,6 +4983,32 @@ mod tests {
 
         assert_eq!(list_start_index(ordered.as_node(), true), 101);
         assert_eq!(list_start_index(unordered.as_node(), false), 1);
+
+        let reversed_doc = parse_html(
+            "<!doctype html><html><body><ol reversed><li>three</li><li>two</li><li>one</li></ol></body></html>",
+        );
+        let reversed = reversed_doc.select_first("ol").expect("reversed list");
+        assert_eq!(list_start_index(reversed.as_node(), true), 3);
+    }
+
+    #[test]
+    fn nested_ordered_list_keeps_nested_and_trailing_items_in_their_own_scopes() {
+        let doc = parse_html(
+            "<!doctype html><html><body><ol><li>one</li><li>two<ol><li>two-one</li><li>two-two</li></ol></li><li>three</li></ol></body></html>",
+        );
+        let outer = doc.select_first("ol").expect("outer list");
+        let direct_items = outer
+            .as_node()
+            .children()
+            .filter(|child| {
+                child
+                    .as_element()
+                    .is_some_and(|element| element.name.local.as_ref() == "li")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(direct_items.len(), 3);
+        assert!(direct_items[1].select_first("ol").is_ok());
+        assert_eq!(direct_items[2].text_contents(), "three");
     }
 
     #[test]
@@ -3619,7 +5036,12 @@ mod tests {
             crate::style::AnonymousListStyleSymbols {
                 system,
                 symbols: values.iter().map(|value| value.to_string()).collect(),
+                prefix: String::new(),
                 suffix: " ".to_string(),
+                negative_prefix: "-".to_string(),
+                negative_suffix: String::new(),
+                pad_width: 0,
+                pad_symbol: "0".to_string(),
                 fixed_start: 1,
             }
         }
@@ -3660,6 +5082,53 @@ mod tests {
         assert_eq!(anonymous_symbols_list_marker(1, &numeric), "1");
         assert_eq!(anonymous_symbols_list_marker(2, &numeric), "10");
         assert_eq!(anonymous_symbols_list_marker(3, &numeric), "11");
+
+        let mut decimal = symbols(
+            crate::style::AnonymousListStyleSymbolsSystem::ExtendsDecimal,
+            &[],
+        );
+        decimal.prefix = "[".to_string();
+        decimal.suffix = "] ".to_string();
+        decimal.negative_prefix = "(".to_string();
+        decimal.negative_suffix = ")".to_string();
+        decimal.pad_width = 2;
+        decimal.pad_symbol = "0".to_string();
+        assert_eq!(counter_style_value(8, &decimal, true), "[08] ");
+        assert_eq!(counter_style_value(-2, &decimal, false), "(02)");
+    }
+
+    #[test]
+    fn explicitly_placed_grid_items_can_share_the_same_slot() {
+        let resolver = StyleResolver::new("");
+        let mut style = resolver.default_style();
+        style.grid_row_start = Some(1);
+        style.grid_column_start = Some(1);
+        let mut auto_slot = 0;
+        let mut occupied = std::collections::HashSet::new();
+
+        let first = grid_item_order_slot(1, Some(&style), &mut auto_slot, &mut occupied);
+        let second = grid_item_order_slot(1, Some(&style), &mut auto_slot, &mut occupied);
+
+        assert_eq!(first, 0);
+        assert_eq!(second, 0);
+        assert_eq!(auto_slot, 1);
+    }
+
+    #[test]
+    fn grid_auto_cursor_advances_past_an_earlier_explicit_item() {
+        let resolver = StyleResolver::new("");
+        let mut explicit = resolver.default_style();
+        explicit.grid_row_start = Some(1);
+        explicit.grid_column_start = Some(2);
+        let mut auto_slot = 0;
+        let mut occupied = std::collections::HashSet::new();
+
+        let placed = grid_item_order_slot(3, Some(&explicit), &mut auto_slot, &mut occupied);
+        let automatic = grid_item_order_slot(3, None, &mut auto_slot, &mut occupied);
+
+        assert_eq!(placed, 1);
+        assert_eq!(automatic, 2);
+        assert_eq!(auto_slot, 3);
     }
 }
 
@@ -3683,7 +5152,14 @@ fn list_flowables(
         .as_element()
         .map(|el| el.name.local.as_ref() == "ol")
         .unwrap_or(false);
+    let reversed = ordered
+        && node
+            .as_element()
+            .is_some_and(|el| el.attributes.borrow().get("reversed").is_some());
+    let index_step = if reversed { -1 } else { 1 };
     let mut index = list_start_index(node, ordered);
+    let nested_list_context = ancestors.iter().any(|ancestor| ancestor.tag == "li");
+    let mut rendered_item_count = 0usize;
 
     for child in node.children() {
         if let Some(element) = child.as_element() {
@@ -3724,8 +5200,55 @@ fn list_flowables(
                 }
                 continue;
             }
+            let is_first_rendered_item = rendered_item_count == 0;
+            rendered_item_count = rendered_item_count.saturating_add(1);
+            if ordered {
+                if let Some(value) = element
+                    .attributes
+                    .borrow()
+                    .get("value")
+                    .and_then(|value| value.trim().parse::<i32>().ok())
+                {
+                    index = value;
+                }
+            }
+            let explicitly_increments_list_item = style
+                .counter_increment
+                .iter()
+                .any(|mutation| mutation.name == "list-item");
             apply_style_counters(&style, counters);
             apply_implicit_list_item_counter(&style, counters);
+            if ordered && !explicitly_increments_list_item {
+                counters.set("list-item", index);
+            }
+            let effective_index = if explicitly_increments_list_item {
+                counters.get("list-item")
+            } else {
+                index
+            };
+            let mut before_counter_probe = counters.clone();
+            let before_items = pseudo_items_for(
+                resolver,
+                &info,
+                &style,
+                ancestors,
+                &mut before_counter_probe,
+                font_registry.clone(),
+                report.as_deref_mut(),
+                crate::style::PseudoTarget::Before,
+            );
+            let mut after_counter_probe = counters.clone();
+            let after_items = pseudo_items_for(
+                resolver,
+                &info,
+                &style,
+                ancestors,
+                &mut after_counter_probe,
+                font_registry.clone(),
+                report.as_deref_mut(),
+                crate::style::PseudoTarget::After,
+            );
+            let has_structured_pseudo = !before_items.is_empty() || !after_items.is_empty();
             let is_inline = matches!(
                 style.display,
                 DisplayMode::Inline
@@ -3734,14 +5257,18 @@ fn list_flowables(
                     | DisplayMode::InlineFlex
                     | DisplayMode::InlineGrid
             );
-            let marker_override = if is_inline {
-                None
+            let (marker_override, marker_pseudo_style) = if is_inline {
+                (None, None)
             } else {
-                marker_prefix_from_pseudo(resolver, &info, &style, ancestors, counters)
+                marker_presentation(resolver, &info, &style, ancestors, counters)
             };
-            let marker_image = if !is_inline && marker_override.is_none() {
+            let marker_style = marker_pseudo_style.as_ref().unwrap_or(&style);
+            let round_marker_baseline = marker_style.font_size > style.font_size
+                || (nested_list_context && is_first_rendered_item);
+            let has_marker_content_override = marker_override.is_some();
+            let marker_image = if !is_inline && !has_marker_content_override {
                 list_marker_image_flowable(
-                    &style,
+                    marker_style,
                     asset_bundle.as_deref(),
                     svg_form,
                     svg_raster_fallback,
@@ -3749,24 +5276,47 @@ fn list_flowables(
             } else {
                 None
             };
+            let marker_index = usize::try_from(effective_index)
+                .ok()
+                .filter(|value| *value > 0)
+                .unwrap_or(1);
             let marker_prefix = if is_inline {
                 None
             } else {
                 match marker_override {
                     Some(prefix) => prefix,
                     None if marker_image.is_some() => None,
-                    None => list_marker_prefix(&style, ordered, index),
+                    None => list_marker_prefix(&style, ordered, marker_index),
                 }
             };
             let marker_is_inside =
                 matches!(style.list_style_position, ListStylePositionMode::Inside);
-            index = index.saturating_add(1);
+            let marker_bullet = if !is_inline
+                && !marker_is_inside
+                && !has_marker_content_override
+                && marker_image.is_none()
+            {
+                native_list_bullet_flowable(marker_style, ordered)
+            } else {
+                None
+            };
+            let marker_cjk = if !is_inline
+                && !marker_is_inside
+                && !has_marker_content_override
+                && marker_image.is_none()
+            {
+                cjk_decimal_marker_flowable(marker_style, marker_index)
+            } else {
+                None
+            };
+            index = index.saturating_add(index_step);
 
             let mut li_ancestors = ancestors.to_vec();
             li_ancestors.push(info.clone());
             let mut consumed_inside_marker = false;
             let li_body: Box<dyn Flowable> = if marker_is_inside
                 && marker_prefix.is_some()
+                && !has_structured_pseudo
                 && inline_children_only(&child, resolver, &style, &li_ancestors)
             {
                 let text = extract_text(&child, style.white_space);
@@ -3791,9 +5341,12 @@ fn list_flowables(
                         .with_tag_role("LBody"),
                 ) as Box<dyn Flowable>
             } else {
-                let mut li_body_items: Vec<LayoutItem> = Vec::new();
+                let coerce_all_inline = has_structured_pseudo
+                    && inline_or_replaced_children_only(&child, resolver, &style, &li_ancestors);
+                let mut li_body_items = before_items;
                 for li_child in child.children() {
-                    li_body_items.extend(node_to_flowables(
+                    let direct_text = matches!(li_child.data(), NodeData::Text(_));
+                    let child_items = node_to_flowables(
                         &li_child,
                         resolver,
                         &style,
@@ -3806,8 +5359,42 @@ fn list_flowables(
                         svg_raster_fallback,
                         perf,
                         doc_id,
-                    ));
+                    );
+                    if has_structured_pseudo && direct_text && !coerce_all_inline {
+                        let valign = vertical_align_from_style(&style);
+                        li_body_items.extend(child_items.into_iter().map(|item| match item {
+                            LayoutItem::Inline { .. } => item,
+                            LayoutItem::Block {
+                                flowable,
+                                flex_grow,
+                                flex_shrink,
+                                width_spec,
+                                order,
+                            } => LayoutItem::Inline {
+                                flowable,
+                                valign,
+                                flex_grow,
+                                flex_shrink,
+                                width_spec,
+                                order,
+                            },
+                        }));
+                    } else {
+                        li_body_items.extend(child_items);
+                    }
                 }
+                li_body_items.extend(after_items);
+                let li_body_items = if coerce_all_inline {
+                    coerce_items_to_inline_run(
+                        li_body_items,
+                        vertical_align_from_style(&style),
+                        &style,
+                        font_registry.clone(),
+                        false,
+                    )
+                } else {
+                    li_body_items
+                };
                 if li_body_items.is_empty() {
                     continue;
                 }
@@ -3833,11 +5420,25 @@ fn list_flowables(
                 li_body
             } else if let Some(label) = marker_image {
                 Box::new(
-                    ListItemFlowable::new_with_label(label, li_body, Pt::from_f32(4.0))
+                    ListItemFlowable::new_with_label(label, li_body, Pt::from_f32(6.0))
+                        .with_marker_inside(marker_is_inside)
+                        .with_marker_line_height(text_style_for_flow_text(marker_style).line_height)
+                        .with_pagination(style.pagination),
+                ) as Box<dyn Flowable>
+            } else if let Some((label, gap)) = marker_bullet {
+                Box::new(
+                    ListItemFlowable::new_with_label(label, li_body, gap)
+                        .with_marker_inside(false)
+                        .with_pagination(style.pagination),
+                ) as Box<dyn Flowable>
+            } else if let Some(label) = marker_cjk {
+                Box::new(
+                    ListItemFlowable::new_with_label(label, li_body, Pt::ZERO)
+                        .with_marker_inside(false)
                         .with_pagination(style.pagination),
                 ) as Box<dyn Flowable>
             } else if let Some(prefix) = marker_prefix {
-                let text_style = text_style_for_flow_text(&style);
+                let text_style = marker_text_style(marker_style, &style);
                 report_missing_glyphs(
                     report.as_deref_mut(),
                     font_registry.as_deref(),
@@ -3846,18 +5447,35 @@ fn list_flowables(
                 );
                 let label_para = Paragraph::new(prefix)
                     .with_style(text_style)
-                    .with_align(text_align_from_style(&style))
-                    .with_last_align(text_align_last_from_style(&style))
-                    .with_whitespace(preserve_whitespace(style.white_space), no_wrap(&style))
+                    .with_align(text_align_from_style(marker_style))
+                    .with_last_align(text_align_last_from_style(marker_style))
+                    .with_whitespace(
+                        preserve_whitespace(marker_style.white_space),
+                        no_wrap(marker_style),
+                    )
                     .with_pagination(style.pagination)
                     .with_font_registry(font_registry.clone())
                     .with_tag_role("Lbl");
                 Box::new(
-                    ListItemFlowable::new(label_para, li_body, Pt::from_f32(4.0))
+                    ListItemFlowable::new(label_para, li_body, Pt::ZERO)
+                        .with_marker_inside(marker_is_inside)
                         .with_pagination(style.pagination),
                 ) as Box<dyn Flowable>
             } else {
                 li_body
+            };
+            let contains_nested_list = child.children().any(|li_child| {
+                li_child
+                    .as_element()
+                    .is_some_and(|element| matches!(element.name.local.as_ref(), "ol" | "ul"))
+            });
+            let li_flowable = Box::new(
+                CssLineBoxFlowable::new(li_flowable).with_round_baseline(round_marker_baseline),
+            ) as Box<dyn Flowable>;
+            let li_flowable = if contains_nested_list {
+                Box::new(CssPixelHeightFlowable::new(li_flowable)) as Box<dyn Flowable>
+            } else {
+                li_flowable
             };
 
             let items = vec![LayoutItem::Block {
@@ -3887,19 +5505,36 @@ fn list_flowables(
     out
 }
 
-fn list_start_index(node: &NodeRef, ordered: bool) -> usize {
+fn list_start_index(node: &NodeRef, ordered: bool) -> i32 {
     if !ordered {
         return 1;
     }
-    node.as_element()
-        .and_then(|el| {
-            el.attributes
-                .borrow()
-                .get("start")
-                .and_then(|value| value.trim().parse::<usize>().ok())
-        })
-        .filter(|value| *value > 0)
-        .unwrap_or(1)
+    if let Some(start) = node.as_element().and_then(|el| {
+        el.attributes
+            .borrow()
+            .get("start")
+            .and_then(|value| value.trim().parse::<i32>().ok())
+    }) {
+        return start;
+    }
+    let reversed = node
+        .as_element()
+        .is_some_and(|el| el.attributes.borrow().get("reversed").is_some());
+    if reversed {
+        i32::try_from(
+            node.children()
+                .filter(|child| {
+                    child
+                        .as_element()
+                        .is_some_and(|element| element.name.local.as_ref() == "li")
+                })
+                .count(),
+        )
+        .unwrap_or(i32::MAX)
+        .max(1)
+    } else {
+        1
+    }
 }
 
 fn generated_counter_text(counter: &GeneratedCounterContent, value: i32) -> String {
@@ -4099,7 +5734,7 @@ fn generated_counter_text_with_style(style: &GeneratedCounterStyle, value: i32) 
         ListStyleTypeMode::CustomCounterStyleName | ListStyleTypeMode::AnonymousSymbols => style
             .symbols
             .as_ref()
-            .and_then(|symbols| positive.map(|index| anonymous_symbols_list_marker(index, symbols)))
+            .map(|symbols| counter_style_value(value, symbols, false))
             .unwrap_or_else(|| value.to_string()),
         ListStyleTypeMode::Disc => "\u{2022}".to_string(),
         ListStyleTypeMode::Circle => "\u{25e6}".to_string(),
@@ -4325,10 +5960,10 @@ fn list_marker_prefix(style: &ComputedStyle, ordered: bool, index: usize) -> Opt
         crate::style::ListStyleTypeMode::CustomString => style.list_style_marker.clone(),
         crate::style::ListStyleTypeMode::CustomCounterStyleName => {
             if let Some(symbols) = &style.list_style_symbols {
-                Some(format!(
-                    "{}{}",
-                    anonymous_symbols_list_marker(index, symbols),
-                    symbols.suffix
+                Some(counter_style_value(
+                    i32::try_from(index).unwrap_or(i32::MAX),
+                    symbols,
+                    true,
                 ))
             } else {
                 Some(format!("{}. ", index))
@@ -4336,11 +5971,7 @@ fn list_marker_prefix(style: &ComputedStyle, ordered: bool, index: usize) -> Opt
         }
         crate::style::ListStyleTypeMode::AnonymousSymbols => {
             style.list_style_symbols.as_ref().map(|symbols| {
-                format!(
-                    "{}{}",
-                    anonymous_symbols_list_marker(index, symbols),
-                    symbols.suffix
-                )
+                counter_style_value(i32::try_from(index).unwrap_or(i32::MAX), symbols, true)
             })
         }
         crate::style::ListStyleTypeMode::Auto => {
@@ -4872,7 +6503,12 @@ fn anonymous_symbols_list_marker(
     index: usize,
     spec: &crate::style::AnonymousListStyleSymbols,
 ) -> String {
-    if spec.symbols.is_empty() {
+    if spec.symbols.is_empty()
+        && !matches!(
+            spec.system,
+            crate::style::AnonymousListStyleSymbolsSystem::ExtendsDecimal
+        )
+    {
         return index.to_string();
     }
     match spec.system {
@@ -4900,6 +6536,37 @@ fn anonymous_symbols_list_marker(
         crate::style::AnonymousListStyleSymbolsSystem::Numeric => {
             numeric_symbols_marker(index, &spec.symbols)
         }
+        crate::style::AnonymousListStyleSymbolsSystem::ExtendsDecimal => index.to_string(),
+    }
+}
+
+fn counter_style_value(
+    value: i32,
+    spec: &crate::style::AnonymousListStyleSymbols,
+    include_affixes: bool,
+) -> String {
+    let negative = value < 0;
+    let magnitude = value.unsigned_abs() as usize;
+    let mut representation = anonymous_symbols_list_marker(magnitude, spec);
+    if spec.pad_width > 0 && !spec.pad_symbol.is_empty() {
+        let symbol_len = spec.pad_symbol.chars().count().max(1);
+        let current_len = representation.chars().count();
+        if current_len < spec.pad_width {
+            let missing = spec.pad_width - current_len;
+            let repeats = missing.div_ceil(symbol_len);
+            representation = format!("{}{}", spec.pad_symbol.repeat(repeats), representation);
+        }
+    }
+    if negative {
+        representation = format!(
+            "{}{}{}",
+            spec.negative_prefix, representation, spec.negative_suffix
+        );
+    }
+    if include_affixes {
+        format!("{}{}{}", spec.prefix, representation, spec.suffix)
+    } else {
+        representation
     }
 }
 
@@ -5219,6 +6886,35 @@ fn establishes_abs_containing_block(style: &ComputedStyle) -> bool {
     !matches!(style.position, PositionMode::Static) || !style.transform.is_empty()
 }
 
+fn mixes_inline_and_block_children(children: &[LayoutItem]) -> bool {
+    let has_inline = children
+        .iter()
+        .any(|child| matches!(child, LayoutItem::Inline { .. }));
+    let has_block = children
+        .iter()
+        .any(|child| matches!(child, LayoutItem::Block { .. }));
+    has_inline && has_block
+}
+
+fn forced_inline_line_height(children: &[LayoutItem], style: &ComputedStyle) -> Option<Pt> {
+    let has_inline = children
+        .iter()
+        .any(|child| matches!(child, LayoutItem::Inline { .. }));
+
+    // The fixed-height compatibility line box applies only to a single inline
+    // formatting context. Mixed inline/block children create anonymous block
+    // boxes; forcing every anonymous inline line to the container's height
+    // makes generated ::before/::after content advance by that height each time.
+    if has_inline && !mixes_inline_and_block_children(children) {
+        match style.height {
+            LengthSpec::Absolute(value) if value > Pt::ZERO => Some(value),
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
 fn container_flowable_with_role(
     children: Vec<LayoutItem>,
     style: &ComputedStyle,
@@ -5261,14 +6957,39 @@ fn container_flowable_with_role(
         return None;
     }
 
-    let forced_line_height = match style.height {
-        LengthSpec::Absolute(value) if value > Pt::ZERO => Some(value),
-        _ => None,
-    };
+    let forced_line_height = forced_inline_line_height(&children, style);
+    let anonymous_block_lines = mixes_inline_and_block_children(&children);
 
-    let flowables = layout_children_to_flowables(children, forced_line_height);
+    let mut flowables = layout_children_to_flowables_with_options(
+        children,
+        forced_line_height,
+        no_wrap(style),
+        !anonymous_block_lines,
+    );
+    if style.column_count > 1
+        && matches!(
+            style.display,
+            DisplayMode::Block | DisplayMode::FlowRoot | DisplayMode::InlineBlock
+        )
+    {
+        flowables = vec![Box::new(MultiColumnFlowable::new_pt(
+            flowables,
+            style.column_count,
+            style.gap,
+            style.column_rule_width,
+            style.column_rule_style,
+            style.resolved_column_rule_color(),
+            style.column_rule_visible,
+            style.font_size,
+            style.root_font_size,
+        )) as Box<dyn Flowable>];
+    }
     let mut container = ContainerFlowable::new_pt(flowables, style.font_size, style.root_font_size)
         .with_establishes_abs_containing_block(establishes_abs_containing_block(style))
+        .with_float_containment(
+            matches!(style.display, DisplayMode::FlowRoot)
+                || matches!(style.overflow, OverflowMode::Hidden),
+        )
         .with_margin(style.margin)
         .with_border(
             style.border_width,
@@ -5300,9 +7021,11 @@ fn container_flowable_with_role(
         .with_max_width(style.max_width)
         .with_min_width(style.min_width)
         .with_height(style.height)
+        .with_aspect_ratio(style.aspect_ratio)
         .with_min_height(style.min_height)
         .with_max_height(style.max_height)
-        .with_background(style.background_color)
+        .with_background(style.background_source_color.or(style.background_color))
+        .with_background_opacity(style.background_alpha)
         .with_background_paint(style.background_paint.clone())
         .with_background_layers(
             style.background_paints.clone(),
@@ -5325,7 +7048,10 @@ fn container_flowable_with_role(
         .with_opacity(style.opacity)
         .with_transforms(style.transform.clone())
         .with_transform_origin(style.transform_origin)
-        .with_overflow_hidden(matches!(style.overflow, OverflowMode::Hidden))
+        .with_overflow_hidden(matches!(
+            style.overflow,
+            OverflowMode::Hidden | OverflowMode::Clip
+        ))
         .with_self_visible(style.visibility.paints())
         .with_pagination(style.pagination);
     if let Some(role) = role {
@@ -5458,6 +7184,15 @@ fn layout_children_to_flowables(
     items: Vec<LayoutItem>,
     forced_line_height: Option<Pt>,
 ) -> Vec<Box<dyn Flowable>> {
+    layout_children_to_flowables_with_options(items, forced_line_height, false, true)
+}
+
+fn layout_children_to_flowables_with_options(
+    items: Vec<LayoutItem>,
+    forced_line_height: Option<Pt>,
+    prevent_soft_wrap: bool,
+    snap_line_height_to_css_pixel: bool,
+) -> Vec<Box<dyn Flowable>> {
     let mut out: Vec<Box<dyn Flowable>> = Vec::new();
     let mut inline_group: Vec<(Box<dyn Flowable>, VerticalAlign)> = Vec::new();
 
@@ -5474,7 +7209,8 @@ fn layout_children_to_flowables(
                             Pt::ZERO,
                             forced_line_height,
                         )
-                        .with_css_pixel_line_snap(true),
+                        .with_css_pixel_line_snap(snap_line_height_to_css_pixel)
+                        .with_no_wrap(prevent_soft_wrap),
                     ));
                     inline_group = Vec::new();
                 }
@@ -5486,7 +7222,8 @@ fn layout_children_to_flowables(
     if !inline_group.is_empty() {
         out.push(Box::new(
             InlineBlockLayoutFlowable::new_pt(inline_group, Pt::ZERO, forced_line_height)
-                .with_css_pixel_line_snap(true),
+                .with_css_pixel_line_snap(snap_line_height_to_css_pixel)
+                .with_no_wrap(prevent_soft_wrap),
         ));
     }
 
@@ -5559,7 +7296,8 @@ fn wrap_relative(flowables: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<Layou
         style.font_size,
         style.root_font_size,
     )
-    .with_pagination(style.pagination);
+    .with_pagination(style.pagination)
+    .with_z_index(style.z_index);
     vec![LayoutItem::Block {
         flowable: Box::new(rel) as Box<dyn Flowable>,
         flex_grow: style.flex_grow,
@@ -5567,6 +7305,152 @@ fn wrap_relative(flowables: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<Layou
         width_spec: flex_item_basis(style),
         order: 0,
     }]
+}
+
+fn wrap_float(flowables: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<LayoutItem> {
+    if flowables.is_empty() {
+        return Vec::new();
+    }
+    let side = match style.float_mode {
+        FloatMode::Left => FloatSide::Left,
+        FloatMode::Right => FloatSide::Right,
+        FloatMode::None => return flowables,
+    };
+    let boxed: Box<dyn Flowable> = if flowables.len() == 1 {
+        match flowables.into_iter().next().unwrap() {
+            LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => flowable,
+        }
+    } else {
+        let children = layout_children_to_flowables(flowables, None);
+        Box::new(
+            ContainerFlowable::new_pt(children, style.font_size, style.root_font_size)
+                .with_establishes_abs_containing_block(true)
+                .with_self_visible(style.visibility.paints()),
+        )
+    };
+    vec![LayoutItem::Block {
+        flowable: Box::new(FloatFlowable::new(boxed, side)) as Box<dyn Flowable>,
+        flex_grow: style.flex_grow,
+        flex_shrink: style.flex_shrink,
+        width_spec: flex_item_basis(style),
+        order: style.order,
+    }]
+}
+
+fn wrap_clear(flowables: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<LayoutItem> {
+    if flowables.is_empty() {
+        return Vec::new();
+    }
+    let clear = match style.clear_mode {
+        ClearMode::Left => FloatClear::Left,
+        ClearMode::Right => FloatClear::Right,
+        ClearMode::Both => FloatClear::Both,
+        ClearMode::None => return flowables,
+    };
+    let boxed: Box<dyn Flowable> = if flowables.len() == 1 {
+        match flowables.into_iter().next().unwrap() {
+            LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => flowable,
+        }
+    } else {
+        let children = layout_children_to_flowables(flowables, None);
+        Box::new(
+            ContainerFlowable::new_pt(children, style.font_size, style.root_font_size)
+                .with_establishes_abs_containing_block(true)
+                .with_self_visible(style.visibility.paints()),
+        )
+    };
+    vec![LayoutItem::Block {
+        flowable: Box::new(ClearFlowable::new(boxed, clear)) as Box<dyn Flowable>,
+        flex_grow: style.flex_grow,
+        flex_shrink: style.flex_shrink,
+        width_spec: flex_item_basis(style),
+        order: style.order,
+    }]
+}
+
+type StagedFlexItem = (
+    i32,
+    usize,
+    Box<dyn Flowable>,
+    f32,
+    f32,
+    Option<LengthSpec>,
+    Option<AlignItems>,
+    i32,
+);
+
+fn push_generated_flex_item(
+    staged: &mut Vec<StagedFlexItem>,
+    pseudo_items: &[LayoutItem],
+    source_index: usize,
+    style: &ComputedStyle,
+    is_grid_like: bool,
+    grid_track_count: usize,
+    grid_basis: Option<LengthSpec>,
+    grid_auto_slot: &mut usize,
+    grid_occupied_slots: &mut std::collections::HashSet<usize>,
+) {
+    if pseudo_items.is_empty() {
+        return;
+    }
+    let grow = pseudo_items
+        .iter()
+        .map(LayoutItem::flex_grow)
+        .fold(0.0, f32::max);
+    let shrink = pseudo_items
+        .iter()
+        .map(LayoutItem::flex_shrink)
+        .reduce(f32::max)
+        .unwrap_or(1.0);
+    let order = pseudo_items
+        .iter()
+        .map(LayoutItem::order)
+        .min()
+        .unwrap_or(0);
+    let width_spec = pseudo_items
+        .iter()
+        .filter_map(LayoutItem::width_spec)
+        .find(|spec| {
+            !matches!(
+                spec,
+                LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
+            )
+        });
+    let mut flowables = layout_children_to_flowables(pseudo_items.to_vec(), None);
+    let boxed: Box<dyn Flowable> = if flowables.len() == 1 {
+        flowables.pop().expect("one generated flex item")
+    } else {
+        Box::new(
+            ContainerFlowable::new_pt(flowables, style.font_size, style.root_font_size)
+                .with_self_visible(style.visibility.paints()),
+        )
+    };
+    let z_index = boxed.z_index();
+    let effective_order = if is_grid_like && grid_track_count > 0 {
+        grid_item_order_slot(grid_track_count, None, grid_auto_slot, grid_occupied_slots)
+    } else {
+        order
+    };
+    let (effective_grow, effective_width_spec) = if is_grid_like && grid_track_count > 0 {
+        grid_column_item_sizing(
+            &style.grid_column_tracks,
+            (effective_order.max(0) as usize) % grid_track_count,
+            width_spec,
+            grid_basis,
+        )
+    } else {
+        (grow, width_spec)
+    };
+    staged.push((
+        effective_order,
+        source_index,
+        boxed,
+        effective_grow,
+        if is_grid_like { 0.0 } else { shrink },
+        effective_width_spec,
+        None,
+        z_index,
+    ));
 }
 
 fn flex_container_flowables(
@@ -5582,6 +7466,8 @@ fn flex_container_flowables(
     svg_raster_fallback: bool,
     perf: Option<&crate::perf::PerfLogger>,
     doc_id: Option<usize>,
+    before_items: &[LayoutItem],
+    after_items: &[LayoutItem],
 ) -> Vec<LayoutItem> {
     fn align_self_override(mode: AlignSelfMode) -> Option<AlignItems> {
         match mode {
@@ -5590,6 +7476,8 @@ fn flex_container_flowables(
             AlignSelfMode::Center => Some(AlignItems::Center),
             AlignSelfMode::Stretch => Some(AlignItems::Stretch),
             AlignSelfMode::FlexStart => Some(AlignItems::FlexStart),
+            AlignSelfMode::FirstBaseline => Some(AlignItems::FirstBaseline),
+            AlignSelfMode::LastBaseline => Some(AlignItems::LastBaseline),
         }
     }
 
@@ -5613,21 +7501,30 @@ fn flex_container_flowables(
         None
     };
 
-    let mut items_with_order: Vec<(
-        i32,
-        usize,
-        Box<dyn Flowable>,
-        f32,
-        f32,
-        Option<LengthSpec>,
-        Option<AlignItems>,
-    )> = Vec::new();
+    let mut items_with_order: Vec<StagedFlexItem> = Vec::new();
     let mut grid_auto_slot = 0usize;
     let mut grid_occupied_slots: std::collections::HashSet<usize> =
         std::collections::HashSet::new();
     let mut report = report;
 
+    push_generated_flex_item(
+        &mut items_with_order,
+        before_items,
+        0,
+        style,
+        is_grid_like,
+        grid_track_count,
+        grid_basis,
+        &mut grid_auto_slot,
+        &mut grid_occupied_slots,
+    );
+
     for (child_idx, child) in node.children().enumerate() {
+        let child_style = child.as_element().map(|el| {
+            let child_info = element_info(&child, resolver.has_sibling_selectors());
+            let inline_style = el.attributes.borrow().get("style").map(|s| s.to_string());
+            resolver.compute_style(&child_info, style, inline_style.as_deref(), ancestors)
+        });
         let child_items = node_to_flowables(
             &child,
             resolver,
@@ -5645,6 +7542,64 @@ fn flex_container_flowables(
         if child_items.is_empty() {
             continue;
         }
+        if child_style
+            .as_ref()
+            .is_some_and(|child_style| matches!(child_style.display, DisplayMode::Contents))
+        {
+            // A `display: contents` wrapper generates no flex/grid item of its
+            // own. Its generated children participate directly in the parent
+            // formatting context instead of becoming one boxed vertical group.
+            for (contents_idx, item) in child_items.into_iter().enumerate() {
+                let grow = item.flex_grow();
+                let shrink = item.flex_shrink();
+                let order = item.order();
+                let width_spec = item.width_spec().filter(|spec| {
+                    !matches!(
+                        spec,
+                        LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
+                    )
+                });
+                let mut flowables = layout_children_to_flowables(vec![item], None);
+                let Some(boxed) = flowables.pop() else {
+                    continue;
+                };
+                let z_index = boxed.z_index();
+                let effective_order = if is_grid_like {
+                    grid_item_order_slot(
+                        grid_track_count,
+                        None,
+                        &mut grid_auto_slot,
+                        &mut grid_occupied_slots,
+                    )
+                } else {
+                    order
+                };
+                let (effective_grow, effective_width_spec) = if is_grid_like {
+                    grid_column_item_sizing(
+                        &style.grid_column_tracks,
+                        (effective_order.max(0) as usize) % grid_track_count.max(1),
+                        width_spec,
+                        grid_basis,
+                    )
+                } else {
+                    (grow, width_spec)
+                };
+                items_with_order.push((
+                    effective_order,
+                    child_idx
+                        .saturating_add(1)
+                        .saturating_mul(1024)
+                        .saturating_add(contents_idx),
+                    boxed,
+                    effective_grow,
+                    if is_grid_like { 0.0 } else { shrink },
+                    effective_width_spec,
+                    None,
+                    z_index,
+                ));
+            }
+            continue;
+        }
         let grow = child_items
             .iter()
             .map(|it| it.flex_grow())
@@ -5652,7 +7607,8 @@ fn flex_container_flowables(
         let shrink = child_items
             .iter()
             .map(|it| it.flex_shrink())
-            .fold(1.0, f32::max);
+            .reduce(f32::max)
+            .unwrap_or(1.0);
         let order = child_items.iter().map(|it| it.order()).min().unwrap_or(0);
         let width_spec = child_items
             .iter()
@@ -5673,11 +7629,6 @@ fn flex_container_flowables(
                     .with_self_visible(style.visibility.paints()),
             )
         };
-        let child_style = child.as_element().map(|el| {
-            let child_info = element_info(&child, resolver.has_sibling_selectors());
-            let inline_style = el.attributes.borrow().get("style").map(|s| s.to_string());
-            resolver.compute_style(&child_info, style, inline_style.as_deref(), ancestors)
-        });
         let align_self = child_style
             .as_ref()
             .and_then(|child_style| align_self_override(child_style.align_self));
@@ -5705,22 +7656,36 @@ fn flex_container_flowables(
 
         items_with_order.push((
             effective_order,
-            child_idx,
+            child_idx.saturating_add(1).saturating_mul(1024),
             boxed,
             effective_grow,
             effective_shrink,
             effective_width_spec,
             align_self,
+            child_style.as_ref().map_or(0, |style| style.z_index),
         ));
     }
 
+    push_generated_flex_item(
+        &mut items_with_order,
+        after_items,
+        usize::MAX,
+        style,
+        is_grid_like,
+        grid_track_count,
+        grid_basis,
+        &mut grid_auto_slot,
+        &mut grid_occupied_slots,
+    );
+
     items_with_order.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-    let items: Vec<(
+    let items_with_z: Vec<(
         Box<dyn Flowable>,
         f32,
         f32,
         Option<LengthSpec>,
         Option<AlignItems>,
+        i32,
     )> = if is_grid_like && grid_track_count > 0 {
         let mut padded_items: Vec<(
             Box<dyn Flowable>,
@@ -5728,30 +7693,32 @@ fn flex_container_flowables(
             f32,
             Option<LengthSpec>,
             Option<AlignItems>,
+            i32,
         )> = Vec::new();
         let max_slot = items_with_order
             .iter()
-            .map(|(slot, _, _, _, _, _, _)| *slot)
+            .map(|(slot, _, _, _, _, _, _, _)| *slot)
             .max()
             .unwrap_or(-1)
             .max(0);
         let mut iter = items_with_order.into_iter().peekable();
         for slot in 0..=max_slot {
-            let mut placed = false;
+            let mut slot_items = Vec::new();
             loop {
                 let should_take = iter
                     .peek()
-                    .map(|(item_slot, _, _, _, _, _, _)| *item_slot == slot)
+                    .map(|(item_slot, _, _, _, _, _, _, _)| *item_slot == slot)
                     .unwrap_or(false);
                 if !should_take {
                     break;
                 }
-                if let Some((_, _, boxed, grow, shrink, width_spec, align_self)) = iter.next() {
-                    padded_items.push((boxed, grow, shrink, width_spec, align_self));
-                    placed = true;
+                if let Some((_, _, boxed, grow, shrink, width_spec, align_self, z_index)) =
+                    iter.next()
+                {
+                    slot_items.push((boxed, grow, shrink, width_spec, align_self, z_index));
                 }
             }
-            if !placed {
+            if slot_items.is_empty() {
                 let (grow, basis) = grid_column_item_sizing(
                     &style.grid_column_tracks,
                     (slot as usize) % grid_track_count,
@@ -5764,34 +7731,110 @@ fn flex_container_flowables(
                     0.0,
                     basis,
                     None,
+                    0,
+                ));
+            } else if slot_items.len() == 1 {
+                padded_items.push(slot_items.pop().expect("one grid slot item"));
+            } else {
+                let mut layers = Vec::with_capacity(slot_items.len());
+                let mut slot_items = slot_items.into_iter();
+                let (boxed, grow, shrink, width_spec, align_self, z_index) =
+                    slot_items.next().expect("overlapping grid slot items");
+                layers.push((boxed, z_index));
+                layers.extend(slot_items.map(|(boxed, _, _, _, _, z_index)| (boxed, z_index)));
+                padded_items.push((
+                    Box::new(OverlayFlowable::new(layers)) as Box<dyn Flowable>,
+                    grow,
+                    shrink,
+                    width_spec,
+                    align_self,
+                    0,
                 ));
             }
         }
-        while let Some((_, _, boxed, grow, shrink, width_spec, align_self)) = iter.next() {
-            padded_items.push((boxed, grow, shrink, width_spec, align_self));
+        while let Some((_, _, boxed, grow, shrink, width_spec, align_self, z_index)) = iter.next() {
+            padded_items.push((boxed, grow, shrink, width_spec, align_self, z_index));
         }
         padded_items
     } else {
         items_with_order
             .into_iter()
-            .map(|(_, _, boxed, grow, shrink, width_spec, align_self)| {
-                (boxed, grow, shrink, width_spec, align_self)
-            })
+            .map(
+                |(_, _, boxed, grow, shrink, width_spec, align_self, z_index)| {
+                    (boxed, grow, shrink, width_spec, align_self, z_index)
+                },
+            )
             .collect()
     };
+    let mut items = Vec::with_capacity(items_with_z.len());
+    let mut z_indices = Vec::with_capacity(items_with_z.len());
+    for (boxed, grow, shrink, width_spec, align_self, z_index) in items_with_z {
+        items.push((boxed, grow, shrink, width_spec, align_self));
+        z_indices.push(z_index);
+    }
     let grid_wrap = is_grid_like && grid_track_count > 0;
 
+    let vertical_flex =
+        !is_grid_like && !matches!(style.writing_mode, WritingModeMode::HorizontalTb);
     let dir = if is_grid_like {
         FlexDirection::Row
+    } else if vertical_flex {
+        match style.flex_direction {
+            FlexDirectionMode::Column | FlexDirectionMode::ColumnReverse => FlexDirection::Row,
+            FlexDirectionMode::Row | FlexDirectionMode::RowReverse => FlexDirection::Column,
+        }
     } else {
         match style.flex_direction {
-            FlexDirectionMode::Column => FlexDirection::Column,
-            _ => FlexDirection::Row,
+            FlexDirectionMode::Column | FlexDirectionMode::ColumnReverse => FlexDirection::Column,
+            FlexDirectionMode::Row | FlexDirectionMode::RowReverse => FlexDirection::Row,
         }
     };
+    let reverse_main = if is_grid_like {
+        false
+    } else if vertical_flex {
+        match style.flex_direction {
+            FlexDirectionMode::Row => matches!(style.direction, DirectionMode::Rtl),
+            FlexDirectionMode::RowReverse => !matches!(style.direction, DirectionMode::Rtl),
+            FlexDirectionMode::Column => matches!(
+                style.writing_mode,
+                WritingModeMode::VerticalRl | WritingModeMode::SidewaysRl
+            ),
+            FlexDirectionMode::ColumnReverse => !matches!(
+                style.writing_mode,
+                WritingModeMode::VerticalRl | WritingModeMode::SidewaysRl
+            ),
+        }
+    } else {
+        match style.flex_direction {
+            FlexDirectionMode::Row => matches!(style.direction, DirectionMode::Rtl),
+            FlexDirectionMode::RowReverse => !matches!(style.direction, DirectionMode::Rtl),
+            FlexDirectionMode::Column => false,
+            FlexDirectionMode::ColumnReverse => true,
+        }
+    };
+    let reverse_cross = if is_grid_like {
+        false
+    } else {
+        match style.flex_direction {
+            FlexDirectionMode::Row | FlexDirectionMode::RowReverse => matches!(
+                style.writing_mode,
+                WritingModeMode::VerticalRl | WritingModeMode::SidewaysRl
+            ),
+            FlexDirectionMode::Column | FlexDirectionMode::ColumnReverse => {
+                matches!(style.direction, DirectionMode::Rtl)
+            }
+        }
+    };
+    let (physical_row_gap, physical_column_gap) = if vertical_flex {
+        (style.gap, style.row_gap)
+    } else {
+        (style.row_gap, style.gap)
+    };
+    let wrap_reverse = !is_grid_like && matches!(style.flex_wrap, FlexWrapMode::WrapReverse);
     let justify = match style.justify_content {
         JustifyContentMode::FlexEnd => JustifyContent::FlexEnd,
         JustifyContentMode::Center => JustifyContent::Center,
+        JustifyContentMode::SafeCenter => JustifyContent::SafeCenter,
         JustifyContentMode::SpaceBetween => JustifyContent::SpaceBetween,
         JustifyContentMode::SpaceAround => JustifyContent::SpaceAround,
         JustifyContentMode::SpaceEvenly => JustifyContent::SpaceEvenly,
@@ -5801,6 +7844,8 @@ fn flex_container_flowables(
         AlignItemsMode::FlexEnd => AlignItems::FlexEnd,
         AlignItemsMode::Center => AlignItems::Center,
         AlignItemsMode::Stretch => AlignItems::Stretch,
+        AlignItemsMode::FirstBaseline => AlignItems::FirstBaseline,
+        AlignItemsMode::LastBaseline => AlignItems::LastBaseline,
         _ => AlignItems::FlexStart,
     };
     let align_content = match style.align_content {
@@ -5819,15 +7864,22 @@ fn flex_container_flowables(
         justify,
         align,
         align_content,
-        style.gap,
+        physical_column_gap,
         if is_grid_like {
             grid_wrap
         } else {
-            matches!(style.flex_wrap, FlexWrapMode::Wrap)
+            matches!(
+                style.flex_wrap,
+                FlexWrapMode::Wrap | FlexWrapMode::WrapReverse
+            )
         },
         style.font_size,
         style.root_font_size,
-    );
+    )
+    .with_item_z_indices(z_indices)
+    .with_reversals(reverse_main, wrap_reverse)
+    .with_cross_reversal(reverse_cross)
+    .with_axis_gaps(physical_row_gap, physical_column_gap);
     let flex = if is_grid_like && grid_track_count > 0 {
         flex.with_grid_tracks(grid_track_count, style.grid_row_tracks.clone())
     } else {
@@ -5868,9 +7920,11 @@ fn flex_container_flowables(
             .with_max_width(style.max_width)
             .with_min_width(style.min_width)
             .with_height(style.height)
+            .with_aspect_ratio(style.aspect_ratio)
             .with_min_height(style.min_height)
             .with_max_height(style.max_height)
-            .with_background(style.background_color)
+            .with_background(style.background_source_color.or(style.background_color))
+            .with_background_opacity(style.background_alpha)
             .with_background_paint(style.background_paint.clone())
             .with_background_layers(
                 style.background_paints.clone(),
@@ -5893,7 +7947,10 @@ fn flex_container_flowables(
             .with_opacity(style.opacity)
             .with_transforms(style.transform.clone())
             .with_transform_origin(style.transform_origin)
-            .with_overflow_hidden(matches!(style.overflow, OverflowMode::Hidden))
+            .with_overflow_hidden(matches!(
+                style.overflow,
+                OverflowMode::Hidden | OverflowMode::Clip
+            ))
             .with_self_visible(style.visibility.paints())
             .with_pagination(style.pagination);
 
@@ -5950,7 +8007,7 @@ fn table_caption_flowable_from_node(
 ) -> Option<Box<dyn Flowable>> {
     let mut caption_text = extract_text(node, caption_style.white_space);
     if caption_text.trim().is_empty() {
-        return None;
+        return container_flowable_with_role(Vec::new(), caption_style, Some("Caption"));
     }
     if !preserve_whitespace(caption_style.white_space) {
         caption_text = caption_text.trim().to_string();
@@ -6052,6 +8109,272 @@ fn collect_css_table_collapsed_columns(
     collapsed_columns
 }
 
+#[allow(clippy::too_many_arguments)]
+fn native_css_table_container_flowables(
+    node: &NodeRef,
+    resolver: &StyleResolver,
+    style: &ComputedStyle,
+    ancestors: &[ElementInfo],
+    counters: &mut CounterState,
+    font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<Arc<AssetBundle>>,
+    report: Option<&mut GlyphCoverageReport>,
+    svg_form: bool,
+    svg_raster_fallback: bool,
+    perf: Option<&crate::perf::PerfLogger>,
+    doc_id: Option<usize>,
+) -> Option<Vec<LayoutItem>> {
+    let mut report = report;
+    let include_prev_siblings = resolver.has_sibling_selectors();
+    let mut has_table_structure = false;
+    let mut top_caption_flowables: Vec<Box<dyn Flowable>> = Vec::new();
+    let mut bottom_caption_flowables: Vec<Box<dyn Flowable>> = Vec::new();
+
+    for child in node.children() {
+        let Some(_) = child.as_element() else {
+            continue;
+        };
+        let child_info = element_info(&child, include_prev_siblings);
+        let inline_style = node_inline_style_attr(&child);
+        let child_style =
+            resolver.compute_style(&child_info, style, inline_style.as_deref(), ancestors);
+        if matches!(child_style.display, DisplayMode::None) {
+            continue;
+        }
+        if matches!(
+            child_style.display,
+            DisplayMode::TableRow
+                | DisplayMode::TableCell
+                | DisplayMode::TableRowGroup
+                | DisplayMode::TableHeaderGroup
+                | DisplayMode::TableFooterGroup
+                | DisplayMode::TableColumn
+                | DisplayMode::TableColumnGroup
+        ) {
+            has_table_structure = true;
+        }
+        if matches!(child_style.display, DisplayMode::TableCaption) {
+            has_table_structure = true;
+            if let Some(caption) = table_caption_flowable_from_node(
+                &child,
+                &child_style,
+                report.as_deref_mut(),
+                font_registry.clone(),
+            ) {
+                if matches!(
+                    child_style.caption_side,
+                    crate::style::CaptionSideMode::Bottom
+                ) {
+                    bottom_caption_flowables.push(caption);
+                } else {
+                    top_caption_flowables.push(caption);
+                }
+            }
+        }
+    }
+    if !has_table_structure {
+        return None;
+    }
+
+    let effective_table_layout = if matches!(style.table_layout, TableLayoutMode::Fixed)
+        && matches!(
+            style.width,
+            LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
+        ) {
+        TableLayoutMode::Auto
+    } else {
+        style.table_layout
+    };
+    let minimum_table_height = match style.height {
+        LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => Pt::ZERO,
+        height => height
+            .resolve_height(Pt::ZERO, style.font_size, style.root_font_size)
+            .max(Pt::ZERO),
+    };
+    let table_border_colors = style.resolved_border_colors(style.color);
+    let table_border_styles = style.resolved_border_styles();
+    let table_hidden_borders = style.border_hidden_sides();
+    let collapsed_table = matches!(
+        style.border_collapse,
+        crate::flowable::BorderCollapseMode::Collapse
+    );
+    let mut table_ancestors = ancestors.to_vec();
+    let table = table_flowable(
+        node,
+        style,
+        resolver,
+        &mut table_ancestors,
+        counters,
+        font_registry,
+        asset_bundle,
+        report.as_deref_mut(),
+        svg_form,
+        svg_raster_fallback,
+        perf,
+        doc_id,
+    )
+    .with_tag_role("Table")
+    .with_border_collapse(style.border_collapse)
+    .with_border_spacing(style.border_spacing)
+    .with_table_layout(effective_table_layout)
+    .with_direction(style.direction)
+    .with_table_border(
+        style.border_width,
+        style.border_color.unwrap_or(style.color),
+    )
+    .with_table_border_colors(
+        table_border_colors.top,
+        table_border_colors.right,
+        table_border_colors.bottom,
+        table_border_colors.left,
+    )
+    .with_table_border_styles(
+        table_border_styles.top,
+        table_border_styles.right,
+        table_border_styles.bottom,
+        table_border_styles.left,
+    )
+    .with_table_hidden_borders(
+        table_hidden_borders.top,
+        table_hidden_borders.right,
+        table_hidden_borders.bottom,
+        table_hidden_borders.left,
+    )
+    .with_font_metrics(style.font_size, style.root_font_size)
+    .with_minimum_height(minimum_table_height);
+
+    let has_caption = !top_caption_flowables.is_empty() || !bottom_caption_flowables.is_empty();
+    let caption_width_overflow = match style.width {
+        LengthSpec::Absolute(width) if has_caption => table.collapsed_caption_width_overflow(width),
+        _ => Pt::ZERO,
+    };
+    if caption_width_overflow > Pt::ZERO {
+        top_caption_flowables = top_caption_flowables
+            .into_iter()
+            .map(|caption| {
+                Box::new(ExpandedWidthFlowable::new(caption, caption_width_overflow))
+                    as Box<dyn Flowable>
+            })
+            .collect();
+        bottom_caption_flowables = bottom_caption_flowables
+            .into_iter()
+            .map(|caption| {
+                Box::new(ExpandedWidthFlowable::new(caption, caption_width_overflow))
+                    as Box<dyn Flowable>
+            })
+            .collect();
+    }
+    let mut table_children: Vec<Box<dyn Flowable>> = Vec::new();
+    table_children.extend(top_caption_flowables);
+    table_children.push(Box::new(table));
+    table_children.extend(bottom_caption_flowables);
+    let used_table_width = if matches!(
+        style.width,
+        LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
+    ) {
+        table_children
+            .iter()
+            .filter_map(|child| child.intrinsic_width())
+            .reduce(Pt::max)
+            .map(LengthSpec::Absolute)
+            .unwrap_or(style.width)
+    } else {
+        style.width
+    };
+
+    let container =
+        ContainerFlowable::new_pt(table_children, style.font_size, style.root_font_size)
+            .with_establishes_abs_containing_block(establishes_abs_containing_block(style))
+            .with_margin(style.margin)
+            .with_border(
+                if collapsed_table {
+                    EdgeSizes::zero()
+                } else {
+                    style.border_width
+                },
+                style.border_color.unwrap_or(style.color),
+            )
+            .with_border_colors(
+                table_border_colors.top,
+                table_border_colors.right,
+                table_border_colors.bottom,
+                table_border_colors.left,
+            )
+            .with_border_styles(
+                table_border_styles.top,
+                table_border_styles.right,
+                table_border_styles.bottom,
+                table_border_styles.left,
+            )
+            .with_border_radius(style.border_radius)
+            .with_outline(
+                style.outline_width,
+                style.outline_offset,
+                style.outline_style,
+                style.resolved_outline_color(),
+                style.outline_visible,
+            )
+            .with_padding(style.padding)
+            .with_box_sizing(style.box_sizing)
+            .with_width(used_table_width)
+            .with_max_width(style.max_width)
+            .with_min_width(style.min_width)
+            .with_height(style.height)
+            .with_aspect_ratio(style.aspect_ratio)
+            .with_min_height(style.min_height)
+            .with_max_height(style.max_height)
+            .with_background(style.background_source_color.or(style.background_color))
+            .with_background_opacity(style.background_alpha)
+            .with_background_paint(style.background_paint.clone())
+            .with_background_layers(
+                style.background_paints.clone(),
+                style.background_sizes.clone(),
+                style.background_positions.clone(),
+                style.background_repeats.clone(),
+                style.background_origins.clone(),
+                style.background_clips.clone(),
+            )
+            .with_background_blend_modes(style.background_blend_modes.clone())
+            .with_clip_path(style.clip_path.clone())
+            .with_clip_path_reference_box(style.clip_path_reference_box)
+            .with_box_shadows(style.box_shadows.clone())
+            .with_paint_filter(style.paint_filter.clone())
+            .with_backdrop_filter(style.backdrop_filter.clone())
+            .with_will_change_backdrop_root(style.will_change_backdrop_root)
+            .with_mask_backdrop_root(style.mask_backdrop_root)
+            .with_mix_blend_mode(style.mix_blend_mode)
+            .with_isolation(style.isolation)
+            .with_opacity(style.opacity)
+            .with_transforms(style.transform.clone())
+            .with_transform_origin(style.transform_origin)
+            .with_overflow_hidden(matches!(
+                style.overflow,
+                OverflowMode::Hidden | OverflowMode::Clip
+            ))
+            .with_self_visible(style.visibility.paints())
+            .with_pagination(style.pagination);
+
+    let flowable = Box::new(container) as Box<dyn Flowable>;
+    Some(if matches!(style.display, DisplayMode::InlineTable) {
+        vec![LayoutItem::Inline {
+            flowable,
+            valign: vertical_align_from_style(style),
+            flex_grow: style.flex_grow,
+            flex_shrink: style.flex_shrink,
+            width_spec: flex_item_basis(style),
+            order: 0,
+        }]
+    } else {
+        vec![LayoutItem::Block {
+            flowable,
+            flex_grow: style.flex_grow,
+            flex_shrink: style.flex_shrink,
+            width_spec: flex_item_basis(style),
+            order: 0,
+        }]
+    })
+}
+
 fn table_container_flowables(
     node: &NodeRef,
     resolver: &StyleResolver,
@@ -6067,6 +8390,22 @@ fn table_container_flowables(
     doc_id: Option<usize>,
 ) -> Vec<LayoutItem> {
     let mut report = report;
+    if let Some(native) = native_css_table_container_flowables(
+        node,
+        resolver,
+        style,
+        ancestors,
+        counters,
+        font_registry.clone(),
+        asset_bundle.clone(),
+        report.as_deref_mut(),
+        svg_form,
+        svg_raster_fallback,
+        perf,
+        doc_id,
+    ) {
+        return native;
+    }
     let include_prev_siblings = resolver.has_sibling_selectors();
     let mut table_children: Vec<Box<dyn Flowable>> = Vec::new();
     let mut header_group_flowables: Vec<Box<dyn Flowable>> = Vec::new();
@@ -6074,6 +8413,8 @@ fn table_container_flowables(
     let mut top_caption_flowables: Vec<Box<dyn Flowable>> = Vec::new();
     let mut bottom_caption_flowables: Vec<Box<dyn Flowable>> = Vec::new();
     let mut anon_cells: Vec<(NodeRef, ComputedStyle)> = Vec::new();
+    let mut has_proper_table_child = false;
+    let mut has_improper_table_child = false;
     let collapsed_columns = collect_css_table_collapsed_columns(
         node,
         resolver,
@@ -6102,6 +8443,7 @@ fn table_container_flowables(
         }
 
         if matches!(child_style.display, DisplayMode::TableCell) {
+            has_proper_table_child = true;
             anon_cells.push((child.clone(), child_style));
             continue;
         }
@@ -6125,10 +8467,12 @@ fn table_container_flowables(
         }
 
         if is_table_column_display(child_style.display) {
+            has_proper_table_child = true;
             continue;
         }
 
         if matches!(child_style.display, DisplayMode::TableCaption) {
+            has_proper_table_child = true;
             if let Some(caption_flowable) = table_caption_flowable_from_node(
                 &child,
                 &child_style,
@@ -6148,6 +8492,7 @@ fn table_container_flowables(
         }
 
         if matches!(child_style.display, DisplayMode::TableRow) {
+            has_proper_table_child = true;
             if matches!(child_style.visibility, VisibilityMode::Collapse) {
                 continue;
             }
@@ -6172,6 +8517,7 @@ fn table_container_flowables(
         }
 
         if is_table_row_group_display(child_style.display) {
+            has_proper_table_child = true;
             let group_collapsed = matches!(child_style.visibility, VisibilityMode::Collapse);
             let mut group_rows: Vec<Box<dyn Flowable>> = Vec::new();
             for row_node in child.children() {
@@ -6247,6 +8593,7 @@ fn table_container_flowables(
             continue;
         }
 
+        has_improper_table_child = true;
         let mut child_ancestors = ancestors.to_vec();
         let child_items = node_to_flowables(
             &child,
@@ -6295,6 +8642,10 @@ fn table_container_flowables(
     ordered_table_children.extend(table_children);
     ordered_table_children.extend(footer_group_flowables);
     ordered_table_children.extend(bottom_caption_flowables);
+    if has_improper_table_child && !has_proper_table_child {
+        ordered_table_children =
+            anonymous_table_sequence_with_spacing(ordered_table_children, style);
+    }
 
     let table_items: Vec<LayoutItem> = ordered_table_children
         .into_iter()
@@ -6331,6 +8682,36 @@ fn table_container_flowables(
             order: 0,
         }]
     }
+}
+
+fn anonymous_table_sequence_with_spacing(
+    children: Vec<Box<dyn Flowable>>,
+    style: &ComputedStyle,
+) -> Vec<Box<dyn Flowable>> {
+    if children.is_empty()
+        || matches!(
+            style.border_collapse,
+            crate::flowable::BorderCollapseMode::Collapse
+        )
+        || style.border_spacing == BorderSpacingSpec::zero()
+    {
+        return children;
+    }
+
+    // Consecutive improper children of a table generate one anonymous row and
+    // one anonymous cell around the sequence. In the separated-border model,
+    // that cell is inset by one border-spacing interval on every table edge.
+    let padding = EdgeSizes {
+        top: style.border_spacing.vertical,
+        right: style.border_spacing.horizontal,
+        bottom: style.border_spacing.vertical,
+        left: style.border_spacing.horizontal,
+    };
+    vec![Box::new(
+        ContainerFlowable::new_pt(children, style.font_size, style.root_font_size)
+            .with_padding(padding)
+            .with_self_visible(style.visibility.paints()),
+    ) as Box<dyn Flowable>]
 }
 
 fn table_row_flowable_from_node(
@@ -6553,10 +8934,21 @@ fn grid_column_item_sizing(
     };
 
     if let Some(factor) = track.fraction_factor() {
-        let basis = match track.min {
+        let track_minimum = match track.min {
             GridTrackBreadth::Length(length) => Some(length),
             _ => None,
         };
+        // A definite grid-item width contributes to an auto minimum track.
+        // Preserve it as the lower bound for the fractional-track allocator;
+        // otherwise two `1fr` tracks incorrectly split evenly even when one
+        // item has a larger specified size.
+        let item_minimum = item_width.filter(|width| {
+            !matches!(
+                width,
+                LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
+            )
+        });
+        let basis = item_minimum.or(track_minimum);
         return (factor, basis);
     }
     if let Some(length) = track.fixed_breadth() {
@@ -6595,7 +8987,13 @@ fn grid_track_basis(track_count: usize, gap: LengthSpec) -> LengthSpec {
             calc.em = -(value.em * gap_share);
             calc.rem = -(value.rem * gap_share);
         }
-        LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => {}
+        LengthSpec::Auto
+        | LengthSpec::Content
+        | LengthSpec::MinContent
+        | LengthSpec::MaxContent
+        | LengthSpec::FitContent
+        | LengthSpec::Inherit
+        | LengthSpec::Initial => {}
     }
 
     LengthSpec::Calc(calc)
@@ -6633,24 +9031,21 @@ fn grid_item_order_slot(
         .unwrap_or(0)
         .saturating_add(1);
 
-    let mut assigned_slot = child_style
-        .and_then(|style| {
-            if style.grid_row_start.is_some() || style.grid_column_start.is_some() {
-                let row_start = style.grid_row_start.or(Some(auto_row));
-                let column_start = style.grid_column_start.or(Some(auto_column));
-                grid_explicit_slot(track_count, row_start, column_start)
-            } else {
-                None
-            }
-        })
-        .unwrap_or(*auto_slot);
-
-    while occupied_slots.contains(&assigned_slot) {
-        assigned_slot = assigned_slot.saturating_add(1);
-    }
+    let explicit_slot = child_style.and_then(|style| {
+        if style.grid_row_start.is_some() || style.grid_column_start.is_some() {
+            let row_start = style.grid_row_start.or(Some(auto_row));
+            let column_start = style.grid_column_start.or(Some(auto_column));
+            grid_explicit_slot(track_count, row_start, column_start)
+        } else {
+            None
+        }
+    });
+    let assigned_slot = explicit_slot.unwrap_or(*auto_slot);
     occupied_slots.insert(assigned_slot);
-
-    *auto_slot = assigned_slot.saturating_add(1);
+    // The auto-placement cursor advances past earlier definite placements in
+    // document order, while later definite items may still intentionally use
+    // the same slot (grid overlap).
+    *auto_slot = (*auto_slot).max(assigned_slot.saturating_add(1));
     while occupied_slots.contains(auto_slot) {
         *auto_slot = auto_slot.saturating_add(1);
     }
@@ -6673,9 +9068,15 @@ fn table_flowable(
     doc_id: Option<usize>,
 ) -> TableFlowable {
     let mut report = report;
+    let legacy_cell_padding = legacy_table_length_attribute(node, "cellpadding");
+    let legacy_border_width =
+        legacy_table_length_attribute(node, "border").filter(|width| *width > Pt::ZERO);
     let mut header_rows: Vec<Vec<TableCell>> = Vec::new();
     let mut body_rows: Vec<Vec<TableCell>> = Vec::new();
     let mut body_row_meta: Vec<Vec<(String, String)>> = Vec::new();
+    let mut body_row_pagination = Vec::new();
+    let mut body_row_keep_ranges = Vec::new();
+    let mut footer_row_count = 0usize;
     let mut row_style_ms = 0.0;
     let mut cell_style_ms = 0.0;
     let mut cell_text_ms = 0.0;
@@ -6703,7 +9104,13 @@ fn table_flowable(
             LengthSpec::Calc(calc) => {
                 calc.abs <= Pt::ZERO && calc.percent <= 0.0 && calc.em <= 0.0 && calc.rem <= 0.0
             }
-            LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => true,
+            LengthSpec::Auto
+            | LengthSpec::Content
+            | LengthSpec::MinContent
+            | LengthSpec::MaxContent
+            | LengthSpec::FitContent
+            | LengthSpec::Inherit
+            | LengthSpec::Initial => true,
         }
     }
 
@@ -6719,66 +9126,184 @@ fn table_flowable(
     #[derive(Clone)]
     struct TableRowInput {
         node: NodeRef,
-        in_thead: bool,
+        anonymous_cells: Option<Vec<NodeRef>>,
+        section: TableRowSection,
         in_explicit_row_group: bool,
         group_row_index: usize,
         group_row_count: usize,
     }
 
-    fn collect_rows_from_group(group: &NodeRef, in_thead: bool, out: &mut Vec<TableRowInput>) {
-        let row_nodes: Vec<NodeRef> = group
-            .children()
-            .filter(|child| {
-                child
-                    .as_element()
-                    .map(|el| el.name.local.as_ref() == "tr")
-                    .unwrap_or(false)
-            })
-            .collect();
-        let group_row_count = row_nodes.len().max(1);
-        for (idx, child) in row_nodes.into_iter().enumerate() {
-            out.push(TableRowInput {
-                node: child,
-                in_thead,
-                in_explicit_row_group: true,
-                group_row_index: idx + 1,
-                group_row_count,
-            });
-        }
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum TableRowSection {
+        Header,
+        Body,
+        Footer,
     }
 
-    fn collect_rows(table: &NodeRef, out: &mut Vec<TableRowInput>) {
-        let direct_row_count = table
-            .children()
-            .filter(|child| {
-                child
-                    .as_element()
-                    .map(|el| el.name.local.as_ref() == "tr")
-                    .unwrap_or(false)
-            })
-            .count()
-            .max(1);
-        let mut direct_row_index = 0usize;
-        for child in table.children() {
-            let Some(el) = child.as_element() else {
+    fn collect_rows_from_group(
+        group: &NodeRef,
+        group_style: &ComputedStyle,
+        section: TableRowSection,
+        resolver: &StyleResolver,
+        ancestors: &mut Vec<ElementInfo>,
+        include_prev_siblings: bool,
+    ) -> Vec<TableRowInput> {
+        let mut raw_rows: Vec<(NodeRef, Option<Vec<NodeRef>>)> = Vec::new();
+        let mut anonymous_cells: Vec<NodeRef> = Vec::new();
+        let flush_anonymous = |rows: &mut Vec<(NodeRef, Option<Vec<NodeRef>>)>,
+                               cells: &mut Vec<NodeRef>| {
+            if let Some(first) = cells.first().cloned() {
+                rows.push((first, Some(std::mem::take(cells))));
+            }
+        };
+
+        for child in group.children() {
+            let Some(element) = child.as_element() else {
                 continue;
             };
-            match el.name.local.as_ref() {
-                "thead" => collect_rows_from_group(&child, true, out),
-                "tbody" | "tfoot" => collect_rows_from_group(&child, false, out),
-                "tr" => {
-                    direct_row_index += 1;
-                    out.push(TableRowInput {
-                        node: child,
-                        in_thead: false,
-                        in_explicit_row_group: false,
-                        group_row_index: direct_row_index,
-                        group_row_count: direct_row_count,
-                    });
-                }
-                _ => {}
+            let tag = element.name.local.as_ref();
+            let child_info = element_info(&child, include_prev_siblings);
+            let inline_style = node_inline_style_attr(&child);
+            let child_style = resolver.compute_style(
+                &child_info,
+                group_style,
+                inline_style.as_deref(),
+                ancestors,
+            );
+            if matches!(child_style.display, DisplayMode::None) {
+                continue;
+            }
+            if tag == "tr" || matches!(child_style.display, DisplayMode::TableRow) {
+                flush_anonymous(&mut raw_rows, &mut anonymous_cells);
+                raw_rows.push((child, None));
+            } else if !is_table_column_display(child_style.display)
+                && !matches!(child_style.display, DisplayMode::TableCaption)
+            {
+                // CSS table fixup wraps improper row-group children in an
+                // anonymous row, then in anonymous cells.  Keeping the
+                // authored node as the cell preserves its sizing and paint.
+                anonymous_cells.push(child);
             }
         }
+        flush_anonymous(&mut raw_rows, &mut anonymous_cells);
+
+        let group_row_count = raw_rows.len().max(1);
+        raw_rows
+            .into_iter()
+            .enumerate()
+            .map(|(index, (node, anonymous_cells))| TableRowInput {
+                node,
+                anonymous_cells,
+                section,
+                in_explicit_row_group: true,
+                group_row_index: index + 1,
+                group_row_count,
+            })
+            .collect()
+    }
+
+    fn collect_rows(
+        table: &NodeRef,
+        table_style: &ComputedStyle,
+        resolver: &StyleResolver,
+        ancestors: &mut Vec<ElementInfo>,
+        include_prev_siblings: bool,
+        out: &mut Vec<TableRowInput>,
+    ) {
+        let mut header_rows = Vec::new();
+        let mut body_rows = Vec::new();
+        let mut footer_rows = Vec::new();
+        let mut direct_rows: Vec<(NodeRef, Option<Vec<NodeRef>>)> = Vec::new();
+        let mut anonymous_cells: Vec<NodeRef> = Vec::new();
+        let mut saw_header_group = false;
+        let flush_direct_anonymous =
+            |rows: &mut Vec<(NodeRef, Option<Vec<NodeRef>>)>, cells: &mut Vec<NodeRef>| {
+                if let Some(first) = cells.first().cloned() {
+                    rows.push((first, Some(std::mem::take(cells))));
+                }
+            };
+
+        for child in table.children() {
+            let Some(element) = child.as_element() else {
+                continue;
+            };
+            let tag = element.name.local.as_ref();
+            let mut child_info = element_info(&child, include_prev_siblings);
+            let inline_style = node_inline_style_attr(&child);
+            let child_style = resolver.compute_style(
+                &child_info,
+                table_style,
+                inline_style.as_deref(),
+                ancestors,
+            );
+            if matches!(child_style.display, DisplayMode::None) {
+                continue;
+            }
+
+            if matches!(tag, "thead" | "tbody" | "tfoot")
+                || is_table_row_group_display(child_style.display)
+            {
+                flush_direct_anonymous(&mut direct_rows, &mut anonymous_cells);
+                child_info.apply_computed_container_style(&child_style);
+                ancestors.push(child_info);
+                let mut section = match (tag, child_style.display) {
+                    ("thead", _) | (_, DisplayMode::TableHeaderGroup) => TableRowSection::Header,
+                    ("tfoot", _) | (_, DisplayMode::TableFooterGroup) => TableRowSection::Footer,
+                    _ => TableRowSection::Body,
+                };
+                if section == TableRowSection::Header {
+                    if saw_header_group {
+                        // CSS only repeats the first header group. Later
+                        // table-header-group boxes participate as ordinary
+                        // rows in visual order.
+                        section = TableRowSection::Body;
+                    } else {
+                        saw_header_group = true;
+                    }
+                }
+                let rows = collect_rows_from_group(
+                    &child,
+                    &child_style,
+                    section,
+                    resolver,
+                    ancestors,
+                    include_prev_siblings,
+                );
+                ancestors.pop();
+                match section {
+                    TableRowSection::Header => header_rows.extend(rows),
+                    TableRowSection::Body => body_rows.extend(rows),
+                    TableRowSection::Footer => footer_rows.extend(rows),
+                }
+            } else if tag == "tr" || matches!(child_style.display, DisplayMode::TableRow) {
+                flush_direct_anonymous(&mut direct_rows, &mut anonymous_cells);
+                direct_rows.push((child, None));
+            } else if matches!(tag, "td" | "th")
+                || matches!(child_style.display, DisplayMode::TableCell)
+            {
+                anonymous_cells.push(child);
+            }
+        }
+        flush_direct_anonymous(&mut direct_rows, &mut anonymous_cells);
+
+        let direct_row_count = direct_rows.len().max(1);
+        body_rows.extend(direct_rows.into_iter().enumerate().map(
+            |(index, (node, anonymous_cells))| TableRowInput {
+                node,
+                anonymous_cells,
+                section: TableRowSection::Body,
+                in_explicit_row_group: false,
+                group_row_index: index + 1,
+                group_row_count: direct_row_count,
+            },
+        ));
+
+        // Header and footer groups have a visual order independent of source
+        // order. The table fragmenter receives the section identity below so
+        // it can repeat footers without treating them as ordinary body rows.
+        out.extend(header_rows);
+        out.extend(body_rows);
+        out.extend(footer_rows);
     }
 
     fn span_attr(node: &NodeRef) -> usize {
@@ -6897,6 +9422,12 @@ fn table_flowable(
         }
     }
 
+    fn append_column_background(out: &mut Vec<Option<Color>>, color: Option<Color>, span: usize) {
+        for _ in 0..span.max(1) {
+            out.push(color);
+        }
+    }
+
     fn collect_column_metadata(
         table: &NodeRef,
         table_style: &ComputedStyle,
@@ -6907,29 +9438,26 @@ fn table_flowable(
         Vec<Option<TableColumnWidthHint>>,
         Vec<Option<TableColumnBorder>>,
         Vec<Option<TableColumnGroupBorder>>,
+        Vec<Option<Color>>,
         Vec<bool>,
     ) {
         let column_nodes: Vec<NodeRef> = table
             .children()
-            .filter(|child| {
-                child
-                    .as_element()
-                    .map(|el| matches!(el.name.local.as_ref(), "col" | "colgroup"))
-                    .unwrap_or(false)
-            })
+            .filter(|child| child.as_element().is_some())
             .collect();
         let child_count = column_nodes.len().max(1);
         let mut hints: Vec<Option<TableColumnWidthHint>> = Vec::new();
         let mut borders: Vec<Option<TableColumnBorder>> = Vec::new();
         let mut group_borders: Vec<Option<TableColumnGroupBorder>> = Vec::new();
+        let mut backgrounds: Vec<Option<Color>> = Vec::new();
         let mut collapsed_columns: Vec<bool> = Vec::new();
         let mut prev_infos: Vec<ElementInfo> = Vec::new();
 
         for (child_index, child) in column_nodes.iter().enumerate() {
-            let Some(el) = child.as_element() else {
+            let Some(element) = child.as_element() else {
                 continue;
             };
-            let tag = el.name.local.as_ref();
+            let tag = element.name.local.as_ref();
             let base_info =
                 element_info_basic(child, child_index + 1, child_count, false, Vec::new());
             let mut info = if include_prev_siblings {
@@ -6945,118 +9473,133 @@ fn table_flowable(
                 resolver.compute_style(&info, table_style, inline_style.as_deref(), ancestors);
             info.apply_computed_container_style(&computed);
 
-            match tag {
-                "col" => {
+            if tag == "col" || matches!(computed.display, DisplayMode::TableColumn) {
+                let span = span_attr(child);
+                append_column_hint(&mut hints, column_width_hint_from_style(&computed), span);
+                append_column_border(&mut borders, column_border_from_style(&computed), span);
+                append_column_group_border(&mut group_borders, None, span, 0, span);
+                append_column_background(&mut backgrounds, computed.background_color, span);
+                append_column_collapsed(
+                    &mut collapsed_columns,
+                    matches!(computed.visibility, VisibilityMode::Collapse),
+                    span,
+                );
+            } else if tag == "colgroup" || matches!(computed.display, DisplayMode::TableColumnGroup)
+            {
+                let group_collapsed = matches!(computed.visibility, VisibilityMode::Collapse);
+                ancestors.push(info);
+                let cols: Vec<NodeRef> = child
+                    .children()
+                    .filter(|col| col.as_element().is_some())
+                    .collect();
+                if cols.is_empty() {
                     let span = span_attr(child);
                     append_column_hint(&mut hints, column_width_hint_from_style(&computed), span);
-                    append_column_border(&mut borders, column_border_from_style(&computed), span);
-                    append_column_group_border(&mut group_borders, None, span, 0, span);
+                    append_column_border(&mut borders, None, span);
+                    append_column_group_border(
+                        &mut group_borders,
+                        column_border_from_style(&computed),
+                        span,
+                        0,
+                        span,
+                    );
+                    append_column_background(&mut backgrounds, computed.background_color, span);
                     append_column_collapsed(
                         &mut collapsed_columns,
                         matches!(computed.visibility, VisibilityMode::Collapse),
                         span,
                     );
-                }
-                "colgroup" => {
-                    let group_collapsed = matches!(computed.visibility, VisibilityMode::Collapse);
-                    ancestors.push(info);
-                    let cols: Vec<NodeRef> = child
-                        .children()
-                        .filter(|col| {
-                            col.as_element()
-                                .map(|col_el| col_el.name.local.as_ref() == "col")
-                                .unwrap_or(false)
-                        })
-                        .collect();
-                    if cols.is_empty() {
-                        let span = span_attr(child);
+                } else {
+                    let col_count = cols.len().max(1);
+                    let group_span = cols.iter().map(span_attr).sum::<usize>().max(1);
+                    let group_border = column_border_from_style(&computed);
+                    let mut group_offset = 0usize;
+                    let mut prev_col_infos: Vec<ElementInfo> = Vec::new();
+                    for (col_index, col) in cols.iter().enumerate() {
+                        let base_col_info =
+                            element_info_basic(col, col_index + 1, col_count, false, Vec::new());
+                        let col_info = if include_prev_siblings {
+                            let mut with_prev = base_col_info.clone();
+                            with_prev.prev_siblings = prev_col_infos.clone();
+                            prev_col_infos.push(base_col_info);
+                            with_prev
+                        } else {
+                            base_col_info
+                        };
+                        let col_inline_style = inline_style_attr(col);
+                        let col_style = resolver.compute_style(
+                            &col_info,
+                            &computed,
+                            col_inline_style.as_deref(),
+                            ancestors,
+                        );
+                        let col_tag = col
+                            .as_element()
+                            .map(|element| element.name.local.as_ref() == "col")
+                            .unwrap_or(false);
+                        if !col_tag && !matches!(col_style.display, DisplayMode::TableColumn) {
+                            continue;
+                        }
                         append_column_hint(
                             &mut hints,
-                            column_width_hint_from_style(&computed),
+                            column_width_hint_from_style(&col_style),
+                            span_attr(col),
+                        );
+                        let span = span_attr(col);
+                        append_column_border(
+                            &mut borders,
+                            column_border_from_style(&col_style),
                             span,
                         );
-                        append_column_border(&mut borders, None, span);
                         append_column_group_border(
                             &mut group_borders,
-                            column_border_from_style(&computed),
+                            group_border,
                             span,
-                            0,
+                            group_offset,
+                            group_span,
+                        );
+                        append_column_background(
+                            &mut backgrounds,
+                            col_style.background_color.or(computed.background_color),
                             span,
                         );
                         append_column_collapsed(
                             &mut collapsed_columns,
-                            matches!(computed.visibility, VisibilityMode::Collapse),
+                            group_collapsed
+                                || matches!(col_style.visibility, VisibilityMode::Collapse),
                             span,
                         );
-                    } else {
-                        let col_count = cols.len().max(1);
-                        let group_span = cols.iter().map(span_attr).sum::<usize>().max(1);
-                        let group_border = column_border_from_style(&computed);
-                        let mut group_offset = 0usize;
-                        let mut prev_col_infos: Vec<ElementInfo> = Vec::new();
-                        for (col_index, col) in cols.iter().enumerate() {
-                            let base_col_info = element_info_basic(
-                                col,
-                                col_index + 1,
-                                col_count,
-                                false,
-                                Vec::new(),
-                            );
-                            let col_info = if include_prev_siblings {
-                                let mut with_prev = base_col_info.clone();
-                                with_prev.prev_siblings = prev_col_infos.clone();
-                                prev_col_infos.push(base_col_info);
-                                with_prev
-                            } else {
-                                base_col_info
-                            };
-                            let col_inline_style = inline_style_attr(col);
-                            let col_style = resolver.compute_style(
-                                &col_info,
-                                &computed,
-                                col_inline_style.as_deref(),
-                                ancestors,
-                            );
-                            append_column_hint(
-                                &mut hints,
-                                column_width_hint_from_style(&col_style),
-                                span_attr(col),
-                            );
-                            let span = span_attr(col);
-                            append_column_border(
-                                &mut borders,
-                                column_border_from_style(&col_style),
-                                span,
-                            );
-                            append_column_group_border(
-                                &mut group_borders,
-                                group_border,
-                                span,
-                                group_offset,
-                                group_span,
-                            );
-                            append_column_collapsed(
-                                &mut collapsed_columns,
-                                group_collapsed
-                                    || matches!(col_style.visibility, VisibilityMode::Collapse),
-                                span,
-                            );
-                            group_offset = group_offset.saturating_add(span);
-                        }
+                        group_offset = group_offset.saturating_add(span);
                     }
-                    ancestors.pop();
                 }
-                _ => {}
+                ancestors.pop();
             }
         }
 
-        (hints, borders, group_borders, collapsed_columns)
+        (
+            hints,
+            borders,
+            group_borders,
+            backgrounds,
+            collapsed_columns,
+        )
     }
 
+    let include_prev_siblings = resolver.has_sibling_selectors();
     let mut rows: Vec<TableRowInput> = Vec::new();
-    collect_rows(node, &mut rows);
+    collect_rows(
+        node,
+        style,
+        resolver,
+        ancestors,
+        include_prev_siblings,
+        &mut rows,
+    );
     if let Some(logger) = resolver.debug_logger() {
-        let header_count = rows.iter().filter(|row| row.in_thead).count();
+        let header_count = rows
+            .iter()
+            .filter(|row| row.section == TableRowSection::Header)
+            .count();
         let body_count = rows.len().saturating_sub(header_count);
         let json = format!(
             "{{\"type\":\"table.rows\",\"total\":{},\"header\":{},\"body\":{}}}",
@@ -7066,9 +9609,13 @@ fn table_flowable(
         );
         logger.log_json(&json);
     }
-    let include_prev_siblings = resolver.has_sibling_selectors();
-    let (column_width_hints, column_borders, column_group_borders, collapsed_columns) =
-        collect_column_metadata(node, style, resolver, ancestors, include_prev_siblings);
+    let (
+        column_width_hints,
+        column_borders,
+        column_group_borders,
+        column_backgrounds,
+        collapsed_columns,
+    ) = collect_column_metadata(node, style, resolver, ancestors, include_prev_siblings);
     let collapsed_table = matches!(
         style.border_collapse,
         crate::flowable::BorderCollapseMode::Collapse
@@ -7096,18 +9643,51 @@ fn table_flowable(
         }
     }
 
-    let header_count = rows.iter().filter(|row| row.in_thead).count();
+    let header_count = rows
+        .iter()
+        .filter(|row| row.section == TableRowSection::Header)
+        .count();
     let body_count = rows.len().saturating_sub(header_count);
     let mut prev_row_infos: Vec<ElementInfo> = Vec::new();
     let mut header_index = 0usize;
     let mut body_index = 0usize;
+    let mut active_rowspans: Vec<Option<(TableCell, usize)>> = Vec::new();
+    let table_node = node.clone();
 
     for row_input in rows {
         let row = row_input.node;
-        let is_header = row_input.in_thead;
+        let anonymous_cells = row_input.anonymous_cells;
+        let anonymous_row = anonymous_cells.is_some();
+        let is_header = row_input.section == TableRowSection::Header;
+        let is_footer = row_input.section == TableRowSection::Footer;
         let in_explicit_row_group = row_input.in_explicit_row_group;
-        let row_group_starts = row_input.group_row_index == 1;
-        let row_group_ends = row_input.group_row_index == row_input.group_row_count;
+        let group_row_index = row_input.group_row_index;
+        let group_row_count = row_input.group_row_count;
+        let row_group_starts = group_row_index == 1;
+        let row_group_ends = group_row_index == group_row_count;
+        if row_group_starts {
+            active_rowspans.clear();
+            // Cached row/cell styles inherit from their section.  Reusing a
+            // tbody-derived entry for a later tfoot (or a second tbody) leaks
+            // section backgrounds, visibility and selectors across groups.
+            cached_header_tr_style = None;
+            cached_body_tr_style = None;
+            cached_header_th_empty = None;
+            cached_header_th_num = None;
+            cached_body_td_empty = None;
+            cached_body_td_num = None;
+        }
+        let mut next_rowspans: Vec<Option<(TableCell, usize)>> = active_rowspans
+            .iter()
+            .map(|entry| {
+                entry.as_ref().and_then(|(cell, remaining)| {
+                    remaining
+                        .checked_sub(1)
+                        .filter(|remaining| *remaining > 0)
+                        .map(|remaining| (cell.clone(), remaining))
+                })
+            })
+            .collect();
         row_count = row_count.saturating_add(1);
         let row_meta = row
             .as_element()
@@ -7120,18 +9700,8 @@ fn table_flowable(
             .unwrap_or_default();
         let section_context = row.parent().and_then(|parent| {
             let parent_el = parent.as_element()?;
-            let tag = parent_el.name.local.as_ref().to_ascii_lowercase();
-            match tag.as_str() {
-                "thead" | "tbody" | "tfoot" => {
-                    let info = element_info(&parent, include_prev_siblings);
-                    let inline_style = parent_el
-                        .attributes
-                        .borrow()
-                        .get("style")
-                        .map(|s| s.to_string());
-                    Some((info, inline_style))
-                }
-                "table" => Some((
+            if parent == table_node {
+                Some((
                     ElementInfo {
                         tag: "tbody".to_string(),
                         id: None,
@@ -7146,11 +9716,20 @@ fn table_flowable(
                         is_root: false,
                         child_index: 1,
                         child_count: 1,
+                        type_index: 1,
+                        type_count: 1,
                         prev_siblings: Vec::new(),
                     },
                     None,
-                )),
-                _ => None,
+                ))
+            } else {
+                let info = element_info(&parent, include_prev_siblings);
+                let inline_style = parent_el
+                    .attributes
+                    .borrow()
+                    .get("style")
+                    .map(|s| s.to_string());
+                Some((info, inline_style))
             }
         });
         let mut pushed_section = false;
@@ -7182,9 +9761,10 @@ fn table_flowable(
         } else {
             body_count.max(1)
         };
-        let mut row_info = row
-            .as_element()
-            .map(|_| {
+        let mut row_info = if anonymous_row {
+            None
+        } else {
+            row.as_element().map(|_| {
                 let t_info = std::time::Instant::now();
                 let base_info =
                     element_info_basic(&row, row_child_index, row_child_count, false, Vec::new());
@@ -7200,22 +9780,25 @@ fn table_flowable(
                 row_info_calls = row_info_calls.saturating_add(1);
                 info
             })
-            .unwrap_or(ElementInfo {
-                tag: "tr".to_string(),
-                id: None,
-                classes: Vec::new(),
-                attrs: std::collections::HashMap::new(),
-                container_names: Vec::new(),
-                container_type: crate::style::ContainerQueryType::Normal,
-                container_width: None,
-                container_height: None,
-                container_inline_size: None,
-                container_block_size: None,
-                is_root: false,
-                child_index: row_child_index,
-                child_count: row_child_count,
-                prev_siblings: Vec::new(),
-            });
+        }
+        .unwrap_or(ElementInfo {
+            tag: "tr".to_string(),
+            id: None,
+            classes: Vec::new(),
+            attrs: std::collections::HashMap::new(),
+            container_names: Vec::new(),
+            container_type: crate::style::ContainerQueryType::Normal,
+            container_width: None,
+            container_height: None,
+            container_inline_size: None,
+            container_block_size: None,
+            is_root: false,
+            child_index: row_child_index,
+            child_count: row_child_count,
+            type_index: row_child_index,
+            type_count: row_child_count,
+            prev_siblings: Vec::new(),
+        });
         if let Some(logger) = resolver.debug_logger() {
             let kind = if is_header { "header" } else { "body" };
             let json = format!(
@@ -7229,9 +9812,12 @@ fn table_flowable(
         }
 
         // Compute row style once so `td` can inherit from `tr` (more correct than inheriting from `table`).
-        let row_inline_style = row
-            .as_element()
-            .and_then(|el| el.attributes.borrow().get("style").map(|s| s.to_string()));
+        let row_inline_style = if anonymous_row {
+            None
+        } else {
+            row.as_element()
+                .and_then(|el| el.attributes.borrow().get("style").map(|s| s.to_string()))
+        };
         let can_cache_row = !resolver.has_positional_selectors()
             && row_info.id.is_none()
             && row_info.classes.is_empty()
@@ -7291,19 +9877,16 @@ fn table_flowable(
         ancestors.push(row_info);
 
         let mut cells: Vec<TableCell> = Vec::new();
-        let mut cell_nodes: Vec<NodeRef> = Vec::new();
-        for cell_child in row.children() {
-            let Some(cell_el) = cell_child.as_element() else {
-                continue;
-            };
-            let tag = cell_el.name.local.as_ref();
-            if tag != "th" && tag != "td" {
-                continue;
-            }
-            cell_nodes.push(cell_child);
-        }
+        let cell_nodes: Vec<NodeRef> = if let Some(cells) = anonymous_cells {
+            cells
+        } else {
+            row.children()
+                .filter(|child| child.as_element().is_some())
+                .collect()
+        };
         let cell_total = cell_nodes.len().max(1);
         let mut prev_cell_infos: Vec<ElementInfo> = Vec::new();
+        let mut logical_col = 0usize;
         for (cell_idx, cell_child) in cell_nodes.iter().enumerate() {
             let cell_el = cell_child.as_element().expect("cell element");
             let tag = cell_el.name.local.as_ref();
@@ -7315,6 +9898,73 @@ fn table_flowable(
                 .and_then(|raw| raw.trim().parse::<usize>().ok())
                 .filter(|value| *value > 0)
                 .unwrap_or(1);
+            while let Some(Some((spanning_cell, _))) = active_rowspans.get(logical_col) {
+                cells.push(
+                    spanning_cell
+                        .as_rowspan_placeholder()
+                        .with_row_collapsed(row_collapsed)
+                        .with_row_border(
+                            row_style.border_width,
+                            crate::flowable::ResolvedEdgeColors {
+                                top: row_border_colors.top,
+                                right: row_border_colors.right,
+                                bottom: row_border_colors.bottom,
+                                left: row_border_colors.left,
+                            },
+                            crate::flowable::ResolvedEdgeStyles {
+                                top: row_border_styles.top,
+                                right: row_border_styles.right,
+                                bottom: row_border_styles.bottom,
+                                left: row_border_styles.left,
+                            },
+                            crate::flowable::ResolvedEdgeHidden {
+                                top: row_hidden_borders.top,
+                                right: row_hidden_borders.right,
+                                bottom: row_hidden_borders.bottom,
+                                left: row_hidden_borders.left,
+                            },
+                        )
+                        .with_row_group_border(
+                            row_parent_style.border_width,
+                            crate::flowable::ResolvedEdgeColors {
+                                top: row_group_border_colors.top,
+                                right: row_group_border_colors.right,
+                                bottom: row_group_border_colors.bottom,
+                                left: row_group_border_colors.left,
+                            },
+                            crate::flowable::ResolvedEdgeStyles {
+                                top: row_group_border_styles.top,
+                                right: row_group_border_styles.right,
+                                bottom: row_group_border_styles.bottom,
+                                left: row_group_border_styles.left,
+                            },
+                            crate::flowable::ResolvedEdgeHidden {
+                                top: row_group_hidden_borders.top,
+                                right: row_group_hidden_borders.right,
+                                bottom: row_group_hidden_borders.bottom,
+                                left: row_group_hidden_borders.left,
+                            },
+                            row_group_starts,
+                            row_group_ends,
+                        ),
+                );
+                logical_col = logical_col.saturating_add(1);
+            }
+            let remaining_group_rows = row_input
+                .group_row_count
+                .saturating_sub(row_input.group_row_index)
+                .saturating_add(1)
+                .max(1);
+            let row_span = match cell_el
+                .attributes
+                .borrow()
+                .get("rowspan")
+                .and_then(|raw| raw.trim().parse::<usize>().ok())
+            {
+                Some(0) => remaining_group_rows,
+                Some(value) => value.max(1).min(remaining_group_rows),
+                None => 1,
+            };
 
             let mut cell_info = {
                 let t_info = std::time::Instant::now();
@@ -7386,14 +10036,21 @@ fn table_flowable(
                 StyleRef::Owned(computed)
             };
             let cell_style = cell_style_ref.as_ref();
+            if matches!(cell_style.display, DisplayMode::None) {
+                continue;
+            }
             cell_info.apply_computed_container_style(cell_style);
 
             let has_element_children = cell_child
                 .children()
                 .any(|child| child.as_element().is_some());
             let mut cell_content: Option<Box<dyn Flowable>> = None;
+            let mut inline_content_phase = false;
             let mut cell_text = String::new();
             if has_element_children {
+                let coerce_mixed_inline =
+                    inline_or_replaced_children_only(cell_child, resolver, cell_style, ancestors);
+                inline_content_phase = coerce_mixed_inline;
                 let before_items = pseudo_items_for(
                     resolver,
                     &cell_info,
@@ -7434,6 +10091,23 @@ fn table_flowable(
                 ancestors.pop();
                 cell_items.extend(after_items);
 
+                let cell_items = if coerce_mixed_inline {
+                    // `vertical-align` on a table cell controls the cell's
+                    // contents as a group; it is not inherited by anonymous
+                    // inline children. Those runs participate in their own
+                    // line box on the baseline, while TableFlowable applies
+                    // the cell-level alignment to the completed content box.
+                    coerce_items_to_inline_run(
+                        cell_items,
+                        VerticalAlign::Baseline,
+                        cell_style,
+                        font_registry.clone(),
+                        false,
+                    )
+                } else {
+                    cell_items
+                };
+
                 let mut cell_flowables = layout_children_to_flowables(cell_items, None);
                 cell_content = if cell_flowables.is_empty() {
                     None
@@ -7446,9 +10120,6 @@ fn table_flowable(
                             cell_style.font_size,
                             cell_style.root_font_size,
                         )
-                        .with_establishes_abs_containing_block(establishes_abs_containing_block(
-                            &cell_style,
-                        ))
                         .with_self_visible(cell_style.visibility.paints()),
                     ) as Box<dyn Flowable>)
                 };
@@ -7458,7 +10129,11 @@ fn table_flowable(
                 let t_cell_text = std::time::Instant::now();
                 let text = cell_child.text_contents();
                 cell_text_ms += t_cell_text.elapsed().as_secs_f64() * 1000.0;
-                let trimmed = text.trim();
+                // HTML collapsible whitespace does not include NBSP.  Keeping
+                // it here is also what makes `empty-cells: hide` treat a cell
+                // containing `&nbsp;` as non-empty.
+                let trimmed =
+                    text.trim_matches(|ch| matches!(ch, ' ' | '\n' | '\r' | '\t' | '\u{000c}'));
                 if !trimmed.is_empty() {
                     let transformed = apply_text_transform(trimmed, cell_style.text_transform);
                     text_chars = text_chars.saturating_add(transformed.chars().count() as u64);
@@ -7467,7 +10142,43 @@ fn table_flowable(
             }
 
             let align = text_align_from_style(&cell_style);
-            let valign = vertical_align_from_style(&cell_style);
+            let valign = match cell_style.vertical_align {
+                VerticalAlignMode::TextTop
+                | VerticalAlignMode::TextBottom
+                | VerticalAlignMode::Sub
+                | VerticalAlignMode::Super => VerticalAlign::Baseline,
+                _ => vertical_align_from_style(&cell_style),
+            };
+            let cell_min_height = resolve_non_auto_height(
+                cell_style.height,
+                cell_style.font_size,
+                cell_style.root_font_size,
+            );
+
+            let mut cell_padding = cell_style.padding;
+            if let Some(padding) = legacy_cell_padding {
+                let ua_padding = LengthSpec::Absolute(Pt::from_f32(0.75));
+                let is_zero = length_spec_is_zero(cell_padding.top)
+                    && length_spec_is_zero(cell_padding.right)
+                    && length_spec_is_zero(cell_padding.bottom)
+                    && length_spec_is_zero(cell_padding.left);
+                let is_ua_default = cell_padding
+                    == EdgeSizes {
+                        top: ua_padding,
+                        right: ua_padding,
+                        bottom: ua_padding,
+                        left: ua_padding,
+                    };
+                if is_zero || is_ua_default {
+                    let padding = LengthSpec::Absolute(padding);
+                    cell_padding = EdgeSizes {
+                        top: padding,
+                        right: padding,
+                        bottom: padding,
+                        left: padding,
+                    };
+                }
+            }
 
             let mut border_widths = cell_style.border_width;
             if !collapsed_table {
@@ -7482,19 +10193,58 @@ fn table_flowable(
                     border_widths.bottom = row_style.border_width.bottom;
                 }
             }
+            let mut border_styles = cell_style.resolved_border_styles();
+            let mut hidden_borders = cell_style.border_hidden_sides();
+            let base_border_color = if collapsed_table {
+                cell_style.border_color.unwrap_or(cell_style.color)
+            } else {
+                cell_style
+                    .border_color
+                    .or(row_style.border_color)
+                    .unwrap_or(cell_style.color)
+            };
+            let resolved_cell_border_colors = cell_style.resolved_border_colors(base_border_color);
+            let mut border_color_top = resolved_cell_border_colors.top;
+            let mut border_color_right = resolved_cell_border_colors.right;
+            let mut border_color_bottom = resolved_cell_border_colors.bottom;
+            let mut border_color_left = resolved_cell_border_colors.left;
+            if legacy_border_width.is_some()
+                && length_spec_is_zero(border_widths.top)
+                && length_spec_is_zero(border_widths.right)
+                && length_spec_is_zero(border_widths.bottom)
+                && length_spec_is_zero(border_widths.left)
+            {
+                let one_css_px = LengthSpec::Absolute(Pt::from_f32(0.75));
+                border_widths = EdgeSizes {
+                    top: one_css_px,
+                    right: one_css_px,
+                    bottom: one_css_px,
+                    left: one_css_px,
+                };
+                border_styles.top = OutlineLineStyle::Solid;
+                border_styles.right = OutlineLineStyle::Solid;
+                border_styles.bottom = OutlineLineStyle::Solid;
+                border_styles.left = OutlineLineStyle::Solid;
+                hidden_borders.top = false;
+                hidden_borders.right = false;
+                hidden_borders.bottom = false;
+                hidden_borders.left = false;
+                let light = Color::rgb(238.0 / 255.0, 238.0 / 255.0, 238.0 / 255.0);
+                let dark = Color::rgb(154.0 / 255.0, 154.0 / 255.0, 154.0 / 255.0);
+                border_color_top = dark;
+                border_color_left = dark;
+                border_color_right = light;
+                border_color_bottom = light;
+            }
             let border = BorderSpec {
                 widths: border_widths,
-                color: if collapsed_table {
-                    cell_style.border_color.unwrap_or(cell_style.color)
-                } else {
-                    cell_style
-                        .border_color
-                        .or(row_style.border_color)
-                        .unwrap_or(cell_style.color)
-                },
+                color: border_color_top,
             };
-            let border_styles = cell_style.resolved_border_styles();
-            let hidden_borders = cell_style.border_hidden_sides();
+            let effective_cell_background = cell_style
+                .background_color
+                .or(row_style.background_color)
+                .or(row_parent_style.background_color)
+                .or_else(|| column_backgrounds.get(logical_col).copied().flatten());
 
             let text_style = text_style_for_flow_text(&cell_style);
             if !cell_text.is_empty() {
@@ -7513,8 +10263,8 @@ fn table_flowable(
                 text_style,
                 align,
                 valign,
-                cell_style.padding,
-                cell_style.background_color,
+                cell_padding,
+                effective_cell_background,
                 border,
                 cell_style.box_shadow.clone(),
                 Some(Arc::<str>::from(if tag == "th" { "TH" } else { "TD" })),
@@ -7536,6 +10286,12 @@ fn table_flowable(
                     border_styles.right,
                     border_styles.bottom,
                     border_styles.left,
+                )
+                .with_border_colors(
+                    border_color_top,
+                    border_color_right,
+                    border_color_bottom,
+                    border_color_left,
                 )
                 .with_hidden_borders(
                     hidden_borders.top,
@@ -7589,8 +10345,14 @@ fn table_flowable(
                     row_group_starts,
                     row_group_ends,
                 )
-                .with_row_min_height(row_min_height)
-                .with_hide_empty_cells(cell_style.empty_cells_hide);
+                .with_row_min_height(row_min_height.max(cell_min_height))
+                .with_row_span(row_span)
+                .with_hide_empty_cells(cell_style.empty_cells_hide)
+                .with_establishes_abs_containing_block(establishes_abs_containing_block(cell_style))
+                .with_overflow_hidden(matches!(
+                    cell_style.overflow,
+                    OverflowMode::Hidden | OverflowMode::Clip
+                ));
             if !matches!(
                 cell_style.width,
                 LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
@@ -7603,22 +10365,109 @@ fn table_flowable(
             }
             let cell = if let Some(content) = cell_content {
                 cell.with_content(content)
+                    .with_inline_content_phase(inline_content_phase)
             } else {
                 cell
             };
+            if row_span > 1 {
+                let required_columns = logical_col.saturating_add(col_span);
+                if next_rowspans.len() < required_columns {
+                    next_rowspans.resize(required_columns, None);
+                }
+                for slot in &mut next_rowspans[logical_col..required_columns] {
+                    *slot = Some((cell.clone(), row_span - 1));
+                }
+            }
             cells.push(cell);
+            logical_col = logical_col.saturating_add(col_span);
         }
+
+        while logical_col < active_rowspans.len() {
+            if let Some((spanning_cell, _)) = active_rowspans[logical_col].as_ref() {
+                cells.push(
+                    spanning_cell
+                        .as_rowspan_placeholder()
+                        .with_row_collapsed(row_collapsed)
+                        .with_row_border(
+                            row_style.border_width,
+                            crate::flowable::ResolvedEdgeColors {
+                                top: row_border_colors.top,
+                                right: row_border_colors.right,
+                                bottom: row_border_colors.bottom,
+                                left: row_border_colors.left,
+                            },
+                            crate::flowable::ResolvedEdgeStyles {
+                                top: row_border_styles.top,
+                                right: row_border_styles.right,
+                                bottom: row_border_styles.bottom,
+                                left: row_border_styles.left,
+                            },
+                            crate::flowable::ResolvedEdgeHidden {
+                                top: row_hidden_borders.top,
+                                right: row_hidden_borders.right,
+                                bottom: row_hidden_borders.bottom,
+                                left: row_hidden_borders.left,
+                            },
+                        )
+                        .with_row_group_border(
+                            row_parent_style.border_width,
+                            crate::flowable::ResolvedEdgeColors {
+                                top: row_group_border_colors.top,
+                                right: row_group_border_colors.right,
+                                bottom: row_group_border_colors.bottom,
+                                left: row_group_border_colors.left,
+                            },
+                            crate::flowable::ResolvedEdgeStyles {
+                                top: row_group_border_styles.top,
+                                right: row_group_border_styles.right,
+                                bottom: row_group_border_styles.bottom,
+                                left: row_group_border_styles.left,
+                            },
+                            crate::flowable::ResolvedEdgeHidden {
+                                top: row_group_hidden_borders.top,
+                                right: row_group_hidden_borders.right,
+                                bottom: row_group_hidden_borders.bottom,
+                                left: row_group_hidden_borders.left,
+                            },
+                            row_group_starts,
+                            row_group_ends,
+                        ),
+                );
+            }
+            logical_col = logical_col.saturating_add(1);
+        }
+        active_rowspans = next_rowspans;
 
         ancestors.pop();
 
         if cells.is_empty() {
+            if pushed_section {
+                ancestors.pop();
+            }
             continue;
         }
         if is_header {
             header_rows.push(cells);
         } else {
+            let body_index = body_rows.len();
+            let keep_range = if !is_footer
+                && in_explicit_row_group
+                && matches!(
+                    row_parent_style.pagination.break_inside,
+                    BreakInside::Avoid | BreakInside::AvoidPage
+                ) {
+                let start = body_index.saturating_sub(group_row_index.saturating_sub(1));
+                Some((start, start.saturating_add(group_row_count)))
+            } else {
+                None
+            };
             body_rows.push(cells);
             body_row_meta.push(row_meta);
+            body_row_pagination.push(row_style.pagination);
+            body_row_keep_ranges.push(keep_range);
+            if is_footer {
+                footer_row_count += 1;
+            }
         }
 
         if pushed_section {
@@ -7630,6 +10479,9 @@ fn table_flowable(
         body_rows = header_rows.clone();
         header_rows.clear();
         body_row_meta = vec![Vec::new(); body_rows.len()];
+        body_row_pagination = vec![crate::flowable::Pagination::default(); body_rows.len()];
+        body_row_keep_ranges = vec![None; body_rows.len()];
+        footer_row_count = 0;
     }
 
     if let Some(perf_logger) = perf {
@@ -7662,13 +10514,32 @@ fn table_flowable(
     TableFlowable::new(body_rows)
         .with_header(header_rows)
         .repeat_header(true)
+        .with_footer_row_count(footer_row_count)
+        .repeat_footer(footer_row_count > 0)
         .with_row_backgrounds(false)
         .with_body_row_meta(body_row_meta)
+        .with_body_row_pagination(body_row_pagination)
+        .with_body_row_keep_ranges(body_row_keep_ranges)
         .with_column_width_hints(column_width_hints)
         .with_column_borders(column_borders)
         .with_column_group_borders(column_group_borders)
         .with_collapsed_columns(collapsed_columns)
         .with_pagination(style.pagination)
+}
+
+fn legacy_table_length_attribute(node: &NodeRef, name: &str) -> Option<Pt> {
+    let raw = node
+        .as_element()?
+        .attributes
+        .borrow()
+        .get(name)?
+        .trim()
+        .parse::<f32>()
+        .ok()?;
+    if !raw.is_finite() || raw < 0.0 {
+        return None;
+    }
+    Some(Pt::from_f32(raw * 0.75))
 }
 
 fn report_missing_glyphs(
@@ -7707,6 +10578,30 @@ fn element_info_basic(
 ) -> ElementInfo {
     let element = node.as_element().expect("element node");
     let tag = element.name.local.as_ref().to_ascii_lowercase();
+    let (type_index, type_count) = node
+        .parent()
+        .map(|parent| {
+            let mut count = 0usize;
+            let mut index = 0usize;
+            for sibling in parent.children() {
+                let Some(sibling_element) = sibling.as_element() else {
+                    continue;
+                };
+                if sibling_element
+                    .name
+                    .local
+                    .as_ref()
+                    .eq_ignore_ascii_case(&tag)
+                {
+                    count += 1;
+                    if sibling == *node {
+                        index = count;
+                    }
+                }
+            }
+            (index.max(1), count.max(1))
+        })
+        .unwrap_or((1, 1));
     let attrs = element.attributes.borrow();
     let id = attrs.get("id").map(|s| s.to_ascii_lowercase());
     let classes = attrs
@@ -7740,6 +10635,8 @@ fn element_info_basic(
         is_root,
         child_index,
         child_count,
+        type_index,
+        type_count,
         prev_siblings,
     }
 }
@@ -7890,6 +10787,35 @@ fn parse_svg_viewbox_dimensions(value: Option<&str>) -> Option<(Pt, Pt)> {
     Some((Pt::from_f32(width * 0.75), Pt::from_f32(height * 0.75)))
 }
 
+fn svg_image_intrinsic_dimensions(xml: &str) -> Option<(Pt, Pt)> {
+    let document = crate::xml::Document::parse(xml).ok()?;
+    let root = document
+        .descendants()
+        .find(|node| node.tag_name().name().eq_ignore_ascii_case("svg"))?;
+    let width = parse_dimension(root.attribute("width"));
+    let height = parse_dimension(root.attribute("height"));
+    let viewbox = parse_svg_viewbox_dimensions(
+        root.attribute("viewBox")
+            .or_else(|| root.attribute("viewbox")),
+    );
+    let ratio = viewbox.and_then(|(width, height)| {
+        let height = height.to_f32();
+        (height.is_finite() && height > 0.0).then_some(width.to_f32() / height)
+    });
+
+    match (width, height, ratio, viewbox) {
+        (Some(width), Some(height), _, _) => Some((width, height)),
+        (Some(width), None, Some(ratio), _) if ratio.is_finite() && ratio > 0.0 => {
+            Some((width, Pt::from_f32(width.to_f32() / ratio)))
+        }
+        (None, Some(height), Some(ratio), _) if ratio.is_finite() && ratio > 0.0 => {
+            Some((Pt::from_f32(height.to_f32() * ratio), height))
+        }
+        (None, None, _, Some(viewbox)) => Some(viewbox),
+        _ => None,
+    }
+}
+
 fn resolve_svg_dimensions(
     inline_width: Option<Pt>,
     inline_height: Option<Pt>,
@@ -7983,7 +10909,7 @@ fn collect_text(node: &NodeRef, out: &mut String) {
         NodeData::Element(element) => {
             let tag = element.name.local.as_ref();
             if tag.eq_ignore_ascii_case("br") {
-                out.push('\n');
+                out.push(FORCED_LINE_BREAK);
                 return;
             }
             if tag.eq_ignore_ascii_case("script") || tag.eq_ignore_ascii_case("style") {
@@ -8000,14 +10926,25 @@ fn collect_text(node: &NodeRef, out: &mut String) {
 fn normalize_text(text: &str, mode: WhiteSpaceMode, trim: bool) -> String {
     match mode {
         WhiteSpaceMode::Pre | WhiteSpaceMode::PreWrap | WhiteSpaceMode::BreakSpaces => {
-            return text.replace("\r\n", "\n").replace('\r', "\n");
+            return text
+                .replace("\r\n", "\n")
+                .replace('\r', "\n")
+                .replace(FORCED_LINE_BREAK, "\n");
         }
         WhiteSpaceMode::PreserveSpaces => {
             return text
                 .replace("\r\n", "\n")
                 .replace('\r', "\n")
                 .chars()
-                .map(|ch| if ch == '\n' || ch == '\t' { ' ' } else { ch })
+                .map(|ch| {
+                    if ch == FORCED_LINE_BREAK {
+                        '\n'
+                    } else if ch == '\n' || ch == '\t' {
+                        ' '
+                    } else {
+                        ch
+                    }
+                })
                 .collect();
         }
         _ => {}
@@ -8016,6 +10953,14 @@ fn normalize_text(text: &str, mode: WhiteSpaceMode, trim: bool) -> String {
     let mut out = String::new();
     let mut in_space = false;
     for ch in text.chars() {
+        if ch == FORCED_LINE_BREAK {
+            while out.ends_with(' ') {
+                out.pop();
+            }
+            out.push('\n');
+            in_space = false;
+            continue;
+        }
         let ch = if ch == '\u{00A0}' { ' ' } else { ch };
         if ch == '\n' {
             match mode {
@@ -8113,7 +11058,7 @@ fn preserve_whitespace(mode: WhiteSpaceMode) -> bool {
 
 fn text_style_for_flow_text(style: &ComputedStyle) -> TextStyle {
     let mut text_style = style.to_text_style();
-    if !matches!(style.overflow, OverflowMode::Hidden) {
+    if matches!(style.overflow, OverflowMode::Visible) {
         text_style.text_overflow = crate::style::TextOverflowMode::Clip;
     }
     text_style
@@ -8121,6 +11066,10 @@ fn text_style_for_flow_text(style: &ComputedStyle) -> TextStyle {
 
 fn no_wrap(style: &ComputedStyle) -> bool {
     matches!(style.text_wrap_mode, TextWrapMode::NoWrap)
+        || matches!(
+            style.white_space,
+            WhiteSpaceMode::NoWrap | WhiteSpaceMode::Pre
+        )
 }
 
 fn inline_dimensions(style: Option<&str>) -> (Option<Pt>, Option<Pt>) {

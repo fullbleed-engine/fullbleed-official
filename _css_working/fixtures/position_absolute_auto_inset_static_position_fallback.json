@@ -36,9 +36,9 @@
         "fixed": 30,
         "start": 0,
         "rgba": [
-          255,
-          255,
-          255,
+          211,
+          211,
+          211,
           255
         ],
         "tolerance": 8,
@@ -68,9 +68,9 @@
         "fixed": 90,
         "start": 0,
         "rgba": [
-          255,
-          255,
-          255,
+          211,
+          211,
+          211,
           255
         ],
         "tolerance": 8,
@@ -137,5 +137,5 @@
       }
     ]
   },
-  "stability_hash": "127eb88ea4c41c5f7072b8a2b6883fe9258ad0fa543b3fe342935e797c6f9710"
+  "stability_hash": "d1070463bceaa511d3756fb7060c30f2e59a0ce9d41231209a16a818c22d2142"
 }

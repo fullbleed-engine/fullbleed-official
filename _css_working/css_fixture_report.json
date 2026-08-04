@@ -40,7 +40,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -81,14 +81,14 @@
               "x": 380,
               "y": 80,
               "expected_rgba": [
-                137,
-                59,
+                255,
+                0,
                 0,
                 255
               ],
               "actual_rgba": [
-                137,
-                59,
+                255,
+                0,
                 0,
                 255
               ],
@@ -107,8 +107,8 @@
               ],
               "actual_rgba": [
                 0,
-                127,
-                1,
+                128,
+                0,
                 255
               ],
               "tolerance": 30,
@@ -120,14 +120,14 @@
               "y": 380,
               "expected_rgba": [
                 0,
-                64,
                 128,
+                0,
                 255
               ],
               "actual_rgba": [
                 0,
-                64,
                 128,
+                0,
                 255
               ],
               "tolerance": 30,
@@ -162,19 +162,19 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_background_conic_gradient_supported_quadrants_272448_1779749378354271900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_background_conic_gradient_supported_quadrants_220748_1785811234873500300.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 16892,
-        "pdf_sha256": "b5c81cf0362705d92b7380a2917003037db7843c447d8576e46a3184e687ea25",
+        "pdf_bytes": 13043,
+        "pdf_sha256": "927bd870b58723d60fb6c1495d388076b66da86828f53829fa4f29bb57687e37",
         "image_count": 1,
         "image_sha256": [
-          "90e0ed28620df5c64742e5f3d3dc1c1db41b920982eef0e0f4b89ff9b11ca8d5"
+          "4e91b637f9b2a3d9335f822020b67463e7655ef4981541c91d8c7d41f30e2dd5"
         ],
-        "stability_hash_expected": "dc39e56beaefd5ad22d3d092c04b67757b004f55f34d5213393f35533de05228",
-        "stability_hash_actual": "dc39e56beaefd5ad22d3d092c04b67757b004f55f34d5213393f35533de05228",
+        "stability_hash_expected": "eb2531208b9f17f21945073966cfde4363e52bc7d913f3df0e55a97a2e3371a7",
+        "stability_hash_actual": "eb2531208b9f17f21945073966cfde4363e52bc7d913f3df0e55a97a2e3371a7",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -209,7 +209,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -408,16 +408,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_left_color_override_272448_1779749378355276500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_left_color_override_220748_1785811234874496300.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 655,
-        "pdf_sha256": "f615a4aed02078472190ec3ea0c624b026aec3bd5e02b0076b1b13899eca83b3",
+        "pdf_bytes": 766,
+        "pdf_sha256": "1b2bee554ad8644ecb6f1d1443bc4ca4967697eaba20195aa7a3268de5f75ff8",
         "image_count": 1,
         "image_sha256": [
-          "7e3881aa8f1d99164c74ceb759ce52d2a19d92ff084e4b4e9ba30f57adc5bc36"
+          "947b3a2a124ee4a4bb6a5c381ff1cba10cc5f328ef988ab14d69bc89ac6d12be"
         ],
         "stability_hash_expected": "ee6bdc99d7241c1e786fb55523ade19a88a9bb01eddf1dc384a68357e898b1f3",
         "stability_hash_actual": "ee6bdc99d7241c1e786fb55523ade19a88a9bb01eddf1dc384a68357e898b1f3",
@@ -455,7 +455,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -711,16 +711,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_uniform_frame_paint_matrix_272448_1779749378356278400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_uniform_frame_paint_matrix_220748_1785811234875502500.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 698,
-        "pdf_sha256": "ffd725204f6e5733ff5ce2e67bf3fdd6106cf635722e88ddcad695440b42bb2a",
+        "pdf_bytes": 731,
+        "pdf_sha256": "3c5efd68192ef8f668eff0955d686a7b38173d0b8385a5d1f442c313f4bce0ab",
         "image_count": 1,
         "image_sha256": [
-          "76644141263a198ace241915eb5ebf2f7466eb2ad4f777abab3c1f91ff5e2902"
+          "96889497f1846ac4e8225e91e6180f2c52ee1e90a7960be962de879bc8bd80d3"
         ],
         "stability_hash_expected": "d74c548767e31205fdde0621bd8839579b17691204679182ff5b39683a8e633f",
         "stability_hash_actual": "d74c548767e31205fdde0621bd8839579b17691204679182ff5b39683a8e633f",
@@ -757,7 +757,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -836,15 +836,15 @@
               "x": 355,
               "y": 166,
               "expected_rgba": [
-                255,
-                255,
-                255,
+                217,
+                217,
+                217,
                 255
               ],
               "actual_rgba": [
-                255,
-                255,
-                255,
+                217,
+                217,
+                217,
                 255
               ],
               "tolerance": 8,
@@ -855,15 +855,15 @@
               "x": 24,
               "y": 24,
               "expected_rgba": [
-                255,
-                255,
-                255,
+                217,
+                217,
+                217,
                 255
               ],
               "actual_rgba": [
-                255,
-                255,
-                255,
+                217,
+                217,
+                217,
                 255
               ],
               "tolerance": 8,
@@ -879,19 +879,19 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_box_shadow_negative_spread_offset_paints_shrunk_shadow_272448_1779749378357274900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_box_shadow_negative_spread_offset_paints_shrunk_shadow_220748_1785811234874496300.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 922,
-        "pdf_sha256": "2f08753ee05f8e0c34d0d1df402a5d2c60c04eb3d83e94fd946a5bd533295320",
+        "pdf_bytes": 974,
+        "pdf_sha256": "f60d9199f593c8454dc5fb573a6fbf7696293f46ddf468732e741318b1959ae0",
         "image_count": 1,
         "image_sha256": [
-          "450591e73894c84181d5b3476c00f676812be7bdf1884914a854185511e4540e"
+          "9b44da2e66c21d2a2c6b5b5bba85a8d725c4ae7478d2d4f607176dca9a7dcbfa"
         ],
-        "stability_hash_expected": "5a5e3025a4c8442fe88fe28d257d844aeed37167893c054e0a9aaa04944709a7",
-        "stability_hash_actual": "5a5e3025a4c8442fe88fe28d257d844aeed37167893c054e0a9aaa04944709a7",
+        "stability_hash_expected": "8f726379ca286913269595bad187df8d074175b74544cf819b191fa75bf702d4",
+        "stability_hash_actual": "8f726379ca286913269595bad187df8d074175b74544cf819b191fa75bf702d4",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -927,7 +927,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 12,
+            "computed_event_count": 27,
             "checks": [
               {
                 "index": 0,
@@ -1096,16 +1096,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_calc_var_additive_mixed_lengths_272448_1779749380182487900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_calc_var_additive_mixed_lengths_220748_1785811236004847800.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 814,
-        "pdf_sha256": "21c8fba470034eb2ef19589f687becb6f68bd03f0c48f029ad702c889085c726",
+        "pdf_bytes": 841,
+        "pdf_sha256": "607d0ec964595c50afc70da5acbb83add10d5bb32c01dbf57bb8198ca32f47eb",
         "image_count": 1,
         "image_sha256": [
-          "e9c24da39fac0ec6d32ce48fc906b9a40852ed03ea59a4d7c46bb1cd4e313ef7"
+          "9d60eb7abfde9cf667f11719545b518d5defd4bc0326e70e2fdd5bfbb984d9e1"
         ],
         "stability_hash_expected": "c04e58f90a630b9cbdd634d6494948cce92ed9887203968de61e7e47a53a834f",
         "stability_hash_actual": "c04e58f90a630b9cbdd634d6494948cce92ed9887203968de61e7e47a53a834f",
@@ -1143,7 +1143,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -1247,16 +1247,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_calc_var_percent_width_272448_1779749380212531200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_calc_var_percent_width_220748_1785811236114093000.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 779,
-        "pdf_sha256": "f771cb003f07405ea2b526ef3623799da0fb86d2fa0b7774fe640f32238d5a62",
+        "pdf_bytes": 829,
+        "pdf_sha256": "8ada61753aeedb5dec2f136cf7cf164e485c71fbdcd6eae60cfe9ca3ef1feca9",
         "image_count": 1,
         "image_sha256": [
-          "45d8824ee161439ee909e515feed1b5252fdb50a02ae2c86cec32d26a92776f9"
+          "d6750a350db88c33dda9293c49665de9fb79490ea0eae3388409c4479c23488f"
         ],
         "stability_hash_expected": "ced9e89a9f4ba55ffbfeec39cb11d30e93a4de60bdd786e3afba2cce4011b4ef",
         "stability_hash_actual": "ced9e89a9f4ba55ffbfeec39cb11d30e93a4de60bdd786e3afba2cce4011b4ef",
@@ -1294,7 +1294,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -1379,16 +1379,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_fallback_chain_272448_1779749380238480900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_fallback_chain_220748_1785811236116102700.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 786,
-        "pdf_sha256": "d02493736fae880b310cf07528b233cef03c21369351ec7d67f74e5d0132d54f",
+        "pdf_bytes": 836,
+        "pdf_sha256": "965cf223534589d29bd572614fede09a3bb3f58e3e5519cc844911de0f9d4fd3",
         "image_count": 1,
         "image_sha256": [
-          "b3314c54559e3e3bb223c5019f3c775c15c26d7eecec25d026652d12d8361809"
+          "dbfd8bd03e2415c3eff39f511a850456bec2a45e69cc3a270e5f2fd4687bf43c"
         ],
         "stability_hash_expected": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
         "stability_hash_actual": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
@@ -1426,7 +1426,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 12,
+            "computed_event_count": 27,
             "checks": [
               {
                 "index": 0,
@@ -1595,16 +1595,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_length_chain_fallback_272448_1779749380320033700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_length_chain_fallback_220748_1785811236178751800.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 805,
-        "pdf_sha256": "3450863d9b7bd36582bbd421f0a2179febe82a3f8da669003107513d69980e1f",
+        "pdf_bytes": 833,
+        "pdf_sha256": "3dfe87b99903309dfeac80d1c83b434a3f0c0950de40ef4bb082293ef0b41620",
         "image_count": 1,
         "image_sha256": [
-          "7c073f75168a6ccce655700ea6c3a324492ab2bff6ec3700352b3e9fd45f844a"
+          "7a0f87451f6f33a48c92366f11281e30d7e8d4e39f5dd43977d5b01e3041c473"
         ],
         "stability_hash_expected": "4501533968752d8316b0adea6fc1c0efa788cfc29522d4b2f3b054e5bd1ae02d",
         "stability_hash_actual": "4501533968752d8316b0adea6fc1c0efa788cfc29522d4b2f3b054e5bd1ae02d",
@@ -1644,7 +1644,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 3,
-            "computed_event_count": 15,
+            "computed_event_count": 30,
             "checks": [
               {
                 "index": 0,
@@ -1878,16 +1878,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_math_min_max_clamp_lengths_272448_1779749381100243700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_math_min_max_clamp_lengths_220748_1785811236700684000.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 834,
-        "pdf_sha256": "e9aa768a56e7eb23405f19c97419a6f79446c0e9db227639a0400140b05ac33b",
+        "pdf_bytes": 860,
+        "pdf_sha256": "9d942caca6ecb501b92d083f5ba33ee421f97f918799263880b646a9cbec2e07",
         "image_count": 1,
         "image_sha256": [
-          "f5e849f60fb14c42f7e1eabbca9f5ed3108884b84af47fc8aa2b1d8a2533c9a7"
+          "3ffae2a8d8886306def45b9d0205a9dd392bcc446bbbd217c9521f972e571fdb"
         ],
         "stability_hash_expected": "2692f3d7976c83633c1812281eca3ff29a68e721eb161c7502b13acf0bf9e4f0",
         "stability_hash_actual": "2692f3d7976c83633c1812281eca3ff29a68e721eb161c7502b13acf0bf9e4f0",
@@ -1926,7 +1926,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -2030,16 +2030,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_conic_gradient_fallback_no_color_272448_1779749381284885800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_conic_gradient_fallback_no_color_220748_1785811236723737300.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 753,
-        "pdf_sha256": "72ca9b74ffb742bd8f1485d17f7fc97546d431bb5d0c6592e27e7a8943e38759",
+        "pdf_bytes": 802,
+        "pdf_sha256": "1de93f3b207cc5e747d24cd2b219886fdcf24f197ed4438c08a9bf43a6c4dc29",
         "image_count": 1,
         "image_sha256": [
-          "2a7983421e540cc52e5020297b66a088f455a86fb38d8665a835af10199d0f0e"
+          "757bcdaa6d914b629faec7e10f0b1e3fc3485ff8f155ab2c21efceaec51ca4c7"
         ],
         "stability_hash_expected": "2421e9620493c542b8a7ad632cc7eae1e55a42d7bdaecc676f60fce5541d6e1b",
         "stability_hash_actual": "2421e9620493c542b8a7ad632cc7eae1e55a42d7bdaecc676f60fce5541d6e1b",
@@ -2078,7 +2078,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -2162,16 +2162,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_conic_gradient_fallback_with_color_272448_1779749381744220800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_conic_gradient_fallback_with_color_220748_1785811236758297700.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 788,
-        "pdf_sha256": "b829b26817f0de7165898f887b884f16ead8f7ee7bb774cc0b53815074940308",
+        "pdf_bytes": 833,
+        "pdf_sha256": "78c80b9d29f0da49c6f83dd8c78f6deb3c0228c4b82f44b68bfb150835b79aa9",
         "image_count": 1,
         "image_sha256": [
-          "ef179c9ee23666dee439e0107950820ed1315d8999a39e1f2a23474bb7b77292"
+          "088de466cb0f7f1147de14c72fdff40c556a953912683c586e2ba0db6e0be449"
         ],
         "stability_hash_expected": "ab97e9788967f246329b952679412d119d81f0c1025ccbf1f74a435fc8b26642",
         "stability_hash_actual": "ab97e9788967f246329b952679412d119d81f0c1025ccbf1f74a435fc8b26642",
@@ -2211,7 +2211,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -2286,25 +2286,25 @@
                 "kind": "summary_count_at_least",
                 "key": "jit.known_loss.filters_effects_fallback",
                 "expected": 1,
-                "actual": 3,
+                "actual": 6,
                 "ok": true
               }
             ],
             "summary_counts_total": {
-              "jit.known_loss.filters_effects_fallback": 3,
+              "jit.known_loss.filters_effects_fallback": 6,
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_filters_effects_fallback_272448_1779749381772785000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_filters_effects_fallback_220748_1785811236852719800.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1039,
-        "pdf_sha256": "012d864ffa01b5936ef49d431328b7aae90dde5ed479582d8f63ac05a49d35a3",
+        "pdf_bytes": 1088,
+        "pdf_sha256": "96b2daa061ad38de24ecce682aa346e107bb9efa1a7a63c4725ebbcef2f066aa",
         "image_count": 1,
         "image_sha256": [
-          "a78f81e921283df878380cae92ab635061301c0189d1b578775aa6c0a40f1301"
+          "5b1ad4b06df5d346f334cf9c68f7219ad70e6c34e42cd1e71ee6790378178f81"
         ],
         "stability_hash_expected": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2",
         "stability_hash_actual": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2",
@@ -2320,7 +2320,7 @@
         "full",
         "diagnostics"
       ],
-      "description": "Multi-column properties should deterministically degrade to single-column layout with explicit known-loss diagnostics.",
+      "description": "Supported column-count and column-rule should render while unsupported multicolumn properties emit explicit fallback diagnostics.",
       "required_features": [
         "multi-column",
         "fallback-policy",
@@ -2342,7 +2342,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 21,
+            "computed_event_count": 36,
             "checks": [
               {
                 "index": 0,
@@ -2409,7 +2409,7 @@
                 "condition": {
                   "type": "jit.known_loss",
                   "code": "MULTICOL_SINGLE_COLUMN_FALLBACK",
-                  "property": "column-count"
+                  "property": "column-width"
                 },
                 "ok": true
               },
@@ -2417,25 +2417,25 @@
                 "kind": "summary_count_at_least",
                 "key": "jit.known_loss.multicol_single_column_fallback",
                 "expected": 1,
-                "actual": 18,
+                "actual": 12,
                 "ok": true
               }
             ],
             "summary_counts_total": {
-              "jit.known_loss.multicol_single_column_fallback": 18,
+              "jit.known_loss.multicol_single_column_fallback": 12,
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_multicol_single_column_fallback_272448_1779749382361181900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_multicol_single_column_fallback_220748_1785811237237820200.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 833,
-        "pdf_sha256": "79c2aeddb9af336a7d26ef97ab26b63912c9be1bf1b6181269bbd4f3316bc451",
+        "pdf_bytes": 873,
+        "pdf_sha256": "e801c5d744a1a55640dd7cdd677e1982e43c359397573e6e6cbfaee99632940f",
         "image_count": 1,
         "image_sha256": [
-          "d7778aae200751afd3c4e8af576483cb8d5b6415b92792eae320ff56869bd1a2"
+          "a60175080169d92a85a432d48bb594c565a380926490b5ca585d4f0922a3930b"
         ],
         "stability_hash_expected": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2",
         "stability_hash_actual": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2",
@@ -2473,7 +2473,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -2574,28 +2574,30 @@
                 "kind": "summary_count_at_least",
                 "key": "jit.known_loss.declaration_parsed_no_effect",
                 "expected": 1,
-                "actual": 6,
+                "actual": 3,
                 "ok": true
               }
             ],
             "summary_counts_total": {
+              "css.media.matched": 0,
               "css.media.rules": 3,
               "css.media.rules_skipped": 3,
+              "css.media.unmatched": 0,
               "css.media.unsupported": 6,
-              "jit.known_loss.declaration_parsed_no_effect": 6,
+              "jit.known_loss.declaration_parsed_no_effect": 3,
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_unsupported_media_and_no_effect_272448_1779749382362697800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_unsupported_media_and_no_effect_220748_1785811237289569900.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 793,
-        "pdf_sha256": "2f43f7fa8b3845eda1d3ba158b6032391f8e5694fde66928ee743bba86f6c6d1",
+        "pdf_bytes": 838,
+        "pdf_sha256": "2601fa3b81ceaf640ddd711a6a0d9d320779ce832d34f1571d1ac4af62c5cb12",
         "image_count": 1,
         "image_sha256": [
-          "54861c6f063edf73d6c084a65553e298217a7a64fdc8e57741609b5ee97c9463"
+          "1fc390cffa02312be7089d69f861bbeff792e25ce24485a271614986f759b4d3"
         ],
         "stability_hash_expected": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
         "stability_hash_actual": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
@@ -2632,7 +2634,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 33,
+            "computed_event_count": 48,
             "checks": [
               {
                 "index": 0,
@@ -2869,16 +2871,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_align_content_flex_end_wrap_272448_1779749382448152800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_align_content_flex_end_wrap_220748_1785811237357543700.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 831,
-        "pdf_sha256": "053c61c3c7e0a3085589eaae94ed4c359454b670de96b0f3a0c43dea6fa69958",
+        "pdf_bytes": 861,
+        "pdf_sha256": "ed108bf4d8253f6ef34e1d7674eeb643b56901a4511d15f789da0106c2674faf",
         "image_count": 1,
         "image_sha256": [
-          "0aaf677bd0716a9b596f8cec1a96a53741041c91f54b7b3fe977934679812383"
+          "f96ba19f99d3c9fa3631374240c0ff7d0379a3de39a5c3761318314a3b7d54e8"
         ],
         "stability_hash_expected": "5d641a7e1d6a285858f1d15a442a79de691521ebd268cde9c1004413e0a8cb36",
         "stability_hash_actual": "5d641a7e1d6a285858f1d15a442a79de691521ebd268cde9c1004413e0a8cb36",
@@ -2915,7 +2917,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 21,
+            "computed_event_count": 36,
             "checks": [
               {
                 "index": 0,
@@ -3141,16 +3143,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_align_self_item_override_272448_1779749383045284000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_align_self_item_override_220748_1785811237755587000.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 810,
-        "pdf_sha256": "d0230cc8e1abcd8749f6922cab013ace795be732545248c8b5be215a9260b169",
+        "pdf_bytes": 839,
+        "pdf_sha256": "94ec79bce64ce9a3de3e254b639b75101c28fda0ad25315a712535a7a2322445",
         "image_count": 1,
         "image_sha256": [
-          "73b62e18fb61fe1245a5bd0c2ca19582259db99de235a57db892a2f70f3fd519"
+          "69fcc5a736a8101d1d2ad0ecef9ecfb712abcf922fcea195182ab30332ce96a0"
         ],
         "stability_hash_expected": "458010f30b7f18e8073574a760d8281e794858eca8b80aabf2d05f3591948aa8",
         "stability_hash_actual": "458010f30b7f18e8073574a760d8281e794858eca8b80aabf2d05f3591948aa8",
@@ -3187,7 +3189,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 33,
+            "computed_event_count": 48,
             "checks": [
               {
                 "index": 0,
@@ -3394,16 +3396,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_flow_row_wrap_layout_272448_1779749383214054600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_flow_row_wrap_layout_220748_1785811237959791600.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 840,
-        "pdf_sha256": "098620b2b7fb53a887b101c90c69c3f0650d6795f5e304f1407989a797b17706",
+        "pdf_bytes": 868,
+        "pdf_sha256": "d9a048557350e358261672a3c8a9dcbc5e8e094bc65755998aecb7e9559cc541",
         "image_count": 1,
         "image_sha256": [
-          "4d56e1afee9a79f90fe9985cccebf3bcf7dff52b537b465d2e7b169219e8080a"
+          "440bbd0e10a2277d3ddc1286058617ff16b320559b4bb943947c7cce8200c3da"
         ],
         "stability_hash_expected": "5a88c3edb8979365e6c191fc018fada7bd89c6e8172982613f9388cfc4a7cf0d",
         "stability_hash_actual": "5a88c3edb8979365e6c191fc018fada7bd89c6e8172982613f9388cfc4a7cf0d",
@@ -3441,7 +3443,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 33,
+            "computed_event_count": 48,
             "checks": [
               {
                 "index": 0,
@@ -3716,16 +3718,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_content_flex_end_center_wrap_272448_1779749383326327600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_content_flex_end_center_wrap_220748_1785811238052650500.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 837,
-        "pdf_sha256": "44ac5b46581c1c83c3855cb5b9b06e52f9b9fcdc3750d86de6ab8ebf6c33d679",
+        "pdf_bytes": 866,
+        "pdf_sha256": "9ebb6ea8e3b2f175f21651da98e5a85ccc1fb3c4d1bcfa5f8cbbd1c3127b0eb5",
         "image_count": 1,
         "image_sha256": [
-          "599fd65d036bb13cd51bd8d9134a0666f8a9b418f67a10359a7ee2c42f762b67"
+          "a701d638fd70de2e3ab5e3225d8fc217e4b8d92fc3e3f96439f8dbe9ca8da751"
         ],
         "stability_hash_expected": "7a0c959c4eaee689ce32d6f625debd435b7d2eeac6ece4b54f1c74f18f6c5112",
         "stability_hash_actual": "7a0c959c4eaee689ce32d6f625debd435b7d2eeac6ece4b54f1c74f18f6c5112",
@@ -3762,7 +3764,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 21,
+            "computed_event_count": 36,
             "checks": [
               {
                 "index": 0,
@@ -3942,16 +3944,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_items_container_alignment_272448_1779749384437379300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_items_container_alignment_220748_1785811239322425500.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 805,
-        "pdf_sha256": "bf0becb4e884e534fce087c71f2b9f4f9e98a400ca77d8c51687e5a9521b1849",
+        "pdf_bytes": 833,
+        "pdf_sha256": "76fc213276713ef9171d5ac6e3d821b74043ca144ba54483dfead570432e61bf",
         "image_count": 1,
         "image_sha256": [
-          "28c492c1793cb9e79d7994e4284d592df8d28c442fbdb6a73a70968353757db3"
+          "a26c7a72ec15e129107a36067c0f7174fd5b90a8ba988e7c258c65f2036d3325"
         ],
         "stability_hash_expected": "bf8b6da2fd5cce5eba124a99b2e313187f35f45284387a0ef6d3dc70eac50234",
         "stability_hash_actual": "bf8b6da2fd5cce5eba124a99b2e313187f35f45284387a0ef6d3dc70eac50234",
@@ -3988,7 +3990,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 21,
+            "computed_event_count": 36,
             "checks": [
               {
                 "index": 0,
@@ -4214,16 +4216,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_self_item_override_272448_1779749385135454700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_self_item_override_220748_1785811239334794000.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 810,
-        "pdf_sha256": "d0230cc8e1abcd8749f6922cab013ace795be732545248c8b5be215a9260b169",
+        "pdf_bytes": 839,
+        "pdf_sha256": "94ec79bce64ce9a3de3e254b639b75101c28fda0ad25315a712535a7a2322445",
         "image_count": 1,
         "image_sha256": [
-          "73b62e18fb61fe1245a5bd0c2ca19582259db99de235a57db892a2f70f3fd519"
+          "69fcc5a736a8101d1d2ad0ecef9ecfb712abcf922fcea195182ab30332ce96a0"
         ],
         "stability_hash_expected": "458010f30b7f18e8073574a760d8281e794858eca8b80aabf2d05f3591948aa8",
         "stability_hash_actual": "458010f30b7f18e8073574a760d8281e794858eca8b80aabf2d05f3591948aa8",
@@ -4261,7 +4263,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 3,
-            "computed_event_count": 21,
+            "computed_event_count": 36,
             "checks": [
               {
                 "index": 0,
@@ -4400,16 +4402,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_two_column_distribution_272448_1779749385270194700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_two_column_distribution_220748_1785811239447472600.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 808,
-        "pdf_sha256": "c2eb2a0dc186bc9115e95c88d0a89a09fc048ecf0a54c16bb9f093ba082012d2",
+        "pdf_bytes": 837,
+        "pdf_sha256": "87ad9703f55755c904d773294d59a73a5285ff27fba6d9985b0cc83555ab7d75",
         "image_count": 1,
         "image_sha256": [
-          "5bb63d3f215a7a374977b4a0c4248e1ab97442621a05ddff9c8acda42fef0429"
+          "a6fadb4dd09091aa0a404598033b797a5a93b9061b950db5fefea0810b086c4a"
         ],
         "stability_hash_expected": "e183beba4721fff5794ec13d27c053c6f2bb2bb1f03c3fc8f0f52c047c175d41",
         "stability_hash_actual": "e183beba4721fff5794ec13d27c053c6f2bb2bb1f03c3fc8f0f52c047c175d41",
@@ -4446,7 +4448,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 12,
+            "computed_event_count": 27,
             "checks": [
               {
                 "index": 0,
@@ -4589,17 +4591,17 @@
               "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_fragmentation_break_inside_avoid_block_272448_1779749385674271100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_fragmentation_break_inside_avoid_block_220748_1785811240248097800.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1048,
-        "pdf_sha256": "31b8fbd64cb0ba84934fac6f63cabf3b16c16758de9457bc1ae0e980df0e008c",
+        "pdf_bytes": 1148,
+        "pdf_sha256": "31c8260d8906f413a9800521d197c8faa8c1f6843908952030bb3e3f67a61d00",
         "image_count": 2,
         "image_sha256": [
-          "2f7471f27655f0ad25cd665685a5a53919991c7ffbeed9728de25e6a224ebebc",
-          "c71637f192584d069238ba133c320969352038a030052324b284386a7792b09d"
+          "c754fc4f0cdc92ad8953492fbc2ab9a0473da296ab62ef835996517bb6f49ed9",
+          "0119def4d797652100595ec3861296eef0bbbde9bbadf3467a137bff208acfaf"
         ],
         "stability_hash_expected": "321a01269ce6f2fa9cf63f20c3ff85e087d40f676f65a3d8df1401a8203a81b6",
         "stability_hash_actual": "321a01269ce6f2fa9cf63f20c3ff85e087d40f676f65a3d8df1401a8203a81b6",
@@ -4636,7 +4638,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 186,
+            "computed_event_count": 201,
             "checks": [
               {
                 "index": 0,
@@ -4651,8 +4653,8 @@
         },
         "layout": {
           "ok": true,
-          "expected_page_count": 5,
-          "actual_page_count": 5,
+          "expected_page_count": 3,
+          "actual_page_count": 3,
           "dpi": 120,
           "assertions_enabled": true,
           "assertions_ok": true,
@@ -4663,7 +4665,7 @@
                 "index": 0,
                 "ok": true,
                 "kind": "color_run_length",
-                "page": 5,
+                "page": 3,
                 "axis": "x",
                 "fixed": 470,
                 "start": 0,
@@ -4699,26 +4701,24 @@
           "details": {
             "summary_counts_total": {
               "jit.layout.strategy": 3,
-              "jit.page_break.trigger": 24
+              "jit.page_break.trigger": 12
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_fragmentation_long_paragraph_272448_1779749385677263800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_fragmentation_long_paragraph_220748_1785811240357857000.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 2271,
-        "pdf_sha256": "c37df39b8df4d9a75b3483582ddfb08e306bd3f80bb9985c861c0a8e2e238554",
-        "image_count": 5,
+        "pdf_bytes": 1800,
+        "pdf_sha256": "db1d70d4ddd2b3eaf0ab1f993f913b5101aa08e05e77ebd203d7bedd5ee13fd7",
+        "image_count": 3,
         "image_sha256": [
-          "6c65e83e25336098de950439ef88a5dd2416d992cbaec8f74de186f0bbe7663c",
-          "b838990fd1b8ee05f17e69592d18779396c3e30f75ed4632cf559c560a330e77",
-          "215538afee465a52161f923431f99e99cd044b933b1b82e8f8f33f293594ef93",
-          "ef9f6df6416795fcc263f17f8c80a509ace735fc3bcfb096f27affe0be165609",
-          "c3f38f0e7927e39c9a74818e36792f9c1b562b3b9d9f7929e63260acadcd07fd"
+          "27b530b6452860836b260162879f24d171629a3a498a383c91eb28deeed471f7",
+          "4e29a64ac4d0d0285d20c73285854db16d53670fd98f87e77b4ef8dbfa4940e4",
+          "79b30d5fd04ca98af8b542ff17b26f90192def43114dea2c2e18ea7b596f61bc"
         ],
-        "stability_hash_expected": "5b014d5a0a149b502a3639136c5600ca10a20e27dc1d829c902d143734364524",
-        "stability_hash_actual": "5b014d5a0a149b502a3639136c5600ca10a20e27dc1d829c902d143734364524",
+        "stability_hash_expected": "9cfa892328e42f639e11b522cc13e9c3b159fe6cb92d6b1897e15a00bf6b87dd",
+        "stability_hash_actual": "9cfa892328e42f639e11b522cc13e9c3b159fe6cb92d6b1897e15a00bf6b87dd",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -4754,7 +4754,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 21,
+            "computed_event_count": 36,
             "checks": [
               {
                 "index": 0,
@@ -4904,16 +4904,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_gap_row_column_var_resolution_272448_1779749386409905700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_gap_row_column_var_resolution_220748_1785811240420895700.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 801,
-        "pdf_sha256": "a36509d90237728c5cbde2ca3a429e8ae85d444cd640c23f0380db4bb7bb29fc",
+        "pdf_bytes": 830,
+        "pdf_sha256": "d9d6a667b3b5d9e62caa8ea942c6b119fc35ac1ec37821a90473688f969bf9a2",
         "image_count": 1,
         "image_sha256": [
-          "7f7dbbdded6e5147f089b1c574f846b978e7ae81af173395f60e86eb81812519"
+          "c0f3a0fc306853c85d45d711cee2f0ac8f5cf1ec82fe258f09f95eb6c727fdd0"
         ],
         "stability_hash_expected": "ea9dabec024fbe1d451002524e8364ccb95d90dc8e8d19c9c90a50cc8dc7faa1",
         "stability_hash_actual": "ea9dabec024fbe1d451002524e8364ccb95d90dc8e8d19c9c90a50cc8dc7faa1",
@@ -4928,7 +4928,7 @@
       "labels": [
         "full"
       ],
-      "description": "When multiple grid items target the same explicit start slot, deterministic fallback should place later items into the next free slot.",
+      "description": "Grid items targeting the same explicit slot should overlap, with the later item painting above the earlier item.",
       "required_features": [
         "grid",
         "grid-row",
@@ -4951,7 +4951,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 21,
+            "computed_event_count": 36,
             "checks": [
               {
                 "index": 0,
@@ -4983,8 +4983,8 @@
                 "fixed": 60,
                 "start": 0,
                 "expected_rgba": [
-                  255,
                   0,
+                  255,
                   0,
                   255
                 ],
@@ -5002,14 +5002,14 @@
                 "fixed": 60,
                 "start": 120,
                 "expected_rgba": [
-                  0,
                   255,
-                  0,
+                  255,
+                  255,
                   255
                 ],
                 "tolerance": 8,
-                "actual_run_length": 120,
-                "expected_length": 120,
+                "actual_run_length": 360,
+                "expected_length": 360,
                 "length_tolerance": 1
               }
             ]
@@ -5031,14 +5031,14 @@
               "x": 60,
               "y": 60,
               "expected_rgba": [
-                255,
                 0,
+                255,
                 0,
                 255
               ],
               "actual_rgba": [
-                255,
                 0,
+                255,
                 0,
                 255
               ],
@@ -5050,15 +5050,15 @@
               "x": 180,
               "y": 60,
               "expected_rgba": [
-                0,
                 255,
-                0,
+                255,
+                255,
                 255
               ],
               "actual_rgba": [
-                0,
                 255,
-                0,
+                255,
+                255,
                 255
               ],
               "tolerance": 8,
@@ -5071,23 +5071,22 @@
           "enabled": true,
           "details": {
             "summary_counts_total": {
-              "jit.known_loss.declaration_parsed_no_effect": 9,
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_conflicting_explicit_slots_fall_forward_272448_1779749386468945100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_conflicting_explicit_slots_fall_forward_220748_1785811240454582300.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 808,
-        "pdf_sha256": "b72cc008f73b8172c1a6b4de6937848d2ca342e090df5a748face19ca3225f92",
+        "pdf_bytes": 828,
+        "pdf_sha256": "5c2dc5b9ed0bad244fb2a692e280a8311d812b2663741e49b84775cdfc6d441c",
         "image_count": 1,
         "image_sha256": [
-          "55abc8b7f736e78fd8ad0192497d4b65b76e80c48811e4b61dd81e21cb1645a6"
+          "cff4a927c0f14775fb845dc3106fb7cdb3bc81f7f583b697b39b0d6e51a2f31f"
         ],
-        "stability_hash_expected": "e2f7c012dfb1ed97957ce749d0fee555c3cd8f15899ca6b6f6a913c460971def",
-        "stability_hash_actual": "e2f7c012dfb1ed97957ce749d0fee555c3cd8f15899ca6b6f6a913c460971def",
+        "stability_hash_expected": "d56779c474445e44894f64bac3f95b8fbb1787980dfb31abf962736008538563",
+        "stability_hash_actual": "d56779c474445e44894f64bac3f95b8fbb1787980dfb31abf962736008538563",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -5122,7 +5121,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 21,
+            "computed_event_count": 36,
             "checks": [
               {
                 "index": 0,
@@ -5318,20 +5317,19 @@
           "enabled": true,
           "details": {
             "summary_counts_total": {
-              "jit.known_loss.declaration_parsed_no_effect": 9,
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_explicit_row_column_starts_272448_1779749386493008700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_explicit_row_column_starts_220748_1785811241134951300.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 814,
-        "pdf_sha256": "1cd2d7f870b673b76147c47ccdc9319c62063dda4f7e59a5938054def895f44a",
+        "pdf_bytes": 843,
+        "pdf_sha256": "f5395754b0d2ccde4c035884e0b83a69b1e74decc9f55c432e9629290e9a27a5",
         "image_count": 1,
         "image_sha256": [
-          "5883c2daf852032b96e294230e15fb4bd2f6fd7272170673aa5b9899b6432b7c"
+          "98f63a2a0b2bdb1b6ba58b6871f7296c51c552bce9069f96919a8d2679b30339"
         ],
         "stability_hash_expected": "5b4dd6b669a62960e67cc5f6a7f840d6ea55bb3acc739b5e2a8ed940da178f24",
         "stability_hash_actual": "5b4dd6b669a62960e67cc5f6a7f840d6ea55bb3acc739b5e2a8ed940da178f24",
@@ -5368,7 +5366,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 33,
+            "computed_event_count": 48,
             "checks": [
               {
                 "index": 0,
@@ -5564,20 +5562,19 @@
           "enabled": true,
           "details": {
             "summary_counts_total": {
-              "jit.known_loss.declaration_parsed_no_effect": 3,
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_rows_only_column_derivation_272448_1779749386671364500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_rows_only_column_derivation_220748_1785811241209445100.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 840,
-        "pdf_sha256": "098620b2b7fb53a887b101c90c69c3f0650d6795f5e304f1407989a797b17706",
+        "pdf_bytes": 868,
+        "pdf_sha256": "d9a048557350e358261672a3c8a9dcbc5e8e094bc65755998aecb7e9559cc541",
         "image_count": 1,
         "image_sha256": [
-          "4d56e1afee9a79f90fe9985cccebf3bcf7dff52b537b465d2e7b169219e8080a"
+          "440bbd0e10a2277d3ddc1286058617ff16b320559b4bb943947c7cce8200c3da"
         ],
         "stability_hash_expected": "07200ceb08a48fced099525df1f4b9046d5c3d4f78cacc7a1b49752c7bf88171",
         "stability_hash_actual": "07200ceb08a48fced099525df1f4b9046d5c3d4f78cacc7a1b49752c7bf88171",
@@ -5615,7 +5612,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 33,
+            "computed_event_count": 48,
             "checks": [
               {
                 "index": 0,
@@ -5830,20 +5827,19 @@
           "enabled": true,
           "details": {
             "summary_counts_total": {
-              "jit.known_loss.declaration_parsed_no_effect": 3,
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_template_rows_columns_matrix_272448_1779749387296860500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_template_rows_columns_matrix_220748_1785811241212667900.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 840,
-        "pdf_sha256": "098620b2b7fb53a887b101c90c69c3f0650d6795f5e304f1407989a797b17706",
+        "pdf_bytes": 868,
+        "pdf_sha256": "d9a048557350e358261672a3c8a9dcbc5e8e094bc65755998aecb7e9559cc541",
         "image_count": 1,
         "image_sha256": [
-          "4d56e1afee9a79f90fe9985cccebf3bcf7dff52b537b465d2e7b169219e8080a"
+          "440bbd0e10a2277d3ddc1286058617ff16b320559b4bb943947c7cce8200c3da"
         ],
         "stability_hash_expected": "3d332c2dbcb47021f7496812fe529a109c434757f919f494519353dec137d5c0",
         "stability_hash_actual": "3d332c2dbcb47021f7496812fe529a109c434757f919f494519353dec137d5c0",
@@ -5880,7 +5876,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 12,
+            "computed_event_count": 27,
             "checks": [
               {
                 "index": 0,
@@ -6030,16 +6026,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inheritance_unset_noninherited_resets_272448_1779749387813661800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inheritance_unset_noninherited_resets_220748_1785811241564798700.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 815,
-        "pdf_sha256": "2fc8bad9481eb3cb1fd83121d5557f9066be49ab6d94f1173dfc05242180c334",
+        "pdf_bytes": 832,
+        "pdf_sha256": "9d864351904a7940ab7080696a11f8f4e6686ac91c165c63e49609f191197dc6",
         "image_count": 1,
         "image_sha256": [
-          "ceb9d2f025a5fa7b5f6348f24b470f8f68430d87963e411d312ae72a3b49c712"
+          "d72159419b038fa64a5a7bbb1b92b3926a277e605418c4aefb659c0bcf7d001d"
         ],
         "stability_hash_expected": "fa297792afc5abcb15d6ba42cc454817010084af2f42920655884a2c26e60f85",
         "stability_hash_actual": "fa297792afc5abcb15d6ba42cc454817010084af2f42920655884a2c26e60f85",
@@ -6086,7 +6082,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 4,
-            "computed_event_count": 58,
+            "computed_event_count": 82,
             "checks": [
               {
                 "index": 0,
@@ -6139,7 +6135,7 @@
                 "kind": "color_run_length",
                 "page": 1,
                 "axis": "x",
-                "fixed": 30,
+                "fixed": 35,
                 "start": 90,
                 "expected_rgba": [
                   20,
@@ -6177,7 +6173,7 @@
                 "kind": "color_run_length",
                 "page": 1,
                 "axis": "x",
-                "fixed": 30,
+                "fixed": 36,
                 "start": 165,
                 "expected_rgba": [
                   255,
@@ -6286,7 +6282,7 @@
             {
               "page": 1,
               "x": 185,
-              "y": 35,
+              "y": 36,
               "expected_rgba": [
                 255,
                 0,
@@ -6312,19 +6308,19 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inline_svg_image_mixed_run_torture_272448_1779749388567500700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inline_svg_image_mixed_run_torture_220748_1785811242740964900.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1254,
-        "pdf_sha256": "db570bf879101c001d0f5e30ba627f552c99024e9ad788bf8149f9614096a78c",
+        "pdf_bytes": 1316,
+        "pdf_sha256": "10a58c36c1b2936c25101bbfce6591cac109ecbd148d16f5a4ec073ba14d27ef",
         "image_count": 1,
         "image_sha256": [
-          "806651150178b391ca23d2211475e131306af72211a672e65dc15f2cb8db9954"
+          "84e5b31c060167f8f1ea974156eadbad94c9dcd21193d43341169ecbe050f135"
         ],
-        "stability_hash_expected": "2dceec197b1d1211beaaa9d45b6a1c1b8147bd31aca82bf716239b32d5425c49",
-        "stability_hash_actual": "2dceec197b1d1211beaaa9d45b6a1c1b8147bd31aca82bf716239b32d5425c49",
+        "stability_hash_expected": "a3285a6873eac7956668da6c2be0e1a21782379f8eaf8698f53a4848ebe658ad",
+        "stability_hash_actual": "a3285a6873eac7956668da6c2be0e1a21782379f8eaf8698f53a4848ebe658ad",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -6359,7 +6355,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -6462,16 +6458,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inset_left_var_resolution_272448_1779749388719401200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inset_left_var_resolution_220748_1785811243040318500.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 773,
-        "pdf_sha256": "33e7778813031b96a6ca43314e3393c7cff768651e8047a67247ddf65c431529",
+        "pdf_bytes": 823,
+        "pdf_sha256": "f471c2911614818a6a3180d4e201c3986efb1c2c2ba79fa7853b5992463b45c8",
         "image_count": 1,
         "image_sha256": [
-          "9295a67195dcbd765eace2f34e0ba1948cb00a38efc852bd21227b61f8fcc2a8"
+          "0daedc080da115c82ea6844e27512a8c731d6a0e08f4024b9e186b931deef1ba"
         ],
         "stability_hash_expected": "43ac4eb5215ed2b375bcb688b3d85c45fd648e03596b0c2eb5d3ef9e8588ee36",
         "stability_hash_actual": "43ac4eb5215ed2b375bcb688b3d85c45fd648e03596b0c2eb5d3ef9e8588ee36",
@@ -6509,7 +6505,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 3,
-            "computed_event_count": 15,
+            "computed_event_count": 30,
             "checks": [
               {
                 "index": 0,
@@ -6743,16 +6739,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_inline_block_size_min_max_272448_1779749389026424700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_inline_block_size_min_max_220748_1785811243167694800.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 660,
-        "pdf_sha256": "06876f4001505d8f13b88c6afe8e6c6c79c997db5d95f5ddbbd7558c8afc4f3f",
+        "pdf_bytes": 699,
+        "pdf_sha256": "dcb7e1ee2a8bfcc9cca191f017b0e736dcd5ef3c4fe83641133a1044b9a39f9c",
         "image_count": 1,
         "image_sha256": [
-          "5f8842aab75b831e1a67bfc2c0adbbcffc927f5f419454759dcbccf4084c1207"
+          "b6197877e9b7363b708bfb4e637162b6f3cabceab5a187b1b813df82b800eeb6"
         ],
         "stability_hash_expected": "d2c3dcad69997de9f67b2324488016b4e96fe8ad40ca94d7eed9184840d2382d",
         "stability_hash_actual": "d2c3dcad69997de9f67b2324488016b4e96fe8ad40ca94d7eed9184840d2382d",
@@ -6793,7 +6789,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 18,
+            "computed_event_count": 39,
             "checks": [
               {
                 "index": 0,
@@ -6923,16 +6919,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_inset_horizontal_tb_ltr_272448_1779749389057457400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_inset_horizontal_tb_ltr_220748_1785811243247959500.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 661,
-        "pdf_sha256": "ee5d1d3b32007ddbc701614ad8dbb54e8347d5c190d66f910036fc33da202290",
+        "pdf_bytes": 697,
+        "pdf_sha256": "81cc98cad036a906f5d3b3a1218fe75356cca5dc980845007e4b5ead034e1d16",
         "image_count": 1,
         "image_sha256": [
-          "088150b9838263245d13569c35a35e98c07df072b3165e1b879fcf27742ee969"
+          "0db5c8d66fdc9ac422985acf8d2bc90db9031c8b805feb941f27a34ae048204e"
         ],
         "stability_hash_expected": "bbe1391a86b90611b730db48a46d4cc41a92d0473d882847f5e8eade20337938",
         "stability_hash_actual": "bbe1391a86b90611b730db48a46d4cc41a92d0473d882847f5e8eade20337938",
@@ -6972,7 +6968,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 15,
+            "computed_event_count": 36,
             "checks": [
               {
                 "index": 0,
@@ -7102,16 +7098,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_margin_padding_horizontal_tb_ltr_272448_1779749389288858700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_margin_padding_horizontal_tb_ltr_220748_1785811243302514800.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 637,
-        "pdf_sha256": "0d86883f4188797aa19803741af6b05402bdfb83ec1696249f62508ae814f65c",
+        "pdf_bytes": 699,
+        "pdf_sha256": "9de5fb68e00eea573984dca706acca3901e6b4946500698c5636a32ee14913b6",
         "image_count": 1,
         "image_sha256": [
-          "2516a87bafb6067f03ed79f60f7149f279d5ecbd85ac2dc03d18a203827c4bbf"
+          "7d8ad8d041dd37c119011c3bbeb0845bde3a09a4345e4acd0645d3235abfda49"
         ],
         "stability_hash_expected": "3752423858a003e6fef7cfd263328f2281ed6264ca1d0188b8beff3792fcf161",
         "stability_hash_actual": "3752423858a003e6fef7cfd263328f2281ed6264ca1d0188b8beff3792fcf161",
@@ -7149,7 +7145,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 15,
+            "computed_event_count": 36,
             "checks": [
               {
                 "index": 0,
@@ -7337,16 +7333,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_overflow_hidden_clips_absolute_child_272448_1779749389396257700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_overflow_hidden_clips_absolute_child_220748_1785811243374746900.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 661,
-        "pdf_sha256": "837755e45db3fed717093d6e9303f3b27bc77be75a16119c29eb174cc82cd17b",
+        "pdf_bytes": 700,
+        "pdf_sha256": "ba696c08990d411bbf38e70f5dd51d66b77945dbf952286880d3a1ff6373d3ae",
         "image_count": 1,
         "image_sha256": [
-          "c991b54eaad0e8ac5ba41c65c26df3038cd5e411be0238e58d030fcde0aefdfd"
+          "59d208cedec0a042d24fb8096148bbb34e317e87999fc7f99dec96409e05913d"
         ],
         "stability_hash_expected": "5eddd23d6ad0798a14e4de3b5f56f6582de0d6321c12ddc81f7e0d1949e8213d",
         "stability_hash_actual": "5eddd23d6ad0798a14e4de3b5f56f6582de0d6321c12ddc81f7e0d1949e8213d",
@@ -7384,7 +7380,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 15,
+            "computed_event_count": 36,
             "checks": [
               {
                 "index": 0,
@@ -7572,16 +7568,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_overflow_visible_allows_absolute_bleed_272448_1779749390266566200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_overflow_visible_allows_absolute_bleed_220748_1785811244164564400.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 637,
-        "pdf_sha256": "1a4c3fa527b724699b55b322381309d3f0339a7cb5ea57d24a168755c770c054",
+        "pdf_bytes": 693,
+        "pdf_sha256": "d928cfa3acc5fdac641cd212454d3036943a928c45830af0abcae19095d4ef36",
         "image_count": 1,
         "image_sha256": [
-          "6e2424093331cbff757ac8f7e28896985d059826fceaa220dd0044e49617759b"
+          "c54812362eea08576ce570b1227ff9da693f26cc1ac46b879594557d06909cd7"
         ],
         "stability_hash_expected": "58d085a89002cf07bad8f458c910773b41d3f6deea4dfb9ecbf38ebe6f5b47d2",
         "stability_hash_actual": "58d085a89002cf07bad8f458c910773b41d3f6deea4dfb9ecbf38ebe6f5b47d2",
@@ -7618,7 +7614,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 12,
+            "computed_event_count": 27,
             "checks": [
               {
                 "index": 0,
@@ -7739,20 +7735,20 @@
           "details": {
             "summary_counts_total": {
               "jit.layout.strategy": 3,
-              "jit.page_break.trigger": 3
+              "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_paged_break_before_forced_block_272448_1779749390671794700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_paged_break_before_forced_block_220748_1785811244673600000.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1062,
-        "pdf_sha256": "c1dd529461bafabc56a4e90154ed36be0ae02c5cc9c95f2efef7c511ff357d51",
+        "pdf_bytes": 1158,
+        "pdf_sha256": "b6bdcf59702b4d6ac3687868c8e1335e1ccb9202f10177be40b541bfc41c5914",
         "image_count": 2,
         "image_sha256": [
-          "e2ae9089e4dadb9af023a3c8ebc7521e4897a12b309566f13dff1d7ba200e6f0",
-          "eba778b96ddae69d9b7a0691dea7836e040782b9cbdd50de46c0ccd07d677822"
+          "f7fb8a19b229799404dbfbf15c2705fa3bdfe2065fbbed7c1a20fbfdd91dfa1e",
+          "5a21483d8878bbb6c454dfd0cc0dbb881edf3f1c16c62d5f83ca8092dea84444"
         ],
         "stability_hash_expected": "62e83d5eba30e961bf14d7c59af0d59b6cf6361601e0a10e64c1bc0e360004e4",
         "stability_hash_actual": "62e83d5eba30e961bf14d7c59af0d59b6cf6361601e0a10e64c1bc0e360004e4",
@@ -7789,7 +7785,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 18,
+            "computed_event_count": 39,
             "checks": [
               {
                 "index": 0,
@@ -7821,9 +7817,9 @@
                 "fixed": 30,
                 "start": 0,
                 "expected_rgba": [
-                  255,
-                  255,
-                  255,
+                  211,
+                  211,
+                  211,
                   255
                 ],
                 "tolerance": 8,
@@ -7859,9 +7855,9 @@
                 "fixed": 90,
                 "start": 0,
                 "expected_rgba": [
-                  255,
-                  255,
-                  255,
+                  211,
+                  211,
+                  211,
                   255
                 ],
                 "tolerance": 8,
@@ -7969,19 +7965,19 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_auto_inset_static_position_fallback_272448_1779749390964439900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_auto_inset_static_position_fallback_220748_1785811244689653500.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 830,
-        "pdf_sha256": "b261804bc9159626f9304f9ee47f074aca2055838e970187d6d3ff3f9e1a7f34",
+        "pdf_bytes": 893,
+        "pdf_sha256": "74dd79bbec7a67b73f094c1f59613e1b89eeaecb9454e7a261797ca90bd9afd9",
         "image_count": 1,
         "image_sha256": [
-          "45bea579b1f12e501459473d13d0072054d8dd06e9b7a8dd24b656acc050cdd6"
+          "9ccec4d6ab8d299eeb04ae6857344d8f69959579c0f9358573e1d58526c68241"
         ],
-        "stability_hash_expected": "127eb88ea4c41c5f7072b8a2b6883fe9258ad0fa543b3fe342935e797c6f9710",
-        "stability_hash_actual": "127eb88ea4c41c5f7072b8a2b6883fe9258ad0fa543b3fe342935e797c6f9710",
+        "stability_hash_expected": "d1070463bceaa511d3756fb7060c30f2e59a0ce9d41231209a16a818c22d2142",
+        "stability_hash_actual": "d1070463bceaa511d3756fb7060c30f2e59a0ce9d41231209a16a818c22d2142",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -8016,7 +8012,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 12,
+            "computed_event_count": 27,
             "checks": [
               {
                 "index": 0,
@@ -8177,16 +8173,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_empty_box_background_272448_1779749391141469000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_empty_box_background_220748_1785811244820032800.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 634,
-        "pdf_sha256": "2d0f6a82efbef056693953f0b49d80d416f307eb50d02ed871d534d0bc10ca4c",
+        "pdf_bytes": 681,
+        "pdf_sha256": "3efd7eb336b0f3688c8e993425fd1edd31cb5134c5e72137d0baa68e5fb9dc81",
         "image_count": 1,
         "image_sha256": [
-          "06ce991bcb046fa8927e7c06951b47108e19a6cabf13ce2e22aabe871a4fb85c"
+          "acfea91ee6e402ab24172ab9a206342ee8b11246d2cafffd6141efb32acc3dd6"
         ],
         "stability_hash_expected": "e8b51986b327124ecdb28d381321d8d593aba0e465b8460ad7953610e82d147d",
         "stability_hash_actual": "e8b51986b327124ecdb28d381321d8d593aba0e465b8460ad7953610e82d147d",
@@ -8224,7 +8220,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 15,
+            "computed_event_count": 36,
             "checks": [
               {
                 "index": 0,
@@ -8442,16 +8438,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_explicit_width_overflow_no_clamp_272448_1779749391647146900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_explicit_width_overflow_no_clamp_220748_1785811245611240000.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 804,
-        "pdf_sha256": "bb3e384cf7d803c88b57593b463f8b391b6e127db4b02768c4b299cb6801ff21",
+        "pdf_bytes": 854,
+        "pdf_sha256": "a39e1980eedbdcd0f25edcad9ff60027febd44ec5dcaa93940b62e1a9c229ae7",
         "image_count": 1,
         "image_sha256": [
-          "257a4bf813436fcc56207c7ca39060ae5761501cde68d27b1ef91b6de1e69617"
+          "24ef6ca0b1bc4135f915576f9000c1054a1ed8fffa926169c62219ce2b863be6"
         ],
         "stability_hash_expected": "86fdf392c8800a33dee46183c4d83a622590d51e727ec9d562b9343266fc75b7",
         "stability_hash_actual": "86fdf392c8800a33dee46183c4d83a622590d51e727ec9d562b9343266fc75b7",
@@ -8488,7 +8484,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 15,
+            "computed_event_count": 36,
             "checks": [
               {
                 "index": 0,
@@ -8668,16 +8664,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_initial_containing_block_from_static_parent_272448_1779749391985408000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_initial_containing_block_from_static_parent_220748_1785811245626161500.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 635,
-        "pdf_sha256": "4d9b7a6d95ae7e0b85f651cdfffdb6cc82993bc4e1f779717c1095588d31c473",
+        "pdf_bytes": 688,
+        "pdf_sha256": "0435317a31ef34c992766da80ccc032d52890bb19c29e310742c7f211608efd2",
         "image_count": 1,
         "image_sha256": [
-          "d75d47738f2bdb0274b256a7da564591f1cd68d728a17863eb33bafcbd981ac6"
+          "98aac531cd7e9ae745361f0396d94ae2f60d4a2fbcd8533b8366e50e62e09508"
         ],
         "stability_hash_expected": "a3acde17715191d23dabb69a269222b5e944db63c24e77285416480a09a63f17",
         "stability_hash_actual": "a3acde17715191d23dabb69a269222b5e944db63c24e77285416480a09a63f17",
@@ -8715,7 +8711,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 12,
+            "computed_event_count": 27,
             "checks": [
               {
                 "index": 0,
@@ -8876,16 +8872,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_left_right_width_precedence_272448_1779749391987388300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_left_right_width_precedence_220748_1785811245898629300.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 802,
-        "pdf_sha256": "0a1881db1ea55aeef18563a02a055eb730f2caf64a4d680e0190712be9542005",
+        "pdf_bytes": 830,
+        "pdf_sha256": "9942c52b092d324ab64253845feaff2353f39f20d18532d0bc50a4af3d04da3f",
         "image_count": 1,
         "image_sha256": [
-          "7ab75f5237e14a23e08c6d8669f641730af6dc00182cfd19d1df1e7fe53980c7"
+          "4ad4d44b215a092cccc9cbe21ef9eb485f449ea18b2a9034d72c7610f1b4333d"
         ],
         "stability_hash_expected": "8aaf52ace27b691578f22a53b6b0875457ad68e9505c4a0d114488161fe35e21",
         "stability_hash_actual": "8aaf52ace27b691578f22a53b6b0875457ad68e9505c4a0d114488161fe35e21",
@@ -8923,7 +8919,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 21,
+            "computed_event_count": 48,
             "checks": [
               {
                 "index": 0,
@@ -9103,16 +9099,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_nearest_positioned_ancestor_272448_1779749392367825000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_nearest_positioned_ancestor_220748_1785811245901632300.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 662,
-        "pdf_sha256": "c557b54ea7273a9cb893858040665603c44fc307ed0e29abf10e68f403c53de9",
+        "pdf_bytes": 702,
+        "pdf_sha256": "72d4f50e0bac174b27e5c404842ab9b53f9753b2b9cf90d2c0de3b2b282a56bb",
         "image_count": 1,
         "image_sha256": [
-          "a2001025d8019aa754788ae01d7cc50265b791fadc497a39dc4a55b2ecd3d1d2"
+          "c0665f885b72bc320ceef860f7640a068f2ef931680fe864ebd58c620072fd95"
         ],
         "stability_hash_expected": "e31a62462ac1ad4c31ff4b54330a76f79f40252c6c6b5a4a8048325d6051f19e",
         "stability_hash_actual": "e31a62462ac1ad4c31ff4b54330a76f79f40252c6c6b5a4a8048325d6051f19e",
@@ -9150,7 +9146,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 21,
+            "computed_event_count": 48,
             "checks": [
               {
                 "index": 0,
@@ -9330,16 +9326,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_percent_nearest_positioned_ancestor_272448_1779749392885360600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_percent_nearest_positioned_ancestor_220748_1785811246400758700.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 664,
-        "pdf_sha256": "ed20dedb4cd152a0121862eb5f07d346c4f6037de9545a655b218c867ed4aa40",
+        "pdf_bytes": 698,
+        "pdf_sha256": "90b8f6d096033459082a302b4f01f0502c6e0558f9733542584cf4b393fbdc54",
         "image_count": 1,
         "image_sha256": [
-          "ad4744585c7632326df4439f63e1b1586d318a2061f9edd37dc1794d9185cbd8"
+          "aa3ccb01b21e3652241d3736b6dfeece1dcc3f0c3797b5012388c51a44332d11"
         ],
         "stability_hash_expected": "885ef0e990f9fea54e34ec18cdede507ae1d66e0ef8dc8c2eb216518296f55d1",
         "stability_hash_actual": "885ef0e990f9fea54e34ec18cdede507ae1d66e0ef8dc8c2eb216518296f55d1",
@@ -9377,7 +9373,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 27,
+            "computed_event_count": 54,
             "checks": [
               {
                 "index": 0,
@@ -9517,20 +9513,20 @@
           "details": {
             "summary_counts_total": {
               "jit.layout.strategy": 3,
-              "jit.page_break.trigger": 3
+              "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_negative_page_one_only_272448_1779749392961672300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_negative_page_one_only_220748_1785811246434841200.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1056,
-        "pdf_sha256": "04026fd5f3d190ea7e555d4bd694073f319f51091f3310e85478fa6192bbbcd0",
+        "pdf_bytes": 1122,
+        "pdf_sha256": "2e72637d1e15cb0f5f18a8cb8d4c7b06cf86e68546045669f70a2b566a9dd686",
         "image_count": 2,
         "image_sha256": [
-          "cece394a4751d48ad5da13d2decf09894c802d131302494743434a28be21bd13",
-          "553bdbe7e182c2e6050ee4f3423f49a7077fbdbee39aca4ff3cda1a478bd6ef4"
+          "af9be2770b19f45a1b8ad85f33440911ab9afa97998df68a8b30cb6c012cbb76",
+          "f191427ab216c78d53ef1d104a2c488270fcc97b439b5b6f6351fd2c897c3614"
         ],
         "stability_hash_expected": "49e946670c492c239f5617321430fa8d8739caa7b2e24c857820592d8bea0a5d",
         "stability_hash_actual": "49e946670c492c239f5617321430fa8d8739caa7b2e24c857820592d8bea0a5d",
@@ -9567,7 +9563,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 27,
+            "computed_event_count": 54,
             "checks": [
               {
                 "index": 0,
@@ -9726,20 +9722,20 @@
           "details": {
             "summary_counts_total": {
               "jit.layout.strategy": 3,
-              "jit.page_break.trigger": 3
+              "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_page_one_only_272448_1779749392964200600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_page_one_only_220748_1785811246481497200.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1097,
-        "pdf_sha256": "56ebdb14c23c84b7b09fa9a00863218a394586c7efc8e75a5ce0c1d4db531050",
+        "pdf_bytes": 1173,
+        "pdf_sha256": "3c39088529e3a63fd9d58e93484948057b7a58e216915fa79bba22e6ae1ae7c2",
         "image_count": 2,
         "image_sha256": [
-          "505776781cac6c697ce36958846d38ddd76cc500d14ee3c659cadd98131e7136",
-          "bd89fa281f1eba5c27cbcccf9d56db4067d90f34dead0c673eb2f92d47de1634"
+          "39cee1d5be167ca226ad0b7de6b6822c98f73f7d95f719e53a809361d90a4ad9",
+          "1bb7302a6a0a44499e9a18e1e823a9f61b47df1c4fb83545c1a3788b391deb09"
         ],
         "stability_hash_expected": "4e1a0d95ca9c4766e39533f7c445e10dd90d1932a510658e00e7b67ad12c3901",
         "stability_hash_actual": "4e1a0d95ca9c4766e39533f7c445e10dd90d1932a510658e00e7b67ad12c3901",
@@ -9778,7 +9774,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 21,
+            "computed_event_count": 42,
             "checks": [
               {
                 "index": 0,
@@ -9947,16 +9943,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_source_order_zindex_272448_1779749393037308100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_source_order_zindex_220748_1785811246528940400.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 828,
-        "pdf_sha256": "350bcd3172b0fbca07a451d3f6b3be06a76c194c2ae193d922cb145342e634c3",
+        "pdf_bytes": 857,
+        "pdf_sha256": "8b63d801b3cdc7057e8dd0dd30646f469c60acb0d95a1bbc124350284247776e",
         "image_count": 1,
         "image_sha256": [
-          "53ee99f6f8720a7035e9a99755ec32e8304c07eafc654a7809f022bf2de48a2d"
+          "e0761dbc107595895060f61cf45f401fd38d20a1215b54c84084961dd87dc03a"
         ],
         "stability_hash_expected": "404befeff2e1c8b4d21df18662cf14a586fe37c325f5286534882a80f98c290d",
         "stability_hash_actual": "404befeff2e1c8b4d21df18662cf14a586fe37c325f5286534882a80f98c290d",
@@ -9998,7 +9994,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 21,
+            "computed_event_count": 42,
             "checks": [
               {
                 "index": 0,
@@ -10167,16 +10163,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_specificity_zindex_id_wins_272448_1779749393673250500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_specificity_zindex_id_wins_220748_1785811247003344700.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 828,
-        "pdf_sha256": "350bcd3172b0fbca07a451d3f6b3be06a76c194c2ae193d922cb145342e634c3",
+        "pdf_bytes": 857,
+        "pdf_sha256": "8b63d801b3cdc7057e8dd0dd30646f469c60acb0d95a1bbc124350284247776e",
         "image_count": 1,
         "image_sha256": [
-          "53ee99f6f8720a7035e9a99755ec32e8304c07eafc654a7809f022bf2de48a2d"
+          "e0761dbc107595895060f61cf45f401fd38d20a1215b54c84084961dd87dc03a"
         ],
         "stability_hash_expected": "404befeff2e1c8b4d21df18662cf14a586fe37c325f5286534882a80f98c290d",
         "stability_hash_actual": "404befeff2e1c8b4d21df18662cf14a586fe37c325f5286534882a80f98c290d",
@@ -10213,7 +10209,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 21,
+            "computed_event_count": 42,
             "checks": [
               {
                 "index": 0,
@@ -10382,16 +10378,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_zindex_overlay_272448_1779749395012951000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_zindex_overlay_220748_1785811247768765800.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 839,
-        "pdf_sha256": "c65e6ca28c4cb11accfd12e75c4483cc0a956f76e4733bc547562e2d37a93c32",
+        "pdf_bytes": 865,
+        "pdf_sha256": "4e45323fa51c29a6fd0af9b02bfe810c10d0b6cf50d6851c9ae1cf5801eb51e3",
         "image_count": 1,
         "image_sha256": [
-          "1b5a9e346f4cf9d72eab7c0c4350644a6457c6280faed4fefc737e1a619b49b1"
+          "11c28cd2a08a4d88d84d2873bda1fbe5ec859c6c99a901f5e592a1f6eb062462"
         ],
         "stability_hash_expected": "0b2f8b19d78f2dcae5c40e5c7c43479244ef5f483dbf9eed3e22a3d0047e3024",
         "stability_hash_actual": "0b2f8b19d78f2dcae5c40e5c7c43479244ef5f483dbf9eed3e22a3d0047e3024",
@@ -10429,7 +10425,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 12,
+            "computed_event_count": 27,
             "checks": [
               {
                 "index": 0,
@@ -10590,16 +10586,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_top_bottom_height_precedence_272448_1779749395152114500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_top_bottom_height_precedence_220748_1785811248044914200.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 801,
-        "pdf_sha256": "ad27da751717031324d1cf0de9fc7dd5b99f2a8b6ada8e56325c97464e8ce02e",
+        "pdf_bytes": 833,
+        "pdf_sha256": "2b90565c38a880f5b88fa62e865db32db729e8bad170f511634ea87a9358a18c",
         "image_count": 1,
         "image_sha256": [
-          "734e81ec85f290aa09fc6f67a47e20a7259441d5cf07b14efc8cc4901a137c73"
+          "1e7a7516d4d7f566f81a02a65a48a504d3058db75de00c4222bcdc3926f9fe88"
         ],
         "stability_hash_expected": "444ca97cb8167d5caf2b7308e7f7b0fa17dfea13d00c4be6572368a8d3db737b",
         "stability_hash_actual": "444ca97cb8167d5caf2b7308e7f7b0fa17dfea13d00c4be6572368a8d3db737b",
@@ -10637,7 +10633,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 15,
+            "computed_event_count": 36,
             "checks": [
               {
                 "index": 0,
@@ -10817,16 +10813,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_transform_establishes_containing_block_272448_1779749395198770000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_transform_establishes_containing_block_220748_1785811248197031700.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 694,
-        "pdf_sha256": "7f7b2437cf6fd504683b0cd862d6b91fc9c89a6fdba1d3c23c22fa6b723d152c",
+        "pdf_bytes": 711,
+        "pdf_sha256": "b28a1a7df6ed7755bc6b7ef73e1ed8bd86e5d8eeb492c2ec44d509c9517c5009",
         "image_count": 1,
         "image_sha256": [
-          "26c085bc21af56f807919dc5296e812bdafdaf86eb6201e83cea4397f643f2ce"
+          "82589c3e7fd4bfd77a12c603d1eca12ad0c191b5aa18d1a5a992b869d58f9e5b"
         ],
         "stability_hash_expected": "3f6fdf2924957b0646ebcfaadbeabcaec207791c9c6d370cd361f39c5500955a",
         "stability_hash_actual": "3f6fdf2924957b0646ebcfaadbeabcaec207791c9c6d370cd361f39c5500955a",
@@ -10864,7 +10860,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 27,
+            "computed_event_count": 54,
             "checks": [
               {
                 "index": 0,
@@ -10985,20 +10981,20 @@
           "details": {
             "summary_counts_total": {
               "jit.layout.strategy": 3,
-              "jit.page_break.trigger": 3
+              "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_negative_zindex_under_content_272448_1779749395381449700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_negative_zindex_under_content_220748_1785811248739388500.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1139,
-        "pdf_sha256": "9e0b5c88359bb2298c77191b10dcca91992d74493bc9bef6ccb23a9a14218eb7",
+        "pdf_bytes": 1193,
+        "pdf_sha256": "05ac80b6c1d7544121ef5212206d3f613d86d6b8b50f060b12799ecc93d7d751",
         "image_count": 2,
         "image_sha256": [
-          "160c4f68aa9b3b025dd0e3695be73558c7e3f842dad0440e7fa7ed644b7c2949",
-          "bd89fa281f1eba5c27cbcccf9d56db4067d90f34dead0c673eb2f92d47de1634"
+          "bf37bbfb7c1fddc47880e120115df081466a670898007240910975c72c69bc80",
+          "1bb7302a6a0a44499e9a18e1e823a9f61b47df1c4fb83545c1a3788b391deb09"
         ],
         "stability_hash_expected": "32a72e35dadb80704da87e19a16d8487ca2850973ee60da6e99a4e6c4c4959dd",
         "stability_hash_actual": "32a72e35dadb80704da87e19a16d8487ca2850973ee60da6e99a4e6c4c4959dd",
@@ -11035,7 +11031,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 27,
+            "computed_event_count": 54,
             "checks": [
               {
                 "index": 0,
@@ -11194,20 +11190,20 @@
           "details": {
             "summary_counts_total": {
               "jit.layout.strategy": 3,
-              "jit.page_break.trigger": 3
+              "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_repeats_each_page_272448_1779749396469677900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_repeats_each_page_220748_1785811248973057400.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1139,
-        "pdf_sha256": "330bca52678fa04c1974b75cb07101f03fb9200bf3ec7095f8a82380cbf4b661",
+        "pdf_bytes": 1192,
+        "pdf_sha256": "dcdb836187794c1036ef0431f57c942364c1f33b2b0ecca5d2d78276b0b7b7ca",
         "image_count": 2,
         "image_sha256": [
-          "1f22ec500f8d6e483cbd74e082d8df67c32049c3bf426f770906d8742b05a90c",
-          "2f73ddd82ad3235b5e3721882839bd7b9234b0c0a4e6dc40be9045d17132c44f"
+          "260a7a9dec59cd90ddc9f980ad994df21a1cad7f2061d405ce6138e5844283aa",
+          "b62408d0c399b9ad7a773495465604db5810a20c7a502df0b116c2e53069f0f8"
         ],
         "stability_hash_expected": "1c0acea57e5ac9c9a59ac28681c0ae72b470d58ee8f08ca61c7d4c329cf178aa",
         "stability_hash_actual": "1c0acea57e5ac9c9a59ac28681c0ae72b470d58ee8f08ca61c7d4c329cf178aa",
@@ -11244,7 +11240,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 21,
+            "computed_event_count": 42,
             "checks": [
               {
                 "index": 0,
@@ -11413,16 +11409,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_zindex_front_ordering_272448_1779749396520389500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_zindex_front_ordering_220748_1785811249073184700.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 839,
-        "pdf_sha256": "c65e6ca28c4cb11accfd12e75c4483cc0a956f76e4733bc547562e2d37a93c32",
+        "pdf_bytes": 865,
+        "pdf_sha256": "4e45323fa51c29a6fd0af9b02bfe810c10d0b6cf50d6851c9ae1cf5801eb51e3",
         "image_count": 1,
         "image_sha256": [
-          "1b5a9e346f4cf9d72eab7c0c4350644a6457c6280faed4fefc737e1a619b49b1"
+          "11c28cd2a08a4d88d84d2873bda1fbe5ec859c6c99a901f5e592a1f6eb062462"
         ],
         "stability_hash_expected": "0b2f8b19d78f2dcae5c40e5c7c43479244ef5f483dbf9eed3e22a3d0047e3024",
         "stability_hash_actual": "0b2f8b19d78f2dcae5c40e5c7c43479244ef5f483dbf9eed3e22a3d0047e3024",
@@ -11461,7 +11457,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 15,
+            "computed_event_count": 36,
             "checks": [
               {
                 "index": 0,
@@ -11584,16 +11580,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_bottom_containing_height_272448_1779749396524288000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_bottom_containing_height_220748_1785811249077290600.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 775,
-        "pdf_sha256": "e920dfbc0b295bee674ba57f804f48d6f7f531c411b89a362b7d17faff23ea93",
+        "pdf_bytes": 825,
+        "pdf_sha256": "706ead27de9469b84954ced041f51af82286aa38a4e24e5808ba9ad6125bb159",
         "image_count": 1,
         "image_sha256": [
-          "c207b80ee94bce53fc9d17d922102515909ae3c8deff974d8a3311d3850b2aee"
+          "ff8aac41d8782609d96d5fa92d48439347ebf94d1ee1b9af08b7fa3dec29ee12"
         ],
         "stability_hash_expected": "a050a21d03ffa13c380c0339558306ca9bdc3af3768a8527ef2a7c5da00a2d12",
         "stability_hash_actual": "a050a21d03ffa13c380c0339558306ca9bdc3af3768a8527ef2a7c5da00a2d12",
@@ -11632,7 +11628,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -11755,16 +11751,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_left_containing_width_272448_1779749397054181300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_left_containing_width_220748_1785811250060220400.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 775,
-        "pdf_sha256": "72115d9eeaeaa0c5c6cd244ad41e7e69fa2ab80311570c0f419c241f932b1ebb",
+        "pdf_bytes": 825,
+        "pdf_sha256": "0abf5ebf5dbf31c9ff45abc2b28a5091df37dde64e4db536f9bab7a697726ffd",
         "image_count": 1,
         "image_sha256": [
-          "0b4de3d15ea915be822cd27f66d41aa35767d85ef1a0a2f077a1b0fb35955478"
+          "6d21ee7f1e43e0a28f8d8a0acdd23d55ecd0e212a616cfc6eb5fd5f1f77a36cb"
         ],
         "stability_hash_expected": "40ccfac0282fc3eef3275c341c9e6c603c727d918598e01f2a56fe7b9c44e7b0",
         "stability_hash_actual": "40ccfac0282fc3eef3275c341c9e6c603c727d918598e01f2a56fe7b9c44e7b0",
@@ -11803,7 +11799,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -11926,16 +11922,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_right_containing_width_272448_1779749397425543400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_right_containing_width_220748_1785811250192520200.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 773,
-        "pdf_sha256": "1da17229e40c2092811df5607f51837a907d1ece712d262a5d691b9749ebadbe",
+        "pdf_bytes": 823,
+        "pdf_sha256": "ef628f6715aa5cd0292cce00742dcac7d821a8769a0f3c0e8e3d2f1e3c698241",
         "image_count": 1,
         "image_sha256": [
-          "b9b56cbf17c5db3957df4ab5022258ea0603be0db5ba119b1871ce2ea9297b95"
+          "966464a0368d902884a7ab1eded68fb308121e38e662c6873b359a3d13d73ec5"
         ],
         "stability_hash_expected": "9ca46894205f00f2d5625b54a4a1d66ca51f507e10a8ca0213ce9a617239bded",
         "stability_hash_actual": "9ca46894205f00f2d5625b54a4a1d66ca51f507e10a8ca0213ce9a617239bded",
@@ -11973,7 +11969,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -12115,16 +12111,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_inset_shorthand_uniform_272448_1779749397730220900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_inset_shorthand_uniform_220748_1785811250516882500.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 774,
-        "pdf_sha256": "bba6cbc1222fa672a1c8ce33a9fb6ca7e39199f25eb4b07fd740c8d85ff74e6f",
+        "pdf_bytes": 824,
+        "pdf_sha256": "c1eab3f5f579e3e99fad02c7450c66c9230fed59e939ecb59abccf9c719ce269",
         "image_count": 1,
         "image_sha256": [
-          "90ee28437795aaefbc0c9406d3baa428ae1b30ea5cd9b8cc0b24a9f8952426fb"
+          "dfdac7bb76c5a9b1b52ea05038d3fc277404231878ab732264b0a9aedfa598d5"
         ],
         "stability_hash_expected": "b44c6116bd6eb4191edc682f16adfded41dc55c1187eed836f756ba749197ee6",
         "stability_hash_actual": "b44c6116bd6eb4191edc682f16adfded41dc55c1187eed836f756ba749197ee6",
@@ -12162,7 +12158,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 12,
+            "computed_event_count": 27,
             "checks": [
               {
                 "index": 0,
@@ -12342,16 +12338,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_left_right_precedence_272448_1779749397806829400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_left_right_precedence_220748_1785811250558219700.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 811,
-        "pdf_sha256": "02e5946b1e649e11d705032d6f8f45c3a42c61f3f7ffbb67eda22d3f02592b9a",
+        "pdf_bytes": 840,
+        "pdf_sha256": "f706642eb3b104a686bbeebdf62340438b805da7b2cbca9d8d30ebc2f6f4df42",
         "image_count": 1,
         "image_sha256": [
-          "1d840ebf3bd4495fac2f338dd91c85507c683a47350a092e4300d55aaea62c0a"
+          "1ceef9d327e196ec34edc3984253efd770a7b285e4ce1d5a4d659e8a56af8929"
         ],
         "stability_hash_expected": "f95ca53970154026e559f41df870ac469ecd53a835cca8120739b881b736874e",
         "stability_hash_actual": "f95ca53970154026e559f41df870ac469ecd53a835cca8120739b881b736874e",
@@ -12389,7 +12385,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 12,
+            "computed_event_count": 27,
             "checks": [
               {
                 "index": 0,
@@ -12588,16 +12584,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_offset_preserves_flow_slot_272448_1779749398245924000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_offset_preserves_flow_slot_220748_1785811250561218100.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 820,
-        "pdf_sha256": "4c69ea63953fe018ef00ad46e2b09d4c9e4823deb9b6015ad0b0959b2008fc6f",
+        "pdf_bytes": 845,
+        "pdf_sha256": "e57eddd5cbe78e6d867dbfdd3024aea1760022cc9d8d8d73298a5280147e9b6a",
         "image_count": 1,
         "image_sha256": [
-          "3b46cd67597432c7062c94cc71a5c8f1ddf0e0d27fe65fda020e169fb35f08df"
+          "38d5ee54b0fc0a6d381f84e6fdff65dbe40ecee97e781a62c23c4a2346e50a6f"
         ],
         "stability_hash_expected": "08bd30e1bdaeeb1b4630a416425de346eef12e35c9de47a8125836e442eb1855",
         "stability_hash_actual": "08bd30e1bdaeeb1b4630a416425de346eef12e35c9de47a8125836e442eb1855",
@@ -12635,7 +12631,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -12758,16 +12754,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_percent_left_containing_width_272448_1779749398249332300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_percent_left_containing_width_220748_1785811250570311400.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 775,
-        "pdf_sha256": "aca11bf957cb3c5512002548a82a613edeec4fcbe26ef44c527db172ab9afe29",
+        "pdf_bytes": 825,
+        "pdf_sha256": "843b61873021f12f101a1401070a5073f639dc5af0a3a02d7503dc5250db5d59",
         "image_count": 1,
         "image_sha256": [
-          "9d72ae0eaa71d3daa72f15fe98aa94b0d38896d614b5257e70ee216c27bd1816"
+          "a1fb08c85f98e58cb2ea0adfd95a9d285e5febcd68bff128c765464fdc8e0a0c"
         ],
         "stability_hash_expected": "8fd842ed6f144e3461b4d48b788708428941b1ea6b2e0083a86e60490e52c5bc",
         "stability_hash_actual": "8fd842ed6f144e3461b4d48b788708428941b1ea6b2e0083a86e60490e52c5bc",
@@ -12805,7 +12801,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 15,
+            "computed_event_count": 36,
             "checks": [
               {
                 "index": 0,
@@ -12928,16 +12924,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_percent_top_containing_height_272448_1779749398251269300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_percent_top_containing_height_220748_1785811250874647300.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 775,
-        "pdf_sha256": "ca536cc192bb441cf667bf58a7b9658a6115698b1b5c29cebf8f62fa1a84e2a2",
+        "pdf_bytes": 825,
+        "pdf_sha256": "ffec59a406e6b06890232faee1cf188046eea16b1d53d0624d83324fab48f785",
         "image_count": 1,
         "image_sha256": [
-          "a96e97e086a6eb95a592da83527a889deed4b24dab89aa7e661d6e00fe968801"
+          "43a70249b140b92871130c4a7040c4b8252881d8fd948d5ad1326b69a46eee8b"
         ],
         "stability_hash_expected": "cbf520d5cbd5e732e75eb3465ca6480703aef8cccbc30a19f39380aab0f2b9fd",
         "stability_hash_actual": "cbf520d5cbd5e732e75eb3465ca6480703aef8cccbc30a19f39380aab0f2b9fd",
@@ -12975,7 +12971,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 12,
+            "computed_event_count": 27,
             "checks": [
               {
                 "index": 0,
@@ -13155,16 +13151,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_right_bottom_offsets_272448_1779749398510430200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_right_bottom_offsets_220748_1785811250965516000.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 814,
-        "pdf_sha256": "d392f882be9851b7b5cb27ad468358231a0cb1f32b219541e91ae1aad408b5cf",
+        "pdf_bytes": 841,
+        "pdf_sha256": "a6e2c7690eea4e920e81051ea523d8880edbcb41798383da6248d4ae93b4f5a0",
         "image_count": 1,
         "image_sha256": [
-          "24ca0dab2cee5e49599bb089c58abd03cc2601b509e82ee420452cd9282a0bfb"
+          "d147973b5a8b67b17977d848aee15aab0a24a10c5ae5bf35453be6de03a245f1"
         ],
         "stability_hash_expected": "87c602153ef4f089ae7971e69821ee01e595e52a66d73aedc59d656490c38c2f",
         "stability_hash_actual": "87c602153ef4f089ae7971e69821ee01e595e52a66d73aedc59d656490c38c2f",
@@ -13202,7 +13198,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 12,
+            "computed_event_count": 27,
             "checks": [
               {
                 "index": 0,
@@ -13363,16 +13359,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_top_bottom_precedence_272448_1779749398548278100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_top_bottom_precedence_220748_1785811251245480600.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 810,
-        "pdf_sha256": "a299e23bb1360d54022cda17420512936e13c10fcd61ba4f5967a2917851fb2c",
+        "pdf_bytes": 838,
+        "pdf_sha256": "932d9b39247f88ddde4417bdacecfa06f1fff3edc3be17cf9fcc61fea0b607fa",
         "image_count": 1,
         "image_sha256": [
-          "9c38e5a0e152a81208786ed3156aabc93e0651ef98a3ecc08f50e9d9b1a20b83"
+          "0c9d45a97ac367ee058189a35e68f627e5694d3e7532e6fa6b50f1aa4a7af047"
         ],
         "stability_hash_expected": "7386ca604177d6047ce3a7b1a343db8c435101d6566e8cd23d955280458745f1",
         "stability_hash_actual": "7386ca604177d6047ce3a7b1a343db8c435101d6566e8cd23d955280458745f1",
@@ -13412,7 +13408,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 5,
-            "computed_event_count": 24,
+            "computed_event_count": 45,
             "checks": [
               {
                 "index": 0,
@@ -13643,16 +13639,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_attribute_variants_272448_1779749399041712400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_attribute_variants_220748_1785811251249658200.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 858,
-        "pdf_sha256": "b91b69ecc89aa61f61ce41639470b388ae73988e7fb5fab2005d0f8787daed0a",
+        "pdf_bytes": 885,
+        "pdf_sha256": "9c5ac832e067bce35256bb975503797bb6ef97b76ce507028e9fdd5f85240e66",
         "image_count": 1,
         "image_sha256": [
-          "cbd197a677ac80239841f5131b00a7fc26bb5edeb046fb6682a5fe10818d8a83"
+          "ad6e62e414746d8b3427e61e788bacd5d3bb0caf60db9893c9bd616c428f3374"
         ],
         "stability_hash_expected": "62b81eda398b5297ed06428120cceee6dc8b77b2f20e55e62660ecec94d438a4",
         "stability_hash_actual": "62b81eda398b5297ed06428120cceee6dc8b77b2f20e55e62660ecec94d438a4",
@@ -13690,7 +13686,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 5,
-            "computed_event_count": 24,
+            "computed_event_count": 45,
             "checks": [
               {
                 "index": 0,
@@ -13921,16 +13917,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_sibling_combinators_272448_1779749399043720200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_sibling_combinators_220748_1785811251631026100.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 846,
-        "pdf_sha256": "fca5f61d7289c635e6bf3298ff708ca8ea480522052bad988021ce4964abe908",
+        "pdf_bytes": 873,
+        "pdf_sha256": "9ab9a29ff3f0e19156b35f05f707cc980fb46b976b20bcc746512c312ef7a36f",
         "image_count": 1,
         "image_sha256": [
-          "e8a7c9261f409c865b84609173baad23f22b571f5855bac6f645f90ce21a712d"
+          "64862beef38cbfd2922a74d23054c119d3062960d1c21d7babdbafe2496540ae"
         ],
         "stability_hash_expected": "47640035467eff10a7db43ebb4bec405056360e7a648c1a51134135e136b4956",
         "stability_hash_actual": "47640035467eff10a7db43ebb4bec405056360e7a648c1a51134135e136b4956",
@@ -13969,7 +13965,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -14054,16 +14050,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_specificity_id_wins_272448_1779749399482675600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_specificity_id_wins_220748_1785811251678186800.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 775,
-        "pdf_sha256": "9f05f930201750109660cb9b07387b830708e6bbd25069fcaa48941f0327c8c5",
+        "pdf_bytes": 825,
+        "pdf_sha256": "726a7f41886bc9db72d3c65f0dcefe0b9e5af567f20d369bceca39b3df96766d",
         "image_count": 1,
         "image_sha256": [
-          "5822fa71a9dad07fc74f33bdfd4ca8f9f7cd6531a725bcd07b8a0ef3c85aa9b5"
+          "8617c831d097396f4b409b87dd1c7b4a1e917c554bfda59adc1c262b7ed5cb83"
         ],
         "stability_hash_expected": "350ca6827921c18bb29dd1f5d145be2090094e869d3d1e44163b2bf723cef7be",
         "stability_hash_actual": "350ca6827921c18bb29dd1f5d145be2090094e869d3d1e44163b2bf723cef7be",
@@ -14102,7 +14098,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 5,
-            "computed_event_count": 24,
+            "computed_event_count": 45,
             "checks": [
               {
                 "index": 0,
@@ -14333,16 +14329,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_structural_pseudos_272448_1779749399744082100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_structural_pseudos_220748_1785811252552862000.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 857,
-        "pdf_sha256": "6f55de17c6c9289a1775c6e12ebaf376fe2791771a12cdd825d187e0ef7082d4",
+        "pdf_bytes": 882,
+        "pdf_sha256": "f162120436ff2a792a7036e905410c85cdd05cd025b73f46e23bdc925d329dc4",
         "image_count": 1,
         "image_sha256": [
-          "cfc5725ac451c1e1078bf3e9186b99edd9c347e94311f40410cd915866c74142"
+          "49843d14507ab44463ce904f34387cf99836b3689de6c08aa07f084e3ddc2816"
         ],
         "stability_hash_expected": "d094d4af6008616158842acfe301b7a8d2ded13521cb3041e051d619a7c9bf82",
         "stability_hash_actual": "d094d4af6008616158842acfe301b7a8d2ded13521cb3041e051d619a7c9bf82",
@@ -14381,7 +14377,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 15,
+            "computed_event_count": 36,
             "checks": [
               {
                 "index": 0,
@@ -14466,16 +14462,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_solid_red_block_272448_1779749400573671700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_solid_red_block_220748_1785811252731520100.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 796,
-        "pdf_sha256": "2ee0439b0277454bfec5129f2245a74f507bd3e171cae44d40ce9bbab6322e3c",
+        "pdf_bytes": 840,
+        "pdf_sha256": "1fb35fcc02086d0dbd480d2035f3383a3db1f4a127109255a6207c6e830d57ed",
         "image_count": 1,
         "image_sha256": [
-          "2880ee4e415c1f61274d0e8948471f8437500f77a7f8519e697342d16aff5722"
+          "ee92ec3cb4da0dba6aa58097da7acd44b58f6d7f86f35b71e87a1d9f159b7d72"
         ],
         "stability_hash_expected": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
         "stability_hash_actual": "f6498fbd2b913a80884dc90131f1b01b07fa70fdccb5859b0a244b6e01429fb8",
@@ -14513,7 +14509,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 45,
+            "computed_event_count": 108,
             "checks": [
               {
                 "index": 0,
@@ -14656,17 +14652,17 @@
               "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_table_header_repeat_across_pages_272448_1779749400928552500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_table_header_repeat_across_pages_220748_1785811252839855400.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1162,
-        "pdf_sha256": "0ae564477cc6ad5ae7648fc7712af0c0b0904a3f9960612d04bbd9af9b27716d",
+        "pdf_bytes": 1365,
+        "pdf_sha256": "a4bb159b73ab1723e0066b442698a75395b400d20215cff7555d4c5f498d594f",
         "image_count": 2,
         "image_sha256": [
-          "e443139fb4c0aa3a8abd2cba87952ed2d253be88907f2d6195e78d465c459d09",
-          "12af9871024d877ffa5ea97a72efc26766d649cdc03316424c233b738477952c"
+          "2bb93bb49d2f702cec97741a2f45ca67ef4d4710225b3b59bb2953da6ce529e5",
+          "184bde0d9fd413fd8a4a975bdcbeae9fe1550d6fcfc87f0a2c53886e825bffd9"
         ],
         "stability_hash_expected": "94cca2c21d9073df81b584f454b631261d008e269eb2067d42865b92d00199d6",
         "stability_hash_actual": "94cca2c21d9073df81b584f454b631261d008e269eb2067d42865b92d00199d6",
@@ -14704,7 +14700,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -14846,16 +14842,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_individual_compose_with_transform_272448_1779749401085109300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_individual_compose_with_transform_220748_1785811253645898900.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 806,
-        "pdf_sha256": "9e88b8d08ca1825947fc973c592a5632e5375cc611de33e7f6ca1b7e91252677",
+        "pdf_bytes": 858,
+        "pdf_sha256": "ac43756b5f18790d863a51a7015868ad55d2354befd861f57d45d7c63acfbbf6",
         "image_count": 1,
         "image_sha256": [
-          "d8c8a87803463851ed098710db95ccdb2fc24d819cc8995068cdd9d0a7a6488f"
+          "45040b2dcb56636f8955e5d5dd55cea5d94f79efa2ba3aaf1677eb78612e6768"
         ],
         "stability_hash_expected": "aecdaf40522b05696cb480fd328d045b20789e4150771272f2e07277e61c0e37",
         "stability_hash_actual": "aecdaf40522b05696cb480fd328d045b20789e4150771272f2e07277e61c0e37",
@@ -14893,7 +14889,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -15035,16 +15031,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_matrix_block_affine_272448_1779749401490169400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_matrix_block_affine_220748_1785811253706695400.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 824,
-        "pdf_sha256": "651f884173c29ca4de9e5579fc334cf2aea8ab05dc0f2f9761f1740cce609cee",
+        "pdf_bytes": 853,
+        "pdf_sha256": "aaa2fbdc7f3efd363164409994a885ef12d06ec45bfa0fa5712fb5de7c49fc32",
         "image_count": 1,
         "image_sha256": [
-          "09346d32e74520f92c9f77fbade1a1da0e1063c175bb455432b9298949c03054"
+          "c1bd603e06addb9ceb8379f9c332ffde3812f87b4670dc8ea2cbaa390f0f3683"
         ],
         "stability_hash_expected": "880c6961294074685074def2c226ccf2248500652bb8751592622fe2e9c35820",
         "stability_hash_actual": "880c6961294074685074def2c226ccf2248500652bb8751592622fe2e9c35820",
@@ -15082,7 +15078,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -15205,16 +15201,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_origin_left_scale_anchor_272448_1779749401733602300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_origin_left_scale_anchor_220748_1785811253949870000.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 826,
-        "pdf_sha256": "6d261dcd91ed3ab436141a6d4ea288e818bf12b942923c6b8c2014843b6ecf81",
+        "pdf_bytes": 852,
+        "pdf_sha256": "e202b10b20d5a2a312a767b4a7e134c23b4766e47f8e5ef0b53669dd9b4a8851",
         "image_count": 1,
         "image_sha256": [
-          "e37029064efdd40cceff9ee987cb20198418496f30c3686a05daa30c5d3cca52"
+          "619967da208b02e196d6e574c6fef6b0fe65cea08ab6ffabc1dbae9c0774e876"
         ],
         "stability_hash_expected": "9ae820e906e8480d592591e503f35b709296582dc3e4e7115cfa869fc097f03e",
         "stability_hash_actual": "9ae820e906e8480d592591e503f35b709296582dc3e4e7115cfa869fc097f03e",
@@ -15252,7 +15248,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -15281,7 +15277,7 @@
                 "kind": "color_run_length",
                 "page": 1,
                 "axis": "x",
-                "fixed": 160,
+                "fixed": 90,
                 "start": 0,
                 "expected_rgba": [
                   255,
@@ -15290,8 +15286,8 @@
                   255
                 ],
                 "tolerance": 8,
-                "actual_run_length": 90,
-                "expected_length": 90,
+                "actual_run_length": 150,
+                "expected_length": 150,
                 "length_tolerance": 2
               },
               {
@@ -15300,8 +15296,8 @@
                 "kind": "color_run_length",
                 "page": 1,
                 "axis": "x",
-                "fixed": 160,
-                "start": 90,
+                "fixed": 90,
+                "start": 150,
                 "expected_rgba": [
                   255,
                   0,
@@ -15319,8 +15315,8 @@
                 "kind": "color_run_length",
                 "page": 1,
                 "axis": "x",
-                "fixed": 160,
-                "start": 150,
+                "fixed": 90,
+                "start": 210,
                 "expected_rgba": [
                   255,
                   255,
@@ -15328,8 +15324,8 @@
                   255
                 ],
                 "tolerance": 8,
-                "actual_run_length": 330,
-                "expected_length": 330,
+                "actual_run_length": 270,
+                "expected_length": 270,
                 "length_tolerance": 2
               }
             ]
@@ -15348,8 +15344,8 @@
           "checks": [
             {
               "page": 1,
-              "x": 120,
-              "y": 160,
+              "x": 180,
+              "y": 90,
               "expected_rgba": [
                 255,
                 0,
@@ -15375,19 +15371,19 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_block_centered_272448_1779749401876665500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_block_centered_220748_1785811254121426400.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 834,
-        "pdf_sha256": "66e6618b952fe0abb096bb8822c5fcca688e3421244cccbc0a13d60211399be7",
+        "pdf_bytes": 875,
+        "pdf_sha256": "cce45c21d551f85d4a593bab6e7c188df703cf3553cca96366fb6813fcebf4c2",
         "image_count": 1,
         "image_sha256": [
-          "2205c185681f2312effea16621c34193b96d0af0a742fa905adb686681ccf6b9"
+          "7e783d4d35afae7f4ae335d808c24c0d8b876c33a72d1dd6fe6211b8c99ba662"
         ],
-        "stability_hash_expected": "9ddbae61cc8e504e17e928e785092473fc986da9fa07fe8ab7d8223fbfa5f68d",
-        "stability_hash_actual": "9ddbae61cc8e504e17e928e785092473fc986da9fa07fe8ab7d8223fbfa5f68d",
+        "stability_hash_expected": "11529287f3bc695e3cf89c908456f96dc61afef1b321d2a00718897b2bdc7e3b",
+        "stability_hash_actual": "11529287f3bc695e3cf89c908456f96dc61afef1b321d2a00718897b2bdc7e3b",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -15423,7 +15419,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -15452,7 +15448,7 @@
                 "kind": "color_run_length",
                 "page": 1,
                 "axis": "x",
-                "fixed": 160,
+                "fixed": 90,
                 "start": 0,
                 "expected_rgba": [
                   255,
@@ -15461,8 +15457,8 @@
                   255
                 ],
                 "tolerance": 8,
-                "actual_run_length": 90,
-                "expected_length": 90,
+                "actual_run_length": 150,
+                "expected_length": 150,
                 "length_tolerance": 2
               },
               {
@@ -15471,8 +15467,8 @@
                 "kind": "color_run_length",
                 "page": 1,
                 "axis": "x",
-                "fixed": 160,
-                "start": 90,
+                "fixed": 90,
+                "start": 150,
                 "expected_rgba": [
                   255,
                   0,
@@ -15490,8 +15486,8 @@
                 "kind": "color_run_length",
                 "page": 1,
                 "axis": "x",
-                "fixed": 160,
-                "start": 150,
+                "fixed": 90,
+                "start": 210,
                 "expected_rgba": [
                   255,
                   255,
@@ -15499,8 +15495,8 @@
                   255
                 ],
                 "tolerance": 8,
-                "actual_run_length": 330,
-                "expected_length": 330,
+                "actual_run_length": 270,
+                "expected_length": 270,
                 "length_tolerance": 2
               }
             ]
@@ -15519,8 +15515,8 @@
           "checks": [
             {
               "page": 1,
-              "x": 120,
-              "y": 160,
+              "x": 180,
+              "y": 90,
               "expected_rgba": [
                 255,
                 0,
@@ -15546,19 +15542,19 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_var_fallback_missing_272448_1779749401947469600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_var_fallback_missing_220748_1785811254175052800.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 834,
-        "pdf_sha256": "622c46b2c1636db45efc93fe975d96c38269c03e5068115dd53e319136076062",
+        "pdf_bytes": 875,
+        "pdf_sha256": "33b1e43d6db7fbe2db5567415dbc0ab9c75e92414578e25e41fa2ec51f0b0395",
         "image_count": 1,
         "image_sha256": [
-          "14800a3834b54fc58a9be4d6808ef3b2b6ec09c9afa1bd44f6c68437df5c2dd1"
+          "dce2c4a1ca5a31efd75de788fd2297fde937519067dfc918c13782313145d1e4"
         ],
-        "stability_hash_expected": "9ddbae61cc8e504e17e928e785092473fc986da9fa07fe8ab7d8223fbfa5f68d",
-        "stability_hash_actual": "9ddbae61cc8e504e17e928e785092473fc986da9fa07fe8ab7d8223fbfa5f68d",
+        "stability_hash_expected": "11529287f3bc695e3cf89c908456f96dc61afef1b321d2a00718897b2bdc7e3b",
+        "stability_hash_actual": "11529287f3bc695e3cf89c908456f96dc61afef1b321d2a00718897b2bdc7e3b",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -15594,7 +15590,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -15623,7 +15619,7 @@
                 "kind": "color_run_length",
                 "page": 1,
                 "axis": "x",
-                "fixed": 160,
+                "fixed": 90,
                 "start": 0,
                 "expected_rgba": [
                   255,
@@ -15632,8 +15628,8 @@
                   255
                 ],
                 "tolerance": 8,
-                "actual_run_length": 90,
-                "expected_length": 90,
+                "actual_run_length": 150,
+                "expected_length": 150,
                 "length_tolerance": 2
               },
               {
@@ -15642,8 +15638,8 @@
                 "kind": "color_run_length",
                 "page": 1,
                 "axis": "x",
-                "fixed": 160,
-                "start": 90,
+                "fixed": 90,
+                "start": 150,
                 "expected_rgba": [
                   0,
                   0,
@@ -15661,8 +15657,8 @@
                 "kind": "color_run_length",
                 "page": 1,
                 "axis": "x",
-                "fixed": 160,
-                "start": 150,
+                "fixed": 90,
+                "start": 210,
                 "expected_rgba": [
                   255,
                   255,
@@ -15670,8 +15666,8 @@
                   255
                 ],
                 "tolerance": 8,
-                "actual_run_length": 330,
-                "expected_length": 330,
+                "actual_run_length": 270,
+                "expected_length": 270,
                 "length_tolerance": 2
               }
             ]
@@ -15690,8 +15686,8 @@
           "checks": [
             {
               "page": 1,
-              "x": 120,
-              "y": 160,
+              "x": 180,
+              "y": 90,
               "expected_rgba": [
                 0,
                 0,
@@ -15717,19 +15713,19 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_var_reference_custom_angle_272448_1779749402039913600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_var_reference_custom_angle_220748_1785811254197942100.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 834,
-        "pdf_sha256": "f38c2a6a818a584c69a8574acd0ad385d361832b14bb68cc97455975b6f88a7b",
+        "pdf_bytes": 875,
+        "pdf_sha256": "226ed44daab58a19f9230a967b8a4fde679ad13b67f4124d664cd5faa27ea3f6",
         "image_count": 1,
         "image_sha256": [
-          "8c85df3fe37236a5398cea7fb5fcfab8ea8ee23c87022762c512d1d7a363b777"
+          "32111e1b6f23f31485be6ff918f4f683c79e9addf409bcda505750b92c73e0a0"
         ],
-        "stability_hash_expected": "be5e4356562bfe63686edff1fd4d2afd14d3f89316a65a97320ef651c9deefa9",
-        "stability_hash_actual": "be5e4356562bfe63686edff1fd4d2afd14d3f89316a65a97320ef651c9deefa9",
+        "stability_hash_expected": "15f6eb525ca3dd6e61132df11c2f07b500c97334b719f94d07cae17cbe390548",
+        "stability_hash_actual": "15f6eb525ca3dd6e61132df11c2f07b500c97334b719f94d07cae17cbe390548",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -15764,7 +15760,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -15887,16 +15883,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_scale_block_centered_272448_1779749402144472100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_scale_block_centered_220748_1785811254257077700.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 829,
-        "pdf_sha256": "1f60d3362c6b5c1bbdb089406391940df0aeb0c4f061ab6ea98687bd97f4a367",
+        "pdf_bytes": 859,
+        "pdf_sha256": "3bcb2ddcdb7d4731c7534a4f0822fe6aa456125cecff62cbfa5df561f75dab24",
         "image_count": 1,
         "image_sha256": [
-          "0cf81c94855662d214a372a8a188f14385f2e26c04e558a7aaebe77a93ab400e"
+          "a283539195854d809a55ee530f05294351e7893a63f759865d0119d57daaa632"
         ],
         "stability_hash_expected": "95e06b4ec9dc15d33a3af532cc3b6ae2391dd2b88586b4a9331a53922c70cc9e",
         "stability_hash_actual": "95e06b4ec9dc15d33a3af532cc3b6ae2391dd2b88586b4a9331a53922c70cc9e",
@@ -15934,7 +15930,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -16057,16 +16053,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_scale_var_reference_custom_pair_272448_1779749402254652200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_scale_var_reference_custom_pair_220748_1785811254505140100.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 829,
-        "pdf_sha256": "cf98d947f29658aafd103b387fa421f0705b16f8740e0c6dae2e3a324a3303e4",
+        "pdf_bytes": 859,
+        "pdf_sha256": "b1e99d7dce81834dbaa15665c8c2242a31a241f1d9260db0a5a0f568221bb5c5",
         "image_count": 1,
         "image_sha256": [
-          "34e7e5850603d8af37a81eaa835b4a4199ae71d0efa68bdfe6cf6709408ce552"
+          "538b873cb20617c9b9f2c046f350eafa1e16ac0017b3bf921dc238a21b360cfa"
         ],
         "stability_hash_expected": "95e06b4ec9dc15d33a3af532cc3b6ae2391dd2b88586b4a9331a53922c70cc9e",
         "stability_hash_actual": "95e06b4ec9dc15d33a3af532cc3b6ae2391dd2b88586b4a9331a53922c70cc9e",
@@ -16104,7 +16100,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -16142,8 +16138,8 @@
                   255
                 ],
                 "tolerance": 8,
-                "actual_run_length": 179,
-                "expected_length": 180,
+                "actual_run_length": 60,
+                "expected_length": 60,
                 "length_tolerance": 2
               },
               {
@@ -16153,7 +16149,7 @@
                 "page": 1,
                 "axis": "x",
                 "fixed": 60,
-                "start": 180,
+                "start": 61,
                 "expected_rgba": [
                   255,
                   0,
@@ -16180,8 +16176,8 @@
                   255
                 ],
                 "tolerance": 8,
-                "actual_run_length": 139,
-                "expected_length": 140,
+                "actual_run_length": 100,
+                "expected_length": 100,
                 "length_tolerance": 2
               },
               {
@@ -16191,7 +16187,7 @@
                 "page": 1,
                 "axis": "x",
                 "fixed": 100,
-                "start": 140,
+                "start": 101,
                 "expected_rgba": [
                   255,
                   0,
@@ -16223,14 +16219,14 @@
               "y": 60,
               "expected_rgba": [
                 255,
-                0,
-                0,
+                255,
+                255,
                 255
               ],
               "actual_rgba": [
                 255,
-                0,
-                0,
+                255,
+                255,
                 255
               ],
               "tolerance": 8,
@@ -16238,7 +16234,7 @@
             },
             {
               "page": 1,
-              "x": 120,
+              "x": 80,
               "y": 100,
               "expected_rgba": [
                 255,
@@ -16284,19 +16280,19 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_skewx_block_left_origin_272448_1779749402311651600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_skewx_block_left_origin_220748_1785811254558060100.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 824,
-        "pdf_sha256": "288294ea916be0f913c703d6705ef02176c039ce1bf7cbea0bacb0c3310e8377",
+        "pdf_bytes": 864,
+        "pdf_sha256": "046e30047491fc849dc0cf34742739650c078cf694acb6a45a633c6b4782a491",
         "image_count": 1,
         "image_sha256": [
-          "10d29555d1f1941d5ac3ca7b7629ccd936a70f8bd7371d518d2e88057f2c798e"
+          "9c17482a22448ba1e380b91cec51874cac0ce59c497d24d12e4106f7a37819e3"
         ],
-        "stability_hash_expected": "19a381102da8c90b99ec093a18e0d4d7a82235496c3ea5f5202f6f6466ec7cd6",
-        "stability_hash_actual": "19a381102da8c90b99ec093a18e0d4d7a82235496c3ea5f5202f6f6466ec7cd6",
+        "stability_hash_expected": "87df84187332602456ac0a4203994f70d85aa1db853331d3094e6ae2080e2f6e",
+        "stability_hash_actual": "87df84187332602456ac0a4203994f70d85aa1db853331d3094e6ae2080e2f6e",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -16331,7 +16327,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -16454,16 +16450,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_translate_block_offsets_272448_1779749402460212200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_translate_block_offsets_220748_1785811254560664000.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 828,
-        "pdf_sha256": "658a65914cf3900a034793e163e51179ff05926e3a60f3b7e6fded8f4d3bfafa",
+        "pdf_bytes": 857,
+        "pdf_sha256": "c3fe8d83bd605f8c8467c330631c2234c57f5c25954008ae158703d29984cd4d",
         "image_count": 1,
         "image_sha256": [
-          "c90df116ad630d62066a7b0e7383e74d0409a173f73a855e4f8e497a723165ba"
+          "df760cf1a17010cc3629dd7478e5e686da0f8ad793ece0df02b6b3ff3daa25a7"
         ],
         "stability_hash_expected": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
         "stability_hash_actual": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
@@ -16502,7 +16498,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -16625,16 +16621,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_translate_var_reference_custom_pair_272448_1779749402521952700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_translate_var_reference_custom_pair_220748_1785811254570709200.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 828,
-        "pdf_sha256": "409191e08fb0c364f7586f4041c4a5d4f873e1902cf3474d80429b36ae22799d",
+        "pdf_bytes": 857,
+        "pdf_sha256": "4df88b7bd34ff5553200474921172dd663d6d1dd14b32317380fa6ca08722a50",
         "image_count": 1,
         "image_sha256": [
-          "27f96650d0d0d35dcdb70e2d0262df413da2df1a37377462cf737aa6651b9918"
+          "e8185b6be1d9ec75f8c9b7981211f53d03a3692b56ef4e43dfd7c97d76751ca0"
         ],
         "stability_hash_expected": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
         "stability_hash_actual": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
@@ -16673,7 +16669,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -16796,16 +16792,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_var_cycle_fallback_translate_272448_1779749402527000300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_var_cycle_fallback_translate_220748_1785811254725778100.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 822,
-        "pdf_sha256": "d7e52525ea039d0fd3f3d144135ecd05b7d75cd4e2472d0607ba7d8f4cd3816a",
+        "pdf_bytes": 851,
+        "pdf_sha256": "a35ea0218281e408536e699cbe79c2ea5b2cb2b9fff54e6569ba94dec7623034",
         "image_count": 1,
         "image_sha256": [
-          "42ee0035d807b32900efd175e6dce03fa7c90197fe1529855be2321a3361fd09"
+          "b0b275e2f8c8f0fc6c99d9aedcd75d8d9cffde28a26aac53cee837f0413b1b48"
         ],
         "stability_hash_expected": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
         "stability_hash_actual": "dd12823c4242703691ca4a46d814fabe3e1c4f3d3be8e4d8040f87d219ff893b",
@@ -16843,7 +16839,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -16985,16 +16981,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_var_reference_custom_list_272448_1779749402756227900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_var_reference_custom_list_220748_1785811254820308700.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 822,
-        "pdf_sha256": "70525d2ff32936fa5fbd0f8e3def74a85a559d50e6c94397163e0976b71e9fea",
+        "pdf_bytes": 851,
+        "pdf_sha256": "58e23ed0eff1b31f9145e5200096789c82fd0ee0a68c7f0fd1913ac96753670e",
         "image_count": 1,
         "image_sha256": [
-          "fea99c5580bff2a44c537946d53ce62c83f93373ec1a0a2a681509cfd46803ad"
+          "4c6e4132588193cf68adb8cefd04d68aa622268dcf3275db9b24c0641bcb4347"
         ],
         "stability_hash_expected": "b354b55cfc75148a3ae8cd366d17ab5943672a1dd51395a8a2d6d897bd0eb752",
         "stability_hash_actual": "b354b55cfc75148a3ae8cd366d17ab5943672a1dd51395a8a2d6d897bd0eb752",
@@ -17032,7 +17028,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 24,
+            "computed_event_count": 51,
             "checks": [
               {
                 "index": 0,
@@ -17161,20 +17157,20 @@
           "details": {
             "summary_counts_total": {
               "jit.layout.strategy": 3,
-              "jit.page_break.trigger": 3
+              "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_two_page_break_colors_272448_1779749402788776700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_two_page_break_colors_220748_1785811254821820200.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1058,
-        "pdf_sha256": "9a111ff59770736cba8d15882520fb0ec7b5dc66d850f367353ce1b9746217fd",
+        "pdf_bytes": 1158,
+        "pdf_sha256": "531a86c485c13e1439d3db836420dcd616c50a1676bd02ca68257acc0b236cbc",
         "image_count": 2,
         "image_sha256": [
-          "d316b1a0517474f0b422396dd1f00fecf8179a7f2137ff75bde7bf9cc2ced52a",
-          "bd89fa281f1eba5c27cbcccf9d56db4067d90f34dead0c673eb2f92d47de1634"
+          "bc59d41bebaada5b93cec6b858749d73949ae442c578c1f525559c5526d5a6c2",
+          "1bb7302a6a0a44499e9a18e1e823a9f61b47df1c4fb83545c1a3788b391deb09"
         ],
         "stability_hash_expected": "bc29dde98105c22445e93abe6d2134a9084e059437e45fe4757bfea267324a0e",
         "stability_hash_actual": "bc29dde98105c22445e93abe6d2134a9084e059437e45fe4757bfea267324a0e",
@@ -17211,7 +17207,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 9,
+            "computed_event_count": 24,
             "checks": [
               {
                 "index": 0,
@@ -17315,16 +17311,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_calc_width_resolution_272448_1779749402791009100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_calc_width_resolution_220748_1785811254964410700.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 780,
-        "pdf_sha256": "93a77941f5434529390926116cbb1e36ec0ec25f098a99658198bc4421c769b4",
+        "pdf_bytes": 830,
+        "pdf_sha256": "dfa789c0fbc44b827e999a3a7f046329d245ae9000fc35a802e439526416cb0e",
         "image_count": 1,
         "image_sha256": [
-          "8a9fb3af75f9a010293e11e3ce6785f116b3ebb5afcc482ccc168bd324398ce6"
+          "1d1dec7bdbe71ad1cf3e435070ed5e146b0f76a6bf204fb1e208066f2d4437a4"
         ],
         "stability_hash_expected": "6ef14544be6597b2a799033f2ebd110d46a2ea845c10aea00898384669cfb76e",
         "stability_hash_actual": "6ef14544be6597b2a799033f2ebd110d46a2ea845c10aea00898384669cfb76e",
@@ -17363,7 +17359,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 3,
-            "computed_event_count": 15,
+            "computed_event_count": 30,
             "checks": [
               {
                 "index": 0,
@@ -17597,16 +17593,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_min_max_clamp_widths_272448_1779749402834053200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_min_max_clamp_widths_220748_1785811254994455100.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 834,
-        "pdf_sha256": "e9aa768a56e7eb23405f19c97419a6f79446c0e9db227639a0400140b05ac33b",
+        "pdf_bytes": 860,
+        "pdf_sha256": "9d942caca6ecb501b92d083f5ba33ee421f97f918799263880b646a9cbec2e07",
         "image_count": 1,
         "image_sha256": [
-          "f5e849f60fb14c42f7e1eabbca9f5ed3108884b84af47fc8aa2b1d8a2533c9a7"
+          "3ffae2a8d8886306def45b9d0205a9dd392bcc446bbbd217c9521f972e571fdb"
         ],
         "stability_hash_expected": "2692f3d7976c83633c1812281eca3ff29a68e721eb161c7502b13acf0bf9e4f0",
         "stability_hash_actual": "2692f3d7976c83633c1812281eca3ff29a68e721eb161c7502b13acf0bf9e4f0",

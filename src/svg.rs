@@ -456,18 +456,19 @@ fn draw_compiled_group(canvas: &mut Canvas, group: &CompiledGroup, x: Pt, y: Pt)
 }
 
 fn concat_top_left_matrix(canvas: &mut Canvas, transform: Matrix, x: Pt, y: Pt) {
-    // Canvas transforms operate in PDF's bottom-left coordinate system. Conjugating
-    // the SVG top-left matrix by the page-height flip keeps PDF and raster output
-    // identical for rotations, skews, and general affine matrices.
+    // Canvas owns top-down transforms. PDF serializers perform the one required
+    // axis conjugation at the backend boundary. This command is absolute in
+    // page space, so compensate for the page-height origin term that a relative
+    // canvas matrix does not otherwise carry.
     let absolute = Matrix::translate(x.to_f32(), y.to_f32()).mul(transform);
     let page_height = canvas.page_size().height.to_f32();
     canvas.concat_matrix(
         absolute.a,
-        -absolute.b,
-        -absolute.c,
+        absolute.b,
+        absolute.c,
         absolute.d,
-        Pt::from_f32(absolute.c * page_height + absolute.e),
-        Pt::from_f32(page_height * (1.0 - absolute.d) - absolute.f),
+        Pt::from_f32(absolute.e + absolute.c * page_height),
+        Pt::from_f32(absolute.f - page_height * (1.0 - absolute.d)),
     );
 }
 
@@ -2949,7 +2950,7 @@ fn parse_paint_into(input: &str, out: &mut Paint) {
         return;
     }
 
-    if let Some(c) = parse_color(v) {
+    if let Some(c) = parse_svg_color(v) {
         out.color = Some(c);
         out.gradient_id = None;
         return;
@@ -3152,7 +3153,11 @@ fn extract_gradients(
             let Some(color) = parse_stop_color(stop, stylesheet) else {
                 continue;
             };
-            stops.push(crate::types::ShadingStop { offset, color });
+            stops.push(crate::types::ShadingStop {
+                offset,
+                color,
+                alpha: 1.0,
+            });
         }
 
         let def = if name == "linearGradient" {
@@ -4017,6 +4022,20 @@ mod tests {
     }
 
     #[test]
+    fn presentation_attributes_accept_short_hex_colors() {
+        let svg = r##"<svg viewBox="0 0 4 4"><rect width="4" height="4" fill="#fff"/></svg>"##;
+        let compiled = compile_svg(svg, Pt::from_f32(4.0), Pt::from_f32(4.0));
+        let fill = compiled
+            .iter()
+            .find_map(|item| match item {
+                CompiledItem::Path(path) => path.style.fill.color,
+                _ => None,
+            })
+            .expect("rectangle fill");
+        assert_eq!(fill, Color::rgb(1.0, 1.0, 1.0));
+    }
+
+    #[test]
     fn svg_stylesheet_class_rules_apply_to_shapes() {
         let svg = r##"
         <svg width="220" height="120" viewBox="0 0 220 120">
@@ -4306,6 +4325,47 @@ mod tests {
                 .count()
                 >= 2
         );
+        assert!(commands.iter().any(|command| {
+            matches!(
+                command,
+                Command::ConcatMatrix { a, b, c, d, e, f }
+                    if (*a - 1.0).abs() < 0.001
+                        && b.abs() < 0.001
+                        && c.abs() < 0.001
+                        && (*d - 1.0).abs() < 0.001
+                        && (*e - Pt::from_f32(5.0)).abs() < Pt::from_f32(0.001)
+                        && (*f - Pt::from_f32(7.0)).abs() < Pt::from_f32(0.001)
+            )
+        }));
+    }
+
+    #[test]
+    fn scaled_svg_text_matrix_carries_the_absolute_page_origin_phase() {
+        let svg = r##"
+        <svg width="80" height="50" viewBox="0 0 80 50">
+          <text x="4" y="42" font-size="12">ok</text>
+        </svg>
+        "##;
+        let compiled = compile_svg(svg, Pt::from_f32(40.0), Pt::from_f32(25.0));
+        let mut canvas = Canvas::new(Size {
+            width: Pt::from_f32(100.0),
+            height: Pt::from_f32(70.0),
+        });
+        render_compiled_items(&compiled, &mut canvas, Pt::from_f32(5.0), Pt::from_f32(7.0));
+        let document = canvas.finish();
+
+        assert!(document.pages[0].commands.iter().any(|command| {
+            matches!(
+                command,
+                Command::ConcatMatrix { a, b, c, d, e, f }
+                    if (*a - 0.5).abs() < 0.001
+                        && b.abs() < 0.001
+                        && c.abs() < 0.001
+                        && (*d - 0.5).abs() < 0.001
+                        && (*e - Pt::from_f32(5.0)).abs() < Pt::from_f32(0.001)
+                        && (*f + Pt::from_f32(28.0)).abs() < Pt::from_f32(0.001)
+            )
+        }));
     }
 
     #[test]

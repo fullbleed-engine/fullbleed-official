@@ -5,7 +5,7 @@ use crate::error::FullBleedError;
 use crate::flowable::Flowable;
 use crate::frame::{AddResult, AddTrace};
 use crate::metrics::{DocumentMetrics, PageMetrics};
-use crate::page_template::PageTemplate;
+use crate::page_template::{PageSelector, PageTemplate};
 use crate::types::Pt;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -188,6 +188,27 @@ impl DocTemplate {
             page_templates: &'a [PageTemplate],
             page_number: usize,
         ) -> &'a PageTemplate {
+            let uses_page_selectors = page_templates
+                .iter()
+                .any(|template| template.page_selector() != PageSelector::Sequence);
+            if uses_page_selectors {
+                let selector = if page_number == 1 {
+                    PageSelector::First
+                } else if page_number % 2 == 0 {
+                    PageSelector::Left
+                } else {
+                    PageSelector::Right
+                };
+                return page_templates
+                    .iter()
+                    .find(|template| template.page_selector() == selector)
+                    .or_else(|| {
+                        page_templates
+                            .iter()
+                            .find(|template| template.page_selector() == PageSelector::Any)
+                    })
+                    .unwrap_or(&page_templates[0]);
+            }
             // Selection rule:
             // - page 1 -> templates[0]
             // - page 2 -> templates[1] (if present)

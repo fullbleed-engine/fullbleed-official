@@ -1495,7 +1495,7 @@ impl<'a> HtmlParser<'a> {
                 self.close_formatting_element(name)
             }
             "button" => self.pop_through_if_present("button"),
-            "li" => self.pop_through_if_present("li"),
+            "li" => self.pop_list_item_if_in_scope(),
             "dt" | "dd" => self.pop_first_present(&["dt", "dd"]),
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
                 self.pop_first_present(&["h1", "h2", "h3", "h4", "h5", "h6"])
@@ -1698,6 +1698,23 @@ impl<'a> HtmlParser<'a> {
     fn pop_through_if_present(&mut self, name: &str) {
         if self.stack_has_html_tag(name) {
             self.pop_through(name);
+        }
+    }
+
+    fn pop_list_item_if_in_scope(&mut self) {
+        for node in self.stack.iter().rev() {
+            if node_tag_eq(node, "li") {
+                self.pop_through("li");
+                return;
+            }
+            // A nested list establishes a new list-item scope. An incoming
+            // <li> inside it must not implicitly close an outer list's <li>.
+            if ["ol", "ul", "menu", "html", "table", "template"]
+                .iter()
+                .any(|boundary| node_tag_eq(node, boundary))
+            {
+                return;
+            }
         }
     }
 

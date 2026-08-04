@@ -1,6 +1,6 @@
 {
   "id": "grid_conflicting_explicit_slots_fall_forward",
-  "description": "When multiple grid items target the same explicit start slot, deterministic fallback should place later items into the next free slot.",
+  "description": "Grid items targeting the same explicit slot should overlap, with the later item painting above the earlier item.",
   "labels": [
     "full"
   ],
@@ -35,8 +35,8 @@
         "fixed": 60,
         "start": 0,
         "rgba": [
-          255,
           0,
+          255,
           0,
           255
         ],
@@ -50,14 +50,9 @@
         "axis": "x",
         "fixed": 60,
         "start": 120,
-        "rgba": [
-          0,
-          255,
-          0,
-          255
-        ],
+        "rgba": [255, 255, 255, 255],
         "tolerance": 8,
-        "expected_length": 120,
+        "expected_length": 360,
         "length_tolerance": 1
       }
     ],
@@ -67,8 +62,8 @@
         "x": 60,
         "y": 60,
         "rgba": [
-          255,
           0,
+          255,
           0,
           255
         ],
@@ -78,15 +73,10 @@
         "page": 1,
         "x": 180,
         "y": 60,
-        "rgba": [
-          0,
-          255,
-          0,
-          255
-        ],
+        "rgba": [255, 255, 255, 255],
         "tolerance": 8
       }
     ]
   },
-  "stability_hash": "e2f7c012dfb1ed97957ce749d0fee555c3cd8f15899ca6b6f6a913c460971def"
+  "stability_hash": "d56779c474445e44894f64bac3f95b8fbb1787980dfb31abf962736008538563"
 }

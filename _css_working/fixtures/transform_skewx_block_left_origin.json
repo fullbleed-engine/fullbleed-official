@@ -43,7 +43,7 @@
           255
         ],
         "tolerance": 8,
-        "expected_length": 180,
+        "expected_length": 60,
         "length_tolerance": 2
       },
       {
@@ -51,7 +51,7 @@
         "page": 1,
         "axis": "x",
         "fixed": 60,
-        "start": 180,
+        "start": 61,
         "rgba": [
           255,
           0,
@@ -75,7 +75,7 @@
           255
         ],
         "tolerance": 8,
-        "expected_length": 140,
+        "expected_length": 100,
         "length_tolerance": 2
       },
       {
@@ -83,7 +83,7 @@
         "page": 1,
         "axis": "x",
         "fixed": 100,
-        "start": 140,
+        "start": 101,
         "rgba": [
           255,
           0,
@@ -102,15 +102,15 @@
         "y": 60,
         "rgba": [
           255,
-          0,
-          0,
+          255,
+          255,
           255
         ],
         "tolerance": 8
       },
       {
         "page": 1,
-        "x": 120,
+        "x": 80,
         "y": 100,
         "rgba": [
           255,
@@ -134,5 +134,5 @@
       }
     ]
   },
-  "stability_hash": "19a381102da8c90b99ec093a18e0d4d7a82235496c3ea5f5202f6f6466ec7cd6"
+  "stability_hash": "87df84187332602456ac0a4203994f70d85aa1db853331d3094e6ae2080e2f6e"
 }

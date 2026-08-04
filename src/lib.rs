@@ -79,6 +79,7 @@ use html_dom::NodeData;
 pub use jit::JitMode;
 pub use metrics::{DocumentMetrics, PageMetrics};
 pub use page_data::{PageDataContext, PageDataOp, PageDataValue, PaginatedContextSpec};
+use page_template::PageSelector;
 pub use page_template::{FrameSpec, PageTemplate};
 use pdf::PdfOptions;
 pub use pdf::{OutputIntent, PdfProfile, PdfVersion};
@@ -534,6 +535,62 @@ fn hash_bytes_local(data: &[u8]) -> u64 {
 fn document_layout_signature(doc: &Document) -> u64 {
     let debug_repr = format!("{:?}", doc);
     hash_bytes_local(debug_repr.as_bytes())
+}
+
+fn apply_html_page_shrink_to_fit(doc: &mut Document) {
+    fn max_scrollable_right_milli(commands: &[Command], max_right: &mut i64) {
+        for command in commands {
+            match command {
+                Command::Meta { key, value } if key == canvas::META_HTML_SCROLLABLE_RIGHT_KEY => {
+                    if let Ok(right) = value.parse::<i64>() {
+                        *max_right = (*max_right).max(right);
+                    }
+                }
+                Command::DefineForm { commands, .. }
+                | Command::DefineIsolatedForm { commands, .. } => {
+                    max_scrollable_right_milli(commands, max_right);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let page_width_milli = doc.page_size.width.to_milli_i64();
+    if page_width_milli <= 0 {
+        return;
+    }
+
+    for page in &mut doc.pages {
+        let mut max_right_milli = page_width_milli;
+        max_scrollable_right_milli(&page.commands, &mut max_right_milli);
+        if max_right_milli <= page_width_milli {
+            continue;
+        }
+
+        let scale = page_width_milli as f64 / max_right_milli as f64;
+        let scale = scale as f32;
+        if !scale.is_finite() || !(0.0..1.0).contains(&scale) {
+            continue;
+        }
+
+        let commands = std::mem::take(&mut page.commands);
+        let mut scaled = Vec::with_capacity(commands.len() + 5);
+        scaled.push(Command::SaveState);
+        scaled.push(Command::CssTransformOrigin {
+            x: Pt::ZERO,
+            y: Pt::ZERO,
+            inverse: false,
+        });
+        scaled.push(Command::Scale(scale, scale));
+        scaled.push(Command::CssTransformOrigin {
+            x: Pt::ZERO,
+            y: Pt::ZERO,
+            inverse: true,
+        });
+        scaled.extend(commands);
+        scaled.push(Command::RestoreState);
+        page.commands = scaled;
+    }
 }
 
 fn jit_mode_str(mode: JitMode) -> &'static str {
@@ -1191,6 +1248,7 @@ fn build_watermark_commands(
                 width: size.width,
                 height: size.height,
                 resource_id: resolved_path,
+                interpolate: true,
             });
             commands.push(Command::RestoreState);
         }
@@ -4275,6 +4333,29 @@ impl FullBleed {
         let mut report = report;
         let collect_report = report.is_some();
         let mut final_report: Option<GlyphCoverageReport> = None;
+        let page_templates =
+            if let Some((color, alpha)) = html::document_canvas_background(html, resolver) {
+                page_templates
+                    .iter()
+                    .cloned()
+                    .map(|template| {
+                        let Some(frame) = template.primary_frame_rect() else {
+                            return template;
+                        };
+                        template.append_on_page(move |canvas, _| {
+                            canvas.save_state();
+                            canvas.set_fill_color(color);
+                            if alpha < 1.0 {
+                                canvas.set_opacity(alpha, alpha);
+                            }
+                            canvas.draw_rect(frame.x, frame.y, frame.width, frame.height);
+                            canvas.restore_state();
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                page_templates.to_vec()
+            };
 
         for pass in 0..pass_limit {
             if lazy && pass > 0 && started.elapsed().as_secs_f64() * 1000.0 >= self.lazy_budget_ms {
@@ -4304,7 +4385,7 @@ impl FullBleed {
             );
             story_ms += t_story.elapsed().as_secs_f64() * 1000.0;
 
-            let mut doc = DocTemplate::new(page_templates.to_vec());
+            let mut doc = DocTemplate::new(page_templates.clone());
             if let Some(logger) = self.debug.clone() {
                 doc = doc.with_debug(logger, Some(doc_id));
             }
@@ -4314,7 +4395,8 @@ impl FullBleed {
 
             let t_layout = std::time::Instant::now();
             let _perf_guard = flowable::set_perf_context(self.perf.clone(), Some(doc_id));
-            let next_built = doc.build()?;
+            let mut next_built = doc.build()?;
+            apply_html_page_shrink_to_fit(&mut next_built);
             layout_ms += t_layout.elapsed().as_secs_f64() * 1000.0;
 
             let signature = document_layout_signature(&next_built);
@@ -4365,11 +4447,12 @@ impl FullBleed {
         let mut page_size = self.default_page_size;
         let mut base_margins = self.default_margins;
         let mut page_margins = self.page_margins.clone();
-        let page_setup = style::extract_css_page_setup(
+        let mut page_styles = style::extract_css_page_styles(
             merged_css,
             self.debug.as_deref(),
             Some(self.default_page_size),
         );
+        let page_setup = page_styles.base;
 
         if let Some(css_size) = page_setup.size {
             if self.page_size_explicit {
@@ -4404,6 +4487,20 @@ impl FullBleed {
             }
         }
 
+        if self.margins_explicit {
+            for setup in [
+                &mut page_styles.base,
+                &mut page_styles.first,
+                &mut page_styles.left,
+                &mut page_styles.right,
+            ] {
+                setup.margin_top = None;
+                setup.margin_right = None;
+                setup.margin_bottom = None;
+                setup.margin_left = None;
+            }
+        }
+
         if let Some(logger) = self.debug.as_deref() {
             let doc_id = doc_id
                 .map(|id| id.to_string())
@@ -4431,7 +4528,7 @@ impl FullBleed {
             logger.log_json(&json);
         }
 
-        build_page_templates(page_size, base_margins, &page_margins)
+        build_page_templates(page_size, base_margins, &page_margins, page_styles)
     }
 
     fn build_render_context(&self, css: &str, doc_id: Option<usize>) -> RenderContext {
@@ -6337,6 +6434,7 @@ fn build_page_templates(
     page_size: Size,
     base_margins: Margins,
     page_margins: &std::collections::BTreeMap<usize, Margins>,
+    page_styles: style::CssPageStyles,
 ) -> Vec<PageTemplate> {
     let base_margins = base_margins.quantized();
     let content_width = (page_size.width - base_margins.left - base_margins.right).max(Pt::ZERO);
@@ -6351,7 +6449,46 @@ fn build_page_templates(
 
     let mut templates: Vec<PageTemplate> = Vec::new();
     if page_margins.is_empty() {
-        templates.push(PageTemplate::new("Page1", page_size).with_frame(frame_rect));
+        if page_styles.has_pseudo_rules() {
+            let first = page_styles
+                .base
+                .cascaded_with(page_styles.right)
+                .cascaded_with(page_styles.first);
+            templates.push(build_css_page_template(
+                "First",
+                page_size,
+                base_margins,
+                first,
+                PageSelector::First,
+            ));
+            templates.push(build_css_page_template(
+                "Left",
+                page_size,
+                base_margins,
+                page_styles.base.cascaded_with(page_styles.left),
+                PageSelector::Left,
+            ));
+            templates.push(build_css_page_template(
+                "Right",
+                page_size,
+                base_margins,
+                page_styles.base.cascaded_with(page_styles.right),
+                PageSelector::Right,
+            ));
+            templates.push(build_css_page_template(
+                "Page",
+                page_size,
+                base_margins,
+                page_styles.base,
+                PageSelector::Any,
+            ));
+        } else {
+            let mut template = PageTemplate::new("Page1", page_size).with_frame(frame_rect);
+            if let Some(background) = page_styles.base.background {
+                template = with_page_background(template, page_size, background);
+            }
+            templates.push(template);
+        }
         return templates;
     }
 
@@ -6371,9 +6508,60 @@ fn build_page_templates(
             height: content_height,
         }
         .quantized();
-        templates.push(PageTemplate::new(format!("Page{page_number}"), page_size).with_frame(rect));
+        let mut template =
+            PageTemplate::new(format!("Page{page_number}"), page_size).with_frame(rect);
+        if let Some(background) = page_styles.base.background {
+            template = with_page_background(template, page_size, background);
+        }
+        templates.push(template);
     }
     templates
+}
+
+fn build_css_page_template(
+    name: impl Into<String>,
+    page_size: Size,
+    base_margins: Margins,
+    setup: style::CssPageSetup,
+    selector: PageSelector,
+) -> PageTemplate {
+    let margins = setup
+        .resolve_margins(base_margins)
+        .unwrap_or(base_margins)
+        .quantized();
+    let rect = Rect {
+        x: margins.left,
+        y: margins.top,
+        width: (page_size.width - margins.left - margins.right).max(Pt::ZERO),
+        height: (page_size.height - margins.top - margins.bottom).max(Pt::ZERO),
+    }
+    .quantized();
+    let mut template = PageTemplate::new(name, page_size)
+        .with_frame(rect)
+        .with_page_selector(selector);
+    if let Some(background) = setup.background {
+        template = with_page_background(template, page_size, background);
+    }
+    template
+}
+
+fn with_page_background(
+    template: PageTemplate,
+    page_size: Size,
+    (color, alpha): (Color, f32),
+) -> PageTemplate {
+    template.set_on_page(move |canvas, _| {
+        if alpha <= 0.0 {
+            return;
+        }
+        canvas.save_state();
+        canvas.set_fill_color(color);
+        if alpha < 1.0 {
+            canvas.set_opacity(alpha, alpha);
+        }
+        canvas.draw_rect(Pt::ZERO, Pt::ZERO, page_size.width, page_size.height);
+        canvas.restore_state();
+    })
 }
 
 impl Default for FullBleedBuilder {
@@ -6452,6 +6640,33 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn html_page_shrink_uses_scrollable_right_edge() {
+        let page_width = Pt::from_f32(252.0);
+        let overflow_right = Pt::from_f32(255.0);
+        let mut doc = Document {
+            page_size: Size {
+                width: page_width,
+                height: Pt::from_f32(72.0),
+            },
+            pages: vec![Page {
+                commands: vec![Command::Meta {
+                    key: canvas::META_HTML_SCROLLABLE_RIGHT_KEY.to_string(),
+                    value: overflow_right.to_milli_i64().to_string(),
+                }],
+            }],
+        };
+
+        apply_html_page_shrink_to_fit(&mut doc);
+
+        let Command::Scale(scale_x, scale_y) = doc.pages[0].commands[2] else {
+            panic!("expected a page shrink transform");
+        };
+        let expected = page_width.to_f32() / overflow_right.to_f32();
+        assert!((scale_x - expected).abs() < 1.0e-6);
+        assert!((scale_y - expected).abs() < 1.0e-6);
     }
 
     fn temp_log_path(tag: &str) -> PathBuf {
@@ -6834,6 +7049,53 @@ mod tests {
     }
 
     #[test]
+    fn grid_display_contents_promotes_children_into_parent_tracks() {
+        let html = r#"
+            <!doctype html>
+            <html><body>
+              <div class="grid">
+                <div class="contents"><div>A</div><div>B</div></div>
+                <div>C</div>
+              </div>
+            </body></html>
+        "#;
+        let css = r#"
+            @page { size: 4in 2in; margin: 0; }
+            * { margin: 0; box-sizing: border-box; }
+            .grid {
+              display: grid;
+              grid-template-columns: 70px 70px 70px;
+              grid-template-rows: 60px;
+              width: 210px;
+            }
+            .contents { display: contents; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
+        let page = doc.pages.first().expect("page");
+        let mut positions = std::collections::HashMap::new();
+        for command in &page.commands {
+            if let Command::DrawString { text, x, y } = command {
+                let text = text.trim();
+                if matches!(text, "A" | "B" | "C") {
+                    positions.insert(text.to_string(), (*x, *y));
+                }
+            }
+        }
+        let (a_x, a_y) = positions["A"];
+        let (b_x, b_y) = positions["B"];
+        let (c_x, c_y) = positions["C"];
+        assert!(
+            a_x < b_x && b_x < c_x,
+            "grid items must occupy three columns"
+        );
+        assert_eq!(a_y, b_y);
+        assert_eq!(b_y, c_y);
+    }
+
+    #[test]
     fn heading_honors_display_block_on_inline_descendants() {
         let html = r#"
             <!doctype html>
@@ -7142,6 +7404,422 @@ mod tests {
     }
 
     #[test]
+    fn html_table_cell_height_sets_the_row_minimum() {
+        let html = r#"
+            <!doctype html>
+            <html>
+              <body>
+                <table><tr><td></td></tr></table>
+              </body>
+            </html>
+        "#;
+        let css = r#"
+            @page { size: 4in 4in; margin: 0; }
+            * { margin: 0; box-sizing: border-box; }
+            body { margin: 0; }
+            table { border-collapse: collapse; width: 120px; }
+            td { height: 60px; background: #a8dadc; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
+        let page = doc.pages.first().expect("page");
+
+        let mut fill = Color::BLACK;
+        let mut cell_height = None;
+        for command in &page.commands {
+            match command {
+                Command::SetFillColor(color) => fill = *color,
+                Command::DrawRect { height, .. }
+                    if fill == Color::rgb(168.0 / 255.0, 218.0 / 255.0, 220.0 / 255.0) =>
+                {
+                    cell_height = Some(*height);
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        assert_eq!(cell_height, Some(Pt::from_f32(45.0)));
+    }
+
+    #[test]
+    fn html_table_column_and_row_group_backgrounds_propagate_into_transparent_cells() {
+        let html = r#"
+            <!doctype html><html><body><table>
+              <colgroup><col class="first"><col></colgroup>
+              <tbody><tr><td></td><td></td></tr></tbody>
+            </table></body></html>
+        "#;
+        let css = r#"
+            @page { size: 4in 4in; margin: 0; }
+            * { margin: 0; box-sizing: border-box; }
+            table { border-collapse: separate; border-spacing: 0; }
+            col.first { background: #e63946; }
+            tbody { background: #2a9d8f; }
+            td { width: 60px; height: 40px; background: transparent; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
+        let page = doc.pages.first().expect("page");
+        let row_group = Color::rgb(42.0 / 255.0, 157.0 / 255.0, 143.0 / 255.0);
+        let mut fill = Color::BLACK;
+        let mut row_group_rects = 0usize;
+        for command in &page.commands {
+            match command {
+                Command::SetFillColor(color) => fill = *color,
+                Command::DrawRect { .. } if fill == row_group => row_group_rects += 1,
+                _ => {}
+            }
+        }
+        assert_eq!(row_group_rects, 2);
+    }
+
+    #[test]
+    fn collapsed_table_appends_the_trailing_grid_borders() {
+        let html = r#"
+            <!doctype html>
+            <html><body><table>
+              <tr><td></td><td></td><td></td></tr>
+              <tr><td></td><td></td><td></td></tr>
+            </table></body></html>
+        "#;
+        let css = r#"
+            @page { size: 5in 5in; margin: 0; }
+            * { margin: 0; box-sizing: border-box; }
+            table { border-collapse: collapse; table-layout: fixed; width: 360px; }
+            td { width: 120px; height: 60px; border: 3px solid #1d3557; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
+        let page = doc.pages.first().expect("page");
+
+        let border_color = Color::rgb(29.0 / 255.0, 53.0 / 255.0, 87.0 / 255.0);
+        let mut fill = Color::BLACK;
+        let mut right = Pt::ZERO;
+        let mut bottom = Pt::ZERO;
+        for command in &page.commands {
+            match command {
+                Command::SetFillColor(color) => fill = *color,
+                Command::DrawRect {
+                    x,
+                    y,
+                    width,
+                    height,
+                } if fill == border_color => {
+                    right = right.max(*x + *width);
+                    bottom = bottom.max(*y + *height);
+                }
+                _ => {}
+            }
+        }
+
+        assert_eq!(right, Pt::from_f32(272.25));
+        assert_eq!(bottom, Pt::from_f32(92.25));
+    }
+
+    #[test]
+    fn html_table_rowspan_reserves_columns_and_spans_row_heights() {
+        let html = r#"
+            <!doctype html>
+            <html><body><table>
+              <tr><td class="span" rowspan="2"></td><td></td><td></td></tr>
+              <tr><td></td><td></td></tr>
+            </table></body></html>
+        "#;
+        let css = r#"
+            @page { size: 5in 5in; margin: 0; }
+            * { margin: 0; box-sizing: border-box; }
+            table { border-collapse: collapse; table-layout: fixed; width: 300px; }
+            td { width: 100px; height: 55px; border: 3px solid #003049; background: #d62828; }
+            td.span { background: #fcbf49; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
+        let page = doc.pages.first().expect("page");
+
+        let span_color = Color::rgb(252.0 / 255.0, 191.0 / 255.0, 73.0 / 255.0);
+        let cell_color = Color::rgb(214.0 / 255.0, 40.0 / 255.0, 40.0 / 255.0);
+        let mut fill = Color::BLACK;
+        let mut span_rect = None;
+        let mut second_row_cell = false;
+        for command in &page.commands {
+            match command {
+                Command::SetFillColor(color) => fill = *color,
+                Command::DrawRect {
+                    x,
+                    y,
+                    width,
+                    height,
+                } if fill == span_color => span_rect = Some((*x, *y, *width, *height)),
+                Command::DrawRect { x, y, .. }
+                    if fill == cell_color
+                        && *x == Pt::from_f32(77.25)
+                        && *y == Pt::from_f32(43.5) =>
+                {
+                    second_row_cell = true;
+                }
+                _ => {}
+            }
+        }
+
+        assert_eq!(
+            span_rect,
+            Some((Pt::ZERO, Pt::ZERO, Pt::from_f32(75.0), Pt::from_f32(82.5),))
+        );
+        assert!(
+            second_row_cell,
+            "the second row must start after the occupied rowspan column"
+        );
+    }
+
+    #[test]
+    fn html_table_rowspan_minimum_is_distributed_across_rows() {
+        let html = r#"
+            <!doctype html>
+            <html><body><table>
+              <tr><td class="span" rowspan="2"></td><td class="peer"></td></tr>
+              <tr><td class="peer"></td></tr>
+            </table></body></html>
+        "#;
+        let css = r#"
+            @page { size: 4in 4in; margin: 0; }
+            * { margin: 0; box-sizing: border-box; }
+            table { border-collapse: separate; border-spacing: 0; }
+            td { width: 64px; height: 28px; border: 2px solid #111; }
+            td.span { height: 100px; background: #e63946; }
+            td.peer { background: #2a9d8f; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
+        let page = doc.pages.first().expect("page");
+
+        let span_color = Color::rgb(230.0 / 255.0, 57.0 / 255.0, 70.0 / 255.0);
+        let peer_color = Color::rgb(42.0 / 255.0, 157.0 / 255.0, 143.0 / 255.0);
+        let mut fill = Color::BLACK;
+        let mut span_height = None;
+        let mut peer_rows = Vec::new();
+        for command in &page.commands {
+            match command {
+                Command::SetFillColor(color) => fill = *color,
+                Command::DrawRect { height, .. } if fill == span_color => {
+                    span_height = Some(*height)
+                }
+                Command::DrawRect { y, .. } if fill == peer_color => peer_rows.push(*y),
+                _ => {}
+            }
+        }
+
+        assert_eq!(span_height, Some(Pt::from_f32(75.0)));
+        assert!(peer_rows.contains(&Pt::ZERO));
+        assert!(peer_rows.contains(&Pt::from_f32(37.5)));
+    }
+
+    #[test]
+    fn fixed_table_slack_is_shared_by_first_row_cells_across_colspans() {
+        let html = r#"
+            <!doctype html>
+            <html><body><table>
+              <tr><td class="big" colspan="2" rowspan="2"></td><td></td></tr>
+              <tr><td></td></tr>
+              <tr><td></td><td></td><td></td></tr>
+            </table></body></html>
+        "#;
+        let css = r#"
+            @page { size: 5in 5in; margin: 0; }
+            * { margin: 0; box-sizing: border-box; }
+            table { border-collapse: collapse; table-layout: fixed; width: 360px; }
+            td { width: 120px; height: 50px; border: 3px solid #1d3557; background: #a8dadc; }
+            td.big { background: #e63946; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
+        let page = doc.pages.first().expect("page");
+
+        let big_color = Color::rgb(230.0 / 255.0, 57.0 / 255.0, 70.0 / 255.0);
+        let mut fill = Color::BLACK;
+        let mut big_width = None;
+        for command in &page.commands {
+            match command {
+                Command::SetFillColor(color) => fill = *color,
+                Command::DrawRect { width, .. } if fill == big_color => {
+                    big_width = Some(*width);
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        assert_eq!(big_width, Some(Pt::from_f32(133.875)));
+    }
+
+    #[test]
+    fn html_auto_table_shrink_wraps_cells_and_distributes_table_height() {
+        let html = r#"
+            <!doctype html>
+            <html><body><table><tr><td></td><td></td></tr></table></body></html>
+        "#;
+        let css = r#"
+            @page { size: 4in 4in; margin: 0; }
+            * { margin: 0; box-sizing: border-box; }
+            table { height: 120px; border-collapse: separate; border-spacing: 0; }
+            td { width: 70px; height: 30px; border: 2px solid #111; background: #2a9d8f; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
+        let page = doc.pages.first().expect("page");
+
+        let cell_color = Color::rgb(42.0 / 255.0, 157.0 / 255.0, 143.0 / 255.0);
+        let mut fill = Color::BLACK;
+        let mut cells = Vec::new();
+        for command in &page.commands {
+            match command {
+                Command::SetFillColor(color) => fill = *color,
+                Command::DrawRect {
+                    x,
+                    y,
+                    width,
+                    height,
+                } if fill == cell_color => cells.push((*x, *y, *width, *height)),
+                _ => {}
+            }
+        }
+
+        assert_eq!(
+            cells,
+            vec![
+                (Pt::ZERO, Pt::ZERO, Pt::from_f32(52.5), Pt::from_f32(90.0),),
+                (
+                    Pt::from_f32(52.5),
+                    Pt::ZERO,
+                    Pt::from_f32(52.5),
+                    Pt::from_f32(90.0),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn html_legacy_cellspacing_and_cellpadding_attributes_affect_the_grid() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let spacing_doc = engine
+            .render_to_document(
+                r#"<!doctype html><html><body><table cellspacing="14"><tr><td class="a"></td><td class="b"></td></tr></table></body></html>"#,
+                r#"
+                    @page { size: 4in 4in; margin: 0; }
+                    * { margin: 0; box-sizing: border-box; }
+                    table { background: #111; }
+                    td { width: 50px; height: 42px; padding: 0; border: 0; }
+                    .a { background: #e63946; }
+                    .b { background: #2a9d8f; }
+                "#,
+            )
+            .expect("render cellspacing document");
+        let page = spacing_doc.pages.first().expect("spacing page");
+        let first_color = Color::rgb(230.0 / 255.0, 57.0 / 255.0, 70.0 / 255.0);
+        let second_color = Color::rgb(42.0 / 255.0, 157.0 / 255.0, 143.0 / 255.0);
+        let mut fill = Color::BLACK;
+        let mut first_x = None;
+        let mut second_x = None;
+        for command in &page.commands {
+            match command {
+                Command::SetFillColor(color) => fill = *color,
+                Command::DrawRect { x, .. } if fill == first_color => first_x = Some(*x),
+                Command::DrawRect { x, .. } if fill == second_color => second_x = Some(*x),
+                _ => {}
+            }
+        }
+        assert_eq!(first_x, Some(Pt::from_f32(10.5)));
+        assert_eq!(second_x, Some(Pt::from_f32(58.5)));
+
+        let padding_doc = engine
+            .render_to_document(
+                r#"<!doctype html><html><body><table cellpadding="16"><tr><td><div class="mark"></div></td></tr></table></body></html>"#,
+                r#"
+                    @page { size: 4in 4in; margin: 0; }
+                    * { margin: 0; box-sizing: border-box; }
+                    table { border-collapse: separate; border-spacing: 0; }
+                    td { width: 80px; height: 60px; border: 2px solid #111; }
+                    .mark { width: 28px; height: 20px; background: #e63946; }
+                "#,
+            )
+            .expect("render cellpadding document");
+        let page = padding_doc.pages.first().expect("padding page");
+        let mut fill = Color::BLACK;
+        let mut marker_x = None;
+        for command in &page.commands {
+            match command {
+                Command::SetFillColor(color) => fill = *color,
+                Command::DrawRect { x, .. } if fill == first_color => marker_x = Some(*x),
+                _ => {}
+            }
+        }
+        assert_eq!(marker_x, Some(Pt::from_f32(13.5)));
+    }
+
+    #[test]
+    fn html_legacy_border_attribute_builds_beveled_table_and_cell_edges() {
+        let html = r#"<!doctype html><html><body><table border="4"><tr><td class="a"></td><td class="b"></td></tr></table></body></html>"#;
+        let css = r#"
+            @page { size: 4in 4in; margin: 0; }
+            * { margin: 0; box-sizing: border-box; }
+            td { width: 64px; height: 44px; }
+            .a { background: #e63946; }
+            .b { background: #2a9d8f; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
+        let page = doc.pages.first().expect("page");
+
+        let light = Color::rgb(238.0 / 255.0, 238.0 / 255.0, 238.0 / 255.0);
+        let dark = Color::rgb(154.0 / 255.0, 154.0 / 255.0, 154.0 / 255.0);
+        let mut fill = Color::BLACK;
+        let mut light_seen = false;
+        let mut dark_seen = false;
+        let mut right = Pt::ZERO;
+        let mut bottom = Pt::ZERO;
+        for command in &page.commands {
+            match command {
+                Command::SetFillColor(color) => fill = *color,
+                Command::DrawRect {
+                    x,
+                    y,
+                    width,
+                    height,
+                } => {
+                    if fill == light {
+                        light_seen = true;
+                    }
+                    if fill == dark {
+                        dark_seen = true;
+                    }
+                    right = right.max(*x + *width);
+                    bottom = bottom.max(*y + *height);
+                }
+                _ => {}
+            }
+        }
+        assert!(light_seen && dark_seen);
+        assert_eq!(right, Pt::from_f32(106.5));
+        assert_eq!(bottom, Pt::from_f32(42.0));
+    }
+
+    #[test]
     fn list_item_block_children_preserve_vertical_flow() {
         let html = r#"
             <!doctype html>
@@ -7202,6 +7880,60 @@ mod tests {
     }
 
     #[test]
+    fn generated_counter_prefix_does_not_narrow_following_inline_text() {
+        let html = r#"
+            <!doctype html>
+            <html><body>
+              <div class="row">minus two</div>
+              <div class="row">minus one</div>
+              <div class="row">zero</div>
+            </body></html>
+        "#;
+        let css = r#"
+            @page { size: 336px 160px; margin: 0; }
+            html { font-family: Inter; line-height: 1.5; }
+            * { margin: 0; box-sizing: border-box; }
+            @counter-style negwrap {
+              system: extends decimal;
+              negative: '(' ')';
+              suffix: ' ';
+            }
+            body { padding: 12px; counter-reset: n -3; }
+            .row {
+              counter-increment: n;
+              font-size: 22px;
+              line-height: 32px;
+              margin-bottom: 4px;
+            }
+            .row::before { content: counter(n, negwrap); font-weight: bold; }
+        "#;
+        let engine = FullBleed::builder()
+            .register_font_file(repo_font_path("Inter-Variable.ttf"))
+            .build()
+            .expect("engine");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
+        let page = doc.pages.first().expect("page");
+        let draws: Vec<_> = page
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::DrawString { text, x, y } => Some((text.as_str(), *x, *y)),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            draws.iter().any(|(text, _, _)| text.contains("minus two")),
+            "the first row must remain a single inline run: {draws:?}"
+        );
+        assert!(
+            draws.iter().any(|(text, _, _)| text.contains("minus one")),
+            "the second row must remain a single inline run: {draws:?}"
+        );
+    }
+
+    #[test]
     fn css_page_size_applies_when_builder_page_size_is_default() {
         let html = "<!doctype html><html><body><p>hello</p></body></html>";
         let css = "@page { size: letter; margin: 0.5in; }";
@@ -7211,6 +7943,142 @@ mod tests {
             .expect("render document");
         assert!((doc.page_size.width.to_f32() - 612.0).abs() < 0.01);
         assert!((doc.page_size.height.to_f32() - 792.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn css_page_pseudo_classes_select_physical_margins_and_background() {
+        let css = r#"
+            @page { size: 192px 200px; margin: 16px; background: #ffd6d6; }
+            @page :left { margin: 8px 32px 24px 8px; }
+            @page :right { margin: 16px 8px 8px 32px; }
+            @page :first { margin: 32px 8px 16px 24px; }
+            html, body { background: #ffffff; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let templates = engine.resolve_page_templates_for_css(css, None);
+        let frame_for = |selector| {
+            templates
+                .iter()
+                .find(|template| template.page_selector() == selector)
+                .expect("page selector template")
+                .instantiate_frames()[0]
+                .rect()
+        };
+
+        let first = frame_for(PageSelector::First);
+        assert_eq!(first.x, Pt::from_f32(18.0));
+        assert_eq!(first.y, Pt::from_f32(24.0));
+        assert_eq!(first.width, Pt::from_f32(120.0));
+        assert_eq!(first.height, Pt::from_f32(114.0));
+
+        let left = frame_for(PageSelector::Left);
+        assert_eq!(left.x, Pt::from_f32(6.0));
+        assert_eq!(left.y, Pt::from_f32(6.0));
+        assert_eq!(left.width, Pt::from_f32(114.0));
+        assert_eq!(left.height, Pt::from_f32(126.0));
+
+        let right = frame_for(PageSelector::Right);
+        assert_eq!(right.x, Pt::from_f32(24.0));
+        assert_eq!(right.y, Pt::from_f32(12.0));
+        assert_eq!(right.width, Pt::from_f32(114.0));
+        assert_eq!(right.height, Pt::from_f32(132.0));
+
+        let html = r#"
+            <div style="break-after: page">one</div>
+            <div style="break-after: page">two</div>
+            <div>three</div>
+        "#;
+        let doc = engine.render_to_document(html, css).expect("render");
+        assert_eq!(doc.pages.len(), 3);
+        let names: Vec<_> = doc
+            .pages
+            .iter()
+            .map(|page| {
+                page.commands
+                    .iter()
+                    .find_map(|command| match command {
+                        Command::Meta { key, value } if key == META_PAGE_TEMPLATE_KEY => {
+                            Some(value.as_str())
+                        }
+                        _ => None,
+                    })
+                    .expect("page template metadata")
+            })
+            .collect();
+        assert_eq!(names, ["First", "Left", "Right"]);
+        assert!(doc.pages.iter().all(|page| {
+            page.commands.iter().any(|command| {
+                matches!(
+                    command,
+                    Command::DrawRect { x, y, width, height }
+                        if *x == Pt::ZERO
+                            && *y == Pt::ZERO
+                            && *width == Pt::from_f32(144.0)
+                            && *height == Pt::from_f32(150.0)
+                )
+            })
+        }));
+        assert!(doc.pages[2].commands.iter().any(|command| {
+            matches!(
+                command,
+                Command::DrawRect { x, y, width, height }
+                    if *x == Pt::from_f32(24.0)
+                        && *y == Pt::from_f32(12.0)
+                        && *width == Pt::from_f32(114.0)
+                        && *height == Pt::from_f32(132.0)
+            )
+        }));
+    }
+
+    #[test]
+    fn generated_before_and_after_are_flex_items_in_source_order() {
+        let html = "<html><body><div class='row'><span>M</span></div></body></html>";
+        let css = r#"
+            @page { size: 200px 100px; margin: 0; }
+            body { margin: 0; }
+            .row { display: flex; width: 120px; gap: 8px; }
+            .row::before { content: 'L'; }
+            .row::after { content: 'R'; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render");
+        let draws: Vec<_> = doc.pages[0]
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::DrawString { text, x, .. } if matches!(text.as_str(), "L" | "M" | "R") => {
+                    Some((text.as_str(), *x))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(draws.len(), 3, "expected both pseudo flex items: {draws:?}");
+        assert_eq!(
+            draws.iter().map(|(text, _)| *text).collect::<Vec<_>>(),
+            ["L", "M", "R"]
+        );
+        assert!(draws[0].1 < draws[1].1 && draws[1].1 < draws[2].1);
+    }
+
+    #[test]
+    fn definite_flex_item_width_caps_its_automatic_minimum() {
+        let html =
+            "<html><body><div class='row'><div class='item'>123456789</div></div></body></html>";
+        let css = r#"
+            @page { size: 200px 100px; margin: 0; }
+            * { box-sizing: border-box; }
+            body { margin: 0; }
+            .row { display: flex; width: 108px; }
+            .item { width: 58px; padding: 5px; border: 2px solid #000; background: #e7f5ff; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render");
+        assert!(doc.pages[0].commands.iter().any(|command| {
+            matches!(
+                command,
+                Command::DrawRect { width, .. } if *width == Pt::from_f32(43.5)
+            )
+        }));
     }
 
     #[test]

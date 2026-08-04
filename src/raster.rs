@@ -16,6 +16,10 @@ use std::collections::HashMap;
 use std::path::Path as FsPath;
 use std::sync::{Arc, Mutex, OnceLock};
 
+// Skia's filtered-surface sampling retains a small positive horizontal coverage
+// phase after converting CSS drop-shadow offsets to device pixels.
+const FILTER_DROP_SHADOW_DIRECTIONAL_PHASE_BIAS_PX: f32 = 3.0 / 16.0;
+
 #[derive(Clone)]
 struct RasterState {
     transform: Transform,
@@ -65,6 +69,129 @@ struct FormDefinition {
     height: Pt,
     isolated: bool,
     commands: Vec<Command>,
+}
+
+pub(crate) struct FilteredFormRaster {
+    pub x: Pt,
+    pub y: Pt,
+    pub width: Pt,
+    pub height: Pt,
+    pub pixel_width: u32,
+    pub pixel_height: u32,
+    pub premultiplied_rgba: Vec<u8>,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn rasterize_filtered_form(
+    page_width: Pt,
+    page_height: Pt,
+    form_width: Pt,
+    form_height: Pt,
+    commands: &[Command],
+    x: Pt,
+    y: Pt,
+    width: Pt,
+    height: Pt,
+    filter: &PaintFilterSpec,
+    dpi: u32,
+    registry: Option<&FontRegistry>,
+    shape_text: bool,
+) -> Result<Option<FilteredFormRaster>, FullBleedError> {
+    let dpi = dpi.max(72);
+    let width_px = pt_milli_to_px_u32(page_width.to_milli_i64(), dpi)?;
+    let height_px = pt_milli_to_px_u32(page_height.to_milli_i64(), dpi)?;
+    let mut pixmap = Pixmap::new(width_px, height_px).ok_or_else(|| {
+        FullBleedError::InvalidConfiguration(format!(
+            "invalid filtered-form raster size {}x{} at {} DPI",
+            width_px, height_px, dpi
+        ))
+    })?;
+
+    let page_height_pt = page_height.to_f32();
+    let page_width_pt = page_width.to_f32();
+    let scale = dpi as f32 / 72.0;
+    let base_transform = Transform::from_row(scale, 0.0, 0.0, -scale, 0.0, page_height_pt * scale);
+    let resource_id = "__fullbleed_filtered_form".to_string();
+    let mut forms = HashMap::new();
+    forms.insert(
+        resource_id.clone(),
+        FormDefinition {
+            width: form_width,
+            height: form_height,
+            isolated: false,
+            commands: commands.to_vec(),
+        },
+    );
+    let draw = [Command::DrawFilteredForm {
+        x,
+        y,
+        width,
+        height,
+        resource_id,
+        filter: filter.clone(),
+    }];
+    let mut image_cache = HashMap::new();
+    let mut state = RasterState::default();
+    let mut stack = Vec::new();
+    let mut path_builder = PathBuilder::new();
+    let mut has_path = false;
+    render_commands(
+        &mut pixmap,
+        page_height_pt,
+        page_width_pt,
+        &draw,
+        base_transform,
+        &mut state,
+        &mut stack,
+        &mut path_builder,
+        &mut has_path,
+        &mut forms,
+        &mut image_cache,
+        registry,
+        shape_text,
+    )?;
+
+    let mut min_x = width_px;
+    let mut min_y = height_px;
+    let mut max_x = 0u32;
+    let mut max_y = 0u32;
+    for (index, pixel) in pixmap.data().chunks_exact(4).enumerate() {
+        if pixel[3] == 0 {
+            continue;
+        }
+        let px = index as u32 % width_px;
+        let py = index as u32 / width_px;
+        min_x = min_x.min(px);
+        min_y = min_y.min(py);
+        max_x = max_x.max(px + 1);
+        max_y = max_y.max(py + 1);
+    }
+    if min_x >= max_x || min_y >= max_y {
+        return Ok(None);
+    }
+
+    let crop_width = max_x - min_x;
+    let crop_height = max_y - min_y;
+    let source_stride = width_px as usize * 4;
+    let crop_stride = crop_width as usize * 4;
+    let mut cropped = vec![0u8; crop_stride * crop_height as usize];
+    for row in 0..crop_height as usize {
+        let source_start = (min_y as usize + row) * source_stride + min_x as usize * 4;
+        let target_start = row * crop_stride;
+        cropped[target_start..target_start + crop_stride]
+            .copy_from_slice(&pixmap.data()[source_start..source_start + crop_stride]);
+    }
+
+    let points_per_pixel = 72.0 / dpi as f32;
+    Ok(Some(FilteredFormRaster {
+        x: Pt::from_f32(min_x as f32 * points_per_pixel),
+        y: Pt::from_f32(min_y as f32 * points_per_pixel),
+        width: Pt::from_f32(crop_width as f32 * points_per_pixel),
+        height: Pt::from_f32(crop_height as f32 * points_per_pixel),
+        pixel_width: crop_width,
+        pixel_height: crop_height,
+        premultiplied_rgba: cropped,
+    }))
 }
 
 pub(crate) fn document_to_png_pages(
@@ -154,30 +281,30 @@ fn render_commands(
             Command::Translate(x, y) => {
                 state.transform = state
                     .transform
-                    .post_concat(Transform::from_translate(x.to_f32(), y.to_f32()));
+                    .pre_concat(Transform::from_translate(x.to_f32(), -y.to_f32()));
             }
             Command::CssTransformOrigin { x, y, inverse } => {
                 let sign = if *inverse { -1.0 } else { 1.0 };
-                state.transform = state.transform.post_concat(Transform::from_translate(
-                    x.to_f32() * sign,
-                    y.to_f32() * sign,
-                ));
+                let pdf_y = page_height_pt - y.to_f32();
+                state.transform = state
+                    .transform
+                    .pre_concat(Transform::from_translate(x.to_f32() * sign, pdf_y * sign));
             }
             Command::Scale(x, y) => {
-                state.transform = state.transform.post_concat(Transform::from_scale(*x, *y));
+                state.transform = state.transform.pre_concat(Transform::from_scale(*x, *y));
             }
             Command::Rotate(angle) => {
-                let deg = *angle * 180.0 / core::f32::consts::PI;
-                state.transform = state.transform.post_concat(Transform::from_rotate(deg));
+                let deg = -*angle * 180.0 / core::f32::consts::PI;
+                state.transform = state.transform.pre_concat(Transform::from_rotate(deg));
             }
             Command::ConcatMatrix { a, b, c, d, e, f } => {
-                state.transform = state.transform.post_concat(Transform::from_row(
+                state.transform = state.transform.pre_concat(Transform::from_row(
                     *a,
-                    *b,
-                    *c,
+                    -*b,
+                    -*c,
                     *d,
                     e.to_f32(),
-                    f.to_f32(),
+                    -f.to_f32(),
                 ));
             }
             Command::Meta { .. } => {}
@@ -447,6 +574,7 @@ fn render_commands(
                 width,
                 height,
                 resource_id,
+                interpolate,
             } => {
                 let source = image_cache
                     .entry(resource_id.clone())
@@ -471,7 +599,11 @@ fn render_commands(
                         let ctm = state.transform.pre_concat(image_ts);
                         let device_ts = base_transform.pre_concat(ctm);
                         let mut paint = PixmapPaint::default();
-                        paint.quality = FilterQuality::Bilinear;
+                        paint.quality = if *interpolate {
+                            FilterQuality::Bilinear
+                        } else {
+                            FilterQuality::Nearest
+                        };
                         paint.opacity = state.fill_opacity.clamp(0.0, 1.0);
                         paint.blend_mode = sk_blend_mode(state.blend_mode);
                         draw_pixmap_blended(
@@ -1173,8 +1305,16 @@ fn draw_filter_drop_shadow(
     }
 
     let (sx, sy) = device_transform.get_scale();
-    let dx = (shadow.offset_x.to_f32() * sx.abs()).round() as i32;
-    let dy = (shadow.offset_y.to_f32() * sy.abs()).round() as i32;
+    let offset_x = shadow.offset_x.to_f32();
+    let directional_phase = if offset_x > 0.0 {
+        FILTER_DROP_SHADOW_DIRECTIONAL_PHASE_BIAS_PX
+    } else if offset_x < 0.0 {
+        -FILTER_DROP_SHADOW_DIRECTIONAL_PHASE_BIAS_PX
+    } else {
+        0.0
+    };
+    let dx = offset_x * sx.abs() + directional_phase;
+    let dy = shadow.offset_y.to_f32() * sy.abs();
     let alpha_scale = (shadow.opacity * filter_opacity.clamp(0.0, 1.0)).clamp(0.0, 1.0);
     if alpha_scale <= 0.0 {
         return;
@@ -1182,32 +1322,41 @@ fn draw_filter_drop_shadow(
 
     let mut shadow_data = vec![0_u8; (width as usize) * (height as usize) * 4];
     let src = offscreen.data();
-    let width_i = width as i32;
-    let height_i = height as i32;
     let color_r = (shadow.color.r.clamp(0.0, 1.0) * 255.0).round() as u8;
     let color_g = (shadow.color.g.clamp(0.0, 1.0) * 255.0).round() as u8;
     let color_b = (shadow.color.b.clamp(0.0, 1.0) * 255.0).round() as u8;
 
-    for y in 0..height_i {
-        let target_y = y + dy;
-        if target_y < 0 || target_y >= height_i {
+    let sample_alpha = |x: i32, y: i32| -> f32 {
+        if x < 0 || y < 0 || x >= width as i32 || y >= height as i32 {
+            return 0.0;
+        }
+        let index = ((y as usize) * (width as usize) + x as usize) * 4 + 3;
+        src[index] as f32
+    };
+    for target_y in 0..height {
+        let source_y = target_y as f32 - dy;
+        let source_y0 = source_y.floor() as i32;
+        let fy = source_y - source_y0 as f32;
+        if source_y0 < -1 || source_y0 >= height as i32 {
             continue;
         }
-        for x in 0..width_i {
-            let target_x = x + dx;
-            if target_x < 0 || target_x >= width_i {
+        for target_x in 0..width {
+            let source_x = target_x as f32 - dx;
+            let source_x0 = source_x.floor() as i32;
+            let fx = source_x - source_x0 as f32;
+            if source_x0 < -1 || source_x0 >= width as i32 {
                 continue;
             }
-            let src_idx = ((y as usize) * (width as usize) + x as usize) * 4;
-            let src_alpha = src[src_idx + 3];
-            if src_alpha == 0 {
+            let top = sample_alpha(source_x0, source_y0) * (1.0 - fx)
+                + sample_alpha(source_x0 + 1, source_y0) * fx;
+            let bottom = sample_alpha(source_x0, source_y0 + 1) * (1.0 - fx)
+                + sample_alpha(source_x0 + 1, source_y0 + 1) * fx;
+            let source_alpha = top * (1.0 - fy) + bottom * fy;
+            if source_alpha <= 0.0 {
                 continue;
             }
             let dst_idx = ((target_y as usize) * (width as usize) + target_x as usize) * 4;
-            let alpha = ((src_alpha as f32) * alpha_scale).round().clamp(0.0, 255.0) as u8;
-            if alpha <= shadow_data[dst_idx + 3] {
-                continue;
-            }
+            let alpha = (source_alpha * alpha_scale).round().clamp(0.0, 255.0) as u8;
             shadow_data[dst_idx] = color_r;
             shadow_data[dst_idx + 1] = color_g;
             shadow_data[dst_idx + 2] = color_b;
@@ -1549,7 +1698,7 @@ fn shading_stops(stops: &[ShadingStop], opacity: f32) -> Vec<GradientStop> {
     for stop in stops {
         out.push(GradientStop::new(
             stop.offset.clamp(0.0, 1.0),
-            to_sk_color(stop.color, opacity),
+            to_sk_color(stop.color, opacity * stop.alpha.clamp(0.0, 1.0)),
         ));
     }
     out
@@ -3013,12 +3162,153 @@ mod tests {
     }
 
     #[test]
+    fn css_transform_origin_scales_around_center() {
+        let half = Pt::from_f32(36.0);
+        let edge = Pt::from_f32(72.0);
+        let doc = Document {
+            page_size: crate::types::Size {
+                width: edge,
+                height: edge,
+            },
+            pages: vec![crate::canvas::Page {
+                commands: vec![
+                    Command::SaveState,
+                    Command::CssTransformOrigin {
+                        x: half,
+                        y: half,
+                        inverse: false,
+                    },
+                    Command::Scale(0.5, 1.0),
+                    Command::CssTransformOrigin {
+                        x: half,
+                        y: half,
+                        inverse: true,
+                    },
+                    Command::SetFillColor(Color::rgb(0.0, 0.0, 1.0)),
+                    Command::MoveTo {
+                        x: Pt::ZERO,
+                        y: Pt::ZERO,
+                    },
+                    Command::LineTo {
+                        x: edge,
+                        y: Pt::ZERO,
+                    },
+                    Command::LineTo { x: edge, y: edge },
+                    Command::LineTo {
+                        x: Pt::ZERO,
+                        y: edge,
+                    },
+                    Command::ClosePath,
+                    Command::Fill,
+                    Command::RestoreState,
+                ],
+            }],
+        };
+
+        let pngs = document_to_png_pages(&doc, 72, None, true).unwrap();
+        let img = crate::image_native::load_from_memory(&pngs[0])
+            .unwrap()
+            .into_rgba8();
+        assert_eq!(img.get_pixel(17, 36).0, [255, 255, 255, 255]);
+        assert_eq!(img.get_pixel(18, 36).0, [0, 0, 255, 255]);
+        assert_eq!(img.get_pixel(53, 36).0, [0, 0, 255, 255]);
+        assert_eq!(img.get_pixel(54, 36).0, [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn css_transform_origin_rotates_clockwise_in_top_down_space() {
+        let page_width = Pt::from_f32(288.0);
+        let page_height = Pt::from_f32(144.0);
+        let doc = Document {
+            page_size: crate::types::Size {
+                width: page_width,
+                height: page_height,
+            },
+            pages: vec![crate::canvas::Page {
+                commands: vec![
+                    Command::SaveState,
+                    Command::CssTransformOrigin {
+                        x: Pt::from_f32(108.0),
+                        y: Pt::from_f32(54.0),
+                        inverse: false,
+                    },
+                    Command::Rotate(core::f32::consts::FRAC_PI_2),
+                    Command::CssTransformOrigin {
+                        x: Pt::from_f32(108.0),
+                        y: Pt::from_f32(54.0),
+                        inverse: true,
+                    },
+                    Command::SetFillColor(Color::rgb(1.0, 0.0, 0.0)),
+                    Command::MoveTo {
+                        x: Pt::from_f32(72.0),
+                        y: Pt::from_f32(36.0),
+                    },
+                    Command::LineTo {
+                        x: Pt::from_f32(144.0),
+                        y: Pt::from_f32(36.0),
+                    },
+                    Command::LineTo {
+                        x: Pt::from_f32(144.0),
+                        y: Pt::from_f32(72.0),
+                    },
+                    Command::LineTo {
+                        x: Pt::from_f32(72.0),
+                        y: Pt::from_f32(72.0),
+                    },
+                    Command::ClosePath,
+                    Command::Fill,
+                    Command::RestoreState,
+                ],
+            }],
+        };
+
+        let pngs = document_to_png_pages(&doc, 72, None, true).unwrap();
+        let img = crate::image_native::load_from_memory(&pngs[0])
+            .unwrap()
+            .into_rgba8();
+        assert_eq!(img.get_pixel(100, 30).0, [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(120, 80).0, [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(80, 54).0, [255, 255, 255, 255]);
+        assert_eq!(img.get_pixel(130, 54).0, [255, 255, 255, 255]);
+    }
+
+    #[test]
     fn pt_milli_to_px_rounds_half_away_from_zero() {
         assert_eq!(pt_milli_to_px_i64(72_000, 150).unwrap(), 150);
         assert_eq!(pt_milli_to_px_i64(240, 150).unwrap(), 1);
         assert_eq!(pt_milli_to_px_i64(-240, 150).unwrap(), -1);
         assert_eq!(pt_milli_to_px_i64(239, 150).unwrap(), 0);
         assert_eq!(pt_milli_to_px_i64(-239, 150).unwrap(), 0);
+    }
+
+    #[test]
+    fn filter_drop_shadow_keeps_fractional_device_coverage() {
+        let mut source = Pixmap::new(6, 4).expect("source pixmap");
+        let source_index = (6 + 1) * 4;
+        source.data_mut()[source_index..source_index + 4].copy_from_slice(&[255; 4]);
+        let mut target = Pixmap::new(6, 4).expect("target pixmap");
+        let shadow = FilterDropShadowSpec {
+            offset_x: Pt::from_f32(1.0),
+            offset_y: Pt::ZERO,
+            blur_radius: Pt::ZERO,
+            color: Color::BLACK,
+            opacity: 1.0,
+            color_is_current_color: false,
+        };
+
+        draw_filter_drop_shadow(
+            &mut target,
+            &source,
+            &RasterState::default(),
+            shadow,
+            1.0,
+            Transform::identity(),
+        );
+
+        let leading_alpha = target.data()[(6 + 2) * 4 + 3];
+        let trailing_alpha = target.data()[(6 + 3) * 4 + 3];
+        assert_eq!(leading_alpha, 207);
+        assert_eq!(trailing_alpha, 48);
     }
 
     #[test]
@@ -3154,6 +3444,7 @@ mod tests {
                         height: Pt::from_f32(30.0),
                         resource_id: "missing-image-for-raster-parity-should-not-exist.png"
                             .to_string(),
+                        interpolate: true,
                     },
                 ],
             }],
@@ -3240,6 +3531,7 @@ mod tests {
                     width: Pt::from_f32(20.0),
                     height: Pt::from_f32(20.0),
                     resource_id: data_uri,
+                    interpolate: true,
                 }],
             }],
         };

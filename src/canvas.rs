@@ -2,6 +2,7 @@ use crate::flowable::PaintFilterSpec;
 use crate::types::{Color, MixBlendMode, Pt, Rect, Shading, Size};
 
 pub const META_FLOWABLE_BBOX_KEY: &str = "__fb_bbox";
+pub const META_HTML_SCROLLABLE_RIGHT_KEY: &str = "__fb_html_scrollable_right";
 pub const META_PAGINATION_EVENT_KEY: &str = "__fb_pagination_event";
 pub const META_DIAGNOSTIC_SCOPE_BEGIN_KEY: &str = "__fb_diag_scope_begin";
 pub const META_DIAGNOSTIC_SCOPE_END_KEY: &str = "__fb_diag_scope_end";
@@ -112,7 +113,7 @@ pub enum Command {
         m10: f32,
         m11: f32,
     },
-    // Raster-only command emitted by PDF parser for precise Type0/CID text rendering.
+    // Explicit glyph run used by the raster backend and by PDF Type 3 outline fonts.
     DrawGlyphRun {
         x: Pt,
         y: Pt,
@@ -135,6 +136,7 @@ pub enum Command {
         width: Pt,
         height: Pt,
         resource_id: String,
+        interpolate: bool,
     },
     DefineForm {
         resource_id: String,
@@ -271,8 +273,27 @@ impl Canvas {
 
     pub fn restore_state(&mut self) {
         if let Some(state) = self.state_stack.pop() {
+            let previous = self.current_state.clone();
             self.current_state = state;
             self.current.commands.push(Command::RestoreState);
+            // PDF q/Q restores graphics paint parameters, but the text state is
+            // maintained separately. Re-emit changed text parameters so a
+            // scoped font draw cannot leak into the following text run.
+            if self.current_state.font_name != previous.font_name {
+                self.current
+                    .commands
+                    .push(Command::SetFontName(self.current_state.font_name.clone()));
+            }
+            if self.current_state.font_size != previous.font_size {
+                self.current
+                    .commands
+                    .push(Command::SetFontSize(self.current_state.font_size));
+            }
+            if self.current_state.text_rendering_mode != previous.text_rendering_mode {
+                self.current.commands.push(Command::SetTextRenderingMode(
+                    self.current_state.text_rendering_mode,
+                ));
+            }
         }
     }
 
@@ -311,6 +332,13 @@ impl Canvas {
         self.current.commands.push(Command::Meta {
             key: META_FLOWABLE_BBOX_KEY.to_string(),
             value,
+        });
+    }
+
+    pub fn record_html_scrollable_right(&mut self, right: Pt) {
+        self.current.commands.push(Command::Meta {
+            key: META_HTML_SCROLLABLE_RIGHT_KEY.to_string(),
+            value: right.to_milli_i64().to_string(),
         });
     }
 
@@ -504,6 +532,25 @@ impl Canvas {
         });
     }
 
+    pub(crate) fn draw_glyph_run(
+        &mut self,
+        x: Pt,
+        baseline_y_from_top: Pt,
+        glyph_ids: Vec<u16>,
+        advances: Vec<(Pt, Pt)>,
+    ) {
+        self.current.commands.push(Command::DrawGlyphRun {
+            x,
+            y: baseline_y_from_top,
+            glyph_ids,
+            advances,
+            m00: 1.0,
+            m01: 0.0,
+            m10: 0.0,
+            m11: 1.0,
+        });
+    }
+
     pub fn draw_string_synthetic_bold(
         &mut self,
         x: Pt,
@@ -516,6 +563,41 @@ impl Canvas {
         self.set_line_width(stroke_width.max(Pt::ZERO));
         self.set_text_rendering_mode(2);
         self.draw_string(x, y, text);
+        self.restore_state();
+    }
+
+    pub fn draw_string_synthetic_italic(
+        &mut self,
+        x: Pt,
+        y: Pt,
+        text: impl Into<String>,
+        shear: f32,
+    ) {
+        let baseline_y = self.page_size.height - y - self.current_state.font_size;
+        self.current.commands.push(Command::DrawStringTransformed {
+            x,
+            y: baseline_y,
+            text: text.into(),
+            m00: 1.0,
+            m01: 0.0,
+            m10: shear,
+            m11: 1.0,
+        });
+    }
+
+    pub fn draw_string_synthetic_bold_italic(
+        &mut self,
+        x: Pt,
+        y: Pt,
+        text: impl Into<String>,
+        stroke_width: Pt,
+        shear: f32,
+    ) {
+        self.save_state();
+        self.set_stroke_color(self.current_state.fill_color);
+        self.set_line_width(stroke_width.max(Pt::ZERO));
+        self.set_text_rendering_mode(2);
+        self.draw_string_synthetic_italic(x, y, text, shear);
         self.restore_state();
     }
 
@@ -536,12 +618,25 @@ impl Canvas {
         height: Pt,
         resource_id: impl Into<String>,
     ) {
+        self.draw_image_with_interpolation(x, y, width, height, resource_id, true);
+    }
+
+    pub fn draw_image_with_interpolation(
+        &mut self,
+        x: Pt,
+        y: Pt,
+        width: Pt,
+        height: Pt,
+        resource_id: impl Into<String>,
+        interpolate: bool,
+    ) {
         self.current.commands.push(Command::DrawImage {
             x,
             y,
             width,
             height,
             resource_id: resource_id.into(),
+            interpolate,
         });
     }
 
@@ -734,6 +829,64 @@ mod tests {
                 .iter()
                 .any(|command| { matches!(command, Command::SetTextRenderingMode(2)) })
         );
-        assert!(matches!(commands.last(), Some(Command::RestoreState)));
+        assert!(matches!(
+            commands.last(),
+            Some(Command::SetTextRenderingMode(0))
+        ));
+    }
+
+    #[test]
+    fn synthetic_italic_anchors_a_pdf_space_shear_at_the_baseline() {
+        let mut canvas = Canvas::new(Size {
+            width: Pt::from_f32(100.0),
+            height: Pt::from_f32(100.0),
+        });
+        canvas.set_font_size(Pt::from_f32(20.0));
+        canvas.draw_string_synthetic_italic(Pt::from_f32(10.0), Pt::from_f32(30.0), "Italic", 0.25);
+        let document = canvas.finish();
+
+        assert!(matches!(
+            document.pages[0].commands.last(),
+            Some(Command::DrawStringTransformed {
+                x,
+                y,
+                m00,
+                m01,
+                m10,
+                m11,
+                ..
+            }) if *x == Pt::from_f32(10.0)
+                && *y == Pt::from_f32(50.0)
+                && *m00 == 1.0
+                && *m01 == 0.0
+                && *m10 == 0.25
+                && *m11 == 1.0
+        ));
+    }
+
+    #[test]
+    fn restore_state_reselects_changed_text_parameters() {
+        let mut canvas = Canvas::new(Size {
+            width: Pt::from_f32(100.0),
+            height: Pt::from_f32(100.0),
+        });
+        canvas.set_font_name("Main");
+        canvas.set_font_size(Pt::from_f32(20.0));
+        canvas.save_state();
+        canvas.set_font_name("Annotation");
+        canvas.set_font_size(Pt::from_f32(10.0));
+        canvas.restore_state();
+        let document = canvas.finish();
+        let commands = &document.pages[0].commands;
+        let suffix = &commands[commands.len() - 3..];
+        assert!(matches!(suffix[0], Command::RestoreState));
+        assert!(matches!(
+            &suffix[1],
+            Command::SetFontName(name) if name == "Main"
+        ));
+        assert!(matches!(
+            &suffix[2],
+            Command::SetFontSize(size) if *size == Pt::from_f32(20.0)
+        ));
     }
 }

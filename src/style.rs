@@ -77,12 +77,18 @@ impl SimpleSelector {
 
         for pseudo in &self.pseudos {
             match pseudo {
-                PseudoClass::Not(inner) => {
-                    let inner_spec = inner.specificity();
+                PseudoClass::Not(inner) | PseudoClass::Is(inner) => {
+                    let inner_spec = inner
+                        .iter()
+                        .map(SimpleSelector::specificity)
+                        .max()
+                        .unwrap_or(Specificity(0, 0, 0));
                     id_count += inner_spec.0;
                     class_count += inner_spec.1;
                     tag_count += inner_spec.2;
                 }
+                // Selectors inside :where() intentionally contribute no specificity.
+                PseudoClass::Where(_) => {}
                 _ => {
                     class_count += 1;
                 }
@@ -98,16 +104,25 @@ enum PseudoClass {
     Root,
     FirstChild,
     LastChild,
+    FirstOfType,
+    LastOfType,
     NthChildEven,
     NthChildOdd,
     NthChild(usize),
     NthChildFormula { a: i32, b: i32 },
+    NthOfTypeEven,
+    NthOfTypeOdd,
+    NthOfType(usize),
+    NthOfTypeFormula { a: i32, b: i32 },
     Hover,
     Before,
     After,
     Marker,
+    FirstLetter,
     Unsupported,
-    Not(SimpleSelector),
+    Not(Vec<SimpleSelector>),
+    Is(Vec<SimpleSelector>),
+    Where(Vec<SimpleSelector>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,6 +131,7 @@ pub(crate) enum PseudoTarget {
     Before,
     After,
     Marker,
+    FirstLetter,
 }
 
 impl PseudoClass {
@@ -124,10 +140,16 @@ impl PseudoClass {
             self,
             PseudoClass::FirstChild
                 | PseudoClass::LastChild
+                | PseudoClass::FirstOfType
+                | PseudoClass::LastOfType
                 | PseudoClass::NthChildEven
                 | PseudoClass::NthChildOdd
                 | PseudoClass::NthChild(_)
                 | PseudoClass::NthChildFormula { .. }
+                | PseudoClass::NthOfTypeEven
+                | PseudoClass::NthOfTypeOdd
+                | PseudoClass::NthOfType(_)
+                | PseudoClass::NthOfTypeFormula { .. }
         )
     }
 
@@ -136,33 +158,73 @@ impl PseudoClass {
             PseudoClass::Root => element.is_root,
             PseudoClass::FirstChild => element.child_index == 1,
             PseudoClass::LastChild => element.child_index == element.child_count,
+            PseudoClass::FirstOfType => element.type_index == 1,
+            PseudoClass::LastOfType => element.type_index == element.type_count,
             PseudoClass::NthChildEven => element.child_index % 2 == 0,
             PseudoClass::NthChildOdd => element.child_index % 2 == 1,
             PseudoClass::NthChild(n) => element.child_index == *n,
-            PseudoClass::NthChildFormula { a, b } => {
-                let idx = element.child_index as i32;
-                if *a == 0 {
-                    return idx == *b;
-                }
-                if *a > 0 {
-                    if idx < *b {
-                        return false;
-                    }
-                    (idx - *b) % *a == 0
-                } else {
-                    if idx > *b {
-                        return false;
-                    }
-                    (b - idx) % (-*a) == 0
-                }
-            }
+            PseudoClass::NthChildFormula { a, b } => nth_index_matches(element.child_index, *a, *b),
+            PseudoClass::NthOfTypeEven => element.type_index % 2 == 0,
+            PseudoClass::NthOfTypeOdd => element.type_index % 2 == 1,
+            PseudoClass::NthOfType(n) => element.type_index == *n,
+            PseudoClass::NthOfTypeFormula { a, b } => nth_index_matches(element.type_index, *a, *b),
             PseudoClass::Hover => false,
             PseudoClass::Before => matches!(pseudo, PseudoTarget::Before),
             PseudoClass::After => matches!(pseudo, PseudoTarget::After),
             PseudoClass::Marker => matches!(pseudo, PseudoTarget::Marker),
+            PseudoClass::FirstLetter => matches!(pseudo, PseudoTarget::FirstLetter),
             PseudoClass::Unsupported => false,
-            PseudoClass::Not(selector) => !selector.matches_with_pseudo(element, pseudo),
+            PseudoClass::Not(selectors) => !selectors
+                .iter()
+                .any(|selector| selector.matches_with_pseudo(element, pseudo)),
+            PseudoClass::Is(selectors) | PseudoClass::Where(selectors) => selectors
+                .iter()
+                .any(|selector| selector.matches_with_pseudo(element, pseudo)),
         }
+    }
+
+    fn has_positional_pseudo(&self) -> bool {
+        if self.is_positional() {
+            return true;
+        }
+        match self {
+            PseudoClass::Not(selectors)
+            | PseudoClass::Is(selectors)
+            | PseudoClass::Where(selectors) => selectors.iter().any(|selector| {
+                selector
+                    .pseudos
+                    .iter()
+                    .any(PseudoClass::has_positional_pseudo)
+            }),
+            _ => false,
+        }
+    }
+
+    fn pseudo_target(&self) -> Option<PseudoTarget> {
+        match self {
+            PseudoClass::Before => Some(PseudoTarget::Before),
+            PseudoClass::After => Some(PseudoTarget::After),
+            PseudoClass::Marker => Some(PseudoTarget::Marker),
+            PseudoClass::FirstLetter => Some(PseudoTarget::FirstLetter),
+            PseudoClass::Not(selectors)
+            | PseudoClass::Is(selectors)
+            | PseudoClass::Where(selectors) => selectors
+                .iter()
+                .find_map(|selector| selector.pseudos.iter().find_map(PseudoClass::pseudo_target)),
+            _ => None,
+        }
+    }
+}
+
+fn nth_index_matches(index: usize, a: i32, b: i32) -> bool {
+    let index = index as i32;
+    if a == 0 {
+        return index == b;
+    }
+    if a > 0 {
+        index >= b && (index - b) % a == 0
+    } else {
+        index <= b && (b - index) % (-a) == 0
     }
 }
 
@@ -237,12 +299,9 @@ struct SelectorPattern {
 
 impl SelectorPattern {
     fn has_positional_pseudos(&self) -> bool {
-        self.parts.iter().any(|part| {
-            part.pseudos.iter().any(|pseudo| match pseudo {
-                PseudoClass::Not(inner) => inner.pseudos.iter().any(|p| p.is_positional()),
-                _ => pseudo.is_positional(),
-            })
-        })
+        self.parts
+            .iter()
+            .any(|part| part.pseudos.iter().any(PseudoClass::has_positional_pseudo))
     }
 
     fn has_sibling_combinators(&self) -> bool {
@@ -257,11 +316,8 @@ impl SelectorPattern {
     fn pseudo_target(&self) -> Option<PseudoTarget> {
         for part in &self.parts {
             for pseudo in &part.pseudos {
-                match pseudo {
-                    PseudoClass::Before => return Some(PseudoTarget::Before),
-                    PseudoClass::After => return Some(PseudoTarget::After),
-                    PseudoClass::Marker => return Some(PseudoTarget::Marker),
-                    _ => {}
+                if let Some(target) = pseudo.pseudo_target() {
+                    return Some(target);
                 }
             }
         }
@@ -486,7 +542,8 @@ enum ColorSpec {
 
 #[derive(Debug, Clone)]
 enum BackgroundSpec {
-    Value(Color),
+    Value(Color, f32),
+    Transparent,
     Inherit,
     Initial,
     CurrentColor,
@@ -742,6 +799,24 @@ pub enum TextDecorationStyleMode {
     Wavy,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextEmphasisStyleMode {
+    None,
+    FilledDot,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextEmphasisPositionMode {
+    Over,
+    Under,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct InitialLetterValue {
+    pub size: f32,
+    pub sink: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TextUnderlineOffsetMode {
     Auto,
@@ -808,6 +883,7 @@ pub enum LineBreakMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisplayMode {
     Block,
+    FlowRoot,
     Inline,
     InlineBlock,
     ListItem,
@@ -852,15 +928,33 @@ pub enum PositionMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatMode {
+    None,
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClearMode {
+    None,
+    Left,
+    Right,
+    Both,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlexDirectionMode {
     Row,
+    RowReverse,
     Column,
+    ColumnReverse,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlexWrapMode {
     NoWrap,
     Wrap,
+    WrapReverse,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -868,6 +962,7 @@ pub enum JustifyContentMode {
     FlexStart,
     FlexEnd,
     Center,
+    SafeCenter,
     SpaceBetween,
     SpaceAround,
     SpaceEvenly,
@@ -879,6 +974,8 @@ pub enum AlignItemsMode {
     FlexEnd,
     Center,
     Stretch,
+    FirstBaseline,
+    LastBaseline,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -888,6 +985,8 @@ pub enum AlignSelfMode {
     FlexEnd,
     Center,
     Stretch,
+    FirstBaseline,
+    LastBaseline,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -939,6 +1038,27 @@ enum TextDecorationThicknessSpec {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TextDecorationStyleSpec {
     Value(TextDecorationStyleMode),
+    Inherit,
+    Initial,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextEmphasisStyleSpec {
+    Value(TextEmphasisStyleMode),
+    Inherit,
+    Initial,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextEmphasisPositionSpec {
+    Value(TextEmphasisPositionMode),
+    Inherit,
+    Initial,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum InitialLetterSpec {
+    Value(InitialLetterValue),
     Inherit,
     Initial,
 }
@@ -1005,6 +1125,7 @@ struct PaginationDelta {
 pub enum OverflowMode {
     Visible,
     Hidden,
+    Clip,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1014,6 +1135,12 @@ pub enum ObjectFitMode {
     Cover,
     None,
     ScaleDown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageRenderingMode {
+    Auto,
+    Pixelated,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1045,6 +1172,13 @@ struct TextIndentValue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ObjectFitSpec {
     Value(ObjectFitMode),
+    Inherit,
+    Initial,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImageRenderingSpec {
+    Value(ImageRenderingMode),
     Inherit,
     Initial,
 }
@@ -1161,13 +1295,19 @@ pub enum AnonymousListStyleSymbolsSystem {
     Alphabetic,
     Symbolic,
     Fixed,
+    ExtendsDecimal,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnonymousListStyleSymbols {
     pub system: AnonymousListStyleSymbolsSystem,
     pub symbols: Vec<String>,
+    pub prefix: String,
     pub suffix: String,
+    pub negative_prefix: String,
+    pub negative_suffix: String,
+    pub pad_width: usize,
+    pub pad_symbol: String,
     pub fixed_start: i32,
 }
 
@@ -1224,6 +1364,14 @@ enum ContainerQueryTypeSpec {
     Initial,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum AspectRatioSpec {
+    Auto,
+    Ratio(f32),
+    Inherit,
+    Initial,
+}
+
 #[derive(Debug, Clone, Default)]
 struct StyleDelta {
     revert_layer: RevertLayerDelta,
@@ -1248,6 +1396,7 @@ struct StyleDelta {
     min_width: Option<LengthSpec>,
     min_height: Option<LengthSpec>,
     max_height: Option<LengthSpec>,
+    aspect_ratio: Option<AspectRatioSpec>,
     min_width_var: Option<String>,
     min_height_var: Option<String>,
     max_height_var: Option<String>,
@@ -1269,6 +1418,7 @@ struct StyleDelta {
     vertical_align: Option<VerticalAlignMode>,
     font_weight: Option<FontWeightSpec>,
     font_weight_var: Option<String>,
+    font_synthesis_weight: Option<bool>,
     font_style: Option<FontStyleMode>,
     font_style_var: Option<String>,
     text_transform: Option<TextTransformSpec>,
@@ -1287,6 +1437,10 @@ struct StyleDelta {
     text_decoration_thickness: Option<TextDecorationThicknessSpec>,
     text_decoration_thickness_var: Option<String>,
     text_decoration_style: Option<TextDecorationStyleSpec>,
+    text_emphasis_style: Option<TextEmphasisStyleSpec>,
+    text_emphasis_color: Option<ColorSpec>,
+    text_emphasis_position: Option<TextEmphasisPositionSpec>,
+    initial_letter: Option<InitialLetterSpec>,
     text_underline_offset: Option<TextUnderlineOffsetSpec>,
     text_underline_offset_var: Option<String>,
     text_underline_position: Option<TextUnderlinePositionSpec>,
@@ -1367,6 +1521,7 @@ struct StyleDelta {
     mix_blend_mode: Option<MixBlendMode>,
     isolation: Option<IsolationSpec>,
     opacity: Option<OpacitySpec>,
+    opacity_var: Option<String>,
     container_names: Option<ContainerNamesSpec>,
     container_type: Option<ContainerQueryTypeSpec>,
     background_paint: Option<BackgroundPaint>,
@@ -1413,6 +1568,8 @@ struct StyleDelta {
     white_space_var: Option<String>,
     display: Option<DisplaySpec>,
     position: Option<PositionMode>,
+    float_mode: Option<FloatMode>,
+    clear_mode: Option<ClearMode>,
     vertical_align_var: Option<String>,
     z_index: Option<i32>,
     inset_left: Option<LengthSpec>,
@@ -1441,12 +1598,18 @@ struct StyleDelta {
     align_items: Option<AlignItemsMode>,
     align_self: Option<AlignSelfMode>,
     align_content: Option<AlignContentMode>,
+    column_count: Option<usize>,
+    column_rule_width: Option<LengthSpec>,
+    column_rule_style: Option<BorderLineStyle>,
+    column_rule_color: Option<ColorSpec>,
     grid_columns: Option<usize>,
     grid_rows: Option<usize>,
     grid_column_tracks: Option<Vec<GridTrackSize>>,
     grid_row_tracks: Option<Vec<GridTrackSize>>,
     grid_column_start: Option<usize>,
     grid_row_start: Option<usize>,
+    row_gap: Option<LengthSpec>,
+    row_gap_var: Option<String>,
     gap: Option<LengthSpec>,
     gap_var: Option<String>,
     flex_grow: Option<f32>,
@@ -1456,6 +1619,7 @@ struct StyleDelta {
     overflow_inline: Option<OverflowMode>,
     overflow_block: Option<OverflowMode>,
     object_fit: Option<ObjectFitSpec>,
+    image_rendering: Option<ImageRenderingSpec>,
     object_position: Option<ObjectPositionSpec>,
     custom_lengths: HashMap<String, LengthSpec>,
     custom_colors: HashMap<String, Color>,
@@ -1475,6 +1639,8 @@ struct RevertLayerDelta {
     display: bool,
     visibility: bool,
     position: bool,
+    float_mode: bool,
+    clear_mode: bool,
     z_index: bool,
     direction: bool,
     writing_mode: bool,
@@ -1490,6 +1656,9 @@ struct RevertLayerDelta {
     text_decoration_color: bool,
     text_decoration_thickness: bool,
     text_decoration_style: bool,
+    text_emphasis_style: bool,
+    text_emphasis_color: bool,
+    text_emphasis_position: bool,
     text_underline_offset: bool,
     text_underline_position: bool,
     text_overflow: bool,
@@ -1546,6 +1715,8 @@ impl RevertLayerDelta {
             && !self.display
             && !self.visibility
             && !self.position
+            && !self.float_mode
+            && !self.clear_mode
             && !self.z_index
             && !self.direction
             && !self.writing_mode
@@ -1561,6 +1732,9 @@ impl RevertLayerDelta {
             && !self.text_decoration_color
             && !self.text_decoration_thickness
             && !self.text_decoration_style
+            && !self.text_emphasis_style
+            && !self.text_emphasis_color
+            && !self.text_emphasis_position
             && !self.text_underline_offset
             && !self.text_underline_position
             && !self.text_overflow
@@ -1751,6 +1925,8 @@ pub struct ComputedStyle {
     pending_line_height_var: Option<String>,
     pub color: Color,
     pub background_color: Option<Color>,
+    pub background_source_color: Option<Color>,
+    pub background_alpha: f32,
     pub background_paint: Option<BackgroundPaint>,
     pub background_paints: Vec<BackgroundPaint>,
     pub background_sizes: Vec<BackgroundSizeSpec>,
@@ -1786,6 +1962,7 @@ pub struct ComputedStyle {
     pub min_width: LengthSpec,
     pub min_height: LengthSpec,
     pub max_height: LengthSpec,
+    pub aspect_ratio: Option<f32>,
     pending_min_width_var: Option<String>,
     pending_min_height_var: Option<String>,
     pending_max_height_var: Option<String>,
@@ -1806,8 +1983,10 @@ pub struct ComputedStyle {
     pub direction: DirectionMode,
     pub writing_mode: WritingModeMode,
     pending_vertical_align_var: Option<String>,
+    vertical_align_inherit_base: VerticalAlignMode,
     pub vertical_align: VerticalAlignMode,
     pub font_weight: u16,
+    pub font_synthesis_weight: bool,
     pub font_style: FontStyleMode,
     pub text_transform: TextTransformMode,
     transform_list: Vec<CssTransformOp>,
@@ -1825,6 +2004,11 @@ pub struct ComputedStyle {
     text_decoration_color_tracks_current: bool,
     pub text_decoration_thickness: TextDecorationThicknessMode,
     pub text_decoration_style: TextDecorationStyleMode,
+    pub text_emphasis_style: TextEmphasisStyleMode,
+    pub text_emphasis_color: Color,
+    text_emphasis_color_tracks_current: bool,
+    pub text_emphasis_position: TextEmphasisPositionMode,
+    pub initial_letter: Option<InitialLetterValue>,
     pub text_underline_offset: TextUnderlineOffsetMode,
     pub text_underline_position: TextUnderlinePositionMode,
     pub text_shadows: Vec<BoxShadowSpec>,
@@ -1834,6 +2018,7 @@ pub struct ComputedStyle {
     pub text_indent_each_line: bool,
     pub content: Option<String>,
     pub generated_content: Option<Vec<GeneratedContentPart>>,
+    pub(crate) marker_content_overridden: bool,
     pub quotes: Vec<(String, String)>,
     pub counter_reset: Vec<CounterMutation>,
     pub counter_increment: Vec<CounterMutation>,
@@ -1877,6 +2062,7 @@ pub struct ComputedStyle {
     pub mix_blend_mode: MixBlendMode,
     pub isolation: bool,
     pub opacity: f32,
+    pending_opacity_var: Option<String>,
     pub container_names: Vec<String>,
     pub container_type: ContainerQueryType,
     pub clip_path: Option<ClipPathShapeSpec>,
@@ -1889,6 +2075,8 @@ pub struct ComputedStyle {
     pub font_stack: Vec<Arc<str>>,
     pub font_name: Arc<str>,
     pub position: PositionMode,
+    pub float_mode: FloatMode,
+    pub clear_mode: ClearMode,
     pub z_index: i32,
     pub inset_left: LengthSpec,
     pub inset_top: LengthSpec,
@@ -1909,12 +2097,20 @@ pub struct ComputedStyle {
     pub align_items: AlignItemsMode,
     pub align_self: AlignSelfMode,
     pub align_content: AlignContentMode,
+    pub column_count: usize,
+    pub column_rule_width: LengthSpec,
+    pub column_rule_style: OutlineLineStyle,
+    pub column_rule_color: Option<Color>,
+    pub column_rule_visible: bool,
     pub grid_columns: Option<usize>,
     pub grid_rows: Option<usize>,
     pub grid_column_tracks: Vec<GridTrackSize>,
     pub grid_row_tracks: Vec<GridTrackSize>,
     pub grid_column_start: Option<usize>,
     pub grid_row_start: Option<usize>,
+    pub row_gap: LengthSpec,
+    pending_row_gap_var: Option<String>,
+    /// Column-axis gap. Kept as `gap` for API compatibility.
     pub gap: LengthSpec,
     pending_gap_var: Option<String>,
     pub flex_grow: f32,
@@ -1923,6 +2119,7 @@ pub struct ComputedStyle {
     overflow_y: OverflowMode,
     pub overflow: OverflowMode,
     pub object_fit: ObjectFitMode,
+    pub image_rendering: ImageRenderingMode,
     pub object_position: BackgroundPositionSpec,
     pub custom_lengths: HashMap<String, LengthSpec>,
     pub custom_colors: HashMap<String, Color>,
@@ -1988,11 +2185,15 @@ impl ComputedStyle {
             font_name: primary,
             font_fallbacks: fallbacks,
             font_weight: self.font_weight,
+            font_synthesis_weight: self.font_synthesis_weight,
             font_style: self.font_style,
             text_decoration: self.text_decoration,
             text_decoration_color: self.text_decoration_color,
             text_decoration_thickness: self.text_decoration_thickness,
             text_decoration_style: self.text_decoration_style,
+            text_emphasis_style: self.text_emphasis_style,
+            text_emphasis_color: self.text_emphasis_color,
+            text_emphasis_position: self.text_emphasis_position,
             text_underline_offset: self.text_underline_offset,
             text_underline_position: self.text_underline_position,
             text_shadows: self.text_shadows.clone(),
@@ -2045,6 +2246,10 @@ impl ComputedStyle {
 
     pub fn resolved_outline_color(&self) -> Color {
         self.outline_color.unwrap_or(self.color)
+    }
+
+    pub fn resolved_column_rule_color(&self) -> Color {
+        self.column_rule_color.unwrap_or(self.color)
     }
 
     fn has_custom_property_value(&self, name: &str) -> bool {
@@ -2582,6 +2787,8 @@ pub struct ElementInfo {
     pub is_root: bool,
     pub child_index: usize,
     pub child_count: usize,
+    pub type_index: usize,
+    pub type_count: usize,
     pub prev_siblings: Vec<ElementInfo>,
 }
 
@@ -2644,6 +2851,7 @@ pub(crate) struct CssPageSetup {
     pub margin_right: Option<Pt>,
     pub margin_bottom: Option<Pt>,
     pub margin_left: Option<Pt>,
+    pub background: Option<(Color, f32)>,
 }
 
 impl CssPageSetup {
@@ -2664,6 +2872,39 @@ impl CssPageSetup {
             bottom: self.margin_bottom.unwrap_or(base.bottom),
             left: self.margin_left.unwrap_or(base.left),
         })
+    }
+
+    pub fn cascaded_with(self, declarations: Self) -> Self {
+        Self {
+            size: declarations.size.or(self.size),
+            margin_top: declarations.margin_top.or(self.margin_top),
+            margin_right: declarations.margin_right.or(self.margin_right),
+            margin_bottom: declarations.margin_bottom.or(self.margin_bottom),
+            margin_left: declarations.margin_left.or(self.margin_left),
+            background: declarations.background.or(self.background),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct CssPageStyles {
+    pub base: CssPageSetup,
+    pub first: CssPageSetup,
+    pub left: CssPageSetup,
+    pub right: CssPageSetup,
+}
+
+impl CssPageStyles {
+    pub fn has_pseudo_rules(self) -> bool {
+        self.first.size.is_some()
+            || self.left.size.is_some()
+            || self.right.size.is_some()
+            || self.first.has_margin_override()
+            || self.left.has_margin_override()
+            || self.right.has_margin_override()
+            || self.first.background.is_some()
+            || self.left.background.is_some()
+            || self.right.background.is_some()
     }
 }
 
@@ -3317,6 +3558,8 @@ impl StyleResolver {
             pending_line_height_var: None,
             color: Color::BLACK,
             background_color: None,
+            background_source_color: None,
+            background_alpha: 1.0,
             background_paint: None,
             background_paints: Vec::new(),
             background_sizes: Vec::new(),
@@ -3352,6 +3595,7 @@ impl StyleResolver {
             min_width: LengthSpec::Auto,
             min_height: LengthSpec::Auto,
             max_height: LengthSpec::Auto,
+            aspect_ratio: None,
             pending_min_width_var: None,
             pending_min_height_var: None,
             pending_max_height_var: None,
@@ -3372,8 +3616,10 @@ impl StyleResolver {
             direction: DirectionMode::Ltr,
             writing_mode: WritingModeMode::HorizontalTb,
             pending_vertical_align_var: None,
+            vertical_align_inherit_base: VerticalAlignMode::Baseline,
             vertical_align: VerticalAlignMode::Baseline,
             font_weight: 400,
+            font_synthesis_weight: true,
             font_style: FontStyleMode::Normal,
             text_transform: TextTransformMode::None,
             transform_list: Vec::new(),
@@ -3391,6 +3637,11 @@ impl StyleResolver {
             text_decoration_color_tracks_current: true,
             text_decoration_thickness: TextDecorationThicknessMode::Auto,
             text_decoration_style: TextDecorationStyleMode::Solid,
+            text_emphasis_style: TextEmphasisStyleMode::None,
+            text_emphasis_color: Color::BLACK,
+            text_emphasis_color_tracks_current: true,
+            text_emphasis_position: TextEmphasisPositionMode::Over,
+            initial_letter: None,
             text_underline_offset: TextUnderlineOffsetMode::Auto,
             text_underline_position: TextUnderlinePositionMode::auto(),
             text_shadows: Vec::new(),
@@ -3400,6 +3651,7 @@ impl StyleResolver {
             text_indent_each_line: false,
             content: None,
             generated_content: None,
+            marker_content_overridden: false,
             quotes: default_quotes(),
             counter_reset: Vec::new(),
             counter_increment: Vec::new(),
@@ -3443,6 +3695,7 @@ impl StyleResolver {
             mix_blend_mode: MixBlendMode::Normal,
             isolation: false,
             opacity: 1.0,
+            pending_opacity_var: None,
             container_names: Vec::new(),
             container_type: ContainerQueryType::Normal,
             clip_path: None,
@@ -3455,6 +3708,8 @@ impl StyleResolver {
             font_stack: vec![Arc::<str>::from("Helvetica")],
             font_name: Arc::<str>::from("Helvetica"),
             position: PositionMode::Static,
+            float_mode: FloatMode::None,
+            clear_mode: ClearMode::None,
             z_index: 0,
             inset_left: LengthSpec::Auto,
             inset_top: LengthSpec::Auto,
@@ -3475,12 +3730,19 @@ impl StyleResolver {
             align_items: AlignItemsMode::Stretch,
             align_self: AlignSelfMode::Auto,
             align_content: AlignContentMode::Stretch,
+            column_count: 1,
+            column_rule_width: LengthSpec::Absolute(Pt::from_f32(2.25)),
+            column_rule_style: OutlineLineStyle::Solid,
+            column_rule_color: None,
+            column_rule_visible: false,
             grid_columns: None,
             grid_rows: None,
             grid_column_tracks: Vec::new(),
             grid_row_tracks: Vec::new(),
             grid_column_start: None,
             grid_row_start: None,
+            row_gap: LengthSpec::Absolute(Pt::ZERO),
+            pending_row_gap_var: None,
             gap: LengthSpec::Absolute(Pt::ZERO),
             pending_gap_var: None,
             flex_grow: 0.0,
@@ -3489,6 +3751,7 @@ impl StyleResolver {
             overflow_y: OverflowMode::Visible,
             overflow: OverflowMode::Visible,
             object_fit: ObjectFitMode::Fill,
+            image_rendering: ImageRenderingMode::Auto,
             object_position: BackgroundPositionSpec::center(),
             custom_lengths: HashMap::new(),
             custom_colors: HashMap::new(),
@@ -3510,6 +3773,7 @@ impl StyleResolver {
     ) -> ComputedStyle {
         let debug = self.debug.as_ref();
         let debug_node = debug.map(|_| format_element_path(element, ancestors));
+        let propagates_text_decoration = !parent.text_decoration.is_none();
         let mut computed = ComputedStyle {
             font_size: parent.font_size,
             pending_font_size_var: None,
@@ -3517,6 +3781,8 @@ impl StyleResolver {
             pending_line_height_var: None,
             color: parent.color,
             background_color: None,
+            background_source_color: None,
+            background_alpha: 1.0,
             background_paint: None,
             background_paints: Vec::new(),
             background_sizes: Vec::new(),
@@ -3552,6 +3818,7 @@ impl StyleResolver {
             min_width: LengthSpec::Auto,
             min_height: LengthSpec::Auto,
             max_height: LengthSpec::Auto,
+            aspect_ratio: None,
             pending_min_width_var: None,
             pending_min_height_var: None,
             pending_max_height_var: None,
@@ -3572,8 +3839,10 @@ impl StyleResolver {
             direction: parent.direction,
             writing_mode: parent.writing_mode,
             pending_vertical_align_var: None,
-            vertical_align: parent.vertical_align,
+            vertical_align_inherit_base: parent.vertical_align,
+            vertical_align: VerticalAlignMode::Baseline,
             font_weight: parent.font_weight,
+            font_synthesis_weight: parent.font_synthesis_weight,
             font_style: parent.font_style,
             text_transform: parent.text_transform,
             transform_list: Vec::new(),
@@ -3587,10 +3856,31 @@ impl StyleResolver {
             transform: Vec::new(),
             transform_origin: CssTransformOrigin::center(),
             text_decoration: parent.text_decoration,
-            text_decoration_color: parent.color,
-            text_decoration_color_tracks_current: true,
-            text_decoration_thickness: TextDecorationThicknessMode::Auto,
-            text_decoration_style: TextDecorationStyleMode::Solid,
+            text_decoration_color: if propagates_text_decoration {
+                parent.text_decoration_color
+            } else {
+                parent.color
+            },
+            text_decoration_color_tracks_current: if propagates_text_decoration {
+                parent.text_decoration_color_tracks_current
+            } else {
+                true
+            },
+            text_decoration_thickness: if propagates_text_decoration {
+                parent.text_decoration_thickness
+            } else {
+                TextDecorationThicknessMode::Auto
+            },
+            text_decoration_style: if propagates_text_decoration {
+                parent.text_decoration_style
+            } else {
+                TextDecorationStyleMode::Solid
+            },
+            text_emphasis_style: parent.text_emphasis_style,
+            text_emphasis_color: parent.text_emphasis_color,
+            text_emphasis_color_tracks_current: parent.text_emphasis_color_tracks_current,
+            text_emphasis_position: parent.text_emphasis_position,
+            initial_letter: None,
             text_underline_offset: parent.text_underline_offset,
             text_underline_position: parent.text_underline_position,
             text_shadows: parent.text_shadows.clone(),
@@ -3600,6 +3890,7 @@ impl StyleResolver {
             text_indent_each_line: parent.text_indent_each_line,
             content: None,
             generated_content: None,
+            marker_content_overridden: false,
             quotes: parent.quotes.clone(),
             counter_reset: Vec::new(),
             counter_increment: Vec::new(),
@@ -3622,9 +3913,9 @@ impl StyleResolver {
             border_bottom_color: None,
             border_left_color: None,
             border_style: BorderStyleState::none(),
-            border_collapse: BorderCollapseMode::Separate,
+            border_collapse: parent.border_collapse,
             caption_side: parent.caption_side,
-            border_spacing: BorderSpacingSpec::zero(),
+            border_spacing: parent.border_spacing,
             table_layout: TableLayoutMode::Auto,
             empty_cells_hide: parent.empty_cells_hide,
             border_radius: BorderRadiiSpec::zero(),
@@ -3643,6 +3934,7 @@ impl StyleResolver {
             mix_blend_mode: MixBlendMode::Normal,
             isolation: false,
             opacity: 1.0,
+            pending_opacity_var: None,
             container_names: Vec::new(),
             container_type: ContainerQueryType::Normal,
             clip_path: None,
@@ -3655,6 +3947,8 @@ impl StyleResolver {
             font_stack: parent.font_stack.clone(),
             font_name: parent.font_name.clone(),
             position: PositionMode::Static,
+            float_mode: FloatMode::None,
+            clear_mode: ClearMode::None,
             z_index: 0,
             inset_left: LengthSpec::Auto,
             inset_top: LengthSpec::Auto,
@@ -3666,29 +3960,37 @@ impl StyleResolver {
             pending_inset_right_var: None,
             pending_inset_bottom_var: None,
             box_sizing: BoxSizingMode::ContentBox,
-            flex_direction: parent.flex_direction,
-            flex_wrap: parent.flex_wrap,
-            flex_basis: parent.flex_basis,
+            flex_direction: FlexDirectionMode::Row,
+            flex_wrap: FlexWrapMode::NoWrap,
+            flex_basis: LengthSpec::Auto,
             pending_flex_basis_var: None,
-            order: parent.order,
-            justify_content: parent.justify_content,
-            align_items: parent.align_items,
+            order: 0,
+            justify_content: JustifyContentMode::FlexStart,
+            align_items: AlignItemsMode::Stretch,
             align_self: AlignSelfMode::Auto,
-            align_content: parent.align_content,
+            align_content: AlignContentMode::Stretch,
+            column_count: 1,
+            column_rule_width: LengthSpec::Absolute(Pt::from_f32(2.25)),
+            column_rule_style: OutlineLineStyle::Solid,
+            column_rule_color: None,
+            column_rule_visible: false,
             grid_columns: None,
             grid_rows: None,
             grid_column_tracks: Vec::new(),
             grid_row_tracks: Vec::new(),
             grid_column_start: None,
             grid_row_start: None,
-            gap: parent.gap,
+            row_gap: LengthSpec::Absolute(Pt::ZERO),
+            pending_row_gap_var: None,
+            gap: LengthSpec::Absolute(Pt::ZERO),
             pending_gap_var: None,
-            flex_grow: parent.flex_grow,
-            flex_shrink: parent.flex_shrink,
+            flex_grow: 0.0,
+            flex_shrink: 1.0,
             overflow_x: OverflowMode::Visible,
             overflow_y: OverflowMode::Visible,
             overflow: OverflowMode::Visible,
             object_fit: ObjectFitMode::Fill,
+            image_rendering: parent.image_rendering,
             object_position: parent.object_position,
             custom_lengths: parent.custom_lengths.clone(),
             custom_colors: parent.custom_colors.clone(),
@@ -4024,6 +4326,17 @@ impl StyleResolver {
                 unresolved.push(name);
             }
         }
+        if let Some(name) = computed.pending_row_gap_var.clone() {
+            if resolve_custom_length_from_maps(
+                &computed.custom_lengths,
+                &computed.custom_color_refs,
+                &name,
+            )
+            .is_none()
+            {
+                unresolved.push(name);
+            }
+        }
         if let Some(name) = computed.pending_outline_offset_var.clone() {
             if resolve_custom_length_from_maps(
                 &computed.custom_lengths,
@@ -4239,6 +4552,26 @@ impl StyleResolver {
         ancestors: &[ElementInfo],
         pseudo: PseudoTarget,
     ) -> Option<ComputedStyle> {
+        self.compute_pseudo_style_impl(element, parent, ancestors, pseudo, false)
+    }
+
+    pub(crate) fn compute_marker_style(
+        &self,
+        element: &ElementInfo,
+        parent: &ComputedStyle,
+        ancestors: &[ElementInfo],
+    ) -> Option<ComputedStyle> {
+        self.compute_pseudo_style_impl(element, parent, ancestors, PseudoTarget::Marker, true)
+    }
+
+    fn compute_pseudo_style_impl(
+        &self,
+        element: &ElementInfo,
+        parent: &ComputedStyle,
+        ancestors: &[ElementInfo],
+        pseudo: PseudoTarget,
+        include_marker_presentation: bool,
+    ) -> Option<ComputedStyle> {
         if matches!(pseudo, PseudoTarget::None) {
             return None;
         }
@@ -4252,6 +4585,7 @@ impl StyleResolver {
             return None;
         }
 
+        let propagates_text_decoration = !parent.text_decoration.is_none();
         let mut computed = ComputedStyle {
             font_size: parent.font_size,
             pending_font_size_var: None,
@@ -4259,6 +4593,8 @@ impl StyleResolver {
             pending_line_height_var: None,
             color: parent.color,
             background_color: None,
+            background_source_color: None,
+            background_alpha: 1.0,
             background_paint: None,
             background_paints: Vec::new(),
             background_sizes: Vec::new(),
@@ -4294,6 +4630,7 @@ impl StyleResolver {
             min_width: LengthSpec::Auto,
             min_height: LengthSpec::Auto,
             max_height: LengthSpec::Auto,
+            aspect_ratio: None,
             pending_min_width_var: None,
             pending_min_height_var: None,
             pending_max_height_var: None,
@@ -4314,8 +4651,10 @@ impl StyleResolver {
             direction: parent.direction,
             writing_mode: parent.writing_mode,
             pending_vertical_align_var: None,
-            vertical_align: parent.vertical_align,
+            vertical_align_inherit_base: parent.vertical_align,
+            vertical_align: VerticalAlignMode::Baseline,
             font_weight: parent.font_weight,
+            font_synthesis_weight: parent.font_synthesis_weight,
             font_style: parent.font_style,
             text_transform: parent.text_transform,
             transform_list: Vec::new(),
@@ -4329,10 +4668,31 @@ impl StyleResolver {
             transform: Vec::new(),
             transform_origin: CssTransformOrigin::center(),
             text_decoration: parent.text_decoration,
-            text_decoration_color: parent.color,
-            text_decoration_color_tracks_current: true,
-            text_decoration_thickness: TextDecorationThicknessMode::Auto,
-            text_decoration_style: TextDecorationStyleMode::Solid,
+            text_decoration_color: if propagates_text_decoration {
+                parent.text_decoration_color
+            } else {
+                parent.color
+            },
+            text_decoration_color_tracks_current: if propagates_text_decoration {
+                parent.text_decoration_color_tracks_current
+            } else {
+                true
+            },
+            text_decoration_thickness: if propagates_text_decoration {
+                parent.text_decoration_thickness
+            } else {
+                TextDecorationThicknessMode::Auto
+            },
+            text_decoration_style: if propagates_text_decoration {
+                parent.text_decoration_style
+            } else {
+                TextDecorationStyleMode::Solid
+            },
+            text_emphasis_style: parent.text_emphasis_style,
+            text_emphasis_color: parent.text_emphasis_color,
+            text_emphasis_color_tracks_current: parent.text_emphasis_color_tracks_current,
+            text_emphasis_position: parent.text_emphasis_position,
+            initial_letter: None,
             text_underline_offset: parent.text_underline_offset,
             text_underline_position: parent.text_underline_position,
             text_shadows: parent.text_shadows.clone(),
@@ -4342,6 +4702,7 @@ impl StyleResolver {
             text_indent_each_line: parent.text_indent_each_line,
             content: None,
             generated_content: None,
+            marker_content_overridden: false,
             quotes: parent.quotes.clone(),
             counter_reset: Vec::new(),
             counter_increment: Vec::new(),
@@ -4364,9 +4725,9 @@ impl StyleResolver {
             border_bottom_color: None,
             border_left_color: None,
             border_style: BorderStyleState::none(),
-            border_collapse: BorderCollapseMode::Separate,
+            border_collapse: parent.border_collapse,
             caption_side: parent.caption_side,
-            border_spacing: BorderSpacingSpec::zero(),
+            border_spacing: parent.border_spacing,
             table_layout: TableLayoutMode::Auto,
             empty_cells_hide: parent.empty_cells_hide,
             border_radius: BorderRadiiSpec::zero(),
@@ -4385,6 +4746,7 @@ impl StyleResolver {
             mix_blend_mode: MixBlendMode::Normal,
             isolation: false,
             opacity: 1.0,
+            pending_opacity_var: None,
             container_names: Vec::new(),
             container_type: ContainerQueryType::Normal,
             clip_path: None,
@@ -4397,6 +4759,8 @@ impl StyleResolver {
             font_stack: parent.font_stack.clone(),
             font_name: parent.font_name.clone(),
             position: PositionMode::Static,
+            float_mode: FloatMode::None,
+            clear_mode: ClearMode::None,
             z_index: 0,
             inset_left: LengthSpec::Auto,
             inset_top: LengthSpec::Auto,
@@ -4408,29 +4772,37 @@ impl StyleResolver {
             pending_inset_right_var: None,
             pending_inset_bottom_var: None,
             box_sizing: BoxSizingMode::ContentBox,
-            flex_direction: parent.flex_direction,
-            flex_wrap: parent.flex_wrap,
-            flex_basis: parent.flex_basis,
+            flex_direction: FlexDirectionMode::Row,
+            flex_wrap: FlexWrapMode::NoWrap,
+            flex_basis: LengthSpec::Auto,
             pending_flex_basis_var: None,
-            order: parent.order,
-            justify_content: parent.justify_content,
-            align_items: parent.align_items,
+            order: 0,
+            justify_content: JustifyContentMode::FlexStart,
+            align_items: AlignItemsMode::Stretch,
             align_self: AlignSelfMode::Auto,
-            align_content: parent.align_content,
+            align_content: AlignContentMode::Stretch,
+            column_count: 1,
+            column_rule_width: LengthSpec::Absolute(Pt::from_f32(2.25)),
+            column_rule_style: OutlineLineStyle::Solid,
+            column_rule_color: None,
+            column_rule_visible: false,
             grid_columns: None,
             grid_rows: None,
             grid_column_tracks: Vec::new(),
             grid_row_tracks: Vec::new(),
             grid_column_start: None,
             grid_row_start: None,
-            gap: parent.gap,
+            row_gap: LengthSpec::Absolute(Pt::ZERO),
+            pending_row_gap_var: None,
+            gap: LengthSpec::Absolute(Pt::ZERO),
             pending_gap_var: None,
-            flex_grow: parent.flex_grow,
-            flex_shrink: parent.flex_shrink,
+            flex_grow: 0.0,
+            flex_shrink: 1.0,
             overflow_x: OverflowMode::Visible,
             overflow_y: OverflowMode::Visible,
             overflow: OverflowMode::Visible,
             object_fit: ObjectFitMode::Fill,
+            image_rendering: parent.image_rendering,
             object_position: parent.object_position,
             custom_lengths: parent.custom_lengths.clone(),
             custom_colors: parent.custom_colors.clone(),
@@ -4505,6 +4877,7 @@ impl StyleResolver {
         resolve_pending_vars(&mut computed);
         apply_border_style_mask(&mut computed);
         resolve_named_counter_style(&mut computed, &self.counter_styles);
+        computed.marker_content_overridden = marker_content_overrides_marker;
 
         let has_static_content = computed
             .content
@@ -4517,6 +4890,8 @@ impl StyleResolver {
         if has_static_content
             || has_generated_content
             || (matches!(pseudo, PseudoTarget::Marker) && marker_content_overrides_marker)
+            || (matches!(pseudo, PseudoTarget::Marker) && include_marker_presentation)
+            || matches!(pseudo, PseudoTarget::FirstLetter)
         {
             Some(computed)
         } else {
@@ -4711,7 +5086,12 @@ fn native_counter_style_symbols(
     let mut system = AnonymousListStyleSymbolsSystem::Symbolic;
     let mut fixed_start = 1;
     let mut symbols: Option<Vec<String>> = None;
+    let mut prefix = String::new();
     let mut suffix = ". ".to_string();
+    let mut negative_prefix = "-".to_string();
+    let mut negative_suffix = String::new();
+    let mut pad_width = 0usize;
+    let mut pad_symbol = "0".to_string();
 
     for declaration in declarations.normal().chain(declarations.important()) {
         match declaration.name.to_ascii_lowercase().as_str() {
@@ -4737,6 +5117,14 @@ fn native_counter_style_symbols(
                             .unwrap_or(1)
                             .max(1);
                     }
+                    "extends"
+                        if parts
+                            .get(1)
+                            .and_then(|value| crate::css_native::parse_identifier(value))
+                            .is_some_and(|value| value.eq_ignore_ascii_case("decimal")) =>
+                    {
+                        system = AnonymousListStyleSymbolsSystem::ExtendsDecimal;
+                    }
                     _ => return None,
                 }
             }
@@ -4754,16 +5142,47 @@ fn native_counter_style_symbols(
                     suffix = parsed.join("");
                 }
             }
+            "prefix" => {
+                if let Some(parsed) =
+                    crate::css_native::parse_string_or_ident_list(&declaration.value)
+                {
+                    prefix = parsed.join("");
+                }
+            }
+            "negative" => {
+                if let Some(parsed) =
+                    crate::css_native::parse_string_or_ident_list(&declaration.value)
+                {
+                    if let Some(value) = parsed.first() {
+                        negative_prefix = value.clone();
+                    }
+                    negative_suffix = parsed.get(1).cloned().unwrap_or_default();
+                }
+            }
+            "pad" => {
+                let parts = split_top_level_whitespace(&declaration.value);
+                if let Some(width) = parts.first().and_then(|value| value.parse::<usize>().ok()) {
+                    if let Some(symbol) = parts.get(1).and_then(|value| {
+                        crate::css_native::parse_string_or_ident_list(value)
+                            .and_then(|values| values.into_iter().next())
+                    }) {
+                        pad_width = width;
+                        pad_symbol = symbol;
+                    }
+                }
+            }
             _ => {}
         }
     }
 
-    let symbols = symbols?;
-    if symbols.is_empty()
-        || (matches!(
-            system,
-            AnonymousListStyleSymbolsSystem::Numeric | AnonymousListStyleSymbolsSystem::Alphabetic
-        ) && symbols.len() < 2)
+    let symbols = symbols.unwrap_or_default();
+    if !matches!(system, AnonymousListStyleSymbolsSystem::ExtendsDecimal)
+        && (symbols.is_empty()
+            || (matches!(
+                system,
+                AnonymousListStyleSymbolsSystem::Numeric
+                    | AnonymousListStyleSymbolsSystem::Alphabetic
+            ) && symbols.len() < 2))
     {
         return None;
     }
@@ -4772,7 +5191,12 @@ fn native_counter_style_symbols(
         AnonymousListStyleSymbols {
             system,
             symbols,
+            prefix,
             suffix,
+            negative_prefix,
+            negative_suffix,
+            pad_width,
+            pad_symbol,
             fixed_start,
         },
     ))
@@ -5122,36 +5546,45 @@ fn compare_f32(lhs: f32, operator: MediaFeatureComparison, rhs: f32) -> bool {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn extract_css_page_setup(
     css: &str,
     debug: Option<&DebugLogger>,
     viewport: Option<Size>,
 ) -> CssPageSetup {
+    extract_css_page_styles(css, debug, viewport).base
+}
+
+pub(crate) fn extract_css_page_styles(
+    css: &str,
+    debug: Option<&DebugLogger>,
+    viewport: Option<Size>,
+) -> CssPageStyles {
     if css.trim().is_empty() {
-        return CssPageSetup::default();
+        return CssPageStyles::default();
     }
     let Ok(sheet) = crate::css_native::parse_stylesheet(css) else {
-        return CssPageSetup::default();
+        return CssPageStyles::default();
     };
     let viewport = viewport.unwrap_or(Size {
         width: Pt::ZERO,
         height: Pt::ZERO,
     });
     let prefer_print = native_rule_list_has_print_media(&sheet.rules);
-    let mut setup = CssPageSetup::default();
-    extract_native_css_page_setup_from_rules(
+    let mut styles = CssPageStyles::default();
+    extract_native_css_page_styles_from_rules(
         &sheet.rules,
-        &mut setup,
+        &mut styles,
         viewport,
         prefer_print,
         debug,
     );
-    setup
+    styles
 }
 
-fn extract_native_css_page_setup_from_rules(
+fn extract_native_css_page_styles_from_rules(
     rules: &[crate::css_native::Rule],
-    setup: &mut CssPageSetup,
+    styles: &mut CssPageStyles,
     viewport: Size,
     prefer_print: bool,
     debug: Option<&DebugLogger>,
@@ -5161,19 +5594,28 @@ fn extract_native_css_page_setup_from_rules(
             continue;
         };
         match at_rule.name.as_str() {
-            "page" if at_rule.prelude.trim().is_empty() => {
+            "page" => {
                 if let Some(crate::css_native::AtRuleBlock::Declarations(declarations)) =
                     &at_rule.block
                 {
-                    apply_native_page_declarations(declarations, setup);
+                    let target = match at_rule.prelude.trim().to_ascii_lowercase().as_str() {
+                        "" => Some(&mut styles.base),
+                        ":first" => Some(&mut styles.first),
+                        ":left" => Some(&mut styles.left),
+                        ":right" => Some(&mut styles.right),
+                        _ => None,
+                    };
+                    if let Some(target) = target {
+                        apply_native_page_declarations(declarations, target);
+                    }
                 }
             }
             "media" => {
                 if native_media_prelude_matches(&at_rule.prelude, viewport, prefer_print, debug) {
                     if let Some(crate::css_native::AtRuleBlock::Rules(nested)) = &at_rule.block {
-                        extract_native_css_page_setup_from_rules(
+                        extract_native_css_page_styles_from_rules(
                             nested,
-                            setup,
+                            styles,
                             viewport,
                             prefer_print,
                             debug,
@@ -5213,6 +5655,9 @@ fn apply_native_page_property(
         "margin-right" => setup.margin_right = parse_absolute_pt_from_str(&declaration.value),
         "margin-bottom" => setup.margin_bottom = parse_absolute_pt_from_str(&declaration.value),
         "margin-left" => setup.margin_left = parse_absolute_pt_from_str(&declaration.value),
+        "background" | "background-color" => {
+            setup.background = parse_color_string(&declaration.value)
+        }
         _ => {}
     }
 }
@@ -5295,6 +5740,12 @@ fn page_named_size(name: &str) -> Option<Size> {
         "a5" => Some(Size::from_mm(148.0, 210.0)),
         "a4" => Some(Size::from_mm(210.0, 297.0)),
         "a3" => Some(Size::from_mm(297.0, 420.0)),
+        // Chromium's print preset is quantized to whole PDF points for this
+        // named sheet (nominally 257 mm by 364 mm).
+        "jis-b4" => Some(Size {
+            width: Pt::from_f32(729.0),
+            height: Pt::from_f32(1032.0),
+        }),
         "letter" => Some(Size::from_inches(8.5, 11.0)),
         "legal" => Some(Size::from_inches(8.5, 14.0)),
         "ledger" | "tabloid" => Some(Size::from_inches(11.0, 17.0)),
@@ -5473,15 +5924,7 @@ fn is_native_parsed_no_effect_property(name: &str) -> bool {
 fn is_multicol_fallback_property_name(name: &str) -> bool {
     matches!(
         name,
-        "columns"
-            | "column-count"
-            | "column-width"
-            | "column-fill"
-            | "column-span"
-            | "column-rule"
-            | "column-rule-width"
-            | "column-rule-style"
-            | "column-rule-color"
+        "columns" | "column-width" | "column-fill" | "column-span"
     )
 }
 
@@ -5726,10 +6169,14 @@ fn parse_pseudo_class(raw: &str) -> Option<PseudoClass> {
     if raw.is_empty() {
         return None;
     }
-    if let Some(args) = raw.strip_prefix("not(") {
-        let args = args.trim_end_matches(')').trim();
-        let inner = parse_simple_selector(args)?;
-        return Some(PseudoClass::Not(inner));
+    if let Some(selectors) = parse_functional_selector_list(raw, "not") {
+        return Some(PseudoClass::Not(selectors));
+    }
+    if let Some(selectors) = parse_functional_selector_list(raw, "is") {
+        return Some(PseudoClass::Is(selectors));
+    }
+    if let Some(selectors) = parse_functional_selector_list(raw, "where") {
+        return Some(PseudoClass::Where(selectors));
     }
     if raw.eq_ignore_ascii_case("root") {
         return Some(PseudoClass::Root);
@@ -5739,6 +6186,12 @@ fn parse_pseudo_class(raw: &str) -> Option<PseudoClass> {
     }
     if raw.eq_ignore_ascii_case("last-child") {
         return Some(PseudoClass::LastChild);
+    }
+    if raw.eq_ignore_ascii_case("first-of-type") {
+        return Some(PseudoClass::FirstOfType);
+    }
+    if raw.eq_ignore_ascii_case("last-of-type") {
+        return Some(PseudoClass::LastOfType);
     }
     if raw.eq_ignore_ascii_case("hover") {
         return Some(PseudoClass::Hover);
@@ -5751,6 +6204,9 @@ fn parse_pseudo_class(raw: &str) -> Option<PseudoClass> {
     }
     if raw.eq_ignore_ascii_case("marker") {
         return Some(PseudoClass::Marker);
+    }
+    if raw.eq_ignore_ascii_case("first-letter") {
+        return Some(PseudoClass::FirstLetter);
     }
     if let Some(args) = raw.strip_prefix("nth-child(") {
         let args = args.trim_end_matches(')').trim();
@@ -5773,22 +6229,40 @@ fn parse_pseudo_class(raw: &str) -> Option<PseudoClass> {
     if let Some(args) = raw.strip_prefix("nth-of-type(") {
         let args = args.trim_end_matches(')').trim();
         if args.eq_ignore_ascii_case("even") {
-            return Some(PseudoClass::NthChildEven);
+            return Some(PseudoClass::NthOfTypeEven);
         }
         if args.eq_ignore_ascii_case("odd") {
-            return Some(PseudoClass::NthChildOdd);
+            return Some(PseudoClass::NthOfTypeOdd);
         }
         if let Ok(n) = args.parse::<usize>() {
             if n >= 1 {
-                return Some(PseudoClass::NthChild(n));
+                return Some(PseudoClass::NthOfType(n));
             }
         }
         if let Some((a, b)) = parse_nth_formula(args) {
-            return Some(PseudoClass::NthChildFormula { a, b });
+            return Some(PseudoClass::NthOfTypeFormula { a, b });
         }
         return None;
     }
     Some(PseudoClass::Unsupported)
+}
+
+fn parse_functional_selector_list(raw: &str, name: &str) -> Option<Vec<SimpleSelector>> {
+    let prefix_len = name.len() + 1;
+    if raw.len() <= prefix_len || !raw.ends_with(')') {
+        return None;
+    }
+    let prefix = raw.get(..prefix_len)?;
+    if !prefix[..name.len()].eq_ignore_ascii_case(name) || !prefix.ends_with('(') {
+        return None;
+    }
+    let args = raw.get(prefix_len..raw.len() - 1)?.trim();
+    let selectors = crate::css_native::split_top_level(args, ',')
+        .ok()?
+        .into_iter()
+        .filter_map(|selector| parse_simple_selector(selector.trim()))
+        .collect::<Vec<_>>();
+    (!selectors.is_empty()).then_some(selectors)
 }
 
 fn parse_nth_formula(raw: &str) -> Option<(i32, i32)> {
@@ -5915,11 +6389,13 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
         "font-size" => apply_font_size_from_raw(delta, raw),
         "line-height" => apply_line_height_from_raw(delta, raw),
         "font-weight" => apply_font_weight_from_raw(delta, raw),
+        "font-synthesis" => apply_font_synthesis_from_raw(delta, raw),
         "font-style" => apply_font_style_from_raw(delta, raw),
         "vertical-align" => apply_vertical_align_from_raw(delta, raw),
         "opacity" => {
             if raw.trim().eq_ignore_ascii_case("revert-layer") {
                 delta.opacity = None;
+                delta.opacity_var = None;
                 delta.revert_layer.opacity = true;
                 true
             } else {
@@ -5943,6 +6419,24 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
                 true
             } else {
                 apply_position_from_raw(delta, raw)
+            }
+        }
+        "float" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                delta.float_mode = None;
+                delta.revert_layer.float_mode = true;
+                true
+            } else {
+                apply_float_from_raw(delta, raw)
+            }
+        }
+        "clear" => {
+            if raw.trim().eq_ignore_ascii_case("revert-layer") {
+                delta.clear_mode = None;
+                delta.revert_layer.clear_mode = true;
+                true
+            } else {
+                apply_clear_from_raw(delta, raw)
             }
         }
         "width" | "height" | "min-width" | "max-width" | "min-height" | "max-height"
@@ -5983,6 +6477,14 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
                 apply_z_index_from_raw(delta, raw)
             }
         }
+        "aspect-ratio" => {
+            if let Some(value) = parse_aspect_ratio_spec(raw) {
+                delta.aspect_ratio = Some(value);
+                true
+            } else {
+                false
+            }
+        }
         "container" => {
             apply_container_shorthand_from_raw(raw, delta);
             true
@@ -6005,8 +6507,10 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
         }
         "flex-direction" => {
             let value = match raw.trim().to_ascii_lowercase().as_str() {
-                "row" | "row-reverse" => Some(FlexDirectionMode::Row),
-                "column" | "column-reverse" => Some(FlexDirectionMode::Column),
+                "row" => Some(FlexDirectionMode::Row),
+                "row-reverse" => Some(FlexDirectionMode::RowReverse),
+                "column" => Some(FlexDirectionMode::Column),
+                "column-reverse" => Some(FlexDirectionMode::ColumnReverse),
                 _ => None,
             };
             if let Some(value) = value {
@@ -6019,7 +6523,8 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
         "flex-wrap" => {
             let value = match raw.trim().to_ascii_lowercase().as_str() {
                 "nowrap" => Some(FlexWrapMode::NoWrap),
-                "wrap" | "wrap-reverse" => Some(FlexWrapMode::Wrap),
+                "wrap" => Some(FlexWrapMode::Wrap),
+                "wrap-reverse" => Some(FlexWrapMode::WrapReverse),
                 _ => None,
             };
             if let Some(value) = value {
@@ -6047,7 +6552,7 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
             }
         }
         "justify-content" => {
-            if let Some(value) = last_css_keyword(raw).and_then(justify_content_mode_from_keyword) {
+            if let Some(value) = justify_content_mode_from_value(raw) {
                 delta.justify_content = Some(value);
                 true
             } else {
@@ -6055,7 +6560,7 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
             }
         }
         "align-items" => {
-            if let Some(value) = last_css_keyword(raw).and_then(align_items_mode_from_keyword) {
+            if let Some(value) = align_items_mode_from_value(raw) {
                 delta.align_items = Some(value);
                 true
             } else {
@@ -6063,7 +6568,7 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
             }
         }
         "align-self" => {
-            if let Some(value) = last_css_keyword(raw).and_then(align_self_mode_from_keyword) {
+            if let Some(value) = align_self_mode_from_value(raw) {
                 delta.align_self = Some(value);
                 true
             } else {
@@ -6103,6 +6608,25 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
                 false
             }
         }
+        "column-count" => {
+            let lowered = raw.trim().to_ascii_lowercase();
+            let value = match lowered.as_str() {
+                "auto" | "initial" | "unset" | "revert" => Some(1),
+                _ => lowered
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|count| (1..=256).contains(count)),
+            };
+            if let Some(value) = value {
+                delta.column_count = Some(value);
+                true
+            } else {
+                false
+            }
+        }
+        "column-rule" | "column-rule-width" | "column-rule-style" | "column-rule-color" => {
+            apply_native_column_rule_property(&name, raw, delta)
+        }
         "grid-template-columns" => {
             if let Some(tracks) = parse_grid_track_list(raw) {
                 delta.grid_columns = Some(tracks.len());
@@ -6139,7 +6663,9 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
             }
             true
         }
-        "gap" | "row-gap" | "column-gap" => apply_native_gap_value(raw, delta),
+        "gap" | "grid-gap" => apply_native_gap_value(raw, delta, GapProperty::Both),
+        "row-gap" | "grid-row-gap" => apply_native_gap_value(raw, delta, GapProperty::Row),
+        "column-gap" | "grid-column-gap" => apply_native_gap_value(raw, delta, GapProperty::Column),
         "flex-grow" => apply_native_nonnegative_number(raw, &mut delta.flex_grow),
         "flex-shrink" => apply_native_nonnegative_number(raw, &mut delta.flex_shrink),
         "flex-basis" => apply_native_flex_basis(raw, delta),
@@ -6425,6 +6951,14 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
                 false
             }
         }
+        "image-rendering" => {
+            if let Some(value) = parse_image_rendering_spec_str(raw) {
+                delta.image_rendering = Some(value);
+                true
+            } else {
+                false
+            }
+        }
         "object-position" => {
             if let Some(value) = parse_object_position_spec_str(raw) {
                 delta.object_position = Some(value);
@@ -6464,6 +6998,11 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
         "text-decoration-color" => apply_text_decoration_color_from_raw(delta, raw),
         "text-decoration-thickness" => apply_text_decoration_thickness_from_raw(delta, raw),
         "text-decoration-style" => apply_text_decoration_style_from_raw(delta, raw),
+        "text-emphasis" => apply_native_text_emphasis_shorthand(raw, delta),
+        "text-emphasis-style" => apply_native_text_emphasis_style(raw, delta),
+        "text-emphasis-color" => apply_native_text_emphasis_color(raw, delta),
+        "text-emphasis-position" => apply_native_text_emphasis_position(raw, delta),
+        "initial-letter" => apply_native_initial_letter(raw, delta),
         "text-underline-offset" => apply_text_underline_offset_from_raw(delta, raw),
         "text-underline-position" => apply_text_underline_position_from_raw(delta, raw),
         "text-overflow" => {
@@ -6609,7 +7148,14 @@ fn native_length_is_nonnegative(value: LengthSpec) -> bool {
     match value {
         LengthSpec::Absolute(value) => value >= Pt::ZERO,
         LengthSpec::Percent(value) | LengthSpec::Em(value) | LengthSpec::Rem(value) => value >= 0.0,
-        LengthSpec::Auto | LengthSpec::Calc(_) | LengthSpec::Inherit | LengthSpec::Initial => true,
+        LengthSpec::Auto
+        | LengthSpec::Content
+        | LengthSpec::MinContent
+        | LengthSpec::MaxContent
+        | LengthSpec::FitContent
+        | LengthSpec::Calc(_)
+        | LengthSpec::Inherit
+        | LengthSpec::Initial => true,
     }
 }
 
@@ -6720,7 +7266,15 @@ fn apply_native_size_property(property_name: &str, raw: &str, delta: &mut StyleD
         property_name,
         "max-width" | "max-height" | "max-inline-size" | "max-block-size"
     );
-    let component = if is_max && lowered == "none" {
+    let intrinsic = match lowered.as_str() {
+        "min-content" => Some(LengthSpec::MinContent),
+        "max-content" => Some(LengthSpec::MaxContent),
+        "fit-content" => Some(LengthSpec::FitContent),
+        _ => None,
+    };
+    let component = if let Some(value) = intrinsic {
+        NativeLengthComponent::Spec(value)
+    } else if is_max && lowered == "none" {
         NativeLengthComponent::Spec(LengthSpec::Auto)
     } else {
         let Some(value) = parse_native_length_component(&lowered, !is_max, false) else {
@@ -7221,7 +7775,11 @@ fn parse_native_border_color_component(raw: &str) -> Option<NativeBorderColorCom
     }
     if let Some((color, alpha)) = parse_color_string(&lowered) {
         return Some(NativeBorderColorComponent::Spec(ColorSpec::Value(
-            blend_over_white(color, alpha),
+            if alpha <= 0.0 {
+                Color::TRANSPARENT
+            } else {
+                blend_over_white(color, alpha)
+            },
         )));
     }
     if should_defer_color_expr(&lowered) || lowered.contains("var(") {
@@ -7660,6 +8218,55 @@ fn apply_native_outline_property(property_name: &str, raw: &str, delta: &mut Sty
                 NativeBorderColorComponent::Spec(value) => set_delta_outline_color(delta, value),
                 NativeBorderColorComponent::Var(_) => return false,
             }
+            true
+        }
+        _ => false,
+    }
+}
+
+fn apply_native_column_rule_property(
+    property_name: &str,
+    raw: &str,
+    delta: &mut StyleDelta,
+) -> bool {
+    match property_name {
+        "column-rule-width" => {
+            let Some(NativeLengthComponent::Spec(value)) = parse_native_border_width_component(raw)
+            else {
+                return false;
+            };
+            delta.column_rule_width = Some(value);
+            true
+        }
+        "column-rule-style" => {
+            let Some(value) = parse_native_border_style_component(raw) else {
+                return false;
+            };
+            delta.column_rule_style = Some(value);
+            true
+        }
+        "column-rule-color" => {
+            let Some(NativeBorderColorComponent::Spec(value)) =
+                parse_native_border_color_component(raw)
+            else {
+                return false;
+            };
+            delta.column_rule_color = Some(value);
+            true
+        }
+        "column-rule" => {
+            let Some((width, style, color)) = parse_native_border_side_shorthand(raw) else {
+                return false;
+            };
+            let NativeLengthComponent::Spec(width) = width else {
+                return false;
+            };
+            let NativeBorderColorComponent::Spec(color) = color else {
+                return false;
+            };
+            delta.column_rule_width = Some(width);
+            delta.column_rule_style = Some(style);
+            delta.column_rule_color = Some(color);
             true
         }
         _ => false,
@@ -8134,7 +8741,12 @@ fn parse_native_anonymous_symbols(raw: &str) -> Option<AnonymousListStyleSymbols
     Some(AnonymousListStyleSymbols {
         system,
         symbols,
+        prefix: String::new(),
         suffix: " ".to_string(),
+        negative_prefix: "-".to_string(),
+        negative_suffix: String::new(),
+        pad_width: 0,
+        pad_symbol: "0".to_string(),
         fixed_start: 1,
     })
 }
@@ -8440,6 +9052,172 @@ fn apply_native_text_decoration_shorthand(raw: &str, delta: &mut StyleDelta) -> 
     true
 }
 
+fn parse_text_emphasis_style_value(raw: &str) -> Option<TextEmphasisStyleMode> {
+    let lowered = raw.trim().to_ascii_lowercase();
+    if lowered == "none" {
+        return Some(TextEmphasisStyleMode::None);
+    }
+    let tokens = split_top_level_whitespace(&lowered);
+    let has_dot = tokens.iter().any(|token| token == "dot");
+    let supported = tokens
+        .iter()
+        .all(|token| matches!(token.as_str(), "filled" | "dot"));
+    (has_dot && supported).then_some(TextEmphasisStyleMode::FilledDot)
+}
+
+fn apply_native_text_emphasis_style(raw: &str, delta: &mut StyleDelta) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    match lowered.as_str() {
+        "inherit" | "unset" => {
+            set_delta_text_emphasis_style(delta, TextEmphasisStyleSpec::Inherit);
+            true
+        }
+        "initial" | "revert" => {
+            set_delta_text_emphasis_style(delta, TextEmphasisStyleSpec::Initial);
+            true
+        }
+        "revert-layer" => set_revert_layer_text_emphasis_style(delta),
+        _ => {
+            if let Some(value) = parse_text_emphasis_style_value(&lowered) {
+                set_delta_text_emphasis_style(delta, TextEmphasisStyleSpec::Value(value));
+                true
+            } else {
+                false
+            }
+        }
+    }
+}
+
+fn parse_text_emphasis_color_value(raw: &str) -> Option<ColorSpec> {
+    let lowered = raw.trim().to_ascii_lowercase();
+    if lowered == "currentcolor" {
+        return Some(ColorSpec::CurrentColor);
+    }
+    parse_color_string(&lowered)
+        .map(|(color, alpha)| ColorSpec::Value(blend_over_white(color, alpha)))
+}
+
+fn apply_native_text_emphasis_color(raw: &str, delta: &mut StyleDelta) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    let spec = match lowered.as_str() {
+        "inherit" | "unset" => Some(ColorSpec::Inherit),
+        "initial" | "revert" => Some(ColorSpec::Initial),
+        "revert-layer" => return set_revert_layer_text_emphasis_color(delta),
+        _ => parse_text_emphasis_color_value(&lowered),
+    };
+    let Some(spec) = spec else {
+        return false;
+    };
+    set_delta_text_emphasis_color(delta, spec);
+    true
+}
+
+fn apply_native_text_emphasis_position(raw: &str, delta: &mut StyleDelta) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    let spec = match lowered.as_str() {
+        "inherit" | "unset" => TextEmphasisPositionSpec::Inherit,
+        "initial" | "revert" => TextEmphasisPositionSpec::Initial,
+        "revert-layer" => return set_revert_layer_text_emphasis_position(delta),
+        _ => {
+            let tokens = split_top_level_whitespace(&lowered);
+            if tokens.iter().any(|token| token == "under") {
+                TextEmphasisPositionSpec::Value(TextEmphasisPositionMode::Under)
+            } else if tokens.iter().any(|token| token == "over") {
+                TextEmphasisPositionSpec::Value(TextEmphasisPositionMode::Over)
+            } else {
+                return false;
+            }
+        }
+    };
+    set_delta_text_emphasis_position(delta, spec);
+    true
+}
+
+fn parse_initial_letter_value(raw: &str) -> Option<InitialLetterValue> {
+    let mut size = None;
+    let mut sink = None;
+    let mut drop = false;
+    for token in raw.split_whitespace() {
+        match token.to_ascii_lowercase().as_str() {
+            "drop" => drop = true,
+            "raise" => sink = Some(1),
+            _ => {
+                let value = token.parse::<f32>().ok()?;
+                if !value.is_finite() || value < 1.0 {
+                    return None;
+                }
+                if size.is_none() {
+                    size = Some(value);
+                } else if sink.is_none() && value.fract().abs() <= f32::EPSILON {
+                    sink = Some(value as usize);
+                } else {
+                    return None;
+                }
+            }
+        }
+    }
+    let size = size?;
+    let sink = sink.unwrap_or_else(|| {
+        if drop {
+            size.floor().max(1.0) as usize
+        } else {
+            size.floor().max(1.0) as usize
+        }
+    });
+    Some(InitialLetterValue {
+        size,
+        sink: sink.max(1),
+    })
+}
+
+fn apply_native_initial_letter(raw: &str, delta: &mut StyleDelta) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    delta.initial_letter = match lowered.as_str() {
+        "normal" | "initial" | "unset" | "revert" | "revert-layer" => {
+            Some(InitialLetterSpec::Initial)
+        }
+        "inherit" => Some(InitialLetterSpec::Inherit),
+        _ => parse_initial_letter_value(&lowered).map(InitialLetterSpec::Value),
+    };
+    delta.initial_letter.is_some()
+}
+
+fn apply_native_text_emphasis_shorthand(raw: &str, delta: &mut StyleDelta) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    match lowered.as_str() {
+        "inherit" | "unset" => {
+            set_delta_text_emphasis_style(delta, TextEmphasisStyleSpec::Inherit);
+            set_delta_text_emphasis_color(delta, ColorSpec::Inherit);
+            return true;
+        }
+        "initial" | "revert" => {
+            set_delta_text_emphasis_style(delta, TextEmphasisStyleSpec::Initial);
+            set_delta_text_emphasis_color(delta, ColorSpec::Initial);
+            return true;
+        }
+        "revert-layer" => return set_revert_layer_text_emphasis_shorthand(delta),
+        _ => {}
+    }
+
+    let tokens = split_top_level_whitespace(&lowered);
+    let color = tokens
+        .iter()
+        .find_map(|token| parse_text_emphasis_color_value(token))
+        .unwrap_or(ColorSpec::CurrentColor);
+    let style_value = tokens
+        .iter()
+        .filter(|token| parse_text_emphasis_color_value(token).is_none())
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let Some(style) = parse_text_emphasis_style_value(&style_value) else {
+        return false;
+    };
+    set_delta_text_emphasis_style(delta, TextEmphasisStyleSpec::Value(style));
+    set_delta_text_emphasis_color(delta, color);
+    true
+}
+
 fn apply_native_text_spacing(property_name: &str, raw: &str, delta: &mut StyleDelta) -> bool {
     if raw.trim().eq_ignore_ascii_case("revert-layer") {
         return if property_name == "letter-spacing" {
@@ -8501,32 +9279,99 @@ fn last_css_keyword(raw: &str) -> Option<&str> {
         .next_back()
 }
 
-fn apply_native_gap_value(raw: &str, delta: &mut StyleDelta) -> bool {
+#[derive(Clone, Copy)]
+enum GapProperty {
+    Both,
+    Row,
+    Column,
+}
+
+enum NativeGapComponent {
+    Spec(LengthSpec),
+    Var(String),
+}
+
+fn parse_native_gap_component(raw: &str) -> Option<NativeGapComponent> {
     let lowered = raw.trim().to_ascii_lowercase();
-    delta.gap_var = None;
     match lowered.as_str() {
         "normal" | "initial" | "unset" | "revert" => {
-            delta.gap = Some(LengthSpec::Absolute(Pt::ZERO));
-            return true;
+            return Some(NativeGapComponent::Spec(LengthSpec::Absolute(Pt::ZERO)));
         }
-        "inherit" => {
-            delta.gap = Some(LengthSpec::Inherit);
-            return true;
-        }
+        "inherit" => return Some(NativeGapComponent::Spec(LengthSpec::Inherit)),
         _ => {}
     }
     if lowered.contains("var(") {
-        delta.gap = None;
-        delta.gap_var = Some(lowered);
-        return true;
+        return Some(NativeGapComponent::Var(lowered));
     }
-    let first = split_top_level_whitespace(raw).into_iter().next();
-    if let Some(value) = first.and_then(|value| length_spec_from_string(&value)) {
-        delta.gap = Some(value);
-        true
-    } else {
-        false
+    length_spec_from_string(&lowered).map(NativeGapComponent::Spec)
+}
+
+fn set_row_gap_component(delta: &mut StyleDelta, component: NativeGapComponent) {
+    match component {
+        NativeGapComponent::Spec(value) => {
+            delta.row_gap = Some(value);
+            delta.row_gap_var = None;
+        }
+        NativeGapComponent::Var(value) => {
+            delta.row_gap = None;
+            delta.row_gap_var = Some(value);
+        }
     }
+}
+
+fn set_column_gap_component(delta: &mut StyleDelta, component: NativeGapComponent) {
+    match component {
+        NativeGapComponent::Spec(value) => {
+            delta.gap = Some(value);
+            delta.gap_var = None;
+        }
+        NativeGapComponent::Var(value) => {
+            delta.gap = None;
+            delta.gap_var = Some(value);
+        }
+    }
+}
+
+fn apply_native_gap_value(raw: &str, delta: &mut StyleDelta, property: GapProperty) -> bool {
+    let parts = split_top_level_whitespace(raw);
+    if parts.is_empty() {
+        return false;
+    }
+    match property {
+        GapProperty::Row => {
+            if parts.len() != 1 {
+                return false;
+            }
+            let Some(component) = parse_native_gap_component(&parts[0]) else {
+                return false;
+            };
+            set_row_gap_component(delta, component);
+        }
+        GapProperty::Column => {
+            if parts.len() != 1 {
+                return false;
+            }
+            let Some(component) = parse_native_gap_component(&parts[0]) else {
+                return false;
+            };
+            set_column_gap_component(delta, component);
+        }
+        GapProperty::Both => {
+            if parts.len() > 2 {
+                return false;
+            }
+            let Some(row) = parse_native_gap_component(&parts[0]) else {
+                return false;
+            };
+            let column_raw = parts.get(1).unwrap_or(&parts[0]);
+            let Some(column) = parse_native_gap_component(column_raw) else {
+                return false;
+            };
+            set_row_gap_component(delta, row);
+            set_column_gap_component(delta, column);
+        }
+    }
+    true
 }
 
 fn apply_native_nonnegative_number(raw: &str, slot: &mut Option<f32>) -> bool {
@@ -8544,7 +9389,11 @@ fn apply_native_flex_basis(raw: &str, delta: &mut StyleDelta) -> bool {
     let lowered = raw.trim().to_ascii_lowercase();
     delta.flex_basis_var = None;
     let value = match lowered.as_str() {
-        "auto" | "content" => Some(LengthSpec::Auto),
+        "auto" => Some(LengthSpec::Auto),
+        "content" => Some(LengthSpec::Content),
+        "min-content" => Some(LengthSpec::MinContent),
+        "max-content" => Some(LengthSpec::MaxContent),
+        "fit-content" => Some(LengthSpec::FitContent),
         "inherit" => Some(LengthSpec::Inherit),
         "initial" | "unset" | "revert" => Some(LengthSpec::Initial),
         _ => length_spec_from_string(&lowered),
@@ -8568,8 +9417,16 @@ fn parse_native_flex_number(raw: &str) -> Option<f32> {
 
 fn parse_native_flex_basis_component(raw: &str) -> Option<NativeLengthComponent> {
     let lowered = raw.trim().to_ascii_lowercase();
-    if lowered == "auto" || lowered == "content" {
-        return Some(NativeLengthComponent::Spec(LengthSpec::Auto));
+    let intrinsic = match lowered.as_str() {
+        "auto" => Some(LengthSpec::Auto),
+        "content" => Some(LengthSpec::Content),
+        "min-content" => Some(LengthSpec::MinContent),
+        "max-content" => Some(LengthSpec::MaxContent),
+        "fit-content" => Some(LengthSpec::FitContent),
+        _ => None,
+    };
+    if let Some(value) = intrinsic {
+        return Some(NativeLengthComponent::Spec(value));
     }
     if lowered.contains("var(") {
         return Some(NativeLengthComponent::Var(lowered));
@@ -8782,17 +9639,14 @@ fn apply_native_background_color_value(delta: &mut StyleDelta, raw: &str) -> boo
     }
     if should_defer_color_expr(&lowered) {
         if let Some((color, alpha)) = parse_color_string(&lowered) {
-            set_delta_background_color(
-                delta,
-                BackgroundSpec::Value(blend_over_white(color, alpha)),
-            );
+            set_delta_background_color(delta, background_spec_from_color_alpha(color, alpha));
         } else {
             set_delta_background_color_var(delta, lowered);
         }
         return true;
     }
     if let Some((color, alpha)) = parse_color_string(&lowered) {
-        set_delta_background_color(delta, BackgroundSpec::Value(blend_over_white(color, alpha)));
+        set_delta_background_color(delta, background_spec_from_color_alpha(color, alpha));
         return true;
     }
     if let Some(var) = var_name_from_string(&lowered) {
@@ -8925,6 +9779,30 @@ fn set_revert_layer_text_decoration_thickness(delta: &mut StyleDelta) -> bool {
 fn set_revert_layer_text_decoration_style(delta: &mut StyleDelta) -> bool {
     delta.text_decoration_style = None;
     delta.revert_layer.text_decoration_style = true;
+    true
+}
+
+fn set_revert_layer_text_emphasis_style(delta: &mut StyleDelta) -> bool {
+    delta.text_emphasis_style = None;
+    delta.revert_layer.text_emphasis_style = true;
+    true
+}
+
+fn set_revert_layer_text_emphasis_color(delta: &mut StyleDelta) -> bool {
+    delta.text_emphasis_color = None;
+    delta.revert_layer.text_emphasis_color = true;
+    true
+}
+
+fn set_revert_layer_text_emphasis_position(delta: &mut StyleDelta) -> bool {
+    delta.text_emphasis_position = None;
+    delta.revert_layer.text_emphasis_position = true;
+    true
+}
+
+fn set_revert_layer_text_emphasis_shorthand(delta: &mut StyleDelta) -> bool {
+    set_revert_layer_text_emphasis_style(delta);
+    set_revert_layer_text_emphasis_color(delta);
     true
 }
 
@@ -9574,6 +10452,16 @@ fn set_delta_position(delta: &mut StyleDelta, value: PositionMode) {
     delta.revert_layer.position = false;
 }
 
+fn set_delta_float_mode(delta: &mut StyleDelta, value: FloatMode) {
+    delta.float_mode = Some(value);
+    delta.revert_layer.float_mode = false;
+}
+
+fn set_delta_clear_mode(delta: &mut StyleDelta, value: ClearMode) {
+    delta.clear_mode = Some(value);
+    delta.revert_layer.clear_mode = false;
+}
+
 fn set_delta_z_index(delta: &mut StyleDelta, value: i32) {
     delta.z_index = Some(value);
     delta.revert_layer.z_index = false;
@@ -9581,6 +10469,7 @@ fn set_delta_z_index(delta: &mut StyleDelta, value: i32) {
 
 fn set_delta_opacity(delta: &mut StyleDelta, value: OpacitySpec) {
     delta.opacity = Some(value);
+    delta.opacity_var = None;
     delta.revert_layer.opacity = false;
 }
 
@@ -9755,6 +10644,20 @@ fn parse_object_fit_spec_str(raw: &str) -> Option<ObjectFitSpec> {
     }
 }
 
+fn parse_image_rendering_spec_str(raw: &str) -> Option<ImageRenderingSpec> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "auto" | "smooth" | "high-quality" => {
+            Some(ImageRenderingSpec::Value(ImageRenderingMode::Auto))
+        }
+        "pixelated" | "crisp-edges" => {
+            Some(ImageRenderingSpec::Value(ImageRenderingMode::Pixelated))
+        }
+        "inherit" | "unset" => Some(ImageRenderingSpec::Inherit),
+        "initial" | "revert" | "revert-layer" => Some(ImageRenderingSpec::Initial),
+        _ => None,
+    }
+}
+
 fn parse_object_position_spec_str(raw: &str) -> Option<ObjectPositionSpec> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "inherit" | "unset" => Some(ObjectPositionSpec::Inherit),
@@ -9776,6 +10679,8 @@ fn combine_overflow_modes(x: OverflowMode, y: OverflowMode) -> OverflowMode {
     // Static PDF output cannot expose scrollbars, so any clipped or scrollable axis clips paint.
     if matches!(x, OverflowMode::Hidden) || matches!(y, OverflowMode::Hidden) {
         OverflowMode::Hidden
+    } else if matches!(x, OverflowMode::Clip) || matches!(y, OverflowMode::Clip) {
+        OverflowMode::Clip
     } else {
         OverflowMode::Visible
     }
@@ -9784,7 +10689,8 @@ fn combine_overflow_modes(x: OverflowMode, y: OverflowMode) -> OverflowMode {
 fn parse_overflow_mode_str(raw: &str) -> Option<OverflowMode> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "visible" => Some(OverflowMode::Visible),
-        "hidden" | "clip" | "scroll" | "auto" => Some(OverflowMode::Hidden),
+        "clip" => Some(OverflowMode::Clip),
+        "hidden" | "scroll" | "auto" => Some(OverflowMode::Hidden),
         _ => None,
     }
 }
@@ -10064,14 +10970,31 @@ fn map_font_family_name(raw: &str, quoted: bool) -> Option<Arc<str>> {
     if quoted {
         return Some(Arc::<str>::from(cleaned.to_string()));
     }
-    let lower = cleaned.to_ascii_lowercase();
-    let mapped = match lower.as_str() {
-        "monospace" | "ui-monospace" => "Courier",
-        "serif" | "ui-serif" => "Times-Roman",
-        "sans-serif" | "ui-sans-serif" => "Helvetica",
-        _ => cleaned,
-    };
-    Some(Arc::<str>::from(mapped.to_string()))
+    Some(Arc::<str>::from(cleaned.to_string()))
+}
+
+fn generic_font_family_stack(raw: &str) -> Option<&'static [&'static str]> {
+    const SANS: &[&str] = &["Liberation Sans", "Arial", "DejaVu Sans", "Helvetica"];
+    const SERIF: &[&str] = &[
+        "Liberation Serif",
+        "Times New Roman",
+        "DejaVu Serif",
+        "Times-Roman",
+    ];
+    const MONO: &[&str] = &[
+        "DejaVu Sans Mono",
+        "Liberation Mono",
+        "Courier New",
+        "Courier",
+    ];
+
+    let cleaned = raw.trim().trim_matches('"').trim_matches('\'');
+    match cleaned.to_ascii_lowercase().as_str() {
+        "sans-serif" | "ui-sans-serif" | "system-ui" => Some(SANS),
+        "serif" | "ui-serif" => Some(SERIF),
+        "monospace" | "ui-monospace" => Some(MONO),
+        _ => None,
+    }
 }
 
 fn finalize_font_stack(mut stack: Vec<Arc<str>>) -> Option<Vec<Arc<str>>> {
@@ -10091,7 +11014,14 @@ fn finalize_font_stack(mut stack: Vec<Arc<str>>) -> Option<Vec<Arc<str>>> {
 fn font_stack_from_string(raw: &str) -> Option<Vec<Arc<str>>> {
     let mut stack = Vec::new();
     for part in split_args(raw) {
-        if let Some(mapped) = map_font_family_name(&part, is_quoted_css_string(&part)) {
+        let quoted = is_quoted_css_string(&part);
+        if !quoted {
+            if let Some(generic) = generic_font_family_stack(&part) {
+                stack.extend(generic.iter().map(|name| Arc::<str>::from(*name)));
+                continue;
+            }
+        }
+        if let Some(mapped) = map_font_family_name(&part, quoted) {
             stack.push(mapped);
         }
     }
@@ -10144,14 +11074,26 @@ fn color_to_hex(color: Color) -> String {
 }
 
 fn blend_over_white(color: Color, alpha: f32) -> Color {
+    blend_over_color(color, alpha, Color::rgb(1.0, 1.0, 1.0))
+}
+
+fn background_spec_from_color_alpha(color: Color, alpha: f32) -> BackgroundSpec {
+    if alpha <= 0.0 {
+        BackgroundSpec::Transparent
+    } else {
+        BackgroundSpec::Value(color, alpha.clamp(0.0, 1.0))
+    }
+}
+
+fn blend_over_color(color: Color, alpha: f32, backdrop: Color) -> Color {
     let alpha = alpha.clamp(0.0, 1.0);
     if alpha >= 1.0 {
         return color;
     }
     Color::rgb(
-        color.r * alpha + (1.0 - alpha),
-        color.g * alpha + (1.0 - alpha),
-        color.b * alpha + (1.0 - alpha),
+        color.r * alpha + backdrop.r * (1.0 - alpha),
+        color.g * alpha + backdrop.g * (1.0 - alpha),
+        color.b * alpha + backdrop.b * (1.0 - alpha),
     )
 }
 
@@ -10163,6 +11105,10 @@ fn should_defer_color_expr(raw: &str) -> bool {
 fn length_spec_debug(value: LengthSpec) -> String {
     match value {
         LengthSpec::Auto => "auto".to_string(),
+        LengthSpec::Content => "content".to_string(),
+        LengthSpec::MinContent => "min-content".to_string(),
+        LengthSpec::MaxContent => "max-content".to_string(),
+        LengthSpec::FitContent => "fit-content".to_string(),
         LengthSpec::Absolute(pt) => format!("{:.3}pt", pt.to_f32()),
         LengthSpec::Percent(v) => format!("{:.3}%", v * 100.0),
         LengthSpec::Em(v) => format!("{:.3}em", v),
@@ -11168,6 +12114,10 @@ fn debug_style_json(style: &ComputedStyle) -> String {
         json_string(&length_spec_debug(style.inset_bottom))
     ));
     fields.push(format!(
+        "\"row_gap\":{}",
+        json_string(&length_spec_debug(style.row_gap))
+    ));
+    fields.push(format!(
         "\"gap\":{}",
         json_string(&length_spec_debug(style.gap))
     ));
@@ -11290,6 +12240,12 @@ fn sync_text_decoration_current_color(style: &mut ComputedStyle) {
     }
 }
 
+fn sync_text_emphasis_current_color(style: &mut ComputedStyle) {
+    if style.text_emphasis_color_tracks_current {
+        style.text_emphasis_color = style.color;
+    }
+}
+
 fn apply_text_decoration_color_spec_to_computed(
     computed: &mut ComputedStyle,
     parent: &ComputedStyle,
@@ -11308,6 +12264,27 @@ fn apply_text_decoration_color_spec_to_computed(
         ColorSpec::Initial | ColorSpec::CurrentColor => {
             computed.text_decoration_color_tracks_current = true;
             computed.text_decoration_color = computed.color;
+        }
+    }
+}
+
+fn apply_text_emphasis_color_spec_to_computed(
+    computed: &mut ComputedStyle,
+    parent: &ComputedStyle,
+    spec: &ColorSpec,
+) {
+    match spec {
+        ColorSpec::Value(value) => {
+            computed.text_emphasis_color = *value;
+            computed.text_emphasis_color_tracks_current = false;
+        }
+        ColorSpec::Inherit => {
+            computed.text_emphasis_color = parent.text_emphasis_color;
+            computed.text_emphasis_color_tracks_current = parent.text_emphasis_color_tracks_current;
+        }
+        ColorSpec::Initial | ColorSpec::CurrentColor => {
+            computed.text_emphasis_color_tracks_current = true;
+            computed.text_emphasis_color = computed.color;
         }
     }
 }
@@ -11432,13 +12409,26 @@ fn apply_delta(
         computed.pending_color_var = Some(var.clone());
     }
     sync_text_decoration_current_color(computed);
+    sync_text_emphasis_current_color(computed);
     if let Some(color) = &delta.background_color {
-        computed.background_color = match color {
-            BackgroundSpec::Value(value) => Some(*value),
-            BackgroundSpec::Inherit => parent.background_color,
-            BackgroundSpec::CurrentColor => Some(computed.color),
-            BackgroundSpec::Initial => None,
+        let (flattened, source, alpha) = match color {
+            BackgroundSpec::Value(value, alpha) => (
+                Some(blend_over_white(*value, *alpha)),
+                Some(*value),
+                alpha.clamp(0.0, 1.0),
+            ),
+            BackgroundSpec::Transparent => (None, None, 0.0),
+            BackgroundSpec::Inherit => (
+                parent.background_color,
+                parent.background_source_color,
+                parent.background_alpha,
+            ),
+            BackgroundSpec::CurrentColor => (Some(computed.color), Some(computed.color), 1.0),
+            BackgroundSpec::Initial => (None, None, 1.0),
         };
+        computed.background_color = flattened;
+        computed.background_source_color = source;
+        computed.background_alpha = alpha;
     }
     if let Some(paint) = &delta.background_paint {
         computed.background_paint = Some(paint.clone());
@@ -11501,6 +12491,9 @@ fn apply_delta(
         };
     } else if let Some(var) = &delta.font_weight_var {
         computed.pending_font_weight_var = Some(var.clone());
+    }
+    if let Some(enabled) = delta.font_synthesis_weight {
+        computed.font_synthesis_weight = enabled;
     }
     if let Some(style) = delta.font_style {
         computed.pending_font_style_var = None;
@@ -11604,6 +12597,30 @@ fn apply_delta(
             TextDecorationStyleSpec::Value(value) => *value,
             TextDecorationStyleSpec::Inherit => parent.text_decoration_style,
             TextDecorationStyleSpec::Initial => TextDecorationStyleMode::Solid,
+        };
+    }
+    if let Some(emphasis_style) = &delta.text_emphasis_style {
+        computed.text_emphasis_style = match emphasis_style {
+            TextEmphasisStyleSpec::Value(value) => *value,
+            TextEmphasisStyleSpec::Inherit => parent.text_emphasis_style,
+            TextEmphasisStyleSpec::Initial => TextEmphasisStyleMode::None,
+        };
+    }
+    if let Some(color) = &delta.text_emphasis_color {
+        apply_text_emphasis_color_spec_to_computed(computed, parent, color);
+    }
+    if let Some(position) = &delta.text_emphasis_position {
+        computed.text_emphasis_position = match position {
+            TextEmphasisPositionSpec::Value(value) => *value,
+            TextEmphasisPositionSpec::Inherit => parent.text_emphasis_position,
+            TextEmphasisPositionSpec::Initial => TextEmphasisPositionMode::Over,
+        };
+    }
+    if let Some(initial_letter) = delta.initial_letter {
+        computed.initial_letter = match initial_letter {
+            InitialLetterSpec::Value(value) => Some(value),
+            InitialLetterSpec::Inherit => parent.initial_letter,
+            InitialLetterSpec::Initial => None,
         };
     }
     if let Some(offset) = &delta.text_underline_offset {
@@ -11749,7 +12766,13 @@ fn apply_delta(
             LengthSpec::Calc(calc) => {
                 calc.resolve(computed.font_size, computed.font_size, root_font_size)
             }
-            LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => Pt::ZERO,
+            LengthSpec::Auto
+            | LengthSpec::Content
+            | LengthSpec::MinContent
+            | LengthSpec::MaxContent
+            | LengthSpec::FitContent
+            | LengthSpec::Inherit
+            | LengthSpec::Initial => Pt::ZERO,
         };
     }
     if let Some(spacing) = &delta.word_spacing {
@@ -11762,7 +12785,13 @@ fn apply_delta(
             LengthSpec::Calc(calc) => {
                 calc.resolve(computed.font_size, computed.font_size, root_font_size)
             }
-            LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => Pt::ZERO,
+            LengthSpec::Auto
+            | LengthSpec::Content
+            | LengthSpec::MinContent
+            | LengthSpec::MaxContent
+            | LengthSpec::FitContent
+            | LengthSpec::Inherit
+            | LengthSpec::Initial => Pt::ZERO,
         };
     }
     if let Some(tab_size) = delta.tab_size {
@@ -11854,6 +12883,13 @@ fn apply_delta(
         computed.max_height = normalize_size_spec(max_height, parent.max_height);
         computed.pending_max_height_var = None;
     }
+    if let Some(aspect_ratio) = delta.aspect_ratio {
+        computed.aspect_ratio = match aspect_ratio {
+            AspectRatioSpec::Ratio(value) => Some(value),
+            AspectRatioSpec::Inherit => parent.aspect_ratio,
+            AspectRatioSpec::Auto | AspectRatioSpec::Initial => None,
+        };
+    }
     apply_logical_size_delta(computed, delta, parent);
     if let Some(var) = &delta.width_var {
         computed.pending_width_var = Some(var.clone());
@@ -11944,6 +12980,7 @@ fn apply_delta(
     }
 
     sync_text_decoration_current_color(computed);
+    sync_text_emphasis_current_color(computed);
 
     if let Some(spec) = delta.border_width.top {
         computed.border_width.top = normalize_length_spec(spec, parent.border_width.top);
@@ -12200,11 +13237,14 @@ fn apply_delta(
         };
     }
     if let Some(spec) = delta.opacity {
+        computed.pending_opacity_var = None;
         computed.opacity = match spec {
             OpacitySpec::Value(value) => value.clamp(0.0, 1.0),
             OpacitySpec::Inherit => parent.opacity,
             OpacitySpec::Initial => 1.0,
         };
+    } else if let Some(expr) = &delta.opacity_var {
+        computed.pending_opacity_var = Some(expr.clone());
     }
     if let Some(spec) = &delta.container_names {
         computed.container_names = match spec {
@@ -12264,6 +13304,12 @@ fn apply_delta(
     }
     if let Some(position) = delta.position {
         computed.position = position;
+    }
+    if let Some(float_mode) = delta.float_mode {
+        computed.float_mode = float_mode;
+    }
+    if let Some(clear_mode) = delta.clear_mode {
+        computed.clear_mode = clear_mode;
     }
     if let Some(z_index) = delta.z_index {
         computed.z_index = z_index;
@@ -12329,6 +13375,32 @@ fn apply_delta(
     if let Some(align_content) = delta.align_content {
         computed.align_content = align_content;
     }
+    if let Some(column_count) = delta.column_count {
+        computed.column_count = column_count.clamp(1, 256);
+    }
+    if let Some(column_rule_width) = delta.column_rule_width {
+        computed.column_rule_width =
+            normalize_length_spec(column_rule_width, parent.column_rule_width);
+    }
+    if let Some(column_rule_style) = delta.column_rule_style {
+        match column_rule_style {
+            BorderLineStyle::None | BorderLineStyle::Hidden => {
+                computed.column_rule_visible = false;
+                computed.column_rule_style = OutlineLineStyle::Solid;
+            }
+            BorderLineStyle::Style(style) => {
+                computed.column_rule_visible = true;
+                computed.column_rule_style = style;
+            }
+        }
+    }
+    if let Some(column_rule_color) = &delta.column_rule_color {
+        computed.column_rule_color = match column_rule_color {
+            ColorSpec::Value(value) => Some(*value),
+            ColorSpec::Inherit => Some(parent.resolved_column_rule_color()),
+            ColorSpec::Initial | ColorSpec::CurrentColor => None,
+        };
+    }
     if let Some(columns) = delta.grid_columns {
         computed.grid_columns = if columns == 0 { None } else { Some(columns) };
     }
@@ -12356,6 +13428,13 @@ fn apply_delta(
         } else {
             Some(row_start)
         };
+    }
+    if let Some(row_gap) = delta.row_gap {
+        computed.row_gap = normalize_length_spec(row_gap, parent.row_gap);
+        computed.pending_row_gap_var = None;
+    }
+    if let Some(var) = &delta.row_gap_var {
+        computed.pending_row_gap_var = Some(var.clone());
     }
     if let Some(gap) = delta.gap {
         computed.gap = normalize_length_spec(gap, parent.gap);
@@ -12404,6 +13483,13 @@ fn apply_delta(
             ObjectFitSpec::Value(value) => value,
             ObjectFitSpec::Inherit => parent.object_fit,
             ObjectFitSpec::Initial => ObjectFitMode::Fill,
+        };
+    }
+    if let Some(image_rendering) = delta.image_rendering {
+        computed.image_rendering = match image_rendering {
+            ImageRenderingSpec::Value(value) => value,
+            ImageRenderingSpec::Inherit => parent.image_rendering,
+            ImageRenderingSpec::Initial => ImageRenderingMode::Auto,
         };
     }
     if let Some(object_position) = delta.object_position {
@@ -12578,9 +13664,12 @@ fn apply_revert_layer_delta(
         computed.color = layer_base.color;
         computed.pending_color_var = layer_base.pending_color_var.clone();
         sync_text_decoration_current_color(computed);
+        sync_text_emphasis_current_color(computed);
     }
     if delta.background_color {
         computed.background_color = layer_base.background_color;
+        computed.background_source_color = layer_base.background_source_color;
+        computed.background_alpha = layer_base.background_alpha;
         computed.pending_background_color_var = layer_base.pending_background_color_var.clone();
     }
     if delta.width {
@@ -12603,11 +13692,18 @@ fn apply_revert_layer_delta(
     if delta.position {
         computed.position = layer_base.position;
     }
+    if delta.float_mode {
+        computed.float_mode = layer_base.float_mode;
+    }
+    if delta.clear_mode {
+        computed.clear_mode = layer_base.clear_mode;
+    }
     if delta.z_index {
         computed.z_index = layer_base.z_index;
     }
     if delta.opacity {
         computed.opacity = layer_base.opacity;
+        computed.pending_opacity_var = layer_base.pending_opacity_var.clone();
     }
     if delta.paint_filter {
         computed.paint_filter = layer_base.paint_filter.clone();
@@ -12652,6 +13748,17 @@ fn apply_revert_layer_delta(
     }
     if delta.text_decoration_style {
         computed.text_decoration_style = layer_base.text_decoration_style;
+    }
+    if delta.text_emphasis_style {
+        computed.text_emphasis_style = layer_base.text_emphasis_style;
+    }
+    if delta.text_emphasis_color {
+        computed.text_emphasis_color = layer_base.text_emphasis_color;
+        computed.text_emphasis_color_tracks_current = layer_base.text_emphasis_color_tracks_current;
+        sync_text_emphasis_current_color(computed);
+    }
+    if delta.text_emphasis_position {
+        computed.text_emphasis_position = layer_base.text_emphasis_position;
     }
     if delta.text_underline_offset {
         computed.text_underline_offset = layer_base.text_underline_offset;
@@ -13171,7 +14278,13 @@ fn apply_border_style_mask(style: &mut ComputedStyle) {
 
 fn is_effective_zero_border_width(spec: LengthSpec) -> bool {
     match spec {
-        LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => true,
+        LengthSpec::Auto
+        | LengthSpec::Content
+        | LengthSpec::MinContent
+        | LengthSpec::MaxContent
+        | LengthSpec::FitContent
+        | LengthSpec::Inherit
+        | LengthSpec::Initial => true,
         LengthSpec::Absolute(value) => value == Pt::ZERO,
         LengthSpec::Percent(value) => value.abs() <= f32::EPSILON,
         LengthSpec::Em(value) => value.abs() <= f32::EPSILON,
@@ -13469,7 +14582,7 @@ fn resolve_vertical_align_expr_inner(
         return None;
     }
     if expr.eq_ignore_ascii_case("inherit") {
-        return Some(style.vertical_align);
+        return Some(style.vertical_align_inherit_base);
     }
     if let Some(value) = parse_vertical_align_mode_str(expr) {
         return Some(value);
@@ -14927,7 +16040,13 @@ fn calc_length_from_length_spec_for_custom_eval(spec: LengthSpec) -> Option<Calc
             rem: value,
         }),
         LengthSpec::Calc(calc) => Some(calc),
-        LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => None,
+        LengthSpec::Auto
+        | LengthSpec::Content
+        | LengthSpec::MinContent
+        | LengthSpec::MaxContent
+        | LengthSpec::FitContent
+        | LengthSpec::Inherit
+        | LengthSpec::Initial => None,
     }
 }
 
@@ -15399,6 +16518,13 @@ fn resolve_pending_vars(style: &mut ComputedStyle) {
             style.gap = spec;
         }
     }
+    if let Some(name) = style.pending_row_gap_var.take() {
+        if let Some(spec) =
+            resolve_custom_length_from_maps(&style.custom_lengths, &style.custom_color_refs, &name)
+        {
+            style.row_gap = spec;
+        }
+    }
     if let Some(name) = style.pending_outline_offset_var.take() {
         if let Some(spec) =
             resolve_custom_length_from_maps(&style.custom_lengths, &style.custom_color_refs, &name)
@@ -15544,14 +16670,22 @@ fn resolve_pending_vars(style: &mut ComputedStyle) {
             style.font_style = value;
         }
     }
+    if let Some(expr) = style.pending_opacity_var.take() {
+        if let Some(value) = resolve_custom_number_expr(style, &expr, 0) {
+            style.opacity = value.clamp(0.0, 1.0);
+        }
+    }
     sync_text_decoration_current_color(style);
+    sync_text_emphasis_current_color(style);
     if let Some(name) = style.pending_background_color_var.take() {
         let paints = parse_background_paints_with_style(style, &name);
         if !paints.is_empty() {
             style.background_paint = paints.first().cloned();
             style.background_paints = paints;
         } else if let Some((color, alpha)) = resolve_custom_color_expr_with_alpha(style, &name) {
-            style.background_color = Some(blend_over_white(color, alpha));
+            style.background_color = (alpha > 0.0).then(|| blend_over_white(color, alpha));
+            style.background_source_color = (alpha > 0.0).then_some(color);
+            style.background_alpha = alpha.clamp(0.0, 1.0);
         }
     }
     if let Some(name) = style.pending_border_color_var.take() {
@@ -15814,20 +16948,32 @@ fn parse_flex_flow_str(raw: &str) -> Option<(FlexDirectionMode, FlexWrapMode)> {
     for token in raw.split_ascii_whitespace() {
         let token = token.to_ascii_lowercase();
         match token.as_str() {
-            "row" | "row-reverse" => {
+            "row" => {
                 direction = FlexDirectionMode::Row;
                 saw_component = true;
             }
-            "column" | "column-reverse" => {
+            "row-reverse" => {
+                direction = FlexDirectionMode::RowReverse;
+                saw_component = true;
+            }
+            "column" => {
                 direction = FlexDirectionMode::Column;
+                saw_component = true;
+            }
+            "column-reverse" => {
+                direction = FlexDirectionMode::ColumnReverse;
                 saw_component = true;
             }
             "nowrap" => {
                 wrap = FlexWrapMode::NoWrap;
                 saw_component = true;
             }
-            "wrap" | "wrap-reverse" => {
+            "wrap" => {
                 wrap = FlexWrapMode::Wrap;
+                saw_component = true;
+            }
+            "wrap-reverse" => {
+                wrap = FlexWrapMode::WrapReverse;
                 saw_component = true;
             }
             _ => return None,
@@ -15852,13 +16998,58 @@ fn justify_content_mode_from_keyword(keyword: &str) -> Option<JustifyContentMode
     }
 }
 
+fn parse_aspect_ratio_spec(raw: &str) -> Option<AspectRatioSpec> {
+    let normalized = raw.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "auto" => return Some(AspectRatioSpec::Auto),
+        "inherit" => return Some(AspectRatioSpec::Inherit),
+        "initial" => return Some(AspectRatioSpec::Initial),
+        _ => {}
+    }
+    let ratio = normalized.strip_prefix("auto ").unwrap_or(&normalized);
+    let mut components = ratio.split('/').map(str::trim);
+    let numerator = components.next()?.parse::<f32>().ok()?;
+    let denominator = components
+        .next()
+        .map(str::parse::<f32>)
+        .transpose()
+        .ok()?
+        .unwrap_or(1.0);
+    if components.next().is_some()
+        || !numerator.is_finite()
+        || !denominator.is_finite()
+        || numerator <= 0.0
+        || denominator <= 0.0
+    {
+        return None;
+    }
+    Some(AspectRatioSpec::Ratio(numerator / denominator))
+}
+
+fn justify_content_mode_from_value(raw: &str) -> Option<JustifyContentMode> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "safe center" => Some(JustifyContentMode::SafeCenter),
+        "unsafe center" => Some(JustifyContentMode::Center),
+        _ => last_css_keyword(raw).and_then(justify_content_mode_from_keyword),
+    }
+}
+
 fn align_items_mode_from_keyword(keyword: &str) -> Option<AlignItemsMode> {
     match keyword {
-        "flex-start" | "start" | "normal" | "baseline" => Some(AlignItemsMode::FlexStart),
+        "flex-start" | "start" | "normal" => Some(AlignItemsMode::FlexStart),
+        "baseline" => Some(AlignItemsMode::FirstBaseline),
         "flex-end" | "end" => Some(AlignItemsMode::FlexEnd),
         "center" => Some(AlignItemsMode::Center),
         "stretch" => Some(AlignItemsMode::Stretch),
         _ => None,
+    }
+}
+
+fn align_items_mode_from_value(raw: &str) -> Option<AlignItemsMode> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "first baseline" => Some(AlignItemsMode::FirstBaseline),
+        "last baseline" => Some(AlignItemsMode::LastBaseline),
+        _ => last_css_keyword(raw).and_then(align_items_mode_from_keyword),
     }
 }
 
@@ -15881,10 +17072,17 @@ fn align_self_mode_from_keyword(keyword: &str) -> Option<AlignSelfMode> {
         "flex-end" | "end" | "self-end" => Some(AlignSelfMode::FlexEnd),
         "center" => Some(AlignSelfMode::Center),
         "stretch" => Some(AlignSelfMode::Stretch),
-        "flex-start" | "start" | "self-start" | "baseline" | "first" | "last" => {
-            Some(AlignSelfMode::FlexStart)
-        }
+        "flex-start" | "start" | "self-start" => Some(AlignSelfMode::FlexStart),
+        "baseline" => Some(AlignSelfMode::FirstBaseline),
         _ => None,
+    }
+}
+
+fn align_self_mode_from_value(raw: &str) -> Option<AlignSelfMode> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "first baseline" => Some(AlignSelfMode::FirstBaseline),
+        "last baseline" => Some(AlignSelfMode::LastBaseline),
+        _ => last_css_keyword(raw).and_then(align_self_mode_from_keyword),
     }
 }
 
@@ -16451,7 +17649,13 @@ fn parse_single_length_spec(raw: &str) -> Option<LengthSpec> {
     if raw.is_empty() {
         return None;
     }
-    length_spec_from_string(raw)
+    match parse_native_length_math(raw, true)? {
+        NativeMathValue::Number(value) if value.abs() <= f32::EPSILON => {
+            Some(LengthSpec::Absolute(Pt::ZERO))
+        }
+        NativeMathValue::Number(_) => None,
+        NativeMathValue::Length(value) => value.to_length_spec(),
+    }
 }
 
 fn parse_translate_components(raw: &str) -> Option<(LengthSpec, LengthSpec)> {
@@ -16792,6 +17996,21 @@ fn set_delta_text_decoration_thickness_var(delta: &mut StyleDelta, var: String) 
 fn set_delta_text_decoration_style_spec(delta: &mut StyleDelta, spec: TextDecorationStyleSpec) {
     delta.text_decoration_style = Some(spec);
     delta.revert_layer.text_decoration_style = false;
+}
+
+fn set_delta_text_emphasis_style(delta: &mut StyleDelta, spec: TextEmphasisStyleSpec) {
+    delta.text_emphasis_style = Some(spec);
+    delta.revert_layer.text_emphasis_style = false;
+}
+
+fn set_delta_text_emphasis_color(delta: &mut StyleDelta, spec: ColorSpec) {
+    delta.text_emphasis_color = Some(spec);
+    delta.revert_layer.text_emphasis_color = false;
+}
+
+fn set_delta_text_emphasis_position(delta: &mut StyleDelta, spec: TextEmphasisPositionSpec) {
+    delta.text_emphasis_position = Some(spec);
+    delta.revert_layer.text_emphasis_position = false;
 }
 
 fn set_delta_text_underline_offset_spec(delta: &mut StyleDelta, spec: TextUnderlineOffsetSpec) {
@@ -17639,9 +18858,14 @@ fn tab_size_length_is_non_negative(length: LengthSpec) -> bool {
         LengthSpec::Calc(calc) => {
             calc.percent == 0.0 && calc.abs >= Pt::ZERO && calc.em >= 0.0 && calc.rem >= 0.0
         }
-        LengthSpec::Percent(_) | LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => {
-            false
-        }
+        LengthSpec::Percent(_)
+        | LengthSpec::Auto
+        | LengthSpec::Content
+        | LengthSpec::MinContent
+        | LengthSpec::MaxContent
+        | LengthSpec::FitContent
+        | LengthSpec::Inherit
+        | LengthSpec::Initial => false,
     }
 }
 
@@ -17962,7 +19186,13 @@ fn border_radius_component_is_non_negative(value: LengthSpec) -> bool {
         LengthSpec::Absolute(value) => value >= Pt::ZERO,
         LengthSpec::Percent(value) | LengthSpec::Em(value) | LengthSpec::Rem(value) => value >= 0.0,
         LengthSpec::Calc(_) => true,
-        LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => false,
+        LengthSpec::Auto
+        | LengthSpec::Content
+        | LengthSpec::MinContent
+        | LengthSpec::MaxContent
+        | LengthSpec::FitContent
+        | LengthSpec::Inherit
+        | LengthSpec::Initial => false,
     }
 }
 
@@ -17989,7 +19219,7 @@ fn apply_background_from_string(raw: &str, delta: &mut StyleDelta) {
         return;
     }
     if let Some((color, alpha)) = parse_color_string(raw) {
-        set_delta_background_color(delta, BackgroundSpec::Value(blend_over_white(color, alpha)));
+        set_delta_background_color(delta, background_spec_from_color_alpha(color, alpha));
         return;
     }
     let layers = split_args(raw);
@@ -18030,10 +19260,7 @@ fn apply_background_from_string(raw: &str, delta: &mut StyleDelta) {
                 continue;
             }
             if let Some((color, alpha)) = parse_color_string(token) {
-                set_delta_background_color(
-                    delta,
-                    BackgroundSpec::Value(blend_over_white(color, alpha)),
-                );
+                set_delta_background_color(delta, background_spec_from_color_alpha(color, alpha));
                 continue;
             }
             if let Some(origin) = parse_background_origin_layer(&lowered) {
@@ -18225,7 +19452,13 @@ fn parse_background_size_component(raw: &str) -> Option<LengthSpec> {
 
 fn background_size_component_is_non_negative(value: LengthSpec) -> bool {
     match value {
-        LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => true,
+        LengthSpec::Auto
+        | LengthSpec::Content
+        | LengthSpec::MinContent
+        | LengthSpec::MaxContent
+        | LengthSpec::FitContent
+        | LengthSpec::Inherit
+        | LengthSpec::Initial => true,
         LengthSpec::Absolute(value) => value >= Pt::ZERO,
         LengthSpec::Percent(value) | LengthSpec::Em(value) | LengthSpec::Rem(value) => value >= 0.0,
         LengthSpec::Calc(_) => true,
@@ -18517,6 +19750,16 @@ fn parse_box_shadow_list_str(raw: &str) -> Option<Vec<BoxShadowSpec>> {
     }
 }
 
+fn parse_shadow_length_str(raw: &str) -> Option<LengthSpec> {
+    match parse_native_length_math(raw.trim(), true)? {
+        NativeMathValue::Number(value) if value.abs() <= f32::EPSILON => {
+            Some(LengthSpec::Absolute(Pt::ZERO))
+        }
+        NativeMathValue::Number(_) => None,
+        NativeMathValue::Length(value) => value.to_length_spec(),
+    }
+}
+
 fn parse_single_box_shadow_str(shadow: &str) -> Option<BoxShadowSpec> {
     let tokens = split_ws_preserve_parens(&shadow);
     let mut lengths: Vec<LengthSpec> = Vec::new();
@@ -18537,7 +19780,7 @@ fn parse_single_box_shadow_str(shadow: &str) -> Option<BoxShadowSpec> {
             inset = t.eq_ignore_ascii_case("inset");
             continue;
         }
-        if let Some(len) = length_spec_from_string(t) {
+        if let Some(len) = parse_shadow_length_str(t) {
             if !box_shadow_length_is_supported(len) {
                 return None;
             }
@@ -18638,7 +19881,7 @@ fn parse_single_text_shadow_str(shadow: &str) -> Option<BoxShadowSpec> {
         if t.is_empty() {
             continue;
         }
-        if let Some(len) = length_spec_from_string(t) {
+        if let Some(len) = parse_shadow_length_str(t) {
             if !box_shadow_length_is_supported(len) {
                 return None;
             }
@@ -19420,7 +20663,13 @@ fn length_spec_from_end_offset(offset: LengthSpec) -> LengthSpec {
             em: -calc.em,
             rem: -calc.rem,
         }),
-        LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => offset,
+        LengthSpec::Auto
+        | LengthSpec::Content
+        | LengthSpec::MinContent
+        | LengthSpec::MaxContent
+        | LengthSpec::FitContent
+        | LengthSpec::Inherit
+        | LengthSpec::Initial => offset,
     }
 }
 
@@ -20314,10 +21563,13 @@ fn parse_linear_gradient_str(raw: &str) -> Option<BackgroundPaint> {
         stop_start = 1;
     }
 
-    let mut stops: Vec<(Color, Option<f32>)> = Vec::new();
+    let mut stops: Vec<(Color, f32, Option<f32>)> = Vec::new();
     for part in parts.iter().skip(stop_start) {
         if let Some(stop) = parse_gradient_stop(part) {
             stops.push(stop);
+            if let Some(second_offset) = parse_second_gradient_stop_offset(part) {
+                stops.push((stop.0, stop.1, Some(second_offset)));
+            }
         }
     }
     let shading_stops = normalize_gradient_stops(&stops);
@@ -20352,10 +21604,13 @@ fn parse_linear_gradient_str_with_style(
         stop_start = 1;
     }
 
-    let mut stops: Vec<(Color, Option<f32>)> = Vec::new();
+    let mut stops: Vec<(Color, f32, Option<f32>)> = Vec::new();
     for part in parts.iter().skip(stop_start) {
         let stop = parse_gradient_stop_with_style(style, part, depth + 1)?;
         stops.push(stop);
+        if let Some(second_offset) = parse_second_gradient_stop_offset(part) {
+            stops.push((stop.0, stop.1, Some(second_offset)));
+        }
     }
     let shading_stops = normalize_gradient_stops(&stops);
     if shading_stops.len() < 2 {
@@ -20384,10 +21639,13 @@ fn parse_radial_gradient_str(raw: &str) -> Option<BackgroundPaint> {
         stop_start = 1;
     }
 
-    let mut stops: Vec<(Color, Option<f32>)> = Vec::new();
+    let mut stops: Vec<(Color, f32, Option<f32>)> = Vec::new();
     for part in parts.iter().skip(stop_start) {
         if let Some(stop) = parse_gradient_stop(part) {
             stops.push(stop);
+            if let Some(second_offset) = parse_second_gradient_stop_offset(part) {
+                stops.push((stop.0, stop.1, Some(second_offset)));
+            }
         }
     }
     let shading_stops = normalize_gradient_stops(&stops);
@@ -20425,10 +21683,13 @@ fn parse_radial_gradient_str_with_style(
         stop_start = 1;
     }
 
-    let mut stops: Vec<(Color, Option<f32>)> = Vec::new();
+    let mut stops: Vec<(Color, f32, Option<f32>)> = Vec::new();
     for part in parts.iter().skip(stop_start) {
         let stop = parse_gradient_stop_with_style(style, part, depth + 1)?;
         stops.push(stop);
+        if let Some(second_offset) = parse_second_gradient_stop_offset(part) {
+            stops.push((stop.0, stop.1, Some(second_offset)));
+        }
     }
     let shading_stops = normalize_gradient_stops(&stops);
     if shading_stops.len() < 2 {
@@ -20460,7 +21721,7 @@ fn parse_conic_gradient_str(raw: &str) -> Option<BackgroundPaint> {
         stop_start = 1;
     }
 
-    let mut stops: Vec<(Color, Option<f32>)> = Vec::new();
+    let mut stops: Vec<(Color, f32, Option<f32>)> = Vec::new();
     for part in parts.iter().skip(stop_start) {
         if let Some(stop) = parse_conic_gradient_stop(part) {
             stops.push(stop);
@@ -20504,7 +21765,7 @@ fn parse_conic_gradient_str_with_style(
         stop_start = 1;
     }
 
-    let mut stops: Vec<(Color, Option<f32>)> = Vec::new();
+    let mut stops: Vec<(Color, f32, Option<f32>)> = Vec::new();
     for part in parts.iter().skip(stop_start) {
         let stop = parse_conic_gradient_stop_with_style(style, part, depth + 1)?;
         stops.push(stop);
@@ -20635,7 +21896,7 @@ fn parse_conic_position(raw: &str) -> Option<(f32, f32)> {
     Some((x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)))
 }
 
-fn parse_conic_gradient_stop(part: &str) -> Option<(Color, Option<f32>)> {
+fn parse_conic_gradient_stop(part: &str) -> Option<(Color, f32, Option<f32>)> {
     let part = part.trim();
     if part.is_empty() {
         return None;
@@ -20658,21 +21919,21 @@ fn parse_conic_gradient_stop(part: &str) -> Option<(Color, Option<f32>)> {
     } else {
         (part, "")
     };
-    let (color, _) = parse_color_string(color_part)?;
+    let (color, alpha) = parse_color_string(color_part)?;
     let offset_token = offset_part.split_whitespace().next().unwrap_or("").trim();
     let offset = if offset_token.is_empty() {
         None
     } else {
         parse_conic_stop_offset(offset_token)
     };
-    Some((color, offset))
+    Some((color, alpha, offset))
 }
 
 fn parse_conic_gradient_stop_with_style(
     style: &ComputedStyle,
     part: &str,
     depth: usize,
-) -> Option<(Color, Option<f32>)> {
+) -> Option<(Color, f32, Option<f32>)> {
     if depth > 12 {
         return None;
     }
@@ -20711,7 +21972,7 @@ fn parse_conic_gradient_stop_with_style(
     } else {
         parse_conic_stop_offset_with_style(style, offset_token, depth + 1)
     };
-    Some((blend_over_white(color, alpha), offset))
+    Some((color, alpha, offset))
 }
 
 fn parse_conic_stop_offset(raw: &str) -> Option<f32> {
@@ -20801,19 +22062,20 @@ fn parse_angle_to_degrees(raw: &str) -> Option<f32> {
     None
 }
 
-fn normalize_gradient_stops(stops: &[(Color, Option<f32>)]) -> Vec<ShadingStop> {
+fn normalize_gradient_stops(stops: &[(Color, f32, Option<f32>)]) -> Vec<ShadingStop> {
     if stops.len() < 2 {
         return Vec::new();
     }
-    let mut offsets: Vec<Option<f32>> = stops.iter().map(|(_, off)| *off).collect();
+    let mut offsets: Vec<Option<f32>> = stops.iter().map(|(_, _, off)| *off).collect();
     if offsets.iter().all(|off| off.is_none()) {
         let denom = (stops.len() - 1) as f32;
         return stops
             .iter()
             .enumerate()
-            .map(|(idx, (color, _))| ShadingStop {
+            .map(|(idx, (color, alpha, _))| ShadingStop {
                 offset: idx as f32 / denom,
                 color: *color,
+                alpha: *alpha,
             })
             .collect();
     }
@@ -20864,9 +22126,10 @@ fn normalize_gradient_stops(stops: &[(Color, Option<f32>)]) -> Vec<ShadingStop> 
     stops
         .iter()
         .enumerate()
-        .map(|(idx, (color, _))| ShadingStop {
+        .map(|(idx, (color, alpha, _))| ShadingStop {
             offset: offsets[idx].unwrap_or(0.0),
             color: *color,
+            alpha: *alpha,
         })
         .collect()
 }
@@ -20908,7 +22171,7 @@ fn parse_gradient_angle(part: &str) -> Option<f32> {
     None
 }
 
-fn parse_gradient_stop(part: &str) -> Option<(Color, Option<f32>)> {
+fn parse_gradient_stop(part: &str) -> Option<(Color, f32, Option<f32>)> {
     let part = part.trim();
     if part.is_empty() {
         return None;
@@ -20931,17 +22194,24 @@ fn parse_gradient_stop(part: &str) -> Option<(Color, Option<f32>)> {
     } else {
         (part, "")
     };
-    let (color, _) = parse_color_string(color_part)?;
+    let (color, alpha) = parse_color_string(color_part)?;
     let offset_token = offset_part.split_whitespace().next().unwrap_or("").trim();
     let offset = parse_percentage_unit(offset_token).map(|v| v.clamp(0.0, 1.0));
-    Some((color, offset))
+    Some((color, alpha, offset))
+}
+
+fn parse_second_gradient_stop_offset(part: &str) -> Option<f32> {
+    split_top_level_whitespace(part)
+        .get(2)
+        .and_then(|token| parse_percentage_unit(token))
+        .map(|value| value.clamp(0.0, 1.0))
 }
 
 fn parse_gradient_stop_with_style(
     style: &ComputedStyle,
     part: &str,
     depth: usize,
-) -> Option<(Color, Option<f32>)> {
+) -> Option<(Color, f32, Option<f32>)> {
     if depth > 12 {
         return None;
     }
@@ -21005,7 +22275,7 @@ fn parse_gradient_stop_with_style(
         }
     };
 
-    Some((blend_over_white(color, alpha), offset))
+    Some((color, alpha, offset))
 }
 
 fn parse_hex_color_with_alpha(value: &str) -> Option<(Color, f32)> {
@@ -22700,17 +23970,42 @@ fn resolve_named_counter_style(
     computed: &mut ComputedStyle,
     counter_styles: &HashMap<String, AnonymousListStyleSymbols>,
 ) {
-    if !matches!(
+    if matches!(
         computed.list_style_type,
         ListStyleTypeMode::CustomCounterStyleName
     ) {
-        return;
+        if let Some(symbols) = computed
+            .list_style_marker
+            .as_deref()
+            .and_then(|name| counter_styles.get(name))
+        {
+            computed.list_style_symbols = Some(symbols.clone());
+        }
     }
-    let Some(name) = computed.list_style_marker.as_deref() else {
-        return;
+
+    let resolve_generated = |style: &mut GeneratedCounterStyle| {
+        if !matches!(
+            style.list_style_type,
+            ListStyleTypeMode::CustomCounterStyleName
+        ) {
+            return;
+        }
+        if let Some(symbols) = style
+            .marker
+            .as_deref()
+            .and_then(|name| counter_styles.get(name))
+        {
+            style.symbols = Some(symbols.clone());
+        }
     };
-    if let Some(symbols) = counter_styles.get(name) {
-        computed.list_style_symbols = Some(symbols.clone());
+    if let Some(parts) = computed.generated_content.as_mut() {
+        for part in parts {
+            match part {
+                GeneratedContentPart::Counter(counter) => resolve_generated(&mut counter.style),
+                GeneratedContentPart::Counters(counter) => resolve_generated(&mut counter.style),
+                GeneratedContentPart::Text(_) => {}
+            }
+        }
     }
 }
 
@@ -22786,8 +24081,8 @@ fn outline_line_style_from_ident(value: &str) -> Option<Option<OutlineLineStyle>
 
 fn parse_display_mode_str(raw: &str) -> Option<DisplayMode> {
     match raw.trim().to_ascii_lowercase().as_str() {
+        "flow-root" | "block flow-root" | "flow-root block" => Some(DisplayMode::FlowRoot),
         "block"
-        | "flow-root"
         | "ruby"
         | "block ruby"
         | "ruby block"
@@ -22815,10 +24110,10 @@ fn parse_display_mode_str(raw: &str) -> Option<DisplayMode> {
         "table-column-group" => Some(DisplayMode::TableColumnGroup),
         "table-column" => Some(DisplayMode::TableColumn),
         "table-caption" => Some(DisplayMode::TableCaption),
-        "flex" => Some(DisplayMode::Flex),
-        "inline-flex" => Some(DisplayMode::InlineFlex),
-        "grid" => Some(DisplayMode::Grid),
-        "inline-grid" => Some(DisplayMode::InlineGrid),
+        "flex" | "block flex" | "flex block" => Some(DisplayMode::Flex),
+        "inline-flex" | "inline flex" | "flex inline" => Some(DisplayMode::InlineFlex),
+        "grid" | "block grid" | "grid block" => Some(DisplayMode::Grid),
+        "inline-grid" | "inline grid" | "grid inline" => Some(DisplayMode::InlineGrid),
         "none" => Some(DisplayMode::None),
         "contents" => Some(DisplayMode::Contents),
         _ => None,
@@ -22883,6 +24178,41 @@ fn apply_position_from_raw(delta: &mut StyleDelta, raw: &str) -> bool {
     true
 }
 
+fn parse_float_mode_str(raw: &str) -> Option<FloatMode> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "none" | "initial" | "unset" | "revert" => Some(FloatMode::None),
+        "left" | "inline-start" => Some(FloatMode::Left),
+        "right" | "inline-end" => Some(FloatMode::Right),
+        _ => None,
+    }
+}
+
+fn apply_float_from_raw(delta: &mut StyleDelta, raw: &str) -> bool {
+    let Some(mode) = parse_float_mode_str(raw) else {
+        return false;
+    };
+    set_delta_float_mode(delta, mode);
+    true
+}
+
+fn parse_clear_mode_str(raw: &str) -> Option<ClearMode> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "none" | "initial" | "unset" | "revert" => Some(ClearMode::None),
+        "left" | "inline-start" => Some(ClearMode::Left),
+        "right" | "inline-end" => Some(ClearMode::Right),
+        "both" => Some(ClearMode::Both),
+        _ => None,
+    }
+}
+
+fn apply_clear_from_raw(delta: &mut StyleDelta, raw: &str) -> bool {
+    let Some(mode) = parse_clear_mode_str(raw) else {
+        return false;
+    };
+    set_delta_clear_mode(delta, mode);
+    true
+}
+
 fn parse_z_index_str(raw: &str) -> Option<i32> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "auto" | "initial" | "unset" | "revert" => Some(0),
@@ -22899,17 +24229,24 @@ fn apply_z_index_from_raw(delta: &mut StyleDelta, raw: &str) -> bool {
 }
 
 fn apply_opacity_from_raw(delta: &mut StyleDelta, raw: &str) -> bool {
-    let Some(spec) = parse_opacity_spec_str(raw) else {
-        return false;
-    };
-    set_delta_opacity(delta, spec);
-    true
+    if let Some(spec) = parse_opacity_spec_str(raw) {
+        set_delta_opacity(delta, spec);
+        return true;
+    }
+    if raw.to_ascii_lowercase().contains("var(") {
+        delta.opacity = None;
+        delta.opacity_var = Some(raw.trim().to_ascii_lowercase());
+        delta.revert_layer.opacity = false;
+        return true;
+    }
+    false
 }
 
 fn display_mode_name(mode: DisplayMode) -> &'static str {
     match mode {
         DisplayMode::Inline => "inline",
         DisplayMode::Block => "block",
+        DisplayMode::FlowRoot => "flow-root",
         DisplayMode::ListItem => "list-item",
         DisplayMode::InlineListItem => "inline list-item",
         DisplayMode::Table => "table",
@@ -24870,6 +26207,33 @@ fn apply_font_weight_from_raw(delta: &mut StyleDelta, raw: &str) -> bool {
     false
 }
 
+fn apply_font_synthesis_from_raw(delta: &mut StyleDelta, raw: &str) -> bool {
+    let lowered = raw.trim().to_ascii_lowercase();
+    match lowered.as_str() {
+        "none" => {
+            delta.font_synthesis_weight = Some(false);
+            true
+        }
+        "auto" | "weight" | "style" | "small-caps" | "position" | "initial" => {
+            delta.font_synthesis_weight = Some(true);
+            true
+        }
+        "inherit" | "unset" | "revert" | "revert-layer" => true,
+        _ => {
+            let tokens: Vec<&str> = lowered.split_ascii_whitespace().collect();
+            if tokens
+                .iter()
+                .all(|token| matches!(*token, "weight" | "style" | "small-caps" | "position"))
+            {
+                delta.font_synthesis_weight = Some(tokens.contains(&"weight"));
+                true
+            } else {
+                false
+            }
+        }
+    }
+}
+
 fn apply_font_style_from_raw(delta: &mut StyleDelta, raw: &str) -> bool {
     let trimmed = raw.trim();
     let lowered = trimmed.to_ascii_lowercase();
@@ -25020,6 +26384,7 @@ impl StyleDelta {
             && self.min_width.is_none()
             && self.min_height.is_none()
             && self.max_height.is_none()
+            && self.aspect_ratio.is_none()
             && self.min_width_var.is_none()
             && self.min_height_var.is_none()
             && self.max_height_var.is_none()
@@ -25042,6 +26407,7 @@ impl StyleDelta {
             && self.vertical_align_var.is_none()
             && self.font_weight.is_none()
             && self.font_weight_var.is_none()
+            && self.font_synthesis_weight.is_none()
             && self.font_style.is_none()
             && self.font_style_var.is_none()
             && self.text_transform.is_none()
@@ -25060,6 +26426,10 @@ impl StyleDelta {
             && self.text_decoration_thickness.is_none()
             && self.text_decoration_thickness_var.is_none()
             && self.text_decoration_style.is_none()
+            && self.text_emphasis_style.is_none()
+            && self.text_emphasis_color.is_none()
+            && self.text_emphasis_position.is_none()
+            && self.initial_letter.is_none()
             && self.text_underline_offset.is_none()
             && self.text_underline_offset_var.is_none()
             && self.text_underline_position.is_none()
@@ -25144,6 +26514,7 @@ impl StyleDelta {
             && self.mix_blend_mode.is_none()
             && self.isolation.is_none()
             && self.opacity.is_none()
+            && self.opacity_var.is_none()
             && self.background_paint.is_none()
             && self.background_paints.is_none()
             && self.background_sizes.is_none()
@@ -25206,6 +26577,8 @@ impl StyleDelta {
             && self.white_space_var.is_none()
             && self.display.is_none()
             && self.position.is_none()
+            && self.float_mode.is_none()
+            && self.clear_mode.is_none()
             && self.z_index.is_none()
             && self.box_sizing.is_none()
             && self.inset_left.is_none()
@@ -25233,12 +26606,18 @@ impl StyleDelta {
             && self.align_items.is_none()
             && self.align_self.is_none()
             && self.align_content.is_none()
+            && self.column_count.is_none()
+            && self.column_rule_width.is_none()
+            && self.column_rule_style.is_none()
+            && self.column_rule_color.is_none()
             && self.grid_columns.is_none()
             && self.grid_rows.is_none()
             && self.grid_column_tracks.is_none()
             && self.grid_row_tracks.is_none()
             && self.grid_column_start.is_none()
             && self.grid_row_start.is_none()
+            && self.row_gap.is_none()
+            && self.row_gap_var.is_none()
             && self.gap.is_none()
             && self.gap_var.is_none()
             && self.flex_grow.is_none()
@@ -25248,6 +26627,7 @@ impl StyleDelta {
             && self.overflow_inline.is_none()
             && self.overflow_block.is_none()
             && self.object_fit.is_none()
+            && self.image_rendering.is_none()
             && self.object_position.is_none()
             && self.custom_lengths.is_empty()
             && self.custom_colors.is_empty()
@@ -25273,9 +26653,13 @@ fn default_ua_css() -> &'static str {
     svg { display: inline-block; }
     /* Treat <img> like a replaced inline element so it is rendered as an atomic box. */
     img { display: inline-block; }
-    div, p, section, article, header, footer, aside, nav, main, blockquote,
+    html, body, div, p, section, article, header, footer, aside, nav, main, blockquote,
     h1, h2, h3, h4, h5, h6,
     ul, ol, dl, dt, dd, li, table, thead, tbody, tfoot, tr, td, th, pre, hr { display: block; }
+    caption { display: table-caption; text-align: center; }
+    td, th { display: table-cell; padding: 1px; }
+    th { font-weight: bold; text-align: center; }
+    ul, ol { padding-inline-start: 40px; }
     table { break-inside: avoid; }
     thead { break-inside: avoid; }
     "#
@@ -25302,6 +26686,8 @@ mod tests {
             is_root: false,
             child_index: 1,
             child_count: 1,
+            type_index: 1,
+            type_count: 1,
             prev_siblings: Vec::new(),
         }
     }
@@ -25320,6 +26706,73 @@ mod tests {
         let p_info = element("p", None, &[]);
         let p_style = resolver.compute_style(&p_info, &div_style, None, &[div_info]);
         assert_eq!(p_style.color, Color::rgb(1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn of_type_pseudos_use_type_relative_indices() {
+        let mut info = element("span", None, &["token"]);
+        info.child_index = 3;
+        info.child_count = 5;
+        info.type_index = 1;
+        info.type_count = 2;
+        assert!(
+            parse_pseudo_class("first-of-type")
+                .expect("first-of-type")
+                .matches_with_pseudo(&info, PseudoTarget::None)
+        );
+        assert!(
+            !parse_pseudo_class("last-of-type")
+                .expect("last-of-type")
+                .matches_with_pseudo(&info, PseudoTarget::None)
+        );
+
+        info.type_index = 2;
+        assert!(
+            parse_pseudo_class("last-of-type")
+                .expect("last-of-type")
+                .matches_with_pseudo(&info, PseudoTarget::None)
+        );
+        assert!(
+            parse_pseudo_class("nth-of-type(2)")
+                .expect("nth-of-type")
+                .matches_with_pseudo(&info, PseudoTarget::None)
+        );
+    }
+
+    #[test]
+    fn where_selector_list_matches_without_adding_specificity() {
+        let css = ":where(div, p, sub) { color: red; } p { color: blue; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+
+        let div_style = resolver.compute_style(&element("div", None, &[]), &root, None, &[]);
+        let p_style = resolver.compute_style(&element("p", None, &[]), &root, None, &[]);
+        let sub_style = resolver.compute_style(&element("sub", None, &[]), &root, None, &[]);
+
+        assert_eq!(div_style.color, Color::rgb(1.0, 0.0, 0.0));
+        assert_eq!(p_style.color, Color::rgb(0.0, 0.0, 1.0));
+        assert_eq!(sub_style.color, Color::rgb(1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn is_selector_uses_most_specific_list_entry() {
+        let css = ":is(p, #target) { color: red; } p { color: blue; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("p", None, &[]), &root, None, &[]);
+
+        assert_eq!(style.color, Color::rgb(1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn pinned_ua_where_rule_applies_subscript_metrics() {
+        let css = ":where(sub) { font-size: 83%; vertical-align: sub; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("sub", None, &[]), &root, None, &[]);
+
+        assert!((style.font_size.to_f32() - root.font_size.to_f32() * 0.83).abs() < 0.01);
+        assert_eq!(style.vertical_align, VerticalAlignMode::Sub);
     }
 
     #[test]
@@ -28624,6 +30077,7 @@ mod tests {
             .expect("content:none marker rule remains distinguishable");
         assert!(none_marker.content.is_none());
         assert!(none_marker.generated_content.is_none());
+        assert!(none_marker.marker_content_overridden);
 
         let normal_info = element("li", None, &["normal"]);
         let normal_style = resolver.compute_style(&normal_info, &root, None, &[]);
@@ -28632,6 +30086,27 @@ mod tests {
                 .compute_pseudo_style(&normal_info, &normal_style, &[], PseudoTarget::Marker)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn marker_presentation_style_keeps_font_and_color_without_replacing_content() {
+        let css = ".paint::marker { color: red; font-size: 32px; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("li", None, &["paint"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+
+        assert!(
+            resolver
+                .compute_pseudo_style(&info, &style, &[], PseudoTarget::Marker)
+                .is_none()
+        );
+        let marker = resolver
+            .compute_marker_style(&info, &style, &[])
+            .expect("marker presentation style");
+        assert_eq!(marker.font_size, Pt::from_f32(24.0));
+        assert_ne!(marker.color, style.color);
+        assert!(!marker.marker_content_overridden);
     }
 
     #[test]
@@ -28686,11 +30161,11 @@ mod tests {
     }
 
     #[test]
-    fn overflow_scroll_auto_clip_compute_to_static_clipping_mode() {
+    fn overflow_clip_keeps_its_non_bfc_clipping_mode() {
         let cases = [
             ("visible", OverflowMode::Visible),
             ("hidden", OverflowMode::Hidden),
-            ("clip", OverflowMode::Hidden),
+            ("clip", OverflowMode::Clip),
             ("scroll", OverflowMode::Hidden),
             ("auto", OverflowMode::Hidden),
         ];
@@ -28725,7 +30200,7 @@ mod tests {
         );
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
-        assert_eq!(style.overflow, OverflowMode::Hidden);
+        assert_eq!(style.overflow, OverflowMode::Clip);
     }
 
     #[test]
@@ -28896,6 +30371,16 @@ mod tests {
     }
 
     #[test]
+    fn ua_css_sets_document_elements_display_block() {
+        let resolver = StyleResolver::new("");
+        let root = resolver.default_style();
+        for tag in ["html", "body"] {
+            let style = resolver.compute_style(&element(tag, None, &[]), &root, None, &[]);
+            assert_eq!(style.display, DisplayMode::Block, "{tag}");
+        }
+    }
+
+    #[test]
     fn extract_css_page_setup_parses_size_and_margin() {
         let css = "@page { size: 8.5in 11in; margin: 0.5in 1in; }";
         let setup = extract_css_page_setup(css, None, None);
@@ -28915,6 +30400,37 @@ mod tests {
         let size = setup.size.expect("expected @page size");
         assert!((size.width.to_f32() - 792.0).abs() < 0.01);
         assert!((size.height.to_f32() - 612.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn extract_css_page_setup_handles_jis_b4_landscape() {
+        let setup = extract_css_page_setup("@page { size: jis-b4 landscape; }", None, None);
+        let size = setup.size.expect("expected @page size");
+        assert_eq!(size.width, Pt::from_f32(1032.0));
+        assert_eq!(size.height, Pt::from_f32(729.0));
+    }
+
+    #[test]
+    fn extract_css_page_styles_parses_pseudo_margins_and_backgrounds() {
+        let styles = extract_css_page_styles(
+            r#"
+                @page { size: 192px 200px; margin: 16px; background: #ffd6d6; }
+                @page :left { margin: 8px 32px 24px 8px; }
+                @page :right { margin: 16px 8px 8px 32px; }
+                @page :first { margin: 32px 8px 16px 24px; }
+            "#,
+            None,
+            None,
+        );
+        assert_eq!(styles.base.margin_top, Some(Pt::from_f32(12.0)));
+        assert_eq!(styles.left.margin_right, Some(Pt::from_f32(24.0)));
+        assert_eq!(styles.right.margin_left, Some(Pt::from_f32(24.0)));
+        assert_eq!(styles.first.margin_top, Some(Pt::from_f32(24.0)));
+        assert_eq!(
+            styles.base.background,
+            Some((Color::rgb(1.0, 214.0 / 255.0, 214.0 / 255.0), 1.0))
+        );
+        assert!(styles.has_pseudo_rules());
     }
 
     #[test]
@@ -28979,13 +30495,16 @@ mod tests {
         ));
         let logger = Arc::new(DebugLogger::new(&path).expect("debug logger"));
         let resolver = StyleResolver::new_with_debug(
-            ".x { column-count: 2; column-width: 120px; column-span: all; background: red; }",
+            ".x { column-count: 2; column-rule: 1px solid black; column-width: 120px; column-span: all; background: red; }",
             Some(logger.clone()),
         );
         drop(resolver);
         drop(logger);
         let log = std::fs::read_to_string(&path).expect("read debug log");
         assert!(log.contains("\"MULTICOL_SINGLE_COLUMN_FALLBACK\""));
+        assert!(log.contains("\"property\":\"column-width\""));
+        assert!(!log.contains("\"property\":\"column-count\""));
+        assert!(!log.contains("\"property\":\"column-rule\""));
         assert!(!log.contains("\"DECLARATION_PARSED_NO_EFFECT\""));
         let _ = std::fs::remove_file(path);
     }
@@ -29706,6 +31225,39 @@ mod tests {
         );
         assert!((parent.opacity - 0.25).abs() < 0.0001);
         assert!((child.opacity - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn opacity_var_reparses_percentage_after_substitution() {
+        let css = ":root { --half-opacity: 50%; } .target { opacity: var(--half-opacity); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let mut root_info = element("html", None, &[]);
+        root_info.is_root = true;
+        let root_style = resolver.compute_style(&root_info, &root, None, &[]);
+        let target = resolver.compute_style(
+            &element("div", None, &["target"]),
+            &root_style,
+            None,
+            &[root_info],
+        );
+
+        assert!((target.opacity - 0.5).abs() < 0.0001);
+    }
+
+    #[test]
+    fn translucent_background_retains_source_color_and_alpha_for_paint() {
+        let resolver = StyleResolver::new(".x { background: rgba(255, 87, 34, 0.5); }");
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
+        let source = style
+            .background_source_color
+            .expect("translucent source color");
+
+        assert!((source.r - 1.0).abs() < 0.001);
+        assert!((source.g - (87.0 / 255.0)).abs() < 0.001);
+        assert!((source.b - (34.0 / 255.0)).abs() < 0.001);
+        assert!((style.background_alpha - 0.5).abs() < 0.001);
     }
 
     #[test]
@@ -30556,6 +32108,30 @@ mod tests {
     }
 
     #[test]
+    fn translucent_gradient_stops_retain_alpha_for_paint_compositing() {
+        let resolver = StyleResolver::new(
+            ".x { background-color: #dceeff; background-image: linear-gradient(135deg, rgba(255, 209, 102, .82), rgba(6, 214, 160, .42)); }",
+        );
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("section", None, &["x"]), &root, None, &[]);
+
+        match style.background_paint {
+            Some(BackgroundPaint::LinearGradient { stops, .. }) => {
+                assert_eq!(stops.len(), 2);
+                assert!((stops[0].color.r - 1.0).abs() < 0.002);
+                assert!((stops[0].color.g - 209.0 / 255.0).abs() < 0.002);
+                assert!((stops[0].color.b - 102.0 / 255.0).abs() < 0.002);
+                assert!((stops[0].alpha - 0.82).abs() < 0.002);
+                assert!((stops[1].color.r - 6.0 / 255.0).abs() < 0.002);
+                assert!((stops[1].color.g - 214.0 / 255.0).abs() < 0.002);
+                assert!((stops[1].color.b - 160.0 / 255.0).abs() < 0.002);
+                assert!((stops[1].alpha - 0.42).abs() < 0.002);
+            }
+            other => panic!("expected translucent linear gradient, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn background_image_multiple_layers_and_longhands_resolve() {
         let resolver = StyleResolver::new(
             ".x { background-image: linear-gradient(red, red), linear-gradient(blue, blue); background-size: 50% 100%, 100% 100%; background-position: left top, left top; background-repeat: no-repeat, no-repeat; }",
@@ -31020,6 +32596,22 @@ mod tests {
     }
 
     #[test]
+    fn two_keyword_display_syntax_preserves_inner_layout_mode() {
+        let resolver = StyleResolver::new(
+            ".bf { display: block flex; } .if { display: inline flex; } \
+             .bg { display: block grid; } .ig { display: inline grid; }",
+        );
+        let root = resolver.default_style();
+        let computed =
+            |class| resolver.compute_style(&element("div", None, &[class]), &root, None, &[]);
+
+        assert_eq!(computed("bf").display, DisplayMode::Flex);
+        assert_eq!(computed("if").display, DisplayMode::InlineFlex);
+        assert_eq!(computed("bg").display, DisplayMode::Grid);
+        assert_eq!(computed("ig").display, DisplayMode::InlineGrid);
+    }
+
+    #[test]
     fn grid_template_rows_sets_row_count() {
         let resolver = StyleResolver::new(".menu { display: grid; grid-template-rows: 1fr 2fr; }");
         let root = resolver.default_style();
@@ -31333,6 +32925,33 @@ mod tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn transform_rejects_nonzero_unitless_translation() {
+        let resolver = StyleResolver::new(
+            ".bad { transform: translate(40, 0); } .zero { transform: translate(0, 0); }",
+        );
+        let root = resolver.default_style();
+        let bad = resolver.compute_style(&element("div", None, &["bad"]), &root, None, &[]);
+        let zero = resolver.compute_style(&element("div", None, &["zero"]), &root, None, &[]);
+
+        assert!(bad.transform.is_empty());
+        assert_eq!(
+            zero.transform,
+            vec![CssTransformOp::Translate {
+                x: LengthSpec::Absolute(Pt::ZERO),
+                y: LengthSpec::Absolute(Pt::ZERO),
+            }]
+        );
+    }
+
+    #[test]
+    fn invalid_negative_flex_grow_preserves_prior_declaration() {
+        let resolver = StyleResolver::new(".x { flex-grow: 1; flex-grow: -1; }");
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
+        assert_eq!(style.flex_grow, 1.0);
     }
 
     #[test]
@@ -32048,17 +33667,30 @@ mod tests {
         let root = resolver.default_style();
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.row_gap, LengthSpec::Absolute(Pt::from_f32(9.0)));
         assert_eq!(style.gap, LengthSpec::Absolute(Pt::from_f32(9.0)));
     }
 
     #[test]
-    fn row_gap_and_column_gap_map_to_engine_gap_last_wins() {
+    fn row_gap_and_column_gap_remain_independent() {
         let css = ".x { row-gap: 10px; column-gap: 4px; }";
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.row_gap, LengthSpec::Absolute(Pt::from_f32(7.5)));
         assert_eq!(style.gap, LengthSpec::Absolute(Pt::from_f32(3.0)));
+    }
+
+    #[test]
+    fn two_value_gap_maps_row_then_column() {
+        let css = ".x { gap: 10px 14px; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.row_gap, LengthSpec::Absolute(Pt::from_f32(7.5)));
+        assert_eq!(style.gap, LengthSpec::Absolute(Pt::from_f32(10.5)));
     }
 
     #[test]
@@ -32538,7 +34170,7 @@ mod tests {
         let root = resolver.default_style();
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
-        assert_eq!(style.gap, LengthSpec::Absolute(Pt::from_f32(10.5)));
+        assert_eq!(style.row_gap, LengthSpec::Absolute(Pt::from_f32(10.5)));
     }
 
     #[test]
@@ -32599,6 +34231,42 @@ mod tests {
     }
 
     #[test]
+    fn intrinsic_flex_basis_keywords_remain_distinct() {
+        let css = ".content { flex: 0 0 content; } \
+                   .min { flex-basis: min-content; } \
+                   .max { flex-basis: max-content; } \
+                   .fit { flex-basis: fit-content; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let basis = |class| {
+            resolver
+                .compute_style(&element("div", None, &[class]), &root, None, &[])
+                .flex_basis
+        };
+        assert_eq!(basis("content"), LengthSpec::Content);
+        assert_eq!(basis("min"), LengthSpec::MinContent);
+        assert_eq!(basis("max"), LengthSpec::MaxContent);
+        assert_eq!(basis("fit"), LengthSpec::FitContent);
+    }
+
+    #[test]
+    fn intrinsic_box_size_keywords_remain_distinct() {
+        let css = ".min { width: min-content; } \
+                   .max { width: max-content; } \
+                   .fit { width: fit-content; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let width = |class| {
+            resolver
+                .compute_style(&element("div", None, &[class]), &root, None, &[])
+                .width
+        };
+        assert_eq!(width("min"), LengthSpec::MinContent);
+        assert_eq!(width("max"), LengthSpec::MaxContent);
+        assert_eq!(width("fit"), LengthSpec::FitContent);
+    }
+
+    #[test]
     fn flex_flow_shorthand_defaults_missing_component() {
         let css = ".a { flex-flow: wrap; } .b { flex-flow: column; }";
         let resolver = StyleResolver::new(css);
@@ -32612,6 +34280,25 @@ mod tests {
         let b_style = resolver.compute_style(&b_info, &root, None, &[]);
         assert_eq!(b_style.flex_direction, FlexDirectionMode::Column);
         assert_eq!(b_style.flex_wrap, FlexWrapMode::NoWrap);
+    }
+
+    #[test]
+    fn flex_reverse_keywords_remain_distinct_computed_values() {
+        let css = ".row { flex-direction: row-reverse; } \
+                   .column { flex-direction: column-reverse; } \
+                   .flow { flex-flow: row-reverse wrap-reverse; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+
+        let row = resolver.compute_style(&element("div", None, &["row"]), &root, None, &[]);
+        assert_eq!(row.flex_direction, FlexDirectionMode::RowReverse);
+
+        let column = resolver.compute_style(&element("div", None, &["column"]), &root, None, &[]);
+        assert_eq!(column.flex_direction, FlexDirectionMode::ColumnReverse);
+
+        let flow = resolver.compute_style(&element("div", None, &["flow"]), &root, None, &[]);
+        assert_eq!(flow.flex_direction, FlexDirectionMode::RowReverse);
+        assert_eq!(flow.flex_wrap, FlexWrapMode::WrapReverse);
     }
 
     #[test]
@@ -32642,6 +34329,62 @@ mod tests {
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
         assert_eq!(style.align_self, AlignSelfMode::FlexEnd);
+    }
+
+    #[test]
+    fn flex_baseline_alignment_keywords_preserve_first_and_last() {
+        let css = ".first { align-items: baseline; align-self: first baseline; }\
+                   .last { align-items: last baseline; align-self: last baseline; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let first = resolver.compute_style(&element("div", None, &["first"]), &root, None, &[]);
+        let last = resolver.compute_style(&element("div", None, &["last"]), &root, None, &[]);
+        assert_eq!(first.align_items, AlignItemsMode::FirstBaseline);
+        assert_eq!(first.align_self, AlignSelfMode::FirstBaseline);
+        assert_eq!(last.align_items, AlignItemsMode::LastBaseline);
+        assert_eq!(last.align_self, AlignSelfMode::LastBaseline);
+    }
+
+    #[test]
+    fn aspect_ratio_parses_ratios_auto_and_inherit() {
+        assert_eq!(
+            parse_aspect_ratio_spec("2 / 1"),
+            Some(AspectRatioSpec::Ratio(2.0))
+        );
+        let css = ".parent { aspect-ratio: 2 / 1; }\
+                   .inherit { aspect-ratio: inherit; }\
+                   .auto { aspect-ratio: auto; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let parent = resolver.compute_style(&element("div", None, &["parent"]), &root, None, &[]);
+        let inherited =
+            resolver.compute_style(&element("div", None, &["inherit"]), &parent, None, &[]);
+        let auto = resolver.compute_style(&element("div", None, &["auto"]), &parent, None, &[]);
+        assert_eq!(parent.aspect_ratio, Some(2.0));
+        assert_eq!(inherited.aspect_ratio, Some(2.0));
+        assert_eq!(auto.aspect_ratio, None);
+    }
+
+    #[test]
+    fn flex_container_and_item_properties_do_not_inherit_to_children() {
+        let css = ".parent { flex-direction: column; flex-wrap: wrap; flex-basis: 30px;\
+                             order: 4; justify-content: space-between; align-items: center;\
+                             align-content: flex-end; gap: 10px; flex-grow: 3; flex-shrink: 0; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let parent = resolver.compute_style(&element("div", None, &["parent"]), &root, None, &[]);
+        let child = resolver.compute_style(&element("div", None, &[]), &parent, None, &[]);
+        assert_eq!(child.flex_direction, FlexDirectionMode::Row);
+        assert_eq!(child.flex_wrap, FlexWrapMode::NoWrap);
+        assert_eq!(child.flex_basis, LengthSpec::Auto);
+        assert_eq!(child.order, 0);
+        assert_eq!(child.justify_content, JustifyContentMode::FlexStart);
+        assert_eq!(child.align_items, AlignItemsMode::Stretch);
+        assert_eq!(child.align_content, AlignContentMode::Stretch);
+        assert_eq!(child.row_gap, LengthSpec::Absolute(Pt::ZERO));
+        assert_eq!(child.gap, LengthSpec::Absolute(Pt::ZERO));
+        assert_eq!(child.flex_grow, 0.0);
+        assert_eq!(child.flex_shrink, 1.0);
     }
 
     #[test]
@@ -32707,6 +34450,19 @@ mod tests {
         let b_info = element("div", None, &["b"]);
         let b_style = resolver.compute_style(&b_info, &root, None, &[]);
         assert_eq!(b_style.justify_content, JustifyContentMode::SpaceEvenly);
+    }
+
+    #[test]
+    fn justify_content_preserves_safe_center_overflow_alignment() {
+        let css = ".safe { justify-content: safe center; }\
+                   .unsafe { justify-content: unsafe center; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let safe = resolver.compute_style(&element("div", None, &["safe"]), &root, None, &[]);
+        let unsafe_style =
+            resolver.compute_style(&element("div", None, &["unsafe"]), &root, None, &[]);
+        assert_eq!(safe.justify_content, JustifyContentMode::SafeCenter);
+        assert_eq!(unsafe_style.justify_content, JustifyContentMode::Center);
     }
 
     #[test]
@@ -32789,6 +34545,21 @@ mod tests {
     }
 
     #[test]
+    fn float_and_clear_modes_are_computed() {
+        let css = ".left { float: left; } .right { float: inline-end; clear: both; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+
+        let left = resolver.compute_style(&element("div", None, &["left"]), &root, None, &[]);
+        assert_eq!(left.float_mode, FloatMode::Left);
+        assert_eq!(left.clear_mode, ClearMode::None);
+
+        let right = resolver.compute_style(&element("div", None, &["right"]), &root, None, &[]);
+        assert_eq!(right.float_mode, FloatMode::Right);
+        assert_eq!(right.clear_mode, ClearMode::Both);
+    }
+
+    #[test]
     fn concrete_inset_overrides_prior_pending_var() {
         let css = ".x { left: var(--missing, 40px); left: 5px; }";
         let resolver = StyleResolver::new(css);
@@ -32805,6 +34576,7 @@ mod tests {
         let root = resolver.default_style();
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.row_gap, LengthSpec::Absolute(Pt::from_f32(3.75)));
         assert_eq!(style.gap, LengthSpec::Absolute(Pt::from_f32(3.75)));
     }
 
@@ -32815,7 +34587,7 @@ mod tests {
         let root = resolver.default_style();
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
-        assert_eq!(style.gap, LengthSpec::Absolute(Pt::from_f32(3.75)));
+        assert_eq!(style.row_gap, LengthSpec::Absolute(Pt::from_f32(3.75)));
     }
 
     #[test]
@@ -32835,7 +34607,7 @@ mod tests {
         let root = resolver.default_style();
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
-        assert_eq!(style.font_name.as_ref(), "Courier");
+        assert_eq!(style.font_name.as_ref(), "DejaVu Sans Mono");
     }
 
     #[test]
@@ -32845,7 +34617,7 @@ mod tests {
         let root = resolver.default_style();
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
-        assert_eq!(style.font_name.as_ref(), "Courier");
+        assert_eq!(style.font_name.as_ref(), "DejaVu Sans Mono");
     }
 
     #[test]
@@ -32856,7 +34628,7 @@ mod tests {
         let root = resolver.default_style();
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
-        assert_eq!(style.font_name.as_ref(), "Times-Roman");
+        assert_eq!(style.font_name.as_ref(), "Liberation Serif");
     }
 
     #[test]
@@ -32878,9 +34650,9 @@ mod tests {
         );
 
         assert_eq!(quoted.font_name.as_ref(), "serif");
-        assert_eq!(unquoted.font_name.as_ref(), "Times-Roman");
+        assert_eq!(unquoted.font_name.as_ref(), "Liberation Serif");
         assert_eq!(custom_quoted.font_name.as_ref(), "monospace");
-        assert_eq!(custom_unquoted.font_name.as_ref(), "Courier");
+        assert_eq!(custom_unquoted.font_name.as_ref(), "DejaVu Sans Mono");
     }
 
     #[test]
@@ -32901,8 +34673,8 @@ mod tests {
             resolver.compute_style(&element("div", None, &["fallback"]), &root, None, &[]);
         let initial = resolver.compute_style(&element("div", None, &["initial"]), &root, None, &[]);
 
-        assert_eq!(child.font_name.as_ref(), "Times-Roman");
-        assert_eq!(fallback.font_name.as_ref(), "Times-Roman");
+        assert_eq!(child.font_name.as_ref(), "Liberation Serif");
+        assert_eq!(fallback.font_name.as_ref(), "Liberation Serif");
         assert_eq!(initial.font_name.as_ref(), "Helvetica");
     }
 
@@ -32920,7 +34692,7 @@ mod tests {
         assert!((full.line_height.to_line_height(full.font_size).to_f32() - 18.0).abs() < 0.01);
         assert_eq!(full.font_weight, 700);
         assert_eq!(full.font_style, FontStyleMode::Italic);
-        assert_eq!(full.font_name.as_ref(), "Times-Roman");
+        assert_eq!(full.font_name.as_ref(), "Liberation Serif");
 
         let reset =
             resolver.compute_style(&element("p", None, &["reset"]), &body, None, &ancestors);
@@ -32928,7 +34700,7 @@ mod tests {
         assert!((reset.line_height.to_line_height(reset.font_size).to_f32() - 14.4).abs() < 0.01);
         assert_eq!(reset.font_weight, 400);
         assert_eq!(reset.font_style, FontStyleMode::Normal);
-        assert_eq!(reset.font_name.as_ref(), "Times-Roman");
+        assert_eq!(reset.font_name.as_ref(), "Liberation Serif");
 
         let system =
             resolver.compute_style(&element("p", None, &["system"]), &body, None, &ancestors);
@@ -32983,13 +34755,13 @@ mod tests {
         );
         assert_eq!(fallback.font_weight, 700);
         assert_eq!(fallback.font_style, FontStyleMode::Normal);
-        assert_eq!(fallback.font_name.as_ref(), "Times-Roman");
+        assert_eq!(fallback.font_name.as_ref(), "Liberation Serif");
 
         let cycle = resolver.compute_style(&element("p", None, &["cycle"]), &root, None, &[]);
         assert!((cycle.font_size.to_f32() - 12.0).abs() < 0.01);
         assert_eq!(cycle.font_weight, 400);
         assert_eq!(oblique_font_style_degrees(cycle.font_style), Some(10.0));
-        assert_eq!(cycle.font_name.as_ref(), "Times-Roman");
+        assert_eq!(cycle.font_name.as_ref(), "Liberation Serif");
 
         let override_style =
             resolver.compute_style(&element("p", None, &["override"]), &root, None, &[]);
@@ -33005,7 +34777,7 @@ mod tests {
         );
         assert_eq!(override_style.font_weight, 700);
         assert_eq!(override_style.font_style, FontStyleMode::Italic);
-        assert_eq!(override_style.font_name.as_ref(), "Times-Roman");
+        assert_eq!(override_style.font_name.as_ref(), "Liberation Serif");
     }
 
     #[test]
@@ -33059,6 +34831,39 @@ mod tests {
     }
 
     #[test]
+    fn vertical_align_uses_its_non_inherited_initial_value() {
+        let css = ".parent { vertical-align: top; } \
+                   .inherited { vertical-align: inherit; } \
+                   .parent::before { content: 'x'; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let parent_info = element("div", None, &["parent"]);
+        let parent_style = resolver.compute_style(&parent_info, &root, None, &[]);
+        assert_eq!(parent_style.vertical_align, VerticalAlignMode::Top);
+
+        let plain = resolver.compute_style(
+            &element("span", None, &["plain"]),
+            &parent_style,
+            None,
+            std::slice::from_ref(&parent_info),
+        );
+        assert_eq!(plain.vertical_align, VerticalAlignMode::Baseline);
+
+        let inherited = resolver.compute_style(
+            &element("span", None, &["inherited"]),
+            &parent_style,
+            None,
+            std::slice::from_ref(&parent_info),
+        );
+        assert_eq!(inherited.vertical_align, VerticalAlignMode::Top);
+
+        let before = resolver
+            .compute_pseudo_style(&parent_info, &parent_style, &[], PseudoTarget::Before)
+            .expect("generated before style");
+        assert_eq!(before.vertical_align, VerticalAlignMode::Baseline);
+    }
+
+    #[test]
     fn text_decoration_parses_and_resets() {
         let css = "div { text-decoration: underline; } span { text-decoration: none; }";
         let resolver = StyleResolver::new(css);
@@ -33071,6 +34876,35 @@ mod tests {
         let span_info = element("span", None, &[]);
         let span_style = resolver.compute_style(&span_info, &div_style, None, &[div_info]);
         assert!(span_style.text_decoration.is_none());
+    }
+
+    #[test]
+    fn active_text_decoration_keeps_its_paint_across_descendant_runs() {
+        let css = ".parent { text-decoration: underline solid rgb(239, 71, 111) 2px; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let parent_info = element("div", None, &["parent"]);
+        let parent_style = resolver.compute_style(&parent_info, &root, None, &[]);
+        let child_style = resolver.compute_style(
+            &element("span", None, &["child"]),
+            &parent_style,
+            None,
+            &[parent_info],
+        );
+
+        assert!(child_style.text_decoration.underline);
+        assert_eq!(
+            child_style.text_decoration_color,
+            Color::rgb(239.0 / 255.0, 71.0 / 255.0, 111.0 / 255.0)
+        );
+        assert_eq!(
+            child_style.text_decoration_thickness,
+            TextDecorationThicknessMode::Length(LengthSpec::Absolute(Pt::from_f32(1.5)))
+        );
+        assert_eq!(
+            child_style.text_decoration_style,
+            TextDecorationStyleMode::Solid
+        );
     }
 
     #[test]
@@ -34065,6 +35899,47 @@ mod tests {
     }
 
     #[test]
+    fn counter_style_extends_decimal_preserves_affixes_negative_and_padding() {
+        let css = ".custom { list-style-type: bracketed; } \
+                   @counter-style bracketed { system: extends decimal; negative: '(' ')'; \
+                   pad: 2 '0'; prefix: '['; suffix: '] '; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let custom = resolver.compute_style(&element("li", None, &["custom"]), &root, None, &[]);
+        let spec = custom
+            .list_style_symbols
+            .as_ref()
+            .expect("extends-decimal counter style");
+
+        assert_eq!(spec.system, AnonymousListStyleSymbolsSystem::ExtendsDecimal);
+        assert_eq!(spec.prefix, "[");
+        assert_eq!(spec.suffix, "] ");
+        assert_eq!(spec.negative_prefix, "(");
+        assert_eq!(spec.negative_suffix, ")");
+        assert_eq!(spec.pad_width, 2);
+        assert_eq!(spec.pad_symbol, "0");
+
+        let generated_resolver = StyleResolver::new(
+            "@counter-style negwrap { system: extends decimal; negative: '(' ')'; } \
+             .row::before { content: counter(n, negwrap); }",
+        );
+        let generated_root = generated_resolver.default_style();
+        let row_info = element("div", None, &["row"]);
+        let row_style = generated_resolver.compute_style(&row_info, &generated_root, None, &[]);
+        let before = generated_resolver
+            .compute_pseudo_style(&row_info, &row_style, &[], PseudoTarget::Before)
+            .expect("generated custom counter style");
+        assert!(matches!(
+            before.generated_content.as_deref(),
+            Some([GeneratedContentPart::Counter(counter)])
+                if counter.style.symbols.as_ref().is_some_and(|symbols|
+                    symbols.system == AnonymousListStyleSymbolsSystem::ExtendsDecimal
+                        && symbols.negative_prefix == "("
+                        && symbols.negative_suffix == ")")
+        ));
+    }
+
+    #[test]
     fn list_style_type_preserves_ethiopic_numeric_marker() {
         let css = ".ethiopic { list-style-type: ethiopic-numeric; }";
         let resolver = StyleResolver::new(css);
@@ -34094,6 +35969,42 @@ mod tests {
     }
 
     #[test]
+    fn multicol_count_and_rule_shorthand_parse() {
+        let resolver =
+            StyleResolver::new(".x { column-count: 2; column-rule: 2px solid #577590; }");
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
+
+        assert_eq!(style.column_count, 2);
+        assert_eq!(
+            style.column_rule_width,
+            LengthSpec::Absolute(Pt::from_f32(1.5))
+        );
+        assert_eq!(style.column_rule_style, OutlineLineStyle::Solid);
+        assert_eq!(style.resolved_column_rule_color(), rgb8(0x57, 0x75, 0x90));
+        assert!(style.column_rule_visible);
+    }
+
+    #[test]
+    fn border_spacing_and_collapse_inherit() {
+        let resolver =
+            StyleResolver::new(".table { border-collapse: collapse; border-spacing: 2px 4px; }");
+        let root = resolver.default_style();
+        let table_info = element("div", None, &["table"]);
+        let table_style = resolver.compute_style(&table_info, &root, None, &[]);
+        let child_info = element("div", None, &[]);
+        let child = resolver.compute_style(
+            &child_info,
+            &table_style,
+            None,
+            std::slice::from_ref(&table_info),
+        );
+
+        assert_eq!(child.border_collapse, BorderCollapseMode::Collapse);
+        assert_eq!(child.border_spacing, table_style.border_spacing);
+    }
+
+    #[test]
     fn table_layout_custom_property_applies() {
         let css = "table { table-layout: fixed; } .auto { table-layout: auto; }";
         let resolver = StyleResolver::new(css);
@@ -34106,6 +36017,49 @@ mod tests {
         let table_auto = element("table", None, &["auto"]);
         let style_auto = resolver.compute_style(&table_auto, &root, None, &[]);
         assert_eq!(style_auto.table_layout, TableLayoutMode::Auto);
+    }
+
+    #[test]
+    fn ua_table_cells_and_captions_match_browser_defaults() {
+        let resolver = StyleResolver::new("");
+        let root = resolver.default_style();
+
+        let caption = resolver.compute_style(&element("caption", None, &[]), &root, None, &[]);
+        assert_eq!(caption.display, DisplayMode::TableCaption);
+        assert_eq!(caption.text_align, TextAlignMode::Center);
+
+        let td = resolver.compute_style(&element("td", None, &[]), &root, None, &[]);
+        assert_eq!(td.display, DisplayMode::TableCell);
+        let one_px = LengthSpec::Absolute(Pt::from_f32(0.75));
+        assert_eq!(td.padding.top, one_px);
+        assert_eq!(td.padding.right, one_px);
+        assert_eq!(td.padding.bottom, one_px);
+        assert_eq!(td.padding.left, one_px);
+
+        let th = resolver.compute_style(&element("th", None, &[]), &root, None, &[]);
+        assert_eq!(th.display, DisplayMode::TableCell);
+        assert_eq!(th.font_weight, 700);
+        assert_eq!(th.text_align, TextAlignMode::Center);
+    }
+
+    #[test]
+    fn ua_lists_reserve_the_browser_default_marker_gutter() {
+        let resolver = StyleResolver::new("");
+        let root = resolver.default_style();
+        let ol = resolver.compute_style(&element("ol", None, &[]), &root, None, &[]);
+        assert_eq!(ol.padding.left, LengthSpec::Absolute(Pt::from_f32(30.0)));
+        assert_eq!(ol.padding.right, LengthSpec::Absolute(Pt::ZERO));
+    }
+
+    #[test]
+    fn font_synthesis_none_disables_synthetic_weight() {
+        let resolver = StyleResolver::new("th { font-synthesis: none; }");
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("th", None, &[]), &root, None, &[]);
+
+        assert_eq!(style.font_weight, 700);
+        assert!(!style.font_synthesis_weight);
+        assert!(!style.to_text_style().font_synthesis_weight);
     }
 
     #[test]
@@ -34209,6 +36163,7 @@ mod tests {
             ".x { box-shadow: 1px 2px 3px 4px 5px red; }",
             ".x { box-shadow: 1px 2px -1px red; }",
             ".x { box-shadow: 10% 0 red; }",
+            ".x { box-shadow: 22px 0 0 red, 12 0 blue; }",
             ".x { box-shadow: red 1px blue 2px; }",
             ".x { box-shadow: inset outset 1px 2px red; }",
         ] {
@@ -35275,5 +37230,72 @@ mod tests {
         let legacy_invalid =
             resolver.compute_style(&element("div", None, &["legacy-invalid"]), &root, None, &[]);
         assert_eq!(legacy_invalid.pagination.break_inside, BreakInside::Avoid);
+    }
+
+    #[test]
+    fn text_emphasis_shorthand_position_and_inheritance_compute() {
+        let resolver = StyleResolver::new(
+            ".em { color: #111; text-emphasis: filled dot #d7263d; text-emphasis-position: under right; } \
+             .current { color: rgb(0, 128, 0); text-emphasis: filled dot; }",
+        );
+        let root = resolver.default_style();
+        let emphasized = resolver.compute_style(&element("span", None, &["em"]), &root, None, &[]);
+        assert_eq!(
+            emphasized.text_emphasis_style,
+            TextEmphasisStyleMode::FilledDot
+        );
+        assert_eq!(
+            emphasized.text_emphasis_position,
+            TextEmphasisPositionMode::Under
+        );
+        assert_eq!(
+            emphasized.text_emphasis_color,
+            Color::rgb(215.0 / 255.0, 38.0 / 255.0, 61.0 / 255.0)
+        );
+
+        let inherited = resolver.compute_style(&element("span", None, &[]), &emphasized, None, &[]);
+        assert_eq!(
+            inherited.text_emphasis_style,
+            TextEmphasisStyleMode::FilledDot
+        );
+        assert_eq!(
+            inherited.text_emphasis_position,
+            TextEmphasisPositionMode::Under
+        );
+        assert_eq!(
+            inherited.text_emphasis_color,
+            emphasized.text_emphasis_color
+        );
+
+        let current =
+            resolver.compute_style(&element("span", None, &["current"]), &root, None, &[]);
+        assert_eq!(current.text_emphasis_color, current.color);
+    }
+
+    #[test]
+    fn first_letter_initial_letter_value_is_non_inherited() {
+        let resolver = StyleResolver::new(
+            "p::first-letter { initial-letter: 2; color: #d7263d; font-weight: bold; }",
+        );
+        let root = resolver.default_style();
+        let info = element("p", None, &[]);
+        let paragraph = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(paragraph.initial_letter, None);
+
+        let first = resolver
+            .compute_pseudo_style(&info, &paragraph, &[], PseudoTarget::FirstLetter)
+            .expect("first-letter style");
+        assert_eq!(
+            first.initial_letter,
+            Some(InitialLetterValue { size: 2.0, sink: 2 })
+        );
+        assert_eq!(first.font_weight, 700);
+        assert_eq!(
+            first.color,
+            Color::rgb(215.0 / 255.0, 38.0 / 255.0, 61.0 / 255.0)
+        );
+
+        let child = resolver.compute_style(&element("span", None, &[]), &first, None, &[]);
+        assert_eq!(child.initial_letter, None);
     }
 }

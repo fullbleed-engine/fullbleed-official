@@ -338,13 +338,15 @@ fn write_command<W: Write>(out: &mut W, command: &Command) -> io::Result<()> {
             width,
             height,
             resource_id,
+            interpolate,
         } => {
             write_u8(out, 31)?;
             write_pt(out, *x)?;
             write_pt(out, *y)?;
             write_pt(out, *width)?;
             write_pt(out, *height)?;
-            write_string(out, resource_id)
+            write_string(out, resource_id)?;
+            write_bool(out, *interpolate)
         }
         Command::BeginTag {
             role,
@@ -603,6 +605,7 @@ fn read_command<R: Read>(input: &mut R) -> io::Result<Command> {
             width: read_pt(input)?,
             height: read_pt(input)?,
             resource_id: read_string(input)?,
+            interpolate: read_bool(input)?,
         },
         32 => Command::BeginTag {
             role: read_string(input)?,
@@ -765,6 +768,7 @@ fn write_stops<W: Write>(out: &mut W, stops: &[ShadingStop]) -> io::Result<()> {
     for stop in stops {
         write_f32(out, stop.offset)?;
         write_color(out, stop.color)?;
+        write_f32(out, stop.alpha)?;
     }
     Ok(())
 }
@@ -775,7 +779,12 @@ fn read_stops<R: Read>(input: &mut R) -> io::Result<Vec<ShadingStop>> {
     for _ in 0..len {
         let offset = read_f32(input)?;
         let color = read_color(input)?;
-        stops.push(ShadingStop { offset, color });
+        let alpha = read_f32(input)?;
+        stops.push(ShadingStop {
+            offset,
+            color,
+            alpha,
+        });
     }
     Ok(stops)
 }

@@ -86,7 +86,7 @@
         "kind": "color_run_length",
         "page": 1,
         "axis": "x",
-        "fixed": 30,
+        "fixed": 35,
         "start": 90,
         "rgba": [
           20,
@@ -118,7 +118,7 @@
         "kind": "color_run_length",
         "page": 1,
         "axis": "x",
-        "fixed": 30,
+        "fixed": 36,
         "start": 165,
         "rgba": [
           255,
@@ -159,7 +159,7 @@
       {
         "page": 1,
         "x": 185,
-        "y": 35,
+        "y": 36,
         "rgba": [
           255,
           0,
@@ -170,5 +170,5 @@
       }
     ]
   },
-  "stability_hash": "2dceec197b1d1211beaaa9d45b6a1c1b8147bd31aca82bf716239b32d5425c49"
+  "stability_hash": "a3285a6873eac7956668da6c2be0e1a21782379f8eaf8698f53a4848ebe658ad"
 }

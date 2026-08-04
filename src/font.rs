@@ -1,6 +1,7 @@
 use crate::error::FullBleedError;
 use crate::glyph_report::GlyphCoverageReport;
 use crate::sfnt::{self, CmapSubtable, Face as SfntFace, GlyphId, PlatformId};
+use crate::sfnt_outline::OutlineBuilder;
 use crate::text_shape;
 use crate::types::Pt;
 use std::collections::{HashMap, VecDeque};
@@ -63,6 +64,69 @@ pub(crate) struct FontRegistry {
 pub(crate) struct FontRun {
     pub font_name: Arc<str>,
     pub text: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum GlyphOutlineCommand {
+    MoveTo(f32, f32),
+    LineTo(f32, f32),
+    QuadTo(f32, f32, f32, f32),
+    CurveTo(f32, f32, f32, f32, f32, f32),
+    Close,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RegisteredGlyphOutline {
+    pub(crate) commands: Vec<GlyphOutlineCommand>,
+    pub(crate) units_per_em: u16,
+    pub(crate) advance: u16,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RegisteredGlyphBounds {
+    pub(crate) x_min: i16,
+    pub(crate) x_max: i16,
+    pub(crate) y_max: i16,
+    pub(crate) units_per_em: u16,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RegisteredPositionedGlyphOutline {
+    pub(crate) commands: Vec<GlyphOutlineCommand>,
+    pub(crate) units_per_em: u16,
+    pub(crate) x_advance: i32,
+    pub(crate) y_advance: i32,
+    pub(crate) x_offset: i32,
+    pub(crate) y_offset: i32,
+}
+
+#[derive(Default)]
+struct GlyphOutlineCollector {
+    commands: Vec<GlyphOutlineCommand>,
+}
+
+impl OutlineBuilder for GlyphOutlineCollector {
+    fn move_to(&mut self, x: f32, y: f32) {
+        self.commands.push(GlyphOutlineCommand::MoveTo(x, y));
+    }
+
+    fn line_to(&mut self, x: f32, y: f32) {
+        self.commands.push(GlyphOutlineCommand::LineTo(x, y));
+    }
+
+    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+        self.commands
+            .push(GlyphOutlineCommand::QuadTo(x1, y1, x, y));
+    }
+
+    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        self.commands
+            .push(GlyphOutlineCommand::CurveTo(x1, y1, x2, y2, x, y));
+    }
+
+    fn close(&mut self) {
+        self.commands.push(GlyphOutlineCommand::Close);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -193,39 +257,57 @@ impl FontRegistry {
             return;
         };
         let ext = ext.to_ascii_lowercase();
-        if ext != "ttf" && ext != "otf" {
+        if ext != "ttf" && ext != "otf" && ext != "ttc" && ext != "otc" {
             return;
         }
         let Ok(data) = fs::read(path) else {
             return;
         };
-        let Ok(face) = SfntFace::parse(&data, 0) else {
-            return;
+        let faces = if matches!(ext.as_str(), "ttc" | "otc") {
+            // Collection tables are commonly shared and can be tens of megabytes.
+            // Register the default face without duplicating every regional face
+            // into the per-engine registry; callers can supply standalone faces
+            // when they need a non-default collection index.
+            extract_collection_face_at(&data, 0)
+                .map(|face| vec![face])
+                .unwrap_or_default()
+        } else {
+            vec![data]
         };
-
-        let (name, aliases) = font_names(&face, path);
-        let (metrics, program_kind) = FontMetrics::from_face(&face);
-        let index = self.fonts.len();
-        self.fonts.push(RegisteredFont {
-            name: name.clone(),
-            data,
-            metrics,
-            program_kind,
-            source: RegisteredFontSourceInfo {
-                kind: source_kind,
-                identifier: path.to_string_lossy().to_string(),
-            },
-        });
-
-        let mut all_aliases = Vec::new();
-        all_aliases.push(name);
-        all_aliases.extend(aliases);
-        for alias in all_aliases {
-            let key = normalize_name(&alias);
-            if key.is_empty() || self.lookup.contains_key(&key) {
+        for (face_index, face_data) in faces.into_iter().enumerate() {
+            let Ok(face) = SfntFace::parse(&face_data, 0) else {
                 continue;
+            };
+
+            let (name, aliases) = font_names(&face, path);
+            let (metrics, program_kind) = FontMetrics::from_face(&face);
+            let index = self.fonts.len();
+            let identifier = if matches!(ext.as_str(), "ttc" | "otc") {
+                format!("{}#{}", path.to_string_lossy(), face_index)
+            } else {
+                path.to_string_lossy().to_string()
+            };
+            self.fonts.push(RegisteredFont {
+                name: name.clone(),
+                data: face_data,
+                metrics,
+                program_kind,
+                source: RegisteredFontSourceInfo {
+                    kind: source_kind,
+                    identifier,
+                },
+            });
+
+            let mut all_aliases = Vec::new();
+            all_aliases.push(name);
+            all_aliases.extend(aliases);
+            for alias in all_aliases {
+                let key = normalize_name(&alias);
+                if key.is_empty() || self.lookup.contains_key(&key) {
+                    continue;
+                }
+                self.lookup.insert(key, index);
             }
-            self.lookup.insert(key, index);
         }
     }
 
@@ -297,11 +379,95 @@ impl FontRegistry {
             .and_then(|index| self.fonts.get(*index))
     }
 
+    pub(crate) fn registered_font_names(&self) -> Vec<Arc<str>> {
+        self.fonts
+            .iter()
+            .map(|font| Arc::<str>::from(font.name.as_str()))
+            .collect()
+    }
+
+    pub(crate) fn is_opentype_cff(&self, name: &str) -> bool {
+        self.resolve(name)
+            .is_some_and(|font| matches!(font.program_kind, FontProgramKind::OpenTypeCff))
+    }
+
+    pub(crate) fn glyph_outline_for_id(
+        &self,
+        name: &str,
+        glyph_id: u16,
+    ) -> Option<RegisteredGlyphOutline> {
+        let font = self.resolve(name)?;
+        let face = SfntFace::parse(&font.data, 0).ok()?;
+        let glyph = GlyphId(glyph_id);
+        let mut collector = GlyphOutlineCollector::default();
+        face.outline_glyph(glyph, &mut collector)?;
+        Some(RegisteredGlyphOutline {
+            commands: collector.commands,
+            units_per_em: face.units_per_em().max(1),
+            advance: face.glyph_hor_advance(glyph).unwrap_or(0),
+        })
+    }
+
+    pub(crate) fn positioned_glyph_outlines(
+        &self,
+        name: &str,
+        text: &str,
+    ) -> Option<Vec<RegisteredPositionedGlyphOutline>> {
+        let font = self.resolve(name)?;
+        let face = SfntFace::parse(&font.data, 0).ok()?;
+        let shaped = text_shape::shape(&font.data, text)?;
+        if shaped.glyphs.is_empty() {
+            return Some(Vec::new());
+        }
+
+        let units_per_em = shaped.units_per_em.max(1);
+        let mut outlines = Vec::with_capacity(shaped.glyphs.len());
+        for glyph in shaped.glyphs {
+            let mut collector = GlyphOutlineCollector::default();
+            // Whitespace and other advance-only glyphs legitimately have no
+            // outline. Keep their shaped advances in the run.
+            let _ = face.outline_glyph(GlyphId(glyph.glyph_id), &mut collector);
+            outlines.push(RegisteredPositionedGlyphOutline {
+                commands: collector.commands,
+                units_per_em,
+                x_advance: glyph.x_advance,
+                y_advance: glyph.y_advance,
+                x_offset: glyph.x_offset,
+                y_offset: glyph.y_offset,
+            });
+        }
+        Some(outlines)
+    }
+
+    pub(crate) fn glyph_bounds_for_char(
+        &self,
+        name: &str,
+        ch: char,
+    ) -> Option<RegisteredGlyphBounds> {
+        let font = self.resolve(name)?;
+        let face = SfntFace::parse(&font.data, 0).ok()?;
+        let (_symbolic, symbol_subtable) = select_symbol_subtable(&face);
+        let glyph = glyph_index_for_codepoint(&face, ch as u32, symbol_subtable)?;
+        let mut collector = GlyphOutlineCollector::default();
+        let bounds = face.outline_glyph(glyph, &mut collector)?;
+        Some(RegisteredGlyphBounds {
+            x_min: bounds.x_min,
+            x_max: bounds.x_max,
+            y_max: bounds.y_max,
+            units_per_em: face.units_per_em().max(1),
+        })
+    }
+
     pub(crate) fn requires_synthetic_bold(&self, name: &str, requested_weight: u16) -> bool {
-        requested_weight >= 600
+        requested_weight >= 700
             && self
                 .resolve(name)
-                .is_some_and(|font| font.metrics.weight_class < 600)
+                .is_some_and(|font| font.metrics.weight_class < 700)
+    }
+
+    pub(crate) fn requires_synthetic_italic(&self, name: &str) -> bool {
+        self.resolve(name)
+            .is_some_and(|font| font.metrics.italic_angle == 0)
     }
 
     #[cfg(feature = "python")]
@@ -813,6 +979,124 @@ fn measure_text_width_full(font: &RegisteredFont, font_size: Pt, text: &str) -> 
     Some(font_size.mul_ratio(total_units, 1000))
 }
 
+#[cfg(test)]
+fn extract_collection_faces(data: &[u8]) -> Option<Vec<Vec<u8>>> {
+    if data.get(0..4)? != b"ttcf" {
+        return None;
+    }
+    let count = usize::try_from(font_be_u32(data, 8)?).ok()?;
+    if count == 0 || count > 256 {
+        return None;
+    }
+    let offsets_end = 12usize.checked_add(count.checked_mul(4)?)?;
+    data.get(0..offsets_end)?;
+
+    let mut faces = Vec::with_capacity(count);
+    for index in 0..count {
+        let face_offset = usize::try_from(font_be_u32(data, 12 + index * 4)?).ok()?;
+        faces.push(extract_collection_face(data, face_offset)?);
+    }
+    Some(faces)
+}
+
+fn extract_collection_face_at(data: &[u8], index: usize) -> Option<Vec<u8>> {
+    if data.get(0..4)? != b"ttcf" {
+        return None;
+    }
+    let count = usize::try_from(font_be_u32(data, 8)?).ok()?;
+    if index >= count || count > 256 {
+        return None;
+    }
+    let face_offset = usize::try_from(font_be_u32(data, 12 + index.checked_mul(4)?)?).ok()?;
+    extract_collection_face(data, face_offset)
+}
+
+fn extract_collection_face(data: &[u8], face_offset: usize) -> Option<Vec<u8>> {
+    let header = data.get(face_offset..face_offset.checked_add(12)?)?;
+    let signature = header.get(0..4)?;
+    if !matches!(signature, b"\0\x01\0\0" | b"OTTO" | b"true" | b"typ1") {
+        return None;
+    }
+    let table_count = usize::from(font_be_u16(data, face_offset + 4)?);
+    let source_directory = face_offset.checked_add(12)?;
+    let source_directory_end = source_directory.checked_add(table_count.checked_mul(16)?)?;
+    data.get(source_directory..source_directory_end)?;
+
+    let output_directory_end = 12usize.checked_add(table_count.checked_mul(16)?)?;
+    let mut output = vec![0u8; align_font_table(output_directory_end)?];
+    output.get_mut(0..12)?.copy_from_slice(header);
+    let mut head_output_offset = None;
+
+    for table_index in 0..table_count {
+        let source_record = source_directory + table_index * 16;
+        let tag = data.get(source_record..source_record + 4)?;
+        let checksum = font_be_u32(data, source_record + 4)?;
+        let source_offset = usize::try_from(font_be_u32(data, source_record + 8)?).ok()?;
+        let length = usize::try_from(font_be_u32(data, source_record + 12)?).ok()?;
+        let source_table = data.get(source_offset..source_offset.checked_add(length)?)?;
+
+        let output_offset = align_font_table(output.len())?;
+        if output_offset > output.len() {
+            output.resize(output_offset, 0);
+        }
+        let output_end = output_offset.checked_add(length)?;
+        if output_end > u32::MAX as usize {
+            return None;
+        }
+        output.resize(output_end, 0);
+        output
+            .get_mut(output_offset..output_end)?
+            .copy_from_slice(source_table);
+        output.resize(align_font_table(output_end)?, 0);
+
+        let output_record = 12 + table_index * 16;
+        output
+            .get_mut(output_record..output_record + 4)?
+            .copy_from_slice(tag);
+        font_write_u32(&mut output, output_record + 4, checksum)?;
+        font_write_u32(&mut output, output_record + 8, output_offset as u32)?;
+        font_write_u32(&mut output, output_record + 12, length as u32)?;
+        if tag == b"head" && length >= 12 {
+            head_output_offset = Some(output_offset);
+        }
+    }
+
+    if let Some(head_offset) = head_output_offset {
+        font_write_u32(&mut output, head_offset + 8, 0)?;
+        let adjustment = 0xB1B0_AFBAu32.wrapping_sub(font_checksum(&output));
+        font_write_u32(&mut output, head_offset + 8, adjustment)?;
+    }
+    Some(output)
+}
+
+fn align_font_table(value: usize) -> Option<usize> {
+    value.checked_add(3).map(|value| value & !3)
+}
+
+fn font_be_u16(data: &[u8], offset: usize) -> Option<u16> {
+    let bytes = data.get(offset..offset.checked_add(2)?)?;
+    Some(u16::from_be_bytes([bytes[0], bytes[1]]))
+}
+
+fn font_be_u32(data: &[u8], offset: usize) -> Option<u32> {
+    let bytes = data.get(offset..offset.checked_add(4)?)?;
+    Some(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+}
+
+fn font_write_u32(data: &mut [u8], offset: usize, value: u32) -> Option<()> {
+    data.get_mut(offset..offset.checked_add(4)?)?
+        .copy_from_slice(&value.to_be_bytes());
+    Some(())
+}
+
+fn font_checksum(data: &[u8]) -> u32 {
+    data.chunks(4).fold(0u32, |sum, chunk| {
+        let mut bytes = [0u8; 4];
+        bytes[..chunk.len()].copy_from_slice(chunk);
+        sum.wrapping_add(u32::from_be_bytes(bytes))
+    })
+}
+
 fn scale_i16(value: i16, scale: f32) -> i16 {
     let scaled = (value as f32 * scale).round() as i32;
     scaled.clamp(i16::MIN as i32, i16::MAX as i32) as i16
@@ -889,8 +1173,13 @@ pub(crate) fn font_primary_name_from_bytes(
 
 #[cfg(test)]
 mod tests {
-    use super::decode_font_name;
-    use crate::sfnt::{NameRecord, PlatformId};
+    use super::{
+        decode_font_name, extract_collection_faces, font_be_u16, font_be_u32, font_checksum,
+        font_write_u32,
+    };
+    use crate::sfnt::{Face, NameRecord, PlatformId};
+
+    const NOTO: &[u8] = include_bytes!("../python/fullbleed_assets/fonts/NotoSans-Regular.ttf");
 
     fn name(platform_id: PlatformId, encoding_id: u16, bytes: &[u8]) -> NameRecord<'_> {
         NameRecord {
@@ -915,6 +1204,28 @@ mod tests {
         assert!(decode_font_name(name(PlatformId::Unicode, 4, &[0, 65, 0])).is_none());
         assert!(decode_font_name(name(PlatformId::Unicode, 4, &[0xd8, 0x00])).is_none());
         assert!(decode_font_name(name(PlatformId::Macintosh, 0, b"FullBleed")).is_none());
+    }
+
+    #[test]
+    fn collection_face_extraction_rebases_tables_and_preserves_font_data() {
+        let table_count = usize::from(font_be_u16(NOTO, 4).unwrap());
+        let mut collection = vec![0u8; 16 + NOTO.len()];
+        collection[0..4].copy_from_slice(b"ttcf");
+        font_write_u32(&mut collection, 4, 0x0001_0000).unwrap();
+        font_write_u32(&mut collection, 8, 1).unwrap();
+        font_write_u32(&mut collection, 12, 16).unwrap();
+        collection[16..].copy_from_slice(NOTO);
+        for table_index in 0..table_count {
+            let record = 16 + 12 + table_index * 16;
+            let old_offset = font_be_u32(&collection, record + 8).unwrap();
+            font_write_u32(&mut collection, record + 8, old_offset + 16).unwrap();
+        }
+
+        let extracted = extract_collection_faces(&collection).unwrap();
+        assert_eq!(extracted.len(), 1);
+        let face = Face::parse(&extracted[0], 0).unwrap();
+        assert!(face.glyph_index('A' as u32).is_some());
+        assert_eq!(font_checksum(&extracted[0]), 0xB1B0_AFBA);
     }
 }
 

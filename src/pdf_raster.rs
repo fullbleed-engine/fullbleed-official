@@ -943,6 +943,7 @@ fn parse_xobject(
                     width: Pt::from_f32(width),
                     height: Pt::from_f32(height),
                     resource_id: data_uri,
+                    interpolate: false,
                 });
             }
         }

@@ -1,6 +1,8 @@
 use crate::canvas::{Command, Document, Page};
 use crate::debug::json_escape;
-use crate::font::{FontProgramKind, FontRegistry, RegisteredFont};
+use crate::font::{
+    FontProgramKind, FontRegistry, GlyphOutlineCommand, RegisteredFont, RegisteredGlyphOutline,
+};
 use crate::metrics::{DocumentMetrics, PageMetrics};
 use crate::perf::PerfLogger;
 use crate::sfnt::{Face as SfntFace, GlyphId};
@@ -240,6 +242,7 @@ impl OutputIntent {
 const PDF_CATALOG_ID: usize = 1;
 const PDF_PAGES_ID: usize = 2;
 const PDF_RESOURCES_ID: usize = 3;
+const PDF_FILTER_RASTER_DPI: u32 = 300;
 
 // Keep the page tree shallow but avoid huge /Kids arrays for large outputs.
 const PDF_PAGE_NODE_MAX_KIDS: usize = 256;
@@ -265,6 +268,13 @@ struct StreamFont<'a> {
     kind: StreamFontKind,
     glyph_map: BTreeMap<u16, String>,
     font_data: Option<&'a [u8]>,
+}
+
+struct Type3StreamFont {
+    logical_name: String,
+    resource: String,
+    font_id: usize,
+    glyph_ids: BTreeSet<u16>,
 }
 
 impl StreamFont<'_> {
@@ -296,6 +306,8 @@ pub(crate) struct PdfStreamWriter<'a, W: Write> {
     // Resources
     fonts: BTreeMap<String, StreamFont<'a>>,
     next_font_resource: usize,
+    type3_fonts: BTreeMap<(String, u8), Type3StreamFont>,
+    next_type3_resource: usize,
     current_doc_id: usize,
     doc_font_usage: BTreeMap<usize, BTreeSet<String>>,
 
@@ -309,6 +321,7 @@ pub(crate) struct PdfStreamWriter<'a, W: Write> {
     form_name_map: HashMap<String, String>,
     form_content_map: HashMap<u64, (String, usize)>,
     form_size_map: HashMap<String, Size>,
+    form_definition_map: HashMap<String, (Pt, Pt, Vec<Command>)>,
     next_form_index: usize,
 
     gs_resources: Vec<(String, usize)>,
@@ -318,6 +331,7 @@ pub(crate) struct PdfStreamWriter<'a, W: Write> {
 
     shading_resources: Vec<(String, usize)>,
     shading_name_map: HashMap<u64, String>,
+    shading_alpha_gs_map: HashMap<u64, String>,
     next_shading_index: usize,
 
     optional_content_names: BTreeSet<String>,
@@ -380,6 +394,8 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             perf,
             fonts: BTreeMap::new(),
             next_font_resource: 1,
+            type3_fonts: BTreeMap::new(),
+            next_type3_resource: 1,
             current_doc_id: 0,
             doc_font_usage: BTreeMap::new(),
             image_resources: Vec::new(),
@@ -391,6 +407,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             form_name_map: HashMap::new(),
             form_content_map: HashMap::new(),
             form_size_map: HashMap::new(),
+            form_definition_map: HashMap::new(),
             next_form_index: 1,
             gs_resources: Vec::new(),
             gs_name_map: HashMap::new(),
@@ -398,6 +415,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             next_gs_index: 1,
             shading_resources: Vec::new(),
             shading_name_map: HashMap::new(),
+            shading_alpha_gs_map: HashMap::new(),
             next_shading_index: 1,
             optional_content_names: BTreeSet::new(),
             page_nodes: Vec::new(),
@@ -486,6 +504,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
 
         // 1) Fonts (some objects were allocated early but not written yet).
         let fonts = std::mem::take(&mut self.fonts);
+        let type3_fonts = std::mem::take(&mut self.type3_fonts);
         let doc_font_usage = std::mem::take(&mut self.doc_font_usage);
 
         if let Some(logger) = self.debug.as_deref() {
@@ -608,13 +627,19 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                         } else {
                             format!("/W [{}]", w_entries.join(" "))
                         };
+                        let (cid_subtype, cid_to_gid_map) = match font.program_kind {
+                            FontProgramKind::OpenTypeCff => ("CIDFontType0", ""),
+                            FontProgramKind::TrueType => ("CIDFontType2", "/CIDToGIDMap /Identity"),
+                        };
                         self.write_object(
                             cid_font_id,
                             &format!(
-                                "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /{} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor {} 0 R {} /CIDToGIDMap /Identity >>",
+                                "<< /Type /Font /Subtype /{} /BaseFont /{} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor {} 0 R {} {} >>",
+                                cid_subtype,
                                 sanitize_font_name(&font.name),
                                 descriptor_id,
-                                w_array
+                                w_array,
+                                cid_to_gid_map,
                             ),
                         )?;
 
@@ -641,6 +666,12 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             }
         }
 
+        if let Some(registry) = self.registry {
+            for type3_font in type3_fonts.values() {
+                self.write_type3_font(type3_font, registry)?;
+            }
+        }
+
         let optional_content_names = std::mem::take(&mut self.optional_content_names);
         let mut optional_content_entries: Vec<(String, usize)> = Vec::new();
         for name in optional_content_names {
@@ -653,6 +684,9 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         let mut font_entries: Vec<(String, usize)> = Vec::new();
         for (_name, font_state) in &fonts {
             font_entries.push((font_state.resource.clone(), font_state.font_object_id()));
+        }
+        for font_state in type3_fonts.values() {
+            font_entries.push((font_state.resource.clone(), font_state.font_id));
         }
         let mut resources = vec![format!("/Font {}", font_resources(&font_entries))];
         let mut xobjects: Vec<(String, usize)> = Vec::new();
@@ -1108,7 +1142,12 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
     }
 
     fn render_page(&mut self, page: &Page, page_index: usize) -> io::Result<String> {
-        self.render_commands(&page.commands, self.page_size.height, Some(page_index))
+        let content =
+            self.render_commands(&page.commands, self.page_size.height, Some(page_index))?;
+        Ok(wrap_page_content_for_print_device_phase(
+            content,
+            self.page_size.height,
+        ))
     }
 
     fn render_commands(
@@ -1129,7 +1168,9 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 Command::SaveState => out.push_str("q\n"),
                 Command::RestoreState => out.push_str("Q\n"),
                 Command::Translate(x, y) => {
-                    out.push_str(&format!("1 0 0 1 {} {} cm\n", fmt_pt(*x), fmt_pt(*y)));
+                    // Canvas transform translations use CSS's top-down axis;
+                    // PDF's user space is bottom-up.
+                    out.push_str(&format!("1 0 0 1 {} {} cm\n", fmt_pt(*x), fmt_pt(-*y)));
                 }
                 Command::CssTransformOrigin { x, y, inverse } => {
                     let pdf_y = page_height - *y;
@@ -1140,7 +1181,9 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     out.push_str(&format!("{} 0 0 {} 0 0 cm\n", fmt(*x), fmt(*y)));
                 }
                 Command::Rotate(angle) => {
-                    let (sin, cos) = crate::math::sin_cos(*angle);
+                    // Canvas uses CSS/SVG's top-down axis. Conjugate the
+                    // rotation into PDF's bottom-up user space.
+                    let (sin, cos) = crate::math::sin_cos(-*angle);
                     out.push_str(&format!(
                         "{} {} {} {} 0 0 cm\n",
                         fmt(cos),
@@ -1150,14 +1193,16 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     ));
                 }
                 Command::ConcatMatrix { a, b, c, d, e, f } => {
+                    // F * M * F converts a top-down affine matrix into PDF's
+                    // bottom-up user space (F flips the y axis).
                     out.push_str(&format!(
                         "{} {} {} {} {} {} cm\n",
                         fmt(*a),
-                        fmt(*b),
-                        fmt(*c),
+                        fmt(-*b),
+                        fmt(-*c),
                         fmt(*d),
                         fmt_pt(*e),
-                        fmt_pt(*f)
+                        fmt_pt(-*f)
                     ));
                 }
                 Command::Meta { .. } => {}
@@ -1297,8 +1342,15 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 }
                 Command::ShadingFill(shading) => {
                     let key = hash_shading(shading);
-                    if let Some(name) = self.ensure_shading(key, shading)? {
-                        out.push_str(&format!("/{} sh\n", name));
+                    if let Some((name, alpha_gs)) = self.ensure_shading(key, shading)? {
+                        if let Some(alpha_gs) = alpha_gs {
+                            out.push_str("q\n");
+                            out.push_str(&format!("/{} gs\n", alpha_gs));
+                            out.push_str(&format!("/{} sh\n", name));
+                            out.push_str("Q\n");
+                        } else {
+                            out.push_str(&format!("/{} sh\n", name));
+                        }
                     }
                 }
                 Command::MoveTo { x, y } => {
@@ -1414,9 +1466,127 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     }
                     out.push_str("ET\n");
                 }
-                Command::DrawStringTransformed { .. } => {}
-                Command::DrawGlyphRun { .. } => {
-                    // Raster-only command; PDF writer does not emit glyph runs directly.
+                Command::DrawStringTransformed {
+                    x,
+                    y,
+                    text,
+                    m00,
+                    m01,
+                    m10,
+                    m11,
+                } => {
+                    let font_key = self.font_key(&current_font_name);
+                    if !self.fonts.contains_key(&font_key) {
+                        self.ensure_font(&current_font_name)?;
+                    }
+                    let Some((resource, encoding)) = self
+                        .fonts
+                        .get(&font_key)
+                        .map(|font| (font.resource.clone(), font.encoding))
+                    else {
+                        continue;
+                    };
+                    out.push_str("BT\n");
+                    out.push_str(&format!("/{} {} Tf\n", resource, fmt_pt(current_font_size)));
+                    out.push_str(&format!(
+                        "{} {} {} {} {} {} Tm\n",
+                        fmt(*m00),
+                        fmt(*m01),
+                        fmt(*m10),
+                        fmt(*m11),
+                        fmt_pt(*x),
+                        fmt_pt(*y)
+                    ));
+                    match encoding {
+                        FontEncoding::WinAnsi => {
+                            let encoded = encode_winansi_pdf_string(text);
+                            if encoded.replaced > 0 {
+                                if let Some(logger) = self.debug.as_deref() {
+                                    let json = format!(
+                                        "{{\"type\":\"pdf.winansi.lossy\",\"font\":{},\"replaced\":{},\"sample\":{}}}",
+                                        json_escape(&current_font_name),
+                                        encoded.replaced,
+                                        json_escape(&truncate_preview(text, 80))
+                                    );
+                                    logger.log_json(&json);
+                                    logger.increment("pdf.winansi.lossy", encoded.replaced as u64);
+                                }
+                            }
+                            if encoded.fallbacks > 0 {
+                                if let Some(logger) = self.debug.as_deref() {
+                                    let json = format!(
+                                        "{{\"type\":\"pdf.winansi.fallback\",\"font\":{},\"fallbacks\":{},\"sample\":{}}}",
+                                        json_escape(&current_font_name),
+                                        encoded.fallbacks,
+                                        json_escape(&truncate_preview(text, 80))
+                                    );
+                                    logger.log_json(&json);
+                                    logger.increment(
+                                        "pdf.winansi.fallback",
+                                        encoded.fallbacks as u64,
+                                    );
+                                }
+                            }
+                            out.push_str(&format!("({}) Tj\n", encoded.text));
+                        }
+                        FontEncoding::IdentityH => {
+                            if let Some(tj) = self.shape_text_to_tj(
+                                &font_key,
+                                &current_font_name,
+                                current_font_size,
+                                text,
+                            ) {
+                                out.push_str(tj);
+                            } else {
+                                let hex = self.encode_cid_hex_fallback(
+                                    &font_key,
+                                    &current_font_name,
+                                    text,
+                                );
+                                out.push_str(&format!("{} Tj\n", hex));
+                            }
+                        }
+                    }
+                    out.push_str("ET\n");
+                }
+                Command::DrawGlyphRun {
+                    x,
+                    y,
+                    glyph_ids,
+                    advances,
+                    m00,
+                    m01,
+                    m10,
+                    m11,
+                } => {
+                    let mut pen_x = *x;
+                    let mut pen_y = page_height - *y;
+                    for (index, glyph_id) in glyph_ids.iter().copied().enumerate() {
+                        if let Some(resource) =
+                            self.ensure_type3_glyph(&current_font_name, glyph_id)?
+                        {
+                            out.push_str("BT\n");
+                            out.push_str(&format!(
+                                "/{} {} Tf\n",
+                                resource,
+                                fmt_pt(current_font_size)
+                            ));
+                            out.push_str(&format!(
+                                "{} {} {} {} {} {} Tm\n",
+                                fmt(*m00),
+                                fmt(*m01),
+                                fmt(*m10),
+                                fmt(*m11),
+                                fmt_pt(pen_x),
+                                fmt_pt(pen_y),
+                            ));
+                            out.push_str(&format!("<{:02X}> Tj\nET\n", glyph_id & 0x00ff));
+                        }
+                        if let Some((advance_x, advance_y)) = advances.get(index) {
+                            pen_x = pen_x + *advance_x;
+                            pen_y = pen_y + *advance_y;
+                        }
+                    }
                 }
                 Command::DrawRect {
                     x,
@@ -1439,6 +1609,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     width,
                     height,
                     resource_id,
+                    ..
                 } => {
                     if let Some(name) = self.ensure_image(resource_id)? {
                         let draw_y = page_height - *y - *height;
@@ -1479,14 +1650,6 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     width,
                     height,
                     resource_id,
-                }
-                | Command::DrawFilteredForm {
-                    x,
-                    y,
-                    width,
-                    height,
-                    resource_id,
-                    ..
                 } => {
                     if let Some(name) = self.form_name_map.get(resource_id) {
                         let draw_y = page_height - *y - *height;
@@ -1515,6 +1678,70 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             fmt(sy),
                             fmt_pt(*x),
                             fmt_pt(draw_y)
+                        ));
+                        out.push_str(&format!("/{} Do\n", name));
+                        out.push_str("Q\n");
+                    }
+                }
+                Command::DrawFilteredForm {
+                    x,
+                    y,
+                    width,
+                    height,
+                    resource_id,
+                    filter,
+                } => {
+                    let Some((form_width, form_height, form_commands)) =
+                        self.form_definition_map.get(resource_id).cloned()
+                    else {
+                        continue;
+                    };
+                    let raster = crate::raster::rasterize_filtered_form(
+                        self.page_size.width,
+                        self.page_size.height,
+                        form_width,
+                        form_height,
+                        &form_commands,
+                        *x,
+                        *y,
+                        *width,
+                        *height,
+                        filter,
+                        PDF_FILTER_RASTER_DPI,
+                        self.registry,
+                        self.options.shape_text,
+                    )
+                    .map_err(|error| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("filtered form rasterization failed: {error}"),
+                        )
+                    })?;
+                    let Some(raster) = raster else {
+                        continue;
+                    };
+                    let Some(image) = image_data_from_premultiplied_rgba(
+                        raster.pixel_width,
+                        raster.pixel_height,
+                        &raster.premultiplied_rgba,
+                    ) else {
+                        continue;
+                    };
+                    let image_key = format!(
+                        "__fullbleed_filter_{:016x}_{}x{}",
+                        hash_bytes(&raster.premultiplied_rgba),
+                        raster.pixel_width,
+                        raster.pixel_height,
+                    );
+                    if let Some(name) = self.ensure_image_data(&image_key, image)? {
+                        let draw_y = page_height - raster.y - raster.height;
+                        out.push_str("q\n");
+                        out.push_str(&format!(
+                            "{} 0 0 {} {} {} cm\n",
+                            fmt_pt(raster.width),
+                            fmt_pt(raster.height),
+                            fmt_pt(raster.x),
+                            fmt_pt(draw_y),
                         ));
                         out.push_str(&format!("/{} Do\n", name));
                         out.push_str("Q\n");
@@ -1733,9 +1960,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     ),
                 ));
             };
-            if self.options.unicode_support
-                && matches!(font.program_kind, FontProgramKind::TrueType)
-            {
+            if self.options.unicode_support {
                 kind = StreamFontKind::TrueTypeIdentityH;
                 encoding = FontEncoding::IdentityH;
                 font_data = Some(font.data.as_slice());
@@ -1749,15 +1974,9 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             if !base14 && self.options.unicode_support {
                 if let Some(registry) = self.registry {
                     if let Some(font) = registry.resolve(&logical_name) {
-                        if matches!(font.program_kind, FontProgramKind::TrueType) {
-                            kind = StreamFontKind::TrueTypeIdentityH;
-                            encoding = FontEncoding::IdentityH;
-                            font_data = Some(font.data.as_slice());
-                        } else {
-                            // OpenType CFF: keep WinAnsi for now (no full Unicode CFF path yet).
-                            kind = StreamFontKind::TrueTypeWinAnsi;
-                            encoding = FontEncoding::WinAnsi;
-                        }
+                        kind = StreamFontKind::TrueTypeIdentityH;
+                        encoding = FontEncoding::IdentityH;
+                        font_data = Some(font.data.as_slice());
                     }
                 }
             }
@@ -1783,6 +2002,119 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         );
         self.record_doc_font_usage(&logical_name);
         Ok(())
+    }
+
+    fn ensure_type3_glyph(&mut self, name: &str, glyph_id: u16) -> io::Result<Option<String>> {
+        if glyph_id == 0 {
+            return Ok(None);
+        }
+        let logical_name = self.canonical_font_name(name);
+        let Some(registry) = self.registry else {
+            return Ok(None);
+        };
+        if registry
+            .glyph_outline_for_id(&logical_name, glyph_id)
+            .is_none()
+        {
+            return Ok(None);
+        }
+
+        let key = (normalize_font_key(&logical_name), (glyph_id >> 8) as u8);
+        if !self.type3_fonts.contains_key(&key) {
+            let resource = format!("T3F{}", self.next_type3_resource);
+            self.next_type3_resource += 1;
+            let font_id = self.alloc_ids(1);
+            self.type3_fonts.insert(
+                key.clone(),
+                Type3StreamFont {
+                    logical_name: logical_name.clone(),
+                    resource,
+                    font_id,
+                    glyph_ids: BTreeSet::new(),
+                },
+            );
+        }
+        let Some(font) = self.type3_fonts.get_mut(&key) else {
+            return Ok(None);
+        };
+        font.glyph_ids.insert(glyph_id);
+        Ok(Some(font.resource.clone()))
+    }
+
+    fn write_type3_font(
+        &mut self,
+        font_state: &Type3StreamFont,
+        registry: &FontRegistry,
+    ) -> io::Result<()> {
+        let mut glyphs = Vec::with_capacity(font_state.glyph_ids.len());
+        for glyph_id in &font_state.glyph_ids {
+            let Some(outline) = registry.glyph_outline_for_id(&font_state.logical_name, *glyph_id)
+            else {
+                continue;
+            };
+            let (program, bbox, width) = type3_glyph_program(&outline);
+            glyphs.push((*glyph_id, program, bbox, width));
+        }
+        if glyphs.is_empty() {
+            return self.write_object(
+                font_state.font_id,
+                "<< /Type /Font /Subtype /Type3 /FontBBox [0 0 0 0] /FontMatrix [0.001 0 0 -0.001 0 0] /CharProcs << >> /Encoding << /Type /Encoding /Differences [] >> /FirstChar 0 /LastChar 0 /Widths [0] /Resources << >> >>",
+            );
+        }
+
+        let stream_start = self.alloc_ids(glyphs.len() + 1);
+        let notdef_id = stream_start;
+        self.write_stream_object_bytes(notdef_id, "", b"0 0 d0\n")?;
+
+        let mut char_procs = vec![format!("/.notdef {} 0 R", notdef_id)];
+        let mut differences = Vec::with_capacity(glyphs.len() * 2);
+        let mut widths_by_code = BTreeMap::new();
+        let mut font_bbox = [
+            f32::INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        ];
+        for (index, (glyph_id, program, bbox, width)) in glyphs.iter().enumerate() {
+            let object_id = stream_start + index + 1;
+            self.write_stream_object_bytes(object_id, "", program.as_bytes())?;
+            let glyph_name = format!("g{:04X}", glyph_id);
+            char_procs.push(format!("/{} {} 0 R", glyph_name, object_id));
+            let code = glyph_id & 0x00ff;
+            differences.push(code.to_string());
+            differences.push(format!("/{}", glyph_name));
+            widths_by_code.insert(code, *width);
+            font_bbox[0] = font_bbox[0].min(bbox[0]);
+            font_bbox[1] = font_bbox[1].min(bbox[1]);
+            font_bbox[2] = font_bbox[2].max(bbox[2]);
+            font_bbox[3] = font_bbox[3].max(bbox[3]);
+        }
+
+        let first_char = *widths_by_code.keys().next().unwrap_or(&0);
+        let last_char = *widths_by_code.keys().next_back().unwrap_or(&first_char);
+        let widths = (first_char..=last_char)
+            .map(|code| fmt(*widths_by_code.get(&code).unwrap_or(&0.0)))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let base = format!(
+            "{}-T3-{:02X}",
+            sanitize_font_name(&font_state.logical_name),
+            font_state.glyph_ids.iter().next().copied().unwrap_or(0) >> 8,
+        );
+        let object = format!(
+            "<< /Type /Font /Subtype /Type3 /BaseFont /{} /FontBBox [{} {} {} {}] /FontMatrix [0.001 0 0 -0.001 0 0] /CharProcs << {} >> /Encoding << /Type /Encoding /Differences [{}] >> /FirstChar {} /LastChar {} /Widths [{}] /Resources << >> >>",
+            base,
+            fmt(font_bbox[0]),
+            fmt(font_bbox[1]),
+            fmt(font_bbox[2]),
+            fmt(font_bbox[3]),
+            char_procs.join(" "),
+            differences.join(" "),
+            first_char,
+            last_char,
+            widths,
+        );
+        self.write_object(font_state.font_id, &object)
     }
 
     fn ensure_image(&mut self, source: &str) -> io::Result<Option<String>> {
@@ -1821,6 +2153,14 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             return Ok(None);
         };
 
+        self.ensure_image_data(source, image)
+    }
+
+    fn ensure_image_data(&mut self, source: &str, image: ImageData) -> io::Result<Option<String>> {
+        if let Some(name) = self.image_name_map.get(source) {
+            return Ok(Some(name.clone()));
+        }
+
         let hash = hash_image(&image);
         if self.options.reuse_xobjects {
             if let Some((name, _obj_id)) = self.image_content_map.get(&hash) {
@@ -1858,6 +2198,9 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         commands: &[Command],
         isolated: bool,
     ) -> io::Result<Option<String>> {
+        self.form_definition_map
+            .entry(resource_id.to_string())
+            .or_insert_with(|| (width, height, commands.to_vec()));
         if let Some(name) = self.form_name_map.get(resource_id) {
             return Ok(Some(name.clone()));
         }
@@ -1973,17 +2316,33 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         Ok(Some(name))
     }
 
-    fn ensure_shading(&mut self, key: u64, shading: &Shading) -> io::Result<Option<String>> {
+    fn ensure_shading(
+        &mut self,
+        key: u64,
+        shading: &Shading,
+    ) -> io::Result<Option<(String, Option<String>)>> {
         if let Some(name) = self.shading_name_map.get(&key) {
-            return Ok(Some(name.clone()));
+            return Ok(Some((
+                name.clone(),
+                self.shading_alpha_gs_map.get(&key).cloned(),
+            )));
         }
 
         let name = format!("Sh{}", self.next_shading_index);
         self.next_shading_index += 1;
 
+        let has_alpha = shading_stops(shading)
+            .iter()
+            .any(|stop| stop.alpha < 1.0 - f32::EPSILON);
+        let color_shading = if has_alpha {
+            premultiplied_color_shading(shading)
+        } else {
+            shading.clone()
+        };
+
         let start_id = self.next_id;
         let (objs, sh_obj_id, new_next) = shading_to_objects(
-            shading,
+            &color_shading,
             start_id,
             self.page_size.height,
             self.options.color_space,
@@ -1997,7 +2356,49 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
 
         self.shading_resources.push((name.clone(), sh_obj_id));
         self.shading_name_map.insert(key, name.clone());
-        Ok(Some(name))
+
+        let alpha_gs = if has_alpha {
+            let alpha_shading = alpha_only_shading(shading);
+            let alpha_start_id = self.next_id;
+            let (alpha_objs, alpha_shading_id, alpha_next_id) = shading_to_objects(
+                &alpha_shading,
+                alpha_start_id,
+                self.page_size.height,
+                ColorSpace::Rgb,
+            );
+            self.next_id = alpha_next_id;
+            self.ensure_offsets_len(self.next_id);
+            for (i, obj) in alpha_objs.iter().enumerate() {
+                self.write_object(alpha_start_id + i, obj)?;
+            }
+
+            let mask_form_id = self.alloc_ids(1);
+            let mask_dict = format!(
+                "/Type /XObject /Subtype /Form /FormType 1 /BBox [0 0 {} {}] /Resources << /Shading << /MaskSh {} 0 R >> >> /Group << /S /Transparency /CS /DeviceRGB /I true /K false >>",
+                fmt_pt(self.page_size.width),
+                fmt_pt(self.page_size.height),
+                alpha_shading_id,
+            );
+            self.write_stream_object_bytes(mask_form_id, &mask_dict, b"/MaskSh sh\n")?;
+
+            let gs_id = self.alloc_ids(1);
+            let gs_name = format!("GS{}", self.next_gs_index);
+            self.next_gs_index += 1;
+            self.write_object(
+                gs_id,
+                &format!(
+                    "<< /Type /ExtGState /SMask << /S /Luminosity /G {} 0 R /BC [0 0 0] >> /AIS false >>",
+                    mask_form_id
+                ),
+            )?;
+            self.gs_resources.push((gs_name.clone(), gs_id));
+            self.shading_alpha_gs_map.insert(key, gs_name.clone());
+            Some(gs_name)
+        } else {
+            None
+        };
+
+        Ok(Some((name, alpha_gs)))
     }
 
     fn shape_text_to_tj(
@@ -2276,7 +2677,7 @@ fn collect_used_font_names_in_commands(commands: &[Command], names: &mut BTreeSe
     for cmd in commands {
         match cmd {
             Command::SetFontName(name) => current_font = name.clone(),
-            Command::DrawString { .. } => {
+            Command::DrawString { .. } | Command::DrawStringTransformed { .. } => {
                 names.insert(current_font.clone());
             }
             Command::DefineForm {
@@ -2465,7 +2866,7 @@ fn collect_font_usage(
         for cmd in &page.commands {
             match cmd {
                 Command::SetFontName(name) => current_font = name.clone(),
-                Command::DrawString { text, .. } => {
+                Command::DrawString { text, .. } | Command::DrawStringTransformed { text, .. } => {
                     let Some(registry) = registry else {
                         continue;
                     };
@@ -2719,6 +3120,55 @@ fn load_image(source: &str) -> Option<ImageData> {
     let path = Path::new(source);
     let bytes = std::fs::read(path).ok()?;
     decode_image_bytes(&bytes, None)
+}
+
+fn image_data_from_premultiplied_rgba(
+    width: u32,
+    height: u32,
+    premultiplied: &[u8],
+) -> Option<ImageData> {
+    let pixel_count = width.checked_mul(height)? as usize;
+    if premultiplied.len() != pixel_count.checked_mul(4)? {
+        return None;
+    }
+
+    let mut rgb = Vec::with_capacity(pixel_count * 3);
+    let mut alpha = Vec::with_capacity(pixel_count);
+    let mut has_alpha = false;
+    for pixel in premultiplied.chunks_exact(4) {
+        let a = pixel[3];
+        has_alpha |= a != 255;
+        let unpremultiply = |channel: u8| -> u8 {
+            if a == 0 {
+                0
+            } else {
+                ((channel as u32 * 255 + a as u32 / 2) / a as u32).min(255) as u8
+            }
+        };
+        rgb.extend_from_slice(&[
+            unpremultiply(pixel[0]),
+            unpremultiply(pixel[1]),
+            unpremultiply(pixel[2]),
+        ]);
+        alpha.push(a);
+    }
+
+    Some(ImageData {
+        width,
+        height,
+        color_space: "/DeviceRGB",
+        bits_per_component: 8,
+        filter: "/FlateDecode",
+        decode: None,
+        data: flate_compress(&rgb),
+        alpha: has_alpha.then(|| AlphaData {
+            width,
+            height,
+            bits_per_component: 8,
+            filter: "/FlateDecode",
+            data: flate_compress(&alpha),
+        }),
+    })
 }
 
 fn decode_image_bytes(data: &[u8], mime: Option<&str>) -> Option<ImageData> {
@@ -3024,7 +3474,7 @@ fn render_page(
             Command::SaveState => out.push_str("q\n"),
             Command::RestoreState => out.push_str("Q\n"),
             Command::Translate(x, y) => {
-                out.push_str(&format!("1 0 0 1 {} {} cm\n", fmt_pt(*x), fmt_pt(*y)));
+                out.push_str(&format!("1 0 0 1 {} {} cm\n", fmt_pt(*x), fmt_pt(-*y)));
             }
             Command::CssTransformOrigin { x, y, inverse } => {
                 let pdf_y = page_height - *y;
@@ -3035,7 +3485,7 @@ fn render_page(
                 out.push_str(&format!("{} 0 0 {} 0 0 cm\n", fmt(*x), fmt(*y)));
             }
             Command::Rotate(angle) => {
-                let (sin, cos) = crate::math::sin_cos(*angle);
+                let (sin, cos) = crate::math::sin_cos(-*angle);
                 out.push_str(&format!(
                     "{} {} {} {} 0 0 cm\n",
                     fmt(cos),
@@ -3048,11 +3498,11 @@ fn render_page(
                 out.push_str(&format!(
                     "{} {} {} {} {} {} cm\n",
                     fmt(*a),
-                    fmt(*b),
-                    fmt(*c),
+                    fmt(-*b),
+                    fmt(-*c),
                     fmt(*d),
                     fmt_pt(*e),
-                    fmt_pt(*f)
+                    fmt_pt(-*f)
                 ));
             }
             Command::Meta { .. } => {}
@@ -3267,7 +3717,60 @@ fn render_page(
                 }
                 out.push_str("ET\n");
             }
-            Command::DrawStringTransformed { .. } => {}
+            Command::DrawStringTransformed {
+                x,
+                y,
+                text,
+                m00,
+                m01,
+                m10,
+                m11,
+            } => {
+                out.push_str("BT\n");
+                let font_res = font_map.get(&current_font_name);
+                let resource = font_res
+                    .map(|value| value.resource.as_str())
+                    .unwrap_or("F1");
+                out.push_str(&format!("/{} {} Tf\n", resource, fmt_pt(current_font_size)));
+                out.push_str(&format!(
+                    "{} {} {} {} {} {} Tm\n",
+                    fmt(*m00),
+                    fmt(*m01),
+                    fmt(*m10),
+                    fmt(*m11),
+                    fmt_pt(*x),
+                    fmt_pt(*y)
+                ));
+                match font_res
+                    .map(|value| value.encoding)
+                    .unwrap_or(FontEncoding::WinAnsi)
+                {
+                    FontEncoding::WinAnsi => {
+                        let encoded = encode_winansi_pdf_string(text);
+                        out.push_str(&format!("({}) Tj\n", encoded.text));
+                    }
+                    FontEncoding::IdentityH => {
+                        if let Some(registry) = registry {
+                            if let Some(tj) = cached_shape_text_to_tj(
+                                registry,
+                                &current_font_name,
+                                current_font_size,
+                                text,
+                                tj_cache,
+                                options,
+                            ) {
+                                out.push_str(&tj);
+                                out.push_str("ET\n");
+                                continue;
+                            }
+                        }
+                        let cmap = font_glyph_maps.get(&current_font_name);
+                        let hex = encode_cid_hex(text, cmap);
+                        out.push_str(&format!("{} Tj\n", hex));
+                    }
+                }
+                out.push_str("ET\n");
+            }
             Command::DrawGlyphRun { .. } => {
                 // Raster-only command; PDF writer does not emit glyph runs directly.
             }
@@ -3291,6 +3794,7 @@ fn render_page(
                 width,
                 height,
                 resource_id,
+                ..
             } => {
                 if let Some(name) = image_map.get(resource_id) {
                     let draw_y = page_height - *y - *height;
@@ -3335,6 +3839,7 @@ fn hash_shading(shading: &Shading) -> u64 {
         for s in stops {
             hash_f32(hasher, s.offset);
             hash_color(hasher, s.color);
+            hash_f32(hasher, s.alpha);
         }
     }
 
@@ -3375,6 +3880,115 @@ fn hash_shading(shading: &Shading) -> u64 {
     hasher.finish()
 }
 
+fn shading_stops(shading: &Shading) -> &[ShadingStop] {
+    match shading {
+        Shading::Axial { stops, .. } | Shading::Radial { stops, .. } => stops,
+    }
+}
+
+fn with_shading_stops(shading: &Shading, stops: Vec<ShadingStop>) -> Shading {
+    match shading {
+        Shading::Axial { x0, y0, x1, y1, .. } => Shading::Axial {
+            x0: *x0,
+            y0: *y0,
+            x1: *x1,
+            y1: *y1,
+            stops,
+        },
+        Shading::Radial {
+            x0,
+            y0,
+            r0,
+            x1,
+            y1,
+            r1,
+            ..
+        } => Shading::Radial {
+            x0: *x0,
+            y0: *y0,
+            r0: *r0,
+            x1: *x1,
+            y1: *y1,
+            r1: *r1,
+            stops,
+        },
+    }
+}
+
+fn alpha_only_shading(shading: &Shading) -> Shading {
+    let stops = shading_stops(shading)
+        .iter()
+        .map(|stop| {
+            let alpha = stop.alpha.clamp(0.0, 1.0);
+            ShadingStop {
+                offset: stop.offset,
+                color: Color::rgb(alpha, alpha, alpha),
+                alpha: 1.0,
+            }
+        })
+        .collect();
+    with_shading_stops(shading, stops)
+}
+
+fn premultiplied_color_shading(shading: &Shading) -> Shading {
+    // CSS interpolates translucent stops in premultiplied colour space. A PDF
+    // shading interpolates colour and the soft-mask alpha independently, so
+    // sample the unpremultiplied colour curve finely enough to keep 8-bit
+    // raster output within one channel value of the authored gradient.
+    const SAMPLES_PER_SEGMENT: usize = 128;
+
+    fn sample(a: ShadingStop, b: ShadingStop, t: f32) -> ShadingStop {
+        let alpha_a = a.alpha.clamp(0.0, 1.0);
+        let alpha_b = b.alpha.clamp(0.0, 1.0);
+        let alpha = alpha_a + (alpha_b - alpha_a) * t;
+        let channel = |ca: f32, cb: f32| {
+            if alpha <= f32::EPSILON {
+                0.0
+            } else {
+                (ca * alpha_a + (cb * alpha_b - ca * alpha_a) * t) / alpha
+            }
+        };
+        ShadingStop {
+            offset: a.offset + (b.offset - a.offset) * t,
+            color: Color::rgb(
+                channel(a.color.r, b.color.r),
+                channel(a.color.g, b.color.g),
+                channel(a.color.b, b.color.b),
+            ),
+            alpha: 1.0,
+        }
+    }
+
+    let source = shading_stops(shading);
+    if source.len() < 2 {
+        return with_shading_stops(
+            shading,
+            source
+                .iter()
+                .map(|stop| ShadingStop {
+                    alpha: 1.0,
+                    ..*stop
+                })
+                .collect(),
+        );
+    }
+
+    let mut stops = Vec::with_capacity((source.len() - 1) * SAMPLES_PER_SEGMENT + 1);
+    stops.push(sample(source[0], source[1], 0.0));
+    for pair in source.windows(2) {
+        let a = pair[0];
+        let b = pair[1];
+        if (b.offset - a.offset).abs() <= f32::EPSILON {
+            stops.push(sample(a, b, 1.0));
+            continue;
+        }
+        for step in 1..=SAMPLES_PER_SEGMENT {
+            stops.push(sample(a, b, step as f32 / SAMPLES_PER_SEGMENT as f32));
+        }
+    }
+    with_shading_stops(shading, stops)
+}
+
 fn shading_to_objects(
     shading: &Shading,
     start_id: usize,
@@ -3399,23 +4013,19 @@ fn shading_to_objects(
     let sh_obj_id = next_id;
     next_id += 1;
 
-    // Flip from our top-left coordinates into PDF user space.
-    let matrix = format!("[1 0 0 -1 0 {}]", fmt_pt(page_height));
-
     let space = match color_space {
         ColorSpace::Rgb => "/DeviceRGB",
         ColorSpace::Cmyk => "/DeviceCMYK",
     };
     let sh_dict = match shading {
         Shading::Axial { x0, y0, x1, y1, .. } => format!(
-            "<< /ShadingType 2 /ColorSpace {} /Coords [{} {} {} {}] /Function {} 0 R /Extend [true true] /Matrix {} >>",
+            "<< /ShadingType 2 /ColorSpace {} /Coords [{} {} {} {}] /Function {} 0 R /Extend [true true] >>",
             space,
             fmt(*x0),
-            fmt(*y0),
+            fmt(page_height.to_f32() - *y0),
             fmt(*x1),
-            fmt(*y1),
+            fmt(page_height.to_f32() - *y1),
             fun_id,
-            matrix
         ),
         Shading::Radial {
             x0,
@@ -3426,16 +4036,15 @@ fn shading_to_objects(
             r1,
             ..
         } => format!(
-            "<< /ShadingType 3 /ColorSpace {} /Coords [{} {} {} {} {} {}] /Function {} 0 R /Extend [true true] /Matrix {} >>",
+            "<< /ShadingType 3 /ColorSpace {} /Coords [{} {} {} {} {} {}] /Function {} 0 R /Extend [true true] >>",
             space,
             fmt(*x0),
-            fmt(*y0),
+            fmt(page_height.to_f32() - *y0),
             fmt(*r0),
             fmt(*x1),
-            fmt(*y1),
+            fmt(page_height.to_f32() - *y1),
             fmt(*r1),
             fun_id,
-            matrix
         ),
     };
     objects.push(sh_dict);
@@ -3456,15 +4065,18 @@ fn build_gradient_function_objects(
         stops.push(ShadingStop {
             offset: 0.0,
             color: Color::BLACK,
+            alpha: 1.0,
         });
         stops.push(ShadingStop {
             offset: 1.0,
             color: Color::BLACK,
+            alpha: 1.0,
         });
     } else if stops.len() == 1 {
         stops.push(ShadingStop {
             offset: 1.0,
             color: stops[0].color,
+            alpha: stops[0].alpha,
         });
     }
 
@@ -3485,14 +4097,16 @@ fn build_gradient_function_objects(
             ShadingStop {
                 offset: 0.0,
                 color: stops[0].color,
+                alpha: stops[0].alpha,
             },
         );
     }
     if stops[stops.len() - 1].offset < 1.0 {
-        let last = stops[stops.len() - 1].color;
+        let last = stops[stops.len() - 1];
         stops.push(ShadingStop {
             offset: 1.0,
-            color: last,
+            color: last.color,
+            alpha: last.alpha,
         });
     }
 
@@ -4185,28 +4799,137 @@ fn shape_text_to_tj(
     Some(format!("[{}] TJ\n", parts.join(" ")))
 }
 
+fn type3_glyph_program(outline: &RegisteredGlyphOutline) -> (String, [f32; 4], f32) {
+    let scale = 1000.0 / f32::from(outline.units_per_em.max(1));
+    let transform = |x: f32, y: f32| (x * scale, -y * scale);
+    let mut path = String::new();
+    let mut current = (0.0_f32, 0.0_f32);
+    let mut contour_start = current;
+    let mut bbox = [
+        f32::INFINITY,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        f32::NEG_INFINITY,
+    ];
+    let include = |point: (f32, f32), bbox: &mut [f32; 4]| {
+        bbox[0] = bbox[0].min(point.0);
+        bbox[1] = bbox[1].min(point.1);
+        bbox[2] = bbox[2].max(point.0);
+        bbox[3] = bbox[3].max(point.1);
+    };
+
+    for command in &outline.commands {
+        match *command {
+            GlyphOutlineCommand::MoveTo(x, y) => {
+                current = transform(x, y);
+                contour_start = current;
+                include(current, &mut bbox);
+                path.push_str(&format!("{} {} m\n", fmt(current.0), fmt(current.1)));
+            }
+            GlyphOutlineCommand::LineTo(x, y) => {
+                current = transform(x, y);
+                include(current, &mut bbox);
+                path.push_str(&format!("{} {} l\n", fmt(current.0), fmt(current.1)));
+            }
+            GlyphOutlineCommand::QuadTo(cx, cy, x, y) => {
+                let control = transform(cx, cy);
+                let end = transform(x, y);
+                let c1 = (
+                    current.0 + (control.0 - current.0) * (2.0 / 3.0),
+                    current.1 + (control.1 - current.1) * (2.0 / 3.0),
+                );
+                let c2 = (
+                    end.0 + (control.0 - end.0) * (2.0 / 3.0),
+                    end.1 + (control.1 - end.1) * (2.0 / 3.0),
+                );
+                include(control, &mut bbox);
+                include(end, &mut bbox);
+                path.push_str(&format!(
+                    "{} {} {} {} {} {} c\n",
+                    fmt(c1.0),
+                    fmt(c1.1),
+                    fmt(c2.0),
+                    fmt(c2.1),
+                    fmt(end.0),
+                    fmt(end.1),
+                ));
+                current = end;
+            }
+            GlyphOutlineCommand::CurveTo(c1x, c1y, c2x, c2y, x, y) => {
+                let c1 = transform(c1x, c1y);
+                let c2 = transform(c2x, c2y);
+                let end = transform(x, y);
+                include(c1, &mut bbox);
+                include(c2, &mut bbox);
+                include(end, &mut bbox);
+                path.push_str(&format!(
+                    "{} {} {} {} {} {} c\n",
+                    fmt(c1.0),
+                    fmt(c1.1),
+                    fmt(c2.0),
+                    fmt(c2.1),
+                    fmt(end.0),
+                    fmt(end.1),
+                ));
+                current = end;
+            }
+            GlyphOutlineCommand::Close => {
+                path.push_str("h\n");
+                current = contour_start;
+            }
+        }
+    }
+
+    if !bbox[0].is_finite() {
+        bbox = [0.0; 4];
+    }
+    let width = f32::from(outline.advance) * scale;
+    let mut program = format!(
+        "{} 0 {} {} {} {} d1\n",
+        fmt(width),
+        fmt(bbox[0]),
+        fmt(bbox[1]),
+        fmt(bbox[2]),
+        fmt(bbox[3]),
+    );
+    program.push_str(&path);
+    program.push_str("f\n");
+    (program, bbox, width)
+}
+
 fn fmt(value: f32) -> String {
     if !value.is_finite() {
         return "0".to_string();
     }
     let fixed = I32F32::from_num(value);
-    let scaled = (fixed * I32F32::from_num(1000.0)).round();
-    let milli = scaled.to_i64_floor();
-    format_milli(milli)
+    let scaled = (fixed * I32F32::from_num(1_000_000.0)).round();
+    let millionths = scaled.to_i64_floor();
+    format_fixed(millionths, 6)
 }
 
 fn format_milli(milli: i64) -> String {
-    if milli == 0 {
+    format_fixed(milli, 3)
+}
+
+fn format_fixed(value: i64, decimal_places: usize) -> String {
+    if value == 0 {
         return "0".to_string();
     }
-    let sign = if milli < 0 { "-" } else { "" };
-    let abs = milli.abs();
-    let int_part = abs / 1000;
-    let frac_part = abs % 1000;
+    let sign = if value < 0 { "-" } else { "" };
+    let abs = value.abs();
+    let denominator = 10_i64.pow(decimal_places as u32);
+    let int_part = abs / denominator;
+    let frac_part = abs % denominator;
     if frac_part == 0 {
         format!("{}{}", sign, int_part)
     } else {
-        let mut s = format!("{}{}.{:03}", sign, int_part, frac_part);
+        let mut s = format!(
+            "{}{}.{:0width$}",
+            sign,
+            int_part,
+            frac_part,
+            width = decimal_places
+        );
         while s.ends_with('0') {
             s.pop();
         }
@@ -4219,6 +4942,30 @@ fn format_milli(milli: i64) -> String {
 
 fn fmt_pt(value: Pt) -> String {
     format_milli(value.to_milli_i64())
+}
+
+/// Preserve the device-pixel phase used by browser print pipelines.
+///
+/// Chromium's PDF path converts its 300-DPI print-device coordinates back to
+/// points with a serialized `0.23999999` factor.  The mathematically equivalent
+/// point-space scale is therefore just below one.  Keeping that minute scale,
+/// anchored at the page top, prevents half-device-pixel CSS edges from landing
+/// on the opposite raster row or column when both PDFs are rendered by the same
+/// PDF rasterizer.  The physical-size delta is less than one part in 25 million.
+fn wrap_page_content_for_print_device_phase(content: String, page_height: Pt) -> String {
+    const PRINT_DEVICE_PHASE_SCALE: f64 = 0.999_999_96;
+
+    let top_anchor = f64::from(page_height.to_f32()) * (1.0 - PRINT_DEVICE_PHASE_SCALE);
+    let mut wrapped = String::with_capacity(content.len() + 80);
+    wrapped.push_str("q\n0.99999996 0 0 0.99999996 0 ");
+    wrapped.push_str(&format!("{top_anchor:.9}"));
+    wrapped.push_str(" cm\n");
+    wrapped.push_str(&content);
+    if !content.ends_with('\n') {
+        wrapped.push('\n');
+    }
+    wrapped.push_str("Q\n");
+    wrapped
 }
 
 fn clamp_unit(value: f32) -> f32 {
@@ -4296,11 +5043,146 @@ mod tests {
         assert!(cmap.contains("<0004> <D83DDE00>"));
     }
 
+    #[test]
+    fn floating_pdf_values_keep_sub_milli_precision() {
+        assert_eq!(fmt(252.0 / 255.0), "0.988235");
+        assert_eq!(fmt(183.0 / 255.0), "0.717647");
+        assert_eq!(fmt(1.0), "1");
+    }
+
     fn one_page_document(commands: Vec<Command>) -> Document {
         Document {
             page_size: Size::a4(),
             pages: vec![Page { commands }],
         }
+    }
+
+    #[test]
+    fn page_content_keeps_browser_print_device_phase_top_anchored() {
+        let doc = Document {
+            page_size: Size {
+                width: Pt::from_f32(390.0),
+                height: Pt::from_f32(150.0),
+            },
+            pages: vec![Page {
+                commands: vec![Command::DrawRect {
+                    x: Pt::from_f32(12.0),
+                    y: Pt::from_f32(12.0),
+                    width: Pt::from_f32(117.0),
+                    height: Pt::from_f32(123.0),
+                }],
+            }],
+        };
+
+        let bytes = document_to_pdf(&doc).expect("render phase-preserving pdf");
+        let content = page_content_bytes(&bytes);
+        assert!(content.starts_with(b"q\n0.99999996 0 0 0.99999996 0 0.000006000 cm\n"));
+        assert!(content.ends_with(b"Q\n\n"));
+    }
+
+    #[test]
+    fn shading_coordinates_are_serialized_in_pdf_bottom_up_space() {
+        let shading = Shading::Axial {
+            x0: 10.0,
+            y0: 20.0,
+            x1: 30.0,
+            y1: 40.0,
+            stops: vec![
+                ShadingStop {
+                    offset: 0.0,
+                    color: Color::BLACK,
+                    alpha: 1.0,
+                },
+                ShadingStop {
+                    offset: 1.0,
+                    color: Color::rgb(1.0, 1.0, 1.0),
+                    alpha: 1.0,
+                },
+            ],
+        };
+
+        let (objects, _, _) =
+            shading_to_objects(&shading, 10, Pt::from_f32(100.0), ColorSpace::Rgb);
+        let dictionary = objects.last().expect("shading dictionary");
+        assert!(dictionary.contains("/Coords [10 80 30 60]"));
+        assert!(!dictionary.contains("/Matrix"));
+    }
+
+    #[test]
+    fn translucent_shading_uses_a_luminosity_soft_mask() {
+        let shading = Shading::Axial {
+            x0: 0.0,
+            y0: 0.0,
+            x1: 100.0,
+            y1: 0.0,
+            stops: vec![
+                ShadingStop {
+                    offset: 0.0,
+                    color: Color::rgb(1.0, 0.0, 0.0),
+                    alpha: 0.0,
+                },
+                ShadingStop {
+                    offset: 1.0,
+                    color: Color::rgb(1.0, 0.0, 0.0),
+                    alpha: 1.0,
+                },
+            ],
+        };
+        let doc = one_page_document(vec![Command::ShadingFill(shading)]);
+
+        let bytes = document_to_pdf(&doc).expect("render translucent shading");
+        let pdf = String::from_utf8_lossy(&bytes);
+        assert!(pdf.contains("/SMask << /S /Luminosity"));
+        assert!(pdf.contains("/Group << /S /Transparency /CS /DeviceRGB"));
+        assert!(pdf.contains("/MaskSh sh"));
+        assert!(pdf.contains(" gs\n/Sh"));
+    }
+
+    #[test]
+    fn filtered_form_is_rasterized_into_an_alpha_image() {
+        let size = Size {
+            width: Pt::from_f32(40.0),
+            height: Pt::from_f32(40.0),
+        };
+        let mut filter = crate::flowable::PaintFilterSpec::identity();
+        filter.brightness = 0.5;
+        let doc = Document {
+            page_size: size,
+            pages: vec![Page {
+                commands: vec![
+                    Command::DefineForm {
+                        resource_id: "filtered".to_string(),
+                        width: size.width,
+                        height: size.height,
+                        commands: vec![
+                            Command::SetFillColor(Color::rgb(1.0, 0.0, 0.0)),
+                            Command::DrawRect {
+                                x: Pt::from_f32(10.0),
+                                y: Pt::from_f32(10.0),
+                                width: Pt::from_f32(20.0),
+                                height: Pt::from_f32(20.0),
+                            },
+                        ],
+                    },
+                    Command::DrawFilteredForm {
+                        x: Pt::ZERO,
+                        y: Pt::ZERO,
+                        width: size.width,
+                        height: size.height,
+                        resource_id: "filtered".to_string(),
+                        filter,
+                    },
+                ],
+            }],
+        };
+
+        let bytes = document_to_pdf(&doc).expect("render filtered form");
+        let pdf = String::from_utf8_lossy(&bytes);
+        let content_bytes = page_content_bytes(&bytes);
+        let content = String::from_utf8_lossy(&content_bytes);
+        assert!(pdf.contains("/Subtype /Image"));
+        assert!(pdf.contains("/SMask"));
+        assert!(content.contains("/Im"));
     }
 
     #[test]
@@ -4322,6 +5204,54 @@ mod tests {
         let content = page_content_bytes(&bytes);
         assert_eq!(count_token(&content, b"2 Tr"), 1);
         assert_eq!(count_token(&content, b"(Bold) Tj"), 1);
+    }
+
+    #[test]
+    fn transformed_text_emits_an_extractable_text_matrix() {
+        let doc = one_page_document(vec![
+            Command::SetFontName("Helvetica".to_string()),
+            Command::SetFontSize(Pt::from_f32(12.0)),
+            Command::DrawStringTransformed {
+                x: Pt::from_f32(10.0),
+                y: Pt::from_f32(60.0),
+                text: "Italic".to_string(),
+                m00: 1.0,
+                m01: 0.0,
+                m10: 0.25,
+                m11: 1.0,
+            },
+        ]);
+        let bytes = document_to_pdf(&doc).expect("render transformed text pdf");
+        let content = page_content_bytes(&bytes);
+
+        assert_eq!(count_token(&content, b"1 0 0.25 1 10 60 Tm"), 1);
+        assert_eq!(count_token(&content, b"(Italic) Tj"), 1);
+    }
+
+    #[test]
+    fn css_translation_converts_the_top_down_y_axis_to_pdf_user_space() {
+        let doc = one_page_document(vec![Command::Translate(
+            Pt::from_f32(10.0),
+            Pt::from_f32(20.0),
+        )]);
+        let bytes = document_to_pdf(&doc).expect("render translated pdf");
+        let content = page_content_bytes(&bytes);
+        assert_eq!(count_token(&content, b"1 0 0 1 10 -20 cm"), 1);
+    }
+
+    #[test]
+    fn affine_matrix_converts_the_top_down_y_axis_to_pdf_user_space() {
+        let doc = one_page_document(vec![Command::ConcatMatrix {
+            a: 1.0,
+            b: 2.0,
+            c: 3.0,
+            d: 4.0,
+            e: Pt::from_f32(10.0),
+            f: Pt::from_f32(20.0),
+        }]);
+        let bytes = document_to_pdf(&doc).expect("render affine pdf");
+        let content = page_content_bytes(&bytes);
+        assert_eq!(count_token(&content, b"1 -2 -3 4 10 -20 cm"), 1);
     }
 
     fn count_token(bytes: &[u8], token: &[u8]) -> usize {
@@ -4568,6 +5498,50 @@ mod tests {
     }
 
     #[test]
+    fn explicit_glyph_run_emits_embedded_type3_outline_font() {
+        let inter_path = repo_font_path("Inter-Variable.ttf");
+        let inter_bytes = std::fs::read(&inter_path).expect("read inter");
+        let mut registry = FontRegistry::new();
+        let inter_name = registry
+            .register_bytes(inter_bytes, Some(inter_path.to_string_lossy().as_ref()))
+            .expect("register inter");
+        let glyph_id = registry.map_glyph_id_for_char(&inter_name, 'A');
+        assert_ne!(glyph_id, 0);
+        let advance = Pt::from_f32(21.0).mul_ratio(
+            i32::from(registry.glyph_advance(&inter_name, glyph_id)),
+            1000,
+        );
+        let doc = one_page_document(vec![
+            Command::SetFontName(inter_name),
+            Command::SetFontSize(Pt::from_f32(21.0)),
+            Command::DrawGlyphRun {
+                x: Pt::from_f32(13.5),
+                y: Pt::from_f32(45.0),
+                glyph_ids: vec![glyph_id],
+                advances: vec![(advance, Pt::ZERO)],
+                m00: 1.0,
+                m01: 0.0,
+                m10: 0.0,
+                m11: 1.0,
+            },
+        ]);
+
+        let bytes = document_to_pdf_with_metrics_and_registry(
+            &doc,
+            None,
+            Some(&registry),
+            &PdfOptions::default(),
+        )
+        .expect("render type3 glyph run");
+        let pdf = String::from_utf8_lossy(&bytes);
+        assert!(pdf.contains("/Subtype /Type3"));
+        assert!(pdf.contains("/FontMatrix [0.001 0 0 -0.001 0 0]"));
+        assert!(pdf.contains("/CharProcs << /.notdef"));
+        assert!(pdf.contains(&format!("/g{:04X}", glyph_id)));
+        assert!(pdf.contains("/T3F1 "));
+    }
+
+    #[test]
     fn pdfua1_emits_pdfua_xmp_and_tagged_structure() {
         let inter_path = repo_font_path("Inter-Variable.ttf");
         let inter_bytes = std::fs::read(&inter_path).expect("read inter");
@@ -4767,6 +5741,7 @@ mod tests {
             width: Pt::from_f32(60.0),
             height: Pt::from_f32(30.0),
             resource_id,
+            interpolate: true,
         };
 
         let doc_one = Document {
@@ -4968,6 +5943,7 @@ mod tests {
             width: Pt::from_f32(60.0),
             height: Pt::from_f32(30.0),
             resource_id: image_source,
+            interpolate: true,
         }]);
 
         let bytes =

@@ -20,6 +20,14 @@ from typing import BinaryIO, Sequence
 
 
 PARITY_FONT_NAMES = ("ParitySans.ttf", "ParitySerif.ttf", "ParityMono.ttf")
+PARITY_GENERIC_FONT_PATHS = (
+    Path("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
+    Path("/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf"),
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"),
+)
+PARITY_FALLBACK_FONT_PATHS = (
+    Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+)
 STYLE_BLOCK = re.compile(
     r"<style\b[^>]*>(?P<css>.*?)</style\s*>",
     flags=re.IGNORECASE | re.DOTALL,
@@ -48,6 +56,14 @@ def parity_font_files(resource_root: Path) -> list[str]:
     missing = [path for path in paths if not path.is_file()]
     if missing:
         raise RuntimeError(f"missing IronPress parity font: {missing[0]}")
+    # The authenticated Chromium snapshot resolves CSS generic families through
+    # these host faces. They are present in the pinned parity image; keeping the
+    # existence check conditional also leaves adapter unit tests host-independent.
+    paths.extend(path for path in PARITY_GENERIC_FONT_PATHS if path.is_file())
+    # Chromium performs platform glyph fallback even when the authored family
+    # list names only ParitySans. Register the pinned host CJK collection so the
+    # engine's registered-font fallback pool follows the same behavior.
+    paths.extend(path for path in PARITY_FALLBACK_FONT_PATHS if path.is_file())
     return [str(path) for path in paths]
 
 
