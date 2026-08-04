@@ -93,11 +93,18 @@ def test_render_fixture_uses_parity_geometry_fonts_and_extracted_css(
     )
     assert observed["cwd"] == base_path.resolve()
     assert Path.cwd() == original_directory
-    assert observed["kwargs"] == {
-        "font_files": [
-            str((font_root / name).resolve()) for name in adapter.PARITY_FONT_NAMES
-        ],
-    }
+    expected_font_files = [
+        str((font_root / name).resolve()) for name in adapter.PARITY_FONT_NAMES
+    ]
+    expected_font_files.extend(
+        str(path)
+        for path in (
+            *adapter.PARITY_GENERIC_FONT_PATHS,
+            *adapter.PARITY_FALLBACK_FONT_PATHS,
+        )
+        if path.is_file()
+    )
+    assert observed["kwargs"] == {"font_files": expected_font_files}
 
 
 def test_server_reuses_engine_and_frames_individual_pdf_responses(
