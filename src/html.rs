@@ -4730,6 +4730,43 @@ mod tests {
     }
 
     #[test]
+    fn auto_width_inline_blocks_shrink_to_fit_on_the_same_line() {
+        let resolver = StyleResolver::new(
+            "* { margin: 0; padding: 0; } \
+             html, body, p { display: block; } \
+             .row { width: 300px; font-size: 12px; line-height: 1; } \
+             .label { display: inline-block; width: 100px; } \
+             .value { display: inline-block; }",
+        );
+        let story = html_to_story_with_resolver_and_fonts_and_report(
+            "<html><body><p class='row'><span class='label'>Account:</span><span class='value'>7392</span></p></body></html>",
+            &resolver,
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        );
+
+        let height = story
+            .iter()
+            .map(|flowable| {
+                flowable
+                    .wrap(Pt::from_f32(300.0), Pt::from_f32(1_000.0))
+                    .height
+            })
+            .fold(Pt::ZERO, |sum, value| sum + value);
+
+        assert_eq!(
+            height,
+            Pt::from_f32(9.75),
+            "the auto-width value should shrink to its text instead of occupying a second line"
+        );
+    }
+
+    #[test]
     fn subscript_baseline_shift_expands_the_inline_line_box() {
         let base_css = "* { margin: 0; } html, body, div { display: block; } \
                         sub { display: inline; font-size: 83%; } \
@@ -6915,6 +6952,23 @@ fn forced_inline_line_height(children: &[LayoutItem], style: &ComputedStyle) -> 
     }
 }
 
+fn normal_flow_container_width(style: &ComputedStyle) -> LengthSpec {
+    if matches!(style.display, DisplayMode::InlineBlock)
+        && matches!(
+            style.width,
+            LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
+        )
+    {
+        // An auto-width inline-block is atomic inline content and therefore
+        // shrink-to-fit. Treating it like an ordinary auto-width block makes
+        // each sibling consume the full line and forces otherwise-fitting
+        // inline-blocks onto separate lines.
+        LengthSpec::FitContent
+    } else {
+        style.width
+    }
+}
+
 fn container_flowable_with_role(
     children: Vec<LayoutItem>,
     style: &ComputedStyle,
@@ -7017,7 +7071,7 @@ fn container_flowable_with_role(
         )
         .with_padding(style.padding)
         .with_box_sizing(style.box_sizing)
-        .with_width(style.width)
+        .with_width(normal_flow_container_width(style))
         .with_max_width(style.max_width)
         .with_min_width(style.min_width)
         .with_height(style.height)

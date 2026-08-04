@@ -60,7 +60,15 @@ def test_mount_component_html_passes_props_to_callable() -> None:
     assert '<div class="payload">ok</div>' in html
 
 
-def test_component_mount_ignores_margin_shifted_page_fragment_docplan(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("fragment_height", "expected_overflow_count"),
+    [(792.0, 0), (792.399, 0), (793.0, 1)],
+)
+def test_component_mount_classifies_margin_shifted_page_fragment_docplan(
+    tmp_path: Path,
+    fragment_height: float,
+    expected_overflow_count: int,
+) -> None:
     debug_log = tmp_path / "docplan.jsonl"
     debug_log.write_text(
         json.dumps(
@@ -73,7 +81,12 @@ def test_component_mount_ignores_margin_shifted_page_fragment_docplan(tmp_path: 
                         "placements": [
                             {
                                 "layer": "content",
-                                "bbox": {"x": 36.0, "y": 30.24, "w": 543.6, "h": 792.0},
+                                "bbox": {
+                                    "x": 36.0,
+                                    "y": 30.24,
+                                    "w": 543.6,
+                                    "h": fragment_height,
+                                },
                             }
                         ],
                     }
@@ -95,8 +108,8 @@ def test_component_mount_ignores_margin_shifted_page_fragment_docplan(tmp_path: 
         fail_on_overflow=True,
     )
 
-    assert report["ok"] is True
-    assert report["overflow_count"] == 0
+    assert report["ok"] is (expected_overflow_count == 0)
+    assert report["overflow_count"] == expected_overflow_count
 
 
 def test_to_html_dispatches_for_element_and_document() -> None:

@@ -379,13 +379,6 @@ impl FontRegistry {
             .and_then(|index| self.fonts.get(*index))
     }
 
-    pub(crate) fn registered_font_names(&self) -> Vec<Arc<str>> {
-        self.fonts
-            .iter()
-            .map(|font| Arc::<str>::from(font.name.as_str()))
-            .collect()
-    }
-
     pub(crate) fn is_opentype_cff(&self, name: &str) -> bool {
         self.resolve(name)
             .is_some_and(|font| matches!(font.program_kind, FontProgramKind::OpenTypeCff))

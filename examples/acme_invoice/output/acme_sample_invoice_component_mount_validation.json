@@ -2,7 +2,7 @@
   "schema": "fullbleed.component_mount_validation.v2",
   "schema_version": 2,
   "ok": true,
-  "bytes_written": 882712,
+  "bytes_written": 914164,
   "missing_glyph_count": 0,
   "overflow_count": 0,
   "css_warning_count": 0,

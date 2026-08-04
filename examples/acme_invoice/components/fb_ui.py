@@ -312,7 +312,9 @@ def _collect_debug_signals(debug_entries: list[dict[str, Any]]) -> dict[str, Any
                     and x >= -0.01
                     and y >= -0.01
                     and w <= page_w + 0.01
-                    and abs(h - page_h) <= 0.01
+                    # Snapped borders and line boxes can expand a page fragment's
+                    # reported height by less than half a PDF point.
+                    and abs(h - page_h) <= 0.5
                 ):
                     overflows = False
                 if overflows:

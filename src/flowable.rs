@@ -1874,15 +1874,40 @@ fn text_draw_y_for_line(
 #[cfg(test)]
 mod text_baseline_tests {
     use super::{
-        Flowable, Paragraph, Pt, TextStyle, draw_text_decorations, text_baseline_for_line,
-        text_baseline_for_table_cell_line, text_draw_y_for_line, text_inline_box_top_overflow,
+        Flowable, Paragraph, Pt, TextStyle, draw_text_decorations, resolve_font_stack,
+        text_baseline_for_line, text_baseline_for_table_cell_line, text_draw_y_for_line,
+        text_inline_box_top_overflow,
     };
     use crate::canvas::Command;
+    use crate::font::FontRegistry;
     use crate::style::{
         TextDecorationMode, TextDecorationThicknessMode, TextEmphasisPositionMode,
         TextEmphasisStyleMode, TextUnderlineOffsetMode, WordBreakMode,
     };
     use crate::{Canvas, LengthSpec, Size};
+    use std::sync::Arc;
+
+    #[test]
+    fn registered_fonts_do_not_override_an_authored_base14_fallback() {
+        let mut registry = FontRegistry::new();
+        registry
+            .register_bytes(
+                include_bytes!("../python/fullbleed_assets/fonts/NotoSans-Regular.ttf").to_vec(),
+                Some("noto"),
+            )
+            .unwrap();
+
+        let mut style = TextStyle::default();
+        style.font_name = Arc::<str>::from("Times New Roman");
+        style.font_fallbacks = vec![Arc::<str>::from("Georgia"), Arc::<str>::from("Times-Roman")];
+
+        let (primary, fallbacks) = resolve_font_stack(Some(&registry), &style);
+        let runs = registry.split_text_by_fallbacks(&primary, &fallbacks, "The Coastal Table");
+
+        assert_eq!(primary.as_ref(), "Times-Roman");
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].font_name.as_ref(), "Times-Roman");
+    }
 
     #[test]
     fn overflow_wrap_anywhere_contributes_character_min_content_width() {
@@ -2417,20 +2442,8 @@ fn resolve_font_stack(
         style.font_weight,
         style.font_style,
     );
-    let mut requested_fallbacks = style.font_fallbacks.clone();
-    if let Some(registry) = registry {
-        for name in registry.registered_font_names() {
-            if name.eq_ignore_ascii_case(primary.as_ref())
-                || requested_fallbacks
-                    .iter()
-                    .any(|existing| existing.eq_ignore_ascii_case(name.as_ref()))
-            {
-                continue;
-            }
-            requested_fallbacks.push(name);
-        }
-    }
-    let fallbacks: Vec<Arc<str>> = requested_fallbacks
+    let fallbacks: Vec<Arc<str>> = style
+        .font_fallbacks
         .iter()
         .map(|name| resolve_font_variant_name(registry, name, style.font_weight, style.font_style))
         .collect();

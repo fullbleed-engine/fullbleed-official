@@ -30483,6 +30483,36 @@ mod tests {
     }
 
     #[test]
+    fn debug_does_not_log_no_effect_for_supported_border_radius_var() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "fullbleed_style_border_radius_supported_{}_{}.jsonl",
+            std::process::id(),
+            nanos
+        ));
+        let logger = Arc::new(DebugLogger::new(&path).expect("debug logger"));
+        let resolver = StyleResolver::new_with_debug(
+            r#"[data-fb-role="document-root"] .ui-card {
+                --fb-radius-card: 0.5rem;
+                border-radius: var(--fb-radius-card);
+            }"#,
+            Some(logger.clone()),
+        );
+        drop(resolver);
+        drop(logger);
+        let log = std::fs::read_to_string(&path).expect("read debug log");
+        assert!(
+            !log.contains("\"DECLARATION_PARSED_NO_EFFECT\"")
+                && !log.contains("\"property\":\"border-radius\""),
+            "supported border-radius should not emit no-effect diagnostics, log={log}"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn debug_logs_multicol_single_column_fallback_for_multicol_props() {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)

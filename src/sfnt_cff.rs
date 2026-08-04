@@ -1659,6 +1659,49 @@ mod tests {
         out
     }
 
+    fn synthetic_cff1_otf() -> Vec<u8> {
+        let cff = synthetic_cff1();
+
+        let mut head = vec![0; 54];
+        head[12..16].copy_from_slice(&0x5F0F_3CF5u32.to_be_bytes());
+        head[18..20].copy_from_slice(&1000u16.to_be_bytes());
+
+        let mut hhea = vec![0; 36];
+        hhea[34..36].copy_from_slice(&1u16.to_be_bytes());
+
+        // CFF-flavored fonts use the compact maxp 0.5 table.
+        let maxp = [0x00, 0x00, 0x50, 0x00, 0x00, 0x02];
+        let tables = [
+            (*b"CFF ", cff.as_slice()),
+            (*b"head", head.as_slice()),
+            (*b"hhea", hhea.as_slice()),
+            (*b"maxp", maxp.as_slice()),
+        ];
+
+        let mut out = Vec::new();
+        out.extend_from_slice(b"OTTO");
+        out.extend_from_slice(&(tables.len() as u16).to_be_bytes());
+        out.extend_from_slice(&64u16.to_be_bytes()); // searchRange
+        out.extend_from_slice(&2u16.to_be_bytes()); // entrySelector
+        out.extend_from_slice(&0u16.to_be_bytes()); // rangeShift
+
+        let mut offset = 12 + tables.len() * 16;
+        for (tag, data) in &tables {
+            out.extend_from_slice(tag);
+            out.extend_from_slice(&0u32.to_be_bytes()); // checksums are not needed by the parser
+            out.extend_from_slice(&(offset as u32).to_be_bytes());
+            out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            offset += (data.len() + 3) & !3;
+        }
+        for (_, data) in tables {
+            out.extend_from_slice(data);
+            while out.len() % 4 != 0 {
+                out.push(0);
+            }
+        }
+        out
+    }
+
     fn synthetic_cff2() -> Vec<u8> {
         // At the default coordinate this region has scalar 1.0, so `10 20 1 blend` becomes 30.
         let mut variation_store = Vec::new();
@@ -1784,16 +1827,11 @@ mod tests {
         }
     }
 
-    #[test]
-    #[ignore = "set FULLBLEED_CFF_FONT to a local CFF1 OpenType font"]
-    fn external_cff1_font_outlines_are_finite_and_bounded() {
-        let path = std::env::var_os("FULLBLEED_CFF_FONT")
-            .or_else(|| std::env::var_os("FULLBLEED_CFF_ORACLE_FONT"))
-            .expect("font path");
-        let data = std::fs::read(path).expect("font data");
+    fn assert_cff1_font_outlines_are_finite_and_bounded(data: &[u8], label: &str) {
         let native_face = Face::parse(&data, 0).expect("native face");
         let native_cff = super::CffOutlines::parse(&native_face).expect("native CFF");
-        assert!(native_face.has_cff_outlines());
+        assert!(native_face.has_cff_outlines(), "{label}");
+        assert!(native_face.number_of_glyphs() > 0, "{label}");
         for glyph in 0..native_face.number_of_glyphs() {
             let mut native = Recorder::default();
             let native_bbox = native_cff.outline(GlyphId(glyph), &mut native);
@@ -1804,15 +1842,29 @@ mod tests {
                 eprintln!("native {glyph}: {:?}", native.0);
             }
             if let Some(bbox) = native_bbox {
-                assert!(bbox.x_min <= bbox.x_max, "glyph {glyph} x bounds");
-                assert!(bbox.y_min <= bbox.y_max, "glyph {glyph} y bounds");
+                assert!(bbox.x_min <= bbox.x_max, "{label} glyph {glyph} x bounds");
+                assert!(bbox.y_min <= bbox.y_max, "{label} glyph {glyph} y bounds");
             }
             for (index, command) in native.0.into_iter().enumerate() {
                 assert!(
                     command_is_finite(command),
-                    "glyph {glyph} command {index}: {command:?}"
+                    "{label} glyph {glyph} command {index}: {command:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn cff1_font_outlines_are_finite_and_bounded() {
+        let synthetic = synthetic_cff1_otf();
+        assert_cff1_font_outlines_are_finite_and_bounded(&synthetic, "synthetic CFF1 font");
+
+        // Developers can still extend this coverage with a real-world CFF1 font.
+        if let Some(path) = std::env::var_os("FULLBLEED_CFF_FONT")
+            .or_else(|| std::env::var_os("FULLBLEED_CFF_ORACLE_FONT"))
+        {
+            let data = std::fs::read(&path).expect("external CFF1 font data");
+            assert_cff1_font_outlines_are_finite_and_bounded(&data, &path.to_string_lossy());
         }
     }
 }
