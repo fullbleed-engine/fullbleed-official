@@ -1,14 +1,14 @@
 {
   "schema": "fullbleed.golden_suite.v1",
-  "generated_at_utc": "2026-08-04T03:40:44.329453+00:00",
+  "generated_at_utc": "2026-08-04T11:59:34.719670+00:00",
   "cases": {
     "acme_invoice": {
       "case_id": "acme_invoice",
       "report": "examples/acme_invoice/report.py",
       "pdf": {
         "path": "examples/acme_invoice/output/acme_sample_invoice.pdf",
-        "bytes": 914164,
-        "sha256": "eaf96995aec9bcddf4bed635014bd70433827af612764878aa0dd8dbbb261774"
+        "bytes": 85912,
+        "sha256": "f1d6e4065b1504ddc6513d626403c41ba6a62fe5a25f3f7a2c2ab3f00fafe2d0"
       },
       "png": {
         "count": 1,
@@ -24,7 +24,7 @@
       "validation": {
         "path": "examples/acme_invoice/output/acme_sample_invoice_component_mount_validation.json",
         "kind": "component_mount",
-        "sha256": "6e596dc45733cb702a93d54f12807b0d791b5eae84c3b912e9da0c3b1056821e"
+        "sha256": "bacf61ebab32d10b7df761c6f32fe00c128c603cc75ce5054c807f2f4be252cb"
       },
       "css_layers": {
         "path": "examples/acme_invoice/output/acme_sample_invoice_css_layers.json",
@@ -36,8 +36,8 @@
       "report": "examples/bank_statement/report.py",
       "pdf": {
         "path": "examples/bank_statement/output/bank_statement.pdf",
-        "bytes": 887133,
-        "sha256": "f5c8918d0dc355b929730e5b33058a5c186e9386247e84f84a86b7d47265b7ff"
+        "bytes": 58999,
+        "sha256": "dc1e340253190fe7987a54a89a7b5490f5855fe94bc7821bf9e76cb3182274b1"
       },
       "png": {
         "count": 2,
@@ -59,7 +59,7 @@
       "validation": {
         "path": "examples/bank_statement/output/bank_statement_component_mount_validation.json",
         "kind": "component_mount",
-        "sha256": "d972fca6beaa31547d518d99d6cb118f3036df307eb3c1ac6478d98c64d98cff"
+        "sha256": "f9258eec7588542d5ea2151331ec4031dad80cf8d2d7e99efbc661eeece3714b"
       },
       "css_layers": {
         "path": "examples/bank_statement/output/bank_statement_css_layers.json",

@@ -89,6 +89,8 @@ See `docs/performance-pass-2026-08-04.md` for the measurement ledger and
 - Python Stable ABI compiled-document tests: seven passed.
 - PyMuPDF and ImageMagick visual comparison of simple and full-document outputs: zero differing
   pixels against released 2.0.0.
+- Golden PDF hashes and byte counts were regenerated for font-subset output; every checked-in PNG
+  page hash remained unchanged.
 - A 1,000-page virtualized PDF reports one shared content stream; pages 1, 500, and 1,000 have
   identical raster hashes, and page 1,000 retains expected extractable text.
 
