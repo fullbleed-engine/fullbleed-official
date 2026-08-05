@@ -5,19 +5,24 @@ use crate::css_queries::{
     ContainerValue as ContainerFeatureValue,
 };
 use crate::debug::{DebugLogger, json_escape};
-use crate::flowable::CalcLength;
+use crate::flowable::FontRelativeLength;
 use crate::flowable::{
     BackgroundBox, BackgroundClipBox, BackgroundPaint, BackgroundPositionComponent,
     BackgroundPositionSpec, BackgroundRepeatMode, BackgroundRepeatSpec, BackgroundSizeMode,
-    BackgroundSizeSpec, BorderCollapseMode, BorderRadiiSpec, BorderRadiusSpec, BorderSpacingSpec,
-    BoxShadowSpec, BreakAfter, BreakBefore, BreakInside, ClipPathCircleSpec, ClipPathEllipseSpec,
-    ClipPathInsetSpec, ClipPathPathCommand, ClipPathPathSpec, ClipPathPolygonSpec,
-    ClipPathRadiusSpec, ClipPathRectSpec, ClipPathReferenceBox, ClipPathShapeControlAnchor,
+    BackgroundSizeSpec, BorderCollapseMode, BorderImageOutsetValue, BorderImageRepeatMode,
+    BorderImageSliceValue, BorderImageSpec, BorderImageWidthValue, BorderRadiiSpec,
+    BorderRadiusSpec, BorderSpacingSpec, BoxDecorationBreak, BoxShadowSpec, BreakAfter,
+    BreakBefore, BreakInside, ClipPathCircleSpec, ClipPathEllipseSpec, ClipPathInsetSpec,
+    ClipPathPathCommand, ClipPathPathSpec, ClipPathPolygonSpec, ClipPathRadiusSpec,
+    ClipPathRectSpec, ClipPathReferenceBox, ClipPathShapeControlAnchor,
     ClipPathShapeFunctionCommand, ClipPathShapeFunctionSpec, ClipPathShapeRadius,
     ClipPathShapeSpec, ClipPathXywhSpec, CssTransformOp, CssTransformOrigin, EdgeSizes,
-    FilterDropShadowSpec, GridTrackBreadth, GridTrackSize, LengthSpec, OutlineLineStyle,
-    Pagination, PaintFilterSpec, TabSizeSpec, TableLayoutMode, TextStyle,
+    FilterDropShadowSpec, GradientPosition, GradientRepeat, GradientStopPosition, GridTrackBreadth,
+    GridTrackSize, LengthSpec, OutlineLineStyle, Pagination, PaintFilterSpec, RadialGradientShape,
+    RadialGradientSize, TabSizeSpec, TableLayoutMode, TextStyle,
 };
+use crate::flowable::{CalcLength, ClampedLength};
+use crate::font::FontRegistry;
 use crate::svg;
 use crate::types::{BoxSizingMode, Color, I32F32, Margins, MixBlendMode, Pt, ShadingStop, Size};
 use std::collections::{HashMap, HashSet};
@@ -87,6 +92,27 @@ impl SimpleSelector {
                     class_count += inner_spec.1;
                     tag_count += inner_spec.2;
                 }
+                PseudoClass::Has(relative) => {
+                    let inner_spec = relative
+                        .iter()
+                        .map(|selector| selector.selector.specificity())
+                        .max()
+                        .unwrap_or(Specificity(0, 0, 0));
+                    id_count += inner_spec.0;
+                    class_count += inner_spec.1;
+                    tag_count += inner_spec.2;
+                }
+                PseudoClass::NthChildOf { selectors, .. } => {
+                    class_count += 1;
+                    let inner_spec = selectors
+                        .iter()
+                        .map(SimpleSelector::specificity)
+                        .max()
+                        .unwrap_or(Specificity(0, 0, 0));
+                    id_count += inner_spec.0;
+                    class_count += inner_spec.1;
+                    tag_count += inner_spec.2;
+                }
                 // Selectors inside :where() intentionally contribute no specificity.
                 PseudoClass::Where(_) => {}
                 _ => {
@@ -102,18 +128,44 @@ impl SimpleSelector {
 #[derive(Debug, Clone)]
 enum PseudoClass {
     Root,
+    Scope,
+    Empty,
+    Defined,
+    Direction(String),
+    Language(String),
     FirstChild,
     LastChild,
+    OnlyChild,
     FirstOfType,
     LastOfType,
+    OnlyOfType,
     NthChildEven,
     NthChildOdd,
     NthChild(usize),
-    NthChildFormula { a: i32, b: i32 },
+    NthChildFormula {
+        a: i32,
+        b: i32,
+    },
+    NthChildOf {
+        a: i32,
+        b: i32,
+        selectors: Vec<SimpleSelector>,
+    },
+    NthLastChildFormula {
+        a: i32,
+        b: i32,
+    },
     NthOfTypeEven,
     NthOfTypeOdd,
     NthOfType(usize),
-    NthOfTypeFormula { a: i32, b: i32 },
+    NthOfTypeFormula {
+        a: i32,
+        b: i32,
+    },
+    NthLastOfTypeFormula {
+        a: i32,
+        b: i32,
+    },
     Hover,
     Before,
     After,
@@ -123,6 +175,13 @@ enum PseudoClass {
     Not(Vec<SimpleSelector>),
     Is(Vec<SimpleSelector>),
     Where(Vec<SimpleSelector>),
+    Has(Vec<RelativeSelector>),
+}
+
+#[derive(Debug, Clone)]
+struct RelativeSelector {
+    combinator: Combinator,
+    selector: SimpleSelector,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,34 +199,92 @@ impl PseudoClass {
             self,
             PseudoClass::FirstChild
                 | PseudoClass::LastChild
+                | PseudoClass::OnlyChild
                 | PseudoClass::FirstOfType
                 | PseudoClass::LastOfType
+                | PseudoClass::OnlyOfType
                 | PseudoClass::NthChildEven
                 | PseudoClass::NthChildOdd
                 | PseudoClass::NthChild(_)
                 | PseudoClass::NthChildFormula { .. }
+                | PseudoClass::NthChildOf { .. }
+                | PseudoClass::NthLastChildFormula { .. }
                 | PseudoClass::NthOfTypeEven
                 | PseudoClass::NthOfTypeOdd
                 | PseudoClass::NthOfType(_)
                 | PseudoClass::NthOfTypeFormula { .. }
+                | PseudoClass::NthLastOfTypeFormula { .. }
         )
     }
 
     fn matches_with_pseudo(&self, element: &ElementInfo, pseudo: PseudoTarget) -> bool {
         match self {
             PseudoClass::Root => element.is_root,
+            PseudoClass::Scope => element.is_root,
+            PseudoClass::Empty => element.is_empty,
+            PseudoClass::Defined => element.is_defined,
+            PseudoClass::Direction(direction) => element
+                .direction
+                .as_deref()
+                .is_some_and(|value| value.eq_ignore_ascii_case(direction)),
+            PseudoClass::Language(language) => element.language.as_deref().is_some_and(|value| {
+                value.eq_ignore_ascii_case(language)
+                    || value
+                        .get(language.len()..)
+                        .is_some_and(|suffix| suffix.starts_with('-'))
+                        && value
+                            .get(..language.len())
+                            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(language))
+            }),
             PseudoClass::FirstChild => element.child_index == 1,
             PseudoClass::LastChild => element.child_index == element.child_count,
+            PseudoClass::OnlyChild => element.child_count == 1,
             PseudoClass::FirstOfType => element.type_index == 1,
             PseudoClass::LastOfType => element.type_index == element.type_count,
+            PseudoClass::OnlyOfType => element.type_count == 1,
             PseudoClass::NthChildEven => element.child_index % 2 == 0,
             PseudoClass::NthChildOdd => element.child_index % 2 == 1,
             PseudoClass::NthChild(n) => element.child_index == *n,
             PseudoClass::NthChildFormula { a, b } => nth_index_matches(element.child_index, *a, *b),
+            PseudoClass::NthChildOf { a, b, selectors } => {
+                if !selectors
+                    .iter()
+                    .any(|selector| selector.matches_with_pseudo(element, PseudoTarget::None))
+                {
+                    false
+                } else {
+                    let index = 1 + element
+                        .prev_siblings
+                        .iter()
+                        .filter(|sibling| {
+                            selectors.iter().any(|selector| {
+                                selector.matches_with_pseudo(sibling, PseudoTarget::None)
+                            })
+                        })
+                        .count();
+                    nth_index_matches(index, *a, *b)
+                }
+            }
+            PseudoClass::NthLastChildFormula { a, b } => nth_index_matches(
+                element
+                    .child_count
+                    .saturating_add(1)
+                    .saturating_sub(element.child_index),
+                *a,
+                *b,
+            ),
             PseudoClass::NthOfTypeEven => element.type_index % 2 == 0,
             PseudoClass::NthOfTypeOdd => element.type_index % 2 == 1,
             PseudoClass::NthOfType(n) => element.type_index == *n,
             PseudoClass::NthOfTypeFormula { a, b } => nth_index_matches(element.type_index, *a, *b),
+            PseudoClass::NthLastOfTypeFormula { a, b } => nth_index_matches(
+                element
+                    .type_count
+                    .saturating_add(1)
+                    .saturating_sub(element.type_index),
+                *a,
+                *b,
+            ),
             PseudoClass::Hover => false,
             PseudoClass::Before => matches!(pseudo, PseudoTarget::Before),
             PseudoClass::After => matches!(pseudo, PseudoTarget::After),
@@ -180,6 +297,9 @@ impl PseudoClass {
             PseudoClass::Is(selectors) | PseudoClass::Where(selectors) => selectors
                 .iter()
                 .any(|selector| selector.matches_with_pseudo(element, pseudo)),
+            PseudoClass::Has(selectors) => {
+                selectors.iter().any(|selector| selector.matches(element))
+            }
         }
     }
 
@@ -195,6 +315,21 @@ impl PseudoClass {
                     .pseudos
                     .iter()
                     .any(PseudoClass::has_positional_pseudo)
+            }),
+            _ => false,
+        }
+    }
+
+    fn has_relational_pseudo(&self) -> bool {
+        match self {
+            PseudoClass::Has(_) | PseudoClass::NthChildOf { .. } => true,
+            PseudoClass::Not(selectors)
+            | PseudoClass::Is(selectors)
+            | PseudoClass::Where(selectors) => selectors.iter().any(|selector| {
+                selector
+                    .pseudos
+                    .iter()
+                    .any(PseudoClass::has_relational_pseudo)
             }),
             _ => false,
         }
@@ -233,6 +368,7 @@ struct AttrSelector {
     name: String,
     op: AttrOp,
     value: Option<String>,
+    case_insensitive: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,33 +387,72 @@ impl AttrSelector {
         let Some(value) = element.attrs.get(&self.name) else {
             return false;
         };
+        let matches_value = |candidate: &str, expected: &str| {
+            if self.case_insensitive {
+                candidate.eq_ignore_ascii_case(expected)
+            } else {
+                candidate == expected
+            }
+        };
         match self.op {
             AttrOp::Exists => true,
-            AttrOp::Equals => self.value.as_deref().map(|v| value == v).unwrap_or(false),
+            AttrOp::Equals => self
+                .value
+                .as_deref()
+                .map(|expected| matches_value(value, expected))
+                .unwrap_or(false),
             AttrOp::Includes => self
                 .value
                 .as_deref()
-                .map(|v| value.split_whitespace().any(|part| part == v))
+                .map(|expected| {
+                    value
+                        .split_whitespace()
+                        .any(|part| matches_value(part, expected))
+                })
                 .unwrap_or(false),
             AttrOp::DashMatch => self
                 .value
                 .as_deref()
-                .map(|v| value == v || value.starts_with(&format!("{v}-")))
+                .map(|expected| {
+                    matches_value(value, expected)
+                        || value
+                            .get(..expected.len())
+                            .is_some_and(|prefix| matches_value(prefix, expected))
+                            && value
+                                .get(expected.len()..)
+                                .is_some_and(|suffix| suffix.starts_with('-'))
+                })
                 .unwrap_or(false),
             AttrOp::Prefix => self
                 .value
                 .as_deref()
-                .map(|v| value.starts_with(v))
+                .map(|expected| {
+                    value
+                        .get(..expected.len())
+                        .is_some_and(|prefix| matches_value(prefix, expected))
+                })
                 .unwrap_or(false),
             AttrOp::Suffix => self
                 .value
                 .as_deref()
-                .map(|v| value.ends_with(v))
+                .map(|expected| {
+                    value
+                        .get(value.len().saturating_sub(expected.len())..)
+                        .is_some_and(|suffix| matches_value(suffix, expected))
+                })
                 .unwrap_or(false),
             AttrOp::Substring => self
                 .value
                 .as_deref()
-                .map(|v| value.contains(v))
+                .map(|expected| {
+                    if self.case_insensitive {
+                        value
+                            .to_ascii_lowercase()
+                            .contains(&expected.to_ascii_lowercase())
+                    } else {
+                        value.contains(expected)
+                    }
+                })
                 .unwrap_or(false),
         }
     }
@@ -289,6 +464,28 @@ enum Combinator {
     Child,
     AdjacentSibling,
     GeneralSibling,
+}
+
+impl RelativeSelector {
+    fn matches(&self, element: &ElementInfo) -> bool {
+        match self.combinator {
+            Combinator::Descendant => element.children.iter().any(|child| {
+                self.selector.matches_with_pseudo(child, PseudoTarget::None) || self.matches(child)
+            }),
+            Combinator::Child => element
+                .children
+                .iter()
+                .any(|child| self.selector.matches_with_pseudo(child, PseudoTarget::None)),
+            Combinator::AdjacentSibling => element.next_siblings.first().is_some_and(|sibling| {
+                self.selector
+                    .matches_with_pseudo(sibling, PseudoTarget::None)
+            }),
+            Combinator::GeneralSibling => element.next_siblings.iter().any(|sibling| {
+                self.selector
+                    .matches_with_pseudo(sibling, PseudoTarget::None)
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -311,6 +508,12 @@ impl SelectorPattern {
                 Combinator::AdjacentSibling | Combinator::GeneralSibling
             )
         })
+    }
+
+    fn has_relational_pseudos(&self) -> bool {
+        self.parts
+            .iter()
+            .any(|part| part.pseudos.iter().any(PseudoClass::has_relational_pseudo))
     }
 
     fn pseudo_target(&self) -> Option<PseudoTarget> {
@@ -535,6 +738,7 @@ impl LineHeightSpec {
 #[derive(Debug, Clone)]
 enum ColorSpec {
     Value(Color),
+    AlphaValue(Color, f32),
     Inherit,
     Initial,
     CurrentColor,
@@ -679,7 +883,7 @@ pub enum WritingModeMode {
     SidewaysLr,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum VerticalAlignMode {
     Baseline,
     Sub,
@@ -689,6 +893,7 @@ pub enum VerticalAlignMode {
     Middle,
     TextBottom,
     Bottom,
+    Length(LengthSpec),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -998,6 +1203,43 @@ pub enum AlignContentMode {
     SpaceBetween,
     SpaceAround,
     SpaceEvenly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridAutoFlowMode {
+    Row,
+    Column,
+    RowDense,
+    ColumnDense,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridAutoRepeatMode {
+    Fill,
+    Fit,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GridAutoRepeatSpec {
+    pub mode: GridAutoRepeatMode,
+    pub tracks: Vec<GridTrackSize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum GridLineSpec {
+    #[default]
+    Auto,
+    Line(i32),
+    Named(String),
+    NamedOccurrence {
+        occurrence: i32,
+        name: String,
+    },
+    Span(usize),
+    SpanNamed {
+        count: usize,
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1373,7 +1615,75 @@ enum AspectRatioSpec {
 }
 
 #[derive(Debug, Clone, Default)]
+struct BorderImageDelta {
+    reset: bool,
+    source: Option<Option<BackgroundPaint>>,
+    slice: Option<[BorderImageSliceValue; 4]>,
+    fill: Option<bool>,
+    width: Option<[BorderImageWidthValue; 4]>,
+    outset: Option<[BorderImageOutsetValue; 4]>,
+    repeat: Option<(BorderImageRepeatMode, BorderImageRepeatMode)>,
+}
+
+impl BorderImageDelta {
+    fn is_empty(&self) -> bool {
+        !self.reset
+            && self.source.is_none()
+            && self.slice.is_none()
+            && self.fill.is_none()
+            && self.width.is_none()
+            && self.outset.is_none()
+            && self.repeat.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CascadeWideKeyword {
+    Inherit,
+    Initial,
+    Unset,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PhysicalCorner {
+    TopLeft,
+    TopRight,
+    BottomRight,
+    BottomLeft,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BorderRadiusCornerTarget {
+    Physical(PhysicalCorner),
+    StartStart,
+    StartEnd,
+    EndStart,
+    EndEnd,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct BorderRadiusCornerValue {
+    horizontal: LengthSpec,
+    vertical: LengthSpec,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum BorderRadiusOp {
+    Shorthand(BorderRadiiSpec),
+    Corner(BorderRadiusCornerTarget, BorderRadiusCornerValue),
+}
+
+#[derive(Debug, Clone)]
+enum BorderCascadeOp {
+    Width(BorderColorTarget, NativeLengthComponent),
+    Style(BorderColorTarget, BorderLineStyle),
+    Color(BorderColorTarget, NativeBorderColorComponent),
+}
+
+#[derive(Debug, Clone, Default)]
 struct StyleDelta {
+    all: Option<CascadeWideKeyword>,
+    background_reset: Option<CascadeWideKeyword>,
     revert_layer: RevertLayerDelta,
     font_size: Option<FontSizeSpec>,
     font_size_var: Option<String>,
@@ -1494,6 +1804,7 @@ struct StyleDelta {
     border_inline_end_style: Option<BorderLineStyle>,
     border_block_start_style: Option<BorderLineStyle>,
     border_block_end_style: Option<BorderLineStyle>,
+    border_cascade_ops: Vec<BorderCascadeOp>,
     border_collapse: Option<BorderCollapseMode>,
     caption_side: Option<CaptionSideMode>,
     border_spacing: Option<BorderSpacingSpec>,
@@ -1502,6 +1813,9 @@ struct StyleDelta {
     visibility: Option<VisibilitySpec>,
     border_radius: Option<BorderRadiiSpec>,
     border_radius_var: Option<String>,
+    border_radius_ops: Vec<BorderRadiusOp>,
+    box_decoration_break: Option<BoxDecorationBreak>,
+    border_image: BorderImageDelta,
     outline_width: Option<LengthSpec>,
     outline_offset: Option<LengthSpec>,
     outline_offset_var: Option<String>,
@@ -1528,6 +1842,8 @@ struct StyleDelta {
     background_paints: Option<Vec<BackgroundPaint>>,
     background_sizes: Option<Vec<BackgroundSizeSpec>>,
     background_positions: Option<Vec<BackgroundPositionSpec>>,
+    background_position_x: Option<Vec<BackgroundPositionComponent>>,
+    background_position_y: Option<Vec<BackgroundPositionComponent>>,
     background_repeats: Option<Vec<BackgroundRepeatSpec>>,
     background_blend_modes: Option<Vec<MixBlendMode>>,
     background_origins: Option<Vec<BackgroundBox>>,
@@ -1597,6 +1913,8 @@ struct StyleDelta {
     justify_content: Option<JustifyContentMode>,
     align_items: Option<AlignItemsMode>,
     align_self: Option<AlignSelfMode>,
+    justify_items: Option<AlignItemsMode>,
+    justify_self: Option<AlignSelfMode>,
     align_content: Option<AlignContentMode>,
     column_count: Option<usize>,
     column_rule_width: Option<LengthSpec>,
@@ -1606,6 +1924,23 @@ struct StyleDelta {
     grid_rows: Option<usize>,
     grid_column_tracks: Option<Vec<GridTrackSize>>,
     grid_row_tracks: Option<Vec<GridTrackSize>>,
+    grid_subgrid_columns: Option<bool>,
+    grid_subgrid_rows: Option<bool>,
+    grid_column_tracks_var: Option<Option<String>>,
+    grid_row_tracks_var: Option<Option<String>>,
+    grid_auto_column_tracks: Option<Vec<GridTrackSize>>,
+    grid_auto_row_tracks: Option<Vec<GridTrackSize>>,
+    grid_auto_flow: Option<GridAutoFlowMode>,
+    grid_column_auto_repeat: Option<Option<GridAutoRepeatSpec>>,
+    grid_row_auto_repeat: Option<Option<GridAutoRepeatSpec>>,
+    grid_template_areas: Option<Vec<Vec<Option<String>>>>,
+    grid_column_line_names: Option<Vec<Vec<String>>>,
+    grid_row_line_names: Option<Vec<Vec<String>>>,
+    grid_column_line_start: Option<GridLineSpec>,
+    grid_column_line_end: Option<GridLineSpec>,
+    grid_row_line_start: Option<GridLineSpec>,
+    grid_row_line_end: Option<GridLineSpec>,
+    grid_area_name: Option<Option<String>>,
     grid_column_start: Option<usize>,
     grid_row_start: Option<usize>,
     row_gap: Option<LengthSpec>,
@@ -1901,6 +2236,14 @@ pub struct ComputedBorderColors {
     pub left: Color,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ComputedBorderOpacities {
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+    pub left: f32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComputedBorderStyles {
     pub top: OutlineLineStyle,
@@ -2040,6 +2383,10 @@ pub struct ComputedStyle {
     pub border_right_color: Option<Color>,
     pub border_bottom_color: Option<Color>,
     pub border_left_color: Option<Color>,
+    pub border_top_alpha: f32,
+    pub border_right_alpha: f32,
+    pub border_bottom_alpha: f32,
+    pub border_left_alpha: f32,
     border_style: BorderStyleState,
     pub border_collapse: BorderCollapseMode,
     pub caption_side: CaptionSideMode,
@@ -2047,6 +2394,8 @@ pub struct ComputedStyle {
     pub table_layout: TableLayoutMode,
     pub empty_cells_hide: bool,
     pub border_radius: BorderRadiiSpec,
+    pub box_decoration_break: BoxDecorationBreak,
+    pub border_image: BorderImageSpec,
     pending_border_radius_var: Option<String>,
     pub outline_width: LengthSpec,
     pub outline_offset: LengthSpec,
@@ -2069,6 +2418,7 @@ pub struct ComputedStyle {
     pub clip_path_reference_box: ClipPathReferenceBox,
     pub clip_path_inset: Option<ClipPathInsetSpec>,
     pub root_font_size: Pt,
+    root_line_height: Pt,
     pub white_space: WhiteSpaceMode,
     pub display: DisplayMode,
     pub visibility: VisibilityMode,
@@ -2096,6 +2446,8 @@ pub struct ComputedStyle {
     pub justify_content: JustifyContentMode,
     pub align_items: AlignItemsMode,
     pub align_self: AlignSelfMode,
+    pub justify_items: AlignItemsMode,
+    pub justify_self: AlignSelfMode,
     pub align_content: AlignContentMode,
     pub column_count: usize,
     pub column_rule_width: LengthSpec,
@@ -2106,6 +2458,23 @@ pub struct ComputedStyle {
     pub grid_rows: Option<usize>,
     pub grid_column_tracks: Vec<GridTrackSize>,
     pub grid_row_tracks: Vec<GridTrackSize>,
+    pub grid_subgrid_columns: bool,
+    pub grid_subgrid_rows: bool,
+    pending_grid_column_tracks_var: Option<String>,
+    pending_grid_row_tracks_var: Option<String>,
+    pub grid_auto_column_tracks: Vec<GridTrackSize>,
+    pub grid_auto_row_tracks: Vec<GridTrackSize>,
+    pub grid_auto_flow: GridAutoFlowMode,
+    pub grid_column_auto_repeat: Option<GridAutoRepeatSpec>,
+    pub grid_row_auto_repeat: Option<GridAutoRepeatSpec>,
+    pub grid_template_areas: Vec<Vec<Option<String>>>,
+    pub grid_column_line_names: Vec<Vec<String>>,
+    pub grid_row_line_names: Vec<Vec<String>>,
+    pub grid_column_line_start: GridLineSpec,
+    pub grid_column_line_end: GridLineSpec,
+    pub grid_row_line_start: GridLineSpec,
+    pub grid_row_line_end: GridLineSpec,
+    pub grid_area_name: Option<String>,
     pub grid_column_start: Option<usize>,
     pub grid_row_start: Option<usize>,
     pub row_gap: LengthSpec,
@@ -2223,6 +2592,15 @@ impl ComputedStyle {
             right: self.border_right_color.unwrap_or(uniform),
             bottom: self.border_bottom_color.unwrap_or(uniform),
             left: self.border_left_color.unwrap_or(uniform),
+        }
+    }
+
+    pub fn resolved_border_opacities(&self) -> ComputedBorderOpacities {
+        ComputedBorderOpacities {
+            top: self.border_top_alpha.clamp(0.0, 1.0),
+            right: self.border_right_alpha.clamp(0.0, 1.0),
+            bottom: self.border_bottom_alpha.clamp(0.0, 1.0),
+            left: self.border_left_alpha.clamp(0.0, 1.0),
         }
     }
 
@@ -2528,6 +2906,10 @@ enum BorderColorTarget {
 }
 
 fn set_delta_border_color_spec(delta: &mut StyleDelta, target: BorderColorTarget, spec: ColorSpec) {
+    delta.border_cascade_ops.push(BorderCascadeOp::Color(
+        target,
+        NativeBorderColorComponent::Spec(spec.clone()),
+    ));
     clear_delta_border_color(delta, target);
     clear_revert_layer_border_color(delta, target);
     match target {
@@ -2579,6 +2961,10 @@ fn set_delta_border_color_spec(delta: &mut StyleDelta, target: BorderColorTarget
 }
 
 fn set_delta_border_color_var(delta: &mut StyleDelta, target: BorderColorTarget, var: String) {
+    delta.border_cascade_ops.push(BorderCascadeOp::Color(
+        target,
+        NativeBorderColorComponent::Var(var.clone()),
+    ));
     clear_delta_border_color(delta, target);
     clear_revert_layer_border_color(delta, target);
     match target {
@@ -2634,6 +3020,10 @@ fn set_delta_border_width_spec(
     target: BorderColorTarget,
     spec: LengthSpec,
 ) {
+    delta.border_cascade_ops.push(BorderCascadeOp::Width(
+        target,
+        NativeLengthComponent::Spec(spec),
+    ));
     clear_delta_border_width(delta, target);
     clear_revert_layer_border_width(delta, target);
     match target {
@@ -2659,6 +3049,10 @@ fn set_delta_border_width_var(
     target: BorderColorTarget,
     expr: LengthVarExpr,
 ) {
+    delta.border_cascade_ops.push(BorderCascadeOp::Width(
+        target,
+        NativeLengthComponent::Var(expr.name.clone()),
+    ));
     clear_delta_border_width(delta, target);
     clear_revert_layer_border_width(delta, target);
     match target {
@@ -2684,6 +3078,9 @@ fn set_delta_border_style(
     target: BorderColorTarget,
     style: BorderLineStyle,
 ) {
+    delta
+        .border_cascade_ops
+        .push(BorderCascadeOp::Style(target, style));
     clear_delta_border_style(delta, target);
     clear_revert_layer_border_style(delta, target);
     match target {
@@ -2785,11 +3182,17 @@ pub struct ElementInfo {
     pub container_inline_size: Option<Pt>,
     pub container_block_size: Option<Pt>,
     pub is_root: bool,
+    pub is_empty: bool,
+    pub is_defined: bool,
+    pub language: Option<String>,
+    pub direction: Option<String>,
     pub child_index: usize,
     pub child_count: usize,
     pub type_index: usize,
     pub type_count: usize,
     pub prev_siblings: Vec<ElementInfo>,
+    pub next_siblings: Vec<ElementInfo>,
+    pub children: Vec<ElementInfo>,
 }
 
 impl ElementInfo {
@@ -2827,6 +3230,7 @@ pub struct StyleResolver {
     important_index: RuleIndex,
     root_font_size: Pt,
     viewport: Size,
+    font_registry: Option<Arc<FontRegistry>>,
     debug: Option<Arc<DebugLogger>>,
     root_normal: Vec<StyleDelta>,
     root_important: Vec<StyleDelta>,
@@ -2987,6 +3391,15 @@ impl StyleResolver {
         debug: Option<Arc<DebugLogger>>,
         viewport: Option<Size>,
     ) -> Self {
+        Self::new_with_debug_viewport_and_fonts(css, debug, viewport, None)
+    }
+
+    pub(crate) fn new_with_debug_viewport_and_fonts(
+        css: &str,
+        debug: Option<Arc<DebugLogger>>,
+        viewport: Option<Size>,
+        font_registry: Option<Arc<FontRegistry>>,
+    ) -> Self {
         let viewport = viewport.unwrap_or(Size {
             width: Pt::ZERO,
             height: Pt::ZERO,
@@ -3050,7 +3463,7 @@ impl StyleResolver {
                 match rule {
                     crate::css_native::Rule::Style(style) => {
                         let (normal_delta, important_delta) =
-                            style_from_native_declarations(&style.declarations);
+                            style_from_native_declarations(&style.declarations, viewport);
                         let selectors = crate::css_native::split_top_level(&style.selectors, ',')
                             .unwrap_or_else(|_| vec![style.selectors.clone()]);
                         if let Some(logger) = debug {
@@ -3091,7 +3504,9 @@ impl StyleResolver {
                                 if pattern.has_positional_pseudos() {
                                     *has_positional_selectors = true;
                                 }
-                                if pattern.has_sibling_combinators() {
+                                if pattern.has_sibling_combinators()
+                                    || pattern.has_relational_pseudos()
+                                {
                                     *has_sibling_selectors = true;
                                 }
                                 if !normal_delta.is_empty() {
@@ -3527,6 +3942,7 @@ impl StyleResolver {
             important_index,
             root_font_size: TextStyle::default().font_size,
             viewport,
+            font_registry,
             debug,
             root_normal,
             root_important,
@@ -3544,6 +3960,41 @@ impl StyleResolver {
 
     pub fn has_sibling_selectors(&self) -> bool {
         self.has_sibling_selectors
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_style_delta(
+        &self,
+        computed: &mut ComputedStyle,
+        delta: &StyleDelta,
+        parent: &ComputedStyle,
+        unset_base: &ComputedStyle,
+        parent_font_size: Pt,
+        parent_line_height: LineHeightSpec,
+        root_font_size: Pt,
+        element: Option<&ElementInfo>,
+    ) {
+        if let Some(keyword) = delta.all {
+            match keyword {
+                CascadeWideKeyword::Inherit => replace_computed_style_for_all(computed, parent),
+                CascadeWideKeyword::Initial => {
+                    let initial = self.default_style();
+                    replace_computed_style_for_all(computed, &initial);
+                }
+                CascadeWideKeyword::Unset => replace_computed_style_for_all(computed, unset_base),
+            }
+        }
+        apply_delta(
+            computed,
+            delta,
+            &self.custom_property_registrations,
+            parent,
+            parent_font_size,
+            parent_line_height,
+            root_font_size,
+            element,
+            self.viewport,
+        );
     }
 
     pub fn debug_logger(&self) -> Option<Arc<DebugLogger>> {
@@ -3673,6 +4124,10 @@ impl StyleResolver {
             border_right_color: None,
             border_bottom_color: None,
             border_left_color: None,
+            border_top_alpha: 1.0,
+            border_right_alpha: 1.0,
+            border_bottom_alpha: 1.0,
+            border_left_alpha: 1.0,
             border_style: BorderStyleState::none(),
             border_collapse: BorderCollapseMode::Separate,
             caption_side: CaptionSideMode::Top,
@@ -3680,6 +4135,8 @@ impl StyleResolver {
             table_layout: TableLayoutMode::Auto,
             empty_cells_hide: false,
             border_radius: BorderRadiiSpec::zero(),
+            box_decoration_break: BoxDecorationBreak::Slice,
+            border_image: BorderImageSpec::default(),
             pending_border_radius_var: None,
             outline_width: LengthSpec::Absolute(Pt::from_f32(1.5)),
             outline_offset: LengthSpec::Absolute(Pt::ZERO),
@@ -3702,6 +4159,7 @@ impl StyleResolver {
             clip_path_reference_box: ClipPathReferenceBox::Border,
             clip_path_inset: None,
             root_font_size: self.root_font_size,
+            root_line_height: self.root_font_size.mul_ratio(6, 5),
             white_space: WhiteSpaceMode::Normal,
             display: DisplayMode::Inline,
             visibility: VisibilityMode::Visible,
@@ -3729,6 +4187,8 @@ impl StyleResolver {
             justify_content: JustifyContentMode::FlexStart,
             align_items: AlignItemsMode::Stretch,
             align_self: AlignSelfMode::Auto,
+            justify_items: AlignItemsMode::Stretch,
+            justify_self: AlignSelfMode::Auto,
             align_content: AlignContentMode::Stretch,
             column_count: 1,
             column_rule_width: LengthSpec::Absolute(Pt::from_f32(2.25)),
@@ -3739,6 +4199,23 @@ impl StyleResolver {
             grid_rows: None,
             grid_column_tracks: Vec::new(),
             grid_row_tracks: Vec::new(),
+            grid_subgrid_columns: false,
+            grid_subgrid_rows: false,
+            pending_grid_column_tracks_var: None,
+            pending_grid_row_tracks_var: None,
+            grid_auto_column_tracks: Vec::new(),
+            grid_auto_row_tracks: Vec::new(),
+            grid_auto_flow: GridAutoFlowMode::Row,
+            grid_column_auto_repeat: None,
+            grid_row_auto_repeat: None,
+            grid_template_areas: Vec::new(),
+            grid_column_line_names: Vec::new(),
+            grid_row_line_names: Vec::new(),
+            grid_column_line_start: GridLineSpec::Auto,
+            grid_column_line_end: GridLineSpec::Auto,
+            grid_row_line_start: GridLineSpec::Auto,
+            grid_row_line_end: GridLineSpec::Auto,
+            grid_area_name: None,
             grid_column_start: None,
             grid_row_start: None,
             row_gap: LengthSpec::Absolute(Pt::ZERO),
@@ -3912,6 +4389,10 @@ impl StyleResolver {
             border_right_color: None,
             border_bottom_color: None,
             border_left_color: None,
+            border_top_alpha: 1.0,
+            border_right_alpha: 1.0,
+            border_bottom_alpha: 1.0,
+            border_left_alpha: 1.0,
             border_style: BorderStyleState::none(),
             border_collapse: parent.border_collapse,
             caption_side: parent.caption_side,
@@ -3919,6 +4400,8 @@ impl StyleResolver {
             table_layout: TableLayoutMode::Auto,
             empty_cells_hide: parent.empty_cells_hide,
             border_radius: BorderRadiiSpec::zero(),
+            box_decoration_break: BoxDecorationBreak::Slice,
+            border_image: BorderImageSpec::default(),
             pending_border_radius_var: None,
             outline_width: LengthSpec::Absolute(Pt::from_f32(1.5)),
             outline_offset: LengthSpec::Absolute(Pt::ZERO),
@@ -3941,6 +4424,7 @@ impl StyleResolver {
             clip_path_reference_box: ClipPathReferenceBox::Border,
             clip_path_inset: None,
             root_font_size: parent.root_font_size,
+            root_line_height: parent.root_line_height,
             white_space: parent.white_space,
             display: DisplayMode::Inline,
             visibility: parent.visibility,
@@ -3968,6 +4452,8 @@ impl StyleResolver {
             justify_content: JustifyContentMode::FlexStart,
             align_items: AlignItemsMode::Stretch,
             align_self: AlignSelfMode::Auto,
+            justify_items: AlignItemsMode::Stretch,
+            justify_self: AlignSelfMode::Auto,
             align_content: AlignContentMode::Stretch,
             column_count: 1,
             column_rule_width: LengthSpec::Absolute(Pt::from_f32(2.25)),
@@ -3978,6 +4464,23 @@ impl StyleResolver {
             grid_rows: None,
             grid_column_tracks: Vec::new(),
             grid_row_tracks: Vec::new(),
+            grid_subgrid_columns: false,
+            grid_subgrid_rows: false,
+            pending_grid_column_tracks_var: None,
+            pending_grid_row_tracks_var: None,
+            grid_auto_column_tracks: Vec::new(),
+            grid_auto_row_tracks: Vec::new(),
+            grid_auto_flow: GridAutoFlowMode::Row,
+            grid_column_auto_repeat: None,
+            grid_row_auto_repeat: None,
+            grid_template_areas: Vec::new(),
+            grid_column_line_names: Vec::new(),
+            grid_row_line_names: Vec::new(),
+            grid_column_line_start: GridLineSpec::Auto,
+            grid_column_line_end: GridLineSpec::Auto,
+            grid_row_line_start: GridLineSpec::Auto,
+            grid_row_line_end: GridLineSpec::Auto,
+            grid_area_name: None,
             grid_column_start: None,
             grid_row_start: None,
             row_gap: LengthSpec::Absolute(Pt::ZERO),
@@ -4000,22 +4503,22 @@ impl StyleResolver {
             custom_font_stacks: parent.custom_font_stacks.clone(),
         };
         apply_custom_property_registrations(&mut computed, &self.custom_property_registrations);
+        let unset_base = computed.clone();
         let parent_font_size = parent.font_size;
         let parent_line_height = parent.line_height.clone();
         let root_font_size = parent.root_font_size;
 
         if element.is_root {
             for delta in &self.root_normal {
-                apply_delta(
+                self.apply_style_delta(
                     &mut computed,
                     delta,
-                    &self.custom_property_registrations,
                     parent,
+                    &unset_base,
                     parent_font_size,
                     parent_line_height.clone(),
                     root_font_size,
                     Some(element),
-                    self.viewport,
                 );
             }
         }
@@ -4063,16 +4566,15 @@ impl StyleResolver {
                 current_normal_layer_rank = Some(layer_rank);
                 normal_layer_base = computed.clone();
             }
-            apply_delta(
+            self.apply_style_delta(
                 &mut computed,
                 &rule.delta,
-                &self.custom_property_registrations,
                 parent,
+                &unset_base,
                 parent_font_size,
                 parent_line_height.clone(),
                 root_font_size,
                 Some(element),
-                self.viewport,
             );
             apply_revert_layer_delta(&mut computed, &rule.delta.revert_layer, &normal_layer_base);
         }
@@ -4088,36 +4590,35 @@ impl StyleResolver {
                         .unwrap_or_else(|| "@inline".to_string());
                     log_native_declaration_no_effects(&declarations, &selector, logger);
                 }
-                let (normal_delta, important_delta) = style_from_native_declarations(&declarations);
+                let (normal_delta, important_delta) =
+                    style_from_native_declarations(&declarations, self.viewport);
                 inline_normal = normal_delta;
                 inline_important = important_delta;
             }
         }
 
-        apply_delta(
+        self.apply_style_delta(
             &mut computed,
             &inline_normal,
-            &self.custom_property_registrations,
             parent,
+            &unset_base,
             parent_font_size,
             parent_line_height.clone(),
             root_font_size,
             Some(element),
-            self.viewport,
         );
 
         if element.is_root {
             for delta in &self.root_important {
-                apply_delta(
+                self.apply_style_delta(
                     &mut computed,
                     delta,
-                    &self.custom_property_registrations,
                     parent,
+                    &unset_base,
                     parent_font_size,
                     parent_line_height.clone(),
                     root_font_size,
                     Some(element),
-                    self.viewport,
                 );
             }
         }
@@ -4149,16 +4650,15 @@ impl StyleResolver {
                 current_important_layer_rank = Some(layer_rank);
                 important_layer_base = computed.clone();
             }
-            apply_delta(
+            self.apply_style_delta(
                 &mut computed,
                 &rule.delta,
-                &self.custom_property_registrations,
                 parent,
+                &unset_base,
                 parent_font_size,
                 parent_line_height.clone(),
                 root_font_size,
                 Some(element),
-                self.viewport,
             );
             apply_revert_layer_delta(
                 &mut computed,
@@ -4167,16 +4667,15 @@ impl StyleResolver {
             );
         }
 
-        apply_delta(
+        self.apply_style_delta(
             &mut computed,
             &inline_important,
-            &self.custom_property_registrations,
             parent,
+            &unset_base,
             parent_font_size,
             parent_line_height,
             root_font_size,
             Some(element),
-            self.viewport,
         );
 
         resolve_pending_font_size_var(&mut computed, self.viewport);
@@ -4525,10 +5024,12 @@ impl StyleResolver {
             }
         }
 
+        resolve_pending_vars(&mut computed);
         if element.is_root {
             computed.root_font_size = computed.font_size;
+            computed.root_line_height = computed.line_height.to_line_height(computed.font_size);
         }
-        resolve_pending_vars(&mut computed);
+        resolve_font_relative_lengths(&mut computed, self.font_registry.as_deref());
         apply_border_style_mask(&mut computed);
         resolve_named_counter_style(&mut computed, &self.counter_styles);
         if let (Some(logger), Some(node)) = (debug, debug_node.as_ref()) {
@@ -4724,6 +5225,10 @@ impl StyleResolver {
             border_right_color: None,
             border_bottom_color: None,
             border_left_color: None,
+            border_top_alpha: 1.0,
+            border_right_alpha: 1.0,
+            border_bottom_alpha: 1.0,
+            border_left_alpha: 1.0,
             border_style: BorderStyleState::none(),
             border_collapse: parent.border_collapse,
             caption_side: parent.caption_side,
@@ -4731,6 +5236,8 @@ impl StyleResolver {
             table_layout: TableLayoutMode::Auto,
             empty_cells_hide: parent.empty_cells_hide,
             border_radius: BorderRadiiSpec::zero(),
+            box_decoration_break: BoxDecorationBreak::Slice,
+            border_image: BorderImageSpec::default(),
             pending_border_radius_var: None,
             outline_width: LengthSpec::Absolute(Pt::from_f32(1.5)),
             outline_offset: LengthSpec::Absolute(Pt::ZERO),
@@ -4753,6 +5260,7 @@ impl StyleResolver {
             clip_path_reference_box: ClipPathReferenceBox::Border,
             clip_path_inset: None,
             root_font_size: parent.root_font_size,
+            root_line_height: parent.root_line_height,
             white_space: parent.white_space,
             display: DisplayMode::Inline,
             visibility: parent.visibility,
@@ -4780,6 +5288,8 @@ impl StyleResolver {
             justify_content: JustifyContentMode::FlexStart,
             align_items: AlignItemsMode::Stretch,
             align_self: AlignSelfMode::Auto,
+            justify_items: AlignItemsMode::Stretch,
+            justify_self: AlignSelfMode::Auto,
             align_content: AlignContentMode::Stretch,
             column_count: 1,
             column_rule_width: LengthSpec::Absolute(Pt::from_f32(2.25)),
@@ -4790,6 +5300,23 @@ impl StyleResolver {
             grid_rows: None,
             grid_column_tracks: Vec::new(),
             grid_row_tracks: Vec::new(),
+            grid_subgrid_columns: false,
+            grid_subgrid_rows: false,
+            pending_grid_column_tracks_var: None,
+            pending_grid_row_tracks_var: None,
+            grid_auto_column_tracks: Vec::new(),
+            grid_auto_row_tracks: Vec::new(),
+            grid_auto_flow: GridAutoFlowMode::Row,
+            grid_column_auto_repeat: None,
+            grid_row_auto_repeat: None,
+            grid_template_areas: Vec::new(),
+            grid_column_line_names: Vec::new(),
+            grid_row_line_names: Vec::new(),
+            grid_column_line_start: GridLineSpec::Auto,
+            grid_column_line_end: GridLineSpec::Auto,
+            grid_row_line_start: GridLineSpec::Auto,
+            grid_row_line_end: GridLineSpec::Auto,
+            grid_area_name: None,
             grid_column_start: None,
             grid_row_start: None,
             row_gap: LengthSpec::Absolute(Pt::ZERO),
@@ -4812,6 +5339,7 @@ impl StyleResolver {
             custom_font_stacks: parent.custom_font_stacks.clone(),
         };
         apply_custom_property_registrations(&mut computed, &self.custom_property_registrations);
+        let unset_base = computed.clone();
 
         let parent_font_size = parent.font_size;
         let parent_line_height = parent.line_height.clone();
@@ -4858,16 +5386,15 @@ impl StyleResolver {
                         !matches!(content, ContentSpec::Normal | ContentSpec::Initial);
                 }
             }
-            apply_delta(
+            self.apply_style_delta(
                 &mut computed,
                 &rule.delta,
-                &self.custom_property_registrations,
                 parent,
+                &unset_base,
                 parent_font_size,
                 parent_line_height.clone(),
                 root_font_size,
                 Some(element),
-                self.viewport,
             );
             apply_revert_layer_delta(&mut computed, &rule.delta.revert_layer, &normal_layer_base);
         }
@@ -4875,6 +5402,7 @@ impl StyleResolver {
         resolve_pending_line_height_var(&mut computed, self.viewport);
         resolve_computed_line_height(&mut computed, self.viewport);
         resolve_pending_vars(&mut computed);
+        resolve_font_relative_lengths(&mut computed, self.font_registry.as_deref());
         apply_border_style_mask(&mut computed);
         resolve_named_counter_style(&mut computed, &self.counter_styles);
         computed.marker_content_overridden = marker_content_overrides_marker;
@@ -5040,7 +5568,14 @@ fn native_supports_prelude_matches(prelude: &str) -> bool {
                 important: false,
             };
             let mut delta = StyleDelta::default();
-            apply_raw_declaration(&declaration, &mut delta);
+            apply_raw_declaration(
+                &declaration,
+                &mut delta,
+                Size {
+                    width: Pt::ZERO,
+                    height: Pt::ZERO,
+                },
+            );
             !delta.is_empty()
         },
         |selector| parse_selector_pattern(selector).is_some(),
@@ -5906,19 +6441,8 @@ fn native_filters_effects_fallback(property_name: &str, raw: &str) -> bool {
 }
 
 fn is_native_parsed_no_effect_property(name: &str) -> bool {
-    matches!(
-        name,
-        "justify-items"
-            | "justify-self"
-            | "grid-auto-columns"
-            | "grid-auto-rows"
-            | "grid-auto-flow"
-            | "grid-template-areas"
-            | "grid-template"
-            | "grid"
-            | "grid-row-end"
-            | "grid-column-end"
-    )
+    let _ = name;
+    false
 }
 
 fn is_multicol_fallback_property_name(name: &str) -> bool {
@@ -6150,18 +6674,34 @@ fn parse_attr_selector(raw: &str) -> Option<AttrSelector> {
         return None;
     }
 
+    let mut case_insensitive = false;
     let value = value.and_then(|v| {
         let v = v.trim();
         if v.is_empty() {
             return None;
         }
-        let v = v.split_whitespace().next().unwrap_or(v);
-        let unquoted = v.trim_matches('"').trim_matches('\'').to_string();
-        Some(unquoted)
+        let (value, modifier) =
+            if let Some(quote) = v.chars().next().filter(|ch| *ch == '"' || *ch == '\'') {
+                let tail = v.get(quote.len_utf8()..)?;
+                let closing = tail.find(quote)?;
+                let value = tail.get(..closing)?;
+                let modifier = tail.get(closing + quote.len_utf8()..)?.trim();
+                (value, modifier)
+            } else {
+                let mut parts = v.split_whitespace();
+                (parts.next()?, parts.next().unwrap_or(""))
+            };
+        case_insensitive = modifier.eq_ignore_ascii_case("i");
+        Some(value.to_string())
     });
 
     let op = op.unwrap_or(AttrOp::Exists);
-    Some(AttrSelector { name, op, value })
+    Some(AttrSelector {
+        name,
+        op,
+        value,
+        case_insensitive,
+    })
 }
 
 fn parse_pseudo_class(raw: &str) -> Option<PseudoClass> {
@@ -6178,8 +6718,37 @@ fn parse_pseudo_class(raw: &str) -> Option<PseudoClass> {
     if let Some(selectors) = parse_functional_selector_list(raw, "where") {
         return Some(PseudoClass::Where(selectors));
     }
+    if let Some(selectors) = parse_relative_selector_list(raw, "has") {
+        return Some(PseudoClass::Has(selectors));
+    }
     if raw.eq_ignore_ascii_case("root") {
         return Some(PseudoClass::Root);
+    }
+    if raw.eq_ignore_ascii_case("scope") {
+        return Some(PseudoClass::Scope);
+    }
+    if raw.eq_ignore_ascii_case("empty") {
+        return Some(PseudoClass::Empty);
+    }
+    if raw.eq_ignore_ascii_case("defined") {
+        return Some(PseudoClass::Defined);
+    }
+    if let Some(value) = parse_single_pseudo_argument(raw, "dir") {
+        let direction = value.to_ascii_lowercase();
+        if matches!(direction.as_str(), "ltr" | "rtl") {
+            return Some(PseudoClass::Direction(direction));
+        }
+        return Some(PseudoClass::Unsupported);
+    }
+    if let Some(value) = parse_single_pseudo_argument(raw, "lang") {
+        let language = value
+            .trim_matches('"')
+            .trim_matches('\'')
+            .to_ascii_lowercase();
+        if !language.is_empty() {
+            return Some(PseudoClass::Language(language));
+        }
+        return Some(PseudoClass::Unsupported);
     }
     if raw.eq_ignore_ascii_case("first-child") {
         return Some(PseudoClass::FirstChild);
@@ -6187,11 +6756,17 @@ fn parse_pseudo_class(raw: &str) -> Option<PseudoClass> {
     if raw.eq_ignore_ascii_case("last-child") {
         return Some(PseudoClass::LastChild);
     }
+    if raw.eq_ignore_ascii_case("only-child") {
+        return Some(PseudoClass::OnlyChild);
+    }
     if raw.eq_ignore_ascii_case("first-of-type") {
         return Some(PseudoClass::FirstOfType);
     }
     if raw.eq_ignore_ascii_case("last-of-type") {
         return Some(PseudoClass::LastOfType);
+    }
+    if raw.eq_ignore_ascii_case("only-of-type") {
+        return Some(PseudoClass::OnlyOfType);
     }
     if raw.eq_ignore_ascii_case("hover") {
         return Some(PseudoClass::Hover);
@@ -6210,6 +6785,18 @@ fn parse_pseudo_class(raw: &str) -> Option<PseudoClass> {
     }
     if let Some(args) = raw.strip_prefix("nth-child(") {
         let args = args.trim_end_matches(')').trim();
+        if let Some((formula, selector_list)) = split_nth_of_selector(args) {
+            let (a, b) = parse_nth_expression(formula)?;
+            let selectors = crate::css_native::split_top_level(selector_list, ',')
+                .ok()?
+                .into_iter()
+                .filter_map(|selector| parse_simple_selector(selector.trim()))
+                .collect::<Vec<_>>();
+            if selectors.is_empty() {
+                return None;
+            }
+            return Some(PseudoClass::NthChildOf { a, b, selectors });
+        }
         if args.eq_ignore_ascii_case("even") {
             return Some(PseudoClass::NthChildEven);
         }
@@ -6225,6 +6812,11 @@ fn parse_pseudo_class(raw: &str) -> Option<PseudoClass> {
             return Some(PseudoClass::NthChildFormula { a, b });
         }
         return None;
+    }
+    if let Some(args) = raw.strip_prefix("nth-last-child(") {
+        let args = args.trim_end_matches(')').trim();
+        let (a, b) = parse_nth_expression(args)?;
+        return Some(PseudoClass::NthLastChildFormula { a, b });
     }
     if let Some(args) = raw.strip_prefix("nth-of-type(") {
         let args = args.trim_end_matches(')').trim();
@@ -6244,7 +6836,41 @@ fn parse_pseudo_class(raw: &str) -> Option<PseudoClass> {
         }
         return None;
     }
+    if let Some(args) = raw.strip_prefix("nth-last-of-type(") {
+        let args = args.trim_end_matches(')').trim();
+        let (a, b) = parse_nth_expression(args)?;
+        return Some(PseudoClass::NthLastOfTypeFormula { a, b });
+    }
     Some(PseudoClass::Unsupported)
+}
+
+fn parse_single_pseudo_argument<'a>(raw: &'a str, name: &str) -> Option<&'a str> {
+    let open = raw.find('(')?;
+    if !raw.get(..open)?.eq_ignore_ascii_case(name) || !raw.ends_with(')') {
+        return None;
+    }
+    Some(raw.get(open + 1..raw.len() - 1)?.trim())
+}
+
+fn split_nth_of_selector(args: &str) -> Option<(&str, &str)> {
+    let lower = args.to_ascii_lowercase();
+    let index = lower.find(" of ")?;
+    let formula = args.get(..index)?.trim();
+    let selectors = args.get(index + 4..)?.trim();
+    (!formula.is_empty() && !selectors.is_empty()).then_some((formula, selectors))
+}
+
+fn parse_nth_expression(raw: &str) -> Option<(i32, i32)> {
+    if raw.eq_ignore_ascii_case("even") {
+        return Some((2, 0));
+    }
+    if raw.eq_ignore_ascii_case("odd") {
+        return Some((2, 1));
+    }
+    if let Ok(index) = raw.parse::<i32>() {
+        return Some((0, index));
+    }
+    parse_nth_formula(raw)
 }
 
 fn parse_functional_selector_list(raw: &str, name: &str) -> Option<Vec<SimpleSelector>> {
@@ -6261,6 +6887,28 @@ fn parse_functional_selector_list(raw: &str, name: &str) -> Option<Vec<SimpleSel
         .ok()?
         .into_iter()
         .filter_map(|selector| parse_simple_selector(selector.trim()))
+        .collect::<Vec<_>>();
+    (!selectors.is_empty()).then_some(selectors)
+}
+
+fn parse_relative_selector_list(raw: &str, name: &str) -> Option<Vec<RelativeSelector>> {
+    let args = parse_single_pseudo_argument(raw, name)?;
+    let selectors = crate::css_native::split_top_level(args, ',')
+        .ok()?
+        .into_iter()
+        .filter_map(|raw_selector| {
+            let raw_selector = raw_selector.trim();
+            let (combinator, selector) = match raw_selector.chars().next()? {
+                '>' => (Combinator::Child, raw_selector.get(1..)?.trim()),
+                '+' => (Combinator::AdjacentSibling, raw_selector.get(1..)?.trim()),
+                '~' => (Combinator::GeneralSibling, raw_selector.get(1..)?.trim()),
+                _ => (Combinator::Descendant, raw_selector),
+            };
+            Some(RelativeSelector {
+                combinator,
+                selector: parse_simple_selector(selector)?,
+            })
+        })
         .collect::<Vec<_>>();
     (!selectors.is_empty()).then_some(selectors)
 }
@@ -6328,20 +6976,207 @@ fn flush_selector_part(
 
 fn style_from_native_declarations(
     declarations: &crate::css_native::DeclarationBlock,
+    viewport: Size,
 ) -> (StyleDelta, StyleDelta) {
     let mut normal = StyleDelta::default();
     let mut important = StyleDelta::default();
     for declaration in declarations.normal() {
-        apply_raw_declaration(declaration, &mut normal);
+        apply_raw_declaration(declaration, &mut normal, viewport);
     }
     for declaration in declarations.important() {
-        apply_raw_declaration(declaration, &mut important);
+        apply_raw_declaration(declaration, &mut important, viewport);
     }
     (normal, important)
 }
 
-fn apply_raw_declaration(declaration: &crate::css_native::Declaration, delta: &mut StyleDelta) {
-    let _ = apply_native_raw_property(&declaration.name, &declaration.value, delta);
+fn apply_raw_declaration(
+    declaration: &crate::css_native::Declaration,
+    delta: &mut StyleDelta,
+    viewport: Size,
+) {
+    let resolved = resolve_viewport_units_in_raw(&declaration.value, viewport);
+    let _ = apply_native_raw_property(&declaration.name, &resolved, delta);
+}
+
+fn resolve_viewport_units_in_raw(raw: &str, viewport: Size) -> String {
+    let lower = raw.to_ascii_lowercase();
+    if ![
+        "vw", "vh", "vmin", "vmax", "svw", "svh", "svmin", "svmax", "lvw", "lvh", "lvmin", "lvmax",
+        "dvw", "dvh", "dvmin", "dvmax",
+    ]
+    .iter()
+    .any(|unit| lower.contains(unit))
+    {
+        return raw.to_string();
+    }
+
+    let bytes = raw.as_bytes();
+    let mut output = String::with_capacity(raw.len());
+    let mut cursor = 0usize;
+    let mut quote = None;
+    while cursor < bytes.len() {
+        let byte = bytes[cursor];
+        if let Some(active_quote) = quote {
+            let character = raw[cursor..].chars().next().expect("valid UTF-8 cursor");
+            output.push(character);
+            cursor += character.len_utf8();
+            if byte == b'\\' && cursor < bytes.len() {
+                let escaped = raw[cursor..]
+                    .chars()
+                    .next()
+                    .expect("valid escaped character");
+                output.push(escaped);
+                cursor += escaped.len_utf8();
+            } else if byte == active_quote {
+                quote = None;
+            }
+            continue;
+        }
+        if matches!(byte, b'\'' | b'"') {
+            quote = Some(byte);
+            output.push(byte as char);
+            cursor += 1;
+            continue;
+        }
+
+        let begins_number = byte.is_ascii_digit()
+            || (byte == b'.'
+                && bytes
+                    .get(cursor + 1)
+                    .is_some_and(|next| next.is_ascii_digit()));
+        let has_identifier_prefix = cursor > 0 && bytes[cursor - 1].is_ascii_alphanumeric()
+            || cursor > 0 && matches!(bytes[cursor - 1], b'_' | b'-');
+        if begins_number && !has_identifier_prefix {
+            let number_start = cursor;
+            let mut number_end = cursor;
+            while bytes
+                .get(number_end)
+                .is_some_and(|value| value.is_ascii_digit())
+            {
+                number_end += 1;
+            }
+            if bytes.get(number_end) == Some(&b'.') {
+                number_end += 1;
+                while bytes
+                    .get(number_end)
+                    .is_some_and(|value| value.is_ascii_digit())
+                {
+                    number_end += 1;
+                }
+            }
+            if matches!(bytes.get(number_end), Some(b'e' | b'E')) {
+                let exponent = number_end;
+                number_end += 1;
+                if matches!(bytes.get(number_end), Some(b'+' | b'-')) {
+                    number_end += 1;
+                }
+                let exponent_digits = number_end;
+                while bytes
+                    .get(number_end)
+                    .is_some_and(|value| value.is_ascii_digit())
+                {
+                    number_end += 1;
+                }
+                if number_end == exponent_digits {
+                    number_end = exponent;
+                }
+            }
+            let mut unit_end = number_end;
+            while bytes
+                .get(unit_end)
+                .is_some_and(|value| value.is_ascii_alphabetic())
+            {
+                unit_end += 1;
+            }
+            let unit = raw[number_end..unit_end].to_ascii_lowercase();
+            let axis = match unit.as_str() {
+                "vw" | "svw" | "lvw" | "dvw" => Some(viewport.width),
+                "vh" | "svh" | "lvh" | "dvh" => Some(viewport.height),
+                "vmin" | "svmin" | "lvmin" | "dvmin" => Some(viewport.width.min(viewport.height)),
+                "vmax" | "svmax" | "lvmax" | "dvmax" => Some(viewport.width.max(viewport.height)),
+                _ => None,
+            };
+            if let Some(axis) = axis {
+                if let Ok(value) = raw[number_start..number_end].parse::<f32>() {
+                    let points = axis.to_f32() * value / 100.0;
+                    output.push_str(&format!("{points:.6}pt"));
+                    cursor = unit_end;
+                    continue;
+                }
+            }
+        }
+
+        let character = raw[cursor..].chars().next().expect("valid UTF-8 cursor");
+        output.push(character);
+        cursor += character.len_utf8();
+    }
+    output
+}
+
+fn parse_cascade_wide_keyword(raw: &str) -> Option<CascadeWideKeyword> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "inherit" => Some(CascadeWideKeyword::Inherit),
+        "initial" => Some(CascadeWideKeyword::Initial),
+        "unset" => Some(CascadeWideKeyword::Unset),
+        _ => None,
+    }
+}
+
+fn apply_native_all_value(delta: &mut StyleDelta, raw: &str) -> bool {
+    let Some(keyword) = parse_cascade_wide_keyword(raw) else {
+        return false;
+    };
+
+    // `all` resets every supported property at this declaration position, but
+    // custom properties and `direction` are explicitly outside its scope. By
+    // rebuilding the delta here, declarations before `all` are discarded while
+    // declarations after it can still override the reset normally.
+    let direction = delta.direction;
+    let revert_layer_direction = delta.revert_layer.direction;
+    let custom_lengths = std::mem::take(&mut delta.custom_lengths);
+    let custom_colors = std::mem::take(&mut delta.custom_colors);
+    let custom_color_alpha = std::mem::take(&mut delta.custom_color_alpha);
+    let custom_color_refs = std::mem::take(&mut delta.custom_color_refs);
+    let custom_raw_values = std::mem::take(&mut delta.custom_raw_values);
+    let custom_font_stacks = std::mem::take(&mut delta.custom_font_stacks);
+
+    *delta = StyleDelta::default();
+    delta.all = Some(keyword);
+    delta.direction = direction;
+    delta.revert_layer.direction = revert_layer_direction;
+    delta.custom_lengths = custom_lengths;
+    delta.custom_colors = custom_colors;
+    delta.custom_color_alpha = custom_color_alpha;
+    delta.custom_color_refs = custom_color_refs;
+    delta.custom_raw_values = custom_raw_values;
+    delta.custom_font_stacks = custom_font_stacks;
+    true
+}
+
+fn apply_native_background_shorthand_keyword(delta: &mut StyleDelta, raw: &str) -> bool {
+    let Some(keyword) = parse_cascade_wide_keyword(raw) else {
+        return false;
+    };
+
+    reset_native_background_shorthand(delta, keyword);
+    true
+}
+
+fn reset_native_background_shorthand(delta: &mut StyleDelta, keyword: CascadeWideKeyword) {
+    delta.background_reset = Some(keyword);
+    delta.background_color = None;
+    delta.background_color_var = None;
+    delta.background_paint = None;
+    delta.background_paints = None;
+    delta.background_sizes = None;
+    delta.background_positions = None;
+    delta.background_position_x = None;
+    delta.background_position_y = None;
+    delta.background_repeats = None;
+    delta.background_blend_modes = None;
+    delta.background_origins = None;
+    delta.background_clips = None;
+    delta.revert_layer.background_color = false;
 }
 
 fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDelta) -> bool {
@@ -6350,9 +7185,14 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
     }
     let name = property_name.to_ascii_lowercase();
     match name.as_str() {
+        "all" => apply_native_all_value(delta, raw),
         "color" => apply_native_color_value(delta, raw),
         "background-color" => apply_native_background_color_value(delta, raw),
         "background" => {
+            if apply_native_background_shorthand_keyword(delta, raw) {
+                return true;
+            }
+            reset_native_background_shorthand(delta, CascadeWideKeyword::Initial);
             apply_background_from_string(raw, delta);
             true
         }
@@ -6366,6 +7206,14 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
         }
         "background-position" => {
             apply_background_position_from_string(raw, delta);
+            true
+        }
+        "background-position-x" => {
+            apply_background_position_axis_from_string(raw, BackgroundPositionAxis::X, delta);
+            true
+        }
+        "background-position-y" => {
+            apply_background_position_axis_from_string(raw, BackgroundPositionAxis::Y, delta);
             true
         }
         "background-repeat" => {
@@ -6575,6 +7423,22 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
                 false
             }
         }
+        "justify-items" => {
+            if let Some(value) = align_items_mode_from_value(raw) {
+                delta.justify_items = Some(value);
+                true
+            } else {
+                false
+            }
+        }
+        "justify-self" => {
+            if let Some(value) = align_self_mode_from_value(raw) {
+                delta.justify_self = Some(value);
+                true
+            } else {
+                false
+            }
+        }
         "align-content" => {
             if let Some(value) = last_css_keyword(raw).and_then(align_content_mode_from_keyword) {
                 delta.align_content = Some(value);
@@ -6593,16 +7457,18 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
             }
         }
         "place-items" => {
-            if let Some(value) = parse_place_items_align_str(raw) {
-                delta.align_items = Some(value);
+            if let Some((align, justify)) = parse_place_items_str(raw) {
+                delta.align_items = Some(align);
+                delta.justify_items = Some(justify);
                 true
             } else {
                 false
             }
         }
         "place-self" => {
-            if let Some(value) = parse_place_self_align_str(raw) {
-                delta.align_self = Some(value);
+            if let Some((align, justify)) = parse_place_self_str(raw) {
+                delta.align_self = Some(align);
+                delta.justify_self = Some(justify);
                 true
             } else {
                 false
@@ -6628,38 +7494,147 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
             apply_native_column_rule_property(&name, raw, delta)
         }
         "grid-template-columns" => {
-            if let Some(tracks) = parse_grid_track_list(raw) {
+            if let Some(line_names) = parse_subgrid_line_names(raw) {
+                delta.grid_columns = Some(0);
+                delta.grid_column_tracks = Some(Vec::new());
+                delta.grid_subgrid_columns = Some(true);
+                delta.grid_column_line_names = Some(line_names);
+                delta.grid_column_auto_repeat = Some(None);
+                delta.grid_column_tracks_var = Some(None);
+                true
+            } else if let Some(tracks) = parse_grid_track_list(raw) {
                 delta.grid_columns = Some(tracks.len());
                 delta.grid_column_tracks = Some(tracks);
+                delta.grid_subgrid_columns = Some(false);
+                delta.grid_column_line_names = Some(parse_grid_track_line_names(raw));
+                delta.grid_column_auto_repeat = Some(parse_grid_auto_repeat(raw));
+                delta.grid_column_tracks_var = Some(None);
+                true
+            } else if raw.to_ascii_lowercase().contains("var(") {
+                delta.grid_columns = Some(0);
+                delta.grid_column_tracks = Some(Vec::new());
+                delta.grid_subgrid_columns = Some(false);
+                delta.grid_column_line_names = Some(Vec::new());
+                delta.grid_column_auto_repeat = Some(None);
+                delta.grid_column_tracks_var = Some(Some(raw.to_string()));
                 true
             } else {
                 false
             }
         }
         "grid-template-rows" => {
-            if let Some(tracks) = parse_grid_track_list(raw) {
+            if let Some(line_names) = parse_subgrid_line_names(raw) {
+                delta.grid_rows = Some(0);
+                delta.grid_row_tracks = Some(Vec::new());
+                delta.grid_subgrid_rows = Some(true);
+                delta.grid_row_line_names = Some(line_names);
+                delta.grid_row_auto_repeat = Some(None);
+                delta.grid_row_tracks_var = Some(None);
+                true
+            } else if let Some(tracks) = parse_grid_track_list(raw) {
                 delta.grid_rows = Some(tracks.len());
                 delta.grid_row_tracks = Some(tracks);
+                delta.grid_subgrid_rows = Some(false);
+                delta.grid_row_line_names = Some(parse_grid_track_line_names(raw));
+                delta.grid_row_auto_repeat = Some(parse_grid_auto_repeat(raw));
+                delta.grid_row_tracks_var = Some(None);
+                true
+            } else if raw.to_ascii_lowercase().contains("var(") {
+                delta.grid_rows = Some(0);
+                delta.grid_row_tracks = Some(Vec::new());
+                delta.grid_subgrid_rows = Some(false);
+                delta.grid_row_line_names = Some(Vec::new());
+                delta.grid_row_auto_repeat = Some(None);
+                delta.grid_row_tracks_var = Some(Some(raw.to_string()));
                 true
             } else {
                 false
             }
         }
-        "grid-column-start" | "grid-column" => {
-            delta.grid_column_start = parse_grid_track_start(raw);
+        "grid-auto-columns" => {
+            if let Some(tracks) = parse_grid_track_list(raw) {
+                delta.grid_auto_column_tracks = Some(tracks);
+                true
+            } else {
+                false
+            }
+        }
+        "grid-auto-rows" => {
+            if let Some(tracks) = parse_grid_track_list(raw) {
+                delta.grid_auto_row_tracks = Some(tracks);
+                true
+            } else {
+                false
+            }
+        }
+        "grid-auto-flow" => {
+            if let Some(flow) = parse_grid_auto_flow(raw) {
+                delta.grid_auto_flow = Some(flow);
+                true
+            } else {
+                false
+            }
+        }
+        "grid-template-areas" => {
+            if let Some(areas) = parse_grid_template_areas(raw) {
+                delta.grid_template_areas = Some(areas);
+                true
+            } else {
+                false
+            }
+        }
+        "grid-template" => apply_native_grid_template_shorthand(raw, delta),
+        "grid" => apply_native_grid_shorthand(raw, delta),
+        "grid-column-start" => {
+            let line = parse_grid_line_spec(raw);
+            delta.grid_column_start = Some(legacy_positive_grid_start(&line));
+            delta.grid_column_line_start = Some(line);
             true
         }
-        "grid-row-start" | "grid-row" => {
-            delta.grid_row_start = parse_grid_track_start(raw);
+        "grid-column-end" => {
+            delta.grid_column_line_end = Some(parse_grid_line_spec(raw));
+            true
+        }
+        "grid-column" => {
+            let (start, end) = parse_grid_placement_shorthand(raw);
+            delta.grid_column_start = Some(legacy_positive_grid_start(&start));
+            delta.grid_column_line_start = Some(start);
+            delta.grid_column_line_end = Some(end);
+            true
+        }
+        "grid-row-start" => {
+            let line = parse_grid_line_spec(raw);
+            delta.grid_row_start = Some(legacy_positive_grid_start(&line));
+            delta.grid_row_line_start = Some(line);
+            true
+        }
+        "grid-row-end" => {
+            delta.grid_row_line_end = Some(parse_grid_line_spec(raw));
+            true
+        }
+        "grid-row" => {
+            let (start, end) = parse_grid_placement_shorthand(raw);
+            delta.grid_row_start = Some(legacy_positive_grid_start(&start));
+            delta.grid_row_line_start = Some(start);
+            delta.grid_row_line_end = Some(end);
             true
         }
         "grid-area" => {
-            let (row, column) = parse_grid_area_starts(raw);
-            if row.is_some() {
-                delta.grid_row_start = row;
-            }
-            if column.is_some() {
-                delta.grid_column_start = column;
+            if raw.contains('/') {
+                let (row_start, column_start, row_end, column_end) = parse_grid_area_lines(raw);
+                delta.grid_row_start = Some(legacy_positive_grid_start(&row_start));
+                delta.grid_column_start = Some(legacy_positive_grid_start(&column_start));
+                delta.grid_row_line_start = Some(row_start);
+                delta.grid_column_line_start = Some(column_start);
+                delta.grid_row_line_end = Some(row_end);
+                delta.grid_column_line_end = Some(column_end);
+                delta.grid_area_name = Some(None);
+            } else {
+                let name = raw.trim();
+                delta.grid_area_name = Some(
+                    (!name.is_empty() && !name.eq_ignore_ascii_case("auto"))
+                        .then(|| name.to_string()),
+                );
             }
             true
         }
@@ -6784,7 +7759,22 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
         | "border-block-start-style"
         | "border-block-end-style"
         | "border-inline-style"
-        | "border-block-style" => apply_native_border_property(&name, raw, delta),
+        | "border-block-style" => {
+            let applied = apply_native_border_property(&name, raw, delta);
+            if applied && name == "border" {
+                delta.border_image = BorderImageDelta {
+                    reset: true,
+                    ..BorderImageDelta::default()
+                };
+            }
+            applied
+        }
+        "border-image" => apply_border_image_shorthand(raw, delta),
+        "border-image-source" => apply_border_image_source(raw, delta),
+        "border-image-slice" => apply_border_image_slice(raw, delta),
+        "border-image-width" => apply_border_image_width(raw, delta),
+        "border-image-outset" => apply_border_image_outset(raw, delta),
+        "border-image-repeat" => apply_border_image_repeat(raw, delta),
         "outline" | "outline-width" | "outline-style" | "outline-color" | "outline-offset" => {
             apply_native_outline_property(&name, raw, delta)
         }
@@ -6849,9 +7839,12 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
         }
         "orphans" | "widows" => apply_native_pagination_count(&name, raw, delta),
         "border-radius" => {
-            delta.border_radius_var = None;
             if let Some(value) = parse_border_radius_str(raw) {
                 delta.border_radius = Some(value);
+                delta.border_radius_var = None;
+                delta
+                    .border_radius_ops
+                    .push(BorderRadiusOp::Shorthand(value));
                 true
             } else if raw.to_ascii_lowercase().contains("var(") {
                 delta.border_radius = None;
@@ -6860,6 +7853,22 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
             } else {
                 false
             }
+        }
+        "border-top-left-radius"
+        | "border-top-right-radius"
+        | "border-bottom-right-radius"
+        | "border-bottom-left-radius"
+        | "border-start-start-radius"
+        | "border-start-end-radius"
+        | "border-end-start-radius"
+        | "border-end-end-radius" => apply_border_radius_corner_longhand(&name, raw, delta),
+        "box-decoration-break" | "-webkit-box-decoration-break" => {
+            delta.box_decoration_break = match raw.trim().to_ascii_lowercase().as_str() {
+                "clone" => Some(BoxDecorationBreak::Clone),
+                "slice" | "initial" | "unset" | "revert" => Some(BoxDecorationBreak::Slice),
+                _ => None,
+            };
+            delta.box_decoration_break.is_some()
         }
         "border-spacing" => {
             if let Some(value) = parse_border_spacing_str(raw) {
@@ -7154,6 +8163,8 @@ fn native_length_is_nonnegative(value: LengthSpec) -> bool {
         | LengthSpec::MaxContent
         | LengthSpec::FitContent
         | LengthSpec::Calc(_)
+        | LengthSpec::Clamped(_)
+        | LengthSpec::FontRelative(_)
         | LengthSpec::Inherit
         | LengthSpec::Initial => true,
     }
@@ -7178,7 +8189,11 @@ fn parse_native_length_component(
         return Some(NativeLengthComponent::Var(lowered));
     }
     let value = length_spec_from_string(&lowered)?;
-    if !allow_negative && !native_length_is_nonnegative(value) {
+    // CSS math functions are range-checked at used-value time. A negative
+    // result for a non-negative property (for example `width: calc(50vw -
+    // 280px)`) is valid syntax and clamps to zero instead of invalidating the
+    // declaration and falling back to `auto`.
+    if !allow_negative && !native_length_is_nonnegative(value) && !lowered.contains('(') {
         return None;
     }
     Some(NativeLengthComponent::Spec(value))
@@ -7774,13 +8789,12 @@ fn parse_native_border_color_component(raw: &str) -> Option<NativeBorderColorCom
         _ => {}
     }
     if let Some((color, alpha)) = parse_color_string(&lowered) {
-        return Some(NativeBorderColorComponent::Spec(ColorSpec::Value(
-            if alpha <= 0.0 {
-                Color::TRANSPARENT
-            } else {
-                blend_over_white(color, alpha)
-            },
-        )));
+        let alpha = alpha.clamp(0.0, 1.0);
+        return Some(NativeBorderColorComponent::Spec(if alpha >= 1.0 {
+            ColorSpec::Value(color)
+        } else {
+            ColorSpec::AlphaValue(color, alpha)
+        }));
     }
     if should_defer_color_expr(&lowered) || lowered.contains("var(") {
         return Some(NativeBorderColorComponent::Var(lowered));
@@ -7939,6 +8953,226 @@ fn apply_native_border_property(property_name: &str, raw: &str, delta: &mut Styl
         set_delta_border_style(delta, target, style);
         apply_native_border_color_component(delta, target, color.clone());
     }
+    true
+}
+
+fn expand_border_image_quad<T: Copy>(values: &[T]) -> Option<[T; 4]> {
+    match values {
+        [all] => Some([*all; 4]),
+        [vertical, horizontal] => Some([*vertical, *horizontal, *vertical, *horizontal]),
+        [top, horizontal, bottom] => Some([*top, *horizontal, *bottom, *horizontal]),
+        [top, right, bottom, left] => Some([*top, *right, *bottom, *left]),
+        _ => None,
+    }
+}
+
+fn parse_border_image_source_value(raw: &str) -> Option<Option<BackgroundPaint>> {
+    let trimmed = raw.trim();
+    if trimmed.eq_ignore_ascii_case("none") {
+        return Some(None);
+    }
+    parse_background_layer_paint_str(trimmed).map(Some)
+}
+
+fn parse_border_image_slice_value(raw: &str) -> Option<BorderImageSliceValue> {
+    let trimmed = raw.trim();
+    if let Some(percent) = trimmed.strip_suffix('%') {
+        let value = percent.trim().parse::<f32>().ok()?;
+        return (value.is_finite() && value >= 0.0)
+            .then_some(BorderImageSliceValue::Percent(value / 100.0));
+    }
+    let value = trimmed.parse::<f32>().ok()?;
+    (value.is_finite() && value >= 0.0).then_some(BorderImageSliceValue::Number(value))
+}
+
+fn parse_border_image_width_value(raw: &str) -> Option<BorderImageWidthValue> {
+    let trimmed = raw.trim();
+    if trimmed.eq_ignore_ascii_case("auto") {
+        return Some(BorderImageWidthValue::Auto);
+    }
+    if let Ok(value) = trimmed.parse::<f32>() {
+        return (value.is_finite() && value >= 0.0).then_some(BorderImageWidthValue::Number(value));
+    }
+    let value = length_spec_from_string(&trimmed.to_ascii_lowercase())?;
+    native_length_is_nonnegative(value).then_some(BorderImageWidthValue::Length(value))
+}
+
+fn parse_border_image_outset_value(raw: &str) -> Option<BorderImageOutsetValue> {
+    let trimmed = raw.trim();
+    if let Ok(value) = trimmed.parse::<f32>() {
+        return (value.is_finite() && value >= 0.0)
+            .then_some(BorderImageOutsetValue::Number(value));
+    }
+    let value = length_spec_from_string(&trimmed.to_ascii_lowercase())?;
+    // Percentages and `auto` are not valid for border-image-outset.
+    if matches!(value, LengthSpec::Percent(_) | LengthSpec::Auto) {
+        return None;
+    }
+    native_length_is_nonnegative(value).then_some(BorderImageOutsetValue::Length(value))
+}
+
+fn parse_border_image_repeat_mode(raw: &str) -> Option<BorderImageRepeatMode> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "stretch" => Some(BorderImageRepeatMode::Stretch),
+        "repeat" => Some(BorderImageRepeatMode::Repeat),
+        "round" => Some(BorderImageRepeatMode::Round),
+        "space" => Some(BorderImageRepeatMode::Space),
+        _ => None,
+    }
+}
+
+fn parse_border_image_slice(raw: &str) -> Option<([BorderImageSliceValue; 4], bool)> {
+    let mut fill = false;
+    let mut values = Vec::new();
+    for token in split_top_level_whitespace(raw) {
+        if token.eq_ignore_ascii_case("fill") {
+            if fill {
+                return None;
+            }
+            fill = true;
+        } else {
+            values.push(parse_border_image_slice_value(&token)?);
+        }
+    }
+    Some((expand_border_image_quad(&values)?, fill))
+}
+
+fn parse_border_image_width(raw: &str) -> Option<[BorderImageWidthValue; 4]> {
+    let values = split_top_level_whitespace(raw)
+        .iter()
+        .map(|token| parse_border_image_width_value(token))
+        .collect::<Option<Vec<_>>>()?;
+    expand_border_image_quad(&values)
+}
+
+fn parse_border_image_outset(raw: &str) -> Option<[BorderImageOutsetValue; 4]> {
+    let values = split_top_level_whitespace(raw)
+        .iter()
+        .map(|token| parse_border_image_outset_value(token))
+        .collect::<Option<Vec<_>>>()?;
+    expand_border_image_quad(&values)
+}
+
+fn parse_border_image_repeat(raw: &str) -> Option<(BorderImageRepeatMode, BorderImageRepeatMode)> {
+    let values = split_top_level_whitespace(raw)
+        .iter()
+        .map(|token| parse_border_image_repeat_mode(token))
+        .collect::<Option<Vec<_>>>()?;
+    match values.as_slice() {
+        [both] => Some((*both, *both)),
+        [x, y] => Some((*x, *y)),
+        _ => None,
+    }
+}
+
+fn apply_border_image_source(raw: &str, delta: &mut StyleDelta) -> bool {
+    let Some(source) = parse_border_image_source_value(raw) else {
+        return false;
+    };
+    delta.border_image.source = Some(source);
+    true
+}
+
+fn apply_border_image_slice(raw: &str, delta: &mut StyleDelta) -> bool {
+    let Some((slice, fill)) = parse_border_image_slice(raw) else {
+        return false;
+    };
+    delta.border_image.slice = Some(slice);
+    delta.border_image.fill = Some(fill);
+    true
+}
+
+fn apply_border_image_width(raw: &str, delta: &mut StyleDelta) -> bool {
+    let Some(width) = parse_border_image_width(raw) else {
+        return false;
+    };
+    delta.border_image.width = Some(width);
+    true
+}
+
+fn apply_border_image_outset(raw: &str, delta: &mut StyleDelta) -> bool {
+    let Some(outset) = parse_border_image_outset(raw) else {
+        return false;
+    };
+    delta.border_image.outset = Some(outset);
+    true
+}
+
+fn apply_border_image_repeat(raw: &str, delta: &mut StyleDelta) -> bool {
+    let Some(repeat) = parse_border_image_repeat(raw) else {
+        return false;
+    };
+    delta.border_image.repeat = Some(repeat);
+    true
+}
+
+fn apply_border_image_shorthand(raw: &str, delta: &mut StyleDelta) -> bool {
+    let mut parsed = BorderImageDelta {
+        reset: true,
+        ..BorderImageDelta::default()
+    };
+    let mut section = 0usize;
+    let mut slice_tokens = Vec::new();
+    let mut width_tokens = Vec::new();
+    let mut outset_tokens = Vec::new();
+    let mut repeat_tokens = Vec::new();
+    let mut source = None;
+
+    for token in split_top_level_whitespace(raw) {
+        if token == "/" {
+            section += 1;
+            if section > 2 {
+                return false;
+            }
+            continue;
+        }
+        if source.is_none() {
+            if let Some(value) = parse_border_image_source_value(&token) {
+                source = Some(value);
+                continue;
+            }
+        }
+        if parse_border_image_repeat_mode(&token).is_some() {
+            repeat_tokens.push(token);
+            continue;
+        }
+        match section {
+            0 => slice_tokens.push(token),
+            1 => width_tokens.push(token),
+            2 => outset_tokens.push(token),
+            _ => unreachable!(),
+        }
+    }
+
+    if let Some(source) = source {
+        parsed.source = Some(source);
+    }
+    if !slice_tokens.is_empty() {
+        let Some((slice, fill)) = parse_border_image_slice(&slice_tokens.join(" ")) else {
+            return false;
+        };
+        parsed.slice = Some(slice);
+        parsed.fill = Some(fill);
+    }
+    if !width_tokens.is_empty() {
+        let Some(width) = parse_border_image_width(&width_tokens.join(" ")) else {
+            return false;
+        };
+        parsed.width = Some(width);
+    }
+    if !outset_tokens.is_empty() {
+        let Some(outset) = parse_border_image_outset(&outset_tokens.join(" ")) else {
+            return false;
+        };
+        parsed.outset = Some(outset);
+    }
+    if !repeat_tokens.is_empty() {
+        let Some(repeat) = parse_border_image_repeat(&repeat_tokens.join(" ")) else {
+            return false;
+        };
+        parsed.repeat = Some(repeat);
+    }
+    delta.border_image = parsed;
     true
 }
 
@@ -11120,6 +12354,27 @@ fn length_spec_debug(value: LengthSpec) -> String {
             calc.em,
             calc.rem
         ),
+        LengthSpec::Clamped(calc) => format!(
+            "clamp({:?}, calc({:.3}pt + {:.3}% + {:.3}em + {:.3}rem), {:?})",
+            calc.min.map(Pt::to_f32),
+            calc.value.abs.to_f32(),
+            calc.value.percent * 100.0,
+            calc.value.em,
+            calc.value.rem,
+            calc.max.map(Pt::to_f32),
+        ),
+        LengthSpec::FontRelative(calc) => format!(
+            "calc({:.3}pt + {:.3}% + {:.3}em + {:.3}rem + {:.3}ex + {:.3}ch + {:.3}cap + {:.3}lh + {:.3}rlh)",
+            calc.base.abs.to_f32(),
+            calc.base.percent * 100.0,
+            calc.base.em,
+            calc.base.rem,
+            calc.ex,
+            calc.ch,
+            calc.cap,
+            calc.lh,
+            calc.rlh,
+        ),
         LengthSpec::Inherit => "inherit".to_string(),
         LengthSpec::Initial => "initial".to_string(),
     }
@@ -12257,6 +13512,10 @@ fn apply_text_decoration_color_spec_to_computed(
             computed.text_decoration_color = *value;
             computed.text_decoration_color_tracks_current = false;
         }
+        ColorSpec::AlphaValue(value, alpha) => {
+            computed.text_decoration_color = blend_over_white(*value, *alpha);
+            computed.text_decoration_color_tracks_current = false;
+        }
         ColorSpec::Inherit => {
             computed.text_decoration_color = parent.text_decoration_color;
             computed.text_decoration_color_tracks_current = false;
@@ -12276,6 +13535,10 @@ fn apply_text_emphasis_color_spec_to_computed(
     match spec {
         ColorSpec::Value(value) => {
             computed.text_emphasis_color = *value;
+            computed.text_emphasis_color_tracks_current = false;
+        }
+        ColorSpec::AlphaValue(value, alpha) => {
+            computed.text_emphasis_color = blend_over_white(*value, *alpha);
             computed.text_emphasis_color_tracks_current = false;
         }
         ColorSpec::Inherit => {
@@ -12366,6 +13629,95 @@ fn resolve_line_height_spec_to_computed(
     }
 }
 
+fn resolve_font_relative_lengths(style: &mut ComputedStyle, registry: Option<&FontRegistry>) {
+    let fallback_ex = style.font_size.mul_ratio(1, 2);
+    let fallback_ch = style.font_size.mul_ratio(3, 5);
+    let fallback_cap = style.font_size.mul_ratio(7, 10);
+    let (ex, ch, cap) = registry
+        .and_then(|registry| {
+            registry.css_font_relative_metrics(style.font_name.as_ref(), style.font_size)
+        })
+        .unwrap_or((fallback_ex, fallback_ch, fallback_cap));
+    let line_height = style.line_height.to_line_height(style.font_size);
+    let root_line_height = style.root_line_height;
+
+    let resolve = |spec: LengthSpec| match spec {
+        LengthSpec::FontRelative(value) => {
+            let mut calc = value.base;
+            calc.abs = calc.abs
+                + ex * value.ex
+                + ch * value.ch
+                + cap * value.cap
+                + line_height * value.lh
+                + root_line_height * value.rlh;
+            length_spec_from_calc_length(calc)
+        }
+        value => value,
+    };
+
+    style.width = resolve(style.width);
+    style.height = resolve(style.height);
+    style.min_width = resolve(style.min_width);
+    style.max_width = resolve(style.max_width);
+    style.min_height = resolve(style.min_height);
+    style.max_height = resolve(style.max_height);
+    style.margin.top = resolve(style.margin.top);
+    style.margin.right = resolve(style.margin.right);
+    style.margin.bottom = resolve(style.margin.bottom);
+    style.margin.left = resolve(style.margin.left);
+    style.padding.top = resolve(style.padding.top);
+    style.padding.right = resolve(style.padding.right);
+    style.padding.bottom = resolve(style.padding.bottom);
+    style.padding.left = resolve(style.padding.left);
+    style.border_width.top = resolve(style.border_width.top);
+    style.border_width.right = resolve(style.border_width.right);
+    style.border_width.bottom = resolve(style.border_width.bottom);
+    style.border_width.left = resolve(style.border_width.left);
+    style.inset_top = resolve(style.inset_top);
+    style.inset_right = resolve(style.inset_right);
+    style.inset_bottom = resolve(style.inset_bottom);
+    style.inset_left = resolve(style.inset_left);
+    style.text_indent = resolve(style.text_indent);
+    style.outline_width = resolve(style.outline_width);
+    style.outline_offset = resolve(style.outline_offset);
+    style.flex_basis = resolve(style.flex_basis);
+    style.row_gap = resolve(style.row_gap);
+    style.gap = resolve(style.gap);
+    style.column_rule_width = resolve(style.column_rule_width);
+    if let TabSizeSpec::Length(value) = style.tab_size {
+        style.tab_size = TabSizeSpec::Length(resolve(value));
+    }
+    for value in style.custom_lengths.values_mut() {
+        *value = resolve(*value);
+    }
+}
+
+fn replace_computed_style_for_all(computed: &mut ComputedStyle, source: &ComputedStyle) {
+    // CSS-wide `all` leaves custom properties and `direction` untouched. Keep
+    // the element's custom-property environment while replacing every other
+    // supported computed property from the requested cascade-wide baseline.
+    let direction = computed.direction;
+    let root_font_size = computed.root_font_size;
+    let root_line_height = computed.root_line_height;
+    let custom_lengths = std::mem::take(&mut computed.custom_lengths);
+    let custom_colors = std::mem::take(&mut computed.custom_colors);
+    let custom_color_alpha = std::mem::take(&mut computed.custom_color_alpha);
+    let custom_color_refs = std::mem::take(&mut computed.custom_color_refs);
+    let custom_raw_values = std::mem::take(&mut computed.custom_raw_values);
+    let custom_font_stacks = std::mem::take(&mut computed.custom_font_stacks);
+
+    *computed = source.clone();
+    computed.direction = direction;
+    computed.root_font_size = root_font_size;
+    computed.root_line_height = root_line_height;
+    computed.custom_lengths = custom_lengths;
+    computed.custom_colors = custom_colors;
+    computed.custom_color_alpha = custom_color_alpha;
+    computed.custom_color_refs = custom_color_refs;
+    computed.custom_raw_values = custom_raw_values;
+    computed.custom_font_stacks = custom_font_stacks;
+}
+
 fn apply_delta(
     computed: &mut ComputedStyle,
     delta: &StyleDelta,
@@ -12400,6 +13752,7 @@ fn apply_delta(
     if let Some(color) = &delta.color {
         computed.color = match color {
             ColorSpec::Value(value) => *value,
+            ColorSpec::AlphaValue(value, alpha) => blend_over_white(*value, *alpha),
             ColorSpec::Inherit => parent.color,
             ColorSpec::Initial => Color::BLACK,
             ColorSpec::CurrentColor => computed.color,
@@ -12410,6 +13763,38 @@ fn apply_delta(
     }
     sync_text_decoration_current_color(computed);
     sync_text_emphasis_current_color(computed);
+    if let Some(keyword) = delta.background_reset {
+        match keyword {
+            CascadeWideKeyword::Inherit => {
+                computed.background_color = parent.background_color;
+                computed.background_source_color = parent.background_source_color;
+                computed.background_alpha = parent.background_alpha;
+                computed.background_paint = parent.background_paint.clone();
+                computed.background_paints = parent.background_paints.clone();
+                computed.background_sizes = parent.background_sizes.clone();
+                computed.background_positions = parent.background_positions.clone();
+                computed.background_repeats = parent.background_repeats.clone();
+                computed.background_blend_modes = parent.background_blend_modes.clone();
+                computed.background_origins = parent.background_origins.clone();
+                computed.background_clips = parent.background_clips.clone();
+                computed.pending_background_color_var = parent.pending_background_color_var.clone();
+            }
+            CascadeWideKeyword::Initial | CascadeWideKeyword::Unset => {
+                computed.background_color = None;
+                computed.background_source_color = None;
+                computed.background_alpha = 1.0;
+                computed.background_paint = None;
+                computed.background_paints.clear();
+                computed.background_sizes.clear();
+                computed.background_positions.clear();
+                computed.background_repeats.clear();
+                computed.background_blend_modes.clear();
+                computed.background_origins.clear();
+                computed.background_clips.clear();
+                computed.pending_background_color_var = None;
+            }
+        }
+    }
     if let Some(color) = &delta.background_color {
         let (flattened, source, alpha) = match color {
             BackgroundSpec::Value(value, alpha) => (
@@ -12443,6 +13828,20 @@ fn apply_delta(
     }
     if let Some(positions) = &delta.background_positions {
         computed.background_positions = positions.clone();
+    }
+    if let Some(components) = &delta.background_position_x {
+        merge_background_position_axis(
+            &mut computed.background_positions,
+            components,
+            BackgroundPositionAxis::X,
+        );
+    }
+    if let Some(components) = &delta.background_position_y {
+        merge_background_position_axis(
+            &mut computed.background_positions,
+            components,
+            BackgroundPositionAxis::Y,
+        );
     }
     if let Some(repeats) = &delta.background_repeats {
         computed.background_repeats = repeats.clone();
@@ -12766,6 +14165,12 @@ fn apply_delta(
             LengthSpec::Calc(calc) => {
                 calc.resolve(computed.font_size, computed.font_size, root_font_size)
             }
+            LengthSpec::Clamped(calc) => {
+                calc.resolve(computed.font_size, computed.font_size, root_font_size)
+            }
+            LengthSpec::FontRelative(calc) => {
+                calc.resolve(computed.font_size, computed.font_size, root_font_size)
+            }
             LengthSpec::Auto
             | LengthSpec::Content
             | LengthSpec::MinContent
@@ -12783,6 +14188,12 @@ fn apply_delta(
             LengthSpec::Em(scale) => computed.font_size * scale,
             LengthSpec::Rem(scale) => root_font_size * scale,
             LengthSpec::Calc(calc) => {
+                calc.resolve(computed.font_size, computed.font_size, root_font_size)
+            }
+            LengthSpec::Clamped(calc) => {
+                calc.resolve(computed.font_size, computed.font_size, root_font_size)
+            }
+            LengthSpec::FontRelative(calc) => {
                 calc.resolve(computed.font_size, computed.font_size, root_font_size)
             }
             LengthSpec::Auto
@@ -12892,21 +14303,30 @@ fn apply_delta(
     }
     apply_logical_size_delta(computed, delta, parent);
     if let Some(var) = &delta.width_var {
+        // A winning declaration that becomes invalid after var() substitution
+        // resolves to the property's unset value; it must not expose a lower
+        // declaration from the cascade.
+        computed.width = LengthSpec::Auto;
         computed.pending_width_var = Some(var.clone());
     }
     if let Some(var) = &delta.max_width_var {
+        computed.max_width = LengthSpec::Auto;
         computed.pending_max_width_var = Some(var.clone());
     }
     if let Some(var) = &delta.height_var {
+        computed.height = LengthSpec::Auto;
         computed.pending_height_var = Some(var.clone());
     }
     if let Some(var) = &delta.min_width_var {
+        computed.min_width = LengthSpec::Auto;
         computed.pending_min_width_var = Some(var.clone());
     }
     if let Some(var) = &delta.min_height_var {
+        computed.min_height = LengthSpec::Auto;
         computed.pending_min_height_var = Some(var.clone());
     }
     if let Some(var) = &delta.max_height_var {
+        computed.max_height = LengthSpec::Auto;
         computed.pending_max_height_var = Some(var.clone());
     }
     apply_logical_size_var_delta(computed, delta);
@@ -13005,17 +14425,25 @@ fn apply_delta(
         computed.direction,
     );
     if let Some(color) = &delta.border_color {
-        let resolved = match color {
-            ColorSpec::Value(value) => *value,
-            ColorSpec::Inherit => parent.border_color.unwrap_or(parent.color),
-            ColorSpec::Initial => Color::BLACK,
-            ColorSpec::CurrentColor => computed.color,
+        let (resolved, alpha) = match color {
+            ColorSpec::Value(value) => (*value, 1.0),
+            ColorSpec::AlphaValue(value, alpha) => (*value, alpha.clamp(0.0, 1.0)),
+            ColorSpec::Inherit => (
+                parent.border_color.unwrap_or(parent.color),
+                parent.border_top_alpha,
+            ),
+            ColorSpec::Initial => (Color::BLACK, 1.0),
+            ColorSpec::CurrentColor => (computed.color, 1.0),
         };
         computed.border_color = Some(resolved);
         computed.border_top_color = Some(resolved);
         computed.border_right_color = Some(resolved);
         computed.border_bottom_color = Some(resolved);
         computed.border_left_color = Some(resolved);
+        computed.border_top_alpha = alpha;
+        computed.border_right_alpha = alpha;
+        computed.border_bottom_alpha = alpha;
+        computed.border_left_alpha = alpha;
         computed.pending_border_top_color_var = None;
         computed.pending_border_right_color_var = None;
         computed.pending_border_bottom_color_var = None;
@@ -13029,48 +14457,72 @@ fn apply_delta(
         computed.pending_border_left_color_var = Some(var.clone());
     }
     if let Some(color) = &delta.border_top_color {
-        computed.border_top_color = Some(match color {
-            ColorSpec::Value(value) => *value,
-            ColorSpec::Inherit => parent
-                .border_top_color
-                .or(parent.border_color)
-                .unwrap_or(parent.color),
-            ColorSpec::Initial => Color::BLACK,
-            ColorSpec::CurrentColor => computed.color,
-        });
+        let (resolved, alpha) = match color {
+            ColorSpec::Value(value) => (*value, 1.0),
+            ColorSpec::AlphaValue(value, alpha) => (*value, alpha.clamp(0.0, 1.0)),
+            ColorSpec::Inherit => (
+                parent
+                    .border_top_color
+                    .or(parent.border_color)
+                    .unwrap_or(parent.color),
+                parent.border_top_alpha,
+            ),
+            ColorSpec::Initial => (Color::BLACK, 1.0),
+            ColorSpec::CurrentColor => (computed.color, 1.0),
+        };
+        computed.border_top_color = Some(resolved);
+        computed.border_top_alpha = alpha;
     }
     if let Some(color) = &delta.border_right_color {
-        computed.border_right_color = Some(match color {
-            ColorSpec::Value(value) => *value,
-            ColorSpec::Inherit => parent
-                .border_right_color
-                .or(parent.border_color)
-                .unwrap_or(parent.color),
-            ColorSpec::Initial => Color::BLACK,
-            ColorSpec::CurrentColor => computed.color,
-        });
+        let (resolved, alpha) = match color {
+            ColorSpec::Value(value) => (*value, 1.0),
+            ColorSpec::AlphaValue(value, alpha) => (*value, alpha.clamp(0.0, 1.0)),
+            ColorSpec::Inherit => (
+                parent
+                    .border_right_color
+                    .or(parent.border_color)
+                    .unwrap_or(parent.color),
+                parent.border_right_alpha,
+            ),
+            ColorSpec::Initial => (Color::BLACK, 1.0),
+            ColorSpec::CurrentColor => (computed.color, 1.0),
+        };
+        computed.border_right_color = Some(resolved);
+        computed.border_right_alpha = alpha;
     }
     if let Some(color) = &delta.border_bottom_color {
-        computed.border_bottom_color = Some(match color {
-            ColorSpec::Value(value) => *value,
-            ColorSpec::Inherit => parent
-                .border_bottom_color
-                .or(parent.border_color)
-                .unwrap_or(parent.color),
-            ColorSpec::Initial => Color::BLACK,
-            ColorSpec::CurrentColor => computed.color,
-        });
+        let (resolved, alpha) = match color {
+            ColorSpec::Value(value) => (*value, 1.0),
+            ColorSpec::AlphaValue(value, alpha) => (*value, alpha.clamp(0.0, 1.0)),
+            ColorSpec::Inherit => (
+                parent
+                    .border_bottom_color
+                    .or(parent.border_color)
+                    .unwrap_or(parent.color),
+                parent.border_bottom_alpha,
+            ),
+            ColorSpec::Initial => (Color::BLACK, 1.0),
+            ColorSpec::CurrentColor => (computed.color, 1.0),
+        };
+        computed.border_bottom_color = Some(resolved);
+        computed.border_bottom_alpha = alpha;
     }
     if let Some(color) = &delta.border_left_color {
-        computed.border_left_color = Some(match color {
-            ColorSpec::Value(value) => *value,
-            ColorSpec::Inherit => parent
-                .border_left_color
-                .or(parent.border_color)
-                .unwrap_or(parent.color),
-            ColorSpec::Initial => Color::BLACK,
-            ColorSpec::CurrentColor => computed.color,
-        });
+        let (resolved, alpha) = match color {
+            ColorSpec::Value(value) => (*value, 1.0),
+            ColorSpec::AlphaValue(value, alpha) => (*value, alpha.clamp(0.0, 1.0)),
+            ColorSpec::Inherit => (
+                parent
+                    .border_left_color
+                    .or(parent.border_color)
+                    .unwrap_or(parent.color),
+                parent.border_left_alpha,
+            ),
+            ColorSpec::Initial => (Color::BLACK, 1.0),
+            ColorSpec::CurrentColor => (computed.color, 1.0),
+        };
+        computed.border_left_color = Some(resolved);
+        computed.border_left_alpha = alpha;
     }
     if let Some(var) = &delta.border_top_color_var {
         computed.pending_border_top_color_var = Some(var.clone());
@@ -13120,6 +14572,7 @@ fn apply_delta(
         computed.writing_mode,
         computed.direction,
     );
+    apply_border_cascade_ops(computed, &delta.border_cascade_ops, parent);
 
     if let Some(spec) = delta.outline_width {
         computed.outline_width = normalize_length_spec(spec, parent.outline_width);
@@ -13139,6 +14592,7 @@ fn apply_delta(
     if let Some(color) = &delta.outline_color {
         computed.outline_color = match color {
             ColorSpec::Value(value) => Some(*value),
+            ColorSpec::AlphaValue(value, alpha) => Some(blend_over_white(*value, *alpha)),
             ColorSpec::Inherit => Some(parent.resolved_outline_color()),
             ColorSpec::Initial | ColorSpec::CurrentColor => None,
         };
@@ -13162,14 +14616,46 @@ fn apply_delta(
     if let Some(hide) = delta.empty_cells_hide {
         computed.empty_cells_hide = hide;
     }
-    if let Some(radius) = &delta.border_radius {
-        computed.border_radius = *radius;
+    if delta.border_radius_ops.is_empty() {
+        if let Some(radius) = &delta.border_radius {
+            computed.border_radius = *radius;
+            computed.pending_border_radius_var = None;
+        }
+    } else {
+        apply_border_radius_ops(computed, &delta.border_radius_ops);
         computed.pending_border_radius_var = None;
     }
-    if delta.border_radius.is_none() {
+    if let Some(mode) = delta.box_decoration_break {
+        computed.box_decoration_break = mode;
+    }
+    if delta.border_image.reset {
+        computed.border_image = BorderImageSpec::default();
+    }
+    if let Some(source) = &delta.border_image.source {
+        computed.border_image.source = source.clone();
+    }
+    if let Some(slice) = delta.border_image.slice {
+        computed.border_image.slice = slice;
+    }
+    if let Some(fill) = delta.border_image.fill {
+        computed.border_image.fill = fill;
+    }
+    if let Some(width) = delta.border_image.width {
+        computed.border_image.width = width;
+    }
+    if let Some(outset) = delta.border_image.outset {
+        computed.border_image.outset = outset;
+    }
+    if let Some((repeat_x, repeat_y)) = delta.border_image.repeat {
+        computed.border_image.repeat_x = repeat_x;
+        computed.border_image.repeat_y = repeat_y;
+    }
+    if delta.border_radius.is_none() && delta.border_radius_ops.is_empty() {
         if let Some(var) = &delta.border_radius_var {
             computed.pending_border_radius_var = Some(var.clone());
         }
+    } else if let Some(var) = &delta.border_radius_var {
+        computed.pending_border_radius_var = Some(var.clone());
     }
     if let Some(shadow) = &delta.box_shadow {
         computed.box_shadow = Some(shadow.clone());
@@ -13372,6 +14858,12 @@ fn apply_delta(
     if let Some(align_self) = delta.align_self {
         computed.align_self = align_self;
     }
+    if let Some(justify_items) = delta.justify_items {
+        computed.justify_items = justify_items;
+    }
+    if let Some(justify_self) = delta.justify_self {
+        computed.justify_self = justify_self;
+    }
     if let Some(align_content) = delta.align_content {
         computed.align_content = align_content;
     }
@@ -13397,6 +14889,7 @@ fn apply_delta(
     if let Some(column_rule_color) = &delta.column_rule_color {
         computed.column_rule_color = match column_rule_color {
             ColorSpec::Value(value) => Some(*value),
+            ColorSpec::AlphaValue(value, alpha) => Some(blend_over_white(*value, *alpha)),
             ColorSpec::Inherit => Some(parent.resolved_column_rule_color()),
             ColorSpec::Initial | ColorSpec::CurrentColor => None,
         };
@@ -13414,6 +14907,57 @@ fn apply_delta(
     if let Some(tracks) = &delta.grid_row_tracks {
         computed.grid_row_tracks = tracks.clone();
         computed.grid_rows = (!tracks.is_empty()).then_some(tracks.len());
+    }
+    if let Some(subgrid) = delta.grid_subgrid_columns {
+        computed.grid_subgrid_columns = subgrid;
+    }
+    if let Some(subgrid) = delta.grid_subgrid_rows {
+        computed.grid_subgrid_rows = subgrid;
+    }
+    if let Some(raw) = &delta.grid_column_tracks_var {
+        computed.pending_grid_column_tracks_var = raw.clone();
+    }
+    if let Some(raw) = &delta.grid_row_tracks_var {
+        computed.pending_grid_row_tracks_var = raw.clone();
+    }
+    if let Some(line_names) = &delta.grid_column_line_names {
+        computed.grid_column_line_names = line_names.clone();
+    }
+    if let Some(line_names) = &delta.grid_row_line_names {
+        computed.grid_row_line_names = line_names.clone();
+    }
+    if let Some(tracks) = &delta.grid_auto_column_tracks {
+        computed.grid_auto_column_tracks = tracks.clone();
+    }
+    if let Some(tracks) = &delta.grid_auto_row_tracks {
+        computed.grid_auto_row_tracks = tracks.clone();
+    }
+    if let Some(flow) = delta.grid_auto_flow {
+        computed.grid_auto_flow = flow;
+    }
+    if let Some(repeat) = &delta.grid_column_auto_repeat {
+        computed.grid_column_auto_repeat = repeat.clone();
+    }
+    if let Some(repeat) = &delta.grid_row_auto_repeat {
+        computed.grid_row_auto_repeat = repeat.clone();
+    }
+    if let Some(areas) = &delta.grid_template_areas {
+        computed.grid_template_areas = areas.clone();
+    }
+    if let Some(line) = &delta.grid_column_line_start {
+        computed.grid_column_line_start = line.clone();
+    }
+    if let Some(line) = &delta.grid_column_line_end {
+        computed.grid_column_line_end = line.clone();
+    }
+    if let Some(line) = &delta.grid_row_line_start {
+        computed.grid_row_line_start = line.clone();
+    }
+    if let Some(line) = &delta.grid_row_line_end {
+        computed.grid_row_line_end = line.clone();
+    }
+    if let Some(name) = &delta.grid_area_name {
+        computed.grid_area_name = name.clone();
     }
     if let Some(column_start) = delta.grid_column_start {
         computed.grid_column_start = if column_start == 0 {
@@ -13647,7 +15191,10 @@ fn apply_delta(
         computed.pagination.widows = 1;
     }
 
-    if computed.font_size <= Pt::ZERO {
+    // Zero is a valid CSS font-size and is commonly used to remove the
+    // whitespace advance between inline-block boxes. Parsing already rejects
+    // negative sizes, so only an actually negative computed value is invalid.
+    if computed.font_size < Pt::ZERO {
         computed.font_size = root_font_size;
     }
 }
@@ -14152,9 +15699,11 @@ fn copy_revert_layer_border_color(
     layer_base: &ComputedStyle,
 ) {
     let colors = layer_base.resolved_border_colors(layer_base.color);
+    let opacities = layer_base.resolved_border_opacities();
     match side {
         PhysicalSide::Left => {
             computed.border_left_color = Some(colors.left);
+            computed.border_left_alpha = opacities.left;
             computed.pending_border_left_color_var = layer_base
                 .pending_border_left_color_var
                 .clone()
@@ -14162,6 +15711,7 @@ fn copy_revert_layer_border_color(
         }
         PhysicalSide::Top => {
             computed.border_top_color = Some(colors.top);
+            computed.border_top_alpha = opacities.top;
             computed.pending_border_top_color_var = layer_base
                 .pending_border_top_color_var
                 .clone()
@@ -14169,6 +15719,7 @@ fn copy_revert_layer_border_color(
         }
         PhysicalSide::Right => {
             computed.border_right_color = Some(colors.right);
+            computed.border_right_alpha = opacities.right;
             computed.pending_border_right_color_var = layer_base
                 .pending_border_right_color_var
                 .clone()
@@ -14176,6 +15727,7 @@ fn copy_revert_layer_border_color(
         }
         PhysicalSide::Bottom => {
             computed.border_bottom_color = Some(colors.bottom);
+            computed.border_bottom_alpha = opacities.bottom;
             computed.pending_border_bottom_color_var = layer_base
                 .pending_border_bottom_color_var
                 .clone()
@@ -14294,6 +15846,18 @@ fn is_effective_zero_border_width(spec: LengthSpec) -> bool {
                 && calc.percent.abs() <= f32::EPSILON
                 && calc.em.abs() <= f32::EPSILON
                 && calc.rem.abs() <= f32::EPSILON
+        }
+        LengthSpec::Clamped(calc) => calc.resolve(Pt::ZERO, Pt::ZERO, Pt::ZERO) == Pt::ZERO,
+        LengthSpec::FontRelative(calc) => {
+            calc.base.abs == Pt::ZERO
+                && calc.base.percent.abs() <= f32::EPSILON
+                && calc.base.em.abs() <= f32::EPSILON
+                && calc.base.rem.abs() <= f32::EPSILON
+                && calc.ex.abs() <= f32::EPSILON
+                && calc.ch.abs() <= f32::EPSILON
+                && calc.cap.abs() <= f32::EPSILON
+                && calc.lh.abs() <= f32::EPSILON
+                && calc.rlh.abs() <= f32::EPSILON
         }
     }
 }
@@ -16040,6 +17604,7 @@ fn calc_length_from_length_spec_for_custom_eval(spec: LengthSpec) -> Option<Calc
             rem: value,
         }),
         LengthSpec::Calc(calc) => Some(calc),
+        LengthSpec::Clamped(_) | LengthSpec::FontRelative(_) => None,
         LengthSpec::Auto
         | LengthSpec::Content
         | LengthSpec::MinContent
@@ -16434,6 +17999,26 @@ fn resolve_pending_line_height_var(style: &mut ComputedStyle, viewport: Size) {
 }
 
 fn resolve_pending_vars(style: &mut ComputedStyle) {
+    if let Some(raw) = style.pending_grid_column_tracks_var.take() {
+        if let Some(resolved) = substitute_vars_in_color_expr(style, &raw, 0) {
+            if let Some(tracks) = parse_grid_track_list(&resolved) {
+                style.grid_columns = (!tracks.is_empty()).then_some(tracks.len());
+                style.grid_column_tracks = tracks;
+                style.grid_column_line_names = parse_grid_track_line_names(&resolved);
+                style.grid_column_auto_repeat = parse_grid_auto_repeat(&resolved);
+            }
+        }
+    }
+    if let Some(raw) = style.pending_grid_row_tracks_var.take() {
+        if let Some(resolved) = substitute_vars_in_color_expr(style, &raw, 0) {
+            if let Some(tracks) = parse_grid_track_list(&resolved) {
+                style.grid_rows = (!tracks.is_empty()).then_some(tracks.len());
+                style.grid_row_tracks = tracks;
+                style.grid_row_line_names = parse_grid_track_line_names(&resolved);
+                style.grid_row_auto_repeat = parse_grid_auto_repeat(&resolved);
+            }
+        }
+    }
     if let Some(name) = style.pending_width_var.take() {
         if let Some(spec) =
             resolve_custom_length_from_maps(&style.custom_lengths, &style.custom_color_refs, &name)
@@ -16690,32 +18275,40 @@ fn resolve_pending_vars(style: &mut ComputedStyle) {
     }
     if let Some(name) = style.pending_border_color_var.take() {
         if let Some((color, alpha)) = resolve_custom_color_expr_with_alpha(style, &name) {
-            let resolved = blend_over_white(color, alpha);
-            style.border_color = Some(resolved);
-            style.border_top_color = Some(resolved);
-            style.border_right_color = Some(resolved);
-            style.border_bottom_color = Some(resolved);
-            style.border_left_color = Some(resolved);
+            let alpha = alpha.clamp(0.0, 1.0);
+            style.border_color = Some(color);
+            style.border_top_color = Some(color);
+            style.border_right_color = Some(color);
+            style.border_bottom_color = Some(color);
+            style.border_left_color = Some(color);
+            style.border_top_alpha = alpha;
+            style.border_right_alpha = alpha;
+            style.border_bottom_alpha = alpha;
+            style.border_left_alpha = alpha;
         }
     }
     if let Some(name) = style.pending_border_top_color_var.take() {
         if let Some((color, alpha)) = resolve_custom_color_expr_with_alpha(style, &name) {
-            style.border_top_color = Some(blend_over_white(color, alpha));
+            style.border_top_color = Some(color);
+            style.border_top_alpha = alpha.clamp(0.0, 1.0);
         }
     }
     if let Some(name) = style.pending_border_right_color_var.take() {
         if let Some((color, alpha)) = resolve_custom_color_expr_with_alpha(style, &name) {
-            style.border_right_color = Some(blend_over_white(color, alpha));
+            style.border_right_color = Some(color);
+            style.border_right_alpha = alpha.clamp(0.0, 1.0);
         }
     }
     if let Some(name) = style.pending_border_bottom_color_var.take() {
         if let Some((color, alpha)) = resolve_custom_color_expr_with_alpha(style, &name) {
-            style.border_bottom_color = Some(blend_over_white(color, alpha));
+            style.border_bottom_color = Some(color);
+            style.border_bottom_alpha = alpha.clamp(0.0, 1.0);
         }
     }
     if let Some(name) = style.pending_border_left_color_var.take() {
         if let Some((color, alpha)) = resolve_custom_color_expr_with_alpha(style, &name) {
-            style.border_left_color = Some(blend_over_white(color, alpha));
+            style.border_left_color = Some(color);
+            style.border_left_alpha = alpha.clamp(0.0, 1.0);
         }
     }
     if let Some(name) = style.pending_font_name_var.take() {
@@ -16832,7 +18425,9 @@ fn native_font_length_math(raw: &str) -> Option<NativeLengthMath> {
             Some(NativeLengthMath::zero())
         }
         NativeMathValue::Length(value) => Some(value),
-        NativeMathValue::Number(_) => None,
+        NativeMathValue::Number(_) | NativeMathValue::Clamped(_) | NativeMathValue::Typed(_) => {
+            None
+        }
     }
 }
 
@@ -16846,6 +18441,11 @@ fn native_length_math_is_finite(value: NativeLengthMath) -> bool {
         value.vh,
         value.vmin,
         value.vmax,
+        value.ex,
+        value.ch,
+        value.cap,
+        value.lh,
+        value.rlh,
     ]
     .into_iter()
     .all(f32::is_finite)
@@ -16860,6 +18460,11 @@ fn native_length_math_is_nonnegative(value: NativeLengthMath) -> bool {
         && value.vh >= 0.0
         && value.vmin >= 0.0
         && value.vmax >= 0.0
+        && value.ex >= 0.0
+        && value.ch >= 0.0
+        && value.cap >= 0.0
+        && value.lh >= 0.0
+        && value.rlh >= 0.0
 }
 
 fn native_length_math_has_only_abs(value: NativeLengthMath) -> bool {
@@ -16870,11 +18475,22 @@ fn native_length_math_has_only_abs(value: NativeLengthMath) -> bool {
         && native_math_component_is_zero(value.vh)
         && native_math_component_is_zero(value.vmin)
         && native_math_component_is_zero(value.vmax)
+        && native_math_component_is_zero(value.ex)
+        && native_math_component_is_zero(value.ch)
+        && native_math_component_is_zero(value.cap)
+        && native_math_component_is_zero(value.lh)
+        && native_math_component_is_zero(value.rlh)
 }
 
 fn font_size_from_native_length(raw: &str) -> Option<FontSizeSpec> {
     let value = native_font_length_math(raw)?;
     if !native_length_math_is_finite(value) {
+        return None;
+    }
+    if [value.ex, value.ch, value.cap, value.lh, value.rlh]
+        .into_iter()
+        .any(|component| !native_math_component_is_zero(component))
+    {
         return None;
     }
     let lowered = raw.trim().to_ascii_lowercase();
@@ -16917,6 +18533,12 @@ fn parse_line_height_spec_str(raw: &str) -> Option<LineHeightSpec> {
 fn line_height_from_native_length(raw: &str) -> Option<LineHeightSpec> {
     let value = native_font_length_math(raw)?;
     if !native_length_math_is_finite(value) {
+        return None;
+    }
+    if [value.ex, value.ch, value.cap, value.lh, value.rlh]
+        .into_iter()
+        .any(|component| !native_math_component_is_zero(component))
+    {
         return None;
     }
     let lowered = raw.trim().to_ascii_lowercase();
@@ -17101,26 +18723,34 @@ fn parse_place_content_str(raw: &str) -> Option<(AlignContentMode, JustifyConten
     Some((align, justify))
 }
 
-fn parse_place_items_align_str(raw: &str) -> Option<AlignItemsMode> {
+fn parse_place_items_str(raw: &str) -> Option<(AlignItemsMode, AlignItemsMode)> {
     let mut tokens = raw.split_ascii_whitespace().map(|v| v.to_ascii_lowercase());
     let first = tokens.next()?;
     let align = align_items_mode_from_keyword(first.as_str())?;
-    let _justify = tokens.next();
+    let justify = if let Some(second) = tokens.next() {
+        align_items_mode_from_keyword(second.as_str())?
+    } else {
+        align
+    };
     if tokens.next().is_some() {
         return None;
     }
-    Some(align)
+    Some((align, justify))
 }
 
-fn parse_place_self_align_str(raw: &str) -> Option<AlignSelfMode> {
+fn parse_place_self_str(raw: &str) -> Option<(AlignSelfMode, AlignSelfMode)> {
     let mut tokens = raw.split_ascii_whitespace().map(|v| v.to_ascii_lowercase());
     let first = tokens.next()?;
     let align = align_self_mode_from_keyword(first.as_str())?;
-    let _justify = tokens.next();
+    let justify = if let Some(second) = tokens.next() {
+        align_self_mode_from_keyword(second.as_str())?
+    } else {
+        align
+    };
     if tokens.next().is_some() {
         return None;
     }
-    Some(align)
+    Some((align, justify))
 }
 
 fn parse_font_weight_str(raw: &str) -> Option<u16> {
@@ -17655,6 +19285,8 @@ fn parse_single_length_spec(raw: &str) -> Option<LengthSpec> {
         }
         NativeMathValue::Number(_) => None,
         NativeMathValue::Length(value) => value.to_length_spec(),
+        NativeMathValue::Clamped(value) => value.to_length_spec(),
+        NativeMathValue::Typed(_) => None,
     }
 }
 
@@ -18858,6 +20490,18 @@ fn tab_size_length_is_non_negative(length: LengthSpec) -> bool {
         LengthSpec::Calc(calc) => {
             calc.percent == 0.0 && calc.abs >= Pt::ZERO && calc.em >= 0.0 && calc.rem >= 0.0
         }
+        LengthSpec::Clamped(calc) => calc.min.is_some_and(|minimum| minimum >= Pt::ZERO),
+        LengthSpec::FontRelative(calc) => {
+            calc.base.percent == 0.0
+                && calc.base.abs >= Pt::ZERO
+                && calc.base.em >= 0.0
+                && calc.base.rem >= 0.0
+                && calc.ex >= 0.0
+                && calc.ch >= 0.0
+                && calc.cap >= 0.0
+                && calc.lh >= 0.0
+                && calc.rlh >= 0.0
+        }
         LengthSpec::Percent(_)
         | LengthSpec::Auto
         | LengthSpec::Content
@@ -18930,6 +20574,8 @@ fn length_spec_from_string(raw: &str) -> Option<LengthSpec> {
     match parse_native_length_math(raw, true)? {
         NativeMathValue::Number(value) => Some(LengthSpec::Absolute(px_to_pt(value))),
         NativeMathValue::Length(value) => value.to_length_spec(),
+        NativeMathValue::Clamped(value) => value.to_length_spec(),
+        NativeMathValue::Typed(_) => None,
     }
 }
 
@@ -18937,6 +20583,27 @@ fn parse_length_list(raw: &str) -> Vec<LengthSpec> {
     raw.split_whitespace()
         .filter_map(length_spec_from_string)
         .collect()
+}
+
+fn parse_grid_auto_repeat(raw: &str) -> Option<GridAutoRepeatSpec> {
+    let tokens = split_top_level_whitespace_tokens(&raw.trim().to_ascii_lowercase());
+    if tokens.len() != 1 {
+        return None;
+    }
+    let token = tokens.first()?.trim();
+    if !token.starts_with("repeat(") || !token.ends_with(')') {
+        return None;
+    }
+    let inner = &token[7..token.len().saturating_sub(1)];
+    let (count_raw, segment_raw) = split_top_level_comma_once(inner)?;
+    let mode = match count_raw.trim() {
+        "auto-fill" => GridAutoRepeatMode::Fill,
+        "auto-fit" => GridAutoRepeatMode::Fit,
+        _ => return None,
+    };
+    let mut tracks = Vec::new();
+    parse_grid_track_segment(segment_raw.trim(), 1, &mut tracks)?;
+    (!tracks.is_empty()).then_some(GridAutoRepeatSpec { mode, tracks })
 }
 
 fn parse_grid_track_list(raw: &str) -> Option<Vec<GridTrackSize>> {
@@ -18951,6 +20618,466 @@ fn parse_grid_track_list(raw: &str) -> Option<Vec<GridTrackSize>> {
     let mut tracks = Vec::new();
     parse_grid_track_segment(&normalized, 0, &mut tracks)?;
     (!tracks.is_empty()).then_some(tracks)
+}
+
+fn parse_subgrid_line_names(raw: &str) -> Option<Vec<Vec<String>>> {
+    let tokens = split_top_level_whitespace_tokens(&raw.trim().to_ascii_lowercase());
+    if tokens.first().map(String::as_str) != Some("subgrid") {
+        return None;
+    }
+    let mut lines = Vec::new();
+    for token in tokens.iter().skip(1) {
+        if !(token.starts_with('[') && token.ends_with(']')) {
+            return None;
+        }
+        lines.push(
+            token[1..token.len().saturating_sub(1)]
+                .split_ascii_whitespace()
+                .filter(|name| !name.is_empty())
+                .map(ToString::to_string)
+                .collect(),
+        );
+    }
+    Some(lines)
+}
+
+fn parse_grid_track_line_names(raw: &str) -> Vec<Vec<String>> {
+    fn segment(raw: &str, depth: usize) -> Option<Vec<Vec<String>>> {
+        if depth > 8 {
+            return None;
+        }
+        let mut lines = vec![Vec::new()];
+        for token in split_top_level_whitespace_tokens(raw) {
+            let token = token.trim();
+            if token.is_empty() {
+                continue;
+            }
+            if token.starts_with('[') && token.ends_with(']') {
+                lines.last_mut()?.extend(
+                    token[1..token.len().saturating_sub(1)]
+                        .split_ascii_whitespace()
+                        .filter(|name| !name.is_empty())
+                        .map(ToString::to_string),
+                );
+                continue;
+            }
+            if token.starts_with("repeat(") && token.ends_with(')') {
+                let inner = &token[7..token.len().saturating_sub(1)];
+                let (repeat_raw, repeated_raw) = split_top_level_comma_once(inner)?;
+                let repeat_count = repeat_raw
+                    .trim()
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|count| *count > 0)
+                    .unwrap_or(1);
+                let repeated = segment(repeated_raw, depth + 1)?;
+                for _ in 0..repeat_count {
+                    if let Some(first) = repeated.first() {
+                        lines.last_mut()?.extend(first.iter().cloned());
+                    }
+                    lines.extend(repeated.iter().skip(1).cloned());
+                }
+                continue;
+            }
+            if parse_grid_track_size(token).is_some() {
+                lines.push(Vec::new());
+            }
+        }
+        Some(lines)
+    }
+
+    segment(&raw.trim().to_ascii_lowercase(), 0).unwrap_or_default()
+}
+
+fn parse_grid_line_spec(raw: &str) -> GridLineSpec {
+    let normalized = raw.trim().to_ascii_lowercase();
+    if normalized.is_empty() || normalized == "auto" {
+        return GridLineSpec::Auto;
+    }
+    let parts = split_top_level_whitespace_tokens(&normalized);
+    if parts.first().is_some_and(|part| part == "span") {
+        let mut count = 1usize;
+        let mut name = None;
+        for part in parts.iter().skip(1) {
+            if let Ok(value) = part.parse::<usize>() {
+                if value == 0 {
+                    return GridLineSpec::Auto;
+                }
+                count = value;
+            } else if name.replace(part.clone()).is_some() {
+                return GridLineSpec::Auto;
+            }
+        }
+        return name.map_or(GridLineSpec::Span(count), |name| GridLineSpec::SpanNamed {
+            count,
+            name,
+        });
+    }
+    if parts.len() == 2 {
+        if let Ok(occurrence) = parts[0].parse::<i32>() {
+            if occurrence != 0 {
+                return GridLineSpec::NamedOccurrence {
+                    occurrence,
+                    name: parts[1].clone(),
+                };
+            }
+        }
+        if let Ok(occurrence) = parts[1].parse::<i32>() {
+            if occurrence != 0 {
+                return GridLineSpec::NamedOccurrence {
+                    occurrence,
+                    name: parts[0].clone(),
+                };
+            }
+        }
+    }
+    if let Ok(line) = normalized.parse::<i32>() {
+        return if line == 0 {
+            GridLineSpec::Auto
+        } else {
+            GridLineSpec::Line(line)
+        };
+    }
+    GridLineSpec::Named(normalized)
+}
+
+fn parse_grid_placement_shorthand(raw: &str) -> (GridLineSpec, GridLineSpec) {
+    if let Some((start, end)) = raw.split_once('/') {
+        (parse_grid_line_spec(start), parse_grid_line_spec(end))
+    } else {
+        (parse_grid_line_spec(raw), GridLineSpec::Auto)
+    }
+}
+
+fn parse_grid_area_lines(raw: &str) -> (GridLineSpec, GridLineSpec, GridLineSpec, GridLineSpec) {
+    let parts: Vec<&str> = raw.split('/').collect();
+    let get = |index: usize| {
+        parts
+            .get(index)
+            .map(|value| parse_grid_line_spec(value))
+            .unwrap_or_default()
+    };
+    (get(0), get(1), get(2), get(3))
+}
+
+fn legacy_positive_grid_start(line: &GridLineSpec) -> usize {
+    match line {
+        GridLineSpec::Line(line) if *line > 0 => *line as usize,
+        _ => 0,
+    }
+}
+
+fn parse_grid_template_areas(raw: &str) -> Option<Vec<Vec<Option<String>>>> {
+    let trimmed = raw.trim();
+    if trimmed.eq_ignore_ascii_case("none") {
+        return Some(Vec::new());
+    }
+    let mut rows = Vec::new();
+    let mut quote = None;
+    let mut current = String::new();
+    for character in trimmed.chars() {
+        match quote {
+            Some(delimiter) if character == delimiter => {
+                let row: Vec<Option<String>> = current
+                    .split_ascii_whitespace()
+                    .map(|cell| {
+                        (!cell.chars().all(|character| character == '.'))
+                            .then(|| cell.to_ascii_lowercase())
+                    })
+                    .collect();
+                if row.is_empty() {
+                    return None;
+                }
+                rows.push(row);
+                current.clear();
+                quote = None;
+            }
+            Some(_) => current.push(character),
+            None if matches!(character, '\'' | '"') => quote = Some(character),
+            None if character.is_whitespace() => {}
+            None => return None,
+        }
+    }
+    if quote.is_some() || rows.is_empty() {
+        return None;
+    }
+    let columns = rows[0].len();
+    if rows.iter().any(|row| row.len() != columns) {
+        return None;
+    }
+
+    let mut bounds: HashMap<&str, (usize, usize, usize, usize, usize)> = HashMap::new();
+    for (row_index, row) in rows.iter().enumerate() {
+        for (column_index, cell) in row.iter().enumerate() {
+            if let Some(name) = cell.as_deref() {
+                let entry = bounds.entry(name).or_insert((
+                    row_index,
+                    row_index,
+                    column_index,
+                    column_index,
+                    0,
+                ));
+                entry.0 = entry.0.min(row_index);
+                entry.1 = entry.1.max(row_index);
+                entry.2 = entry.2.min(column_index);
+                entry.3 = entry.3.max(column_index);
+                entry.4 += 1;
+            }
+        }
+    }
+    if bounds
+        .values()
+        .any(|(r0, r1, c0, c1, count)| (r1 - r0 + 1).saturating_mul(c1 - c0 + 1) != *count)
+    {
+        return None;
+    }
+    Some(rows)
+}
+
+struct ParsedGridTemplateShorthand {
+    column_tracks: Vec<GridTrackSize>,
+    column_line_names: Vec<Vec<String>>,
+    row_tracks: Vec<GridTrackSize>,
+    row_line_names: Vec<Vec<String>>,
+    areas: Vec<Vec<Option<String>>>,
+}
+
+fn parse_grid_template_shorthand(raw: &str) -> Option<ParsedGridTemplateShorthand> {
+    let (rows_raw, columns_raw) = split_top_level_slash_once(raw)?;
+    let column_tracks = parse_grid_track_list(columns_raw)?;
+    let column_line_names = parse_grid_track_line_names(columns_raw);
+
+    if !rows_raw.contains(['\'', '"']) {
+        let row_tracks = parse_grid_track_list(rows_raw)?;
+        return Some(ParsedGridTemplateShorthand {
+            column_tracks,
+            column_line_names,
+            row_line_names: parse_grid_track_line_names(rows_raw),
+            row_tracks,
+            areas: Vec::new(),
+        });
+    }
+
+    let mut quoted_rows = Vec::new();
+    let mut row_ranges = Vec::new();
+    let mut quote = None;
+    let mut row_start = 0usize;
+    let mut escaped = false;
+    for (index, character) in rows_raw.char_indices() {
+        if let Some(delimiter) = quote {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == delimiter {
+                quoted_rows.push(rows_raw[row_start..index].to_string());
+                row_ranges.push((row_start.saturating_sub(1), index + character.len_utf8()));
+                quote = None;
+            }
+        } else if matches!(character, '\'' | '"') {
+            quote = Some(character);
+            row_start = index + character.len_utf8();
+        }
+    }
+    if quote.is_some() || quoted_rows.is_empty() {
+        return None;
+    }
+
+    let areas_raw = quoted_rows
+        .iter()
+        .map(|row| format!("\"{row}\""))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let areas = parse_grid_template_areas(&areas_raw)?;
+    if !column_tracks.is_empty()
+        && areas
+            .first()
+            .is_some_and(|row| row.len() != column_tracks.len())
+    {
+        return None;
+    }
+
+    let mut row_tracks = Vec::with_capacity(row_ranges.len());
+    for (index, (_, close)) in row_ranges.iter().copied().enumerate() {
+        let next_open = row_ranges
+            .get(index + 1)
+            .map(|(open, _)| *open)
+            .unwrap_or(rows_raw.len());
+        let tail = rows_raw.get(close..next_open)?.trim();
+        let sizes: Vec<GridTrackSize> = split_top_level_whitespace_tokens(tail)
+            .into_iter()
+            .filter(|token| !(token.starts_with('[') && token.ends_with(']')))
+            .filter_map(|token| parse_grid_track_size(&token))
+            .collect();
+        if sizes.len() > 1 {
+            return None;
+        }
+        row_tracks.push(sizes.first().copied().unwrap_or_else(GridTrackSize::auto));
+    }
+    let row_line_names = vec![Vec::new(); row_tracks.len().saturating_add(1)];
+
+    Some(ParsedGridTemplateShorthand {
+        column_tracks,
+        column_line_names,
+        row_tracks,
+        row_line_names,
+        areas,
+    })
+}
+
+fn set_grid_template_delta(delta: &mut StyleDelta, parsed: ParsedGridTemplateShorthand) {
+    delta.grid_columns = Some(parsed.column_tracks.len());
+    delta.grid_rows = Some(parsed.row_tracks.len());
+    delta.grid_column_tracks = Some(parsed.column_tracks);
+    delta.grid_row_tracks = Some(parsed.row_tracks);
+    delta.grid_subgrid_columns = Some(false);
+    delta.grid_subgrid_rows = Some(false);
+    delta.grid_column_line_names = Some(parsed.column_line_names);
+    delta.grid_row_line_names = Some(parsed.row_line_names);
+    delta.grid_template_areas = Some(parsed.areas);
+    delta.grid_column_auto_repeat = Some(None);
+    delta.grid_row_auto_repeat = Some(None);
+    delta.grid_column_tracks_var = Some(None);
+    delta.grid_row_tracks_var = Some(None);
+}
+
+fn apply_native_grid_template_shorthand(raw: &str, delta: &mut StyleDelta) -> bool {
+    let Some(parsed) = parse_grid_template_shorthand(raw) else {
+        return false;
+    };
+    set_grid_template_delta(delta, parsed);
+    true
+}
+
+fn parse_grid_auto_flow_side(raw: &str) -> Option<(GridAutoFlowMode, Vec<GridTrackSize>)> {
+    let tokens = split_top_level_whitespace_tokens(raw);
+    if !tokens
+        .iter()
+        .any(|token| token.eq_ignore_ascii_case("auto-flow"))
+    {
+        return None;
+    }
+    let dense = tokens
+        .iter()
+        .any(|token| token.eq_ignore_ascii_case("dense"));
+    let track_raw = tokens
+        .iter()
+        .filter(|token| {
+            !token.eq_ignore_ascii_case("auto-flow") && !token.eq_ignore_ascii_case("dense")
+        })
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let tracks = if track_raw.is_empty() {
+        vec![GridTrackSize::auto()]
+    } else {
+        parse_grid_track_list(&track_raw)?
+    };
+    Some((
+        if dense {
+            GridAutoFlowMode::RowDense
+        } else {
+            GridAutoFlowMode::Row
+        },
+        tracks,
+    ))
+}
+
+fn apply_native_grid_shorthand(raw: &str, delta: &mut StyleDelta) -> bool {
+    let Some((rows_raw, columns_raw)) = split_top_level_slash_once(raw) else {
+        return false;
+    };
+    let row_auto_flow = parse_grid_auto_flow_side(rows_raw);
+    let column_auto_flow = parse_grid_auto_flow_side(columns_raw);
+    if row_auto_flow.is_some() && column_auto_flow.is_some() {
+        return false;
+    }
+
+    if let Some((flow, auto_rows)) = row_auto_flow {
+        let Some(column_tracks) = parse_grid_track_list(columns_raw) else {
+            return false;
+        };
+        delta.grid_columns = Some(column_tracks.len());
+        delta.grid_rows = Some(0);
+        delta.grid_column_line_names = Some(parse_grid_track_line_names(columns_raw));
+        delta.grid_row_line_names = Some(Vec::new());
+        delta.grid_column_tracks = Some(column_tracks);
+        delta.grid_row_tracks = Some(Vec::new());
+        delta.grid_subgrid_columns = Some(false);
+        delta.grid_subgrid_rows = Some(false);
+        delta.grid_template_areas = Some(Vec::new());
+        delta.grid_auto_flow = Some(flow);
+        delta.grid_auto_row_tracks = Some(auto_rows);
+        delta.grid_auto_column_tracks = Some(Vec::new());
+        delta.grid_column_auto_repeat = Some(None);
+        delta.grid_row_auto_repeat = Some(None);
+        delta.grid_column_tracks_var = Some(None);
+        delta.grid_row_tracks_var = Some(None);
+        return true;
+    }
+
+    if let Some((flow, auto_columns)) = column_auto_flow {
+        let Some(row_tracks) = parse_grid_track_list(rows_raw) else {
+            return false;
+        };
+        delta.grid_columns = Some(0);
+        delta.grid_rows = Some(row_tracks.len());
+        delta.grid_column_line_names = Some(Vec::new());
+        delta.grid_row_line_names = Some(parse_grid_track_line_names(rows_raw));
+        delta.grid_column_tracks = Some(Vec::new());
+        delta.grid_row_tracks = Some(row_tracks);
+        delta.grid_subgrid_columns = Some(false);
+        delta.grid_subgrid_rows = Some(false);
+        delta.grid_template_areas = Some(Vec::new());
+        delta.grid_auto_flow = Some(if matches!(flow, GridAutoFlowMode::RowDense) {
+            GridAutoFlowMode::ColumnDense
+        } else {
+            GridAutoFlowMode::Column
+        });
+        delta.grid_auto_column_tracks = Some(auto_columns);
+        delta.grid_auto_row_tracks = Some(Vec::new());
+        delta.grid_column_auto_repeat = Some(None);
+        delta.grid_row_auto_repeat = Some(None);
+        delta.grid_column_tracks_var = Some(None);
+        delta.grid_row_tracks_var = Some(None);
+        return true;
+    }
+
+    let Some(parsed) = parse_grid_template_shorthand(raw) else {
+        return false;
+    };
+    set_grid_template_delta(delta, parsed);
+    delta.grid_auto_flow = Some(GridAutoFlowMode::Row);
+    delta.grid_auto_column_tracks = Some(Vec::new());
+    delta.grid_auto_row_tracks = Some(Vec::new());
+    true
+}
+
+fn parse_grid_auto_flow(raw: &str) -> Option<GridAutoFlowMode> {
+    let mut row = false;
+    let mut column = false;
+    let mut dense = false;
+    for token in raw.split_ascii_whitespace() {
+        match token.to_ascii_lowercase().as_str() {
+            "row" if !row && !column => row = true,
+            "column" if !row && !column => column = true,
+            "dense" if !dense => dense = true,
+            _ => return None,
+        }
+    }
+    if column {
+        Some(if dense {
+            GridAutoFlowMode::ColumnDense
+        } else {
+            GridAutoFlowMode::Column
+        })
+    } else {
+        Some(if dense {
+            GridAutoFlowMode::RowDense
+        } else {
+            GridAutoFlowMode::Row
+        })
+    }
 }
 
 fn parse_grid_track_segment(
@@ -19013,7 +21140,7 @@ fn parse_grid_track_size(raw: &str) -> Option<GridTrackSize> {
         let inner = &raw[12..raw.len().saturating_sub(1)];
         return Some(GridTrackSize {
             min: GridTrackBreadth::Auto,
-            max: GridTrackBreadth::Length(length_spec_from_string(inner.trim())?),
+            max: GridTrackBreadth::FitContent(length_spec_from_string(inner.trim())?),
         });
     }
 
@@ -19042,37 +21169,6 @@ fn parse_grid_track_breadth(raw: &str) -> Option<GridTrackBreadth> {
             length_spec_from_string(raw).map(GridTrackBreadth::Length)
         }
     }
-}
-
-fn parse_grid_track_start(raw: &str) -> Option<usize> {
-    let mut normalized = raw.trim().to_ascii_lowercase();
-    if normalized.is_empty() || normalized == "auto" {
-        return None;
-    }
-
-    if let Some((before_slash, _)) = normalized.split_once('/') {
-        normalized = before_slash.trim().to_string();
-    }
-    if normalized.is_empty() || normalized == "auto" {
-        return None;
-    }
-
-    let first = split_top_level_whitespace_tokens(&normalized)
-        .into_iter()
-        .next()?;
-    if first == "span" {
-        return None;
-    }
-
-    let parsed = first.parse::<i32>().ok()?;
-    (parsed > 0).then_some(parsed as usize)
-}
-
-fn parse_grid_area_starts(raw: &str) -> (Option<usize>, Option<usize>) {
-    let mut parts = raw.split('/');
-    let row_start = parts.next().and_then(parse_grid_track_start);
-    let column_start = parts.next().and_then(parse_grid_track_start);
-    (row_start, column_start)
 }
 
 fn split_top_level_comma_once(raw: &str) -> Option<(&str, &str)> {
@@ -19161,7 +21257,7 @@ fn parse_border_radius_axis(raw: &str) -> Option<BorderRadiusSpec> {
     }
     let mut values = Vec::with_capacity(tokens.len());
     for token in tokens {
-        let value = length_spec_from_string(&token)?;
+        let value = parse_border_radius_component(&token)?;
         if !border_radius_component_is_non_negative(value) {
             return None;
         }
@@ -19181,11 +21277,76 @@ fn parse_border_radius_axis(raw: &str) -> Option<BorderRadiusSpec> {
     })
 }
 
+fn parse_border_radius_component(raw: &str) -> Option<LengthSpec> {
+    match parse_native_length_math(raw.trim(), true)? {
+        // CSS permits a unitless zero in a length slot, but nonzero numbers are
+        // invalid and must not replace an earlier valid declaration.
+        NativeMathValue::Number(value) if value.abs() <= f32::EPSILON => {
+            Some(LengthSpec::Absolute(Pt::ZERO))
+        }
+        NativeMathValue::Number(_) | NativeMathValue::Typed(_) => None,
+        NativeMathValue::Length(value) => value.to_length_spec(),
+        NativeMathValue::Clamped(value) => value.to_length_spec(),
+    }
+}
+
+fn parse_border_radius_corner_str(raw: &str) -> Option<BorderRadiusCornerValue> {
+    let tokens = split_top_level_whitespace(raw);
+    if tokens.is_empty() || tokens.len() > 2 {
+        return None;
+    }
+    let horizontal = parse_border_radius_component(&tokens[0])?;
+    let vertical = if tokens.len() == 2 {
+        parse_border_radius_component(&tokens[1])?
+    } else {
+        horizontal
+    };
+    if !border_radius_component_is_non_negative(horizontal)
+        || !border_radius_component_is_non_negative(vertical)
+    {
+        return None;
+    }
+    Some(BorderRadiusCornerValue {
+        horizontal,
+        vertical,
+    })
+}
+
+fn apply_border_radius_corner_longhand(
+    property_name: &str,
+    raw: &str,
+    delta: &mut StyleDelta,
+) -> bool {
+    let Some(value) = parse_border_radius_corner_str(raw) else {
+        return false;
+    };
+    let target = match property_name {
+        "border-top-left-radius" => BorderRadiusCornerTarget::Physical(PhysicalCorner::TopLeft),
+        "border-top-right-radius" => BorderRadiusCornerTarget::Physical(PhysicalCorner::TopRight),
+        "border-bottom-right-radius" => {
+            BorderRadiusCornerTarget::Physical(PhysicalCorner::BottomRight)
+        }
+        "border-bottom-left-radius" => {
+            BorderRadiusCornerTarget::Physical(PhysicalCorner::BottomLeft)
+        }
+        "border-start-start-radius" => BorderRadiusCornerTarget::StartStart,
+        "border-start-end-radius" => BorderRadiusCornerTarget::StartEnd,
+        "border-end-start-radius" => BorderRadiusCornerTarget::EndStart,
+        "border-end-end-radius" => BorderRadiusCornerTarget::EndEnd,
+        _ => return false,
+    };
+    delta.border_radius_var = None;
+    delta
+        .border_radius_ops
+        .push(BorderRadiusOp::Corner(target, value));
+    true
+}
+
 fn border_radius_component_is_non_negative(value: LengthSpec) -> bool {
     match value {
         LengthSpec::Absolute(value) => value >= Pt::ZERO,
         LengthSpec::Percent(value) | LengthSpec::Em(value) | LengthSpec::Rem(value) => value >= 0.0,
-        LengthSpec::Calc(_) => true,
+        LengthSpec::Calc(_) | LengthSpec::Clamped(_) | LengthSpec::FontRelative(_) => true,
         LengthSpec::Auto
         | LengthSpec::Content
         | LengthSpec::MinContent
@@ -19365,6 +21526,61 @@ fn apply_background_position_from_string(raw: &str, delta: &mut StyleDelta) {
     let positions = parse_background_position_list(raw);
     if !positions.is_empty() {
         delta.background_positions = Some(positions);
+        delta.background_position_x = None;
+        delta.background_position_y = None;
+    }
+}
+
+fn apply_background_position_axis_from_string(
+    raw: &str,
+    axis: BackgroundPositionAxis,
+    delta: &mut StyleDelta,
+) {
+    let components = split_args(raw)
+        .into_iter()
+        .filter_map(|layer| {
+            let combined = match axis {
+                BackgroundPositionAxis::X => format!("{layer} top"),
+                BackgroundPositionAxis::Y => format!("left {layer}"),
+            };
+            let position = parse_background_position_layer(&combined)?;
+            Some(match axis {
+                BackgroundPositionAxis::X => position.x,
+                BackgroundPositionAxis::Y => position.y,
+            })
+        })
+        .collect::<Vec<_>>();
+    if !components.is_empty() {
+        match axis {
+            BackgroundPositionAxis::X => delta.background_position_x = Some(components),
+            BackgroundPositionAxis::Y => delta.background_position_y = Some(components),
+        }
+    }
+}
+
+fn merge_background_position_axis(
+    positions: &mut Vec<BackgroundPositionSpec>,
+    components: &[BackgroundPositionComponent],
+    axis: BackgroundPositionAxis,
+) {
+    if components.is_empty() {
+        return;
+    }
+    let previous = positions.clone();
+    let count = previous.len().max(components.len()).max(1);
+    positions.clear();
+    positions.reserve(count);
+    for index in 0..count {
+        let mut position = if previous.is_empty() {
+            BackgroundPositionSpec::default()
+        } else {
+            previous[index % previous.len()]
+        };
+        match axis {
+            BackgroundPositionAxis::X => position.x = components[index % components.len()],
+            BackgroundPositionAxis::Y => position.y = components[index % components.len()],
+        }
+        positions.push(position);
     }
 }
 
@@ -19461,7 +21677,7 @@ fn background_size_component_is_non_negative(value: LengthSpec) -> bool {
         | LengthSpec::Initial => true,
         LengthSpec::Absolute(value) => value >= Pt::ZERO,
         LengthSpec::Percent(value) | LengthSpec::Em(value) | LengthSpec::Rem(value) => value >= 0.0,
-        LengthSpec::Calc(_) => true,
+        LengthSpec::Calc(_) | LengthSpec::Clamped(_) | LengthSpec::FontRelative(_) => true,
     }
 }
 
@@ -19757,6 +21973,8 @@ fn parse_shadow_length_str(raw: &str) -> Option<LengthSpec> {
         }
         NativeMathValue::Number(_) => None,
         NativeMathValue::Length(value) => value.to_length_spec(),
+        NativeMathValue::Clamped(value) => value.to_length_spec(),
+        NativeMathValue::Typed(_) => None,
     }
 }
 
@@ -20663,6 +22881,20 @@ fn length_spec_from_end_offset(offset: LengthSpec) -> LengthSpec {
             em: -calc.em,
             rem: -calc.rem,
         }),
+        LengthSpec::FontRelative(calc) => LengthSpec::FontRelative(FontRelativeLength {
+            base: CalcLength {
+                abs: -calc.base.abs,
+                percent: 1.0 - calc.base.percent,
+                em: -calc.base.em,
+                rem: -calc.base.rem,
+            },
+            ex: -calc.ex,
+            ch: -calc.ch,
+            cap: -calc.cap,
+            lh: -calc.lh,
+            rlh: -calc.rlh,
+        }),
+        LengthSpec::Clamped(_) => offset,
         LengthSpec::Auto
         | LengthSpec::Content
         | LengthSpec::MinContent
@@ -21445,7 +23677,11 @@ fn parse_background_paints_str(raw: &str) -> Vec<BackgroundPaint> {
 }
 
 fn parse_background_layer_paint_str(layer: &str) -> Option<BackgroundPaint> {
+    if layer.trim().eq_ignore_ascii_case("none") {
+        return Some(BackgroundPaint::None);
+    }
     parse_background_image_url_str(layer)
+        .or_else(|| parse_background_image_set_str(layer))
         .or_else(|| parse_linear_gradient_str(layer))
         .or_else(|| parse_radial_gradient_str(layer))
         .or_else(|| parse_conic_gradient_str(layer))
@@ -21469,7 +23705,13 @@ fn parse_background_layer_paint_with_style(
     layer: &str,
 ) -> Option<BackgroundPaint> {
     {
+        if layer.trim().eq_ignore_ascii_case("none") {
+            return Some(BackgroundPaint::None);
+        }
         if let Some(paint) = parse_background_image_url_str(layer) {
+            return Some(paint);
+        }
+        if let Some(paint) = parse_background_image_set_str(layer) {
             return Some(paint);
         }
         if has_dynamic_gradient_expression(layer) {
@@ -21523,6 +23765,75 @@ fn parse_background_image_url_str(raw: &str) -> Option<BackgroundPaint> {
     })
 }
 
+fn parse_image_set_resolution(raw: &str) -> Option<f32> {
+    let value = raw.trim().to_ascii_lowercase();
+    let (number, scale) = if let Some(number) = value.strip_suffix("dppx") {
+        (number, 1.0)
+    } else if let Some(number) = value.strip_suffix('x') {
+        (number, 1.0)
+    } else if let Some(number) = value.strip_suffix("dpi") {
+        (number, 1.0 / 96.0)
+    } else if let Some(number) = value.strip_suffix("dpcm") {
+        (number, 2.54 / 96.0)
+    } else {
+        return None;
+    };
+    let density = number.trim().parse::<f32>().ok()? * scale;
+    (density.is_finite() && density > 0.0).then_some(density)
+}
+
+fn parse_background_image_set_str(raw: &str) -> Option<BackgroundPaint> {
+    let value = raw.trim();
+    let lower = value.to_ascii_lowercase();
+    let prefix_len = if lower.starts_with("image-set(") {
+        "image-set(".len()
+    } else if lower.starts_with("-webkit-image-set(") {
+        "-webkit-image-set(".len()
+    } else {
+        return None;
+    };
+    if !value.ends_with(')') {
+        return None;
+    }
+    let inner = &value[prefix_len..value.len().saturating_sub(1)];
+    let mut best: Option<(f32, BackgroundPaint)> = None;
+    for candidate in split_args(inner) {
+        let tokens = split_ws_preserve_parens(&candidate);
+        let Some(source_token) = tokens.first() else {
+            continue;
+        };
+        let paint = parse_background_image_url_str(source_token).or_else(|| {
+            let source = source_token
+                .strip_prefix('"')
+                .and_then(|value| value.strip_suffix('"'))
+                .or_else(|| {
+                    source_token
+                        .strip_prefix('\'')
+                        .and_then(|value| value.strip_suffix('\''))
+                })?;
+            (!source.is_empty()).then(|| BackgroundPaint::Image {
+                source: source.to_string(),
+            })
+        });
+        let Some(paint) = paint else {
+            continue;
+        };
+        let density = tokens
+            .iter()
+            .skip(1)
+            .find_map(|token| parse_image_set_resolution(token))
+            .unwrap_or(1.0);
+        let distance = (density - 1.0).abs();
+        if best
+            .as_ref()
+            .is_none_or(|(best_distance, _)| distance < *best_distance)
+        {
+            best = Some((distance, paint));
+        }
+    }
+    best.map(|(_, paint)| paint)
+}
+
 fn has_dynamic_gradient_expression(raw: &str) -> bool {
     let lower = raw.to_ascii_lowercase();
     lower.contains("var(") || lower.contains("currentcolor") || lower.contains("color-mix(")
@@ -21549,7 +23860,104 @@ fn extract_function_args<'a>(raw: &'a str, function: &str) -> Option<&'a str> {
     None
 }
 
+fn gradient_stop_position_from_length_spec(
+    spec: LengthSpec,
+    font_size: Pt,
+    root_font_size: Pt,
+) -> Option<GradientStopPosition> {
+    let (fraction, length) = match spec {
+        LengthSpec::Absolute(value) => (0.0, value),
+        LengthSpec::Percent(value) => (value, Pt::ZERO),
+        LengthSpec::Em(value) => (0.0, font_size * value),
+        LengthSpec::Rem(value) => (0.0, root_font_size * value),
+        LengthSpec::Calc(calc) => (
+            calc.percent,
+            calc.abs + font_size * calc.em + root_font_size * calc.rem,
+        ),
+        _ => return None,
+    };
+    (fraction.is_finite() && length.to_f32().is_finite())
+        .then_some(GradientStopPosition { fraction, length })
+}
+
+fn parse_gradient_stop_position(
+    raw: &str,
+    font_size: Pt,
+    root_font_size: Pt,
+) -> Option<GradientStopPosition> {
+    gradient_stop_position_from_length_spec(
+        parse_single_length_spec(raw)?,
+        font_size,
+        root_font_size,
+    )
+}
+
+fn parse_linear_gradient_color_stop(
+    part: &str,
+) -> Option<Vec<(Color, f32, Option<GradientStopPosition>)>> {
+    let tokens = split_top_level_whitespace(part);
+    if tokens.is_empty() || tokens.len() > 3 {
+        return None;
+    }
+    let (color, alpha) = parse_color_string(&tokens[0])?;
+    let default_font_size = TextStyle::default().font_size;
+    if tokens.len() == 1 {
+        return Some(vec![(color, alpha, None)]);
+    }
+    tokens
+        .iter()
+        .skip(1)
+        .map(|token| {
+            parse_gradient_stop_position(token, default_font_size, default_font_size)
+                .map(|position| (color, alpha, Some(position)))
+        })
+        .collect()
+}
+
+fn parse_linear_gradient_color_stop_with_style(
+    style: &ComputedStyle,
+    part: &str,
+    depth: usize,
+) -> Option<Vec<(Color, f32, Option<GradientStopPosition>)>> {
+    if depth > 12 {
+        return None;
+    }
+    let tokens = split_top_level_whitespace(part);
+    if tokens.is_empty() || tokens.len() > 3 {
+        return None;
+    }
+    let color_part = tokens[0].trim();
+    let (color, alpha) = if color_part.eq_ignore_ascii_case("currentcolor") {
+        (style.color, 1.0)
+    } else {
+        resolve_custom_color_expr_with_alpha_inner(style, color_part, depth + 1)
+            .or_else(|| parse_color_string(color_part))?
+    };
+    if tokens.len() == 1 {
+        return Some(vec![(color, alpha, None)]);
+    }
+    tokens
+        .iter()
+        .skip(1)
+        .map(|token| {
+            let spec = parse_single_length_spec(token).or_else(|| {
+                resolve_custom_length_from_maps(
+                    &style.custom_lengths,
+                    &style.custom_color_refs,
+                    token,
+                )
+            })?;
+            gradient_stop_position_from_length_spec(spec, style.font_size, style.root_font_size)
+                .map(|position| (color, alpha, Some(position)))
+        })
+        .collect()
+}
+
 fn parse_linear_gradient_str(raw: &str) -> Option<BackgroundPaint> {
+    let repeating = raw
+        .trim()
+        .to_ascii_lowercase()
+        .starts_with("repeating-linear-gradient(");
     let inside = extract_function_args(raw.trim(), "linear-gradient(")?;
     let parts = split_args(inside);
     if parts.len() < 2 {
@@ -21563,23 +23971,62 @@ fn parse_linear_gradient_str(raw: &str) -> Option<BackgroundPaint> {
         stop_start = 1;
     }
 
-    let mut stops: Vec<(Color, f32, Option<f32>)> = Vec::new();
+    let mut positioned_stops = Vec::new();
+    let mut hints = Vec::new();
+    let mut length_stops = Vec::new();
     for part in parts.iter().skip(stop_start) {
-        if let Some(stop) = parse_gradient_stop(part) {
-            stops.push(stop);
-            if let Some(second_offset) = parse_second_gradient_stop_offset(part) {
-                stops.push((stop.0, stop.1, Some(second_offset)));
-            }
+        if let Some(parsed) = parse_gradient_length_stops(part) {
+            length_stops.extend(parsed);
+        }
+        if let Some(stops) = parse_linear_gradient_color_stop(part) {
+            positioned_stops.extend(stops);
+        } else if let Some(hint) = parse_percentage_unit(part.trim()) {
+            hints.push(hint);
         }
     }
-    let shading_stops = normalize_gradient_stops(&stops);
+    let stops = positioned_stops
+        .iter()
+        .map(|(color, alpha, position)| {
+            (*color, *alpha, position.map(|position| position.fraction))
+        })
+        .collect::<Vec<_>>();
+    let geometry_positions = !repeating
+        && hints.is_empty()
+        && positioned_stops
+            .iter()
+            .any(|(_, _, position)| position.is_some_and(|position| position.length != Pt::ZERO));
+    let (shading_stops, repeat) = if geometry_positions {
+        let denominator = positioned_stops.len().saturating_sub(1).max(1) as f32;
+        (
+            positioned_stops
+                .iter()
+                .enumerate()
+                .map(|(index, (color, alpha, _))| ShadingStop {
+                    offset: index as f32 / denominator,
+                    color: *color,
+                    alpha: *alpha,
+                })
+                .collect(),
+            GradientRepeat::None,
+        )
+    } else {
+        finalize_gradient_stops(&stops, &hints, &length_stops, repeating)
+    };
     if shading_stops.len() < 2 {
         return None;
     }
+    let stop_positions = geometry_positions.then(|| {
+        positioned_stops
+            .iter()
+            .map(|(_, _, position)| *position)
+            .collect()
+    });
 
     Some(BackgroundPaint::LinearGradient {
         angle_deg,
+        repeat,
         stops: shading_stops,
+        stop_positions,
     })
 }
 
@@ -21591,6 +24038,10 @@ fn parse_linear_gradient_str_with_style(
     if depth > 12 {
         return None;
     }
+    let repeating = raw
+        .trim()
+        .to_ascii_lowercase()
+        .starts_with("repeating-linear-gradient(");
     let inside = extract_function_args(raw.trim(), "linear-gradient(")?;
     let parts = split_args(inside);
     if parts.len() < 2 {
@@ -21604,58 +24055,118 @@ fn parse_linear_gradient_str_with_style(
         stop_start = 1;
     }
 
-    let mut stops: Vec<(Color, f32, Option<f32>)> = Vec::new();
+    let mut positioned_stops = Vec::new();
+    let mut hints = Vec::new();
+    let mut length_stops = Vec::new();
     for part in parts.iter().skip(stop_start) {
-        let stop = parse_gradient_stop_with_style(style, part, depth + 1)?;
-        stops.push(stop);
-        if let Some(second_offset) = parse_second_gradient_stop_offset(part) {
-            stops.push((stop.0, stop.1, Some(second_offset)));
+        if let Some(parsed) = parse_gradient_length_stops(part) {
+            length_stops.extend(parsed);
+        }
+        if let Some(stops) = parse_linear_gradient_color_stop_with_style(style, part, depth + 1) {
+            positioned_stops.extend(stops);
+        } else if let Some(hint) = parse_percentage_unit(part.trim()) {
+            hints.push(hint);
+        } else {
+            return None;
         }
     }
-    let shading_stops = normalize_gradient_stops(&stops);
+    let stops = positioned_stops
+        .iter()
+        .map(|(color, alpha, position)| {
+            (*color, *alpha, position.map(|position| position.fraction))
+        })
+        .collect::<Vec<_>>();
+    let geometry_positions = !repeating
+        && hints.is_empty()
+        && positioned_stops
+            .iter()
+            .any(|(_, _, position)| position.is_some_and(|position| position.length != Pt::ZERO));
+    let (shading_stops, repeat) = if geometry_positions {
+        let denominator = positioned_stops.len().saturating_sub(1).max(1) as f32;
+        (
+            positioned_stops
+                .iter()
+                .enumerate()
+                .map(|(index, (color, alpha, _))| ShadingStop {
+                    offset: index as f32 / denominator,
+                    color: *color,
+                    alpha: *alpha,
+                })
+                .collect(),
+            GradientRepeat::None,
+        )
+    } else {
+        finalize_gradient_stops(&stops, &hints, &length_stops, repeating)
+    };
     if shading_stops.len() < 2 {
         return None;
     }
+    let stop_positions = geometry_positions.then(|| {
+        positioned_stops
+            .iter()
+            .map(|(_, _, position)| *position)
+            .collect()
+    });
 
     Some(BackgroundPaint::LinearGradient {
         angle_deg,
+        repeat,
         stops: shading_stops,
+        stop_positions,
     })
 }
 
 fn parse_radial_gradient_str(raw: &str) -> Option<BackgroundPaint> {
+    let repeating = raw
+        .trim()
+        .to_ascii_lowercase()
+        .starts_with("repeating-radial-gradient(");
     let inside = extract_function_args(raw.trim(), "radial-gradient(")?;
     let parts = split_args(inside);
     if parts.len() < 2 {
         return None;
     }
 
-    let mut center_x_pct = 0.5f32;
-    let mut center_y_pct = 0.5f32;
+    let mut shape = RadialGradientShape::Ellipse;
+    let mut size = RadialGradientSize::FarthestCorner;
+    let mut center_x = GradientPosition::Percent(0.5);
+    let mut center_y = GradientPosition::Percent(0.5);
     let mut stop_start = 0usize;
-    if let Some((cx, cy)) = parse_radial_gradient_preamble(&parts[0]) {
-        center_x_pct = cx;
-        center_y_pct = cy;
+    if let Some((parsed_shape, parsed_size, cx, cy)) = parse_radial_gradient_preamble(&parts[0]) {
+        shape = parsed_shape;
+        size = parsed_size;
+        center_x = cx;
+        center_y = cy;
         stop_start = 1;
     }
 
     let mut stops: Vec<(Color, f32, Option<f32>)> = Vec::new();
+    let mut hints = Vec::new();
+    let mut length_stops = Vec::new();
     for part in parts.iter().skip(stop_start) {
+        if let Some(parsed) = parse_gradient_length_stops(part) {
+            length_stops.extend(parsed);
+        }
         if let Some(stop) = parse_gradient_stop(part) {
             stops.push(stop);
             if let Some(second_offset) = parse_second_gradient_stop_offset(part) {
                 stops.push((stop.0, stop.1, Some(second_offset)));
             }
+        } else if let Some(hint) = parse_percentage_unit(part.trim()) {
+            hints.push(hint);
         }
     }
-    let shading_stops = normalize_gradient_stops(&stops);
+    let (shading_stops, repeat) = finalize_gradient_stops(&stops, &hints, &length_stops, repeating);
     if shading_stops.len() < 2 {
         return None;
     }
 
     Some(BackgroundPaint::RadialGradient {
-        center_x_pct,
-        center_y_pct,
+        shape,
+        size,
+        center_x,
+        center_y,
+        repeat,
         stops: shading_stops,
     })
 }
@@ -21668,42 +24179,67 @@ fn parse_radial_gradient_str_with_style(
     if depth > 12 {
         return None;
     }
+    let repeating = raw
+        .trim()
+        .to_ascii_lowercase()
+        .starts_with("repeating-radial-gradient(");
     let inside = extract_function_args(raw.trim(), "radial-gradient(")?;
     let parts = split_args(inside);
     if parts.len() < 2 {
         return None;
     }
 
-    let mut center_x_pct = 0.5f32;
-    let mut center_y_pct = 0.5f32;
+    let mut shape = RadialGradientShape::Ellipse;
+    let mut size = RadialGradientSize::FarthestCorner;
+    let mut center_x = GradientPosition::Percent(0.5);
+    let mut center_y = GradientPosition::Percent(0.5);
     let mut stop_start = 0usize;
-    if let Some((cx, cy)) = parse_radial_gradient_preamble(&parts[0]) {
-        center_x_pct = cx;
-        center_y_pct = cy;
+    if let Some((parsed_shape, parsed_size, cx, cy)) = parse_radial_gradient_preamble(&parts[0]) {
+        shape = parsed_shape;
+        size = parsed_size;
+        center_x = cx;
+        center_y = cy;
         stop_start = 1;
     }
 
     let mut stops: Vec<(Color, f32, Option<f32>)> = Vec::new();
+    let mut hints = Vec::new();
+    let mut length_stops = Vec::new();
     for part in parts.iter().skip(stop_start) {
-        let stop = parse_gradient_stop_with_style(style, part, depth + 1)?;
-        stops.push(stop);
-        if let Some(second_offset) = parse_second_gradient_stop_offset(part) {
-            stops.push((stop.0, stop.1, Some(second_offset)));
+        if let Some(parsed) = parse_gradient_length_stops(part) {
+            length_stops.extend(parsed);
+        }
+        if let Some(stop) = parse_gradient_stop_with_style(style, part, depth + 1) {
+            stops.push(stop);
+            if let Some(second_offset) = parse_second_gradient_stop_offset(part) {
+                stops.push((stop.0, stop.1, Some(second_offset)));
+            }
+        } else if let Some(hint) = parse_percentage_unit(part.trim()) {
+            hints.push(hint);
+        } else {
+            return None;
         }
     }
-    let shading_stops = normalize_gradient_stops(&stops);
+    let (shading_stops, repeat) = finalize_gradient_stops(&stops, &hints, &length_stops, repeating);
     if shading_stops.len() < 2 {
         return None;
     }
 
     Some(BackgroundPaint::RadialGradient {
-        center_x_pct,
-        center_y_pct,
+        shape,
+        size,
+        center_x,
+        center_y,
+        repeat,
         stops: shading_stops,
     })
 }
 
 fn parse_conic_gradient_str(raw: &str) -> Option<BackgroundPaint> {
+    let repeating = raw
+        .trim()
+        .to_ascii_lowercase()
+        .starts_with("repeating-conic-gradient(");
     let inside = extract_function_args(raw.trim(), "conic-gradient(")?;
     let parts = split_args(inside);
     if parts.len() < 2 {
@@ -21711,31 +24247,38 @@ fn parse_conic_gradient_str(raw: &str) -> Option<BackgroundPaint> {
     }
 
     let mut start_angle_deg = 0.0f32;
-    let mut center_x_pct = 0.5f32;
-    let mut center_y_pct = 0.5f32;
+    let mut center_x = GradientPosition::Percent(0.5);
+    let mut center_y = GradientPosition::Percent(0.5);
     let mut stop_start = 0usize;
     if let Some((angle_deg, cx, cy)) = parse_conic_gradient_preamble(&parts[0]) {
         start_angle_deg = angle_deg;
-        center_x_pct = cx;
-        center_y_pct = cy;
+        center_x = cx;
+        center_y = cy;
         stop_start = 1;
     }
 
     let mut stops: Vec<(Color, f32, Option<f32>)> = Vec::new();
+    let mut hints = Vec::new();
     for part in parts.iter().skip(stop_start) {
         if let Some(stop) = parse_conic_gradient_stop(part) {
             stops.push(stop);
+            if let Some(second_offset) = parse_second_conic_gradient_stop_offset(part) {
+                stops.push((stop.0, stop.1, Some(second_offset)));
+            }
+        } else if let Some(hint) = parse_conic_stop_offset(part.trim()) {
+            hints.push(hint);
         }
     }
-    let shading_stops = normalize_gradient_stops(&stops);
+    let (shading_stops, repeat) = finalize_gradient_stops(&stops, &hints, &[], repeating);
     if shading_stops.len() < 2 {
         return None;
     }
 
     Some(BackgroundPaint::ConicGradient {
         start_angle_deg,
-        center_x_pct,
-        center_y_pct,
+        center_x,
+        center_y,
+        repeat,
         stops: shading_stops,
     })
 }
@@ -21748,6 +24291,10 @@ fn parse_conic_gradient_str_with_style(
     if depth > 12 {
         return None;
     }
+    let repeating = raw
+        .trim()
+        .to_ascii_lowercase()
+        .starts_with("repeating-conic-gradient(");
     let inside = extract_function_args(raw.trim(), "conic-gradient(")?;
     let parts = split_args(inside);
     if parts.len() < 2 {
@@ -21755,35 +24302,45 @@ fn parse_conic_gradient_str_with_style(
     }
 
     let mut start_angle_deg = 0.0f32;
-    let mut center_x_pct = 0.5f32;
-    let mut center_y_pct = 0.5f32;
+    let mut center_x = GradientPosition::Percent(0.5);
+    let mut center_y = GradientPosition::Percent(0.5);
     let mut stop_start = 0usize;
     if let Some((angle_deg, cx, cy)) = parse_conic_gradient_preamble(&parts[0]) {
         start_angle_deg = angle_deg;
-        center_x_pct = cx;
-        center_y_pct = cy;
+        center_x = cx;
+        center_y = cy;
         stop_start = 1;
     }
 
     let mut stops: Vec<(Color, f32, Option<f32>)> = Vec::new();
+    let mut hints = Vec::new();
     for part in parts.iter().skip(stop_start) {
-        let stop = parse_conic_gradient_stop_with_style(style, part, depth + 1)?;
-        stops.push(stop);
+        if let Some(stop) = parse_conic_gradient_stop_with_style(style, part, depth + 1) {
+            stops.push(stop);
+            if let Some(second_offset) = parse_second_conic_gradient_stop_offset(part) {
+                stops.push((stop.0, stop.1, Some(second_offset)));
+            }
+        } else if let Some(hint) = parse_conic_stop_offset(part.trim()) {
+            hints.push(hint);
+        } else {
+            return None;
+        }
     }
-    let shading_stops = normalize_gradient_stops(&stops);
+    let (shading_stops, repeat) = finalize_gradient_stops(&stops, &hints, &[], repeating);
     if shading_stops.len() < 2 {
         return None;
     }
 
     Some(BackgroundPaint::ConicGradient {
         start_angle_deg,
-        center_x_pct,
-        center_y_pct,
+        center_x,
+        center_y,
+        repeat,
         stops: shading_stops,
     })
 }
 
-fn parse_conic_gradient_preamble(part: &str) -> Option<(f32, f32, f32)> {
+fn parse_conic_gradient_preamble(part: &str) -> Option<(f32, GradientPosition, GradientPosition)> {
     let part_trimmed = part.trim();
     let lower = part_trimmed.to_ascii_lowercase();
     let has_from = lower.contains("from ");
@@ -21793,8 +24350,8 @@ fn parse_conic_gradient_preamble(part: &str) -> Option<(f32, f32, f32)> {
     }
 
     let mut start_angle_deg = 0.0f32;
-    let mut center_x_pct = 0.5f32;
-    let mut center_y_pct = 0.5f32;
+    let mut center_x = GradientPosition::Percent(0.5);
+    let mut center_y = GradientPosition::Percent(0.5);
 
     if has_from {
         let from_index = lower.find("from ")?;
@@ -21810,90 +24367,161 @@ fn parse_conic_gradient_preamble(part: &str) -> Option<(f32, f32, f32)> {
         } else {
             return None;
         };
-        let (x, y) = parse_conic_position(after.trim())?;
-        center_x_pct = x;
-        center_y_pct = y;
+        (center_x, center_y) = parse_gradient_position(after.trim())?;
     }
 
-    Some((start_angle_deg, center_x_pct, center_y_pct))
+    Some((start_angle_deg, center_x, center_y))
 }
 
-fn parse_radial_gradient_preamble(part: &str) -> Option<(f32, f32)> {
+fn parse_radial_gradient_preamble(
+    part: &str,
+) -> Option<(
+    RadialGradientShape,
+    RadialGradientSize,
+    GradientPosition,
+    GradientPosition,
+)> {
     let part_trimmed = part.trim();
     if part_trimmed.is_empty() {
         return None;
     }
     let lower = part_trimmed.to_ascii_lowercase();
     let has_at = lower.starts_with("at ") || lower.contains(" at ");
-    let is_shape_or_size = lower.starts_with("circle")
-        || lower.starts_with("ellipse")
-        || lower.contains("closest-side")
-        || lower.contains("closest-corner")
-        || lower.contains("farthest-side")
-        || lower.contains("farthest-corner");
-    if has_at {
-        let after = if lower.starts_with("at ") {
-            &part_trimmed[3..]
-        } else if let Some(idx) = lower.find(" at ") {
-            &part_trimmed[idx + 4..]
-        } else {
-            return None;
-        };
-        return parse_conic_position(after.trim());
+    let (geometry, position) = if lower.starts_with("at ") {
+        ("", Some(&part_trimmed[3..]))
+    } else if let Some(index) = lower.find(" at ") {
+        (&part_trimmed[..index], Some(&part_trimmed[index + 4..]))
+    } else {
+        (part_trimmed, None)
+    };
+    let geometry_lower = geometry.trim().to_ascii_lowercase();
+    let mut shape = if geometry_lower.contains("circle") {
+        RadialGradientShape::Circle
+    } else {
+        RadialGradientShape::Ellipse
+    };
+    let mut size = if geometry_lower.contains("closest-side") {
+        RadialGradientSize::ClosestSide
+    } else if geometry_lower.contains("closest-corner") {
+        RadialGradientSize::ClosestCorner
+    } else if geometry_lower.contains("farthest-side") {
+        RadialGradientSize::FarthestSide
+    } else {
+        RadialGradientSize::FarthestCorner
+    };
+    let explicit = geometry
+        .split_ascii_whitespace()
+        .filter_map(parse_gradient_absolute_length)
+        .collect::<Vec<_>>();
+    if explicit.len() >= 2 {
+        shape = RadialGradientShape::Ellipse;
+        size = RadialGradientSize::Explicit(explicit[0], Some(explicit[1]));
+    } else if let Some(value) = explicit.first().copied() {
+        shape = RadialGradientShape::Circle;
+        size = RadialGradientSize::Explicit(value, None);
     }
-    if let Some((x, y)) = parse_conic_position(part_trimmed) {
-        return Some((x, y));
+    let recognized_geometry = geometry_lower.is_empty()
+        || geometry_lower.contains("circle")
+        || geometry_lower.contains("ellipse")
+        || geometry_lower.contains("closest-")
+        || geometry_lower.contains("farthest-")
+        || !explicit.is_empty();
+    if !recognized_geometry || (!has_at && geometry_lower.is_empty()) {
+        return None;
     }
-    if is_shape_or_size {
-        return Some((0.5, 0.5));
-    }
-    None
+    let (center_x, center_y) = if let Some(position) = position {
+        parse_gradient_position(position)?
+    } else {
+        (
+            GradientPosition::Percent(0.5),
+            GradientPosition::Percent(0.5),
+        )
+    };
+    Some((shape, size, center_x, center_y))
 }
 
-fn parse_conic_position(raw: &str) -> Option<(f32, f32)> {
+fn parse_gradient_absolute_length(raw: &str) -> Option<Pt> {
+    let lower = raw.trim().to_ascii_lowercase();
+    if let Some(value) = lower.strip_suffix("px") {
+        return value
+            .trim()
+            .parse::<f32>()
+            .ok()
+            .filter(|value| value.is_finite() && *value >= 0.0)
+            .map(|value| Pt::from_f32(value * 0.75));
+    }
+    if let Some(value) = lower.strip_suffix("pt") {
+        return value
+            .trim()
+            .parse::<f32>()
+            .ok()
+            .filter(|value| value.is_finite() && *value >= 0.0)
+            .map(Pt::from_f32);
+    }
+    (lower == "0").then_some(Pt::ZERO)
+}
+
+fn parse_gradient_position(raw: &str) -> Option<(GradientPosition, GradientPosition)> {
     let tokens = split_ws_preserve_parens(raw);
     if tokens.is_empty() {
         return None;
     }
 
-    let mut x = 0.5f32;
-    let mut y = 0.5f32;
-    let mut percent_tokens: Vec<f32> = Vec::new();
-
-    for token in tokens.iter().take(2) {
-        let lower = token.trim().to_ascii_lowercase();
-        if lower.is_empty() {
-            continue;
-        }
+    let mut x = GradientPosition::Percent(0.5);
+    let mut y = GradientPosition::Percent(0.5);
+    let mut numeric = Vec::new();
+    let mut index = 0usize;
+    while index < tokens.len() {
+        let lower = tokens[index].trim().to_ascii_lowercase();
+        let edge_with_offset = tokens
+            .get(index + 1)
+            .and_then(|next| parse_gradient_absolute_length(next));
         match lower.as_str() {
-            "left" => x = 0.0,
-            "right" => x = 1.0,
-            "top" => y = 0.0,
-            "bottom" => y = 1.0,
-            "center" => {}
-            _ => {
-                if let Some(value) = parse_percentage_unit(&lower) {
-                    percent_tokens.push(value);
-                } else if let Ok(value) = lower.parse::<f32>() {
-                    if value.abs() <= f32::EPSILON {
-                        percent_tokens.push(0.0);
-                    } else {
-                        return None;
-                    }
-                } else {
-                    return None;
-                }
+            "left" => {
+                x = edge_with_offset
+                    .map(GradientPosition::Length)
+                    .unwrap_or(GradientPosition::Percent(0.0));
             }
+            "right" => {
+                x = edge_with_offset
+                    .map(GradientPosition::EndLength)
+                    .unwrap_or(GradientPosition::Percent(1.0));
+            }
+            "top" => {
+                y = edge_with_offset
+                    .map(GradientPosition::Length)
+                    .unwrap_or(GradientPosition::Percent(0.0));
+            }
+            "bottom" => {
+                y = edge_with_offset
+                    .map(GradientPosition::EndLength)
+                    .unwrap_or(GradientPosition::Percent(1.0));
+            }
+            "center" => {}
+            _ if parse_percentage_unit(&lower).is_some() => {
+                numeric.push(GradientPosition::Percent(parse_percentage_unit(&lower)?));
+            }
+            _ if parse_gradient_absolute_length(&lower).is_some() => {
+                numeric.push(GradientPosition::Length(parse_gradient_absolute_length(
+                    &lower,
+                )?));
+            }
+            _ => return None,
         }
+        if matches!(lower.as_str(), "left" | "right" | "top" | "bottom")
+            && edge_with_offset.is_some()
+        {
+            index += 1;
+        }
+        index += 1;
     }
-
-    if let Some(first) = percent_tokens.first().copied() {
+    if let Some(first) = numeric.first().copied() {
         x = first;
     }
-    if percent_tokens.len() >= 2 {
-        y = percent_tokens[1];
+    if let Some(second) = numeric.get(1).copied() {
+        y = second;
     }
-    Some((x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)))
+    Some((x, y))
 }
 
 fn parse_conic_gradient_stop(part: &str) -> Option<(Color, f32, Option<f32>)> {
@@ -21966,11 +24594,14 @@ fn parse_conic_gradient_stop_with_style(
         resolve_custom_color_expr_with_alpha_inner(style, color_part, depth + 1)
             .or_else(|| parse_color_string(color_part))?
     };
-    let offset_token = offset_part.trim();
+    let offset_token = split_top_level_whitespace(offset_part)
+        .into_iter()
+        .next()
+        .unwrap_or_default();
     let offset = if offset_token.is_empty() {
         None
     } else {
-        parse_conic_stop_offset_with_style(style, offset_token, depth + 1)
+        parse_conic_stop_offset_with_style(style, &offset_token, depth + 1)
     };
     Some((color, alpha, offset))
 }
@@ -21993,6 +24624,12 @@ fn parse_conic_stop_offset(raw: &str) -> Option<f32> {
         }
     }
     None
+}
+
+fn parse_second_conic_gradient_stop_offset(part: &str) -> Option<f32> {
+    split_top_level_whitespace(part)
+        .get(2)
+        .and_then(|token| parse_conic_stop_offset(token))
 }
 
 fn parse_conic_stop_offset_with_style(
@@ -22063,6 +24700,10 @@ fn parse_angle_to_degrees(raw: &str) -> Option<f32> {
 }
 
 fn normalize_gradient_stops(stops: &[(Color, f32, Option<f32>)]) -> Vec<ShadingStop> {
+    clip_gradient_stops_to_unit(&normalize_gradient_stops_unclipped(stops))
+}
+
+fn normalize_gradient_stops_unclipped(stops: &[(Color, f32, Option<f32>)]) -> Vec<ShadingStop> {
     if stops.len() < 2 {
         return Vec::new();
     }
@@ -22113,9 +24754,9 @@ fn normalize_gradient_stops(stops: &[(Color, f32, Option<f32>)]) -> Vec<ShadingS
         idx = right;
     }
 
-    let mut previous = 0.0f32;
+    let mut previous = f32::NEG_INFINITY;
     for off in &mut offsets {
-        let mut value = off.unwrap_or(previous).clamp(0.0, 1.0);
+        let mut value = off.unwrap_or(previous);
         if value < previous {
             value = previous;
         }
@@ -22123,7 +24764,7 @@ fn normalize_gradient_stops(stops: &[(Color, f32, Option<f32>)]) -> Vec<ShadingS
         previous = value;
     }
 
-    stops
+    let normalized = stops
         .iter()
         .enumerate()
         .map(|(idx, (color, alpha, _))| ShadingStop {
@@ -22131,11 +24772,186 @@ fn normalize_gradient_stops(stops: &[(Color, f32, Option<f32>)]) -> Vec<ShadingS
             color: *color,
             alpha: *alpha,
         })
-        .collect()
+        .collect::<Vec<_>>();
+    normalized
+}
+
+fn clip_gradient_stops_to_unit(stops: &[ShadingStop]) -> Vec<ShadingStop> {
+    if stops.len() < 2 {
+        return stops.to_vec();
+    }
+    let sample = |position: f32| {
+        let mut left = stops[0];
+        for stop in stops.iter().copied().skip(1) {
+            if stop.offset <= position {
+                left = stop;
+                continue;
+            }
+            let span = stop.offset - left.offset;
+            if span <= 1.0e-6 {
+                return stop;
+            }
+            let t = ((position - left.offset) / span).clamp(0.0, 1.0);
+            return ShadingStop {
+                offset: position,
+                color: Color::rgb(
+                    left.color.r + (stop.color.r - left.color.r) * t,
+                    left.color.g + (stop.color.g - left.color.g) * t,
+                    left.color.b + (stop.color.b - left.color.b) * t,
+                ),
+                alpha: left.alpha + (stop.alpha - left.alpha) * t,
+            };
+        }
+        ShadingStop {
+            offset: position,
+            ..left
+        }
+    };
+
+    let mut clipped = Vec::with_capacity(stops.len() + 2);
+    if !stops.iter().any(|stop| stop.offset == 0.0) {
+        clipped.push(sample(0.0));
+    }
+    clipped.extend(
+        stops
+            .iter()
+            .copied()
+            .filter(|stop| (0.0..=1.0).contains(&stop.offset)),
+    );
+    if !stops.iter().any(|stop| stop.offset == 1.0) {
+        clipped.push(sample(1.0));
+    }
+    clipped
+}
+
+fn expand_gradient_color_hints(stops: &[ShadingStop], hints: &[f32]) -> Vec<ShadingStop> {
+    const HINT_APPROXIMATION_STOPS: usize = 9;
+
+    if stops.len() < 2 || hints.is_empty() {
+        return stops.to_vec();
+    }
+    let mut expanded = Vec::with_capacity(stops.len() + hints.len() * HINT_APPROXIMATION_STOPS);
+    expanded.push(stops[0]);
+    for window in stops.windows(2) {
+        let start = window[0];
+        let end = window[1];
+        let hint = hints
+            .iter()
+            .copied()
+            .find(|hint| *hint > start.offset && *hint < end.offset);
+        let Some(hint) = hint else {
+            expanded.push(end);
+            continue;
+        };
+        let span = end.offset - start.offset;
+        let midpoint = ((hint - start.offset) / span).clamp(1.0e-5, 1.0 - 1.0e-5);
+        if (midpoint - 0.5).abs() <= 1.0e-6 {
+            expanded.push(end);
+            continue;
+        }
+        let exponent = 0.5f32.ln() / midpoint.ln();
+        // PDF shadings interpolate linearly between stops. Match Chromium's
+        // focused nine-stop approximation of the CSS exponential hint curve:
+        // two samples on the short side and seven concentrated around the hint.
+        let mut positions = [0.0f32; HINT_APPROXIMATION_STOPS];
+        if midpoint > 0.5 {
+            for (index, position) in positions.iter_mut().take(7).enumerate() {
+                *position = midpoint * (7 + index) as f32 / 13.0;
+            }
+            positions[7] = midpoint + (1.0 - midpoint) / 3.0;
+            positions[8] = midpoint + (1.0 - midpoint) * 2.0 / 3.0;
+        } else {
+            positions[0] = midpoint / 3.0;
+            positions[1] = midpoint * 2.0 / 3.0;
+            for (index, position) in positions.iter_mut().skip(2).enumerate() {
+                *position = midpoint + (1.0 - midpoint) * index as f32 / 13.0;
+            }
+        }
+        for position_t in positions {
+            let color_t = position_t.powf(exponent).clamp(0.0, 1.0);
+            expanded.push(ShadingStop {
+                offset: start.offset + span * position_t,
+                color: Color::rgb(
+                    start.color.r + (end.color.r - start.color.r) * color_t,
+                    start.color.g + (end.color.g - start.color.g) * color_t,
+                    start.color.b + (end.color.b - start.color.b) * color_t,
+                ),
+                alpha: start.alpha + (end.alpha - start.alpha) * color_t,
+            });
+        }
+        expanded.push(end);
+    }
+    expanded
+}
+
+fn parse_gradient_length_stops(part: &str) -> Option<Vec<(Color, f32, Pt)>> {
+    let tokens = split_top_level_whitespace(part);
+    let color_token = tokens.first()?;
+    let (color, alpha) = parse_color_string(color_token)?;
+    let positions = tokens
+        .iter()
+        .skip(1)
+        .map(|token| parse_gradient_absolute_length(token))
+        .collect::<Option<Vec<_>>>()?;
+    (!positions.is_empty()).then(|| {
+        positions
+            .into_iter()
+            .map(|position| (color, alpha, position))
+            .collect()
+    })
+}
+
+fn finalize_gradient_stops(
+    stops: &[(Color, f32, Option<f32>)],
+    hints: &[f32],
+    length_stops: &[(Color, f32, Pt)],
+    repeating: bool,
+) -> (Vec<ShadingStop>, GradientRepeat) {
+    if repeating && length_stops.len() >= 2 {
+        let start = length_stops[0].2;
+        let end = length_stops[length_stops.len() - 1].2.max(start);
+        let period = end - start;
+        if period > Pt::ZERO {
+            let mut previous = Pt::ZERO;
+            let normalized = length_stops
+                .iter()
+                .map(|(color, alpha, position)| {
+                    let position = (*position - start).max(previous);
+                    previous = position;
+                    ShadingStop {
+                        offset: position.to_f32() / period.to_f32(),
+                        color: *color,
+                        alpha: *alpha,
+                    }
+                })
+                .collect();
+            return (normalized, GradientRepeat::Length(period));
+        }
+    }
+    let normalized = if repeating {
+        expand_gradient_color_hints(&normalize_gradient_stops_unclipped(stops), hints)
+    } else {
+        expand_gradient_color_hints(&normalize_gradient_stops(stops), hints)
+    };
+    let repeat = if repeating && normalized.len() >= 2 {
+        GradientRepeat::Fraction(
+            (normalized[normalized.len() - 1].offset - normalized[0].offset).max(0.0),
+        )
+    } else {
+        GradientRepeat::None
+    };
+    (normalized, repeat)
 }
 
 fn parse_gradient_angle(part: &str) -> Option<f32> {
     let part = part.trim().to_ascii_lowercase();
+    if let Some(angle) = part
+        .split_ascii_whitespace()
+        .next()
+        .and_then(parse_angle_to_degrees)
+    {
+        return Some(angle);
+    }
     if part.ends_with("deg") {
         let value = part.trim_end_matches("deg").trim();
         return value.parse::<f32>().ok();
@@ -22196,7 +25012,7 @@ fn parse_gradient_stop(part: &str) -> Option<(Color, f32, Option<f32>)> {
     };
     let (color, alpha) = parse_color_string(color_part)?;
     let offset_token = offset_part.split_whitespace().next().unwrap_or("").trim();
-    let offset = parse_percentage_unit(offset_token).map(|v| v.clamp(0.0, 1.0));
+    let offset = parse_percentage_unit(offset_token);
     Some((color, alpha, offset))
 }
 
@@ -22204,7 +25020,6 @@ fn parse_second_gradient_stop_offset(part: &str) -> Option<f32> {
     split_top_level_whitespace(part)
         .get(2)
         .and_then(|token| parse_percentage_unit(token))
-        .map(|value| value.clamp(0.0, 1.0))
 }
 
 fn parse_gradient_stop_with_style(
@@ -22249,20 +25064,20 @@ fn parse_gradient_stop_with_style(
     let offset = if offset_token.is_empty() {
         None
     } else if let Some(value) = parse_percentage_unit(offset_token) {
-        Some(value.clamp(0.0, 1.0))
+        Some(value)
     } else if let Some(spec) = resolve_custom_length_from_maps(
         &style.custom_lengths,
         &style.custom_color_refs,
         offset_token,
     ) {
         match spec {
-            LengthSpec::Percent(value) => Some(value.clamp(0.0, 1.0)),
+            LengthSpec::Percent(value) => Some(value),
             LengthSpec::Calc(calc)
                 if calc.abs == Pt::ZERO
                     && calc.em.abs() <= f32::EPSILON
                     && calc.rem.abs() <= f32::EPSILON =>
             {
-                Some(calc.percent.clamp(0.0, 1.0))
+                Some(calc.percent)
             }
             _ => None,
         }
@@ -24025,7 +26840,7 @@ fn parse_vertical_align_mode_str(raw: &str) -> Option<VerticalAlignMode> {
         "middle" => Some(VerticalAlignMode::Middle),
         "text-bottom" => Some(VerticalAlignMode::TextBottom),
         "bottom" => Some(VerticalAlignMode::Bottom),
-        _ => None,
+        value => parse_single_length_spec(value).map(VerticalAlignMode::Length),
     }
 }
 
@@ -24276,6 +27091,7 @@ enum NativeLengthZeroHint {
     Em,
     Rem,
     Viewport,
+    FontRelative,
     Mixed,
 }
 
@@ -24299,6 +27115,11 @@ struct NativeLengthMath {
     vh: f32,
     vmin: f32,
     vmax: f32,
+    ex: f32,
+    ch: f32,
+    cap: f32,
+    lh: f32,
+    rlh: f32,
     zero_hint: Option<NativeLengthZeroHint>,
 }
 
@@ -24313,6 +27134,11 @@ impl NativeLengthMath {
             vh: 0.0,
             vmin: 0.0,
             vmax: 0.0,
+            ex: 0.0,
+            ch: 0.0,
+            cap: 0.0,
+            lh: 0.0,
+            rlh: 0.0,
             zero_hint: None,
         }
     }
@@ -24345,6 +27171,17 @@ impl NativeLengthMath {
                 result.rem = value;
                 result.zero_hint = Some(NativeLengthZeroHint::Rem);
             }
+            "ex" | "ch" | "cap" | "lh" | "rlh" => {
+                match unit {
+                    "ex" => result.ex = value,
+                    "ch" => result.ch = value,
+                    "cap" => result.cap = value,
+                    "lh" => result.lh = value,
+                    "rlh" => result.rlh = value,
+                    _ => unreachable!(),
+                }
+                result.zero_hint = Some(NativeLengthZeroHint::FontRelative);
+            }
             "vw" | "vh" | "vmin" | "vmax" => {
                 match unit {
                     "vw" => result.vw = value / 100.0,
@@ -24370,6 +27207,11 @@ impl NativeLengthMath {
             vh: self.vh + other.vh,
             vmin: self.vmin + other.vmin,
             vmax: self.vmax + other.vmax,
+            ex: self.ex + other.ex,
+            ch: self.ch + other.ch,
+            cap: self.cap + other.cap,
+            lh: self.lh + other.lh,
+            rlh: self.rlh + other.rlh,
             zero_hint: NativeLengthZeroHint::merge(self.zero_hint, other.zero_hint),
         }
     }
@@ -24384,11 +27226,40 @@ impl NativeLengthMath {
             vh: self.vh * factor,
             vmin: self.vmin * factor,
             vmax: self.vmax * factor,
+            ex: self.ex * factor,
+            ch: self.ch * factor,
+            cap: self.cap * factor,
+            lh: self.lh * factor,
+            rlh: self.rlh * factor,
             zero_hint: self.zero_hint,
         }
     }
 
     fn to_length_spec(self) -> Option<LengthSpec> {
+        if [self.ex, self.ch, self.cap, self.lh, self.rlh]
+            .into_iter()
+            .any(|value| !native_math_component_is_zero(value))
+        {
+            if [self.vw, self.vh, self.vmin, self.vmax]
+                .into_iter()
+                .any(|value| !native_math_component_is_zero(value))
+            {
+                return None;
+            }
+            return Some(LengthSpec::FontRelative(FontRelativeLength {
+                base: CalcLength {
+                    abs: Pt::from_f32(self.abs_pt),
+                    percent: self.percent,
+                    em: self.em,
+                    rem: self.rem,
+                },
+                ex: self.ex,
+                ch: self.ch,
+                cap: self.cap,
+                lh: self.lh,
+                rlh: self.rlh,
+            }));
+        }
         let calc = self.to_calc_length()?;
         if calc_length_component_is_zero(calc.abs.to_f32())
             && calc_length_component_is_zero(calc.percent)
@@ -24410,6 +27281,11 @@ impl NativeLengthMath {
             || !native_math_component_is_zero(self.vh)
             || !native_math_component_is_zero(self.vmin)
             || !native_math_component_is_zero(self.vmax)
+            || !native_math_component_is_zero(self.ex)
+            || !native_math_component_is_zero(self.ch)
+            || !native_math_component_is_zero(self.cap)
+            || !native_math_component_is_zero(self.lh)
+            || !native_math_component_is_zero(self.rlh)
         {
             return None;
         }
@@ -24452,6 +27328,8 @@ fn native_math_component_is_zero(value: f32) -> bool {
 enum NativeMathValue {
     Number(f32),
     Length(NativeLengthMath),
+    Clamped(NativeClampedMath),
+    Typed(NativeTypedMath),
 }
 
 impl NativeMathValue {
@@ -24459,7 +27337,160 @@ impl NativeMathValue {
         match self {
             Self::Number(value) => Self::Number(value * factor),
             Self::Length(value) => Self::Length(value.scale(factor)),
+            Self::Clamped(value) => Self::Clamped(value.scale(factor)),
+            Self::Typed(value) => Self::Typed(value.scale(factor)),
         }
+    }
+
+    fn normalized(self) -> Self {
+        match self {
+            Self::Typed(value) => value.normalized(),
+            value => value,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct NativeClampedMath {
+    value: NativeLengthMath,
+    min_abs_pt: Option<f32>,
+    max_abs_pt: Option<f32>,
+}
+
+impl NativeClampedMath {
+    fn scale(mut self, factor: f32) -> Self {
+        self.value = self.value.scale(factor);
+        self.min_abs_pt = self.min_abs_pt.map(|value| value * factor);
+        self.max_abs_pt = self.max_abs_pt.map(|value| value * factor);
+        if factor < 0.0 {
+            std::mem::swap(&mut self.min_abs_pt, &mut self.max_abs_pt);
+        }
+        self
+    }
+
+    fn shift_absolute(mut self, amount_pt: f32) -> Self {
+        self.value.abs_pt += amount_pt;
+        self.min_abs_pt = self.min_abs_pt.map(|value| value + amount_pt);
+        self.max_abs_pt = self.max_abs_pt.map(|value| value + amount_pt);
+        self
+    }
+
+    fn to_length_spec(self) -> Option<LengthSpec> {
+        let value = self.value.to_calc_length()?;
+        let min = self.min_abs_pt.map(Pt::from_f32);
+        let max = self.max_abs_pt.map(Pt::from_f32);
+        if native_math_component_is_zero(value.percent)
+            && native_math_component_is_zero(value.em)
+            && native_math_component_is_zero(value.rem)
+        {
+            let mut resolved = value.abs;
+            if let Some(maximum) = max {
+                resolved = resolved.min(maximum);
+            }
+            if let Some(minimum) = min {
+                resolved = resolved.max(minimum);
+            }
+            return Some(LengthSpec::Absolute(resolved));
+        }
+        Some(LengthSpec::Clamped(ClampedLength { value, min, max }))
+    }
+}
+
+const NATIVE_DIM_ABSOLUTE_LENGTH: usize = 0;
+const NATIVE_DIM_PERCENT: usize = 1;
+const NATIVE_DIM_EM: usize = 2;
+const NATIVE_DIM_REM: usize = 3;
+const NATIVE_DIM_VW: usize = 4;
+const NATIVE_DIM_VH: usize = 5;
+const NATIVE_DIM_VMIN: usize = 6;
+const NATIVE_DIM_VMAX: usize = 7;
+const NATIVE_DIM_ANGLE: usize = 8;
+const NATIVE_DIM_TIME: usize = 9;
+const NATIVE_DIM_FREQUENCY: usize = 10;
+const NATIVE_DIM_RESOLUTION: usize = 11;
+const NATIVE_DIM_FLEX: usize = 12;
+const NATIVE_DIM_EX: usize = 13;
+const NATIVE_DIM_CH: usize = 14;
+const NATIVE_DIM_CAP: usize = 15;
+const NATIVE_DIM_LH: usize = 16;
+const NATIVE_DIM_RLH: usize = 17;
+const NATIVE_DIMENSION_COUNT: usize = 18;
+
+#[derive(Debug, Clone, Copy)]
+struct NativeTypedMath {
+    factor: f32,
+    powers: [i8; NATIVE_DIMENSION_COUNT],
+}
+
+impl NativeTypedMath {
+    fn dimension(factor: f32, dimension: usize) -> Self {
+        let mut powers = [0; NATIVE_DIMENSION_COUNT];
+        powers[dimension] = 1;
+        Self { factor, powers }
+    }
+
+    fn scale(mut self, factor: f32) -> Self {
+        self.factor *= factor;
+        self
+    }
+
+    fn multiply(mut self, other: Self) -> Option<Self> {
+        self.factor *= other.factor;
+        if !self.factor.is_finite() {
+            return None;
+        }
+        for (power, other_power) in self.powers.iter_mut().zip(other.powers) {
+            *power = power.checked_add(other_power)?;
+        }
+        Some(self)
+    }
+
+    fn divide(mut self, other: Self) -> Option<Self> {
+        if other.factor.abs() <= f32::EPSILON {
+            return None;
+        }
+        self.factor /= other.factor;
+        if !self.factor.is_finite() {
+            return None;
+        }
+        for (power, other_power) in self.powers.iter_mut().zip(other.powers) {
+            *power = power.checked_sub(other_power)?;
+        }
+        Some(self)
+    }
+
+    fn normalized(self) -> NativeMathValue {
+        if self.powers.iter().all(|power| *power == 0) {
+            return NativeMathValue::Number(self.factor);
+        }
+        let populated: Vec<(usize, i8)> = self
+            .powers
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(_, power)| *power != 0)
+            .collect();
+        if let [(dimension, 1)] = populated.as_slice() {
+            let mut length = NativeLengthMath::zero();
+            match *dimension {
+                NATIVE_DIM_ABSOLUTE_LENGTH => length.abs_pt = self.factor,
+                NATIVE_DIM_PERCENT => length.percent = self.factor,
+                NATIVE_DIM_EM => length.em = self.factor,
+                NATIVE_DIM_REM => length.rem = self.factor,
+                NATIVE_DIM_VW => length.vw = self.factor,
+                NATIVE_DIM_VH => length.vh = self.factor,
+                NATIVE_DIM_VMIN => length.vmin = self.factor,
+                NATIVE_DIM_VMAX => length.vmax = self.factor,
+                NATIVE_DIM_EX => length.ex = self.factor,
+                NATIVE_DIM_CH => length.ch = self.factor,
+                NATIVE_DIM_CAP => length.cap = self.factor,
+                NATIVE_DIM_LH => length.lh = self.factor,
+                NATIVE_DIM_RLH => length.rlh = self.factor,
+                _ => return NativeMathValue::Typed(self),
+            }
+            return NativeMathValue::Length(length);
+        }
+        NativeMathValue::Typed(self)
     }
 }
 
@@ -24481,7 +27512,7 @@ impl<'a> NativeLengthMathParser<'a> {
     fn parse(mut self) -> Option<NativeMathValue> {
         let value = self.parse_sum()?;
         self.skip_whitespace();
-        (self.pos == self.input.len()).then_some(value)
+        (self.pos == self.input.len()).then_some(value.normalized())
     }
 
     fn parse_sum(&mut self) -> Option<NativeMathValue> {
@@ -24511,25 +27542,10 @@ impl<'a> NativeLengthMathParser<'a> {
             };
             self.pos += 1;
             let rhs = self.parse_unary()?;
-            value = match (operator, value, rhs) {
-                (b'*', NativeMathValue::Number(left), NativeMathValue::Number(right)) => {
-                    NativeMathValue::Number(left * right)
-                }
-                (b'*', NativeMathValue::Number(scale), NativeMathValue::Length(length))
-                | (b'*', NativeMathValue::Length(length), NativeMathValue::Number(scale)) => {
-                    NativeMathValue::Length(length.scale(scale))
-                }
-                (b'/', NativeMathValue::Number(left), NativeMathValue::Number(right))
-                    if right.abs() > f32::EPSILON =>
-                {
-                    NativeMathValue::Number(left / right)
-                }
-                (b'/', NativeMathValue::Length(length), NativeMathValue::Number(divisor))
-                    if divisor.abs() > f32::EPSILON =>
-                {
-                    NativeMathValue::Length(length.scale(1.0 / divisor))
-                }
-                _ => return None,
+            value = match operator {
+                b'*' => native_math_multiply(value, rhs)?,
+                b'/' => native_math_divide(value, rhs)?,
+                _ => unreachable!(),
             };
         }
         Some(value)
@@ -24566,7 +27582,12 @@ impl<'a> NativeLengthMathParser<'a> {
         let name = self.parse_identifier()?.to_ascii_lowercase();
         self.skip_whitespace();
         if !self.consume_byte(b'(') {
-            return None;
+            return match name.as_str() {
+                "pi" => Some(NativeMathValue::Number(std::f32::consts::PI)),
+                "e" => Some(NativeMathValue::Number(std::f32::consts::E)),
+                "infinity" => Some(NativeMathValue::Number(f32::MAX)),
+                _ => None,
+            };
         }
         self.parse_function(&name)
     }
@@ -24589,7 +27610,9 @@ impl<'a> NativeLengthMathParser<'a> {
         let unit = std::str::from_utf8(&self.input[unit_start..self.pos])
             .ok()?
             .to_ascii_lowercase();
-        NativeLengthMath::from_dimension(value, &unit).map(NativeMathValue::Length)
+        NativeLengthMath::from_dimension(value, &unit)
+            .map(NativeMathValue::Length)
+            .or_else(|| native_typed_dimension(value, &unit).map(NativeMathValue::Typed))
     }
 
     fn parse_function(&mut self, name: &str) -> Option<NativeMathValue> {
@@ -24617,8 +27640,92 @@ impl<'a> NativeLengthMathParser<'a> {
                 }
                 native_math_abs(values[0])
             }
+            "sign" if self.allow_extrema => {
+                let values = self.parse_argument_list()?;
+                (values.len() == 1)
+                    .then(|| native_math_sign(values[0]))
+                    .flatten()
+            }
+            "round" if self.allow_extrema => self.parse_round_function(),
+            "mod" | "rem" if self.allow_extrema => {
+                let values = self.parse_argument_list()?;
+                if values.len() != 2 {
+                    return None;
+                }
+                native_math_mod_rem(values[0], values[1], name == "mod")
+            }
+            "hypot" if self.allow_extrema => {
+                let values = self.parse_argument_list()?;
+                native_math_hypot(&values)
+            }
+            "sin" | "cos" | "tan" | "asin" | "acos" | "atan" if self.allow_extrema => {
+                let values = self.parse_argument_list()?;
+                if values.len() != 1 {
+                    return None;
+                }
+                native_math_trig(name, values[0])
+            }
+            "sqrt" | "exp" if self.allow_extrema => {
+                let values = self.parse_argument_list()?;
+                if values.len() != 1 {
+                    return None;
+                }
+                let value = native_math_number(values[0])?;
+                let result = if name == "sqrt" {
+                    (value >= 0.0).then(|| value.sqrt())?
+                } else {
+                    value.exp()
+                };
+                result
+                    .is_finite()
+                    .then_some(NativeMathValue::Number(result))
+            }
+            "pow" | "log" if self.allow_extrema => {
+                let values = self.parse_argument_list()?;
+                if values.len() != 2 {
+                    return None;
+                }
+                let left = native_math_number(values[0])?;
+                let right = native_math_number(values[1])?;
+                let result = if name == "pow" {
+                    left.powf(right)
+                } else if left > 0.0 && right > 0.0 && (right - 1.0).abs() > f32::EPSILON {
+                    left.log(right)
+                } else {
+                    return None;
+                };
+                result
+                    .is_finite()
+                    .then_some(NativeMathValue::Number(result))
+            }
             _ => None,
         }
+    }
+
+    fn parse_round_function(&mut self) -> Option<NativeMathValue> {
+        self.skip_whitespace();
+        let strategy_start = self.pos;
+        let strategy = self.parse_identifier()?.to_ascii_lowercase();
+        if !matches!(strategy.as_str(), "nearest" | "up" | "down" | "to-zero") {
+            self.pos = strategy_start;
+            return None;
+        }
+        self.skip_whitespace();
+        if !self.consume_byte(b',') {
+            return None;
+        }
+        let value = self.parse_sum()?;
+        self.skip_whitespace();
+        let step = if self.consume_byte(b',') {
+            self.parse_sum()?
+        } else {
+            NativeMathValue::Number(1.0)
+        };
+        self.skip_whitespace();
+        if !self.consume_byte(b')') {
+            return None;
+        }
+        native_math_round(&strategy, value, step)
     }
 
     fn parse_argument_list(&mut self) -> Option<Vec<NativeMathValue>> {
@@ -24710,7 +27817,255 @@ impl<'a> NativeLengthMathParser<'a> {
     }
 }
 
+fn native_typed_dimension(value: f32, unit: &str) -> Option<NativeTypedMath> {
+    let (factor, dimension) = match unit {
+        "deg" => (value.to_radians(), NATIVE_DIM_ANGLE),
+        "grad" => (value * std::f32::consts::PI / 200.0, NATIVE_DIM_ANGLE),
+        "rad" => (value, NATIVE_DIM_ANGLE),
+        "turn" => (value * std::f32::consts::TAU, NATIVE_DIM_ANGLE),
+        "s" => (value, NATIVE_DIM_TIME),
+        "ms" => (value / 1_000.0, NATIVE_DIM_TIME),
+        "hz" => (value, NATIVE_DIM_FREQUENCY),
+        "khz" => (value * 1_000.0, NATIVE_DIM_FREQUENCY),
+        "dppx" | "x" => (value, NATIVE_DIM_RESOLUTION),
+        "dpi" => (value / 96.0, NATIVE_DIM_RESOLUTION),
+        "dpcm" => (value * 2.54 / 96.0, NATIVE_DIM_RESOLUTION),
+        "fr" => (value, NATIVE_DIM_FLEX),
+        _ => return None,
+    };
+    factor
+        .is_finite()
+        .then_some(NativeTypedMath::dimension(factor, dimension))
+}
+
+fn native_length_to_typed(value: NativeLengthMath) -> Option<NativeTypedMath> {
+    let dimensions = [
+        (value.abs_pt, NATIVE_DIM_ABSOLUTE_LENGTH),
+        (value.percent, NATIVE_DIM_PERCENT),
+        (value.em, NATIVE_DIM_EM),
+        (value.rem, NATIVE_DIM_REM),
+        (value.vw, NATIVE_DIM_VW),
+        (value.vh, NATIVE_DIM_VH),
+        (value.vmin, NATIVE_DIM_VMIN),
+        (value.vmax, NATIVE_DIM_VMAX),
+        (value.ex, NATIVE_DIM_EX),
+        (value.ch, NATIVE_DIM_CH),
+        (value.cap, NATIVE_DIM_CAP),
+        (value.lh, NATIVE_DIM_LH),
+        (value.rlh, NATIVE_DIM_RLH),
+    ];
+    let populated: Vec<(f32, usize)> = dimensions
+        .into_iter()
+        .filter(|(component, _)| !native_math_component_is_zero(*component))
+        .collect();
+    if let [(factor, dimension)] = populated.as_slice() {
+        return Some(NativeTypedMath::dimension(*factor, *dimension));
+    }
+    if populated.is_empty() {
+        let dimension = match value.zero_hint {
+            Some(NativeLengthZeroHint::Percent) => NATIVE_DIM_PERCENT,
+            Some(NativeLengthZeroHint::Em) => NATIVE_DIM_EM,
+            Some(NativeLengthZeroHint::Rem) => NATIVE_DIM_REM,
+            Some(NativeLengthZeroHint::Viewport) => NATIVE_DIM_VW,
+            Some(NativeLengthZeroHint::FontRelative) => NATIVE_DIM_EX,
+            _ => NATIVE_DIM_ABSOLUTE_LENGTH,
+        };
+        return Some(NativeTypedMath::dimension(0.0, dimension));
+    }
+    None
+}
+
+fn native_math_to_typed(value: NativeMathValue) -> Option<NativeTypedMath> {
+    match value.normalized() {
+        NativeMathValue::Number(value) => Some(NativeTypedMath {
+            factor: value,
+            powers: [0; NATIVE_DIMENSION_COUNT],
+        }),
+        NativeMathValue::Length(value) => native_length_to_typed(value),
+        NativeMathValue::Clamped(_) => None,
+        NativeMathValue::Typed(value) => Some(value),
+    }
+}
+
+fn native_math_multiply(left: NativeMathValue, right: NativeMathValue) -> Option<NativeMathValue> {
+    match (left.normalized(), right.normalized()) {
+        (NativeMathValue::Number(left), NativeMathValue::Number(right)) => {
+            let value = left * right;
+            value.is_finite().then_some(NativeMathValue::Number(value))
+        }
+        (NativeMathValue::Number(scale), NativeMathValue::Length(length))
+        | (NativeMathValue::Length(length), NativeMathValue::Number(scale)) => {
+            Some(NativeMathValue::Length(length.scale(scale)))
+        }
+        (NativeMathValue::Number(scale), NativeMathValue::Clamped(length))
+        | (NativeMathValue::Clamped(length), NativeMathValue::Number(scale)) => {
+            Some(NativeMathValue::Clamped(length.scale(scale)))
+        }
+        (left, right) => native_math_to_typed(left)?
+            .multiply(native_math_to_typed(right)?)
+            .map(NativeTypedMath::normalized),
+    }
+}
+
+fn native_math_divide(left: NativeMathValue, right: NativeMathValue) -> Option<NativeMathValue> {
+    match (left.normalized(), right.normalized()) {
+        (NativeMathValue::Number(left), NativeMathValue::Number(right))
+            if right.abs() > f32::EPSILON =>
+        {
+            let value = left / right;
+            value.is_finite().then_some(NativeMathValue::Number(value))
+        }
+        (NativeMathValue::Length(length), NativeMathValue::Number(divisor))
+            if divisor.abs() > f32::EPSILON =>
+        {
+            Some(NativeMathValue::Length(length.scale(1.0 / divisor)))
+        }
+        (NativeMathValue::Clamped(length), NativeMathValue::Number(divisor))
+            if divisor.abs() > f32::EPSILON =>
+        {
+            Some(NativeMathValue::Clamped(length.scale(1.0 / divisor)))
+        }
+        (left, right) => native_math_to_typed(left)?
+            .divide(native_math_to_typed(right)?)
+            .map(NativeTypedMath::normalized),
+    }
+}
+
+fn native_math_number(value: NativeMathValue) -> Option<f32> {
+    match value.normalized() {
+        NativeMathValue::Number(value) if value.is_finite() => Some(value),
+        _ => None,
+    }
+}
+
+fn native_math_sign(value: NativeMathValue) -> Option<NativeMathValue> {
+    let factor = native_math_to_typed(value)?.factor;
+    Some(NativeMathValue::Number(if factor > 0.0 {
+        1.0
+    } else if factor < 0.0 {
+        -1.0
+    } else {
+        0.0
+    }))
+}
+
+fn native_math_round(
+    strategy: &str,
+    value: NativeMathValue,
+    step: NativeMathValue,
+) -> Option<NativeMathValue> {
+    let value = native_math_to_typed(value)?;
+    let step = native_math_to_typed(step)?;
+    if value.powers != step.powers || step.factor.abs() <= f32::EPSILON {
+        return None;
+    }
+    let quotient = value.factor / step.factor;
+    let rounded = match strategy {
+        "nearest" => quotient.round(),
+        "up" => quotient.ceil(),
+        "down" => quotient.floor(),
+        "to-zero" => quotient.trunc(),
+        _ => return None,
+    };
+    let result = NativeTypedMath {
+        factor: rounded * step.factor,
+        powers: value.powers,
+    };
+    result.factor.is_finite().then(|| result.normalized())
+}
+
+fn native_math_mod_rem(
+    left: NativeMathValue,
+    right: NativeMathValue,
+    modulo: bool,
+) -> Option<NativeMathValue> {
+    let left = native_math_to_typed(left)?;
+    let right = native_math_to_typed(right)?;
+    if left.powers != right.powers || right.factor.abs() <= f32::EPSILON {
+        return None;
+    }
+    let remainder = left.factor % right.factor;
+    let factor = if modulo && remainder != 0.0 && remainder.signum() != right.factor.signum() {
+        remainder + right.factor
+    } else {
+        remainder
+    };
+    Some(
+        NativeTypedMath {
+            factor,
+            powers: left.powers,
+        }
+        .normalized(),
+    )
+}
+
+fn native_math_hypot(values: &[NativeMathValue]) -> Option<NativeMathValue> {
+    let first = native_math_to_typed(*values.first()?)?;
+    let mut sum = 0.0f32;
+    for value in values {
+        let value = native_math_to_typed(*value)?;
+        if value.powers != first.powers {
+            return None;
+        }
+        sum += value.factor * value.factor;
+    }
+    let factor = sum.sqrt();
+    factor.is_finite().then(|| {
+        NativeTypedMath {
+            factor,
+            powers: first.powers,
+        }
+        .normalized()
+    })
+}
+
+fn native_math_trig(name: &str, value: NativeMathValue) -> Option<NativeMathValue> {
+    match name {
+        "sin" | "cos" | "tan" => {
+            let value = match value.normalized() {
+                NativeMathValue::Number(value) => value,
+                value => {
+                    let typed = native_math_to_typed(value)?;
+                    let mut angle = [0; NATIVE_DIMENSION_COUNT];
+                    angle[NATIVE_DIM_ANGLE] = 1;
+                    if typed.powers != angle {
+                        return None;
+                    }
+                    typed.factor
+                }
+            };
+            let result = match name {
+                "sin" => value.sin(),
+                "cos" => value.cos(),
+                "tan" => value.tan(),
+                _ => unreachable!(),
+            };
+            result
+                .is_finite()
+                .then_some(NativeMathValue::Number(result))
+        }
+        "asin" | "acos" | "atan" => {
+            let value = native_math_number(value)?;
+            let result = match name {
+                "asin" => value.asin(),
+                "acos" => value.acos(),
+                "atan" => value.atan(),
+                _ => unreachable!(),
+            };
+            result
+                .is_finite()
+                .then_some(NativeMathValue::Typed(NativeTypedMath::dimension(
+                    result,
+                    NATIVE_DIM_ANGLE,
+                )))
+        }
+        _ => None,
+    }
+}
+
 fn native_math_add(left: NativeMathValue, right: NativeMathValue) -> Option<NativeMathValue> {
+    let left = left.normalized();
+    let right = right.normalized();
     match (left, right) {
         (NativeMathValue::Number(left), NativeMathValue::Number(right)) => {
             Some(NativeMathValue::Number(left + right))
@@ -24718,14 +28073,103 @@ fn native_math_add(left: NativeMathValue, right: NativeMathValue) -> Option<Nati
         (NativeMathValue::Length(left), NativeMathValue::Length(right)) => {
             Some(NativeMathValue::Length(left.add(right)))
         }
+        (NativeMathValue::Clamped(value), NativeMathValue::Length(offset))
+        | (NativeMathValue::Length(offset), NativeMathValue::Clamped(value)) => {
+            native_length_absolute_pt(offset)
+                .map(|offset| NativeMathValue::Clamped(value.shift_absolute(offset)))
+        }
         (NativeMathValue::Number(number), NativeMathValue::Length(length))
         | (NativeMathValue::Length(length), NativeMathValue::Number(number))
             if native_math_component_is_zero(number) =>
         {
             Some(NativeMathValue::Length(length))
         }
+        (NativeMathValue::Number(number), NativeMathValue::Clamped(length))
+        | (NativeMathValue::Clamped(length), NativeMathValue::Number(number))
+            if native_math_component_is_zero(number) =>
+        {
+            Some(NativeMathValue::Clamped(length))
+        }
+        (NativeMathValue::Typed(mut left), NativeMathValue::Typed(right))
+            if left.powers == right.powers =>
+        {
+            left.factor += right.factor;
+            left.factor.is_finite().then(|| left.normalized())
+        }
         _ => None,
     }
+}
+
+fn native_length_absolute_pt(value: NativeLengthMath) -> Option<f32> {
+    (native_math_component_is_zero(value.percent)
+        && native_math_component_is_zero(value.em)
+        && native_math_component_is_zero(value.rem)
+        && native_math_component_is_zero(value.vw)
+        && native_math_component_is_zero(value.vh)
+        && native_math_component_is_zero(value.vmin)
+        && native_math_component_is_zero(value.vmax))
+    .then_some(value.abs_pt)
+}
+
+fn native_math_absolute_value(value: NativeMathValue) -> Option<f32> {
+    match value.normalized() {
+        NativeMathValue::Length(value) => native_length_absolute_pt(value),
+        NativeMathValue::Number(value) if native_math_component_is_zero(value) => Some(0.0),
+        _ => None,
+    }
+}
+
+fn native_math_with_absolute_clamp(
+    value: NativeMathValue,
+    minimum: f32,
+    maximum: f32,
+) -> Option<NativeMathValue> {
+    let mut value = match value.normalized() {
+        NativeMathValue::Length(value) => NativeClampedMath {
+            value,
+            min_abs_pt: None,
+            max_abs_pt: None,
+        },
+        NativeMathValue::Clamped(value) => value,
+        _ => return None,
+    };
+    value.min_abs_pt = Some(value.min_abs_pt.map_or(minimum, |bound| bound.max(minimum)));
+    value.max_abs_pt = Some(value.max_abs_pt.map_or(maximum, |bound| bound.min(maximum)));
+    Some(NativeMathValue::Clamped(value))
+}
+
+fn native_math_extreme_with_absolute_bounds(
+    values: &[NativeMathValue],
+    pick_max: bool,
+) -> Option<NativeMathValue> {
+    let mut dynamic = None;
+    let mut bounds = Vec::new();
+    for value in values.iter().copied().map(NativeMathValue::normalized) {
+        if let Some(bound) = native_math_absolute_value(value) {
+            bounds.push(bound);
+            continue;
+        }
+        if dynamic.replace(value).is_some() {
+            return None;
+        }
+    }
+    let mut value = match dynamic? {
+        NativeMathValue::Length(value) => NativeClampedMath {
+            value,
+            min_abs_pt: None,
+            max_abs_pt: None,
+        },
+        NativeMathValue::Clamped(value) => value,
+        _ => return None,
+    };
+    for bound in bounds {
+        if pick_max {
+            value.min_abs_pt = Some(value.min_abs_pt.map_or(bound, |current| current.max(bound)));
+        } else {
+            value.max_abs_pt = Some(value.max_abs_pt.map_or(bound, |current| current.min(bound)));
+        }
+    }
+    Some(NativeMathValue::Clamped(value))
 }
 
 fn native_math_lengths(values: &[NativeMathValue]) -> Option<Vec<CalcLength>> {
@@ -24742,6 +28186,7 @@ fn native_math_lengths(values: &[NativeMathValue]) -> Option<Vec<CalcLength>> {
             NativeMathValue::Number(number) if native_math_component_is_zero(*number) => {
                 Some(CalcLength::zero())
             }
+            NativeMathValue::Clamped(_) | NativeMathValue::Typed(_) => None,
             _ => None,
         })
         .collect()
@@ -24766,6 +28211,9 @@ fn native_math_extreme(values: &[NativeMathValue], pick_max: bool) -> Option<Nat
         }
         return Some(NativeMathValue::Number(best));
     }
+    if let Some(value) = native_math_extreme_with_absolute_bounds(values, pick_max) {
+        return Some(value);
+    }
     let lengths = native_math_lengths(values)?;
     calc_length_from_min_max(&lengths, pick_max)
         .map(NativeLengthMath::from_calc_length)
@@ -24786,6 +28234,14 @@ fn native_math_clamp(
         let upper = if min > max { min } else { max };
         return Some(NativeMathValue::Number(preferred.max(min).min(upper)));
     }
+    if let (Some(minimum), Some(maximum)) = (
+        native_math_absolute_value(min),
+        native_math_absolute_value(max),
+    ) {
+        if let Some(value) = native_math_with_absolute_clamp(preferred, minimum, maximum) {
+            return Some(value);
+        }
+    }
     let lengths = native_math_lengths(&[min, preferred, max])?;
     calc_length_from_same_slope_clamp(lengths[0], lengths[1], lengths[2])
         .or_else(|| calc_length_from_domain_clamp(lengths[0], lengths[1], lengths[2]))
@@ -24794,7 +28250,7 @@ fn native_math_clamp(
 }
 
 fn native_math_abs(value: NativeMathValue) -> Option<NativeMathValue> {
-    match value {
+    match value.normalized() {
         NativeMathValue::Number(value) => Some(NativeMathValue::Number(value.abs())),
         NativeMathValue::Length(length) => {
             let value = length.to_calc_length()?;
@@ -24805,6 +28261,11 @@ fn native_math_abs(value: NativeMathValue) -> Option<NativeMathValue> {
                     calc_length_domain_value(value, domain).abs(),
                 ),
             )))
+        }
+        NativeMathValue::Clamped(_) => None,
+        NativeMathValue::Typed(mut value) => {
+            value.factor = value.factor.abs();
+            Some(value.normalized())
         }
     }
 }
@@ -25142,15 +28603,22 @@ enum PhysicalSide {
 }
 
 fn inline_start_side(writing_mode: WritingModeMode, direction: DirectionMode) -> PhysicalSide {
-    if is_vertical_writing_mode(writing_mode) {
-        match direction {
-            DirectionMode::Ltr => PhysicalSide::Top,
-            DirectionMode::Rtl => PhysicalSide::Bottom,
-        }
-    } else {
-        match direction {
+    match writing_mode {
+        WritingModeMode::HorizontalTb => match direction {
             DirectionMode::Ltr => PhysicalSide::Left,
             DirectionMode::Rtl => PhysicalSide::Right,
+        },
+        // Unlike the other vertical writing modes, sideways-lr runs its LTR
+        // inline axis bottom-to-top.
+        WritingModeMode::SidewaysLr => match direction {
+            DirectionMode::Ltr => PhysicalSide::Bottom,
+            DirectionMode::Rtl => PhysicalSide::Top,
+        },
+        WritingModeMode::VerticalRl | WritingModeMode::VerticalLr | WritingModeMode::SidewaysRl => {
+            match direction {
+                DirectionMode::Ltr => PhysicalSide::Top,
+                DirectionMode::Rtl => PhysicalSide::Bottom,
+            }
         }
     }
 }
@@ -25178,6 +28646,174 @@ fn block_end_side(writing_mode: WritingModeMode) -> PhysicalSide {
         PhysicalSide::Right => PhysicalSide::Left,
         PhysicalSide::Top => PhysicalSide::Bottom,
         PhysicalSide::Bottom => PhysicalSide::Top,
+    }
+}
+
+fn physical_corner_from_sides(first: PhysicalSide, second: PhysicalSide) -> PhysicalCorner {
+    match (first, second) {
+        (PhysicalSide::Top, PhysicalSide::Left) | (PhysicalSide::Left, PhysicalSide::Top) => {
+            PhysicalCorner::TopLeft
+        }
+        (PhysicalSide::Top, PhysicalSide::Right) | (PhysicalSide::Right, PhysicalSide::Top) => {
+            PhysicalCorner::TopRight
+        }
+        (PhysicalSide::Bottom, PhysicalSide::Right)
+        | (PhysicalSide::Right, PhysicalSide::Bottom) => PhysicalCorner::BottomRight,
+        (PhysicalSide::Bottom, PhysicalSide::Left) | (PhysicalSide::Left, PhysicalSide::Bottom) => {
+            PhysicalCorner::BottomLeft
+        }
+        _ => PhysicalCorner::TopLeft,
+    }
+}
+
+fn resolve_border_radius_corner_target(
+    target: BorderRadiusCornerTarget,
+    writing_mode: WritingModeMode,
+    direction: DirectionMode,
+) -> PhysicalCorner {
+    match target {
+        BorderRadiusCornerTarget::Physical(corner) => corner,
+        BorderRadiusCornerTarget::StartStart => physical_corner_from_sides(
+            block_start_side(writing_mode),
+            inline_start_side(writing_mode, direction),
+        ),
+        BorderRadiusCornerTarget::StartEnd => physical_corner_from_sides(
+            block_start_side(writing_mode),
+            inline_end_side(writing_mode, direction),
+        ),
+        BorderRadiusCornerTarget::EndStart => physical_corner_from_sides(
+            block_end_side(writing_mode),
+            inline_start_side(writing_mode, direction),
+        ),
+        BorderRadiusCornerTarget::EndEnd => physical_corner_from_sides(
+            block_end_side(writing_mode),
+            inline_end_side(writing_mode, direction),
+        ),
+    }
+}
+
+fn set_border_radius_corner(
+    radii: &mut BorderRadiiSpec,
+    corner: PhysicalCorner,
+    value: BorderRadiusCornerValue,
+) {
+    match corner {
+        PhysicalCorner::TopLeft => {
+            radii.horizontal.top_left = value.horizontal;
+            radii.vertical.top_left = value.vertical;
+        }
+        PhysicalCorner::TopRight => {
+            radii.horizontal.top_right = value.horizontal;
+            radii.vertical.top_right = value.vertical;
+        }
+        PhysicalCorner::BottomRight => {
+            radii.horizontal.bottom_right = value.horizontal;
+            radii.vertical.bottom_right = value.vertical;
+        }
+        PhysicalCorner::BottomLeft => {
+            radii.horizontal.bottom_left = value.horizontal;
+            radii.vertical.bottom_left = value.vertical;
+        }
+    }
+}
+
+fn apply_border_radius_ops(style: &mut ComputedStyle, ops: &[BorderRadiusOp]) {
+    for op in ops {
+        match *op {
+            BorderRadiusOp::Shorthand(radii) => style.border_radius = radii,
+            BorderRadiusOp::Corner(target, value) => {
+                let corner = resolve_border_radius_corner_target(
+                    target,
+                    style.writing_mode,
+                    style.direction,
+                );
+                set_border_radius_corner(&mut style.border_radius, corner, value);
+            }
+        }
+    }
+}
+
+fn border_target_sides(
+    target: BorderColorTarget,
+    writing_mode: WritingModeMode,
+    direction: DirectionMode,
+) -> Vec<PhysicalSide> {
+    match target {
+        BorderColorTarget::All => vec![
+            PhysicalSide::Top,
+            PhysicalSide::Right,
+            PhysicalSide::Bottom,
+            PhysicalSide::Left,
+        ],
+        BorderColorTarget::Top => vec![PhysicalSide::Top],
+        BorderColorTarget::Right => vec![PhysicalSide::Right],
+        BorderColorTarget::Bottom => vec![PhysicalSide::Bottom],
+        BorderColorTarget::Left => vec![PhysicalSide::Left],
+        BorderColorTarget::InlineStart => vec![inline_start_side(writing_mode, direction)],
+        BorderColorTarget::InlineEnd => vec![inline_end_side(writing_mode, direction)],
+        BorderColorTarget::BlockStart => vec![block_start_side(writing_mode)],
+        BorderColorTarget::BlockEnd => vec![block_end_side(writing_mode)],
+    }
+}
+
+fn clear_pending_border_color_var_for_side(style: &mut ComputedStyle, side: PhysicalSide) {
+    match side {
+        PhysicalSide::Left => style.pending_border_left_color_var = None,
+        PhysicalSide::Top => style.pending_border_top_color_var = None,
+        PhysicalSide::Right => style.pending_border_right_color_var = None,
+        PhysicalSide::Bottom => style.pending_border_bottom_color_var = None,
+    }
+}
+
+fn apply_border_cascade_ops(
+    style: &mut ComputedStyle,
+    ops: &[BorderCascadeOp],
+    parent: &ComputedStyle,
+) {
+    for op in ops {
+        match op {
+            BorderCascadeOp::Width(target, component) => {
+                for side in border_target_sides(*target, style.writing_mode, style.direction) {
+                    match component {
+                        NativeLengthComponent::Spec(spec) => apply_edge_to_side(
+                            &mut style.border_width,
+                            side,
+                            *spec,
+                            &parent.border_width,
+                        ),
+                        NativeLengthComponent::Var(name) => apply_edge_var_to_side(
+                            &mut style.border_width,
+                            side,
+                            &LengthVarExpr {
+                                name: name.clone(),
+                                scale: 1.0,
+                            },
+                            &parent.border_width,
+                            &style.custom_lengths,
+                            &style.custom_color_refs,
+                        ),
+                    }
+                }
+            }
+            BorderCascadeOp::Style(target, border_style) => {
+                for side in border_target_sides(*target, style.writing_mode, style.direction) {
+                    set_border_style_for_side(&mut style.border_style, side, *border_style);
+                }
+            }
+            BorderCascadeOp::Color(target, component) => {
+                for side in border_target_sides(*target, style.writing_mode, style.direction) {
+                    match component {
+                        NativeBorderColorComponent::Spec(color) => {
+                            apply_border_color_to_side(style, side, color, parent);
+                            clear_pending_border_color_var_for_side(style, side);
+                        }
+                        NativeBorderColorComponent::Var(var) => {
+                            set_pending_border_color_var_for_side(style, side, var);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -25463,34 +29099,50 @@ fn resolve_border_side_color_spec(
     parent: &ComputedStyle,
     computed_color: Color,
     target: BorderColorTarget,
-) -> Color {
+) -> (Color, f32) {
     match spec {
-        ColorSpec::Value(value) => *value,
+        ColorSpec::Value(value) => (*value, 1.0),
+        ColorSpec::AlphaValue(value, alpha) => (*value, alpha.clamp(0.0, 1.0)),
         ColorSpec::Inherit => match target {
-            BorderColorTarget::Right => parent
-                .border_right_color
-                .or(parent.border_color)
-                .unwrap_or(parent.color),
-            BorderColorTarget::Left => parent
-                .border_left_color
-                .or(parent.border_color)
-                .unwrap_or(parent.color),
-            BorderColorTarget::Top => parent
-                .border_top_color
-                .or(parent.border_color)
-                .unwrap_or(parent.color),
-            BorderColorTarget::Bottom => parent
-                .border_bottom_color
-                .or(parent.border_color)
-                .unwrap_or(parent.color),
+            BorderColorTarget::Right => (
+                parent
+                    .border_right_color
+                    .or(parent.border_color)
+                    .unwrap_or(parent.color),
+                parent.border_right_alpha,
+            ),
+            BorderColorTarget::Left => (
+                parent
+                    .border_left_color
+                    .or(parent.border_color)
+                    .unwrap_or(parent.color),
+                parent.border_left_alpha,
+            ),
+            BorderColorTarget::Top => (
+                parent
+                    .border_top_color
+                    .or(parent.border_color)
+                    .unwrap_or(parent.color),
+                parent.border_top_alpha,
+            ),
+            BorderColorTarget::Bottom => (
+                parent
+                    .border_bottom_color
+                    .or(parent.border_color)
+                    .unwrap_or(parent.color),
+                parent.border_bottom_alpha,
+            ),
             BorderColorTarget::All
             | BorderColorTarget::InlineStart
             | BorderColorTarget::InlineEnd
             | BorderColorTarget::BlockStart
-            | BorderColorTarget::BlockEnd => parent.border_color.unwrap_or(parent.color),
+            | BorderColorTarget::BlockEnd => (
+                parent.border_color.unwrap_or(parent.color),
+                parent.border_top_alpha,
+            ),
         },
-        ColorSpec::Initial => Color::BLACK,
-        ColorSpec::CurrentColor => computed_color,
+        ColorSpec::Initial => (Color::BLACK, 1.0),
+        ColorSpec::CurrentColor => (computed_color, 1.0),
     }
 }
 
@@ -25512,6 +29164,16 @@ fn set_border_color_for_side(style: &mut ComputedStyle, side: PhysicalSide, colo
     }
 }
 
+fn set_border_alpha_for_side(style: &mut ComputedStyle, side: PhysicalSide, alpha: f32) {
+    let alpha = alpha.clamp(0.0, 1.0);
+    match side {
+        PhysicalSide::Left => style.border_left_alpha = alpha,
+        PhysicalSide::Top => style.border_top_alpha = alpha,
+        PhysicalSide::Right => style.border_right_alpha = alpha,
+        PhysicalSide::Bottom => style.border_bottom_alpha = alpha,
+    }
+}
+
 fn set_pending_border_color_var_for_side(style: &mut ComputedStyle, side: PhysicalSide, var: &str) {
     match side {
         PhysicalSide::Left => style.pending_border_left_color_var = Some(var.to_string()),
@@ -25527,13 +29189,14 @@ fn apply_border_color_to_side(
     color: &ColorSpec,
     parent: &ComputedStyle,
 ) {
-    let resolved = resolve_border_side_color_spec(
+    let (resolved, alpha) = resolve_border_side_color_spec(
         color,
         parent,
         style.color,
         border_color_target_from_side(side),
     );
     set_border_color_for_side(style, side, resolved);
+    set_border_alpha_for_side(style, side, alpha);
 }
 
 fn apply_logical_border_color_delta(
@@ -26362,7 +30025,9 @@ fn apply_white_space_collapse_from_raw(delta: &mut StyleDelta, raw: &str) -> boo
 
 impl StyleDelta {
     fn is_empty(&self) -> bool {
-        self.revert_layer.is_empty()
+        self.all.is_none()
+            && self.background_reset.is_none()
+            && self.revert_layer.is_empty()
             && self.font_size.is_none()
             && self.font_size_var.is_none()
             && self.line_height.is_none()
@@ -26489,6 +30154,7 @@ impl StyleDelta {
             && self.border_inline_end_style.is_none()
             && self.border_block_start_style.is_none()
             && self.border_block_end_style.is_none()
+            && self.border_cascade_ops.is_empty()
             && self.outline_width.is_none()
             && self.outline_offset.is_none()
             && self.outline_offset_var.is_none()
@@ -26503,6 +30169,9 @@ impl StyleDelta {
             && self.visibility.is_none()
             && self.border_radius.is_none()
             && self.border_radius_var.is_none()
+            && self.border_radius_ops.is_empty()
+            && self.box_decoration_break.is_none()
+            && self.border_image.is_empty()
             && self.font_name.is_none()
             && self.font_name_var.is_none()
             && self.box_shadow.is_none()
@@ -26519,6 +30188,8 @@ impl StyleDelta {
             && self.background_paints.is_none()
             && self.background_sizes.is_none()
             && self.background_positions.is_none()
+            && self.background_position_x.is_none()
+            && self.background_position_y.is_none()
             && self.background_repeats.is_none()
             && self.background_blend_modes.is_none()
             && self.background_origins.is_none()
@@ -26605,6 +30276,8 @@ impl StyleDelta {
             && self.justify_content.is_none()
             && self.align_items.is_none()
             && self.align_self.is_none()
+            && self.justify_items.is_none()
+            && self.justify_self.is_none()
             && self.align_content.is_none()
             && self.column_count.is_none()
             && self.column_rule_width.is_none()
@@ -26614,6 +30287,23 @@ impl StyleDelta {
             && self.grid_rows.is_none()
             && self.grid_column_tracks.is_none()
             && self.grid_row_tracks.is_none()
+            && self.grid_subgrid_columns.is_none()
+            && self.grid_subgrid_rows.is_none()
+            && self.grid_column_tracks_var.is_none()
+            && self.grid_row_tracks_var.is_none()
+            && self.grid_auto_column_tracks.is_none()
+            && self.grid_auto_row_tracks.is_none()
+            && self.grid_auto_flow.is_none()
+            && self.grid_column_auto_repeat.is_none()
+            && self.grid_row_auto_repeat.is_none()
+            && self.grid_template_areas.is_none()
+            && self.grid_column_line_names.is_none()
+            && self.grid_row_line_names.is_none()
+            && self.grid_column_line_start.is_none()
+            && self.grid_column_line_end.is_none()
+            && self.grid_row_line_start.is_none()
+            && self.grid_row_line_end.is_none()
+            && self.grid_area_name.is_none()
             && self.grid_column_start.is_none()
             && self.grid_row_start.is_none()
             && self.row_gap.is_none()
@@ -26684,11 +30374,17 @@ mod tests {
             container_inline_size: None,
             container_block_size: None,
             is_root: false,
+            is_empty: true,
+            is_defined: true,
+            language: None,
+            direction: None,
             child_index: 1,
             child_count: 1,
             type_index: 1,
             type_count: 1,
             prev_siblings: Vec::new(),
+            next_siblings: Vec::new(),
+            children: Vec::new(),
         }
     }
 
@@ -26740,6 +30436,87 @@ mod tests {
     }
 
     #[test]
+    fn level_four_structural_pseudos_match_element_context() {
+        let mut info = element("p", None, &["box", "flagged"]);
+        info.child_index = 3;
+        info.child_count = 4;
+        info.type_index = 2;
+        info.type_count = 3;
+        info.is_empty = true;
+        info.is_defined = true;
+        info.language = Some("en-US".to_string());
+        info.direction = Some("rtl".to_string());
+        info.prev_siblings = vec![
+            element("p", None, &["flagged"]),
+            element("div", None, &["item"]),
+        ];
+
+        for selector in [
+            "empty",
+            "defined",
+            "lang(en)",
+            "dir(rtl)",
+            "nth-last-child(2)",
+            "nth-last-of-type(2)",
+            "nth-child(2 of .flagged)",
+        ] {
+            assert!(
+                parse_pseudo_class(selector)
+                    .unwrap_or_else(|| panic!("parse {selector}"))
+                    .matches_with_pseudo(&info, PseudoTarget::None),
+                "{selector} should match"
+            );
+        }
+
+        info.child_count = 1;
+        info.type_count = 1;
+        assert!(
+            parse_pseudo_class("only-child")
+                .expect("only-child")
+                .matches_with_pseudo(&info, PseudoTarget::None)
+        );
+        assert!(
+            parse_pseudo_class("only-of-type")
+                .expect("only-of-type")
+                .matches_with_pseudo(&info, PseudoTarget::None)
+        );
+    }
+
+    #[test]
+    fn has_relative_selectors_match_descendants_children_and_following_siblings() {
+        let mut card = element("div", None, &["card"]);
+        let mut wrapper = element("div", None, &["wrapper"]);
+        wrapper.children.push(element("span", None, &["flag"]));
+        card.children.push(wrapper);
+        card.next_siblings.push(element("div", None, &["flag"]));
+
+        for selector in ["has(.flag)", "has(+ .flag)"] {
+            assert!(
+                parse_pseudo_class(selector)
+                    .unwrap_or_else(|| panic!("parse {selector}"))
+                    .matches_with_pseudo(&card, PseudoTarget::None),
+                "{selector} should match"
+            );
+        }
+
+        let mut direct = element("div", None, &["card"]);
+        direct.children.push(element("span", None, &["flag"]));
+        assert!(
+            parse_pseudo_class("has(> .flag)")
+                .expect("child :has")
+                .matches_with_pseudo(&direct, PseudoTarget::None)
+        );
+    }
+
+    #[test]
+    fn attribute_selector_ascii_case_modifier_is_honored() {
+        let selector = parse_simple_selector(".box[data-id=\"yes\" i]").expect("selector");
+        let mut info = element("div", None, &["box"]);
+        info.attrs.insert("data-id".to_string(), "YES".to_string());
+        assert!(selector.matches_with_pseudo(&info, PseudoTarget::None));
+    }
+
+    #[test]
     fn where_selector_list_matches_without_adding_specificity() {
         let css = ":where(div, p, sub) { color: red; } p { color: blue; }";
         let resolver = StyleResolver::new(css);
@@ -26783,6 +30560,94 @@ mod tests {
         let p_info = element("p", None, &["note"]);
         let p_style = resolver.compute_style(&p_info, &root, None, &[]);
         assert_eq!(p_style.color, Color::rgb(1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn background_shorthand_honors_cascade_wide_keywords() {
+        let css = ".parent { background: rgb(10, 127, 46); } \
+                   .box { background: rgb(189, 189, 189); } \
+                   .box.inherit { background: inherit; } \
+                   .box.initial { background: initial; } \
+                   .box.unset { background: unset; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let parent_info = element("div", None, &["parent"]);
+        let parent = resolver.compute_style(&parent_info, &root, None, &[]);
+        assert_eq!(parent.background_color, Some(rgb8(10, 127, 46)));
+
+        let inherited_info = element("div", None, &["box", "inherit"]);
+        assert!(
+            parse_selector_pattern(".box.inherit")
+                .expect("compound class selector")
+                .matches(&inherited_info, std::slice::from_ref(&parent_info))
+        );
+        let parsed = crate::css_native::parse_declaration_block("background: inherit")
+            .expect("background declaration");
+        let (parsed_delta, _) = style_from_native_declarations(
+            &parsed,
+            Size {
+                width: Pt::ZERO,
+                height: Pt::ZERO,
+            },
+        );
+        assert_eq!(
+            parsed_delta.background_reset,
+            Some(CascadeWideKeyword::Inherit)
+        );
+
+        let inherited = resolver.compute_style(
+            &inherited_info,
+            &parent,
+            None,
+            std::slice::from_ref(&parent_info),
+        );
+        assert_eq!(inherited.background_color, Some(rgb8(10, 127, 46)));
+
+        for keyword in ["initial", "unset"] {
+            let style = resolver.compute_style(
+                &element("div", None, &["box", keyword]),
+                &parent,
+                None,
+                std::slice::from_ref(&parent_info),
+            );
+            assert_eq!(style.background_color, None, "background: {keyword}");
+        }
+    }
+
+    #[test]
+    fn all_initial_respects_declaration_order_and_preserves_exclusions() {
+        let css = ".before { --w: 20px; direction: rtl; background: green; padding: 12px; \
+                              all: initial; display: block; width: var(--w); } \
+                   .after { all: initial; display: block; width: 20px; height: 10px; \
+                             background: green; padding: 4px; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+
+        let before = resolver.compute_style(&element("div", None, &["before"]), &root, None, &[]);
+        assert_eq!(before.background_color, None);
+        assert_eq!(before.padding, EdgeSizes::zero());
+        assert_eq!(before.direction, DirectionMode::Rtl);
+        assert_eq!(before.width, LengthSpec::Absolute(Pt::from_f32(15.0)));
+
+        let after = resolver.compute_style(&element("div", None, &["after"]), &root, None, &[]);
+        assert_eq!(after.background_color, Some(rgb8(0, 128, 0)));
+        assert_eq!(after.padding.top, LengthSpec::Absolute(Pt::from_f32(3.0)));
+    }
+
+    #[test]
+    fn invalid_computed_var_does_not_reveal_lower_cascade_value() {
+        let css = ".target { width: 150px; } .stage .target { width: var(--missing-width); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let stage_info = element("div", None, &["stage"]);
+        let stage = resolver.compute_style(&stage_info, &root, None, &[]);
+        let target = resolver.compute_style(
+            &element("div", None, &["target"]),
+            &stage,
+            None,
+            std::slice::from_ref(&stage_info),
+        );
+        assert_eq!(target.width, LengthSpec::Auto);
     }
 
     #[test]
@@ -32050,9 +35915,10 @@ mod tests {
         match style.background_paint {
             Some(BackgroundPaint::ConicGradient {
                 start_angle_deg,
-                center_x_pct,
-                center_y_pct,
+                center_x: GradientPosition::Percent(center_x_pct),
+                center_y: GradientPosition::Percent(center_y_pct),
                 stops,
+                ..
             }) => {
                 assert!((start_angle_deg - 90.0).abs() < 0.01);
                 assert!((center_x_pct - 0.25).abs() < 0.01);
@@ -32127,7 +35993,9 @@ mod tests {
         let style = resolver.compute_style(&info, &root, None, &[]);
         assert_eq!(style.background_color, Some(Color::rgb(0.0, 1.0, 0.0)));
         match style.background_paint {
-            Some(BackgroundPaint::LinearGradient { angle_deg, stops }) => {
+            Some(BackgroundPaint::LinearGradient {
+                angle_deg, stops, ..
+            }) => {
                 assert!((angle_deg - 90.0).abs() < 0.01);
                 assert_eq!(stops.len(), 2);
                 assert!((stops[0].color.r - 1.0).abs() < 0.01);
@@ -32162,6 +36030,32 @@ mod tests {
     }
 
     #[test]
+    fn linear_gradient_two_position_length_stops_keep_authored_colors_and_geometry() {
+        match parse_linear_gradient_str(
+            "linear-gradient(to bottom, #c62828 0 18px, #ffd54f 18px 24px)",
+        ) {
+            Some(BackgroundPaint::LinearGradient {
+                stops,
+                stop_positions: Some(positions),
+                ..
+            }) => {
+                assert_eq!(stops.len(), 4);
+                assert_eq!(positions.len(), 4);
+                assert_eq!(
+                    stops[0].color,
+                    Color::rgb(198.0 / 255.0, 40.0 / 255.0, 40.0 / 255.0)
+                );
+                assert_eq!(stops[1].color, stops[0].color);
+                assert_eq!(stops[2].color, Color::rgb(1.0, 213.0 / 255.0, 79.0 / 255.0));
+                assert_eq!(stops[3].color, stops[2].color);
+                assert_eq!(positions[1].expect("18px stop").length, Pt::from_f32(13.5));
+                assert_eq!(positions[3].expect("24px stop").length, Pt::from_f32(18.0));
+            }
+            other => panic!("expected geometry-aware linear gradient, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn background_image_multiple_layers_and_longhands_resolve() {
         let resolver = StyleResolver::new(
             ".x { background-image: linear-gradient(red, red), linear-gradient(blue, blue); background-size: 50% 100%, 100% 100%; background-position: left top, left top; background-repeat: no-repeat, no-repeat; }",
@@ -32182,6 +36076,42 @@ mod tests {
         assert_eq!(
             style.background_repeats[0].y,
             BackgroundRepeatMode::NoRepeat
+        );
+    }
+
+    #[test]
+    fn background_image_none_preserves_layer_alignment() {
+        let resolver = StyleResolver::new(
+            ".x { background-image: none, url(\"data:image/png;base64,AAAA\"); background-size: 10px 10px, 30px 30px; background-repeat: repeat, no-repeat; }",
+        );
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("section", None, &["x"]), &root, None, &[]);
+
+        assert_eq!(style.background_paints.len(), 2);
+        assert!(matches!(style.background_paints[0], BackgroundPaint::None));
+        assert!(matches!(
+            style.background_paints[1],
+            BackgroundPaint::Image { .. }
+        ));
+        assert_eq!(style.background_sizes.len(), 2);
+        assert_eq!(style.background_repeats.len(), 2);
+    }
+
+    #[test]
+    fn background_position_xy_longhands_merge_axes() {
+        let resolver =
+            StyleResolver::new(".x { background-position-x: 80px; background-position-y: 30px; }");
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("section", None, &["x"]), &root, None, &[]);
+
+        assert_eq!(style.background_positions.len(), 1);
+        assert_eq!(
+            style.background_positions[0].x,
+            BackgroundPositionComponent::Start(LengthSpec::Absolute(Pt::from_f32(60.0)))
+        );
+        assert_eq!(
+            style.background_positions[0].y,
+            BackgroundPositionComponent::Start(LengthSpec::Absolute(Pt::from_f32(22.5)))
         );
     }
 
@@ -32464,8 +36394,8 @@ mod tests {
         );
         match direct {
             Some(BackgroundPaint::RadialGradient {
-                center_x_pct,
-                center_y_pct,
+                center_x: GradientPosition::Percent(center_x_pct),
+                center_y: GradientPosition::Percent(center_y_pct),
                 ..
             }) => {
                 assert!(
@@ -32487,9 +36417,10 @@ mod tests {
         let style = resolver.compute_style(&info, &root, None, &[]);
         match style.background_paint {
             Some(BackgroundPaint::RadialGradient {
-                center_x_pct,
-                center_y_pct,
+                center_x: GradientPosition::Percent(center_x_pct),
+                center_y: GradientPosition::Percent(center_y_pct),
                 stops,
+                ..
             }) => {
                 assert!(
                     (center_x_pct - 0.10).abs() < 0.01,
@@ -32520,9 +36451,10 @@ mod tests {
         let style = resolver.compute_style(&info, &root_style, None, &[root_info]);
         match style.background_paint {
             Some(BackgroundPaint::RadialGradient {
-                center_x_pct,
-                center_y_pct,
+                center_x: GradientPosition::Percent(center_x_pct),
+                center_y: GradientPosition::Percent(center_y_pct),
                 stops,
+                ..
             }) => {
                 assert!(
                     (center_x_pct - 0.10).abs() < 0.01,
@@ -32626,6 +36558,19 @@ mod tests {
     }
 
     #[test]
+    fn grid_auto_tracks_and_flow_are_retained() {
+        let resolver = StyleResolver::new(
+            ".menu { grid-auto-columns: 40px 60px; grid-auto-rows: 25px; \
+             grid-auto-flow: column dense; }",
+        );
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("div", None, &["menu"]), &root, None, &[]);
+        assert_eq!(style.grid_auto_column_tracks.len(), 2);
+        assert_eq!(style.grid_auto_row_tracks.len(), 1);
+        assert_eq!(style.grid_auto_flow, GridAutoFlowMode::ColumnDense);
+    }
+
+    #[test]
     fn two_keyword_display_syntax_preserves_inner_layout_mode() {
         let resolver = StyleResolver::new(
             ".bf { display: block flex; } .if { display: inline flex; } \
@@ -32675,6 +36620,62 @@ mod tests {
     }
 
     #[test]
+    fn grid_auto_repeat_retains_its_mode_and_track_pattern() {
+        let resolver = StyleResolver::new(concat!(
+            ".fill{grid-template-columns:repeat(auto-fill,80px)}",
+            ".fit{grid-template-columns:repeat(auto-fit,minmax(80px,1fr))}"
+        ));
+        let root = resolver.default_style();
+        let fill = resolver.compute_style(&element("div", None, &["fill"]), &root, None, &[]);
+        let fit = resolver.compute_style(&element("div", None, &["fit"]), &root, None, &[]);
+
+        assert_eq!(
+            fill.grid_column_auto_repeat
+                .as_ref()
+                .map(|repeat| repeat.mode),
+            Some(GridAutoRepeatMode::Fill)
+        );
+        assert_eq!(fill.grid_column_auto_repeat.unwrap().tracks.len(), 1);
+        assert_eq!(
+            fit.grid_column_auto_repeat
+                .as_ref()
+                .map(|repeat| repeat.mode),
+            Some(GridAutoRepeatMode::Fit)
+        );
+        assert_eq!(fit.grid_column_auto_repeat.unwrap().tracks.len(), 1);
+    }
+
+    #[test]
+    fn grid_track_functions_resolve_nested_custom_lengths() {
+        let resolver = StyleResolver::new(concat!(
+            ".probe{grid-template-columns:fit-content(var(--limit)) minmax(0,1fr)}",
+            ".percent{--limit:30%}.calc{--limit:calc(20% + 36px)}"
+        ));
+        let root = resolver.default_style();
+        let percent = resolver.compute_style(
+            &element("div", None, &["probe", "percent"]),
+            &root,
+            None,
+            &[],
+        );
+        let calc =
+            resolver.compute_style(&element("div", None, &["probe", "calc"]), &root, None, &[]);
+
+        assert_eq!(percent.grid_column_tracks.len(), 2);
+        assert!(matches!(
+            percent.grid_column_tracks[0].max,
+            GridTrackBreadth::FitContent(LengthSpec::Percent(value)) if (value - 0.3).abs() < 1.0e-6
+        ));
+        assert_eq!(calc.grid_column_tracks.len(), 2);
+        assert!(matches!(
+            calc.grid_column_tracks[0].max,
+            GridTrackBreadth::FitContent(LengthSpec::Calc(value))
+                if (value.percent - 0.2).abs() < 1.0e-6
+                    && (value.abs.to_f32() - 27.0).abs() < 0.01
+        ));
+    }
+
+    #[test]
     fn grid_fixed_tracks_retain_authored_lengths() {
         let resolver = StyleResolver::new(
             ".menu { display: grid; grid-template-columns: 100px 100px; grid-template-rows: repeat(2, 100px); }",
@@ -32690,12 +36691,14 @@ mod tests {
     #[test]
     fn grid_start_lines_parse_from_longhands_and_shorthands() {
         let resolver = StyleResolver::new(
-            ".a{grid-column-start:2;grid-row-start:3}.b{grid-column:4/6;grid-row:5/8}.c{grid-area:7/8/span 2/span 1}",
+            ".a{grid-column-start:2;grid-row-start:3}.b{grid-column:4/6;grid-row:5/8}.c{grid-area:7/8/span 2/span 1}.d{grid-column:-3/-1;grid-row:span 2/4}.e{grid-column:2 content/span 3 content}",
         );
         let root = resolver.default_style();
         let a = resolver.compute_style(&element("div", None, &["a"]), &root, None, &[]);
         let b = resolver.compute_style(&element("div", None, &["b"]), &root, None, &[]);
         let c = resolver.compute_style(&element("div", None, &["c"]), &root, None, &[]);
+        let d = resolver.compute_style(&element("div", None, &["d"]), &root, None, &[]);
+        let e = resolver.compute_style(&element("div", None, &["e"]), &root, None, &[]);
 
         assert_eq!(a.grid_column_start, Some(2));
         assert_eq!(a.grid_row_start, Some(3));
@@ -32703,6 +36706,117 @@ mod tests {
         assert_eq!(b.grid_row_start, Some(5));
         assert_eq!(c.grid_row_start, Some(7));
         assert_eq!(c.grid_column_start, Some(8));
+        assert_eq!(b.grid_column_line_start, GridLineSpec::Line(4));
+        assert_eq!(b.grid_column_line_end, GridLineSpec::Line(6));
+        assert_eq!(b.grid_row_line_start, GridLineSpec::Line(5));
+        assert_eq!(b.grid_row_line_end, GridLineSpec::Line(8));
+        assert_eq!(c.grid_row_line_end, GridLineSpec::Span(2));
+        assert_eq!(c.grid_column_line_end, GridLineSpec::Span(1));
+        assert_eq!(d.grid_column_line_start, GridLineSpec::Line(-3));
+        assert_eq!(d.grid_column_line_end, GridLineSpec::Line(-1));
+        assert_eq!(d.grid_row_line_start, GridLineSpec::Span(2));
+        assert_eq!(d.grid_row_line_end, GridLineSpec::Line(4));
+        assert_eq!(
+            e.grid_column_line_start,
+            GridLineSpec::NamedOccurrence {
+                occurrence: 2,
+                name: "content".to_string(),
+            }
+        );
+        assert_eq!(
+            e.grid_column_line_end,
+            GridLineSpec::SpanNamed {
+                count: 3,
+                name: "content".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn grid_track_line_names_expand_repeat_segments() {
+        let resolver = StyleResolver::new(
+            ".menu{display:grid;grid-template-columns:[outer] 20px repeat(2,[content] 1fr [gutter] 10px) [outer-end]}",
+        );
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("div", None, &["menu"]), &root, None, &[]);
+
+        assert_eq!(style.grid_column_tracks.len(), 5);
+        assert_eq!(style.grid_column_line_names.len(), 6);
+        assert_eq!(style.grid_column_line_names[0], vec!["outer"]);
+        assert_eq!(style.grid_column_line_names[1], vec!["content"]);
+        assert_eq!(style.grid_column_line_names[2], vec!["gutter"]);
+        assert_eq!(style.grid_column_line_names[3], vec!["content"]);
+        assert_eq!(style.grid_column_line_names[4], vec!["gutter"]);
+        assert_eq!(style.grid_column_line_names[5], vec!["outer-end"]);
+    }
+
+    #[test]
+    fn grid_template_areas_require_equal_rectangular_rows() {
+        let resolver = StyleResolver::new(concat!(
+            ".valid{grid-template-areas:'header header' 'main side'}",
+            ".ragged{grid-template-areas:'a a' 'b'}",
+            ".nonrect{grid-template-areas:'a a' 'a b' 'a a'}"
+        ));
+        let root = resolver.default_style();
+        let valid = resolver.compute_style(&element("div", None, &["valid"]), &root, None, &[]);
+        let ragged = resolver.compute_style(&element("div", None, &["ragged"]), &root, None, &[]);
+        let nonrect = resolver.compute_style(&element("div", None, &["nonrect"]), &root, None, &[]);
+
+        assert_eq!(valid.grid_template_areas.len(), 2);
+        assert_eq!(valid.grid_template_areas[0].len(), 2);
+        assert_eq!(valid.grid_template_areas[0][0].as_deref(), Some("header"));
+        assert_eq!(valid.grid_template_areas[1][1].as_deref(), Some("side"));
+        assert!(ragged.grid_template_areas.is_empty());
+        assert!(nonrect.grid_template_areas.is_empty());
+    }
+
+    #[test]
+    fn grid_template_shorthand_sets_areas_and_both_track_axes() {
+        let resolver = StyleResolver::new(
+            ".grid{display:grid;grid-template:'head head' 50px 'side main' 70px / 80px 120px}",
+        );
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("div", None, &["grid"]), &root, None, &[]);
+
+        assert_eq!(style.grid_column_tracks.len(), 2);
+        assert_eq!(style.grid_row_tracks.len(), 2);
+        assert_eq!(
+            style.grid_row_tracks,
+            vec![
+                GridTrackSize::fixed(LengthSpec::Absolute(Pt::from_f32(37.5))),
+                GridTrackSize::fixed(LengthSpec::Absolute(Pt::from_f32(52.5))),
+            ]
+        );
+        assert_eq!(style.grid_template_areas.len(), 2);
+        assert_eq!(style.grid_template_areas[0][0].as_deref(), Some("head"));
+        assert_eq!(style.grid_template_areas[1][1].as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn grid_shorthand_supports_auto_flow_rows_and_resets_implicit_properties() {
+        let resolver = StyleResolver::new(concat!(
+            ".auto{grid:auto-flow 60px/70px 70px}",
+            ".reset{grid-auto-flow:column;grid-auto-rows:99px;",
+            "grid-auto-columns:88px;grid:60px 60px/70px 70px}"
+        ));
+        let root = resolver.default_style();
+        let auto = resolver.compute_style(&element("div", None, &["auto"]), &root, None, &[]);
+        let reset = resolver.compute_style(&element("div", None, &["reset"]), &root, None, &[]);
+
+        assert_eq!(auto.grid_auto_flow, GridAutoFlowMode::Row);
+        assert!(auto.grid_row_tracks.is_empty());
+        assert_eq!(auto.grid_column_tracks.len(), 2);
+        assert_eq!(auto.grid_auto_row_tracks.len(), 1);
+        assert_eq!(
+            auto.grid_auto_row_tracks[0],
+            GridTrackSize::fixed(LengthSpec::Absolute(Pt::from_f32(45.0)))
+        );
+
+        assert_eq!(reset.grid_auto_flow, GridAutoFlowMode::Row);
+        assert_eq!(reset.grid_row_tracks.len(), 2);
+        assert_eq!(reset.grid_column_tracks.len(), 2);
+        assert!(reset.grid_auto_row_tracks.is_empty());
+        assert!(reset.grid_auto_column_tracks.is_empty());
     }
 
     #[test]
@@ -32892,6 +37006,52 @@ mod tests {
         let child_info = element("div", None, &["display"]);
         let child_style = resolver.compute_style(&child_info, &root_style, None, &[root_info]);
         assert!((child_style.font_size.to_f32() - 21.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn layout_lengths_resolve_viewport_and_dynamic_viewport_units() {
+        let css = ".vw { width: 30vw; height: 20vh; } \
+                   .minmax { width: 40vmin; height: 8vmax; } \
+                   .small { width: 50svw; height: 25svh; }";
+        let viewport = Size {
+            width: Pt::from_f32(228.0),
+            height: Pt::from_f32(150.0),
+        };
+        let resolver = StyleResolver::new_with_debug_and_viewport(css, None, Some(viewport));
+        let root = resolver.default_style();
+        let expected = [
+            ("vw", 68.4, 30.0),
+            ("minmax", 60.0, 18.24),
+            ("small", 114.0, 37.5),
+        ];
+        for (class_name, width, height) in expected {
+            let style =
+                resolver.compute_style(&element("div", None, &[class_name]), &root, None, &[]);
+            assert_eq!(style.width, LengthSpec::Absolute(Pt::from_f32(width)));
+            assert_eq!(style.height, LengthSpec::Absolute(Pt::from_f32(height)));
+        }
+    }
+
+    #[test]
+    fn negative_css_math_width_is_valid_and_clamps_during_layout() {
+        let resolver = StyleResolver::new_with_debug_and_viewport(
+            ".x { width: calc(50vw - 280px); }",
+            None,
+            Some(Size {
+                width: Pt::from_f32(360.0),
+                height: Pt::from_f32(468.0),
+            }),
+        );
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(
+            style
+                .width
+                .resolve_width(Pt::from_f32(315.0), style.font_size, style.root_font_size)
+                .max(Pt::ZERO),
+            Pt::ZERO
+        );
     }
 
     #[test]
@@ -33475,6 +37635,119 @@ mod tests {
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
         assert_eq!(style.width, LengthSpec::Absolute(Pt::from_f32(15.0)));
+    }
+
+    #[test]
+    fn css_math_round_mod_trig_and_hypot_resolve_to_lengths() {
+        let css = ".round { width: round(down, 137px, 20px); } \
+                   .mod { width: calc(100px + mod(50px, 30px)); } \
+                   .sin { width: calc(100px + 40px * sin(30deg)); } \
+                   .hypot { width: hypot(72px, 96px); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        for class_name in ["round", "mod", "sin", "hypot"] {
+            let info = element("div", None, &[class_name]);
+            let style = resolver.compute_style(&info, &root, None, &[]);
+            assert_eq!(
+                style.width,
+                LengthSpec::Absolute(Pt::from_f32(90.0)),
+                "{class_name}"
+            );
+        }
+    }
+
+    #[test]
+    fn css_typed_arithmetic_cancels_dimensions_before_used_value_resolution() {
+        let css = ".length { width: calc(40px * 3px / 1px); } \
+                   .angle { width: calc(60px * 2deg / 1deg); } \
+                   .time { width: calc(6px * 1s / 50ms); } \
+                   .frequency { width: calc(30px * 2kHz / 500Hz); } \
+                   .resolution { width: calc(60px * 192dpi / 1dppx); } \
+                   .flex { width: calc(40px * 3fr / 1fr); } \
+                   .font { width: calc(240px / 2em * 1em); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        for class_name in [
+            "length",
+            "angle",
+            "time",
+            "frequency",
+            "resolution",
+            "flex",
+            "font",
+        ] {
+            let info = element("div", None, &[class_name]);
+            let style = resolver.compute_style(&info, &root, None, &[]);
+            assert_eq!(
+                style.width,
+                LengthSpec::Absolute(Pt::from_f32(90.0)),
+                "{class_name}"
+            );
+        }
+    }
+
+    #[test]
+    fn font_relative_layout_units_bind_to_computed_line_and_font_metrics() {
+        let css = "html { font-size: 16px; line-height: 24px; } \
+                   .ex { font-size: 20px; line-height: 30px; width: 2ex; } \
+                   .ch { font-size: 20px; line-height: 30px; width: 2ch; } \
+                   .cap { font-size: 20px; line-height: 30px; width: 2cap; } \
+                   .lh { font-size: 20px; line-height: 30px; width: 2lh; } \
+                   .rlh { font-size: 20px; line-height: 30px; width: 2rlh; }";
+        let resolver = StyleResolver::new(css);
+        let initial = resolver.default_style();
+        let mut root_info = element("html", None, &[]);
+        root_info.is_root = true;
+        let root = resolver.compute_style(&root_info, &initial, None, &[]);
+        let expected = [15.0, 18.0, 21.0, 45.0, 36.0];
+        for (class_name, expected) in ["ex", "ch", "cap", "lh", "rlh"].into_iter().zip(expected) {
+            let info = element("div", None, &[class_name]);
+            let style = resolver.compute_style(&info, &root, None, &[root_info.clone()]);
+            assert_eq!(
+                style.width,
+                LengthSpec::Absolute(Pt::from_f32(expected)),
+                "{class_name}"
+            );
+        }
+    }
+
+    #[test]
+    fn typed_font_relative_dimensions_cancel_in_css_math() {
+        let resolver = StyleResolver::new(".x { width: calc(120px / 2ch * 1ch); }");
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        assert_eq!(style.width, LengthSpec::Absolute(Pt::from_f32(45.0)));
+    }
+
+    #[test]
+    fn css_comparison_math_defers_mixed_percentage_bounds_until_layout() {
+        let css = ".a { width: min(180px, 50%); } \
+                   .b { width: max(120px, 35%); } \
+                   .c { width: clamp(100px, 50%, 160px); } \
+                   .d { width: clamp(100px, 25%, 160px); } \
+                   .e { width: min(calc(50% - 20px), 220px); } \
+                   .f { width: max(min(50%, 180px), 120px); } \
+                   .g { width: calc(max(30%, 100px) + 20px); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let basis = Pt::from_f32(300.0);
+        let expected = [135.0, 105.0, 120.0, 75.0, 135.0, 135.0, 105.0];
+        for (class_name, expected) in ["a", "b", "c", "d", "e", "f", "g"]
+            .into_iter()
+            .zip(expected)
+        {
+            let info = element("div", None, &[class_name]);
+            let style = resolver.compute_style(&info, &root, None, &[]);
+            assert_eq!(
+                style
+                    .width
+                    .resolve_width(basis, style.font_size, style.root_font_size),
+                Pt::from_f32(expected),
+                "{class_name}: {:?}",
+                style.width
+            );
+        }
     }
 
     #[test]
@@ -34425,6 +38698,7 @@ mod tests {
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
         assert_eq!(style.align_items, AlignItemsMode::FlexEnd);
+        assert_eq!(style.justify_items, AlignItemsMode::Center);
     }
 
     #[test]
@@ -34435,6 +38709,7 @@ mod tests {
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
         assert_eq!(style.align_items, AlignItemsMode::Center);
+        assert_eq!(style.justify_items, AlignItemsMode::Center);
     }
 
     #[test]
@@ -34455,6 +38730,7 @@ mod tests {
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
         assert_eq!(style.align_self, AlignSelfMode::FlexEnd);
+        assert_eq!(style.justify_self, AlignSelfMode::Center);
     }
 
     #[test]
@@ -34812,7 +39088,7 @@ mod tests {
 
     #[test]
     fn vertical_align_keywords_and_vars_resolve() {
-        let css = ".baseline { vertical-align: baseline; } .sub { vertical-align: sub; } .super { vertical-align: super; } .texttop { vertical-align: text-top; } .middle { --va: middle; vertical-align: var(--va); } .textbottom { vertical-align: var(--missing, text-bottom); } .initial { vertical-align: initial; }";
+        let css = ".baseline { vertical-align: baseline; } .sub { vertical-align: sub; } .super { vertical-align: super; } .texttop { vertical-align: text-top; } .middle { --va: middle; vertical-align: var(--va); } .textbottom { vertical-align: var(--missing, text-bottom); } .length { vertical-align: 18px; } .percent { vertical-align: 50%; } .varlength { --va: 1.5em; vertical-align: var(--va); } .initial { vertical-align: initial; }";
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
 
@@ -34851,6 +39127,24 @@ mod tests {
                 .compute_style(&element("span", None, &["textbottom"]), &root, None, &[])
                 .vertical_align,
             VerticalAlignMode::TextBottom
+        );
+        assert_eq!(
+            resolver
+                .compute_style(&element("span", None, &["length"]), &root, None, &[])
+                .vertical_align,
+            VerticalAlignMode::Length(LengthSpec::Absolute(Pt::from_f32(13.5)))
+        );
+        assert_eq!(
+            resolver
+                .compute_style(&element("span", None, &["percent"]), &root, None, &[])
+                .vertical_align,
+            VerticalAlignMode::Length(LengthSpec::Percent(0.5))
+        );
+        assert_eq!(
+            resolver
+                .compute_style(&element("span", None, &["varlength"]), &root, None, &[])
+                .vertical_align,
+            VerticalAlignMode::Length(LengthSpec::Em(1.5))
         );
         assert_eq!(
             resolver
@@ -36729,6 +41023,37 @@ mod tests {
     }
 
     #[test]
+    fn border_rgba_preserves_source_color_and_per_edge_alpha() {
+        let resolver = StyleResolver::new(
+            ".uniform { border: 20px solid rgba(0, 0, 0, .35); } .sides { border-style: solid; border-color: rgba(213, 0, 0, .58) rgba(0, 121, 107, .58) rgba(41, 98, 255, .58) rgba(255, 109, 0, .58); }",
+        );
+        let root = resolver.default_style();
+        let uniform = resolver.compute_style(&element("div", None, &["uniform"]), &root, None, &[]);
+        let sides = resolver.compute_style(&element("div", None, &["sides"]), &root, None, &[]);
+
+        assert_eq!(uniform.border_top_color, Some(Color::BLACK));
+        assert!((uniform.border_top_alpha - 0.35).abs() < 1.0e-6);
+        assert_eq!(
+            sides.border_top_color,
+            Some(Color::rgb(213.0 / 255.0, 0.0, 0.0))
+        );
+        assert_eq!(
+            sides.border_right_color,
+            Some(Color::rgb(0.0, 121.0 / 255.0, 107.0 / 255.0))
+        );
+        assert!(
+            [
+                sides.border_top_alpha,
+                sides.border_right_alpha,
+                sides.border_bottom_alpha,
+                sides.border_left_alpha,
+            ]
+            .into_iter()
+            .all(|alpha| (alpha - 0.58).abs() < 1.0e-6)
+        );
+    }
+
+    #[test]
     fn border_width_keywords_match_css_pixel_contract() {
         let css = ".x { border-style: solid; border-width: thin medium thick 8px; }";
         let resolver = StyleResolver::new(css);
@@ -36849,6 +41174,79 @@ mod tests {
             style.border_radius.vertical.bottom_left,
             LengthSpec::Absolute(Pt::from_f32(30.0))
         );
+    }
+
+    #[test]
+    fn border_radius_invalid_unitless_value_preserves_prior_declaration() {
+        let css = ".x { border-radius: 32px; border-radius: 12; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+
+        assert_eq!(
+            style.border_radius.horizontal.top_left,
+            LengthSpec::Absolute(Pt::from_f32(24.0))
+        );
+        assert_eq!(style.border_radius.horizontal, style.border_radius.vertical);
+    }
+
+    #[test]
+    fn border_radius_corner_longhands_update_only_the_target_corners() {
+        let css = ".x { border-radius: 4px; border-top-left-radius: 50px; border-bottom-right-radius: 30px 20px; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+
+        assert_eq!(
+            style.border_radius.horizontal.top_left,
+            LengthSpec::Absolute(Pt::from_f32(37.5))
+        );
+        assert_eq!(
+            style.border_radius.horizontal.bottom_right,
+            LengthSpec::Absolute(Pt::from_f32(22.5))
+        );
+        assert_eq!(
+            style.border_radius.vertical.bottom_right,
+            LengthSpec::Absolute(Pt::from_f32(15.0))
+        );
+        assert_eq!(
+            style.border_radius.horizontal.top_right,
+            LengthSpec::Absolute(Pt::from_f32(3.0))
+        );
+    }
+
+    #[test]
+    fn logical_border_radius_longhands_follow_writing_mode_and_declaration_order() {
+        let css = ".x { writing-mode: vertical-lr; border-start-start-radius: 24px 14px; border-top-left-radius: 7px; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+
+        assert_eq!(
+            style.border_radius.horizontal.top_left,
+            LengthSpec::Absolute(Pt::from_f32(5.25))
+        );
+        assert_eq!(
+            style.border_radius.vertical.top_left,
+            LengthSpec::Absolute(Pt::from_f32(5.25))
+        );
+    }
+
+    #[test]
+    fn background_image_set_selects_the_one_x_candidate() {
+        let css = ".x { background-image: image-set(url(\"low.png\") 1x, url(\"high.png\") 2x); }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let info = element("div", None, &["x"]);
+        let style = resolver.compute_style(&info, &root, None, &[]);
+
+        assert!(matches!(
+            style.background_paints.first(),
+            Some(BackgroundPaint::Image { source }) if source == "low.png"
+        ));
     }
 
     #[test]
@@ -37000,6 +41398,52 @@ mod tests {
         assert_eq!(
             style.border_style.left,
             BorderLineStyle::Style(OutlineLineStyle::Solid)
+        );
+    }
+
+    #[test]
+    fn logical_and_physical_border_longhands_share_declaration_order() {
+        let css = ".x { border: 8px solid #d9dee3; border-inline-start: 14px solid #e63946; border-left-color: #315fce; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
+
+        assert_eq!(
+            style.border_width.left,
+            LengthSpec::Absolute(Pt::from_f32(10.5))
+        );
+        assert_eq!(
+            style.border_left_color,
+            Some(Color::rgb(49.0 / 255.0, 95.0 / 255.0, 206.0 / 255.0))
+        );
+        assert_eq!(
+            style.border_top_color,
+            Some(Color::rgb(217.0 / 255.0, 222.0 / 255.0, 227.0 / 255.0))
+        );
+    }
+
+    #[test]
+    fn sideways_lr_maps_inline_start_to_bottom_for_ltr_content() {
+        let css = ".x { writing-mode: sideways-lr; border-block-start: 13px solid #f4a261; border-inline-start: 11px solid #264653; border-start-start-radius: 24px 14px; }";
+        let resolver = StyleResolver::new(css);
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
+
+        assert_eq!(
+            style.border_width.left,
+            LengthSpec::Absolute(Pt::from_f32(9.75))
+        );
+        assert_eq!(
+            style.border_width.bottom,
+            LengthSpec::Absolute(Pt::from_f32(8.25))
+        );
+        assert_eq!(
+            style.border_radius.horizontal.bottom_left,
+            LengthSpec::Absolute(Pt::from_f32(18.0))
+        );
+        assert_eq!(
+            style.border_radius.vertical.bottom_left,
+            LengthSpec::Absolute(Pt::from_f32(10.5))
         );
     }
 
@@ -37260,6 +41704,94 @@ mod tests {
         let legacy_invalid =
             resolver.compute_style(&element("div", None, &["legacy-invalid"]), &root, None, &[]);
         assert_eq!(legacy_invalid.pagination.break_inside, BreakInside::Avoid);
+    }
+
+    #[test]
+    fn box_decoration_break_parses_clone_slice_and_webkit_alias() {
+        let resolver = StyleResolver::new(
+            ".clone { box-decoration-break: clone; } \
+             .slice { box-decoration-break: slice; } \
+             .webkit { -webkit-box-decoration-break: clone; }",
+        );
+        let root = resolver.default_style();
+
+        let clone = resolver.compute_style(&element("div", None, &["clone"]), &root, None, &[]);
+        assert_eq!(clone.box_decoration_break, BoxDecorationBreak::Clone);
+        let slice = resolver.compute_style(&element("div", None, &["slice"]), &root, None, &[]);
+        assert_eq!(slice.box_decoration_break, BoxDecorationBreak::Slice);
+        let webkit = resolver.compute_style(&element("div", None, &["webkit"]), &root, None, &[]);
+        assert_eq!(webkit.box_decoration_break, BoxDecorationBreak::Clone);
+    }
+
+    #[test]
+    fn border_image_shorthand_parses_nine_slice_components() {
+        let resolver = StyleResolver::new(
+            ".x { border: 8px solid transparent; border-image: linear-gradient(to right, red, blue) 10% 20% fill / 3 4px / .25em 2 round repeat; }",
+        );
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
+
+        assert!(matches!(
+            style.border_image.source,
+            Some(BackgroundPaint::LinearGradient { .. })
+        ));
+        assert_eq!(
+            style.border_image.slice,
+            [
+                BorderImageSliceValue::Percent(0.1),
+                BorderImageSliceValue::Percent(0.2),
+                BorderImageSliceValue::Percent(0.1),
+                BorderImageSliceValue::Percent(0.2),
+            ]
+        );
+        assert!(style.border_image.fill);
+        assert_eq!(
+            style.border_image.width,
+            [
+                BorderImageWidthValue::Number(3.0),
+                BorderImageWidthValue::Length(LengthSpec::Absolute(Pt::from_f32(3.0))),
+                BorderImageWidthValue::Number(3.0),
+                BorderImageWidthValue::Length(LengthSpec::Absolute(Pt::from_f32(3.0))),
+            ]
+        );
+        assert!(matches!(
+            style.border_image.outset[0],
+            BorderImageOutsetValue::Length(LengthSpec::Em(value)) if (value - 0.25).abs() < 1.0e-6
+        ));
+        assert_eq!(
+            style.border_image.outset[1],
+            BorderImageOutsetValue::Number(2.0)
+        );
+        assert_eq!(style.border_image.repeat_x, BorderImageRepeatMode::Round);
+        assert_eq!(style.border_image.repeat_y, BorderImageRepeatMode::Repeat);
+    }
+
+    #[test]
+    fn border_shorthand_resets_border_image_before_later_source_longhand() {
+        let resolver = StyleResolver::new(
+            ".x { border-image: linear-gradient(red, blue) 12 / 5 / 3 round; border: 10px solid #123; border-image-source: linear-gradient(orange, green); }",
+        );
+        let root = resolver.default_style();
+        let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
+
+        assert!(matches!(
+            style.border_image.source,
+            Some(BackgroundPaint::LinearGradient { .. })
+        ));
+        assert_eq!(
+            style.border_image.slice,
+            [BorderImageSliceValue::Percent(1.0); 4]
+        );
+        assert_eq!(
+            style.border_image.width,
+            [BorderImageWidthValue::Number(1.0); 4]
+        );
+        assert_eq!(
+            style.border_image.outset,
+            [BorderImageOutsetValue::Number(0.0); 4]
+        );
+        assert_eq!(style.border_image.repeat_x, BorderImageRepeatMode::Stretch);
+        assert_eq!(style.border_image.repeat_y, BorderImageRepeatMode::Stretch);
     }
 
     #[test]

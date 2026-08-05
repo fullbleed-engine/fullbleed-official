@@ -126,6 +126,14 @@ def test_to_html_dispatches_for_element_and_document() -> None:
     assert node.to_html() == "<div>hello</div>"
 
 
+def test_to_html_serializes_html_void_elements_without_end_tags() -> None:
+    assert to_html(el("br")) == "<br>"
+    assert to_html(el("img", src="chart.png", alt="Quarterly chart")) == (
+        '<img src="chart.png" alt="Quarterly chart">'
+    )
+    assert to_html(el("WBR")) == "<WBR>"
+
+
 def test_document_artifact_emit_artifacts_writes_html_css_with_doc_semantics(tmp_path: Path) -> None:
     @Document(title='Emit "Doc" <A&B>', bootstrap=False, lang="en-US")
     def app() -> object:

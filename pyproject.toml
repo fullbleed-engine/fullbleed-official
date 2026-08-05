@@ -5,7 +5,7 @@ backend-path = ["build_backend"]
 
 [project]
 name = "fullbleed"
-version = "2.1.0"
+version = "2.2.0"
 description = "Deterministic static HTML/CSS-to-PDF renderer built in Rust"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -440,6 +440,7 @@ pub enum Shading {
         y1: f32,
         r1: f32,
         stops: Vec<ShadingStop>,
+        hard_stops: bool,
     },
 }
 

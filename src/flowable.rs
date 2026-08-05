@@ -44,6 +44,9 @@ fn table_debug_verbose_enabled() -> bool {
 }
 
 fn image_intrinsic_size_pt(source: &str) -> Option<(Pt, Pt)> {
+    if let Some(xml) = crate::assets::load_svg_xml_from_image_source(None, source) {
+        return svg_intrinsic_size_pt(&xml);
+    }
     let bytes = if let Some((_, data)) = parse_image_data_uri(source) {
         data
     } else {
@@ -54,6 +57,46 @@ fn image_intrinsic_size_pt(source: &str) -> Option<(Pt, Pt)> {
         return None;
     }
     Some((css_px_to_pt(width as f32), css_px_to_pt(height as f32)))
+}
+
+fn svg_intrinsic_size_pt(xml: &str) -> Option<(Pt, Pt)> {
+    let document = crate::xml::Document::parse(xml).ok()?;
+    let root = document
+        .descendants()
+        .find(|node| node.tag_name().name().eq_ignore_ascii_case("svg"))?;
+    let dimension = |name: &str| {
+        root.attribute(name).and_then(|raw| {
+            let value = raw
+                .trim()
+                .trim_end_matches("px")
+                .trim()
+                .parse::<f32>()
+                .ok()?;
+            (value.is_finite() && value > 0.0).then_some(css_px_to_pt(value))
+        })
+    };
+    match (dimension("width"), dimension("height")) {
+        (Some(width), Some(height)) => Some((width, height)),
+        _ => {
+            let raw = root
+                .attribute("viewBox")
+                .or_else(|| root.attribute("viewbox"))?;
+            let values = raw
+                .split(|ch: char| ch == ',' || ch.is_ascii_whitespace())
+                .filter(|part| !part.is_empty())
+                .filter_map(|part| part.parse::<f32>().ok())
+                .collect::<Vec<_>>();
+            if values.len() != 4
+                || !values[2].is_finite()
+                || !values[3].is_finite()
+                || values[2] <= 0.0
+                || values[3] <= 0.0
+            {
+                return None;
+            }
+            Some((css_px_to_pt(values[2]), css_px_to_pt(values[3])))
+        }
+    }
 }
 
 fn parse_image_data_uri(uri: &str) -> Option<(String, Vec<u8>)> {
@@ -285,6 +328,12 @@ pub enum BreakInside {
     AvoidRegion,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoxDecorationBreak {
+    Slice,
+    Clone,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Pagination {
     pub break_before: BreakBefore,
@@ -328,6 +377,8 @@ pub enum LengthSpec {
     Em(f32),
     Rem(f32),
     Calc(CalcLength),
+    Clamped(ClampedLength),
+    FontRelative(FontRelativeLength),
     Inherit,
     Initial,
 }
@@ -343,6 +394,10 @@ pub enum GridTrackBreadth {
     Fraction(f32),
     MinContent,
     MaxContent,
+    /// `fit-content(<length-percentage>)` retains both its intrinsic sizing
+    /// behavior and its authored cap until the grid item's contributions are
+    /// available during layout.
+    FitContent(LengthSpec),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -391,6 +446,13 @@ impl GridTrackSize {
             _ => None,
         }
     }
+
+    pub(crate) fn fit_content_limit(self) -> Option<LengthSpec> {
+        match self.max {
+            GridTrackBreadth::FitContent(limit) => Some(limit),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -413,6 +475,50 @@ pub struct CalcLength {
     pub percent: f32,
     pub em: f32,
     pub rem: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClampedLength {
+    pub value: CalcLength,
+    pub min: Option<Pt>,
+    pub max: Option<Pt>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FontRelativeLength {
+    pub base: CalcLength,
+    pub ex: f32,
+    pub ch: f32,
+    pub cap: f32,
+    pub lh: f32,
+    pub rlh: f32,
+}
+
+impl FontRelativeLength {
+    pub fn resolve(self, avail: Pt, font_size: Pt, root_font_size: Pt) -> Pt {
+        self.base.resolve(avail, font_size, root_font_size)
+            + font_size * (self.ex * 0.5)
+            + font_size * (self.ch * 0.5)
+            + font_size * (self.cap * 0.7)
+            + font_size * (self.lh * 1.2)
+            + root_font_size * (self.rlh * 1.2)
+    }
+}
+
+impl ClampedLength {
+    pub fn resolve(self, avail: Pt, font_size: Pt, root_font_size: Pt) -> Pt {
+        let mut value = self.value.resolve(avail, font_size, root_font_size);
+        // CSS clamp ordering gives the minimum precedence when bounds are
+        // inverted: max(MIN, min(VAL, MAX)). Applying the upper bound first
+        // preserves that behavior and also represents nested min()/max().
+        if let Some(maximum) = self.max {
+            value = value.min(maximum);
+        }
+        if let Some(minimum) = self.min {
+            value = value.max(minimum);
+        }
+        value
+    }
 }
 
 impl CalcLength {
@@ -443,6 +549,8 @@ impl LengthSpec {
             LengthSpec::Em(value) => font_size * value,
             LengthSpec::Rem(value) => root_font_size * value,
             LengthSpec::Calc(calc) => calc.resolve(avail_width, font_size, root_font_size),
+            LengthSpec::Clamped(calc) => calc.resolve(avail_width, font_size, root_font_size),
+            LengthSpec::FontRelative(calc) => calc.resolve(avail_width, font_size, root_font_size),
             LengthSpec::Inherit | LengthSpec::Initial => Pt::ZERO,
         };
         value
@@ -460,6 +568,8 @@ impl LengthSpec {
             LengthSpec::Em(value) => font_size * value,
             LengthSpec::Rem(value) => root_font_size * value,
             LengthSpec::Calc(calc) => calc.resolve(avail_height, font_size, root_font_size),
+            LengthSpec::Clamped(calc) => calc.resolve(avail_height, font_size, root_font_size),
+            LengthSpec::FontRelative(calc) => calc.resolve(avail_height, font_size, root_font_size),
             LengthSpec::Inherit | LengthSpec::Initial => Pt::ZERO,
         };
         value
@@ -759,24 +869,124 @@ impl PaintFilterSpec {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BackgroundPaint {
+    None,
     Image {
         source: String,
     },
     LinearGradient {
         angle_deg: f32,
+        repeat: GradientRepeat,
         stops: Vec<ShadingStop>,
+        stop_positions: Option<Vec<Option<GradientStopPosition>>>,
     },
     RadialGradient {
-        center_x_pct: f32,
-        center_y_pct: f32,
+        shape: RadialGradientShape,
+        size: RadialGradientSize,
+        center_x: GradientPosition,
+        center_y: GradientPosition,
+        repeat: GradientRepeat,
         stops: Vec<ShadingStop>,
     },
     ConicGradient {
         start_angle_deg: f32,
-        center_x_pct: f32,
-        center_y_pct: f32,
+        center_x: GradientPosition,
+        center_y: GradientPosition,
+        repeat: GradientRepeat,
         stops: Vec<ShadingStop>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GradientRepeat {
+    None,
+    Fraction(f32),
+    Length(Pt),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GradientStopPosition {
+    pub fraction: f32,
+    pub length: Pt,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GradientPosition {
+    Percent(f32),
+    Length(Pt),
+    EndLength(Pt),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RadialGradientShape {
+    Circle,
+    Ellipse,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RadialGradientSize {
+    ClosestSide,
+    ClosestCorner,
+    FarthestSide,
+    FarthestCorner,
+    Explicit(Pt, Option<Pt>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BorderImageSliceValue {
+    Number(f32),
+    Percent(f32),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BorderImageWidthValue {
+    Auto,
+    Number(f32),
+    Length(LengthSpec),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BorderImageOutsetValue {
+    Number(f32),
+    Length(LengthSpec),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BorderImageRepeatMode {
+    Stretch,
+    Repeat,
+    Round,
+    Space,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BorderImageSpec {
+    pub source: Option<BackgroundPaint>,
+    pub slice: [BorderImageSliceValue; 4],
+    pub fill: bool,
+    pub width: [BorderImageWidthValue; 4],
+    pub outset: [BorderImageOutsetValue; 4],
+    pub repeat_x: BorderImageRepeatMode,
+    pub repeat_y: BorderImageRepeatMode,
+}
+
+impl Default for BorderImageSpec {
+    fn default() -> Self {
+        Self {
+            source: None,
+            slice: [BorderImageSliceValue::Percent(1.0); 4],
+            fill: false,
+            width: [BorderImageWidthValue::Number(1.0); 4],
+            outset: [BorderImageOutsetValue::Number(0.0); 4],
+            repeat_x: BorderImageRepeatMode::Stretch,
+            repeat_y: BorderImageRepeatMode::Stretch,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct BorderImageRasterPatch {
+    solid_color: Option<Color>,
+    source: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1101,6 +1311,14 @@ pub(crate) struct ResolvedEdgeColors {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub(crate) struct ResolvedEdgeOpacities {
+    pub(crate) top: f32,
+    pub(crate) right: f32,
+    pub(crate) bottom: f32,
+    pub(crate) left: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct ResolvedEdgeStyles {
     pub(crate) top: OutlineLineStyle,
     pub(crate) right: OutlineLineStyle,
@@ -1144,6 +1362,24 @@ impl ResolvedEdgeColors {
             bottom: color,
             left: color,
         }
+    }
+}
+
+impl ResolvedEdgeOpacities {
+    fn uniform(opacity: f32) -> Self {
+        let opacity = opacity.clamp(0.0, 1.0);
+        Self {
+            top: opacity,
+            right: opacity,
+            bottom: opacity,
+            left: opacity,
+        }
+    }
+
+    fn is_uniform(self) -> bool {
+        (self.top - self.right).abs() <= 1.0e-6
+            && (self.top - self.bottom).abs() <= 1.0e-6
+            && (self.top - self.left).abs() <= 1.0e-6
     }
 }
 
@@ -1309,6 +1545,19 @@ pub trait Flowable: FlowableClone + Send + Sync {
         Pt::ZERO
     }
 
+    /// Convert a definite CSS flex basis into the item's outer main-axis
+    /// width. Non-box flowables already expose outer dimensions; CSS boxes
+    /// override this to account for box-sizing, decorations, and margins.
+    fn flex_outer_width_for_basis(&self, basis: Pt, _avail_width: Pt) -> Pt {
+        basis.max(Pt::ZERO)
+    }
+
+    /// Convert a definite CSS flex basis into the item's outer main-axis
+    /// height for a column flex container.
+    fn flex_outer_height_for_basis(&self, basis: Pt, _avail_width: Pt, _avail_height: Pt) -> Pt {
+        basis.max(Pt::ZERO)
+    }
+
     /// Measure a flex item after the flex algorithm has assigned its used
     /// main-axis width. CSS boxes override this hook so an authored `width`
     /// does not keep their contents wrapped at the pre-flex width.
@@ -1412,6 +1661,13 @@ pub trait Flowable: FlowableClone + Send + Sync {
         None
     }
 
+    /// Snapped ascent/descent of the parent font represented by this inline
+    /// item. `text-top` and `text-bottom` align against these font edges rather
+    /// than against the full line box.
+    fn inline_font_extents(&self, _avail_width: Pt) -> Option<(Pt, Pt)> {
+        None
+    }
+
     /// Resolved vertical margins for an in-flow block that can participate in
     /// sibling margin collapsing. Inline, replaced, floating, and positioned
     /// flowables return `None`.
@@ -1470,6 +1726,84 @@ pub trait Flowable: FlowableClone + Send + Sync {
     /// size comes from a min/max constraint rather than an authored height.
     fn uses_parent_content_height(&self) -> bool {
         false
+    }
+
+    /// Number of CSS grid rows covered by this item's grid area. Ordinary
+    /// flowables occupy one row; the grid-area adapter overrides this so the
+    /// fragmenter can preserve a spanning item's area across page boundaries.
+    fn grid_row_span(&self) -> usize {
+        1
+    }
+
+    fn grid_column_span(&self) -> usize {
+        1
+    }
+
+    fn grid_span_max_content_width(&self, _avail_width: Pt) -> Option<Pt> {
+        None
+    }
+
+    /// Split the contents of a row-spanning grid item at a fragmentainer
+    /// boundary. This is separate from `split`: a grid-area adapter normally
+    /// expands the available height to the entire spanned area for layout, but
+    /// fragmentation must pass the *current page's* remaining height through
+    /// to the underlying box.
+    fn split_grid_row_span(
+        &self,
+        _avail_width: Pt,
+        _avail_height: Pt,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        None
+    }
+
+    /// Fragment one item in an auto-sized grid row while retaining its box
+    /// decoration on both sides of the row boundary. Ordinary flowables can
+    /// use their normal content splitter; CSS boxes additionally synthesize
+    /// an empty decorated fragment when their contents fit on only one side.
+    fn split_grid_row_fragment(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>, bool)> {
+        self.split(avail_width, avail_height)
+            .map(|(first, second)| (first, second, true))
+    }
+
+    /// Synthetic spacers reserve unoccupied grid cells. They may be discarded
+    /// when a one-column spanning item is converted into continuation
+    /// fragments, unlike authored empty boxes which still own paint.
+    fn is_grid_placeholder(&self) -> bool {
+        false
+    }
+
+    /// Return an equivalent flowable whose contents establish an independent
+    /// formatting context. Flex and grid items use this to prevent descendant
+    /// block margins from collapsing through the item boundary.
+    fn establish_independent_formatting_context(&self) -> Box<dyn Flowable> {
+        self.clone_box()
+    }
+
+    /// Grid-item inline formatting rounds its terminal baseline to the nearest
+    /// CSS pixel after the grid area has established its absolute paint phase.
+    /// Ordinary block formatting retains the legacy floor behavior.
+    fn with_grid_item_baseline_rounding(&self) -> Box<dyn Flowable> {
+        self.clone_box()
+    }
+
+    /// Keep a grid item's layout geometry in the fixed-point track space while
+    /// snapping only its painted inline box edges to CSS pixels. Chromium
+    /// retains the unsnapped content origin even when the background and
+    /// border land on snapped device-independent pixel boundaries.
+    fn with_grid_item_inline_paint_snap(&self) -> Box<dyn Flowable> {
+        self.clone_box()
+    }
+
+    /// Clone this flowable with a definite block-size basis supplied by its
+    /// parent. A stretched grid item uses this hook so a nested grid's auto
+    /// tracks can honor align-content against the resolved grid-area height
+    /// without making ordinary auto-height grids expand to a page-sized hint.
+    fn with_definite_parent_height(&self) -> Box<dyn Flowable> {
+        self.clone_box()
     }
 
     fn is_fixed_positioned(&self) -> bool {
@@ -1693,6 +2027,22 @@ fn spread_shadow_radius(radius: Pt, spread: Pt) -> Pt {
     }
 }
 
+fn css_shadow_blur_sigma(blur_radius: Pt) -> Pt {
+    if blur_radius <= Pt::ZERO {
+        return Pt::ZERO;
+    }
+    // Blink's BlurRadiusToStdDev preserves WebKit's historical CSS shadow
+    // mapping: sigma = radius / sqrt(12) + 0.5 CSS px. Keep the conversion in
+    // fixed-point so the paint kernel is deterministic across platforms.
+    blur_radius.mul_ratio(57_735, 200_000) + Pt::from_milli_i64(375)
+}
+
+fn css_shadow_filter_padding(sigma: Pt) -> Pt {
+    // Skia bounds a blurred mask at ceil(3 sigma). The extra CSS pixel retains
+    // the fractional device phase at the local form edge.
+    (sigma * 3 + Pt::from_milli_i64(750)).max(Pt::from_f32(2.0))
+}
+
 fn text_baseline_for_line(
     style: &TextStyle,
     font_registry: Option<&FontRegistry>,
@@ -1740,14 +2090,31 @@ fn text_baseline_for_line(
         // the baseline. Smaller descent corrections leave it below.
         baseline = baseline + Pt::from_milli_i64(375);
     }
-    if style.css_pixel_snap_metrics {
+    if style.css_pixel_snap_metrics && !(leading > Pt::ZERO && leading_milli.rem_euclid(750) != 0) {
         // A snapped font box can move a half-pixel baseline above the browser's
         // unsnapped layout baseline. CssLineBoxFlowable subsequently floors the
-        // absolute baseline, so retain the unsnapped whole-pixel lower bound.
+        // absolute baseline, so retain the unsnapped whole-pixel lower bound
+        // when leading is integral. Fractional positive leading keeps its phase
+        // across successive line boxes; rounding it here shifts only the first
+        // line down by one CSS pixel.
         baseline.max(floor_to_css_pixel_signed(raw_baseline))
     } else {
         baseline
     }
+}
+
+fn text_font_extents(style: &TextStyle, font_registry: Option<&FontRegistry>) -> (Pt, Pt) {
+    let (mut ascent, mut descent) = font_registry
+        .and_then(|registry| {
+            let (primary, _) = resolve_font_stack(Some(registry), style);
+            registry.vertical_metrics(&primary, style.font_size)
+        })
+        .unwrap_or_else(|| (style.font_size * 0.8, style.font_size * 0.2));
+    if style.css_pixel_snap_metrics {
+        ascent = round_to_css_pixel(ascent);
+        descent = ceil_to_css_pixel(descent);
+    }
+    (ascent, descent)
 }
 
 fn text_x_height(style: &TextStyle, font_registry: Option<&FontRegistry>) -> Pt {
@@ -1874,9 +2241,9 @@ fn text_draw_y_for_line(
 #[cfg(test)]
 mod text_baseline_tests {
     use super::{
-        Flowable, Paragraph, Pt, TextStyle, draw_text_decorations, resolve_font_stack,
-        text_baseline_for_line, text_baseline_for_table_cell_line, text_draw_y_for_line,
-        text_inline_box_top_overflow,
+        BoxShadowSpec, Flowable, Paragraph, Pt, TextStyle, draw_text_decorations,
+        resolve_font_stack, text_baseline_for_line, text_baseline_for_table_cell_line,
+        text_draw_y_for_line, text_inline_box_top_overflow,
     };
     use crate::canvas::Command;
     use crate::font::FontRegistry;
@@ -1884,7 +2251,7 @@ mod text_baseline_tests {
         TextDecorationMode, TextDecorationThicknessMode, TextEmphasisPositionMode,
         TextEmphasisStyleMode, TextUnderlineOffsetMode, WordBreakMode,
     };
-    use crate::{Canvas, LengthSpec, Size};
+    use crate::{Canvas, Color, LengthSpec, Size};
     use std::sync::Arc;
 
     #[test]
@@ -1923,6 +2290,39 @@ mod text_baseline_tests {
             .unwrap();
         assert!(anywhere_min < normal_min);
         assert_eq!(anywhere_min, anywhere.measure_text_width("W"));
+    }
+
+    #[test]
+    fn pre_wrap_hangs_the_overflowing_separator_after_the_fitting_word() {
+        let paragraph = Paragraph::new("alpha    beta gamma").with_whitespace(true, false);
+        let fit = paragraph.measure_text_width("alpha    beta");
+        let space = paragraph.measure_text_width(" ");
+        let lines = paragraph.layout_lines(fit + space.mul_ratio(1, 2));
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].text, "alpha    beta ");
+        assert_eq!(lines[1].text, "gamma");
+
+        let break_spaces = Paragraph::new("alpha    beta gamma")
+            .with_whitespace(true, false)
+            .with_break_spaces(true);
+        let lines = break_spaces.layout_lines(fit + space.mul_ratio(1, 2));
+        assert_eq!(lines[0].text, "alpha    ");
+        assert_eq!(lines[1].text, "beta gamma");
+    }
+
+    #[test]
+    fn overflow_wrap_tail_can_share_its_line_with_the_following_word() {
+        let mut style = TextStyle::default();
+        style.font_name = Arc::<str>::from("Courier");
+        style.word_break = WordBreakMode::BreakWord;
+        let paragraph = Paragraph::new("abcdefgh xy").with_style(style);
+        let limit = paragraph.measure_text_width("abcdefg");
+        let lines = paragraph.layout_lines(limit);
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].text, "abcdefg");
+        assert_eq!(lines[1].text, "h xy");
     }
 
     #[test]
@@ -1967,6 +2367,113 @@ mod text_baseline_tests {
             text_baseline_for_line(&style, None, style.line_height),
             Pt::from_f32(18.0)
         );
+    }
+
+    #[test]
+    fn css_fractional_positive_leading_retains_its_baseline_phase() {
+        let mut style = TextStyle::default();
+        style.font_size = Pt::from_f32(16.5);
+        style.line_height = Pt::from_f32(23.1);
+        style.line_height_is_auto = false;
+        style.css_pixel_snap_metrics = true;
+
+        // 22 CSS px text with line-height:1.4 has 7.8px of positive leading
+        // against the snapped Base-14 box. Preserve the 3.9px top half so the
+        // first baseline and later 30.8px advances share Chromium's phase.
+        assert_eq!(
+            text_baseline_for_line(&style, None, style.line_height),
+            Pt::from_f32(16.425)
+        );
+    }
+
+    #[test]
+    fn synthetic_bold_text_shadow_uses_the_shadow_color_for_its_outline() {
+        let mut registry = FontRegistry::new();
+        registry
+            .register_bytes(
+                include_bytes!("../python/fullbleed_assets/fonts/NotoSans-Regular.ttf").to_vec(),
+                Some("noto"),
+            )
+            .unwrap();
+
+        let shadow_color = Color::rgb(0.18, 0.49, 0.20);
+        let mut style = TextStyle::default();
+        style.font_name = Arc::<str>::from("noto");
+        style.font_weight = 700;
+        style.css_pixel_snap_metrics = true;
+        let paragraph = Paragraph::new("Shadow")
+            .with_style(style.clone())
+            .with_font_registry(Some(Arc::new(registry)));
+        let mut canvas = Canvas::new(Size {
+            width: Pt::from_f32(200.0),
+            height: Pt::from_f32(100.0),
+        });
+        canvas.set_font_size(style.font_size);
+
+        paragraph.draw_text_shadow_sample(
+            &mut canvas,
+            Pt::from_f32(10.0),
+            Pt::from_f32(10.0),
+            "Shadow",
+            Pt::from_f32(100.0),
+            shadow_color,
+            1.0,
+        );
+        let document = canvas.finish();
+        assert!(document.pages[0].commands.iter().any(|command| {
+            matches!(command, Command::SetStrokeColor(color) if *color == shadow_color)
+        }));
+        assert!(!document.pages[0].commands.iter().any(|command| {
+            matches!(command, Command::SetStrokeColor(color) if *color == style.color)
+        }));
+    }
+
+    #[test]
+    fn blurred_text_shadow_uses_one_local_filtered_form() {
+        let paragraph = Paragraph::new("Shadow");
+        let shadow = BoxShadowSpec {
+            offset_x: LengthSpec::Absolute(Pt::from_f32(3.0)),
+            offset_y: LengthSpec::Absolute(Pt::from_f32(3.0)),
+            blur: LengthSpec::Absolute(Pt::from_f32(6.0)),
+            spread: LengthSpec::Absolute(Pt::ZERO),
+            color: Color::rgb(0.18, 0.49, 0.20),
+            opacity: 1.0,
+            inset: false,
+            color_var: None,
+        };
+        let mut canvas = Canvas::new(Size {
+            width: Pt::from_f32(200.0),
+            height: Pt::from_f32(100.0),
+        });
+
+        paragraph.draw_text_shadow(
+            &mut canvas,
+            Pt::from_f32(10.0),
+            Pt::from_f32(10.0),
+            "Shadow",
+            Pt::from_f32(50.0),
+            &shadow,
+        );
+        let document = canvas.finish();
+        let page = &document.pages[0];
+        assert_eq!(
+            page.commands
+                .iter()
+                .filter(|command| matches!(command, Command::DefineForm { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(
+            page.commands
+                .iter()
+                .filter(|command| matches!(command, Command::DrawFilteredForm { .. }))
+                .count(),
+            1
+        );
+        assert!(page.commands.iter().any(|command| {
+            matches!(command, Command::DrawFilteredForm { filter, css_shadow: true, .. }
+                if filter.blur_radius == Pt::from_milli_i64(2_107))
+        }));
     }
 
     #[test]
@@ -2039,6 +2546,37 @@ mod text_baseline_tests {
 
         // Baseline 22pt + 2.25pt offset + half of the 1.5pt stroke.
         assert_eq!(move_y, Some(Pt::from_f32(25.0)));
+    }
+
+    #[test]
+    fn css_auto_underline_uses_browser_decoration_geometry() {
+        let mut style = TextStyle::default();
+        style.font_size = Pt::from_f32(15.0);
+        style.css_pixel_snap_metrics = true;
+        style.text_decoration = TextDecorationMode {
+            underline: true,
+            ..TextDecorationMode::default()
+        };
+        let mut canvas = Canvas::new(Size {
+            width: Pt::from_f32(100.0),
+            height: Pt::from_f32(100.0),
+        });
+
+        draw_text_decorations(
+            &mut canvas,
+            &style,
+            None,
+            Pt::from_f32(5.0),
+            Pt::from_f32(10.0),
+            Pt::from_f32(20.0),
+        );
+        let document = canvas.finish();
+        assert!(document.pages[0].commands.iter().any(|command| {
+            matches!(command, Command::SetLineWidth(width) if *width == Pt::from_f32(1.5))
+        }));
+        assert!(document.pages[0].commands.iter().any(|command| {
+            matches!(command, Command::MoveTo { y, .. } if *y == Pt::from_f32(26.5))
+        }));
     }
 
     #[test]
@@ -2226,39 +2764,53 @@ fn draw_text_decorations(
         return;
     }
     let baseline = y + style.font_size;
-    let default_thickness = (style.font_size * 0.05).max(Pt::from_f32(0.5));
-    let mut overline_y = baseline - style.font_size.mul_ratio(9, 10);
+    let default_thickness = if style.css_pixel_snap_metrics {
+        // Blink's authored CSS decoration geometry uses a stable 0.1em
+        // stroke/placement grid for these font-backed lines. The OpenType
+        // `post` underline values are substantially thinner and closer to the
+        // alphabetic baseline than the browser result.
+        floor_to_css_pixel(style.font_size * 0.1).max(Pt::from_milli_i64(750))
+    } else {
+        (style.font_size * 0.05).max(Pt::from_f32(0.5))
+    };
+    let mut overline_y = if style.css_pixel_snap_metrics {
+        baseline - style.font_size.mul_ratio(99, 100)
+    } else {
+        baseline - style.font_size.mul_ratio(9, 10)
+    };
     let mut line_through_y = baseline - style.font_size.mul_ratio(3, 10);
     let mut underline_y = baseline + style.font_size.mul_ratio(1, 10);
     let mut overline_thickness = default_thickness;
     let mut line_through_thickness = default_thickness;
     let mut underline_thickness = default_thickness;
 
-    if let Some(registry) = font_registry {
-        let (primary, _) = resolve_font_stack(Some(registry), style);
-        if let Some(font) = registry.resolve(&primary) {
-            if let Some(metrics) = font.metrics.underline_metrics {
-                let pos = metrics.position as i32;
-                let thickness = metrics.thickness as i32;
-                if thickness > 0 {
-                    underline_thickness = style.font_size.mul_ratio(thickness, 1000);
+    if !style.css_pixel_snap_metrics {
+        if let Some(registry) = font_registry {
+            let (primary, _) = resolve_font_stack(Some(registry), style);
+            if let Some(font) = registry.resolve(&primary) {
+                if let Some(metrics) = font.metrics.underline_metrics {
+                    let pos = metrics.position as i32;
+                    let thickness = metrics.thickness as i32;
+                    if thickness > 0 {
+                        underline_thickness = style.font_size.mul_ratio(thickness, 1000);
+                    }
+                    underline_y = baseline + style.font_size.mul_ratio(-pos, 1000);
                 }
-                underline_y = baseline + style.font_size.mul_ratio(-pos, 1000);
-            }
-            if let Some(metrics) = font.metrics.strikeout_metrics {
-                let pos = metrics.position as i32;
-                let thickness = metrics.thickness as i32;
-                if thickness > 0 {
-                    line_through_thickness = style.font_size.mul_ratio(thickness, 1000);
+                if let Some(metrics) = font.metrics.strikeout_metrics {
+                    let pos = metrics.position as i32;
+                    let thickness = metrics.thickness as i32;
+                    if thickness > 0 {
+                        line_through_thickness = style.font_size.mul_ratio(thickness, 1000);
+                    }
+                    line_through_y = baseline + style.font_size.mul_ratio(-pos, 1000);
                 }
-                line_through_y = baseline + style.font_size.mul_ratio(-pos, 1000);
-            }
-            let mut overline_units = font.metrics.cap_height as i32;
-            if overline_units <= 0 {
-                overline_units = font.metrics.ascent as i32;
-            }
-            if overline_units > 0 {
-                overline_y = baseline - style.font_size.mul_ratio(overline_units, 1000);
+                let mut overline_units = font.metrics.cap_height as i32;
+                if overline_units <= 0 {
+                    overline_units = font.metrics.ascent as i32;
+                }
+                if overline_units > 0 {
+                    overline_y = baseline - style.font_size.mul_ratio(overline_units, 1000);
+                }
             }
         }
     }
@@ -2270,7 +2822,17 @@ fn draw_text_decorations(
         line_through_thickness = thickness;
         underline_thickness = thickness;
     }
-    if let Some(offset) = explicit_text_underline_offset(style) {
+    if style.css_pixel_snap_metrics {
+        let minimum = Pt::from_milli_i64(750);
+        overline_thickness = overline_thickness.max(minimum);
+        line_through_thickness = line_through_thickness.max(minimum);
+        underline_thickness = underline_thickness.max(minimum);
+    }
+    let explicit_underline_offset = explicit_text_underline_offset(style);
+    if style.css_pixel_snap_metrics && explicit_underline_offset.is_none() {
+        underline_y = baseline + underline_thickness.max(style.font_size.mul_ratio(1, 16));
+    }
+    if let Some(offset) = explicit_underline_offset {
         // Explicit offsets locate the near edge of the underline from the
         // alphabetic baseline. PDF strokes are centered on their path, so
         // include half the used thickness and replace the automatic font
@@ -2394,6 +2956,12 @@ fn explicit_text_decoration_thickness(style: &TextStyle) -> Option<Pt> {
                 LengthSpec::Calc(calc) => calc
                     .resolve(style.font_size, style.font_size, style.root_font_size)
                     .max(Pt::ZERO),
+                LengthSpec::Clamped(calc) => calc
+                    .resolve(style.font_size, style.font_size, style.root_font_size)
+                    .max(Pt::ZERO),
+                LengthSpec::FontRelative(calc) => calc
+                    .resolve(style.font_size, style.font_size, style.root_font_size)
+                    .max(Pt::ZERO),
                 LengthSpec::Auto
                 | LengthSpec::Content
                 | LengthSpec::MinContent
@@ -2417,6 +2985,12 @@ fn explicit_text_underline_offset(style: &TextStyle) -> Option<Pt> {
                 LengthSpec::Em(scale) => style.font_size * scale,
                 LengthSpec::Rem(scale) => style.root_font_size * scale,
                 LengthSpec::Calc(calc) => {
+                    calc.resolve(style.font_size, style.font_size, style.root_font_size)
+                }
+                LengthSpec::Clamped(calc) => {
+                    calc.resolve(style.font_size, style.font_size, style.root_font_size)
+                }
+                LengthSpec::FontRelative(calc) => {
                     calc.resolve(style.font_size, style.font_size, style.root_font_size)
                 }
                 LengthSpec::Auto
@@ -2556,7 +3130,10 @@ fn draw_registered_synthetic_bold_outline_run(
     let mut cursor_x = x - Pt::from_f32(0.20);
     let mut cursor_y = y + style.font_size - Pt::from_f32(0.20);
     canvas.save_state();
-    canvas.set_stroke_color(style.color);
+    // Synthetic-bold outlines must use the active paint, not the element's
+    // foreground color. Text shadows deliberately override the fill before
+    // reaching this path and otherwise acquired a dark fringe.
+    canvas.set_stroke_color_to_fill();
     canvas.set_line_width(strength);
     for outline in outlines {
         let units = outline.units_per_em.max(1) as f32;
@@ -2772,8 +3349,10 @@ pub struct Paragraph {
     align_last: Option<TextAlign>,
     pagination: Pagination,
     preserve_whitespace: bool,
+    break_spaces: bool,
     no_wrap: bool,
     suppress_first_line_indent: bool,
+    snap_each_line_baseline: bool,
     initial_letter: Option<InitialLetterLayout>,
     tag_role: Option<Arc<str>>,
     font_registry: Option<Arc<FontRegistry>>,
@@ -2790,8 +3369,10 @@ impl Paragraph {
             align_last: None,
             pagination: Pagination::default(),
             preserve_whitespace: false,
+            break_spaces: false,
             no_wrap: false,
             suppress_first_line_indent: false,
+            snap_each_line_baseline: false,
             initial_letter: None,
             tag_role: None,
             font_registry: None,
@@ -2828,6 +3409,11 @@ impl Paragraph {
     pub fn with_whitespace(mut self, preserve_whitespace: bool, no_wrap: bool) -> Self {
         self.preserve_whitespace = preserve_whitespace;
         self.no_wrap = no_wrap;
+        self
+    }
+
+    pub(crate) fn with_break_spaces(mut self, enabled: bool) -> Self {
+        self.break_spaces = enabled;
         self
     }
 
@@ -3358,6 +3944,16 @@ impl Paragraph {
                 self.style.font_size,
                 self.style.root_font_size,
             ),
+            LengthSpec::Clamped(calc) => calc.resolve(
+                self.style.font_size,
+                self.style.font_size,
+                self.style.root_font_size,
+            ),
+            LengthSpec::FontRelative(calc) => calc.resolve(
+                self.style.font_size,
+                self.style.font_size,
+                self.style.root_font_size,
+            ),
             LengthSpec::Auto
             | LengthSpec::Content
             | LengthSpec::MinContent
@@ -3423,29 +4019,46 @@ impl Paragraph {
             return;
         }
 
-        let spread = (blur * 0.45).max(Pt::from_f32(0.5));
-        let samples = [
-            (Pt::ZERO, Pt::ZERO, 0.36_f32),
-            (spread, Pt::ZERO, 0.10_f32),
-            (-spread, Pt::ZERO, 0.10_f32),
-            (Pt::ZERO, spread, 0.10_f32),
-            (Pt::ZERO, -spread, 0.10_f32),
-            (spread, spread, 0.06_f32),
-            (-spread, spread, 0.06_f32),
-            (spread, -spread, 0.06_f32),
-            (-spread, -spread, 0.06_f32),
-        ];
-        for (dx, dy, weight) in samples {
-            self.draw_text_shadow_sample(
-                canvas,
-                base_x + dx,
-                base_y + dy,
-                text,
-                width,
-                color,
-                opacity * weight,
-            );
-        }
+        // Keep the glyph source vector-native, then virtualize just its local
+        // paint bounds through the shared raster filter pipeline. This replaces
+        // the old nine-copy halo with one Gaussian mask and avoids rasterizing
+        // an entire page for a small shadow.
+        let sigma = css_shadow_blur_sigma(blur);
+        let padding = css_shadow_filter_padding(sigma);
+        let form_width =
+            (width + padding * 2 + self.style.font_size.mul_ratio(1, 4)).max(Pt::from_f32(1.0));
+        let form_height = (self.style.font_size + padding * 2).max(Pt::from_f32(1.0));
+        let form_id = format!(
+            "text-shadow:{}:{}:{}",
+            canvas.current_command_count(),
+            base_x.to_milli_i64(),
+            base_y.to_milli_i64()
+        );
+        let mut source = Canvas::new(Size {
+            width: form_width,
+            height: form_height,
+        });
+        source.set_font_size(self.style.font_size);
+        self.draw_text_shadow_sample(&mut source, padding, padding, text, width, color, opacity);
+        let commands = source
+            .finish()
+            .pages
+            .first()
+            .map(|page| page.commands.clone())
+            .unwrap_or_default();
+        canvas.define_form(form_id.clone(), form_width, form_height, commands);
+        let mut filter = PaintFilterSpec::identity();
+        // CSS shadow blur radius corresponds to approximately twice the
+        // Gaussian standard deviation used by the filter primitive.
+        filter.blur_radius = sigma;
+        canvas.draw_css_shadow_filtered_form(
+            base_x - padding,
+            base_y - padding,
+            form_width,
+            form_height,
+            form_id,
+            filter,
+        );
     }
 
     fn draw_text_shadows_for_line(&self, canvas: &mut Canvas, x: Pt, y: Pt, text: &str, width: Pt) {
@@ -3612,9 +4225,10 @@ impl Paragraph {
                     let current_limit = self.line_limit(max_width, current_indent);
                     if current.is_empty() {
                         if word_width > current_limit {
-                            if let Some(parts) =
+                            if let Some(mut parts) =
                                 split_word_by_soft_hyphen(self, word, current_limit)
                             {
+                                let tail = parts.pop().unwrap_or_default();
                                 for part in parts {
                                     lines.push(PendingLineLayout {
                                         text: part,
@@ -3622,16 +4236,33 @@ impl Paragraph {
                                     });
                                     current_forced_start = false;
                                 }
-                                current.clear();
-                            } else if allow_break_long {
-                                for part in split_long_word_by_width(self, word, current_limit) {
+                                current_width = self.measure_text_width(&tail);
+                                current = tail;
+                            } else if let Some(mut parts) =
+                                split_word_by_hard_hyphen(self, word, current_limit)
+                            {
+                                let tail = parts.pop().unwrap_or_default();
+                                for part in parts {
                                     lines.push(PendingLineLayout {
                                         text: part,
                                         forced_start: current_forced_start,
                                     });
                                     current_forced_start = false;
                                 }
-                                current.clear();
+                                current_width = self.measure_text_width(&tail);
+                                current = tail;
+                            } else if allow_break_long {
+                                let mut parts = split_long_word_by_width(self, word, current_limit);
+                                let tail = parts.pop().unwrap_or_default();
+                                for part in parts {
+                                    lines.push(PendingLineLayout {
+                                        text: part,
+                                        forced_start: current_forced_start,
+                                    });
+                                    current_forced_start = false;
+                                }
+                                current_width = self.measure_text_width(&tail);
+                                current = tail;
                             } else {
                                 lines.push(PendingLineLayout {
                                     text: word.to_string(),
@@ -3651,6 +4282,59 @@ impl Paragraph {
                             current.push_str(word);
                             current_width = next_width;
                         } else {
+                            let remaining_on_line =
+                                (current_limit - current_width - space_width).max(Pt::ZERO);
+                            if let Some((prefix, suffix)) =
+                                split_hard_hyphen_prefix_for_width(self, word, remaining_on_line)
+                            {
+                                current.push(' ');
+                                current.push_str(&prefix);
+                                lines.push(PendingLineLayout {
+                                    text: current,
+                                    forced_start: current_forced_start,
+                                });
+                                current = String::new();
+                                current_forced_start = false;
+                                let follow_indent =
+                                    self.line_text_indent(lines.len(), false, indent_value);
+                                let follow_limit = self.line_limit(max_width, follow_indent);
+                                let suffix_width = self.measure_text_width(&suffix);
+                                if suffix_width <= follow_limit {
+                                    current_width = suffix_width;
+                                    current = suffix;
+                                } else if let Some(mut parts) =
+                                    split_word_by_hard_hyphen(self, &suffix, follow_limit)
+                                {
+                                    let tail = parts.pop().unwrap_or_default();
+                                    for part in parts {
+                                        lines.push(PendingLineLayout {
+                                            text: part,
+                                            forced_start: false,
+                                        });
+                                    }
+                                    current_width = self.measure_text_width(&tail);
+                                    current = tail;
+                                } else if allow_break_long {
+                                    let mut parts =
+                                        split_long_word_by_width(self, &suffix, follow_limit);
+                                    let tail = parts.pop().unwrap_or_default();
+                                    for part in parts {
+                                        lines.push(PendingLineLayout {
+                                            text: part,
+                                            forced_start: false,
+                                        });
+                                    }
+                                    current_width = self.measure_text_width(&tail);
+                                    current = tail;
+                                } else {
+                                    lines.push(PendingLineLayout {
+                                        text: suffix,
+                                        forced_start: false,
+                                    });
+                                    current_width = Pt::ZERO;
+                                }
+                                continue;
+                            }
                             lines.push(PendingLineLayout {
                                 text: current,
                                 forced_start: current_forced_start,
@@ -3661,22 +4345,42 @@ impl Paragraph {
                                 self.line_text_indent(lines.len(), false, indent_value);
                             let follow_limit = self.line_limit(max_width, follow_indent);
                             if word_width > follow_limit {
-                                if let Some(parts) =
+                                if let Some(mut parts) =
                                     split_word_by_soft_hyphen(self, word, follow_limit)
                                 {
+                                    let tail = parts.pop().unwrap_or_default();
                                     for part in parts {
                                         lines.push(PendingLineLayout {
                                             text: part,
                                             forced_start: false,
                                         });
                                     }
-                                } else if allow_break_long {
-                                    for part in split_long_word_by_width(self, word, follow_limit) {
+                                    current_width = self.measure_text_width(&tail);
+                                    current = tail;
+                                } else if let Some(mut parts) =
+                                    split_word_by_hard_hyphen(self, word, follow_limit)
+                                {
+                                    let tail = parts.pop().unwrap_or_default();
+                                    for part in parts {
                                         lines.push(PendingLineLayout {
                                             text: part,
                                             forced_start: false,
                                         });
                                     }
+                                    current_width = self.measure_text_width(&tail);
+                                    current = tail;
+                                } else if allow_break_long {
+                                    let mut parts =
+                                        split_long_word_by_width(self, word, follow_limit);
+                                    let tail = parts.pop().unwrap_or_default();
+                                    for part in parts {
+                                        lines.push(PendingLineLayout {
+                                            text: part,
+                                            forced_start: false,
+                                        });
+                                    }
+                                    current_width = self.measure_text_width(&tail);
+                                    current = tail;
                                 } else {
                                     lines.push(PendingLineLayout {
                                         text: word.to_string(),
@@ -3872,6 +4576,26 @@ fn push_preserved_wrapped_segment(
         let ch_width = paragraph.measure_text_width(&ch.to_string());
         let indent = paragraph.line_text_indent(lines.len(), current_forced_start, indent_value);
         let limit = paragraph.line_limit(max_width, indent);
+        if !paragraph.break_spaces
+            && ch.is_whitespace()
+            && !current.is_empty()
+            && current_width + ch_width > limit
+        {
+            // `pre-wrap` preserves the separator that establishes a soft wrap,
+            // but that separator hangs at the end of the line. Waiting until
+            // after this check made us fall back to the *previous* whitespace
+            // run and wrap an otherwise fitting word one line too early.
+            current.push(ch);
+            lines.push(PendingLineLayout {
+                text: current,
+                forced_start: current_forced_start,
+            });
+            current = String::new();
+            current_width = Pt::ZERO;
+            current_forced_start = false;
+            last_break = None;
+            continue;
+        }
         if !current.is_empty() && current_width + ch_width > limit {
             if let Some((break_idx, break_width)) = last_break {
                 if break_idx == current.len() {
@@ -3969,6 +4693,75 @@ fn split_word_by_soft_hyphen(
     (!parts.is_empty()).then_some(parts)
 }
 
+fn split_hard_hyphen_prefix_for_width(
+    paragraph: &Paragraph,
+    word: &str,
+    max_width: Pt,
+) -> Option<(String, String)> {
+    if max_width <= Pt::ZERO {
+        return None;
+    }
+    let segments: Vec<&str> = word.split_inclusive('-').collect();
+    if segments.len() < 2 {
+        return None;
+    }
+
+    let mut prefix = String::new();
+    let mut best: Option<(usize, String)> = None;
+    for (index, segment) in segments.iter().enumerate().take(segments.len() - 1) {
+        prefix.push_str(segment);
+        if paragraph.measure_text_width(&prefix) <= max_width {
+            best = Some((index + 1, prefix.clone()));
+        } else {
+            break;
+        }
+    }
+    let (split_at, prefix) = best?;
+    let suffix = segments[split_at..].concat();
+    (!suffix.is_empty()).then_some((prefix, suffix))
+}
+
+fn split_word_by_hard_hyphen(
+    paragraph: &Paragraph,
+    word: &str,
+    max_width: Pt,
+) -> Option<Vec<String>> {
+    // UAX #14 exposes a normal line-break opportunity after a visible hyphen.
+    // Keep the hyphen on the preceding line and greedily take the longest
+    // sequence that fits, matching browser line breaking for identifiers such
+    // as `ROW-THREE-LABEL-END`.
+    let segments: Vec<&str> = word.split_inclusive('-').collect();
+    if segments.len() < 2 {
+        return None;
+    }
+
+    let mut parts = Vec::new();
+    let mut index = 0usize;
+    while index < segments.len() {
+        let mut candidate = String::new();
+        let mut best: Option<(usize, String)> = None;
+        for next in index..segments.len() {
+            candidate.push_str(segments[next]);
+            if paragraph.measure_text_width(&candidate) <= max_width {
+                best = Some((next + 1, candidate.clone()));
+            } else if next == index {
+                if next + 1 == segments.len() && !parts.is_empty() {
+                    best = Some((next + 1, candidate.clone()));
+                } else {
+                    return None;
+                }
+            } else {
+                break;
+            }
+        }
+        let (next_index, rendered) = best?;
+        parts.push(rendered);
+        index = next_index;
+    }
+
+    (parts.len() > 1).then_some(parts)
+}
+
 impl Flowable for Paragraph {
     fn wrap(&self, avail_width: Pt, avail_height: Pt) -> Size {
         let perf = perf_start();
@@ -4056,7 +4849,9 @@ impl Flowable for Paragraph {
         let mut max_w = Pt::ZERO;
         for line in self.text.split('\n') {
             for word in line.split_whitespace() {
-                max_w = max_w.max(self.measure_text_width(word));
+                for segment in word.split_inclusive('-') {
+                    max_w = max_w.max(self.measure_text_width(segment));
+                }
             }
         }
         Some(max_w)
@@ -4102,6 +4897,16 @@ impl Flowable for Paragraph {
             return None;
         }
         Some(text_x_height(&self.style, self.font_registry.as_deref()))
+    }
+
+    fn inline_font_extents(&self, _avail_width: Pt) -> Option<(Pt, Pt)> {
+        if self.is_vertical_text() {
+            return None;
+        }
+        Some(text_font_extents(
+            &self.style,
+            self.font_registry.as_deref(),
+        ))
     }
 
     fn split(
@@ -4181,8 +4986,10 @@ impl Flowable for Paragraph {
                 ..self.pagination
             },
             preserve_whitespace: self.preserve_whitespace,
+            break_spaces: self.break_spaces,
             no_wrap: self.no_wrap,
             suppress_first_line_indent: self.suppress_first_line_indent,
+            snap_each_line_baseline: self.snap_each_line_baseline,
             initial_letter: self.initial_letter.clone(),
             tag_role: self.tag_role.clone(),
             font_registry: self.font_registry.clone(),
@@ -4199,8 +5006,10 @@ impl Flowable for Paragraph {
                 ..self.pagination
             },
             preserve_whitespace: self.preserve_whitespace,
+            break_spaces: self.break_spaces,
             no_wrap: self.no_wrap,
             suppress_first_line_indent: true,
+            snap_each_line_baseline: self.snap_each_line_baseline,
             initial_letter: None,
             tag_role: self.tag_role.clone(),
             font_registry: self.font_registry.clone(),
@@ -4261,12 +5070,16 @@ impl Flowable for Paragraph {
         for (idx, line) in lines.iter().enumerate() {
             let line_width = line.width;
             let align = self.effective_text_align_for_line(idx, &lines);
-            let draw_y = text_draw_y_for_line(
+            let mut draw_y = text_draw_y_for_line(
                 &self.style,
                 self.font_registry.as_deref(),
                 cursor_y + emphasis_above,
                 line_height,
             );
+            if self.snap_each_line_baseline {
+                draw_y =
+                    floor_to_css_pixel_signed(draw_y + self.style.font_size) - self.style.font_size;
+            }
             if matches!(align, TextAlign::Justify)
                 && self.draw_justified_line(canvas, x, draw_y, avail_width, line)
             {
@@ -4292,6 +5105,12 @@ impl Flowable for Paragraph {
             canvas.end_tag();
         }
         perf_end("layout.text.draw", perf);
+    }
+
+    fn with_grid_item_baseline_rounding(&self) -> Box<dyn Flowable> {
+        let mut rounded = self.clone();
+        rounded.snap_each_line_baseline = true;
+        Box::new(rounded)
     }
 
     fn pagination(&self) -> Pagination {
@@ -4703,6 +5522,7 @@ impl Flowable for CjkDecimalMarkerFlowable {
 pub struct CssLineBoxFlowable {
     child: Box<dyn Flowable>,
     round_baseline: bool,
+    compensate_nested_floor: bool,
 }
 
 impl CssLineBoxFlowable {
@@ -4710,11 +5530,21 @@ impl CssLineBoxFlowable {
         Self {
             child,
             round_baseline: false,
+            compensate_nested_floor: false,
         }
     }
 
     pub fn with_round_baseline(mut self, enabled: bool) -> Self {
         self.round_baseline = enabled;
+        self
+    }
+
+    /// Preserve a fractional baseline phase around a child that performs its
+    /// own absolute floor snap. This is used for CSS `vertical-align: super`:
+    /// the script shift is quantized to a LayoutUnit, and Blink retains that
+    /// fractional phase after the line-box baseline union expands.
+    pub fn with_nested_floor_compensation(mut self, enabled: bool) -> Self {
+        self.compensate_nested_floor = enabled;
         self
     }
 
@@ -4728,6 +5558,17 @@ impl CssLineBoxFlowable {
                 } else {
                     floor_to_css_pixel(absolute)
                 };
+                if std::env::var_os("FULLBLEED_BASELINE_DEBUG").is_some() {
+                    eprintln!(
+                        "css line baseline y={:?} baseline={:?} absolute={:?} round={} snapped={:?} phase={:?}",
+                        y,
+                        baseline,
+                        absolute,
+                        self.round_baseline,
+                        snapped,
+                        snapped - absolute
+                    );
+                }
                 snapped - absolute
             })
             .unwrap_or(Pt::ZERO)
@@ -4746,14 +5587,37 @@ impl Flowable for CssLineBoxFlowable {
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
         let (first, second) = self.child.split(avail_width, avail_height)?;
         Some((
-            Box::new(Self::new(first).with_round_baseline(self.round_baseline))
-                as Box<dyn Flowable>,
-            Box::new(Self::new(second).with_round_baseline(self.round_baseline))
-                as Box<dyn Flowable>,
+            Box::new(
+                Self::new(first)
+                    .with_round_baseline(self.round_baseline)
+                    .with_nested_floor_compensation(self.compensate_nested_floor),
+            ) as Box<dyn Flowable>,
+            Box::new(
+                Self::new(second)
+                    .with_round_baseline(self.round_baseline)
+                    .with_nested_floor_compensation(self.compensate_nested_floor),
+            ) as Box<dyn Flowable>,
         ))
     }
 
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt) {
+        if self.compensate_nested_floor {
+            let residual = self
+                .child
+                .inline_baseline(avail_width)
+                .map(|baseline| {
+                    let absolute = y + baseline;
+                    absolute - floor_to_css_pixel(absolute)
+                })
+                .unwrap_or(Pt::ZERO);
+            if residual != Pt::ZERO {
+                canvas.save_state();
+                canvas.translate(Pt::ZERO, residual);
+                self.child.draw(canvas, x, y, avail_width, avail_height);
+                canvas.restore_state();
+                return;
+            }
+        }
         self.child.draw(
             canvas,
             x,
@@ -4773,6 +5637,15 @@ impl Flowable for CssLineBoxFlowable {
 
     fn flex_outer_width_minimum(&self, avail_width: Pt) -> Pt {
         self.child.flex_outer_width_minimum(avail_width)
+    }
+
+    fn flex_outer_width_for_basis(&self, basis: Pt, avail_width: Pt) -> Pt {
+        self.child.flex_outer_width_for_basis(basis, avail_width)
+    }
+
+    fn flex_outer_height_for_basis(&self, basis: Pt, avail_width: Pt, avail_height: Pt) -> Pt {
+        self.child
+            .flex_outer_height_for_basis(basis, avail_width, avail_height)
     }
 
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
@@ -4807,6 +5680,10 @@ impl Flowable for CssLineBoxFlowable {
         self.child.inline_x_height(avail_width)
     }
 
+    fn inline_font_extents(&self, avail_width: Pt) -> Option<(Pt, Pt)> {
+        self.child.inline_font_extents(avail_width)
+    }
+
     fn out_of_flow(&self) -> bool {
         self.child.out_of_flow()
     }
@@ -4830,6 +5707,14 @@ impl Flowable for CssLineBoxFlowable {
 
     fn pagination(&self) -> Pagination {
         self.child.pagination()
+    }
+
+    fn with_grid_item_baseline_rounding(&self) -> Box<dyn Flowable> {
+        Box::new(
+            Self::new(self.child.with_grid_item_baseline_rounding())
+                .with_round_baseline(true)
+                .with_nested_floor_compensation(self.compensate_nested_floor),
+        )
     }
 }
 
@@ -4926,6 +5811,15 @@ impl Flowable for CssPixelHeightFlowable {
         self.child.flex_outer_width_minimum(avail_width)
     }
 
+    fn flex_outer_width_for_basis(&self, basis: Pt, avail_width: Pt) -> Pt {
+        self.child.flex_outer_width_for_basis(basis, avail_width)
+    }
+
+    fn flex_outer_height_for_basis(&self, basis: Pt, avail_width: Pt, avail_height: Pt) -> Pt {
+        self.child
+            .flex_outer_height_for_basis(basis, avail_width, avail_height)
+    }
+
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
         self.child.flex_min_content_width(avail_width)
     }
@@ -4968,6 +5862,10 @@ impl Flowable for CssPixelHeightFlowable {
 
     fn inline_x_height(&self, avail_width: Pt) -> Option<Pt> {
         self.child.inline_x_height(avail_width)
+    }
+
+    fn inline_font_extents(&self, avail_width: Pt) -> Option<(Pt, Pt)> {
+        self.child.inline_font_extents(avail_width)
     }
 
     fn collapsible_block_margins(&self, avail_width: Pt) -> Option<(Pt, Pt)> {
@@ -5013,6 +5911,10 @@ impl Flowable for CssPixelHeightFlowable {
 
     fn diagnostic_metadata(&self) -> Vec<(String, String)> {
         self.child.diagnostic_metadata()
+    }
+
+    fn with_grid_item_baseline_rounding(&self) -> Box<dyn Flowable> {
+        Box::new(Self::new(self.child.with_grid_item_baseline_rounding()))
     }
 }
 
@@ -5256,6 +6158,10 @@ impl Flowable for Spacer {
     fn pagination(&self) -> Pagination {
         self.pagination
     }
+
+    fn is_grid_placeholder(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -5316,6 +6222,7 @@ pub struct BackgroundPaintFlowable {
     tag_role: Option<Arc<str>>,
     pagination: Pagination,
     visible: bool,
+    mix_blend_mode: MixBlendMode,
 }
 
 impl BackgroundPaintFlowable {
@@ -5327,6 +6234,7 @@ impl BackgroundPaintFlowable {
             tag_role: None,
             pagination: Pagination::default(),
             visible: true,
+            mix_blend_mode: MixBlendMode::Normal,
         }
     }
 
@@ -5342,6 +6250,11 @@ impl BackgroundPaintFlowable {
 
     pub fn with_visible(mut self, visible: bool) -> Self {
         self.visible = visible;
+        self
+    }
+
+    pub fn with_mix_blend_mode(mut self, mode: MixBlendMode) -> Self {
+        self.mix_blend_mode = mode;
         self
     }
 }
@@ -5373,6 +6286,11 @@ impl Flowable for BackgroundPaintFlowable {
         let tagged = self.tag_role.as_ref().map(|role| {
             canvas.begin_tag(role.as_ref(), None, None, None, None, false);
         });
+        let blended = self.mix_blend_mode != MixBlendMode::Normal;
+        if blended {
+            canvas.save_state();
+            canvas.set_blend_mode(self.mix_blend_mode);
+        }
         ContainerFlowable::draw_background_paint(
             canvas,
             x,
@@ -5382,6 +6300,9 @@ impl Flowable for BackgroundPaintFlowable {
             Pt::ZERO,
             &self.paint,
         );
+        if blended {
+            canvas.restore_state();
+        }
         if tagged.is_some() {
             canvas.end_tag();
         }
@@ -5397,15 +6318,19 @@ pub struct ImageFlowable {
     pub width: Pt,
     pub height: Pt,
     pub resource_id: String,
+    use_available_size: bool,
     object_fit: ObjectFitMode,
     object_position: BackgroundPositionSpec,
     intrinsic_size: Option<Size>,
+    slice_full_size: Option<Size>,
+    slice_offset_y: Pt,
     font_size: Pt,
     root_font_size: Pt,
     tag_role: Option<Arc<str>>,
     alt: Option<String>,
     pagination: Pagination,
     visible: bool,
+    mix_blend_mode: MixBlendMode,
     paint_filter: Option<PaintFilterSpec>,
     image_rendering: ImageRenderingMode,
 }
@@ -5420,15 +6345,19 @@ impl ImageFlowable {
             width,
             height,
             resource_id: resource_id.into(),
+            use_available_size: false,
             object_fit: ObjectFitMode::Fill,
             object_position: BackgroundPositionSpec::center(),
             intrinsic_size: None,
+            slice_full_size: None,
+            slice_offset_y: Pt::ZERO,
             font_size: Pt::from_f32(12.0),
             root_font_size: Pt::from_f32(12.0),
             tag_role: None,
             alt: None,
             pagination: Pagination::default(),
             visible: true,
+            mix_blend_mode: MixBlendMode::Normal,
             paint_filter: None,
             image_rendering: ImageRenderingMode::Auto,
         }
@@ -5446,6 +6375,14 @@ impl ImageFlowable {
 
     pub fn with_object_fit(mut self, object_fit: ObjectFitMode) -> Self {
         self.object_fit = object_fit;
+        self
+    }
+
+    /// Size the replaced content from its containing CSS content box. HTML
+    /// images use this mode because percentages, min/max constraints, borders,
+    /// and aspect-ratio are resolved by the surrounding CSS box during layout.
+    pub(crate) fn with_available_size(mut self, enabled: bool) -> Self {
+        self.use_available_size = enabled;
         self
     }
 
@@ -5478,6 +6415,11 @@ impl ImageFlowable {
 
     pub fn with_visible(mut self, visible: bool) -> Self {
         self.visible = visible;
+        self
+    }
+
+    pub fn with_mix_blend_mode(mut self, mode: MixBlendMode) -> Self {
+        self.mix_blend_mode = mode;
         self
     }
 
@@ -5523,33 +6465,60 @@ impl ImageFlowable {
         }
     }
 
-    fn positioned_object_rect(&self, width: Pt, height: Pt, clip: bool) -> (Pt, Pt, Pt, Pt, bool) {
+    fn positioned_object_rect(
+        &self,
+        area_width: Pt,
+        area_height: Pt,
+        width: Pt,
+        height: Pt,
+        clip: bool,
+    ) -> (Pt, Pt, Pt, Pt, bool) {
         let offset_x =
-            self.resolve_object_position_component(self.object_position.x, self.width, width, true);
+            self.resolve_object_position_component(self.object_position.x, area_width, width, true);
         let offset_y = self.resolve_object_position_component(
             self.object_position.y,
-            self.height,
+            area_height,
             height,
             false,
         );
         (offset_x, offset_y, width, height, clip)
     }
 
-    fn object_fit_rect(&self) -> (Pt, Pt, Pt, Pt, bool) {
-        let fill = (Pt::ZERO, Pt::ZERO, self.width, self.height, false);
+    fn layout_size(&self, avail_width: Pt, avail_height: Pt) -> Size {
+        if !self.use_available_size {
+            return Size {
+                width: self.width,
+                height: self.height,
+            };
+        }
+        let width = if avail_width > Pt::ZERO && avail_width < huge_pt() {
+            avail_width
+        } else {
+            self.width
+        };
+        let height = if avail_height > Pt::ZERO && avail_height < huge_pt() {
+            avail_height
+        } else {
+            self.height
+        };
+        Size { width, height }
+    }
+
+    fn object_fit_rect(&self, area_width: Pt, area_height: Pt) -> (Pt, Pt, Pt, Pt, bool) {
+        let fill = (Pt::ZERO, Pt::ZERO, area_width, area_height, false);
         let Some(intrinsic_size) = self.intrinsic_size else {
             return fill;
         };
         if intrinsic_size.width <= Pt::ZERO
             || intrinsic_size.height <= Pt::ZERO
-            || self.width <= Pt::ZERO
-            || self.height <= Pt::ZERO
+            || area_width <= Pt::ZERO
+            || area_height <= Pt::ZERO
         {
             return fill;
         }
 
-        let width_scale = self.width.to_f32() / intrinsic_size.width.to_f32();
-        let height_scale = self.height.to_f32() / intrinsic_size.height.to_f32();
+        let width_scale = area_width.to_f32() / intrinsic_size.width.to_f32();
+        let height_scale = area_height.to_f32() / intrinsic_size.height.to_f32();
         if !width_scale.is_finite()
             || !height_scale.is_finite()
             || width_scale <= 0.0
@@ -5569,23 +6538,23 @@ impl ImageFlowable {
             ObjectFitMode::Fill => fill,
             ObjectFitMode::Contain => {
                 let (width, height) = contain(width_scale.min(height_scale));
-                self.positioned_object_rect(width, height, false)
+                self.positioned_object_rect(area_width, area_height, width, height, true)
             }
             ObjectFitMode::Cover => {
                 let (width, height) = contain(width_scale.max(height_scale));
-                self.positioned_object_rect(width, height, true)
+                self.positioned_object_rect(area_width, area_height, width, height, true)
             }
             ObjectFitMode::None => {
                 let (width, height) = none();
-                self.positioned_object_rect(width, height, true)
+                self.positioned_object_rect(area_width, area_height, width, height, true)
             }
             ObjectFitMode::ScaleDown => {
-                if intrinsic_size.width <= self.width && intrinsic_size.height <= self.height {
+                if intrinsic_size.width <= area_width && intrinsic_size.height <= area_height {
                     let (width, height) = none();
-                    self.positioned_object_rect(width, height, true)
+                    self.positioned_object_rect(area_width, area_height, width, height, true)
                 } else {
                     let (width, height) = contain(width_scale.min(height_scale));
-                    self.positioned_object_rect(width, height, false)
+                    self.positioned_object_rect(area_width, area_height, width, height, true)
                 }
             }
         }
@@ -5593,11 +6562,8 @@ impl ImageFlowable {
 }
 
 impl Flowable for ImageFlowable {
-    fn wrap(&self, _avail_width: Pt, _avail_height: Pt) -> Size {
-        Size {
-            width: self.width,
-            height: self.height,
-        }
+    fn wrap(&self, avail_width: Pt, avail_height: Pt) -> Size {
+        self.layout_size(avail_width, avail_height)
     }
 
     fn intrinsic_width(&self) -> Option<Pt> {
@@ -5606,10 +6572,32 @@ impl Flowable for ImageFlowable {
 
     fn split(
         &self,
-        _avail_width: Pt,
-        _avail_height: Pt,
+        avail_width: Pt,
+        avail_height: Pt,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
-        None
+        if self.use_available_size || avail_height <= Pt::ZERO || self.height <= avail_height {
+            return None;
+        }
+        let full_size = self.slice_full_size.unwrap_or(Size {
+            width: self.width.min(avail_width).max(Pt::ZERO),
+            height: self.height,
+        });
+        let first_height = avail_height.min(self.height);
+        let remaining_height = self.height - first_height;
+        if first_height <= Pt::ZERO || remaining_height <= Pt::ZERO {
+            return None;
+        }
+
+        let mut first = self.clone();
+        first.height = first_height;
+        first.slice_full_size = Some(full_size);
+
+        let mut second = self.clone();
+        second.height = remaining_height;
+        second.slice_full_size = Some(full_size);
+        second.slice_offset_y = self.slice_offset_y + first_height;
+
+        Some((Box::new(first), Box::new(second)))
     }
 
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, _avail_width: Pt, _avail_height: Pt) {
@@ -5626,8 +6614,9 @@ impl Flowable for ImageFlowable {
             );
             let mut grouped = self.clone();
             grouped.paint_filter = None;
+            grouped.mix_blend_mode = MixBlendMode::Normal;
             let mut temp = Canvas::new(page_size);
-            grouped.draw(&mut temp, x, y, self.width, self.height);
+            grouped.draw(&mut temp, x, y, _avail_width, _avail_height);
             let commands = temp
                 .finish()
                 .pages
@@ -5635,6 +6624,8 @@ impl Flowable for ImageFlowable {
                 .map(|page| page.commands.clone())
                 .unwrap_or_default();
             canvas.define_form(form_id.clone(), page_size.width, page_size.height, commands);
+            canvas.save_state();
+            canvas.set_blend_mode(self.mix_blend_mode);
             canvas.draw_filtered_form(
                 Pt::ZERO,
                 Pt::ZERO,
@@ -5643,25 +6634,38 @@ impl Flowable for ImageFlowable {
                 form_id,
                 filter.clone(),
             );
+            canvas.restore_state();
             return;
         }
         let tagged = self.tag_role.as_ref().map(|role| {
             canvas.begin_tag(role.as_ref(), self.alt.clone(), None, None, None, false);
         });
-        let (offset_x, offset_y, width, height, clip) = self.object_fit_rect();
-        if clip {
+        let blended = self.mix_blend_mode != MixBlendMode::Normal;
+        if blended {
             canvas.save_state();
-            canvas.clip_rect(x, y, self.width, self.height);
+            canvas.set_blend_mode(self.mix_blend_mode);
+        }
+        let area = self.layout_size(_avail_width, _avail_height);
+        let fit_area = self.slice_full_size.unwrap_or(area);
+        let (offset_x, offset_y, width, height, object_clip) =
+            self.object_fit_rect(fit_area.width, fit_area.height);
+        let sliced = self.slice_full_size.is_some();
+        if object_clip || sliced {
+            canvas.save_state();
+            canvas.clip_rect(x, y, area.width, area.height);
         }
         canvas.draw_image_with_interpolation(
             x + offset_x,
-            y + offset_y,
+            y + offset_y - self.slice_offset_y,
             width,
             height,
             self.resource_id.clone(),
             self.image_rendering != ImageRenderingMode::Pixelated,
         );
-        if clip {
+        if object_clip || sliced {
+            canvas.restore_state();
+        }
+        if blended {
             canvas.restore_state();
         }
         if tagged.is_some() {
@@ -5671,6 +6675,70 @@ impl Flowable for ImageFlowable {
 
     fn pagination(&self) -> Pagination {
         self.pagination
+    }
+}
+
+#[cfg(test)]
+mod image_flowable_tests {
+    use super::{Flowable, ImageFlowable};
+    use crate::Canvas;
+    use crate::canvas::Command;
+    use crate::style::ObjectFitMode;
+    use crate::types::{Pt, Size};
+
+    #[test]
+    fn available_content_box_drives_object_fit_geometry() {
+        let image = ImageFlowable::new_pt(Pt::from_f32(6.0), Pt::from_f32(3.0), "image")
+            .with_available_size(true)
+            .with_intrinsic_size(Some((Pt::from_f32(6.0), Pt::from_f32(3.0))))
+            .with_object_fit(ObjectFitMode::Contain);
+
+        let size = image.wrap(Pt::from_f32(120.0), Pt::from_f32(120.0));
+        assert_eq!(size.width, Pt::from_f32(120.0));
+        assert_eq!(size.height, Pt::from_f32(120.0));
+        assert_eq!(
+            image.object_fit_rect(size.width, size.height),
+            (
+                Pt::ZERO,
+                Pt::from_f32(30.0),
+                Pt::from_f32(120.0),
+                Pt::from_f32(60.0),
+                true,
+            )
+        );
+    }
+
+    #[test]
+    fn fixed_raster_slices_preserve_the_original_image_coordinate_space() {
+        let image = ImageFlowable::new_pt(Pt::from_f32(100.0), Pt::from_f32(300.0), "image");
+        let (first, second) = image
+            .split(Pt::from_f32(100.0), Pt::from_f32(100.0))
+            .expect("oversized fixed raster should split");
+        assert_eq!(
+            first.wrap(Pt::from_f32(100.0), Pt::from_f32(100.0)).height,
+            Pt::from_f32(100.0)
+        );
+        assert_eq!(
+            second.wrap(Pt::from_f32(100.0), Pt::from_f32(100.0)).height,
+            Pt::from_f32(200.0)
+        );
+
+        let mut canvas = Canvas::new(Size {
+            width: Pt::from_f32(100.0),
+            height: Pt::from_f32(100.0),
+        });
+        second.draw(
+            &mut canvas,
+            Pt::ZERO,
+            Pt::ZERO,
+            Pt::from_f32(100.0),
+            Pt::from_f32(200.0),
+        );
+        let page = &canvas.finish().pages[0];
+        assert!(page.commands.iter().any(|command| {
+            matches!(command, Command::DrawImage { y, height, .. }
+                if *y == Pt::from_f32(-100.0) && *height == Pt::from_f32(300.0))
+        }));
     }
 }
 
@@ -5685,6 +6753,7 @@ pub struct SvgFlowable {
     alt: Option<String>,
     pagination: Pagination,
     visible: bool,
+    mix_blend_mode: MixBlendMode,
 }
 
 impl SvgFlowable {
@@ -5711,6 +6780,7 @@ impl SvgFlowable {
             alt: None,
             pagination: Pagination::default(),
             visible: true,
+            mix_blend_mode: MixBlendMode::Normal,
         }
     }
 
@@ -5736,6 +6806,11 @@ impl SvgFlowable {
 
     pub fn with_visible(mut self, visible: bool) -> Self {
         self.visible = visible;
+        self
+    }
+
+    pub fn with_mix_blend_mode(mut self, mix_blend_mode: MixBlendMode) -> Self {
+        self.mix_blend_mode = mix_blend_mode;
         self
     }
 }
@@ -5767,6 +6842,38 @@ impl Flowable for SvgFlowable {
         let tagged = self.tag_role.as_ref().map(|role| {
             canvas.begin_tag(role.as_ref(), self.alt.clone(), None, None, None, false);
         });
+        if self.mix_blend_mode != MixBlendMode::Normal {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            self.svg_xml.hash(&mut hasher);
+            self.width.to_milli_i64().hash(&mut hasher);
+            self.height.to_milli_i64().hash(&mut hasher);
+            let form_id = format!("svg-blend:{:x}", hasher.finish());
+            let mut grouped = self.clone();
+            grouped.mix_blend_mode = MixBlendMode::Normal;
+            grouped.tag_role = None;
+            grouped.alt = None;
+            let mut temp = Canvas::new(Size {
+                width: self.width,
+                height: self.height,
+            });
+            grouped.draw(&mut temp, Pt::ZERO, Pt::ZERO, self.width, self.height);
+            let commands = temp
+                .finish()
+                .pages
+                .first()
+                .map(|page| page.commands.clone())
+                .unwrap_or_default();
+            canvas.define_isolated_form(form_id.clone(), self.width, self.height, commands);
+            canvas.save_state();
+            canvas.set_blend_mode(self.mix_blend_mode);
+            canvas.draw_form(x, y, self.width, self.height, form_id);
+            canvas.restore_state();
+            if tagged.is_some() {
+                canvas.end_tag();
+            }
+            return;
+        }
         if self.use_form {
             use std::hash::{Hash, Hasher};
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -5813,6 +6920,51 @@ impl Flowable for SvgFlowable {
     }
 }
 
+#[cfg(test)]
+mod svg_flowable_tests {
+    use super::{Flowable, SvgFlowable};
+    use crate::Canvas;
+    use crate::canvas::Command;
+    use crate::types::{MixBlendMode, Pt, Size};
+
+    #[test]
+    fn svg_mix_blend_mode_groups_the_vector_content() {
+        let svg = SvgFlowable::new_pt(
+            Pt::from_f32(40.0),
+            Pt::from_f32(30.0),
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 30'><circle cx='20' cy='15' r='10' fill='#d32f2f'/></svg>",
+        )
+        .with_mix_blend_mode(MixBlendMode::Screen);
+        let mut canvas = Canvas::new(Size {
+            width: Pt::from_f32(100.0),
+            height: Pt::from_f32(100.0),
+        });
+
+        svg.draw(
+            &mut canvas,
+            Pt::from_f32(10.0),
+            Pt::from_f32(10.0),
+            Pt::from_f32(40.0),
+            Pt::from_f32(30.0),
+        );
+        let document = canvas.finish();
+        let commands = &document.pages[0].commands;
+        assert!(
+            commands
+                .iter()
+                .any(|command| { matches!(command, Command::DefineIsolatedForm { .. }) })
+        );
+        assert!(commands.iter().any(|command| {
+            matches!(command, Command::SetBlendMode { mode } if *mode == MixBlendMode::Screen)
+        }));
+        assert!(
+            commands
+                .iter()
+                .any(|command| matches!(command, Command::DrawForm { .. }))
+        );
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextAlign {
     Left,
@@ -5837,7 +6989,9 @@ pub enum VerticalAlign {
     /// implement CSS `super`.
     BaselineShift(Pt),
     Top,
+    TextTop,
     Middle,
+    TextBottom,
     Bottom,
 }
 
@@ -5846,7 +7000,7 @@ impl VerticalAlign {
         match self {
             Self::Baseline => Some(Pt::ZERO),
             Self::BaselineShift(shift) => Some(shift),
-            Self::Top | Self::Middle | Self::Bottom => None,
+            Self::Top | Self::TextTop | Self::Middle | Self::TextBottom | Self::Bottom => None,
         }
     }
 }
@@ -8882,7 +10036,7 @@ impl TableFlowable {
                 let wrapped = content.wrap(content_width, content_height);
                 let draw_h = wrapped.height.min(content_height).max(Pt::ZERO);
                 let draw_y = match cell.valign {
-                    VerticalAlign::Top => cell_y + pad_top,
+                    VerticalAlign::Top | VerticalAlign::TextTop => cell_y + pad_top,
                     // A table cell whose first in-flow child does not expose a
                     // line baseline uses the child box for baseline alignment.
                     // With no competing row baseline, browsers distribute the
@@ -8892,7 +10046,9 @@ impl TableFlowable {
                     | VerticalAlign::Middle => {
                         cell_y + pad_top + (content_height - draw_h).mul_ratio(1, 2)
                     }
-                    VerticalAlign::Bottom => cell_y + cell_height - pad_bottom - draw_h,
+                    VerticalAlign::Bottom | VerticalAlign::TextBottom => {
+                        cell_y + cell_height - pad_bottom - draw_h
+                    }
                 };
                 let draw_y = if cell.inline_content_phase {
                     draw_y - Pt::from_f32(0.5)
@@ -8958,7 +10114,8 @@ impl TableFlowable {
                 let text_y = match cell.valign {
                     VerticalAlign::Baseline
                     | VerticalAlign::BaselineShift(_)
-                    | VerticalAlign::Top => cell_y + pad_top,
+                    | VerticalAlign::Top
+                    | VerticalAlign::TextTop => cell_y + pad_top,
                     VerticalAlign::Middle => {
                         let collapse_nowrap_phase =
                             self.uses_centered_collapsed_edges() && cell.no_wrap;
@@ -8974,7 +10131,9 @@ impl TableFlowable {
                             + (content_height - text_block_height).mul_ratio(1, 2)
                             + phase
                     }
-                    VerticalAlign::Bottom => cell_y + cell_height - pad_bottom - text_block_height,
+                    VerticalAlign::Bottom | VerticalAlign::TextBottom => {
+                        cell_y + cell_height - pad_bottom - text_block_height
+                    }
                 };
                 let collapsed_no_wrap_phase = self.uses_centered_collapsed_edges()
                     && cell.no_wrap
@@ -10707,12 +11866,16 @@ struct InlineItemLayout {
     baseline: Option<Pt>,
     inline_ascent: Option<Pt>,
     x_height: Option<Pt>,
+    font_extents: Option<(Pt, Pt)>,
 }
 
 #[derive(Clone)]
 struct InlineLineLayout {
     line_height: Pt,
+    alignment_height: Pt,
     baseline: Option<Pt>,
+    parent_font_ascent: Pt,
+    parent_font_descent: Pt,
     items: Vec<InlineItemLayout>,
 }
 
@@ -10783,7 +11946,10 @@ impl Flowable for InlineBackgroundFlowable {
         // backgrounds behind large text in a tight line-height.
         let mut box_height = self.font_box_height.max(Pt::ZERO);
         if self.css_pixel_snap {
-            box_height = round_to_css_pixel(box_height);
+            // Browser inline ink/background extents conservatively contain the
+            // selected face. Rounding a 23.28px hhea box down to 23px clips the
+            // final device row; LayoutNG retains the 24px outward extent.
+            box_height = ceil_to_css_pixel(box_height);
         }
         let mut box_x = x;
         let mut box_width = size.width;
@@ -10835,6 +12001,10 @@ impl Flowable for InlineBackgroundFlowable {
 
     fn inline_x_height(&self, avail_width: Pt) -> Option<Pt> {
         self.child.inline_x_height(avail_width)
+    }
+
+    fn inline_font_extents(&self, avail_width: Pt) -> Option<(Pt, Pt)> {
+        self.child.inline_font_extents(avail_width)
     }
 
     fn pagination(&self) -> Pagination {
@@ -10903,6 +12073,8 @@ impl InlineBlockLayoutFlowable {
             let mut line_baseline: Option<Pt> = None;
             let mut max_descent = Pt::ZERO;
             let mut line_x_height = Pt::ZERO;
+            let mut parent_font_ascent = Pt::ZERO;
+            let mut parent_font_descent = Pt::ZERO;
             for item in line_items.iter() {
                 let Some(baseline_shift) = item.valign.baseline_shift() else {
                     continue;
@@ -10919,6 +12091,12 @@ impl InlineBlockLayoutFlowable {
                     .max((item.size.height - item_baseline + baseline_shift).max(Pt::ZERO));
                 if let Some(x_height) = item.x_height {
                     line_x_height = line_x_height.max(x_height.max(Pt::ZERO));
+                }
+                if matches!(item.valign, VerticalAlign::Baseline) {
+                    if let Some((font_ascent, font_descent)) = item.font_extents {
+                        parent_font_ascent = parent_font_ascent.max(font_ascent.max(Pt::ZERO));
+                        parent_font_descent = parent_font_descent.max(font_descent.max(Pt::ZERO));
+                    }
                 }
             }
             if line_x_height > Pt::ZERO {
@@ -10943,6 +12121,7 @@ impl InlineBlockLayoutFlowable {
             if let Some(baseline) = line_baseline {
                 line_height = line_height.max(baseline + max_descent);
             }
+            let alignment_height = line_height;
             if css_pixel_snap {
                 let text_item_height = line_items
                     .iter()
@@ -10979,6 +12158,24 @@ impl InlineBlockLayoutFlowable {
                         line_height - Pt::from_milli_i64(750)
                     };
                     floor_to_css_pixel(phase).max(atomic_height)
+                } else if line_items.iter().any(|item| {
+                    matches!(item.valign, VerticalAlign::Bottom)
+                        || matches!(
+                            item.valign,
+                            VerticalAlign::BaselineShift(shift)
+                                if shift < Pt::ZERO
+                                    && shift.to_milli_i64().rem_euclid(750) != 0
+                        )
+                }) {
+                    // Bottom alignment retains the authored fractional line
+                    // height, while `super` retains its LayoutUnit baseline
+                    // union. LayoutNG floors the resulting used line advance;
+                    // ceiling adds a visible extra CSS pixel to the block.
+                    let atomic_height = line_items
+                        .iter()
+                        .map(|item| item.size.height)
+                        .fold(Pt::ZERO, Pt::max);
+                    floor_to_css_pixel(line_height).max(atomic_height)
                 } else {
                     ceil_to_css_pixel(line_height)
                 };
@@ -10988,7 +12185,10 @@ impl InlineBlockLayoutFlowable {
             let items = std::mem::take(line_items);
             lines.push(InlineLineLayout {
                 line_height,
+                alignment_height,
                 baseline: line_baseline,
+                parent_font_ascent,
+                parent_font_descent,
                 items,
             });
         };
@@ -11003,7 +12203,10 @@ impl InlineBlockLayoutFlowable {
                     total_height = total_height + empty_height;
                     lines.push(InlineLineLayout {
                         line_height: empty_height,
+                        alignment_height: empty_height,
                         baseline: None,
+                        parent_font_ascent: Pt::ZERO,
+                        parent_font_descent: Pt::ZERO,
                         items: Vec::new(),
                     });
                 } else {
@@ -11074,6 +12277,7 @@ impl InlineBlockLayoutFlowable {
                 } else {
                     None
                 },
+                font_extents: child.inline_font_extents(avail_width),
             });
             line_width = x_off + size.width;
             line_height = line_height.max(size.height);
@@ -11108,6 +12312,33 @@ impl InlineBlockLayoutFlowable {
         let cache = self.compute_layout(avail_width);
         *self.layout_cache.lock().unwrap() = Some(cache.clone());
         cache
+    }
+
+    fn item_y_offset(line: &InlineLineLayout, item: &InlineItemLayout) -> Pt {
+        match item.valign {
+            VerticalAlign::Baseline | VerticalAlign::BaselineShift(_) => line
+                .baseline
+                .zip(item.baseline)
+                .map(|(line_baseline, item_baseline)| {
+                    line_baseline - item_baseline + item.valign.baseline_shift().unwrap_or(Pt::ZERO)
+                })
+                .unwrap_or(Pt::ZERO),
+            VerticalAlign::Top => Pt::ZERO,
+            VerticalAlign::TextTop => line
+                .baseline
+                .map(|baseline| (baseline - line.parent_font_ascent).max(Pt::ZERO))
+                .unwrap_or(Pt::ZERO),
+            VerticalAlign::Middle => line
+                .baseline
+                .zip(item.baseline)
+                .map(|(line_baseline, item_baseline)| line_baseline - item_baseline)
+                .unwrap_or_else(|| (line.line_height - item.size.height).mul_ratio(1, 2)),
+            VerticalAlign::TextBottom => line
+                .baseline
+                .map(|baseline| baseline + line.parent_font_descent - item.size.height)
+                .unwrap_or_else(|| line.line_height - item.size.height),
+            VerticalAlign::Bottom => line.alignment_height - item.size.height,
+        }
     }
 }
 
@@ -11215,23 +12446,7 @@ impl Flowable for InlineBlockLayoutFlowable {
         let mut cursor_y = y;
         for line in &layout.lines {
             for item in &line.items {
-                let y_off = match item.valign {
-                    VerticalAlign::Baseline | VerticalAlign::BaselineShift(_) => line
-                        .baseline
-                        .zip(item.baseline)
-                        .map(|(line_baseline, item_baseline)| {
-                            line_baseline - item_baseline
-                                + item.valign.baseline_shift().unwrap_or(Pt::ZERO)
-                        })
-                        .unwrap_or(Pt::ZERO),
-                    VerticalAlign::Top => Pt::ZERO,
-                    VerticalAlign::Middle => line
-                        .baseline
-                        .zip(item.baseline)
-                        .map(|(line_baseline, item_baseline)| line_baseline - item_baseline)
-                        .unwrap_or_else(|| (line.line_height - item.size.height).mul_ratio(1, 2)),
-                    VerticalAlign::Bottom => line.line_height - item.size.height,
-                };
+                let y_off = Self::item_y_offset(line, item);
                 let (child, _) = &self.children[item.idx];
                 child.draw(
                     canvas,
@@ -11254,9 +12469,12 @@ impl Flowable for InlineBlockLayoutFlowable {
 #[cfg(test)]
 mod inline_baseline_tests {
     use super::{
-        Canvas, CssLineBoxFlowable, CssPixelHeightFlowable, Flowable, InlineBlockLayoutFlowable,
-        ListItemFlowable, Pagination, Paragraph, Pt, Size, VerticalAlign,
+        Canvas, CssLineBoxFlowable, CssPixelHeightFlowable, Flowable, InlineBackgroundFlowable,
+        InlineBlockLayoutFlowable, ListItemFlowable, Pagination, Paragraph, Pt, Size,
+        VerticalAlign,
     };
+    use crate::canvas::Command;
+    use crate::types::Color;
 
     #[derive(Clone)]
     struct BaselineProbe {
@@ -11290,6 +12508,116 @@ mod inline_baseline_tests {
         fn pagination(&self) -> Pagination {
             Pagination::default()
         }
+    }
+
+    #[derive(Clone)]
+    struct FontExtentProbe {
+        size: Size,
+        baseline: Pt,
+        ascent: Pt,
+        descent: Pt,
+    }
+
+    impl Flowable for FontExtentProbe {
+        fn wrap(&self, _avail_width: Pt, _avail_height: Pt) -> Size {
+            self.size
+        }
+
+        fn split(
+            &self,
+            _avail_width: Pt,
+            _avail_height: Pt,
+        ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+            None
+        }
+
+        fn draw(&self, _canvas: &mut Canvas, _x: Pt, _y: Pt, _avail_width: Pt, _avail_height: Pt) {}
+
+        fn first_baseline(&self, _avail_width: Pt) -> Option<Pt> {
+            Some(self.baseline)
+        }
+
+        fn intrinsic_width(&self) -> Option<Pt> {
+            Some(self.size.width)
+        }
+
+        fn inline_font_extents(&self, _avail_width: Pt) -> Option<(Pt, Pt)> {
+            Some((self.ascent, self.descent))
+        }
+    }
+
+    #[test]
+    fn css_inline_background_rounds_font_box_outward() {
+        let child = BaselineProbe {
+            size: Size {
+                width: Pt::from_f32(20.0),
+                height: Pt::from_f32(26.0),
+            },
+            baseline: Pt::from_f32(20.0),
+        };
+        let background = InlineBackgroundFlowable::new_pt(
+            Box::new(child),
+            Color::rgb(1.0, 0.0, 0.0),
+            Pt::from_f32(17.46),
+            Pt::ZERO,
+        )
+        .with_css_pixel_snap(true);
+        let mut canvas = Canvas::new(Size {
+            width: Pt::from_f32(100.0),
+            height: Pt::from_f32(100.0),
+        });
+
+        background.draw(
+            &mut canvas,
+            Pt::ZERO,
+            Pt::ZERO,
+            Pt::from_f32(100.0),
+            Pt::from_f32(100.0),
+        );
+        let document = canvas.finish();
+        assert!(document.pages[0].commands.iter().any(|command| {
+            matches!(command, Command::DrawRect { height, .. } if *height == Pt::from_f32(18.0))
+        }));
+    }
+
+    #[test]
+    fn text_edge_alignment_uses_parent_font_extents_not_line_edges() {
+        let parent = FontExtentProbe {
+            size: Size {
+                width: Pt::from_f32(20.0),
+                height: Pt::from_f32(30.0),
+            },
+            baseline: Pt::from_f32(22.0),
+            ascent: Pt::from_f32(19.0),
+            descent: Pt::from_f32(5.0),
+        };
+        let atomic = || BaselineProbe {
+            size: Size {
+                width: Pt::from_f32(10.0),
+                height: Pt::from_f32(26.0),
+            },
+            baseline: Pt::from_f32(26.0),
+        };
+        let layout = InlineBlockLayoutFlowable::new_pt(
+            vec![
+                (Box::new(parent), VerticalAlign::Baseline),
+                (Box::new(atomic()), VerticalAlign::TextTop),
+                (Box::new(atomic()), VerticalAlign::TextBottom),
+            ],
+            Pt::ZERO,
+            Some(Pt::from_f32(30.0)),
+        )
+        .compute_layout(Pt::from_f32(100.0));
+        let line = &layout.lines[0];
+
+        assert_eq!(
+            InlineBlockLayoutFlowable::item_y_offset(line, &line.items[1]),
+            Pt::from_f32(3.0)
+        );
+        assert_eq!(
+            InlineBlockLayoutFlowable::item_y_offset(line, &line.items[2]),
+            Pt::from_f32(1.0)
+        );
     }
 
     #[derive(Clone)]
@@ -11860,6 +13188,7 @@ pub struct FlexItem {
     shrink: f32,
     basis: Option<LengthSpec>,
     align_self: Option<AlignItems>,
+    justify_self: Option<AlignItems>,
     z_index: i32,
 }
 
@@ -11870,7 +13199,22 @@ pub(crate) struct OverlayFlowable {
 
 impl OverlayFlowable {
     pub(crate) fn new(mut children: Vec<(Box<dyn Flowable>, i32)>) -> Self {
-        children.sort_by_key(|(_, z_index)| *z_index);
+        // Positioned grid descendants with `z-index:auto` paint above the
+        // backgrounds and borders of ordinary grid items. Preserve source
+        // order within each CSS painting bucket while still honoring explicit
+        // negative and positive z-index layers.
+        children.sort_by_key(|(child, z_index)| {
+            let bucket = if *z_index < 0 {
+                0
+            } else if *z_index > 0 {
+                3
+            } else if child.out_of_flow() || child.is_positioned() {
+                2
+            } else {
+                1
+            };
+            (bucket, *z_index)
+        });
         Self { children }
     }
 }
@@ -11902,13 +13246,37 @@ impl Flowable for OverlayFlowable {
 
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt) {
         for (child, _) in &self.children {
+            let local_abs_cb = child.out_of_flow();
+            if local_abs_cb {
+                canvas.push_abs_containing_block(Rect {
+                    x,
+                    y,
+                    width: avail_width.max(Pt::ZERO),
+                    height: avail_height.max(Pt::ZERO),
+                });
+            }
             child.draw(canvas, x, y, avail_width, avail_height);
+            if local_abs_cb {
+                canvas.pop_abs_containing_block();
+            }
         }
     }
 
     fn draw_stretched(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt) {
         for (child, _) in &self.children {
+            let local_abs_cb = child.out_of_flow();
+            if local_abs_cb {
+                canvas.push_abs_containing_block(Rect {
+                    x,
+                    y,
+                    width: avail_width.max(Pt::ZERO),
+                    height: avail_height.max(Pt::ZERO),
+                });
+            }
             child.draw_stretched(canvas, x, y, avail_width, avail_height);
+            if local_abs_cb {
+                canvas.pop_abs_containing_block();
+            }
         }
     }
 
@@ -11977,6 +13345,7 @@ pub struct FlexFlowable {
     reverse_cross: bool,
     justify: JustifyContent,
     align: AlignItems,
+    grid_justify_items: AlignItems,
     align_content: AlignContent,
     row_gap: LengthSpec,
     /// Column-axis gap. Retained as `gap` for constructor compatibility.
@@ -11984,6 +13353,9 @@ pub struct FlexFlowable {
     wrap: bool,
     wrap_reverse: bool,
     line_item_limit: Option<usize>,
+    grid_definite_height: bool,
+    column_tracks: Vec<GridTrackSize>,
+    fragment_column_widths: Option<Vec<Pt>>,
     row_tracks: Vec<GridTrackSize>,
     row_track_offset: usize,
     font_size: Pt,
@@ -12019,6 +13391,7 @@ impl FlexFlowable {
                     shrink: shrink.max(0.0),
                     basis,
                     align_self,
+                    justify_self: None,
                     z_index: 0,
                 })
                 .collect(),
@@ -12027,12 +13400,16 @@ impl FlexFlowable {
             reverse_cross: false,
             justify,
             align,
+            grid_justify_items: AlignItems::Stretch,
             align_content,
             row_gap: gap,
             gap,
             wrap,
             wrap_reverse: false,
             line_item_limit: None,
+            grid_definite_height: false,
+            column_tracks: Vec::new(),
+            fragment_column_widths: None,
             row_tracks: Vec::new(),
             row_track_offset: 0,
             font_size,
@@ -12045,6 +13422,32 @@ impl FlexFlowable {
     pub fn with_grid_tracks(mut self, column_count: usize, row_tracks: Vec<GridTrackSize>) -> Self {
         self.line_item_limit = Some(column_count.max(1));
         self.row_tracks = row_tracks;
+        self.layout_cache = Arc::new(Mutex::new(None));
+        self
+    }
+
+    pub fn with_grid_column_tracks(mut self, column_tracks: Vec<GridTrackSize>) -> Self {
+        self.column_tracks = column_tracks;
+        self.fragment_column_widths = None;
+        self.layout_cache = Arc::new(Mutex::new(None));
+        self
+    }
+
+    pub fn with_grid_definite_height(mut self, definite: bool) -> Self {
+        self.grid_definite_height = definite;
+        self.layout_cache = Arc::new(Mutex::new(None));
+        self
+    }
+
+    pub fn with_grid_item_justification(
+        mut self,
+        justify_items: AlignItems,
+        justify_self: Vec<Option<AlignItems>>,
+    ) -> Self {
+        self.grid_justify_items = justify_items;
+        for (item, alignment) in self.items.iter_mut().zip(justify_self) {
+            item.justify_self = alignment;
+        }
         self.layout_cache = Arc::new(Mutex::new(None));
         self
     }
@@ -12215,11 +13618,14 @@ impl FlexFlowable {
     }
 
     fn definite_row_outer_basis(&self, item_index: usize, basis: Pt, avail_width: Pt) -> Pt {
-        (basis + self.fixed_horizontal_margin_total(item_index, avail_width)).max(
-            self.items[item_index]
-                .child
-                .flex_outer_width_minimum(avail_width),
-        )
+        self.items[item_index]
+            .child
+            .flex_outer_width_for_basis(basis, avail_width)
+            .max(
+                self.items[item_index]
+                    .child
+                    .flex_outer_width_minimum(avail_width),
+            )
     }
 
     fn resolved_row_outer_basis(
@@ -12351,8 +13757,22 @@ impl FlexFlowable {
                     .map(|maximum| maximum.max(minimums[position]))
             })
             .collect();
+        let fixed_grid_track = |position: usize| {
+            self.line_item_limit
+                .and_then(|columns| {
+                    self.column_tracks
+                        .get(item_indices[position] % columns.max(1))
+                })
+                .is_some_and(|track| track.fixed_breadth().is_some())
+        };
 
         for position in 0..widths.len() {
+            // Explicit fixed grid tracks are sizing constraints, not flex
+            // suggestions. A spanning item's min-content width is distributed
+            // across its grid area and must never enlarge only its start track.
+            if fixed_grid_track(position) {
+                continue;
+            }
             widths[position] = widths[position].max(minimums[position]);
             if let Some(maximum) = maximums[position] {
                 widths[position] = widths[position].min(maximum);
@@ -12373,7 +13793,10 @@ impl FlexFlowable {
                     .filter_map(|(position, index)| {
                         let below_maximum =
                             maximums[position].is_none_or(|maximum| widths[position] < maximum);
-                        (self.items[*index].grow > 0.0 && below_maximum).then_some(position)
+                        (!fixed_grid_track(position)
+                            && self.items[*index].grow > 0.0
+                            && below_maximum)
+                            .then_some(position)
                     })
                     .collect();
                 let total_grow: f32 = eligible
@@ -12408,7 +13831,9 @@ impl FlexFlowable {
                     .iter()
                     .enumerate()
                     .filter_map(|(position, index)| {
-                        (self.items[*index].shrink > 0.0 && widths[position] > minimums[position])
+                        (!fixed_grid_track(position)
+                            && self.items[*index].shrink > 0.0
+                            && widths[position] > minimums[position])
                             .then_some(position)
                     })
                     .collect();
@@ -12574,6 +13999,28 @@ impl FlexFlowable {
             .copied()
     }
 
+    fn auto_grid_rows_snap_to_css_pixels(&self) -> bool {
+        self.line_item_limit.is_some()
+            && self.row_tracks.iter().all(|track| {
+                matches!(
+                    (track.min, track.max),
+                    (GridTrackBreadth::Auto, GridTrackBreadth::Auto)
+                )
+            })
+    }
+
+    fn grid_items_round_baselines(&self) -> bool {
+        self.line_item_limit.is_some()
+            && self.fragment_column_widths.is_none()
+            && !self.row_tracks.is_empty()
+            && self.row_tracks.iter().all(|track| {
+                matches!(
+                    (track.min, track.max),
+                    (GridTrackBreadth::Auto, GridTrackBreadth::Auto)
+                )
+            })
+    }
+
     fn fixed_row_track_height(&self, line_index: usize, avail_height: Pt) -> Option<Pt> {
         self.row_track(line_index)
             .and_then(GridTrackSize::fixed_breadth)
@@ -12604,12 +14051,16 @@ impl FlexFlowable {
             reverse_cross: self.reverse_cross,
             justify: self.justify,
             align: self.align,
+            grid_justify_items: self.grid_justify_items,
             align_content: self.align_content,
             row_gap: self.row_gap,
             gap: self.gap,
             wrap: self.wrap,
             wrap_reverse: self.wrap_reverse,
             line_item_limit: self.line_item_limit,
+            grid_definite_height: self.grid_definite_height,
+            column_tracks: self.column_tracks.clone(),
+            fragment_column_widths: self.fragment_column_widths.clone(),
             row_tracks: self.row_tracks.clone(),
             row_track_offset: self.row_track_offset,
             font_size: self.font_size,
@@ -12617,6 +14068,256 @@ impl FlexFlowable {
             pagination,
             layout_cache: Arc::new(Mutex::new(None)),
         }
+    }
+
+    fn fragment_grid_line(
+        &self,
+        item_index: usize,
+        line_index: usize,
+        consumed_rows: usize,
+        first_child: Box<dyn Flowable>,
+        second_child: Box<dyn Flowable>,
+        first_track_height: Pt,
+        second_track_height: Pt,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        if first_track_height <= Pt::ZERO || second_track_height <= Pt::ZERO {
+            return None;
+        }
+
+        let item = self.items.get(item_index)?.clone();
+        let skip_index = item_index
+            .saturating_add(consumed_rows)
+            .min(self.items.len());
+
+        let mut placed = self.items[..item_index].to_vec();
+        placed.push(FlexItem {
+            child: first_child,
+            ..item.clone()
+        });
+        let mut remaining = vec![FlexItem {
+            child: second_child,
+            ..item
+        }];
+        remaining.extend(self.items[skip_index..].iter().cloned());
+
+        let mut first_tracks: Vec<GridTrackSize> = (0..line_index)
+            .map(|index| self.row_track(index).unwrap_or_else(GridTrackSize::auto))
+            .collect();
+        first_tracks.push(GridTrackSize::fixed(LengthSpec::Absolute(
+            first_track_height,
+        )));
+
+        let tail_start = self
+            .row_track_offset
+            .saturating_add(line_index)
+            .saturating_add(consumed_rows);
+        let mut second_tracks = vec![GridTrackSize::fixed(LengthSpec::Absolute(
+            second_track_height,
+        ))];
+        second_tracks.extend(self.row_tracks.iter().skip(tail_start).copied());
+
+        let mut first = self.with_items(placed, true);
+        first.row_tracks = first_tracks;
+        first.row_track_offset = 0;
+        first.layout_cache = Arc::new(Mutex::new(None));
+
+        let mut second = self.with_items(remaining, false);
+        second.row_tracks = second_tracks;
+        second.row_track_offset = 0;
+        second.layout_cache = Arc::new(Mutex::new(None));
+
+        Some((Box::new(first), Box::new(second)))
+    }
+
+    fn fragment_auto_grid_line(
+        &self,
+        avail_width: Pt,
+        line: &[usize],
+        line_index: usize,
+        column_widths: &[Pt],
+        first_children: Vec<Box<dyn Flowable>>,
+        second_children: Vec<Box<dyn Flowable>>,
+        first_track_height: Pt,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        if line.is_empty()
+            || line.len() != first_children.len()
+            || line.len() != second_children.len()
+            || first_track_height <= Pt::ZERO
+        {
+            return None;
+        }
+        let start = *line.first()?;
+        let end = line.last()?.saturating_add(1);
+        if end > self.items.len()
+            || line
+                .iter()
+                .copied()
+                .enumerate()
+                .any(|(position, index)| index != start + position)
+        {
+            return None;
+        }
+
+        let mut placed = self.items[..start].to_vec();
+        for (item, child) in self.items[start..end].iter().cloned().zip(first_children) {
+            placed.push(FlexItem { child, ..item });
+        }
+
+        let mut remaining = Vec::with_capacity(second_children.len() + self.items.len() - end);
+        for (item, child) in self.items[start..end].iter().cloned().zip(second_children) {
+            remaining.push(FlexItem { child, ..item });
+        }
+        remaining.extend(self.items[end..].iter().cloned());
+
+        let mut first_tracks: Vec<GridTrackSize> = (0..line_index)
+            .map(|index| self.row_track(index).unwrap_or_else(GridTrackSize::auto))
+            .collect();
+        first_tracks.push(GridTrackSize::fixed(LengthSpec::Absolute(
+            first_track_height,
+        )));
+
+        let tail_start = self
+            .row_track_offset
+            .saturating_add(line_index)
+            .saturating_add(1);
+        let mut second_tracks = vec![GridTrackSize::auto()];
+        second_tracks.extend(self.row_tracks.iter().skip(tail_start).copied());
+
+        let mut first = self.with_items(placed, true);
+        if self.line_item_limit == Some(column_widths.len()) {
+            first.fragment_column_widths = Some(column_widths.to_vec());
+        }
+        first.row_tracks = first_tracks;
+        first.row_track_offset = 0;
+        first.layout_cache = Arc::new(Mutex::new(None));
+
+        let mut second = self.with_items(remaining, false);
+        if self.line_item_limit == Some(column_widths.len()) {
+            second.fragment_column_widths = Some(column_widths.to_vec());
+        }
+        second.row_tracks = second_tracks;
+        second.row_track_offset = 0;
+        second.layout_cache = Arc::new(Mutex::new(None));
+
+        if std::env::var_os("FULLBLEED_SPLIT_DEBUG").is_some() {
+            eprintln!(
+                "flex grid-row fragments first={:?} second={:?} first_tracks={} second_tracks={} columns={:?}",
+                first.wrap(avail_width, huge_pt()),
+                second.wrap(avail_width, huge_pt()),
+                first.row_tracks.len(),
+                second.row_tracks.len(),
+                column_widths
+            );
+        }
+
+        Some((Box::new(first), Box::new(second)))
+    }
+
+    fn partition_grid_row_tracks(
+        &self,
+        first: &mut FlexFlowable,
+        second: &mut FlexFlowable,
+        consumed_lines: usize,
+    ) {
+        if self.row_tracks.is_empty() || consumed_lines == 0 {
+            return;
+        }
+        first.row_tracks = (0..consumed_lines)
+            .map(|index| self.row_track(index).unwrap_or_else(GridTrackSize::auto))
+            .collect();
+        first.row_track_offset = 0;
+
+        let tail_start = self.row_track_offset.saturating_add(consumed_lines);
+        second.row_tracks = self.row_tracks.iter().skip(tail_start).copied().collect();
+        second.row_track_offset = 0;
+        first.layout_cache = Arc::new(Mutex::new(None));
+        second.layout_cache = Arc::new(Mutex::new(None));
+    }
+
+    /// Resolve the small but important intrinsic-grid case that flex-line
+    /// sizing cannot express: an item spanning multiple `auto` columns gives
+    /// its max-content contribution to the final affected track, then the
+    /// remaining stretch space is shared by every auto track. Keeping
+    /// this vector shared across every row also prevents later sparse rows
+    /// from independently redistributing the container width.
+    fn shared_intrinsic_grid_column_widths(&self, avail_width: Pt) -> Option<Vec<Pt>> {
+        let columns = self.line_item_limit?;
+        if columns == 0 || self.column_tracks.len() < columns {
+            return None;
+        }
+
+        let gap = self.resolved_column_gap(avail_width);
+        let available = (avail_width - gap * (columns.saturating_sub(1) as i32)).max(Pt::ZERO);
+        let mut widths = vec![Pt::ZERO; columns];
+        let mut automatic = vec![false; columns];
+        for (column, track) in self.column_tracks.iter().copied().take(columns).enumerate() {
+            if let Some(length) = track.fixed_breadth() {
+                widths[column] = length
+                    .resolve_width(avail_width, self.font_size, self.root_font_size)
+                    .max(Pt::ZERO);
+            } else if matches!(
+                (track.min, track.max),
+                (GridTrackBreadth::Auto, GridTrackBreadth::Auto)
+            ) {
+                automatic[column] = true;
+            } else {
+                return None;
+            }
+        }
+
+        let mut found_auto_span = false;
+        for (index, item) in self.items.iter().enumerate() {
+            let span = item.child.grid_column_span();
+            if span <= 1 {
+                continue;
+            }
+            let start = index % columns;
+            let end = start.saturating_add(span);
+            if end > columns || !automatic[start..end].iter().all(|value| *value) {
+                continue;
+            }
+            let Some(contribution) = item.child.grid_span_max_content_width(available) else {
+                continue;
+            };
+            let target = end - 1;
+            widths[target] = widths[target].max(contribution.max(Pt::ZERO));
+            found_auto_span = true;
+        }
+        if !found_auto_span {
+            return None;
+        }
+
+        for (index, item) in self.items.iter().enumerate() {
+            if item.child.grid_column_span() != 1 {
+                continue;
+            }
+            let column = index % columns;
+            if !automatic[column] {
+                continue;
+            }
+            if let Some(contribution) = item.child.flex_max_content_width(available) {
+                widths[column] = widths[column].max(contribution.max(Pt::ZERO));
+            }
+        }
+
+        let used = widths.iter().fold(Pt::ZERO, |sum, width| sum + *width);
+        let free = (available - used).max(Pt::ZERO);
+        let recipients: Vec<usize> = (0..columns).filter(|column| automatic[*column]).collect();
+        if !recipients.is_empty() && free > Pt::ZERO {
+            let count = recipients.len();
+            let mut assigned = Pt::ZERO;
+            for (position, column) in recipients.into_iter().enumerate() {
+                let share = if position + 1 == count {
+                    free - assigned
+                } else {
+                    free / (count as i32)
+                };
+                widths[column] = widths[column] + share;
+                assigned = assigned + share;
+            }
+        }
+
+        Some(widths)
     }
 
     fn compute_layout(&self, avail_width: Pt, avail_height: Pt) -> FlexLayoutCache {
@@ -12854,7 +14555,12 @@ impl FlexFlowable {
                         .iter()
                         .fold(Pt::ZERO, |acc, line| acc + line.line_h)
                         + row_gap * (line_layouts.len().saturating_sub(1) as i32);
-                    let bounded_height = Self::bounded_height(avail_height);
+                    let bounded_height =
+                        if self.line_item_limit.is_some() && !self.grid_definite_height {
+                            None
+                        } else {
+                            Self::bounded_height(avail_height)
+                        };
                     if let Some(target_height) = bounded_height
                         .filter(|height| !line_layouts.is_empty() && *height > total_h)
                     {
@@ -12924,7 +14630,13 @@ impl FlexFlowable {
                             }
                         }
                     }
-                    let container_h = bounded_height.unwrap_or(total_h);
+                    let container_h = bounded_height.unwrap_or_else(|| {
+                        if self.auto_grid_rows_snap_to_css_pixels() {
+                            round_to_css_pixel(total_h)
+                        } else {
+                            total_h
+                        }
+                    });
                     (
                         FlexLayout::RowWrap {
                             lines: line_layouts,
@@ -13145,10 +14857,30 @@ impl FlexFlowable {
         if lines.is_empty() {
             return None;
         }
+        let grid_fragment_column_widths = self.line_item_limit.and_then(|columns| {
+            lines
+                .iter()
+                .find(|line| line.len() == columns)
+                .map(|line| self.row_line_layout(line, avail_width, huge_pt()).0)
+                .filter(|widths| widths.len() == columns)
+        });
+        let split_debug = std::env::var_os("FULLBLEED_SPLIT_DEBUG").is_some();
+        if split_debug {
+            eprintln!(
+                "flex row split items={} lines={} columns={:?} avail=({:?},{:?}) row_tracks={}",
+                n,
+                lines.len(),
+                self.line_item_limit,
+                avail_width,
+                avail_height,
+                self.row_tracks.len()
+            );
+        }
 
         let gap = self.resolved_row_gap(avail_height);
         let mut remaining_height = avail_height;
         let mut split_at: Option<usize> = None;
+        let mut consumed_lines = 0usize;
         let mut any_line = false;
 
         for (line_idx, line) in lines.iter().enumerate() {
@@ -13158,7 +14890,69 @@ impl FlexFlowable {
             {
                 break;
             }
-            let (_, _, _, line_h) = self.row_line_layout(line, avail_width, huge_pt());
+            let (line_widths, child_avails, _, line_h) =
+                self.row_line_layout(line, avail_width, huge_pt());
+            let line_h = self
+                .fixed_row_track_height(line_idx, huge_pt())
+                .unwrap_or(line_h);
+            if split_debug {
+                eprintln!(
+                    "flex row split line={} items={:?} height={:?} remaining={:?}",
+                    line_idx, line, line_h, remaining_height
+                );
+            }
+
+            // In the one-column case, a row-spanning item owns one continuous
+            // grid area while the following occupied cells are represented by
+            // synthetic spacers. Fragment that area as a unit and discard only
+            // those placeholders, retaining authored empty boxes and paint.
+            if self.line_item_limit == Some(1) && line.len() == 1 {
+                let item_idx = line[0];
+                let row_span = self.items[item_idx].child.grid_row_span();
+                let covered_end = item_idx.saturating_add(row_span).min(self.items.len());
+                let placeholders_are_synthetic = row_span > 1
+                    && covered_end.saturating_sub(item_idx) == row_span
+                    && self.items[item_idx + 1..covered_end]
+                        .iter()
+                        .all(|covered| covered.child.is_grid_placeholder());
+                if placeholders_are_synthetic {
+                    let mut span_height = Pt::ZERO;
+                    let mut all_tracks_fixed = true;
+                    for offset in 0..row_span {
+                        if let Some(height) =
+                            self.fixed_row_track_height(line_idx + offset, huge_pt())
+                        {
+                            span_height = span_height + height;
+                        } else {
+                            all_tracks_fixed = false;
+                            break;
+                        }
+                    }
+                    if all_tracks_fixed {
+                        span_height = span_height + gap * (row_span.saturating_sub(1) as i32);
+                    }
+                    if all_tracks_fixed
+                        && span_height > remaining_height
+                        && remaining_height > Pt::ZERO
+                    {
+                        if let Some((first_child, second_child)) = self.items[item_idx]
+                            .child
+                            .split_grid_row_span(avail_width, remaining_height)
+                        {
+                            return self.fragment_grid_line(
+                                item_idx,
+                                line_idx,
+                                row_span,
+                                first_child,
+                                second_child,
+                                remaining_height,
+                                span_height - remaining_height,
+                            );
+                        }
+                    }
+                }
+            }
+
             if line_h <= remaining_height {
                 any_line = true;
                 remaining_height = (remaining_height - line_h).max(Pt::ZERO);
@@ -13168,29 +14962,116 @@ impl FlexFlowable {
                 if let Some(last) = line.last() {
                     split_at = Some(last + 1);
                 }
+                consumed_lines = line_idx + 1;
                 continue;
             }
 
-            if !any_line && line.len() == 1 {
+            if self.line_item_limit.is_some()
+                && line.len() > 1
+                && remaining_height > Pt::ZERO
+                && self.fixed_row_track_height(line_idx, huge_pt()).is_none()
+            {
+                let mut first_children = Vec::with_capacity(line.len());
+                let mut second_children = Vec::with_capacity(line.len());
+                let mut fragmented = true;
+                let mut any_first_content = false;
+                for (position, item_idx) in line.iter().copied().enumerate() {
+                    let column = self
+                        .line_item_limit
+                        .map_or(position, |columns| item_idx % columns.max(1));
+                    let shared_width = grid_fragment_column_widths
+                        .as_ref()
+                        .and_then(|widths| widths.get(column))
+                        .copied()
+                        .unwrap_or(line_widths[position]);
+                    let item_width = if self.items[item_idx].child.grid_column_span() > 1 {
+                        child_avails[position]
+                    } else {
+                        shared_width
+                    };
+                    if split_debug {
+                        eprintln!(
+                            "flex grid-row fragment item={} width={:?} basis={:?} remaining={:?}",
+                            item_idx, item_width, child_avails[position], remaining_height
+                        );
+                    }
+                    let Some((first_child, second_child, first_has_content)) = self.items[item_idx]
+                        .child
+                        .split_grid_row_fragment(item_width, remaining_height)
+                    else {
+                        fragmented = false;
+                        break;
+                    };
+                    first_children.push(first_child);
+                    second_children.push(second_child);
+                    any_first_content |= first_has_content;
+                }
+                if fragmented && any_first_content {
+                    let fragment_column_widths = grid_fragment_column_widths
+                        .as_deref()
+                        .unwrap_or(line_widths.as_slice());
+                    if let Some(fragments) = self.fragment_auto_grid_line(
+                        avail_width,
+                        line,
+                        line_idx,
+                        fragment_column_widths,
+                        first_children,
+                        second_children,
+                        remaining_height,
+                    ) {
+                        return Some(fragments);
+                    }
+                }
+            }
+
+            if line.len() == 1 && remaining_height > Pt::ZERO {
                 let item_idx = line[0];
                 let item = self.items[item_idx].clone();
-                if let Some((first, second)) = item.child.split(avail_width, remaining_height) {
-                    let mut placed: Vec<FlexItem> = Vec::new();
-                    let mut remaining: Vec<FlexItem> = Vec::new();
-                    placed.push(FlexItem {
-                        child: first,
-                        ..item.clone()
-                    });
-                    remaining.push(FlexItem {
-                        child: second,
-                        ..item
-                    });
-                    for rest in self.items[item_idx + 1..].iter().cloned() {
-                        remaining.push(rest);
+                let child_split = item.child.split(avail_width, remaining_height).or_else(|| {
+                    // An authored empty auto-height grid item has no internal
+                    // split point, but its stretched background still owns the
+                    // fixed track. Cloning is safe only when it has zero natural
+                    // block extent; non-empty content must never be duplicated.
+                    let natural = item.child.wrap(avail_width, huge_pt());
+                    if split_debug {
+                        eprintln!(
+                            "flex row split unsplittable line={} natural={:?} fixed_track={}",
+                            line_idx,
+                            natural,
+                            self.fixed_row_track_height(line_idx, huge_pt()).is_some()
+                        );
                     }
-                    let first = self.with_items(placed, true);
-                    let second = self.with_items(remaining, false);
-                    return Some((Box::new(first), Box::new(second)));
+                    (self.fixed_row_track_height(line_idx, huge_pt()).is_some()
+                        && natural.height <= Pt::from_f32(0.01))
+                    .then(|| (item.child.clone(), item.child.clone()))
+                });
+                if let Some((first_child, second_child)) = child_split {
+                    if let Some(track_height) = self.fixed_row_track_height(line_idx, huge_pt()) {
+                        return self.fragment_grid_line(
+                            item_idx,
+                            line_idx,
+                            1,
+                            first_child,
+                            second_child,
+                            remaining_height,
+                            track_height - remaining_height,
+                        );
+                    }
+                    if !any_line {
+                        let first_item = FlexItem {
+                            child: first_child,
+                            ..item.clone()
+                        };
+                        let second_item = FlexItem {
+                            child: second_child,
+                            ..item
+                        };
+                        let first = self.with_items(vec![first_item], true);
+                        let mut remaining = vec![second_item];
+                        remaining.extend(self.items[item_idx + 1..].iter().cloned());
+                        let second = self.with_items(remaining, false);
+                        return Some((Box::new(first), Box::new(second)));
+                    }
                 }
             }
             break;
@@ -13203,8 +15084,9 @@ impl FlexFlowable {
 
         let placed = self.items[..split_at].to_vec();
         let remaining = self.items[split_at..].to_vec();
-        let first = self.with_items(placed, true);
-        let second = self.with_items(remaining, false);
+        let mut first = self.with_items(placed, true);
+        let mut second = self.with_items(remaining, false);
+        self.partition_grid_row_tracks(&mut first, &mut second, consumed_lines);
         Some((Box::new(first), Box::new(second)))
     }
 
@@ -13229,8 +15111,12 @@ impl FlexFlowable {
             let basis = item.basis.and_then(|spec| match spec {
                 LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => None,
                 _ => Some(
-                    spec.resolve_height(avail_height, self.font_size, self.root_font_size)
-                        .max(Pt::ZERO),
+                    item.child.flex_outer_height_for_basis(
+                        spec.resolve_height(avail_height, self.font_size, self.root_font_size)
+                            .max(Pt::ZERO),
+                        avail_width,
+                        avail_height,
+                    ),
                 ),
             });
             let hypothetical_h = basis.unwrap_or_else(|| {
@@ -13280,8 +15166,12 @@ impl FlexFlowable {
             let basis = item.basis.and_then(|spec| match spec {
                 LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => None,
                 _ => Some(
-                    spec.resolve_height(avail_height, self.font_size, self.root_font_size)
-                        .max(Pt::ZERO),
+                    item.child.flex_outer_height_for_basis(
+                        spec.resolve_height(avail_height, self.font_size, self.root_font_size)
+                            .max(Pt::ZERO),
+                        avail_width,
+                        avail_height,
+                    ),
                 ),
             });
             let mut size = item.child.wrap(avail_width, basis.unwrap_or(avail_height));
@@ -13386,6 +15276,15 @@ impl FlexFlowable {
                 if self.line_item_limit.is_some() {
                     match spec {
                         LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => None,
+                        LengthSpec::MinContent => item.child.flex_min_content_width(avail_width),
+                        LengthSpec::MaxContent | LengthSpec::Content => {
+                            item.child.flex_max_content_width(avail_width)
+                        }
+                        LengthSpec::FitContent => {
+                            let minimum = item.child.flex_min_content_width(avail_width)?;
+                            let maximum = item.child.flex_max_content_width(avail_width)?;
+                            Some(maximum.min(avail_width.max(minimum)))
+                        }
                         _ => Some(
                             spec.resolve_width(avail_width, self.font_size, self.root_font_size)
                                 .max(Pt::ZERO),
@@ -13534,18 +15433,54 @@ impl FlexFlowable {
 
         for (pos, idx) in indices.iter().enumerate() {
             let item = &self.items[*idx];
-            let basis = item.basis.and_then(|spec| {
-                if self.line_item_limit.is_some() {
-                    match spec {
-                        LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => None,
-                        _ => Some(
-                            spec.resolve_width(avail_width, self.font_size, self.root_font_size)
+            let fit_content_basis = self
+                .line_item_limit
+                .and_then(|columns| self.column_tracks.get(*idx % columns.max(1)).copied())
+                .and_then(GridTrackSize::fit_content_limit)
+                .and_then(|limit| {
+                    // A scroll container's automatic minimum can be smaller
+                    // than its min-content contribution. The outer minimum
+                    // retains authored min-width and box edges without making
+                    // nowrap text override the fit-content cap.
+                    let minimum = item
+                        .child
+                        .flex_min_main_width(avail_width)
+                        .unwrap_or_else(|| item.child.flex_outer_width_minimum(avail_width));
+                    let maximum = item.child.flex_max_content_width(avail_width)?;
+                    let cap = limit
+                        .resolve_width(avail_width, self.font_size, self.root_font_size)
+                        .max(Pt::ZERO);
+                    Some(maximum.min(cap.max(minimum)))
+                });
+            let basis = fit_content_basis.or_else(|| {
+                item.basis.and_then(|spec| {
+                    if self.line_item_limit.is_some() {
+                        match spec {
+                            LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => None,
+                            LengthSpec::MinContent => {
+                                item.child.flex_min_content_width(avail_width)
+                            }
+                            LengthSpec::MaxContent | LengthSpec::Content => {
+                                item.child.flex_max_content_width(avail_width)
+                            }
+                            LengthSpec::FitContent => {
+                                let minimum = item.child.flex_min_content_width(avail_width)?;
+                                let maximum = item.child.flex_max_content_width(avail_width)?;
+                                Some(maximum.min(avail_width.max(minimum)))
+                            }
+                            _ => Some(
+                                spec.resolve_width(
+                                    avail_width,
+                                    self.font_size,
+                                    self.root_font_size,
+                                )
                                 .max(Pt::ZERO),
-                        ),
+                            ),
+                        }
+                    } else {
+                        self.resolved_row_outer_basis(*idx, spec, avail_width)
                     }
-                } else {
-                    self.resolved_row_outer_basis(*idx, spec, avail_width)
-                }
+                })
             });
             if item.grow <= 0.0 {
                 if let Some(basis) = basis {
@@ -13676,10 +15611,68 @@ impl FlexFlowable {
             }
         }
 
+        if let (Some(columns), Some(shared)) = (
+            self.line_item_limit,
+            self.shared_intrinsic_grid_column_widths(avail_width),
+        ) {
+            let gap = self.resolved_column_gap(avail_width);
+            for (position, item_index) in indices.iter().copied().enumerate() {
+                let column = item_index % columns.max(1);
+                widths[position] = shared[column];
+                let span = self.items[item_index].child.grid_column_span();
+                child_avails[position] = if span > 1 && column.saturating_add(span) <= shared.len()
+                {
+                    let area = shared[column..column + span]
+                        .iter()
+                        .fold(Pt::ZERO, |sum, width| sum + *width)
+                        + gap * (span.saturating_sub(1) as i32);
+                    area / (span as i32)
+                } else {
+                    shared[column]
+                };
+                sizes[position] = None;
+            }
+        }
+
+        if let (Some(columns), Some(shared)) =
+            (self.line_item_limit, self.fragment_column_widths.as_ref())
+        {
+            if shared.len() == columns {
+                let gap = self.resolved_column_gap(avail_width);
+                for (position, item_index) in indices.iter().copied().enumerate() {
+                    let column = item_index % columns.max(1);
+                    widths[position] = shared[column];
+                    let span = self.items[item_index].child.grid_column_span();
+                    child_avails[position] =
+                        if span > 1 && column.saturating_add(span) <= shared.len() {
+                            let area = shared[column..column + span]
+                                .iter()
+                                .fold(Pt::ZERO, |sum, width| sum + *width)
+                                + gap * (span.saturating_sub(1) as i32);
+                            area / (span as i32)
+                        } else {
+                            shared[column]
+                        };
+                    sizes[position] = None;
+                }
+            }
+        }
+
         let mut max_h = Pt::ZERO;
         let mut final_sizes: Vec<Size> = Vec::with_capacity(n);
         for (pos, idx) in indices.iter().enumerate() {
-            let size = if let Some(size) = sizes[pos] {
+            let size = if self.line_item_limit.is_some() {
+                // A grid track owns the assigned width; a grid item with a
+                // definite width remains narrower and is aligned inside that
+                // area. Flex-basis semantics would incorrectly overwrite the
+                // item's authored width with the track width.
+                let measure_width = if self.items[*idx].child.grid_column_span() > 1 {
+                    child_avails[pos]
+                } else {
+                    widths[pos]
+                };
+                self.items[*idx].child.wrap(measure_width, avail_height)
+            } else if let Some(size) = sizes[pos] {
                 size
             } else {
                 let size = self.items[*idx]
@@ -14055,6 +16048,15 @@ impl Flowable for FlexFlowable {
                 }
             }
             FlexLayout::RowWrap { lines, container_h } => {
+                if std::env::var_os("FULLBLEED_SPLIT_DEBUG").is_some() {
+                    eprintln!(
+                        "flex row draw items={} lines={} container={:?} heights={:?}",
+                        self.items.len(),
+                        lines.len(),
+                        container_h,
+                        lines.iter().map(|line| line.line_h).collect::<Vec<_>>()
+                    );
+                }
                 let total_lines_h: Pt = lines
                     .iter()
                     .fold(Pt::ZERO, |acc, line| acc + line.line_h.max(Pt::ZERO))
@@ -14088,13 +16090,26 @@ impl Flowable for FlexFlowable {
 
                 let mut cursor_y = y + start_y;
                 for (line_idx, line) in lines.iter().enumerate() {
+                    let (paint_line_y, paint_line_h) = if self.auto_grid_rows_snap_to_css_pixels() {
+                        let top = round_to_css_pixel(cursor_y);
+                        let bottom = round_to_css_pixel(cursor_y + line.line_h);
+                        (top, (bottom - top).max(Pt::ZERO))
+                    } else {
+                        (cursor_y, line.line_h)
+                    };
                     let used_w: Pt = line.widths.iter().fold(Pt::ZERO, |acc, w| acc + *w)
                         + column_gap_base * (line.indices.len().saturating_sub(1) as i32);
                     let free = avail_width - used_w;
                     let extra = free.max(Pt::ZERO);
                     let mut gap = column_gap_base;
                     let mut start_x = Pt::ZERO;
-                    let auto_margin_count = self.row_auto_margin_count(&line.indices, avail_width);
+                    // Grid auto margins resolve inside each grid area. They do
+                    // not consume the free space used to distribute tracks.
+                    let auto_margin_count = if self.line_item_limit.is_some() {
+                        0
+                    } else {
+                        self.row_auto_margin_count(&line.indices, avail_width)
+                    };
                     let auto_margin_share = if auto_margin_count > 0 {
                         extra / (auto_margin_count as i32)
                     } else {
@@ -14192,7 +16207,7 @@ impl Flowable for FlexFlowable {
                                             true,
                                         );
                                         (
-                                            (line.line_h
+                                            (paint_line_h
                                                 - last_baseline_descent.unwrap_or(Pt::ZERO)
                                                 - baseline)
                                                 .max(Pt::ZERO),
@@ -14200,7 +16215,7 @@ impl Flowable for FlexFlowable {
                                         )
                                     }
                                     _ => Self::cross_axis_offset(
-                                        line.line_h,
+                                        paint_line_h,
                                         size.height,
                                         margins.top,
                                         margins.bottom,
@@ -14209,60 +16224,85 @@ impl Flowable for FlexFlowable {
                                 }
                             } else {
                                 Self::cross_axis_offset(
-                                    line.line_h,
+                                    paint_line_h,
                                     size.height,
                                     margins.top,
                                     margins.bottom,
                                     item_align,
                                 )
                             };
-                        let auto_before = if self.reverse_main {
-                            margins.right.is_none()
+                        let is_grid_item = self.line_item_limit.is_some();
+                        let (grid_x_offset, grid_stretch_main) = if is_grid_item {
+                            Self::cross_axis_offset(
+                                line.widths[pos],
+                                size.width,
+                                margins.left,
+                                margins.right,
+                                self.items[*idx]
+                                    .justify_self
+                                    .unwrap_or(self.grid_justify_items),
+                            )
                         } else {
-                            margins.left.is_none()
+                            (Pt::ZERO, false)
                         };
-                        let auto_after = if self.reverse_main {
-                            margins.left.is_none()
-                        } else {
-                            margins.right.is_none()
-                        };
+                        let auto_before = !is_grid_item
+                            && if self.reverse_main {
+                                margins.right.is_none()
+                            } else {
+                                margins.left.is_none()
+                            };
+                        let auto_after = !is_grid_item
+                            && if self.reverse_main {
+                                margins.left.is_none()
+                            } else {
+                                margins.right.is_none()
+                            };
                         if auto_before {
                             cursor_x = cursor_x + auto_margin_share;
                         }
                         let item_x = if self.reverse_main {
-                            x + avail_width - (cursor_x - x) - line.widths[pos]
+                            x + avail_width - (cursor_x - x) - line.widths[pos] + grid_x_offset
                         } else {
-                            cursor_x
+                            cursor_x + grid_x_offset
                         };
                         let item_height = if stretch_cross_axis
                             && self.items[*idx].child.accepts_stretched_height()
                         {
-                            line.line_h
+                            paint_line_h
                         } else {
                             size.height
                         };
                         let item_y = if self.wrap_reverse ^ self.reverse_cross {
                             y + *container_h - (cursor_y - y) - y_off - item_height
                         } else {
-                            cursor_y + y_off
+                            paint_line_y + y_off
                         };
 
-                        let force_main_width = self.row_item_needs_forced_width(
-                            *idx,
-                            size,
-                            line.child_avails[pos],
-                            avail_width,
-                        );
+                        let force_main_width = if is_grid_item {
+                            grid_stretch_main && size.width >= line.widths[pos]
+                        } else {
+                            self.row_item_needs_forced_width(
+                                *idx,
+                                size,
+                                line.child_avails[pos],
+                                avail_width,
+                            )
+                        };
+                        let paint_item_width = if force_main_width {
+                            if self.items[*idx].child.grid_column_span() > 1 {
+                                line.child_avails[pos]
+                            } else {
+                                line.widths[pos]
+                            }
+                        } else {
+                            line.child_avails[pos]
+                        };
                         paint_items.push((
                             *idx,
                             item_x,
                             item_y,
-                            if force_main_width {
-                                line.widths[pos]
-                            } else {
-                                line.child_avails[pos]
-                            },
-                            line.line_h,
+                            paint_item_width,
+                            paint_line_h,
                             stretch_cross_axis,
                             force_main_width,
                         ));
@@ -14546,8 +16586,17 @@ impl Flowable for FlexFlowable {
             paint_items
         {
             let item = &self.items[idx];
+            let rounded_child = self
+                .grid_items_round_baselines()
+                .then(|| item.child.with_grid_item_baseline_rounding());
+            let child = rounded_child.as_deref().unwrap_or(item.child.as_ref());
+            let paint_snapped_child = (self.line_item_limit.is_some()
+                && force_main_width
+                && child.grid_column_span() == 1)
+                .then(|| child.with_grid_item_inline_paint_snap());
+            let child = paint_snapped_child.as_deref().unwrap_or(child);
             if force_main_width {
-                item.child.draw_flexed_width(
+                child.draw_flexed_width(
                     canvas,
                     item_x,
                     item_y,
@@ -14556,14 +16605,11 @@ impl Flowable for FlexFlowable {
                     stretch_cross_axis,
                 );
             } else if matches!(self.direction, FlexDirection::Column) {
-                item.child
-                    .draw_flexed_height(canvas, item_x, item_y, item_width, item_height);
+                child.draw_flexed_height(canvas, item_x, item_y, item_width, item_height);
             } else if stretch_cross_axis {
-                item.child
-                    .draw_stretched(canvas, item_x, item_y, item_width, item_height);
+                child.draw_stretched(canvas, item_x, item_y, item_width, item_height);
             } else {
-                item.child
-                    .draw(canvas, item_x, item_y, item_width, item_height);
+                child.draw(canvas, item_x, item_y, item_width, item_height);
             }
         }
         perf_end("layout.flex.draw", perf);
@@ -14571,6 +16617,13 @@ impl Flowable for FlexFlowable {
 
     fn uses_parent_content_height(&self) -> bool {
         true
+    }
+
+    fn with_definite_parent_height(&self) -> Box<dyn Flowable> {
+        let mut definite = self.clone();
+        definite.grid_definite_height = true;
+        definite.layout_cache = Arc::new(Mutex::new(None));
+        Box::new(definite)
     }
 
     fn pagination(&self) -> Pagination {
@@ -14801,6 +16854,8 @@ struct ContainerLayoutCache {
     total_height: Pt,
     child_avail_height: Pt,
     child_sizes: Vec<Option<Size>>,
+    child_collapsed_top: Vec<Pt>,
+    child_collapsed_bottom: Vec<Pt>,
 }
 
 #[derive(Clone)]
@@ -14809,8 +16864,11 @@ pub struct ContainerFlowable {
     margin: EdgeSizes,
     border_width: EdgeSizes,
     border_colors: ResolvedEdgeColors,
+    border_opacities: ResolvedEdgeOpacities,
     border_styles: ResolvedEdgeStyles,
     border_radius: BorderRadiiSpec,
+    box_decoration_break: BoxDecorationBreak,
+    border_image: BorderImageSpec,
     outline_width: LengthSpec,
     outline_offset: LengthSpec,
     outline_style: OutlineLineStyle,
@@ -14860,6 +16918,7 @@ pub struct ContainerFlowable {
     root_font_size: Pt,
     pagination: Pagination,
     fragmentainer_fill_height: Option<Pt>,
+    grid_inline_paint_snap: bool,
     layout_cache: Arc<Mutex<Option<ContainerLayoutCache>>>,
 }
 
@@ -14878,8 +16937,11 @@ impl ContainerFlowable {
             margin: EdgeSizes::zero(),
             border_width: EdgeSizes::zero(),
             border_colors: ResolvedEdgeColors::uniform(Color::BLACK),
+            border_opacities: ResolvedEdgeOpacities::uniform(1.0),
             border_styles: ResolvedEdgeStyles::uniform(OutlineLineStyle::Solid),
             border_radius: BorderRadiiSpec::zero(),
+            box_decoration_break: BoxDecorationBreak::Slice,
+            border_image: BorderImageSpec::default(),
             outline_width: LengthSpec::Absolute(Pt::ZERO),
             outline_offset: LengthSpec::Absolute(Pt::ZERO),
             outline_style: OutlineLineStyle::Solid,
@@ -14929,8 +16991,18 @@ impl ContainerFlowable {
             root_font_size,
             pagination: Pagination::default(),
             fragmentainer_fill_height: None,
+            grid_inline_paint_snap: false,
             layout_cache: Arc::new(Mutex::new(None)),
         }
+    }
+
+    fn painted_inline_border_box(&self, x: Pt, width: Pt) -> (Pt, Pt) {
+        if !self.grid_inline_paint_snap {
+            return (x, width);
+        }
+        let left = round_to_css_pixel(x);
+        let right = round_to_css_pixel(x + width);
+        (left, (right - left).max(Pt::ZERO))
     }
 
     pub fn with_margin(mut self, margin: EdgeSizes) -> Self {
@@ -14960,6 +17032,16 @@ impl ContainerFlowable {
         self
     }
 
+    pub fn with_border_opacities(mut self, top: f32, right: f32, bottom: f32, left: f32) -> Self {
+        self.border_opacities = ResolvedEdgeOpacities {
+            top: top.clamp(0.0, 1.0),
+            right: right.clamp(0.0, 1.0),
+            bottom: bottom.clamp(0.0, 1.0),
+            left: left.clamp(0.0, 1.0),
+        };
+        self
+    }
+
     pub fn with_border_styles(
         mut self,
         top: OutlineLineStyle,
@@ -14976,8 +17058,18 @@ impl ContainerFlowable {
         self
     }
 
+    pub fn with_box_decoration_break(mut self, mode: BoxDecorationBreak) -> Self {
+        self.box_decoration_break = mode;
+        self
+    }
+
     pub fn with_border_radius(mut self, radius: BorderRadiiSpec) -> Self {
         self.border_radius = radius;
+        self
+    }
+
+    pub fn with_border_image(mut self, border_image: BorderImageSpec) -> Self {
+        self.border_image = border_image;
         self
     }
 
@@ -15207,6 +17299,15 @@ impl ContainerFlowable {
     fn resolve_width_constraint(&self, spec: LengthSpec, avail_width: Pt) -> Option<Pt> {
         match spec {
             LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => None,
+            LengthSpec::MinContent => self.intrinsic_child_content_width(avail_width, false),
+            LengthSpec::MaxContent | LengthSpec::Content => {
+                self.intrinsic_child_content_width(avail_width, true)
+            }
+            LengthSpec::FitContent => {
+                let min_content = self.intrinsic_child_content_width(avail_width, false)?;
+                let max_content = self.intrinsic_child_content_width(avail_width, true)?;
+                Some(max_content.min(avail_width.max(min_content)))
+            }
             _ => Some(
                 spec.resolve_width(avail_width, self.font_size, self.root_font_size)
                     .max(Pt::ZERO),
@@ -15279,8 +17380,24 @@ impl ContainerFlowable {
             }
             _ => None,
         };
+        let transferred_aspect_width = if matches!(self.width, LengthSpec::Auto) {
+            self.aspect_ratio.and_then(|ratio| {
+                if !ratio.is_finite() || ratio <= 0.0 {
+                    return None;
+                }
+                let height = self.resolve_fixed_height(huge_pt())?;
+                Some(if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+                    (height * ratio - border.left - border.right - padding.left - padding.right)
+                        .max(Pt::ZERO)
+                } else {
+                    height * ratio
+                })
+            })
+        } else {
+            None
+        };
         let mut content_width = match self.width {
-            LengthSpec::Auto => available_content_width,
+            LengthSpec::Auto => transferred_aspect_width.unwrap_or(available_content_width),
             LengthSpec::MinContent | LengthSpec::MaxContent | LengthSpec::FitContent => {
                 intrinsic_content_width.unwrap_or(available_content_width)
             }
@@ -15295,23 +17412,19 @@ impl ContainerFlowable {
         let mut border_box_width = if matches!(self.width, LengthSpec::Auto) || intrinsic_width {
             border.left + padding.left + content_width + padding.right + border.right
         } else if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+            let decorations = border.left + padding.left + padding.right + border.right;
             let resolved = self
                 .width
                 .resolve_width(avail_width, self.font_size, self.root_font_size)
-                .max(Pt::ZERO);
+                .max(Pt::ZERO)
+                .max(decorations);
             content_width = (resolved - border.left - border.right - padding.left - padding.right)
                 .max(Pt::ZERO);
             resolved
         } else {
             border.left + padding.left + content_width + padding.right + border.right
         };
-        if !matches!(
-            self.max_width,
-            LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
-        ) {
-            let max_width =
-                self.max_width
-                    .resolve_width(avail_width, self.font_size, self.root_font_size);
+        if let Some(max_width) = self.resolve_width_constraint(self.max_width, avail_width) {
             if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
                 if border_box_width > max_width {
                     border_box_width = max_width;
@@ -15363,7 +17476,73 @@ impl ContainerFlowable {
         } else if auto_right {
             margin.right = extra;
         }
+        let (collapsed_top, collapsed_bottom) =
+            self.collapsed_parent_child_margins(content_width, border, padding);
+        if let Some((_, child_top)) = collapsed_top {
+            margin.top = collapsed_adjacent_margin(margin.top, child_top);
+        }
+        if let Some((_, child_bottom)) = collapsed_bottom {
+            margin.bottom = collapsed_adjacent_margin(margin.bottom, child_bottom);
+        }
         (margin, border, padding, content_width, border_box_width)
+    }
+
+    fn collapsed_parent_child_margins(
+        &self,
+        content_width: Pt,
+        border: ResolvedEdges,
+        padding: ResolvedEdges,
+    ) -> (Option<(usize, Pt)>, Option<(usize, Pt)>) {
+        if self.contain_floats || self.overflow_hidden {
+            return (None, None);
+        }
+
+        let first = if border.top == Pt::ZERO && padding.top == Pt::ZERO {
+            self.children
+                .iter()
+                .enumerate()
+                .find(|(_, child)| !child.out_of_flow())
+                .and_then(|(index, child)| {
+                    if child.clear_float_side().is_some() {
+                        return None;
+                    }
+                    child
+                        .collapsible_block_margins(content_width)
+                        .map(|(top, _)| (index, top))
+                })
+        } else {
+            None
+        };
+
+        let height_is_auto = matches!(
+            self.height,
+            LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
+        );
+        let min_height_allows_collapse = matches!(
+            self.min_height,
+            LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
+        ) || self
+            .resolve_height_constraint(self.min_height, huge_pt())
+            .is_some_and(|height| height == Pt::ZERO);
+        let last = if height_is_auto
+            && min_height_allows_collapse
+            && border.bottom == Pt::ZERO
+            && padding.bottom == Pt::ZERO
+        {
+            self.children
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, child)| !child.out_of_flow())
+                .and_then(|(index, child)| {
+                    child
+                        .collapsible_block_margins(content_width)
+                        .map(|(_, bottom)| (index, bottom))
+                })
+        } else {
+            None
+        };
+        (first, last)
     }
 
     fn has_transforms(&self) -> bool {
@@ -15449,11 +17628,21 @@ impl ContainerFlowable {
         let child_avail_height = fixed_content_height.unwrap_or(huge_pt());
         let mut content_height: Pt = Pt::ZERO;
         let mut child_sizes: Vec<Option<Size>> = Vec::with_capacity(self.children.len());
+        let mut child_collapsed_top = vec![Pt::ZERO; self.children.len()];
+        let mut child_collapsed_bottom = vec![Pt::ZERO; self.children.len()];
+        let (collapsed_top, collapsed_bottom) =
+            self.collapsed_parent_child_margins(content_width, border, padding);
+        if let Some((index, value)) = collapsed_top {
+            child_collapsed_top[index] = value;
+        }
+        if let Some((index, value)) = collapsed_bottom {
+            child_collapsed_bottom[index] = value;
+        }
         let mut in_flow_pagination: Vec<Pagination> = Vec::new();
         let mut left_float_bottom = Pt::ZERO;
         let mut right_float_bottom = Pt::ZERO;
         let mut previous_block_margin_bottom: Option<Pt> = None;
-        for child in &self.children {
+        for (child_index, child) in self.children.iter().enumerate() {
             if let Some((side, size)) = child.float_layout_size(content_width, child_avail_height) {
                 let bottom = content_height + size.height.max(Pt::ZERO);
                 match side {
@@ -15485,7 +17674,9 @@ impl ContainerFlowable {
             }
             in_flow_pagination.push(child.pagination());
             let size = child.wrap(content_width, child_avail_height);
-            content_height = content_height + size.height;
+            content_height = content_height + size.height
+                - child_collapsed_top[child_index]
+                - child_collapsed_bottom[child_index];
             child_sizes.push(Some(size));
             previous_block_margin_bottom = block_margins.map(|(_, bottom)| bottom);
         }
@@ -15564,7 +17755,31 @@ impl ContainerFlowable {
                         .max(Pt::ZERO);
             }
         }
-        let total_height = margin.top + border_box_height + margin.bottom;
+        let height_is_auto = matches!(
+            self.height,
+            LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
+        ) || fixed_height.is_none();
+        let min_height_allows_empty_collapse = matches!(
+            self.min_height,
+            LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
+        ) || self
+            .resolve_height_constraint(self.min_height, avail_height)
+            .is_some_and(|height| height == Pt::ZERO);
+        let empty_self_margins_collapse = height_is_auto
+            && min_height_allows_empty_collapse
+            && !self.contain_floats
+            && !self.overflow_hidden
+            && border.top == Pt::ZERO
+            && border.bottom == Pt::ZERO
+            && padding.top == Pt::ZERO
+            && padding.bottom == Pt::ZERO
+            && border_box_height == Pt::ZERO
+            && self.children.iter().all(|child| child.out_of_flow());
+        let total_height = if empty_self_margins_collapse {
+            collapsed_adjacent_margin(margin.top, margin.bottom)
+        } else {
+            margin.top + border_box_height + margin.bottom
+        };
         let total_width = margin.left + border_box_width + margin.right;
 
         ContainerLayoutCache {
@@ -15581,6 +17796,8 @@ impl ContainerFlowable {
             total_height,
             child_avail_height,
             child_sizes,
+            child_collapsed_top,
+            child_collapsed_bottom,
         }
     }
 
@@ -15605,6 +17822,94 @@ impl ContainerFlowable {
     fn zero_bottom(mut edges: EdgeSizes) -> EdgeSizes {
         edges.bottom = LengthSpec::Absolute(Pt::ZERO);
         edges
+    }
+
+    fn zero_top_radii(mut radii: BorderRadiiSpec) -> BorderRadiiSpec {
+        radii.horizontal.top_left = LengthSpec::Absolute(Pt::ZERO);
+        radii.horizontal.top_right = LengthSpec::Absolute(Pt::ZERO);
+        radii.vertical.top_left = LengthSpec::Absolute(Pt::ZERO);
+        radii.vertical.top_right = LengthSpec::Absolute(Pt::ZERO);
+        radii
+    }
+
+    fn zero_bottom_radii(mut radii: BorderRadiiSpec) -> BorderRadiiSpec {
+        radii.horizontal.bottom_left = LengthSpec::Absolute(Pt::ZERO);
+        radii.horizontal.bottom_right = LengthSpec::Absolute(Pt::ZERO);
+        radii.vertical.bottom_left = LengthSpec::Absolute(Pt::ZERO);
+        radii.vertical.bottom_right = LengthSpec::Absolute(Pt::ZERO);
+        radii
+    }
+
+    /// Slice an authored, empty fixed-height box into two painted fragments.
+    /// Empty boxes have no child flowable at which the normal block splitter
+    /// can break, but their background/border still participates in paged
+    /// fragmentation (a common pattern for bars, swatches, and grid probes).
+    fn split_empty_fixed_height(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        if !self.children.is_empty() || self.resolve_fixed_height(huge_pt()).is_none() {
+            return None;
+        }
+
+        let original = self.cached_layout(avail_width, huge_pt());
+        if original.total_height <= avail_height {
+            return None;
+        }
+
+        let first_content =
+            (avail_height - original.margin.top - original.border.top - original.padding.top)
+                .max(Pt::ZERO)
+                .min(original.content_height);
+        let second_content = (original.content_height - first_content).max(Pt::ZERO);
+        if first_content <= Pt::ZERO || second_content <= Pt::ZERO {
+            return None;
+        }
+
+        let first_height = if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+            original.border.top + original.padding.top + first_content
+        } else {
+            first_content
+        };
+        let second_height = if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+            second_content + original.padding.bottom + original.border.bottom
+        } else {
+            second_content
+        };
+
+        let mut first = self.clone();
+        first.margin = Self::zero_bottom(self.margin);
+        first.border_width = Self::zero_bottom(self.border_width);
+        first.padding = Self::zero_bottom(self.padding);
+        first.height = LengthSpec::Absolute(first_height);
+        first.min_height = LengthSpec::Auto;
+        first.max_height = LengthSpec::Auto;
+        first.aspect_ratio = None;
+        first.pagination = Pagination {
+            break_before: BreakBefore::Auto,
+            break_after: BreakAfter::Auto,
+            ..self.pagination
+        };
+        first.fragmentainer_fill_height = None;
+        first.layout_cache = Arc::new(Mutex::new(None));
+
+        let mut second = self.clone();
+        second.margin = Self::zero_top(self.margin);
+        second.border_width = Self::zero_top(self.border_width);
+        second.padding = Self::zero_top(self.padding);
+        second.height = LengthSpec::Absolute(second_height);
+        second.min_height = LengthSpec::Auto;
+        second.max_height = LengthSpec::Auto;
+        second.aspect_ratio = None;
+        second.pagination = Pagination {
+            break_before: BreakBefore::Auto,
+            ..self.pagination
+        };
+        second.fragmentainer_fill_height = None;
+        second.layout_cache = Arc::new(Mutex::new(None));
+
+        Some((Box::new(first), Box::new(second)))
     }
 
     fn has_border(edges: ResolvedEdges) -> bool {
@@ -15676,7 +17981,68 @@ impl ContainerFlowable {
                 || colors.top != colors.bottom
                 || colors.top != colors.left)
         {
-            Self::draw_solid_border_corner_miters(canvas, x, y, width, height, border, colors);
+            Self::draw_solid_border_corner_miters(
+                canvas,
+                x,
+                y,
+                width,
+                height,
+                border,
+                colors,
+                ResolvedEdgeOpacities::uniform(1.0),
+            );
+        }
+    }
+
+    fn draw_border_with_opacities(
+        canvas: &mut Canvas,
+        x: Pt,
+        y: Pt,
+        width: Pt,
+        height: Pt,
+        border: ResolvedEdges,
+        colors: ResolvedEdgeColors,
+        opacities: ResolvedEdgeOpacities,
+        styles: ResolvedEdgeStyles,
+    ) {
+        for (side, color, opacity, style) in [
+            (BorderSide::Top, colors.top, opacities.top, styles.top),
+            (
+                BorderSide::Bottom,
+                colors.bottom,
+                opacities.bottom,
+                styles.bottom,
+            ),
+            (BorderSide::Left, colors.left, opacities.left, styles.left),
+            (
+                BorderSide::Right,
+                colors.right,
+                opacities.right,
+                styles.right,
+            ),
+        ] {
+            if opacity <= 0.0 {
+                continue;
+            }
+            canvas.save_state();
+            if opacity < 1.0 {
+                canvas.set_opacity(opacity, opacity);
+            }
+            Self::draw_border_side(canvas, side, x, y, width, height, border, color, style);
+            canvas.restore_state();
+        }
+        if styles.top == OutlineLineStyle::Solid
+            && styles.right == OutlineLineStyle::Solid
+            && styles.bottom == OutlineLineStyle::Solid
+            && styles.left == OutlineLineStyle::Solid
+            && (colors.top != colors.right
+                || colors.top != colors.bottom
+                || colors.top != colors.left
+                || !opacities.is_uniform())
+        {
+            Self::draw_solid_border_corner_miters(
+                canvas, x, y, width, height, border, colors, opacities,
+            );
         }
     }
 
@@ -15688,6 +18054,7 @@ impl ContainerFlowable {
         height: Pt,
         border: ResolvedEdges,
         colors: ResolvedEdgeColors,
+        opacities: ResolvedEdgeOpacities,
     ) {
         let right = x + width;
         let bottom = y + height;
@@ -15696,9 +18063,13 @@ impl ContainerFlowable {
         let inner_top = (y + border.top).min(bottom);
         let inner_bottom = (bottom - border.bottom).max(y);
 
-        let mut fill_triangle = |color: Color, points: [(Pt, Pt); 3]| {
-            if color.is_transparent() {
+        let mut fill_triangle = |color: Color, opacity: f32, points: [(Pt, Pt); 3]| {
+            if color.is_transparent() || opacity <= 0.0 {
                 return;
+            }
+            canvas.save_state();
+            if opacity < 1.0 {
+                canvas.set_opacity(opacity, opacity);
             }
             canvas.set_fill_color(color);
             canvas.move_to(points[0].0, points[0].1);
@@ -15707,23 +18078,27 @@ impl ContainerFlowable {
             }
             canvas.close_path();
             canvas.fill();
+            canvas.restore_state();
         };
 
         if border.top > Pt::ZERO && border.left > Pt::ZERO {
             fill_triangle(
                 colors.top,
+                opacities.top,
                 [(x, y), (inner_left, y), (inner_left, inner_top)],
             );
         }
         if border.top > Pt::ZERO && border.right > Pt::ZERO {
             fill_triangle(
                 colors.top,
+                opacities.top,
                 [(inner_right, y), (right, y), (inner_right, inner_top)],
             );
         }
         if border.bottom > Pt::ZERO && border.left > Pt::ZERO {
             fill_triangle(
                 colors.bottom,
+                opacities.bottom,
                 [
                     (x, bottom),
                     (inner_left, inner_bottom),
@@ -15734,6 +18109,7 @@ impl ContainerFlowable {
         if border.bottom > Pt::ZERO && border.right > Pt::ZERO {
             fill_triangle(
                 colors.bottom,
+                opacities.bottom,
                 [
                     (inner_right, inner_bottom),
                     (right, bottom),
@@ -16556,6 +18932,125 @@ impl ContainerFlowable {
         canvas.restore_state();
     }
 
+    fn draw_rounded_partial_uniform_border_stroke(
+        canvas: &mut Canvas,
+        x: Pt,
+        y: Pt,
+        width: Pt,
+        height: Pt,
+        border: ResolvedEdges,
+        color: Color,
+        radius: ResolvedClipPathRadii,
+    ) {
+        let line_width = [border.top, border.right, border.bottom, border.left]
+            .into_iter()
+            .find(|value| *value > Pt::ZERO)
+            .unwrap_or(Pt::ZERO);
+        if line_width <= Pt::ZERO || width <= Pt::ZERO || height <= Pt::ZERO {
+            return;
+        }
+        let nonzero_widths_match = [border.top, border.right, border.bottom, border.left]
+            .into_iter()
+            .all(|value| value == Pt::ZERO || value == line_width);
+        if !nonzero_widths_match {
+            return;
+        }
+
+        let inset = line_width / 2.0;
+        let stroke_width = (width - line_width).max(Pt::ZERO);
+        let stroke_height = (height - line_width).max(Pt::ZERO);
+        let stroke_radius = Self::inset_clip_radii(radius, inset);
+        let mut draw_region = |clip_x: Pt, clip_y: Pt, clip_width: Pt, clip_height: Pt| {
+            Self::draw_rounded_border_stroke_region(
+                canvas,
+                x + inset,
+                y + inset,
+                stroke_width,
+                stroke_height,
+                line_width,
+                color,
+                stroke_radius,
+                clip_x,
+                clip_y,
+                clip_width,
+                clip_height,
+            );
+        };
+        for (present, clip_x, clip_y, clip_width, clip_height) in [
+            (border.top > Pt::ZERO, x, y, width, border.top),
+            (
+                border.right > Pt::ZERO,
+                x + width - border.right,
+                y,
+                border.right,
+                height,
+            ),
+            (
+                border.bottom > Pt::ZERO,
+                x,
+                y + height - border.bottom,
+                width,
+                border.bottom,
+            ),
+            (border.left > Pt::ZERO, x, y, border.left, height),
+        ] {
+            if present {
+                draw_region(clip_x, clip_y, clip_width, clip_height);
+            }
+        }
+
+        // The curved annulus extends farther inward than a straight border
+        // band. Repaint each retained corner through its full radius box so a
+        // sliced fragment does not leave a background-colored wedge between
+        // the horizontal and vertical side clips.
+        for (present, clip_x, clip_y, clip_width, clip_height) in [
+            (
+                border.top > Pt::ZERO
+                    && border.left > Pt::ZERO
+                    && radius.top_left_x > Pt::ZERO
+                    && radius.top_left_y > Pt::ZERO,
+                x,
+                y,
+                radius.top_left_x,
+                radius.top_left_y,
+            ),
+            (
+                border.top > Pt::ZERO
+                    && border.right > Pt::ZERO
+                    && radius.top_right_x > Pt::ZERO
+                    && radius.top_right_y > Pt::ZERO,
+                x + width - radius.top_right_x,
+                y,
+                radius.top_right_x,
+                radius.top_right_y,
+            ),
+            (
+                border.bottom > Pt::ZERO
+                    && border.right > Pt::ZERO
+                    && radius.bottom_right_x > Pt::ZERO
+                    && radius.bottom_right_y > Pt::ZERO,
+                x + width - radius.bottom_right_x,
+                y + height - radius.bottom_right_y,
+                radius.bottom_right_x,
+                radius.bottom_right_y,
+            ),
+            (
+                border.bottom > Pt::ZERO
+                    && border.left > Pt::ZERO
+                    && radius.bottom_left_x > Pt::ZERO
+                    && radius.bottom_left_y > Pt::ZERO,
+                x,
+                y + height - radius.bottom_left_y,
+                radius.bottom_left_x,
+                radius.bottom_left_y,
+            ),
+        ] {
+            if present {
+                draw_region(clip_x, clip_y, clip_width, clip_height);
+            }
+        }
+    }
+
     fn draw_rounded_uniform_double_border(
         canvas: &mut Canvas,
         x: Pt,
@@ -17141,7 +19636,11 @@ impl ContainerFlowable {
             && bottom_left_x <= Pt::ZERO
             && bottom_left_y <= Pt::ZERO
         {
-            canvas.draw_rect(x, y, width, height);
+            canvas.move_to(x, y);
+            canvas.line_to(x + width, y);
+            canvas.line_to(x + width, y + height);
+            canvas.line_to(x, y + height);
+            canvas.close_path();
             return;
         }
 
@@ -17624,33 +20123,45 @@ impl ContainerFlowable {
         paint: &BackgroundPaint,
     ) {
         match paint {
+            BackgroundPaint::None => {}
             BackgroundPaint::Image { .. } => {}
-            BackgroundPaint::LinearGradient { angle_deg, stops } => {
-                Self::draw_linear_gradient_background(
-                    canvas, x, y, width, height, radius, *angle_deg, stops,
-                );
-            }
-            BackgroundPaint::RadialGradient {
-                center_x_pct,
-                center_y_pct,
+            BackgroundPaint::LinearGradient {
+                angle_deg,
+                repeat,
                 stops,
+                stop_positions,
             } => {
-                Self::draw_radial_gradient_background(
+                Self::draw_linear_gradient_background(
                     canvas,
                     x,
                     y,
                     width,
                     height,
                     radius,
-                    *center_x_pct,
-                    *center_y_pct,
+                    *angle_deg,
+                    *repeat,
                     stops,
+                    stop_positions.as_deref(),
+                );
+            }
+            BackgroundPaint::RadialGradient {
+                shape,
+                size,
+                center_x,
+                center_y,
+                repeat,
+                stops,
+            } => {
+                Self::draw_radial_gradient_background(
+                    canvas, x, y, width, height, radius, *shape, *size, *center_x, *center_y,
+                    *repeat, stops,
                 );
             }
             BackgroundPaint::ConicGradient {
                 start_angle_deg,
-                center_x_pct,
-                center_y_pct,
+                center_x,
+                center_y,
+                repeat,
                 stops,
             } => {
                 Self::draw_conic_gradient_background(
@@ -17661,8 +20172,9 @@ impl ContainerFlowable {
                     height,
                     radius,
                     *start_angle_deg,
-                    *center_x_pct,
-                    *center_y_pct,
+                    *center_x,
+                    *center_y,
+                    *repeat,
                     stops,
                 );
             }
@@ -17679,6 +20191,7 @@ impl ContainerFlowable {
         paint: &BackgroundPaint,
     ) {
         match paint {
+            BackgroundPaint::None => {}
             BackgroundPaint::Image { source } => {
                 canvas.draw_image(x, y, width, height, source.clone());
             }
@@ -17686,6 +20199,1119 @@ impl ContainerFlowable {
                 Self::draw_gradient_background(canvas, x, y, width, height, radius, paint);
             }
         }
+    }
+
+    fn rasterize_border_image_gradient(
+        paint: &BackgroundPaint,
+        width: Pt,
+        height: Pt,
+    ) -> Option<String> {
+        if width <= Pt::ZERO || height <= Pt::ZERO {
+            return None;
+        }
+        let mut canvas = Canvas::new(Size { width, height });
+        Self::draw_background_paint(
+            &mut canvas,
+            Pt::ZERO,
+            Pt::ZERO,
+            width,
+            height,
+            Pt::ZERO,
+            paint,
+        );
+        let document = canvas.finish();
+        let png = crate::raster::document_to_png_pages(&document, 300, None, false)
+            .ok()?
+            .into_iter()
+            .next()?;
+        Some(format!(
+            "data:image/png;base64,{}",
+            crate::base64::encode_standard(&png)
+        ))
+    }
+
+    fn border_image_svg_intrinsic_size(source: &str) -> Option<(Pt, Pt)> {
+        let xml = crate::assets::load_svg_xml_from_image_source(None, source)?;
+        svg_intrinsic_size_pt(&xml)
+    }
+
+    fn border_image_source_size(
+        paint: &BackgroundPaint,
+        area_width: Pt,
+        area_height: Pt,
+    ) -> Option<(Pt, Pt)> {
+        match paint {
+            BackgroundPaint::Image { source } => {
+                if let Some((width, height)) =
+                    crate::assets::raster_image_intrinsic_dimensions(None, source)
+                {
+                    return Some((
+                        Pt::from_f32(width as f32 * 0.75),
+                        Pt::from_f32(height as f32 * 0.75),
+                    ));
+                }
+                Self::border_image_svg_intrinsic_size(source)
+            }
+            _ => Some((area_width, area_height)),
+        }
+    }
+
+    fn border_image_raster_patches(
+        source: &str,
+        source_width: Pt,
+        source_height: Pt,
+        source_x: [Pt; 3],
+        source_y: [Pt; 3],
+        source_w: [Pt; 3],
+        source_h: [Pt; 3],
+    ) -> [[BorderImageRasterPatch; 3]; 3] {
+        let mut result = std::array::from_fn(|_| std::array::from_fn(|_| Default::default()));
+        let resolved = crate::assets::resolve_image_asset(None, source);
+        if !resolved.trace.success || resolved.trace.content_kind != "raster_image" {
+            return result;
+        }
+        let Ok(decoded) = crate::image_native::load_from_memory(&resolved.bytes) else {
+            return result;
+        };
+        let pixels = decoded.to_rgba8();
+        let (pixel_width, pixel_height) = pixels.dimensions();
+        if pixel_width == 0
+            || pixel_height == 0
+            || source_width <= Pt::ZERO
+            || source_height <= Pt::ZERO
+        {
+            return result;
+        }
+        let bytes = pixels.as_raw();
+        let high_resolution_source = pixel_width.max(pixel_height) >= 64;
+        let lower_boundary = |position: Pt, extent: Pt, pixels: u32| -> Option<u32> {
+            let value = position.to_f32() / extent.to_f32() * pixels as f32;
+            let rounded = if high_resolution_source {
+                value.round()
+            } else {
+                value.floor()
+            };
+            value
+                .is_finite()
+                .then_some(rounded.clamp(0.0, pixels as f32) as u32)
+        };
+        let upper_boundary = |position: Pt, extent: Pt, pixels: u32| -> Option<u32> {
+            let value = position.to_f32() / extent.to_f32() * pixels as f32;
+            let rounded = if high_resolution_source {
+                value.round()
+            } else {
+                value.ceil()
+            };
+            value
+                .is_finite()
+                .then_some(rounded.clamp(0.0, pixels as f32) as u32)
+        };
+
+        for row in 0..3 {
+            for column in 0..3 {
+                let Some(x0) = lower_boundary(source_x[column], source_width, pixel_width) else {
+                    continue;
+                };
+                let Some(x1) = upper_boundary(
+                    source_x[column] + source_w[column],
+                    source_width,
+                    pixel_width,
+                ) else {
+                    continue;
+                };
+                let Some(y0) = lower_boundary(source_y[row], source_height, pixel_height) else {
+                    continue;
+                };
+                let Some(y1) =
+                    upper_boundary(source_y[row] + source_h[row], source_height, pixel_height)
+                else {
+                    continue;
+                };
+                if x0 >= x1 || y0 >= y1 {
+                    continue;
+                }
+                let offset = ((y0 * pixel_width + x0) * 4) as usize;
+                let rgba = &bytes[offset..offset + 4];
+                if rgba[3] != 255 {
+                    continue;
+                }
+                let mut uniform = true;
+                'rows: for y in y0..y1 {
+                    for x in x0..x1 {
+                        let offset = ((y * pixel_width + x) * 4) as usize;
+                        if bytes[offset..offset + 4] != rgba[..] {
+                            uniform = false;
+                            break 'rows;
+                        }
+                    }
+                }
+                if uniform {
+                    result[row][column].solid_color = Some(Color::rgb(
+                        rgba[0] as f32 / 255.0,
+                        rgba[1] as f32 / 255.0,
+                        rgba[2] as f32 / 255.0,
+                    ));
+                    continue;
+                }
+
+                let crop_width = x1 - x0;
+                let crop_height = y1 - y0;
+                let mut crop = Vec::with_capacity((crop_width * crop_height * 4) as usize);
+                for y in y0..y1 {
+                    let start = ((y * pixel_width + x0) * 4) as usize;
+                    let end = start + (crop_width * 4) as usize;
+                    crop.extend_from_slice(&bytes[start..end]);
+                }
+                if let Ok(png) =
+                    crate::image_native::encode_png_rgba8(&crop, crop_width, crop_height)
+                {
+                    result[row][column].source = Some(format!(
+                        "data:image/png;base64,{}",
+                        crate::base64::encode_standard(&png)
+                    ));
+                }
+            }
+        }
+        result
+    }
+
+    fn resolve_border_image_slice(value: BorderImageSliceValue, basis: Pt) -> Pt {
+        let resolved = match value {
+            BorderImageSliceValue::Number(value) => Pt::from_f32(value.max(0.0) * 0.75),
+            BorderImageSliceValue::Percent(value) => basis * value.max(0.0),
+        };
+        resolved.max(Pt::ZERO).min(basis.max(Pt::ZERO))
+    }
+
+    fn resolve_border_image_width(
+        value: BorderImageWidthValue,
+        border_width: Pt,
+        slice_width: Pt,
+        basis: Pt,
+        font_size: Pt,
+        root_font_size: Pt,
+        vertical: bool,
+    ) -> Pt {
+        match value {
+            BorderImageWidthValue::Auto => slice_width,
+            BorderImageWidthValue::Number(value) => border_width * value.max(0.0),
+            BorderImageWidthValue::Length(value) => {
+                if vertical {
+                    value.resolve_height(basis, font_size, root_font_size)
+                } else {
+                    value.resolve_width(basis, font_size, root_font_size)
+                }
+            }
+        }
+        .max(Pt::ZERO)
+    }
+
+    fn resolve_border_image_outset(
+        value: BorderImageOutsetValue,
+        border_width: Pt,
+        basis: Pt,
+        font_size: Pt,
+        root_font_size: Pt,
+        vertical: bool,
+    ) -> Pt {
+        match value {
+            BorderImageOutsetValue::Number(value) => border_width * value.max(0.0),
+            BorderImageOutsetValue::Length(value) => {
+                if vertical {
+                    value.resolve_height(basis, font_size, root_font_size)
+                } else {
+                    value.resolve_width(basis, font_size, root_font_size)
+                }
+            }
+        }
+        .max(Pt::ZERO)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_border_image_patch(
+        canvas: &mut Canvas,
+        paint: &BackgroundPaint,
+        raster_patch: &BorderImageRasterPatch,
+        source_width: Pt,
+        source_height: Pt,
+        source_x: Pt,
+        source_y: Pt,
+        source_patch_width: Pt,
+        source_patch_height: Pt,
+        dest_x: Pt,
+        dest_y: Pt,
+        dest_width: Pt,
+        dest_height: Pt,
+    ) {
+        if source_patch_width <= Pt::ZERO
+            || source_patch_height <= Pt::ZERO
+            || dest_width <= Pt::ZERO
+            || dest_height <= Pt::ZERO
+        {
+            return;
+        }
+        if let Some(color) = raster_patch.solid_color {
+            canvas.set_fill_color(color);
+            Self::rounded_rect_path(canvas, dest_x, dest_y, dest_width, dest_height, Pt::ZERO);
+            canvas.fill();
+            return;
+        }
+        if let Some(source) = raster_patch.source.as_ref() {
+            canvas.draw_image_with_interpolation(
+                dest_x,
+                dest_y,
+                dest_width,
+                dest_height,
+                source.clone(),
+                false,
+            );
+            return;
+        }
+        let scale_x = dest_width.to_f32() / source_patch_width.to_f32();
+        let scale_y = dest_height.to_f32() / source_patch_height.to_f32();
+        if !scale_x.is_finite() || !scale_y.is_finite() || scale_x <= 0.0 || scale_y <= 0.0 {
+            return;
+        }
+        let mapped_x = dest_x - source_x * scale_x;
+        let mapped_y = dest_y - source_y * scale_y;
+        let mapped_width = source_width * scale_x;
+        let mapped_height = source_height * scale_y;
+        canvas.save_state();
+        canvas.clip_rect(dest_x, dest_y, dest_width, dest_height);
+        if let BackgroundPaint::LinearGradient {
+            angle_deg,
+            stops,
+            stop_positions,
+            ..
+        } = paint
+        {
+            if stops.len() >= 2 {
+                let radians = angle_deg.to_radians();
+                let direction_x = radians.sin();
+                let direction_y = -radians.cos();
+                let projection = (source_width.to_f32().abs() * direction_x.abs()
+                    + source_height.to_f32().abs() * direction_y.abs())
+                    * 0.5;
+                let center_x = source_width.to_f32() * 0.5;
+                let center_y = source_height.to_f32() * 0.5;
+                let stops = Self::resolve_gradient_stop_positions(
+                    stops,
+                    stop_positions.as_deref(),
+                    projection * 2.0,
+                );
+                let mapped_center_x = dest_x.to_f32() + (center_x - source_x.to_f32()) * scale_x;
+                let mapped_center_y = dest_y.to_f32() + (center_y - source_y.to_f32()) * scale_y;
+                // A non-uniform nine-slice scale transforms a gradient's normal as
+                // S^-T, not as the endpoint vector S*g.  Converting that covector
+                // back to the axial shading's half-vector preserves the source
+                // gradient parameter exactly in every stretched patch.
+                let normal_x = direction_x / (scale_x * projection.max(1.0e-6));
+                let normal_y = direction_y / (scale_y * projection.max(1.0e-6));
+                let normal_len2 = normal_x * normal_x + normal_y * normal_y;
+                if normal_len2 > 1.0e-12 {
+                    let half_x = normal_x / normal_len2;
+                    let half_y = normal_y / normal_len2;
+                    canvas.shading_fill(Shading::Axial {
+                        x0: mapped_center_x - half_x,
+                        y0: mapped_center_y - half_y,
+                        x1: mapped_center_x + half_x,
+                        y1: mapped_center_y + half_y,
+                        stops,
+                    });
+                }
+            }
+        } else if let BackgroundPaint::Image { source } = paint {
+            canvas.draw_image_with_interpolation(
+                mapped_x,
+                mapped_y,
+                mapped_width,
+                mapped_height,
+                source.clone(),
+                false,
+            );
+        } else {
+            Self::draw_background_paint(
+                canvas,
+                mapped_x,
+                mapped_y,
+                mapped_width,
+                mapped_height,
+                Pt::ZERO,
+                paint,
+            );
+        }
+        canvas.restore_state();
+    }
+
+    fn border_image_axis_tiles(
+        start: Pt,
+        length: Pt,
+        natural_tile: Pt,
+        mode: BorderImageRepeatMode,
+    ) -> Vec<(Pt, Pt)> {
+        if length <= Pt::ZERO {
+            return Vec::new();
+        }
+        if mode == BorderImageRepeatMode::Stretch || natural_tile <= Pt::ZERO {
+            return vec![(start, length)];
+        }
+        let extent = length.to_f32();
+        let natural = natural_tile.to_f32().max(1.0e-5);
+        match mode {
+            BorderImageRepeatMode::Stretch => vec![(start, length)],
+            BorderImageRepeatMode::Round => {
+                let count = (extent / natural).round().max(1.0) as usize;
+                let tile = length / count as f32;
+                (0..count)
+                    .map(|idx| (start + tile * idx as f32, tile))
+                    .collect()
+            }
+            BorderImageRepeatMode::Space => {
+                let count = (extent / natural).floor().max(1.0) as usize;
+                let tile = Pt::from_f32(natural);
+                if count == 1 {
+                    return vec![(start + (length - tile) * 0.5, tile)];
+                }
+                // Border-image `space` distributes the remainder around as well as
+                // between tiles (unlike background-repeat's edge-anchored spacing).
+                let gap = (length - tile * count as f32) / (count + 1) as f32;
+                (0..count)
+                    .map(|idx| (start + gap + (tile + gap) * idx as f32, tile))
+                    .collect()
+            }
+            BorderImageRepeatMode::Repeat => {
+                let tile = Pt::from_f32(natural);
+                let center = start + length * 0.5;
+                let mut first = center - tile * 0.5;
+                while first > start {
+                    first -= tile;
+                }
+                let mut tiles = Vec::new();
+                let mut cursor = first;
+                let end = start + length;
+                while cursor < end {
+                    tiles.push((cursor, tile));
+                    cursor += tile;
+                }
+                tiles
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_border_image_edge_x(
+        canvas: &mut Canvas,
+        paint: &BackgroundPaint,
+        raster_patch: &BorderImageRasterPatch,
+        source_width: Pt,
+        source_height: Pt,
+        source_x: Pt,
+        source_y: Pt,
+        source_patch_width: Pt,
+        source_patch_height: Pt,
+        dest_x: Pt,
+        dest_y: Pt,
+        dest_width: Pt,
+        dest_height: Pt,
+        mode: BorderImageRepeatMode,
+    ) {
+        if source_patch_height <= Pt::ZERO || dest_height <= Pt::ZERO {
+            return;
+        }
+        let natural = source_patch_width * (dest_height.to_f32() / source_patch_height.to_f32());
+        canvas.save_state();
+        canvas.clip_rect(dest_x, dest_y, dest_width, dest_height);
+        for (tile_x, tile_width) in Self::border_image_axis_tiles(dest_x, dest_width, natural, mode)
+        {
+            Self::draw_border_image_patch(
+                canvas,
+                paint,
+                raster_patch,
+                source_width,
+                source_height,
+                source_x,
+                source_y,
+                source_patch_width,
+                source_patch_height,
+                tile_x,
+                dest_y,
+                tile_width,
+                dest_height,
+            );
+        }
+        canvas.restore_state();
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_border_image_edge_y(
+        canvas: &mut Canvas,
+        paint: &BackgroundPaint,
+        raster_patch: &BorderImageRasterPatch,
+        source_width: Pt,
+        source_height: Pt,
+        source_x: Pt,
+        source_y: Pt,
+        source_patch_width: Pt,
+        source_patch_height: Pt,
+        dest_x: Pt,
+        dest_y: Pt,
+        dest_width: Pt,
+        dest_height: Pt,
+        mode: BorderImageRepeatMode,
+    ) {
+        if source_patch_width <= Pt::ZERO || dest_width <= Pt::ZERO {
+            return;
+        }
+        let natural = source_patch_height * (dest_width.to_f32() / source_patch_width.to_f32());
+        canvas.save_state();
+        canvas.clip_rect(dest_x, dest_y, dest_width, dest_height);
+        for (tile_y, tile_height) in
+            Self::border_image_axis_tiles(dest_y, dest_height, natural, mode)
+        {
+            Self::draw_border_image_patch(
+                canvas,
+                paint,
+                raster_patch,
+                source_width,
+                source_height,
+                source_x,
+                source_y,
+                source_patch_width,
+                source_patch_height,
+                dest_x,
+                tile_y,
+                dest_width,
+                tile_height,
+            );
+        }
+        canvas.restore_state();
+    }
+
+    fn draw_border_image(
+        &self,
+        canvas: &mut Canvas,
+        border_box_x: Pt,
+        border_box_y: Pt,
+        border_box_width: Pt,
+        border_box_height: Pt,
+        border: ResolvedEdges,
+    ) -> bool {
+        let Some(source) = self.border_image.source.as_ref() else {
+            return false;
+        };
+
+        let outset_top = Self::resolve_border_image_outset(
+            self.border_image.outset[0],
+            border.top,
+            border_box_height,
+            self.font_size,
+            self.root_font_size,
+            true,
+        );
+        let outset_right = Self::resolve_border_image_outset(
+            self.border_image.outset[1],
+            border.right,
+            border_box_width,
+            self.font_size,
+            self.root_font_size,
+            false,
+        );
+        let outset_bottom = Self::resolve_border_image_outset(
+            self.border_image.outset[2],
+            border.bottom,
+            border_box_height,
+            self.font_size,
+            self.root_font_size,
+            true,
+        );
+        let outset_left = Self::resolve_border_image_outset(
+            self.border_image.outset[3],
+            border.left,
+            border_box_width,
+            self.font_size,
+            self.root_font_size,
+            false,
+        );
+        let area_x = border_box_x - outset_left;
+        let area_y = border_box_y - outset_top;
+        let area_width = border_box_width + outset_left + outset_right;
+        let area_height = border_box_height + outset_top + outset_bottom;
+        let Some((source_width, source_height)) =
+            Self::border_image_source_size(source, area_width, area_height)
+        else {
+            return false;
+        };
+        if source_width <= Pt::ZERO || source_height <= Pt::ZERO {
+            return false;
+        }
+
+        let mut source_slices = [
+            Self::resolve_border_image_slice(self.border_image.slice[0], source_height),
+            Self::resolve_border_image_slice(self.border_image.slice[1], source_width),
+            Self::resolve_border_image_slice(self.border_image.slice[2], source_height),
+            Self::resolve_border_image_slice(self.border_image.slice[3], source_width),
+        ];
+        let horizontal_sum = source_slices[1] + source_slices[3];
+        let vertical_sum = source_slices[0] + source_slices[2];
+        let slice_scale = (source_width.to_f32() / horizontal_sum.to_f32().max(1.0e-6))
+            .min(source_height.to_f32() / vertical_sum.to_f32().max(1.0e-6))
+            .min(1.0);
+        if slice_scale < 1.0 {
+            for value in &mut source_slices {
+                *value = *value * slice_scale;
+            }
+        }
+
+        let mut widths = [
+            Self::resolve_border_image_width(
+                self.border_image.width[0],
+                border.top,
+                source_slices[0],
+                area_height,
+                self.font_size,
+                self.root_font_size,
+                true,
+            ),
+            Self::resolve_border_image_width(
+                self.border_image.width[1],
+                border.right,
+                source_slices[1],
+                area_width,
+                self.font_size,
+                self.root_font_size,
+                false,
+            ),
+            Self::resolve_border_image_width(
+                self.border_image.width[2],
+                border.bottom,
+                source_slices[2],
+                area_height,
+                self.font_size,
+                self.root_font_size,
+                true,
+            ),
+            Self::resolve_border_image_width(
+                self.border_image.width[3],
+                border.left,
+                source_slices[3],
+                area_width,
+                self.font_size,
+                self.root_font_size,
+                false,
+            ),
+        ];
+        let width_scale = (area_width.to_f32() / (widths[1] + widths[3]).to_f32().max(1.0e-6))
+            .min(area_height.to_f32() / (widths[0] + widths[2]).to_f32().max(1.0e-6))
+            .min(1.0);
+        if width_scale < 1.0 {
+            for value in &mut widths {
+                *value = *value * width_scale;
+            }
+        }
+
+        let [slice_top, slice_right, slice_bottom, slice_left] = source_slices;
+        let [width_top, width_right, width_bottom, width_left] = widths;
+        let source_center_width = (source_width - slice_left - slice_right).max(Pt::ZERO);
+        let source_center_height = (source_height - slice_top - slice_bottom).max(Pt::ZERO);
+        let dest_center_width = (area_width - width_left - width_right).max(Pt::ZERO);
+        let dest_center_height = (area_height - width_top - width_bottom).max(Pt::ZERO);
+        let source_x = [Pt::ZERO, slice_left, source_width - slice_right];
+        let source_y = [Pt::ZERO, slice_top, source_height - slice_bottom];
+        let source_w = [slice_left, source_center_width, slice_right];
+        let source_h = [slice_top, source_center_height, slice_bottom];
+        let dest_x = [
+            area_x,
+            area_x + width_left,
+            area_x + area_width - width_right,
+        ];
+        let dest_y = [
+            area_y,
+            area_y + width_top,
+            area_y + area_height - width_bottom,
+        ];
+        let dest_w = [width_left, dest_center_width, width_right];
+        let dest_h = [width_top, dest_center_height, width_bottom];
+        let render_source = match source {
+            BackgroundPaint::Image {
+                source: image_source,
+            } => crate::assets::load_svg_xml_from_image_source(None, image_source)
+                .and_then(|xml| {
+                    crate::svg::rasterize_svg_to_data_uri(&xml, source_width, source_height)
+                })
+                .map(|source| BackgroundPaint::Image { source })
+                .unwrap_or_else(|| source.clone()),
+            BackgroundPaint::RadialGradient { .. } | BackgroundPaint::ConicGradient { .. } => {
+                Self::rasterize_border_image_gradient(source, source_width, source_height)
+                    .map(|source| BackgroundPaint::Image { source })
+                    .unwrap_or_else(|| source.clone())
+            }
+            _ => source.clone(),
+        };
+        let paint = self.filtered_background_paint(&render_source);
+        let raster_patches = match &paint {
+            BackgroundPaint::Image { source } => Self::border_image_raster_patches(
+                source,
+                source_width,
+                source_height,
+                source_x,
+                source_y,
+                source_w,
+                source_h,
+            ),
+            _ => std::array::from_fn(|_| std::array::from_fn(|_| Default::default())),
+        };
+
+        for &(column, row) in &[(0usize, 0usize), (2, 0), (2, 2), (0, 2)] {
+            Self::draw_border_image_patch(
+                canvas,
+                &paint,
+                &raster_patches[row][column],
+                source_width,
+                source_height,
+                source_x[column],
+                source_y[row],
+                source_w[column],
+                source_h[row],
+                dest_x[column],
+                dest_y[row],
+                dest_w[column],
+                dest_h[row],
+            );
+        }
+        Self::draw_border_image_edge_x(
+            canvas,
+            &paint,
+            &raster_patches[0][1],
+            source_width,
+            source_height,
+            source_x[1],
+            source_y[0],
+            source_w[1],
+            source_h[0],
+            dest_x[1],
+            dest_y[0],
+            dest_w[1],
+            dest_h[0],
+            self.border_image.repeat_x,
+        );
+        Self::draw_border_image_edge_x(
+            canvas,
+            &paint,
+            &raster_patches[2][1],
+            source_width,
+            source_height,
+            source_x[1],
+            source_y[2],
+            source_w[1],
+            source_h[2],
+            dest_x[1],
+            dest_y[2],
+            dest_w[1],
+            dest_h[2],
+            self.border_image.repeat_x,
+        );
+        Self::draw_border_image_edge_y(
+            canvas,
+            &paint,
+            &raster_patches[1][0],
+            source_width,
+            source_height,
+            source_x[0],
+            source_y[1],
+            source_w[0],
+            source_h[1],
+            dest_x[0],
+            dest_y[1],
+            dest_w[0],
+            dest_h[1],
+            self.border_image.repeat_y,
+        );
+        Self::draw_border_image_edge_y(
+            canvas,
+            &paint,
+            &raster_patches[1][2],
+            source_width,
+            source_height,
+            source_x[2],
+            source_y[1],
+            source_w[2],
+            source_h[1],
+            dest_x[2],
+            dest_y[1],
+            dest_w[2],
+            dest_h[1],
+            self.border_image.repeat_y,
+        );
+
+        if self.border_image.fill {
+            // The center tile inherits the scale of the adjoining border-image
+            // regions.  Scaling it from the entire destination center would make
+            // the tile depend on the box size and collapse `space`/`repeat` into
+            // only one or two giant copies.
+            let natural_width = if source_h[0] > Pt::ZERO {
+                source_w[1] * (dest_h[0].to_f32() / source_h[0].to_f32())
+            } else if source_h[2] > Pt::ZERO {
+                source_w[1] * (dest_h[2].to_f32() / source_h[2].to_f32())
+            } else {
+                dest_w[1]
+            };
+            let natural_height = if source_w[0] > Pt::ZERO {
+                source_h[1] * (dest_w[0].to_f32() / source_w[0].to_f32())
+            } else if source_w[2] > Pt::ZERO {
+                source_h[1] * (dest_w[2].to_f32() / source_w[2].to_f32())
+            } else {
+                dest_h[1]
+            };
+            let x_tiles = Self::border_image_axis_tiles(
+                dest_x[1],
+                dest_w[1],
+                natural_width,
+                self.border_image.repeat_x,
+            );
+            let y_tiles = Self::border_image_axis_tiles(
+                dest_y[1],
+                dest_h[1],
+                natural_height,
+                self.border_image.repeat_y,
+            );
+            canvas.save_state();
+            canvas.clip_rect(dest_x[1], dest_y[1], dest_w[1], dest_h[1]);
+            for (tile_x, tile_width) in &x_tiles {
+                for (tile_y, tile_height) in &y_tiles {
+                    Self::draw_border_image_patch(
+                        canvas,
+                        &paint,
+                        &raster_patches[1][1],
+                        source_width,
+                        source_height,
+                        source_x[1],
+                        source_y[1],
+                        source_w[1],
+                        source_h[1],
+                        *tile_x,
+                        *tile_y,
+                        *tile_width,
+                        *tile_height,
+                    );
+                }
+            }
+            canvas.restore_state();
+        }
+
+        true
+    }
+
+    fn resolve_gradient_stop_positions(
+        stops: &[ShadingStop],
+        positions: Option<&[Option<GradientStopPosition>]>,
+        extent: f32,
+    ) -> Vec<ShadingStop> {
+        let Some(positions) = positions else {
+            return stops.to_vec();
+        };
+        if stops.len() < 2 || positions.len() != stops.len() || extent <= 1.0e-6 {
+            return stops.to_vec();
+        }
+
+        let mut offsets = positions
+            .iter()
+            .map(|position| {
+                position.map(|position| position.fraction + position.length.to_f32() / extent)
+            })
+            .collect::<Vec<_>>();
+        if offsets[0].is_none() {
+            offsets[0] = Some(0.0);
+        }
+        let last = offsets.len() - 1;
+        if offsets[last].is_none() {
+            offsets[last] = Some(1.0);
+        }
+
+        // CSS color-stop fixup first prevents an explicitly positioned stop
+        // from moving behind any earlier explicitly positioned stop.
+        let mut previous = f32::NEG_INFINITY;
+        for offset in offsets.iter_mut().flatten() {
+            if *offset < previous {
+                *offset = previous;
+            }
+            previous = *offset;
+        }
+
+        let mut index = 0usize;
+        while index < offsets.len() {
+            if offsets[index].is_some() {
+                index += 1;
+                continue;
+            }
+            let left = index - 1;
+            let mut right = index + 1;
+            while right < offsets.len() && offsets[right].is_none() {
+                right += 1;
+            }
+            let left_value = offsets[left].unwrap_or(0.0);
+            let right_value = offsets[right].unwrap_or(left_value);
+            let denominator = (right - left) as f32;
+            for fill in index..right {
+                let amount = (fill - left) as f32 / denominator;
+                offsets[fill] = Some(left_value + (right_value - left_value) * amount);
+            }
+            index = right;
+        }
+
+        let resolved = stops
+            .iter()
+            .zip(offsets)
+            .map(|(stop, offset)| ShadingStop {
+                offset: offset.unwrap_or(0.0),
+                ..*stop
+            })
+            .collect::<Vec<_>>();
+        let sample = |position: f32| {
+            let mut left = resolved[0];
+            for stop in resolved.iter().copied().skip(1) {
+                if stop.offset <= position {
+                    left = stop;
+                    continue;
+                }
+                let span = stop.offset - left.offset;
+                if span <= 1.0e-6 {
+                    return ShadingStop {
+                        offset: position,
+                        ..stop
+                    };
+                }
+                let amount = ((position - left.offset) / span).clamp(0.0, 1.0);
+                return ShadingStop {
+                    offset: position,
+                    color: Self::lerp_color(left.color, stop.color, amount),
+                    alpha: left.alpha + (stop.alpha - left.alpha) * amount,
+                };
+            }
+            ShadingStop {
+                offset: position,
+                ..left
+            }
+        };
+
+        let mut clipped = Vec::with_capacity(resolved.len() + 2);
+        if !resolved.iter().any(|stop| stop.offset == 0.0) {
+            clipped.push(sample(0.0));
+        }
+        clipped.extend(
+            resolved
+                .iter()
+                .copied()
+                .filter(|stop| (0.0..=1.0).contains(&stop.offset)),
+        );
+        if !resolved.iter().any(|stop| stop.offset == 1.0) {
+            clipped.push(sample(1.0));
+        }
+        clipped
+    }
+
+    fn expanded_repeating_gradient_stops(
+        stops: &[ShadingStop],
+        repeat: GradientRepeat,
+        extent: f32,
+    ) -> Vec<ShadingStop> {
+        if stops.len() < 2 || repeat == GradientRepeat::None {
+            return stops.to_vec();
+        }
+        let mut base = stops.to_vec();
+        let period = match repeat {
+            GradientRepeat::None => return base,
+            GradientRepeat::Fraction(period) => period,
+            GradientRepeat::Length(period) => {
+                let fraction = period.to_f32() / extent.max(1.0e-6);
+                for stop in &mut base {
+                    stop.offset *= fraction;
+                }
+                fraction
+            }
+        };
+        if !period.is_finite() || period <= 1.0e-6 {
+            return stops.to_vec();
+        }
+        let first = base[0].offset;
+        let start_cycle = ((0.0 - first) / period).floor() as i32 - 1;
+        let end_cycle = ((1.0 - first) / period).ceil() as i32 + 1;
+        let mut repeated = Vec::new();
+        for cycle in start_cycle..=end_cycle {
+            let shift = cycle as f32 * period;
+            repeated.extend(base.iter().copied().map(|mut stop| {
+                stop.offset += shift;
+                stop
+            }));
+        }
+        // Equivalent cycle boundaries can differ by a few f32 ulps (for
+        // example `0.5 + 0.1` versus `0.6 + 0.0`). PDF stitching functions
+        // require nondecreasing domains, so retain authored hard-stop order
+        // while snapping those arithmetic reversals onto the prior boundary.
+        let mut previous = f32::NEG_INFINITY;
+        for stop in &mut repeated {
+            if stop.offset < previous {
+                stop.offset = previous;
+            }
+            previous = stop.offset;
+        }
+        let sample = |position: f32| {
+            let mut left = repeated[0];
+            for stop in repeated.iter().copied().skip(1) {
+                if stop.offset <= position {
+                    left = stop;
+                    continue;
+                }
+                let span = stop.offset - left.offset;
+                if span <= 1.0e-6 {
+                    return ShadingStop {
+                        offset: position,
+                        ..stop
+                    };
+                }
+                let amount = ((position - left.offset) / span).clamp(0.0, 1.0);
+                return ShadingStop {
+                    offset: position,
+                    color: Self::lerp_color(left.color, stop.color, amount),
+                    alpha: left.alpha + (stop.alpha - left.alpha) * amount,
+                };
+            }
+            ShadingStop {
+                offset: position,
+                ..left
+            }
+        };
+        let has_start = repeated.iter().any(|stop| stop.offset == 0.0);
+        let has_end = repeated.iter().any(|stop| stop.offset == 1.0);
+        let start_sample = (!has_start).then(|| sample(0.0));
+        let end_sample = (!has_end).then(|| sample(1.0));
+        let mut clipped = Vec::new();
+        if let Some(start) = start_sample {
+            clipped.push(start);
+        }
+        clipped.extend(
+            repeated
+                .into_iter()
+                .filter(|stop| (0.0..=1.0).contains(&stop.offset)),
+        );
+        if let Some(end) = end_sample {
+            clipped.push(end);
+        }
+        clipped
+    }
+
+    fn draw_hard_banded_linear_gradient(
+        canvas: &mut Canvas,
+        axis_x0: f32,
+        axis_y0: f32,
+        direction_x: f32,
+        direction_y: f32,
+        extent: f32,
+        perpendicular_extent: f32,
+        stops: &[ShadingStop],
+    ) -> bool {
+        if stops.len() < 2
+            || stops.iter().any(|stop| (stop.alpha - 1.0).abs() > 1.0e-6)
+            || stops.windows(2).any(|pair| {
+                pair[1].offset - pair[0].offset > 1.0e-6 && pair[0].color != pair[1].color
+            })
+        {
+            return false;
+        }
+
+        let normal_x = -direction_y;
+        let normal_y = direction_x;
+        // Bias shared vector edges by a tiny amount toward increasing t. This
+        // matches PDF's half-open axial sampling at half-device coordinates
+        // while remaining far below an authored or device pixel.
+        const BOUNDARY_PHASE: f32 = 1.0e-5;
+        for pair in stops.windows(2) {
+            let start = if pair[0].offset <= 0.0 {
+                0.0
+            } else {
+                pair[0].offset + BOUNDARY_PHASE
+            };
+            let end = if pair[1].offset >= 1.0 {
+                1.0
+            } else {
+                pair[1].offset + BOUNDARY_PHASE
+            };
+            if end - start <= 1.0e-6 {
+                continue;
+            }
+            let start_distance = extent * start;
+            let end_distance = extent * end;
+            let x0 = axis_x0 + direction_x * start_distance;
+            let y0 = axis_y0 + direction_y * start_distance;
+            let x1 = axis_x0 + direction_x * end_distance;
+            let y1 = axis_y0 + direction_y * end_distance;
+            let nx = normal_x * perpendicular_extent;
+            let ny = normal_y * perpendicular_extent;
+            canvas.set_fill_color(pair[0].color);
+            canvas.move_to(Pt::from_f32(x0 - nx), Pt::from_f32(y0 - ny));
+            canvas.line_to(Pt::from_f32(x0 + nx), Pt::from_f32(y0 + ny));
+            canvas.line_to(Pt::from_f32(x1 + nx), Pt::from_f32(y1 + ny));
+            canvas.line_to(Pt::from_f32(x1 - nx), Pt::from_f32(y1 - ny));
+            canvas.close_path();
+            canvas.fill();
+        }
+        true
+    }
+
+    fn gradient_has_only_hard_bands(stops: &[ShadingStop]) -> bool {
+        stops.len() >= 2
+            && stops.iter().all(|stop| (stop.alpha - 1.0).abs() <= 1.0e-6)
+            && stops.windows(2).all(|pair| {
+                pair[1].offset - pair[0].offset <= 1.0e-6 || pair[0].color == pair[1].color
+            })
+    }
+
+    fn draw_hard_banded_conic_gradient(
+        canvas: &mut Canvas,
+        center_x: f32,
+        center_y: f32,
+        radius: f32,
+        start_angle_deg: f32,
+        stops: &[ShadingStop],
+    ) -> bool {
+        if stops.len() < 2
+            || stops.iter().any(|stop| (stop.alpha - 1.0).abs() > 1.0e-6)
+            || stops.windows(2).any(|pair| {
+                pair[1].offset - pair[0].offset > 1.0e-6 && pair[0].color != pair[1].color
+            })
+        {
+            return false;
+        }
+
+        const BOUNDARY_PHASE: f32 = 1.0e-5;
+        let far_radius = radius * 2.0;
+        for pair in stops.windows(2) {
+            if pair[1].offset - pair[0].offset <= 1.0e-6 {
+                continue;
+            }
+            let start = if pair[0].offset <= 0.0 {
+                0.0
+            } else {
+                pair[0].offset + BOUNDARY_PHASE
+            };
+            let end = if pair[1].offset >= 1.0 {
+                1.0
+            } else {
+                pair[1].offset + BOUNDARY_PHASE
+            };
+            let angle0 = (start_angle_deg + start * 360.0).to_radians();
+            let angle1 = (start_angle_deg + end * 360.0).to_radians();
+            let p0x = center_x + angle0.sin() * far_radius;
+            let p0y = center_y - angle0.cos() * far_radius;
+            let p1x = center_x + angle1.sin() * far_radius;
+            let p1y = center_y - angle1.cos() * far_radius;
+            canvas.set_fill_color(pair[0].color);
+            canvas.move_to(Pt::from_f32(center_x), Pt::from_f32(center_y));
+            canvas.line_to(Pt::from_f32(p0x), Pt::from_f32(p0y));
+            canvas.line_to(Pt::from_f32(p1x), Pt::from_f32(p1y));
+            canvas.close_path();
+            canvas.fill();
+        }
+        true
     }
 
     fn draw_linear_gradient_background(
@@ -17696,7 +21322,9 @@ impl ContainerFlowable {
         height: Pt,
         radius: Pt,
         angle_deg: f32,
+        repeat: GradientRepeat,
         stops: &[ShadingStop],
+        stop_positions: Option<&[Option<GradientStopPosition>]>,
     ) {
         if stops.len() < 2 {
             return;
@@ -17709,13 +21337,11 @@ impl ContainerFlowable {
         let proj = (w.abs() * dx.abs() + h.abs() * dy.abs()) * 0.5;
         let cx = x.to_f32() + w * 0.5;
         let cy = y.to_f32() + h * 0.5;
-        let shading = Shading::Axial {
-            x0: cx - dx * proj,
-            y0: cy - dy * proj,
-            x1: cx + dx * proj,
-            y1: cy + dy * proj,
-            stops: stops.to_vec(),
-        };
+        let extent = proj * 2.0;
+        let stops = Self::resolve_gradient_stop_positions(stops, stop_positions, extent);
+        let stops = Self::expanded_repeating_gradient_stops(&stops, repeat, extent);
+        let axis_x0 = cx - dx * proj;
+        let axis_y0 = cy - dy * proj;
         canvas.save_state();
         if radius > Pt::ZERO {
             Self::rounded_rect_path(canvas, x, y, width, height, radius);
@@ -17723,8 +21349,35 @@ impl ContainerFlowable {
         } else {
             canvas.clip_rect(x, y, width, height);
         }
-        canvas.shading_fill(shading);
+        let hard_bands_drawn = repeat != GradientRepeat::None
+            && Self::draw_hard_banded_linear_gradient(
+                canvas,
+                axis_x0,
+                axis_y0,
+                dx,
+                dy,
+                extent,
+                w.hypot(h) + extent,
+                &stops,
+            );
+        if !hard_bands_drawn {
+            canvas.shading_fill(Shading::Axial {
+                x0: axis_x0,
+                y0: axis_y0,
+                x1: cx + dx * proj,
+                y1: cy + dy * proj,
+                stops,
+            });
+        }
         canvas.restore_state();
+    }
+
+    fn resolve_gradient_position(position: GradientPosition, start: f32, extent: f32) -> f32 {
+        match position {
+            GradientPosition::Percent(value) => start + extent * value,
+            GradientPosition::Length(value) => start + value.to_f32(),
+            GradientPosition::EndLength(value) => start + extent - value.to_f32(),
+        }
     }
 
     fn draw_radial_gradient_background(
@@ -17734,8 +21387,11 @@ impl ContainerFlowable {
         width: Pt,
         height: Pt,
         radius: Pt,
-        center_x_pct: f32,
-        center_y_pct: f32,
+        shape: RadialGradientShape,
+        size: RadialGradientSize,
+        center_x: GradientPosition,
+        center_y: GradientPosition,
+        repeat: GradientRepeat,
         stops: &[ShadingStop],
     ) {
         if stops.len() < 2 {
@@ -17747,33 +21403,85 @@ impl ContainerFlowable {
             return;
         }
 
-        let cx = x.to_f32() + w * center_x_pct.clamp(0.0, 1.0);
-        let cy = y.to_f32() + h * center_y_pct.clamp(0.0, 1.0);
-        let corners = [
-            (x.to_f32(), y.to_f32()),
-            (x.to_f32() + w, y.to_f32()),
-            (x.to_f32(), y.to_f32() + h),
-            (x.to_f32() + w, y.to_f32() + h),
-        ];
-        let mut max_dist2 = 0.0f32;
-        for (px, py) in corners {
-            let dx = px - cx;
-            let dy = py - cy;
-            let dist2 = dx * dx + dy * dy;
-            if dist2 > max_dist2 {
-                max_dist2 = dist2;
-            }
-        }
-        let r1 = max_dist2.sqrt().max(1.0);
-        let shading = Shading::Radial {
-            x0: cx,
-            y0: cy,
-            r0: 0.0,
-            x1: cx,
-            y1: cy,
-            r1,
-            stops: stops.to_vec(),
+        let box_x = x.to_f32();
+        let box_y = y.to_f32();
+        let cx = Self::resolve_gradient_position(center_x, box_x, w);
+        let cy = Self::resolve_gradient_position(center_y, box_y, h);
+        let left = (cx - box_x).abs();
+        let right = (box_x + w - cx).abs();
+        let top = (cy - box_y).abs();
+        let bottom = (box_y + h - cy).abs();
+        let corner_offsets = [(left, top), (right, top), (left, bottom), (right, bottom)];
+        let circle_corner_radius = |farthest: bool| {
+            corner_offsets
+                .iter()
+                .map(|(dx, dy)| (dx * dx + dy * dy).sqrt())
+                .reduce(|a, b| if farthest { a.max(b) } else { a.min(b) })
+                .unwrap_or(1.0)
         };
+        let ellipse_corner_radii = |farthest: bool| {
+            let base_rx = if farthest {
+                left.max(right)
+            } else {
+                left.min(right)
+            }
+            .max(1.0e-4);
+            let base_ry = if farthest {
+                top.max(bottom)
+            } else {
+                top.min(bottom)
+            }
+            .max(1.0e-4);
+            let scale = corner_offsets
+                .iter()
+                .map(|(dx, dy)| {
+                    ((dx / base_rx) * (dx / base_rx) + (dy / base_ry) * (dy / base_ry)).sqrt()
+                })
+                .reduce(|a, b| if farthest { a.max(b) } else { a.min(b) })
+                .unwrap_or(1.0);
+            (base_rx * scale, base_ry * scale)
+        };
+        let (rx, ry) = match (shape, size) {
+            (RadialGradientShape::Circle, RadialGradientSize::Explicit(value, _)) => {
+                let value = value.to_f32().max(1.0e-4);
+                (value, value)
+            }
+            (RadialGradientShape::Ellipse, RadialGradientSize::Explicit(rx, ry)) => (
+                rx.to_f32().max(1.0e-4),
+                ry.unwrap_or(rx).to_f32().max(1.0e-4),
+            ),
+            (RadialGradientShape::Circle, RadialGradientSize::ClosestSide) => {
+                let value = left.min(right).min(top).min(bottom).max(1.0e-4);
+                (value, value)
+            }
+            (RadialGradientShape::Circle, RadialGradientSize::FarthestSide) => {
+                let value = left.max(right).max(top).max(bottom).max(1.0e-4);
+                (value, value)
+            }
+            (RadialGradientShape::Circle, RadialGradientSize::ClosestCorner) => {
+                let value = circle_corner_radius(false).max(1.0e-4);
+                (value, value)
+            }
+            (RadialGradientShape::Circle, RadialGradientSize::FarthestCorner) => {
+                let value = circle_corner_radius(true).max(1.0e-4);
+                (value, value)
+            }
+            (RadialGradientShape::Ellipse, RadialGradientSize::ClosestSide) => {
+                (left.min(right).max(1.0e-4), top.min(bottom).max(1.0e-4))
+            }
+            (RadialGradientShape::Ellipse, RadialGradientSize::FarthestSide) => {
+                (left.max(right).max(1.0e-4), top.max(bottom).max(1.0e-4))
+            }
+            (RadialGradientShape::Ellipse, RadialGradientSize::ClosestCorner) => {
+                ellipse_corner_radii(false)
+            }
+            (RadialGradientShape::Ellipse, RadialGradientSize::FarthestCorner) => {
+                ellipse_corner_radii(true)
+            }
+        };
+        let stops = Self::expanded_repeating_gradient_stops(stops, repeat, ry);
+        let hard_stops =
+            repeat != GradientRepeat::None && Self::gradient_has_only_hard_bands(&stops);
 
         canvas.save_state();
         if radius > Pt::ZERO {
@@ -17782,7 +21490,27 @@ impl ContainerFlowable {
         } else {
             canvas.clip_rect(x, y, width, height);
         }
-        canvas.shading_fill(shading);
+        let scale_x = rx / ry;
+        if (scale_x - 1.0).abs() > 1.0e-6 {
+            canvas.concat_matrix(
+                scale_x,
+                0.0,
+                0.0,
+                1.0,
+                Pt::from_f32(cx * (1.0 - scale_x)),
+                Pt::ZERO,
+            );
+        }
+        canvas.shading_fill(Shading::Radial {
+            x0: cx,
+            y0: cy,
+            r0: 0.0,
+            x1: cx,
+            y1: cy,
+            r1: ry,
+            stops,
+            hard_stops,
+        });
         canvas.restore_state();
     }
 
@@ -17794,8 +21522,9 @@ impl ContainerFlowable {
         height: Pt,
         radius: Pt,
         start_angle_deg: f32,
-        center_x_pct: f32,
-        center_y_pct: f32,
+        center_x: GradientPosition,
+        center_y: GradientPosition,
+        repeat: GradientRepeat,
         stops: &[ShadingStop],
     ) {
         if stops.len() < 2 {
@@ -17807,8 +21536,8 @@ impl ContainerFlowable {
             return;
         }
 
-        let cx = x.to_f32() + w * center_x_pct.clamp(0.0, 1.0);
-        let cy = y.to_f32() + h * center_y_pct.clamp(0.0, 1.0);
+        let cx = Self::resolve_gradient_position(center_x, x.to_f32(), w);
+        let cy = Self::resolve_gradient_position(center_y, y.to_f32(), h);
 
         let corners = [
             (x.to_f32(), y.to_f32()),
@@ -17831,6 +21560,7 @@ impl ContainerFlowable {
             .clamp(128.0, 720.0) as usize;
         let step_deg = 360.0 / steps as f32;
         let overlap_deg = step_deg * 0.4;
+        let stops = Self::expanded_repeating_gradient_stops(stops, repeat, 1.0);
 
         canvas.save_state();
         if radius > Pt::ZERO {
@@ -17840,23 +21570,34 @@ impl ContainerFlowable {
             canvas.clip_rect(x, y, width, height);
         }
 
-        for idx in 0..steps {
-            let t0 = idx as f32 / steps as f32;
-            let t1 = (idx + 1) as f32 / steps as f32;
-            let tm = (t0 + t1) * 0.5;
-            let color = Self::sample_gradient_color(stops, tm);
-            canvas.set_fill_color(color);
-            let a0 = (start_angle_deg + t0 * 360.0 - overlap_deg).to_radians();
-            let a1 = (start_angle_deg + t1 * 360.0 + overlap_deg).to_radians();
-            let p0x = cx + a0.sin() * radius_px;
-            let p0y = cy - a0.cos() * radius_px;
-            let p1x = cx + a1.sin() * radius_px;
-            let p1y = cy - a1.cos() * radius_px;
-            canvas.move_to(Pt::from_f32(cx), Pt::from_f32(cy));
-            canvas.line_to(Pt::from_f32(p0x), Pt::from_f32(p0y));
-            canvas.line_to(Pt::from_f32(p1x), Pt::from_f32(p1y));
-            canvas.close_path();
-            canvas.fill();
+        let hard_bands_drawn = repeat != GradientRepeat::None
+            && Self::draw_hard_banded_conic_gradient(
+                canvas,
+                cx,
+                cy,
+                radius_px,
+                start_angle_deg,
+                &stops,
+            );
+        if !hard_bands_drawn {
+            for idx in 0..steps {
+                let t0 = idx as f32 / steps as f32;
+                let t1 = (idx + 1) as f32 / steps as f32;
+                let tm = (t0 + t1) * 0.5;
+                let color = Self::sample_gradient_color(&stops, tm);
+                canvas.set_fill_color(color);
+                let a0 = (start_angle_deg + t0 * 360.0 - overlap_deg).to_radians();
+                let a1 = (start_angle_deg + t1 * 360.0 + overlap_deg).to_radians();
+                let p0x = cx + a0.sin() * radius_px;
+                let p0y = cy - a0.cos() * radius_px;
+                let p1x = cx + a1.sin() * radius_px;
+                let p1y = cy - a1.cos() * radius_px;
+                canvas.move_to(Pt::from_f32(cx), Pt::from_f32(cy));
+                canvas.line_to(Pt::from_f32(p0x), Pt::from_f32(p0y));
+                canvas.line_to(Pt::from_f32(p1x), Pt::from_f32(p1y));
+                canvas.close_path();
+                canvas.fill();
+            }
         }
         canvas.restore_state();
     }
@@ -17986,33 +21727,47 @@ impl ContainerFlowable {
 
     fn filtered_background_paint(&self, paint: &BackgroundPaint) -> BackgroundPaint {
         match paint {
+            BackgroundPaint::None => BackgroundPaint::None,
             BackgroundPaint::Image { source } => BackgroundPaint::Image {
                 source: source.clone(),
             },
-            BackgroundPaint::LinearGradient { angle_deg, stops } => {
-                BackgroundPaint::LinearGradient {
-                    angle_deg: *angle_deg,
-                    stops: self.apply_paint_filter_stops(stops),
-                }
-            }
+            BackgroundPaint::LinearGradient {
+                angle_deg,
+                repeat,
+                stops,
+                stop_positions,
+            } => BackgroundPaint::LinearGradient {
+                angle_deg: *angle_deg,
+                repeat: *repeat,
+                stops: self.apply_paint_filter_stops(stops),
+                stop_positions: stop_positions.clone(),
+            },
             BackgroundPaint::RadialGradient {
-                center_x_pct,
-                center_y_pct,
+                shape,
+                size,
+                center_x,
+                center_y,
+                repeat,
                 stops,
             } => BackgroundPaint::RadialGradient {
-                center_x_pct: *center_x_pct,
-                center_y_pct: *center_y_pct,
+                shape: *shape,
+                size: *size,
+                center_x: *center_x,
+                center_y: *center_y,
+                repeat: *repeat,
                 stops: self.apply_paint_filter_stops(stops),
             },
             BackgroundPaint::ConicGradient {
                 start_angle_deg,
-                center_x_pct,
-                center_y_pct,
+                center_x,
+                center_y,
+                repeat,
                 stops,
             } => BackgroundPaint::ConicGradient {
                 start_angle_deg: *start_angle_deg,
-                center_x_pct: *center_x_pct,
-                center_y_pct: *center_y_pct,
+                center_x: *center_x,
+                center_y: *center_y,
+                repeat: *repeat,
                 stops: self.apply_paint_filter_stops(stops),
             },
         }
@@ -18217,6 +21972,12 @@ impl ContainerFlowable {
                     + (self.font_size * calc.em)
                     + (self.root_font_size * calc.rem)
             }
+            LengthSpec::Clamped(calc) => {
+                calc.resolve(percent_basis, self.font_size, self.root_font_size)
+            }
+            LengthSpec::FontRelative(calc) => {
+                calc.resolve(percent_basis, self.font_size, self.root_font_size)
+            }
         }
     }
 
@@ -18296,6 +22057,9 @@ impl ContainerFlowable {
         origin: BackgroundBox,
         clip: BackgroundClipBox,
     ) {
+        if matches!(paint, BackgroundPaint::None) {
+            return;
+        }
         let (origin_x, origin_y, origin_width, origin_height) = Self::background_box_rect(
             origin,
             border_box_x,
@@ -18351,6 +22115,213 @@ impl ContainerFlowable {
         }
         let layer_width = Pt::from_f32(tile_width);
         let layer_height = Pt::from_f32(tile_height);
+        let compiled_svg = match paint {
+            BackgroundPaint::Image { source } => {
+                crate::assets::load_svg_xml_from_image_source(None, source)
+                    .map(|xml| svg::compile_svg(&xml, layer_width, layer_height))
+            }
+            _ => None,
+        };
+
+        // Chromium virtualizes `space`/`round` backgrounds into a 72-DPI tiling
+        // surface before emitting its PDF. Do the same once for the complete
+        // clipped layer: this preserves its pixel-grid boundary sampling while
+        // avoiding one PDF shading resource per repeated tile.
+        if matches!(
+            repeat.x,
+            BackgroundRepeatMode::Space | BackgroundRepeatMode::Round
+        ) || matches!(
+            repeat.y,
+            BackgroundRepeatMode::Space | BackgroundRepeatMode::Round
+        ) {
+            let mut virtual_paint = paint.clone();
+            if let BackgroundPaint::LinearGradient {
+                stop_positions: Some(positions),
+                ..
+            } = &mut virtual_paint
+            {
+                // A browser's 72-DPI pattern surface samples exact half-point
+                // hard stops from the preceding band. Keep that tie-break when
+                // our fixed-point coordinate lands exactly on the pixel center.
+                let tie_break = Pt::from_f32(0.5001);
+                for position in positions.iter_mut().flatten() {
+                    position.length = position.length + tie_break;
+                }
+            }
+            let mut virtual_canvas = Canvas::new(Size {
+                width: clip_width,
+                height: clip_height,
+            });
+            for tile_y in tile_y_positions.iter().copied() {
+                for tile_x in tile_x_positions.iter().copied() {
+                    let tile_x = origin_x + Pt::from_f32(tile_x) - clip_x;
+                    let tile_y = origin_y + Pt::from_f32(tile_y) - clip_y;
+                    if let Some(compiled) = compiled_svg.as_ref() {
+                        svg::render_compiled_items(compiled, &mut virtual_canvas, tile_x, tile_y);
+                    } else {
+                        Self::draw_background_paint(
+                            &mut virtual_canvas,
+                            tile_x,
+                            tile_y,
+                            layer_width,
+                            layer_height,
+                            Pt::ZERO,
+                            &virtual_paint,
+                        );
+                    }
+                }
+            }
+            let virtual_document = virtual_canvas.finish();
+            if let Some(mut png) =
+                crate::raster::document_to_transparent_png_pages(&virtual_document, 72, None, false)
+                    .ok()
+                    .and_then(|mut pages| pages.drain(..).next())
+            {
+                if repeat.y == BackgroundRepeatMode::Round {
+                    if let BackgroundPaint::LinearGradient {
+                        angle_deg,
+                        stops,
+                        stop_positions: Some(positions),
+                        ..
+                    } = paint
+                    {
+                        if (*angle_deg - 180.0).abs() <= 1.0e-4 {
+                            let resolved = Self::resolve_gradient_stop_positions(
+                                stops,
+                                Some(positions),
+                                layer_height.to_f32(),
+                            );
+                            let hard_boundaries = resolved
+                                .windows(2)
+                                .filter(|pair| {
+                                    (pair[0].offset - pair[1].offset).abs() <= 1.0e-6
+                                        && pair[0].color != pair[1].color
+                                })
+                                .map(|pair| (pair[0], pair[1]))
+                                .collect::<Vec<_>>();
+                            if !hard_boundaries.is_empty() {
+                                if let Ok(decoded) = crate::image_native::load_from_memory(&png) {
+                                    let rgba = decoded.to_rgba8();
+                                    let (pixel_width, pixel_height) = rgba.dimensions();
+                                    let mut pixels = rgba.into_raw();
+                                    let channel =
+                                        |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+                                    let stop_rgba = |stop: ShadingStop| {
+                                        [
+                                            channel(stop.color.r),
+                                            channel(stop.color.g),
+                                            channel(stop.color.b),
+                                            channel(stop.alpha),
+                                        ]
+                                    };
+                                    let blend =
+                                        |from: [u8; 4], to: [u8; 4], amount: f32| -> [u8; 4] {
+                                            std::array::from_fn(|index| {
+                                                (from[index] as f32
+                                                    + (to[index] as f32 - from[index] as f32)
+                                                        * amount)
+                                                    .round()
+                                                    .clamp(0.0, 255.0)
+                                                    as u8
+                                            })
+                                        };
+                                    let first = stop_rgba(resolved[0]);
+                                    let last = stop_rgba(resolved[resolved.len() - 1]);
+                                    for (tile_index, tile_y) in
+                                        tile_y_positions.iter().copied().enumerate()
+                                    {
+                                        let local_y =
+                                            (origin_y + Pt::from_f32(tile_y) - clip_y).to_f32();
+                                        let amount = (2 * tile_index + 1) as f32 / 256.0;
+                                        for tile_x in tile_x_positions.iter().copied() {
+                                            let local_x =
+                                                (origin_x + Pt::from_f32(tile_x) - clip_x).to_f32();
+                                            let x0 = local_x.floor().max(0.0) as u32;
+                                            let x1 = (local_x + layer_width.to_f32())
+                                                .ceil()
+                                                .max(0.0)
+                                                .min(pixel_width as f32)
+                                                as u32;
+                                            for (before, after) in &hard_boundaries {
+                                                let row = (local_y
+                                                    + before.offset * layer_height.to_f32())
+                                                .floor()
+                                                    as i32;
+                                                if row < 0 || row >= pixel_height as i32 {
+                                                    continue;
+                                                }
+                                                let color = blend(
+                                                    stop_rgba(*before),
+                                                    stop_rgba(*after),
+                                                    amount,
+                                                );
+                                                for x in x0..x1 {
+                                                    let offset = ((row as u32 * pixel_width + x)
+                                                        * 4)
+                                                        as usize;
+                                                    pixels[offset..offset + 4]
+                                                        .copy_from_slice(&color);
+                                                }
+                                            }
+                                            let row =
+                                                (local_y + layer_height.to_f32()).ceil() as i32 - 1;
+                                            if row >= 0 && row < pixel_height as i32 {
+                                                let color = blend(last, first, amount);
+                                                for x in x0..x1 {
+                                                    let offset = ((row as u32 * pixel_width + x)
+                                                        * 4)
+                                                        as usize;
+                                                    pixels[offset..offset + 4]
+                                                        .copy_from_slice(&color);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if let Ok(encoded) = crate::image_native::encode_png_rgba8(
+                                        &pixels,
+                                        pixel_width,
+                                        pixel_height,
+                                    ) {
+                                        png = encoded;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                let source = format!(
+                    "data:image/png;base64,{}",
+                    crate::base64::encode_standard(&png)
+                );
+                canvas.save_state();
+                if clip == BackgroundClipBox::Border && radius > Pt::ZERO {
+                    Self::rounded_rect_path(
+                        canvas,
+                        clip_x,
+                        clip_y,
+                        clip_width,
+                        clip_height,
+                        radius,
+                    );
+                    canvas.clip_path(false);
+                } else {
+                    canvas.clip_rect(clip_x, clip_y, clip_width, clip_height);
+                }
+                if blend_mode != MixBlendMode::Normal {
+                    canvas.set_blend_mode(blend_mode);
+                }
+                canvas.draw_image_with_interpolation(
+                    clip_x,
+                    clip_y,
+                    clip_width,
+                    clip_height,
+                    source,
+                    false,
+                );
+                canvas.restore_state();
+                return;
+            }
+        }
 
         canvas.save_state();
         if clip == BackgroundClipBox::Border && radius > Pt::ZERO {
@@ -18365,15 +22336,21 @@ impl ContainerFlowable {
 
         for tile_y in tile_y_positions {
             for tile_x in tile_x_positions.iter().copied() {
-                Self::draw_background_paint(
-                    canvas,
-                    origin_x + Pt::from_f32(tile_x),
-                    origin_y + Pt::from_f32(tile_y),
-                    layer_width,
-                    layer_height,
-                    Pt::ZERO,
-                    paint,
-                );
+                let tile_x = origin_x + Pt::from_f32(tile_x);
+                let tile_y = origin_y + Pt::from_f32(tile_y);
+                if let Some(compiled) = compiled_svg.as_ref() {
+                    svg::render_compiled_items(compiled, canvas, tile_x, tile_y);
+                } else {
+                    Self::draw_background_paint(
+                        canvas,
+                        tile_x,
+                        tile_y,
+                        layer_width,
+                        layer_height,
+                        Pt::ZERO,
+                        paint,
+                    );
+                }
             }
         }
         canvas.restore_state();
@@ -18429,43 +22406,47 @@ impl ContainerFlowable {
             return;
         }
 
-        let blur_f = blur.to_f32().max(0.0);
-        let steps = ((blur_f / 1.5).ceil() as usize).clamp(6, 24);
-        let sigma = 0.38_f32;
-        let mut weights = Vec::with_capacity(steps);
-        let mut weight_sum = 0.0_f32;
-        for i in 0..steps {
-            let t = (i as f32 + 0.5) / (steps as f32);
-            let z = t / sigma;
-            let w = (-0.5 * z * z).exp();
-            weights.push(w);
-            weight_sum += w;
+        // A single local alpha mask is both more faithful and substantially
+        // cheaper than emitting 6-24 nested vector rectangles. Keep the source
+        // shape vector-native and virtualize only its blur bounds.
+        let sigma = css_shadow_blur_sigma(blur);
+        let padding = css_shadow_filter_padding(sigma);
+        let form_width = (base_w + padding * 2).max(Pt::from_f32(1.0));
+        let form_height = (base_h + padding * 2).max(Pt::from_f32(1.0));
+        let form_id = format!(
+            "box-shadow:{}:{}:{}",
+            canvas.current_command_count(),
+            base_x.to_milli_i64(),
+            base_y.to_milli_i64()
+        );
+        let mut source = Canvas::new(Size {
+            width: form_width,
+            height: form_height,
+        });
+        source.set_fill_color(shadow_color);
+        source.set_opacity(shadow.opacity, shadow.opacity);
+        if base_r > Pt::ZERO {
+            Self::draw_rounded_rect_fill(&mut source, padding, padding, base_w, base_h, base_r);
+        } else {
+            source.draw_rect(padding, padding, base_w, base_h);
         }
-        let norm = if weight_sum > 0.0 { weight_sum } else { 1.0 };
-        for i in (0..steps).rev() {
-            let frac = (i + 1) as f32 / (steps as f32);
-            let extra = blur * frac;
-            let opacity = (shadow.opacity * (weights[i] / norm)).clamp(0.0, 1.0);
-            if opacity <= 0.0 {
-                continue;
-            }
-            let x0 = base_x - extra;
-            let y0 = base_y - extra;
-            let w0 = (base_w + extra * 2).max(Pt::ZERO);
-            let h0 = (base_h + extra * 2).max(Pt::ZERO);
-            if w0 <= Pt::ZERO || h0 <= Pt::ZERO {
-                continue;
-            }
-            let r0 = (base_r + extra).max(Pt::ZERO);
-            canvas.set_opacity(opacity, opacity);
-            canvas.set_fill_color(shadow_color);
-            if r0 > Pt::ZERO {
-                Self::draw_rounded_rect_fill(canvas, x0, y0, w0, h0, r0);
-            } else {
-                canvas.draw_rect(x0, y0, w0, h0);
-            }
-        }
-        canvas.set_opacity(1.0, 1.0);
+        let commands = source
+            .finish()
+            .pages
+            .first()
+            .map(|page| page.commands.clone())
+            .unwrap_or_default();
+        canvas.define_form(form_id.clone(), form_width, form_height, commands);
+        let mut filter = PaintFilterSpec::identity();
+        filter.blur_radius = sigma;
+        canvas.draw_css_shadow_filtered_form(
+            base_x - padding,
+            base_y - padding,
+            form_width,
+            form_height,
+            form_id,
+            filter,
+        );
     }
 
     fn draw_inset_box_shadow(
@@ -18504,6 +22485,74 @@ impl ContainerFlowable {
             canvas.clip_rect(x, y, width, height);
         }
         let opacity = shadow.opacity.clamp(0.0, 1.0);
+        if blur > Pt::ZERO {
+            let sigma = css_shadow_blur_sigma(blur);
+            let padding = css_shadow_filter_padding(sigma);
+            let form_width = width + padding * 2;
+            let form_height = height + padding * 2;
+            let hole_x = padding + spread + offset_x;
+            let hole_y = padding + spread + offset_y;
+            let hole_width = (width - spread * 2).max(Pt::ZERO);
+            let hole_height = (height - spread * 2).max(Pt::ZERO);
+            let hole_radius = (radius - spread).max(Pt::ZERO);
+            let form_id = format!(
+                "inset-box-shadow:{}:{}:{}",
+                canvas.current_command_count(),
+                x.to_milli_i64(),
+                y.to_milli_i64()
+            );
+            let mut source = Canvas::new(Size {
+                width: form_width,
+                height: form_height,
+            });
+            source.set_fill_color(self.apply_paint_filter_color(shadow.color));
+            source.set_opacity(opacity, opacity);
+            if hole_width > Pt::ZERO && hole_height > Pt::ZERO {
+                source.move_to(Pt::ZERO, Pt::ZERO);
+                source.line_to(form_width, Pt::ZERO);
+                source.line_to(form_width, form_height);
+                source.line_to(Pt::ZERO, form_height);
+                source.close_path();
+                if hole_radius > Pt::ZERO {
+                    Self::rounded_rect_path(
+                        &mut source,
+                        hole_x,
+                        hole_y,
+                        hole_width,
+                        hole_height,
+                        hole_radius,
+                    );
+                } else {
+                    source.move_to(hole_x, hole_y);
+                    source.line_to(hole_x + hole_width, hole_y);
+                    source.line_to(hole_x + hole_width, hole_y + hole_height);
+                    source.line_to(hole_x, hole_y + hole_height);
+                    source.close_path();
+                }
+                source.fill_evenodd();
+            } else {
+                source.draw_rect(Pt::ZERO, Pt::ZERO, form_width, form_height);
+            }
+            let commands = source
+                .finish()
+                .pages
+                .first()
+                .map(|page| page.commands.clone())
+                .unwrap_or_default();
+            canvas.define_form(form_id.clone(), form_width, form_height, commands);
+            let mut filter = PaintFilterSpec::identity();
+            filter.blur_radius = sigma;
+            canvas.draw_css_shadow_filtered_form(
+                x - padding,
+                y - padding,
+                form_width,
+                form_height,
+                form_id,
+                filter,
+            );
+            canvas.restore_state();
+            return;
+        }
         Self::draw_inset_shadow_layers(
             canvas,
             x,
@@ -18743,12 +22792,23 @@ impl Flowable for ContainerFlowable {
             LengthSpec::Absolute(_)
             | LengthSpec::Em(_)
             | LengthSpec::Rem(_)
-            | LengthSpec::Calc(CalcLength { percent: 0.0, .. }) => Some(
+            | LengthSpec::Calc(CalcLength { percent: 0.0, .. })
+            | LengthSpec::Clamped(ClampedLength {
+                value: CalcLength { percent: 0.0, .. },
+                ..
+            })
+            | LengthSpec::FontRelative(FontRelativeLength {
+                base: CalcLength { percent: 0.0, .. },
+                ..
+            }) => Some(
                 self.width
                     .resolve_width(Pt::ZERO, self.font_size, self.root_font_size)
                     .max(Pt::ZERO),
             ),
-            LengthSpec::Percent(_) | LengthSpec::Calc(_) => return None,
+            LengthSpec::Percent(_)
+            | LengthSpec::Calc(_)
+            | LengthSpec::Clamped(_)
+            | LengthSpec::FontRelative(_) => return None,
             LengthSpec::Auto
             | LengthSpec::Content
             | LengthSpec::MinContent
@@ -19047,9 +23107,7 @@ impl Flowable for ContainerFlowable {
     }
 
     fn collapsible_block_margins(&self, avail_width: Pt) -> Option<(Pt, Pt)> {
-        let margin = self
-            .margin
-            .resolve(avail_width, self.font_size, self.root_font_size);
+        let (margin, _, _, _, _) = self.resolve_box(avail_width);
         Some((margin.top, margin.bottom))
     }
 
@@ -19097,20 +23155,47 @@ impl Flowable for ContainerFlowable {
         avail_width: Pt,
         avail_height: Pt,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        if let Some(fragments) = self.split_empty_fixed_height(avail_width, avail_height) {
+            return Some(fragments);
+        }
         let (margin, border, padding, content_width, _border_box_width) =
             self.resolve_box(avail_width);
         // This method constructs a non-final first fragment, whose block-end
         // margin, border, and padding are sliced away below. Let its contents
         // use that released fragmentainer space as well; otherwise nested
         // fragmented boxes stop short by the discarded block-end decoration.
-        let available_content_height = avail_height - margin.top - border.top - padding.top;
+        let clones_decoration = matches!(self.box_decoration_break, BoxDecorationBreak::Clone);
+        let available_content_height = if clones_decoration {
+            avail_height
+                - margin.top
+                - border.top
+                - padding.top
+                - padding.bottom
+                - border.bottom
+                - margin.bottom
+        } else {
+            avail_height - margin.top - border.top - padding.top
+        };
         if available_content_height <= Pt::ZERO {
             return None;
         }
 
         let mut remaining_height = available_content_height;
+        let split_debug = std::env::var_os("FULLBLEED_SPLIT_DEBUG").is_some();
+        if split_debug {
+            eprintln!(
+                "container split enter children={} avail=({:?},{:?}) content=({:?},{:?})",
+                self.children.len(),
+                avail_width,
+                avail_height,
+                content_width,
+                available_content_height
+            );
+        }
         let mut placed: Vec<Box<dyn Flowable>> = Vec::new();
         let mut remaining: Vec<Box<dyn Flowable>> = Vec::new();
+        let (collapsed_parent_top, _) =
+            self.collapsed_parent_child_margins(content_width, border, padding);
         let out_of_flow: Vec<Box<dyn Flowable>> = self
             .children
             .iter()
@@ -19123,8 +23208,24 @@ impl Flowable for ContainerFlowable {
             .cloned()
             .filter(|child| !child.out_of_flow())
             .collect();
+        let flow_child_indices: Vec<usize> = self
+            .children
+            .iter()
+            .enumerate()
+            .filter_map(|(index, child)| (!child.out_of_flow()).then_some(index))
+            .collect();
 
         for (index, child) in flow_children.iter().cloned().enumerate() {
+            let original_index = flow_child_indices[index];
+            let collapsed_top = collapsed_parent_top
+                .filter(|(child_index, _)| *child_index == original_index)
+                .map_or(Pt::ZERO, |(_, margin)| margin);
+            // A first child's top margin may already have collapsed through
+            // this container and become the container's own top margin. Give
+            // that space back while splitting the child, then subtract it from
+            // the child's occupied height. Otherwise the same margin is
+            // charged once by the parent and again by its first child.
+            let child_available_height = remaining_height + collapsed_top;
             let pagination = child.pagination();
             if pagination.break_before.forces_page() && !placed.is_empty() {
                 remaining.push(child);
@@ -19134,7 +23235,35 @@ impl Flowable for ContainerFlowable {
                 break;
             }
 
-            if let Some((first, second)) = child.split(content_width, remaining_height) {
+            let size = child.wrap(content_width, child_available_height);
+            // A descendant with break-inside: avoid participates atomically
+            // when it can fit in a fresh fragmentainer. Calling its splitter
+            // here would slice a fixed-height box into the last few points of
+            // this page and duplicate the continuation paint on the next one.
+            // An oversized avoid box may still fragment when it is the first
+            // child; CSS relaxes avoidance rather than clipping it forever.
+            let avoids_page_break = matches!(
+                pagination.break_inside,
+                BreakInside::Avoid | BreakInside::AvoidPage
+            );
+            let child_split = if avoids_page_break
+                && (!placed.is_empty() || size.height <= available_content_height)
+            {
+                None
+            } else {
+                child.split(content_width, child_available_height)
+            };
+            if split_debug {
+                eprintln!(
+                    "container split child index={} remaining={:?} collapsed_top={:?} wrapped={:?} split={}",
+                    index,
+                    remaining_height,
+                    collapsed_top,
+                    size,
+                    child_split.is_some()
+                );
+            }
+            if let Some((first, second)) = child_split {
                 placed.push(first);
                 remaining.push(second);
                 for rest in flow_children[index + 1..].iter().cloned() {
@@ -19143,10 +23272,10 @@ impl Flowable for ContainerFlowable {
                 break;
             }
 
-            let size = child.wrap(content_width, remaining_height);
-            if size.height <= remaining_height {
+            let occupied_height = (size.height - collapsed_top).max(Pt::ZERO);
+            if occupied_height <= remaining_height {
                 placed.push(child);
-                remaining_height -= size.height;
+                remaining_height -= occupied_height;
                 if pagination.break_after.forces_page() {
                     for rest in flow_children[index + 1..].iter().cloned() {
                         remaining.push(rest);
@@ -19164,6 +23293,13 @@ impl Flowable for ContainerFlowable {
         }
 
         if placed.is_empty() || remaining.is_empty() {
+            if split_debug {
+                eprintln!(
+                    "container split rejected placed={} remaining={}",
+                    placed.len(),
+                    remaining.len()
+                );
+            }
             return None;
         }
 
@@ -19181,17 +23317,36 @@ impl Flowable for ContainerFlowable {
 
         let first = ContainerFlowable {
             children: placed,
-            margin: Self::zero_bottom(self.margin),
-            border_width: Self::zero_bottom(self.border_width),
+            margin: if clones_decoration {
+                self.margin
+            } else {
+                Self::zero_bottom(self.margin)
+            },
+            border_width: if clones_decoration {
+                self.border_width
+            } else {
+                Self::zero_bottom(self.border_width)
+            },
             border_colors: self.border_colors,
+            border_opacities: self.border_opacities,
             border_styles: self.border_styles,
-            border_radius: self.border_radius,
+            border_radius: if clones_decoration {
+                self.border_radius
+            } else {
+                Self::zero_bottom_radii(self.border_radius)
+            },
+            box_decoration_break: self.box_decoration_break,
+            border_image: self.border_image.clone(),
             outline_width: self.outline_width,
             outline_offset: self.outline_offset,
             outline_style: self.outline_style,
             outline_color: self.outline_color,
             outline_visible: self.outline_visible,
-            padding: Self::zero_bottom(self.padding),
+            padding: if clones_decoration {
+                self.padding
+            } else {
+                Self::zero_bottom(self.padding)
+            },
             width: self.width,
             max_width: self.max_width,
             min_width: self.min_width,
@@ -19240,21 +23395,41 @@ impl Flowable for ContainerFlowable {
                 ..self.pagination
             },
             fragmentainer_fill_height: Some(avail_height),
+            grid_inline_paint_snap: self.grid_inline_paint_snap,
             layout_cache: Arc::new(Mutex::new(None)),
         };
         let second = ContainerFlowable {
             children: remaining,
-            margin: Self::zero_top(self.margin),
-            border_width: Self::zero_top(self.border_width),
+            margin: if clones_decoration {
+                self.margin
+            } else {
+                Self::zero_top(self.margin)
+            },
+            border_width: if clones_decoration {
+                self.border_width
+            } else {
+                Self::zero_top(self.border_width)
+            },
             border_colors: self.border_colors,
+            border_opacities: self.border_opacities,
             border_styles: self.border_styles,
-            border_radius: self.border_radius,
+            border_radius: if clones_decoration {
+                self.border_radius
+            } else {
+                Self::zero_top_radii(self.border_radius)
+            },
+            box_decoration_break: self.box_decoration_break,
+            border_image: self.border_image.clone(),
             outline_width: self.outline_width,
             outline_offset: self.outline_offset,
             outline_style: self.outline_style,
             outline_color: self.outline_color,
             outline_visible: self.outline_visible,
-            padding: Self::zero_top(self.padding),
+            padding: if clones_decoration {
+                self.padding
+            } else {
+                Self::zero_top(self.padding)
+            },
             width: self.width,
             max_width: self.max_width,
             min_width: self.min_width,
@@ -19302,10 +23477,74 @@ impl Flowable for ContainerFlowable {
                 ..self.pagination
             },
             fragmentainer_fill_height: None,
+            grid_inline_paint_snap: self.grid_inline_paint_snap,
             layout_cache: Arc::new(Mutex::new(None)),
         };
 
         Some((Box::new(first), Box::new(second)))
+    }
+
+    fn split_grid_row_fragment(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>, bool)> {
+        if let Some(fragments) = self.split(avail_width, avail_height) {
+            return Some((fragments.0, fragments.1, true));
+        }
+        if avail_height <= Pt::ZERO || self.resolve_fixed_height(huge_pt()).is_some() {
+            return None;
+        }
+
+        let natural = self.wrap(avail_width, huge_pt());
+        if std::env::var_os("FULLBLEED_SPLIT_DEBUG").is_some() {
+            eprintln!(
+                "container grid-row fragment width={:?} available={:?} natural={:?}",
+                avail_width, avail_height, natural
+            );
+        }
+        if natural.height <= Pt::ZERO {
+            return None;
+        }
+        let content_stays_first = natural.height <= avail_height;
+        let clones_decoration = matches!(self.box_decoration_break, BoxDecorationBreak::Clone);
+
+        let mut first = self.clone();
+        if !clones_decoration {
+            first.margin = Self::zero_bottom(self.margin);
+            first.border_width = Self::zero_bottom(self.border_width);
+            first.border_radius = Self::zero_bottom_radii(self.border_radius);
+            first.padding = Self::zero_bottom(self.padding);
+        }
+        if !content_stays_first {
+            first.children.clear();
+        }
+        first.pagination = Pagination {
+            break_before: BreakBefore::Auto,
+            break_after: BreakAfter::Auto,
+            ..self.pagination
+        };
+        first.fragmentainer_fill_height = Some(avail_height);
+        first.layout_cache = Arc::new(Mutex::new(None));
+
+        let mut second = self.clone();
+        if !clones_decoration {
+            second.margin = Self::zero_top(self.margin);
+            second.border_width = Self::zero_top(self.border_width);
+            second.border_radius = Self::zero_top_radii(self.border_radius);
+            second.padding = Self::zero_top(self.padding);
+        }
+        if content_stays_first {
+            second.children.clear();
+        }
+        second.pagination = Pagination {
+            break_before: BreakBefore::Auto,
+            ..self.pagination
+        };
+        second.fragmentainer_fill_height = None;
+        second.layout_cache = Arc::new(Mutex::new(None));
+
+        Some((Box::new(first), Box::new(second), content_stays_first))
     }
 
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt) {
@@ -19466,9 +23705,11 @@ impl Flowable for ContainerFlowable {
             let page_size = canvas.page_size();
             let cache = self.cached_layout(avail_width, avail_height);
             let margin = cache.margin;
-            let border_box_width = cache.border_box_width;
+            let layout_border_box_width = cache.border_box_width;
             let border_box_height = cache.border_box_height;
-            let border_box_x = x + margin.left;
+            let layout_border_box_x = x + margin.left;
+            let (border_box_x, border_box_width) =
+                self.painted_inline_border_box(layout_border_box_x, layout_border_box_width);
             let border_box_y = y + margin.top;
             let border_clip_radii = self.border_radius.resolve(
                 border_box_width,
@@ -19626,17 +23867,34 @@ impl Flowable for ContainerFlowable {
         let padding = cache.padding;
         let content_width = cache.content_width;
         let content_height = cache.content_height;
-        let border_box_width = cache.border_box_width;
+        let layout_border_box_width = cache.border_box_width;
         let border_box_height = cache.border_box_height;
         let child_avail_height = cache.child_avail_height;
 
-        let border_box_x = x + margin.left;
+        let layout_border_box_x = x + margin.left;
+        let (border_box_x, border_box_width) =
+            self.painted_inline_border_box(layout_border_box_x, layout_border_box_width);
         let border_box_y = y + margin.top;
+        let paint_content_width =
+            (border_box_width - border.left - border.right - padding.left - padding.right)
+                .max(Pt::ZERO);
         // Chromium's print pipeline uses the right edge of scrollable content (not the
         // trailing margin edge) when it decides whether an HTML page must be shrunk to fit.
         // Keep this measurement in Pt's signed Q32.32 domain; the renderer only converts
         // the final page scale at the paint boundary.
         canvas.record_html_scrollable_right(border_box_x + border_box_width);
+        if std::env::var_os("FULLBLEED_SCROLL_DEBUG").is_some() {
+            eprintln!(
+                "container scroll right={:?} x={:?} border_box_width={:?} avail_width={:?} authored_width={:?} children={} background={:?}",
+                border_box_x + border_box_width,
+                border_box_x,
+                border_box_width,
+                avail_width,
+                self.width,
+                self.children.len(),
+                self.background
+            );
+        }
         let transformed = self.has_transforms();
         if transformed {
             // CSS transforms apply around transform-origin (default: center center) and do
@@ -19672,12 +23930,12 @@ impl Flowable for ContainerFlowable {
             let (clip_ref_x, clip_ref_y, clip_ref_w, clip_ref_h) =
                 Self::resolve_clip_path_reference_rect(
                     self.clip_path_reference_box,
-                    x,
+                    border_box_x - margin.left,
                     y,
                     margin,
                     border,
                     padding,
-                    content_width,
+                    paint_content_width,
                     content_height,
                     border_box_x,
                     border_box_y,
@@ -19850,7 +24108,7 @@ impl Flowable for ContainerFlowable {
                     border_box_height,
                     border,
                     padding,
-                    content_width,
+                    paint_content_width,
                     content_height,
                 );
                 if color_clip == BackgroundClipBox::Border
@@ -19896,7 +24154,7 @@ impl Flowable for ContainerFlowable {
                 border_box_height,
                 border,
                 padding,
-                content_width,
+                paint_content_width,
                 content_height,
                 radius,
                 &paint_filtered,
@@ -19931,7 +24189,17 @@ impl Flowable for ContainerFlowable {
             }
         }
 
-        if paint_self && Self::has_border(border) {
+        let border_image_painted = paint_self
+            && self.draw_border_image(
+                canvas,
+                border_box_x,
+                border_box_y,
+                border_box_width,
+                border_box_height,
+                border,
+            );
+
+        if paint_self && !border_image_painted && Self::has_border(border) {
             let uniform_width = border.top == border.right
                 && border.top == border.bottom
                 && border.top == border.left;
@@ -19941,6 +24209,22 @@ impl Flowable for ContainerFlowable {
                 bottom: self.apply_paint_filter_color(self.border_colors.bottom),
                 left: self.apply_paint_filter_color(self.border_colors.left),
             };
+            let border_opacities = self.border_opacities;
+            let uniform_opacity = border_opacities.is_uniform();
+            let shared_opacity = border_opacities.top.clamp(0.0, 1.0);
+            let has_rounded_border = Self::clip_radii_have_rounding(border_clip_radii);
+            let use_isolated_border_group = uniform_opacity
+                && shared_opacity < 1.0
+                && has_rounded_border
+                && !(border_colors.top == border_colors.right
+                    && border_colors.top == border_colors.bottom
+                    && border_colors.top == border_colors.left);
+            let opacity_state_saved =
+                uniform_opacity && shared_opacity < 1.0 && !use_isolated_border_group;
+            if opacity_state_saved {
+                canvas.save_state();
+                canvas.set_opacity(shared_opacity, shared_opacity);
+            }
             let uniform_color = border_colors.top == border_colors.right
                 && border_colors.top == border_colors.bottom
                 && border_colors.top == border_colors.left;
@@ -19951,6 +24235,7 @@ impl Flowable for ContainerFlowable {
             };
             if uniform_width
                 && uniform_color
+                && uniform_opacity
                 && border.top > Pt::ZERO
                 && rounded_uniform_style == Some(OutlineLineStyle::Solid)
             {
@@ -19965,9 +24250,35 @@ impl Flowable for ContainerFlowable {
                     OutlineLineStyle::Solid,
                     border_clip_radii,
                 );
+            } else if uniform_color
+                && uniform_opacity
+                && rounded_uniform_style == Some(OutlineLineStyle::Solid)
+                && Self::clip_radii_have_rounding(border_clip_radii)
+                && [border.top, border.right, border.bottom, border.left]
+                    .into_iter()
+                    .filter(|value| *value > Pt::ZERO)
+                    .all(|value| {
+                        value
+                            == [border.top, border.right, border.bottom, border.left]
+                                .into_iter()
+                                .find(|candidate| *candidate > Pt::ZERO)
+                                .unwrap_or(Pt::ZERO)
+                    })
+            {
+                Self::draw_rounded_partial_uniform_border_stroke(
+                    canvas,
+                    border_box_x,
+                    border_box_y,
+                    border_box_width,
+                    border_box_height,
+                    border,
+                    border_colors.top,
+                    border_clip_radii,
+                );
             } else if Self::clip_radii_have_rounding(border_clip_radii)
                 && uniform_width
                 && uniform_color
+                && uniform_opacity
                 && border.top > Pt::ZERO
                 && rounded_uniform_style.is_some()
             {
@@ -20009,16 +24320,132 @@ impl Flowable for ContainerFlowable {
                     ),
                 }
             } else {
-                Self::draw_border(
-                    canvas,
-                    border_box_x,
-                    border_box_y,
-                    border_box_width,
-                    border_box_height,
-                    border,
-                    border_colors,
-                    self.border_styles,
-                );
+                let rounded = has_rounded_border;
+                if use_isolated_border_group {
+                    let mut group = Canvas::new(Size {
+                        width: border_box_width,
+                        height: border_box_height,
+                    });
+                    Self::rounded_rect_corners_path(
+                        &mut group,
+                        Pt::ZERO,
+                        Pt::ZERO,
+                        border_box_width,
+                        border_box_height,
+                        border_clip_radii,
+                    );
+                    let inner_width = (border_box_width - border.left - border.right).max(Pt::ZERO);
+                    let inner_height =
+                        (border_box_height - border.top - border.bottom).max(Pt::ZERO);
+                    if inner_width > Pt::ZERO && inner_height > Pt::ZERO {
+                        Self::rounded_rect_corners_path(
+                            &mut group,
+                            border.left,
+                            border.top,
+                            inner_width,
+                            inner_height,
+                            Self::inset_clip_radii_edges(border_clip_radii, border),
+                        );
+                    }
+                    group.clip_path(true);
+                    Self::draw_border(
+                        &mut group,
+                        Pt::ZERO,
+                        Pt::ZERO,
+                        border_box_width,
+                        border_box_height,
+                        border,
+                        border_colors,
+                        self.border_styles,
+                    );
+                    let commands = group
+                        .finish()
+                        .pages
+                        .first()
+                        .map(|page| page.commands.clone())
+                        .unwrap_or_default();
+                    let form_id = format!(
+                        "border-alpha:{}:{}:{}",
+                        canvas.current_command_count(),
+                        border_box_width.to_milli_i64(),
+                        border_box_height.to_milli_i64()
+                    );
+                    canvas.define_isolated_form(
+                        form_id.clone(),
+                        border_box_width,
+                        border_box_height,
+                        commands,
+                    );
+                    canvas.save_state();
+                    canvas.set_opacity(shared_opacity, shared_opacity);
+                    canvas.draw_form(
+                        border_box_x,
+                        border_box_y,
+                        border_box_width,
+                        border_box_height,
+                        form_id,
+                    );
+                    canvas.restore_state();
+                } else {
+                    if rounded {
+                        canvas.save_state();
+                        Self::rounded_rect_corners_path(
+                            canvas,
+                            border_box_x,
+                            border_box_y,
+                            border_box_width,
+                            border_box_height,
+                            border_clip_radii,
+                        );
+                        let inner_x = border_box_x + border.left;
+                        let inner_y = border_box_y + border.top;
+                        let inner_width =
+                            (border_box_width - border.left - border.right).max(Pt::ZERO);
+                        let inner_height =
+                            (border_box_height - border.top - border.bottom).max(Pt::ZERO);
+                        if inner_width > Pt::ZERO && inner_height > Pt::ZERO {
+                            Self::rounded_rect_corners_path(
+                                canvas,
+                                inner_x,
+                                inner_y,
+                                inner_width,
+                                inner_height,
+                                Self::inset_clip_radii_edges(border_clip_radii, border),
+                            );
+                        }
+                        canvas.clip_path(true);
+                    }
+                    if uniform_opacity {
+                        Self::draw_border(
+                            canvas,
+                            border_box_x,
+                            border_box_y,
+                            border_box_width,
+                            border_box_height,
+                            border,
+                            border_colors,
+                            self.border_styles,
+                        );
+                    } else {
+                        Self::draw_border_with_opacities(
+                            canvas,
+                            border_box_x,
+                            border_box_y,
+                            border_box_width,
+                            border_box_height,
+                            border,
+                            border_colors,
+                            border_opacities,
+                            self.border_styles,
+                        );
+                    }
+                    if rounded {
+                        canvas.restore_state();
+                    }
+                }
+            }
+            if opacity_state_saved {
+                canvas.restore_state();
             }
         }
 
@@ -20072,11 +24499,11 @@ impl Flowable for ContainerFlowable {
         }
 
         let inner_y = border_box_y + border.top + padding.top;
-        let inner_x = border_box_x + border.left + padding.left;
+        let inner_x = layout_border_box_x + border.left + padding.left;
 
-        let padding_box_x = border_box_x + border.left;
+        let padding_box_x = layout_border_box_x + border.left;
         let padding_box_y = border_box_y + border.top;
-        let padding_box_w = (border_box_width - border.left - border.right).max(Pt::ZERO);
+        let padding_box_w = (layout_border_box_width - border.left - border.right).max(Pt::ZERO);
         let padding_box_h = (border_box_height - border.top - border.bottom).max(Pt::ZERO);
 
         let pushed_abs_cb = if self.establishes_abs_containing_block {
@@ -20122,7 +24549,9 @@ impl Flowable for ContainerFlowable {
                 previous_block_margin_bottom = block_margins.map(|(_, bottom)| bottom);
             }
             let static_x = inner_x;
-            let static_y = static_cursor_y;
+            let collapsed_top = cache.child_collapsed_top[idx];
+            let collapsed_bottom = cache.child_collapsed_bottom[idx];
+            let static_y = static_cursor_y - collapsed_top;
             let (draw_width, draw_height) = if out_of_flow {
                 if float_layout.is_some() {
                     (content_width, padding_box_h)
@@ -20146,7 +24575,7 @@ impl Flowable for ContainerFlowable {
                     size.height
                 };
                 in_flow_static_y[idx] = Some(static_y);
-                static_cursor_y = static_cursor_y + size.height;
+                static_cursor_y = static_cursor_y + size.height - collapsed_top - collapsed_bottom;
                 (content_width, draw_height)
             };
 
@@ -20277,6 +24706,11 @@ impl Flowable for ContainerFlowable {
         };
         let mut stretched = self.clone();
         stretched.height = LengthSpec::Absolute(forced_height);
+        stretched.children = stretched
+            .children
+            .iter()
+            .map(|child| child.with_definite_parent_height())
+            .collect();
         stretched.layout_cache = Arc::new(Mutex::new(None));
         stretched.draw(canvas, x, y, avail_width, avail_height);
     }
@@ -20317,6 +24751,44 @@ impl Flowable for ContainerFlowable {
             + padding.right
             + border.right
             + margins.right.unwrap_or(Pt::ZERO)
+    }
+
+    fn flex_outer_width_for_basis(&self, basis: Pt, avail_width: Pt) -> Pt {
+        let margins = self
+            .flex_margins(avail_width)
+            .unwrap_or_else(FlexMargins::zero);
+        let fixed_margins = margins.left.unwrap_or(Pt::ZERO) + margins.right.unwrap_or(Pt::ZERO);
+        let border = self
+            .border_width
+            .resolve(avail_width, self.font_size, self.root_font_size);
+        let padding = self
+            .padding
+            .resolve(avail_width, self.font_size, self.root_font_size);
+        let decorations = border.left + padding.left + padding.right + border.right;
+        if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+            basis.max(decorations) + fixed_margins
+        } else {
+            basis.max(Pt::ZERO) + decorations + fixed_margins
+        }
+    }
+
+    fn flex_outer_height_for_basis(&self, basis: Pt, avail_width: Pt, _avail_height: Pt) -> Pt {
+        let margins = self
+            .flex_margins(avail_width)
+            .unwrap_or_else(FlexMargins::zero);
+        let fixed_margins = margins.top.unwrap_or(Pt::ZERO) + margins.bottom.unwrap_or(Pt::ZERO);
+        let border = self
+            .border_width
+            .resolve(avail_width, self.font_size, self.root_font_size);
+        let padding = self
+            .padding
+            .resolve(avail_width, self.font_size, self.root_font_size);
+        let decorations = border.top + padding.top + padding.bottom + border.bottom;
+        if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+            basis.max(decorations) + fixed_margins
+        } else {
+            basis.max(Pt::ZERO) + decorations + fixed_margins
+        }
     }
 
     fn wrap_flexed_width(&self, avail_width: Pt, avail_height: Pt) -> Size {
@@ -20418,11 +24890,35 @@ impl Flowable for ContainerFlowable {
     fn pagination(&self) -> Pagination {
         self.pagination
     }
+
+    fn establish_independent_formatting_context(&self) -> Box<dyn Flowable> {
+        let mut independent = self.clone();
+        independent.contain_floats = true;
+        independent.layout_cache = Arc::new(Mutex::new(None));
+        Box::new(independent)
+    }
+
+    fn with_grid_item_baseline_rounding(&self) -> Box<dyn Flowable> {
+        let mut rounded = self.clone();
+        rounded.children = rounded
+            .children
+            .iter()
+            .map(|child| child.with_grid_item_baseline_rounding())
+            .collect();
+        rounded.layout_cache = Arc::new(Mutex::new(None));
+        Box::new(rounded)
+    }
+
+    fn with_grid_item_inline_paint_snap(&self) -> Box<dyn Flowable> {
+        let mut snapped = self.clone();
+        snapped.grid_inline_paint_snap = true;
+        Box::new(snapped)
+    }
 }
 
 #[cfg(test)]
 mod margin_collapse_tests {
-    use super::{Canvas, ContainerFlowable, Flowable, Pt, Size};
+    use super::{Canvas, ContainerFlowable, EdgeSizes, Flowable, LengthSpec, Pt, Size};
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone)]
@@ -20508,6 +25004,95 @@ mod margin_collapse_tests {
             super::collapsed_adjacent_margin(-Pt::from_f32(10.0), -Pt::from_f32(20.0)),
             -Pt::from_f32(20.0)
         );
+    }
+
+    #[test]
+    fn empty_blocks_collapse_their_own_top_and_bottom_margins() {
+        let forty = LengthSpec::Absolute(Pt::from_f32(40.0));
+        let empty = ContainerFlowable::new_pt(Vec::new(), Pt::from_f32(12.0), Pt::from_f32(12.0))
+            .with_margin(EdgeSizes {
+                top: forty,
+                right: LengthSpec::Absolute(Pt::ZERO),
+                bottom: forty,
+                left: LengthSpec::Absolute(Pt::ZERO),
+            });
+        let available = Pt::from_f32(300.0);
+
+        assert_eq!(
+            empty.collapsible_block_margins(available),
+            Some((Pt::from_f32(40.0), Pt::from_f32(40.0)))
+        );
+        assert_eq!(empty.wrap(available, available).height, Pt::from_f32(40.0));
+    }
+
+    #[test]
+    fn parent_first_and_last_child_margins_collapse_outward() {
+        let drawn_y = Arc::new(Mutex::new(Vec::new()));
+        let child = MarginProbe {
+            size: Size {
+                width: Pt::from_f32(100.0),
+                height: Pt::from_f32(90.0),
+            },
+            top: Pt::from_f32(40.0),
+            bottom: Pt::from_f32(30.0),
+            drawn_y: drawn_y.clone(),
+        };
+        let parent = ContainerFlowable::new_pt(
+            vec![Box::new(child)],
+            Pt::from_f32(12.0),
+            Pt::from_f32(12.0),
+        );
+        let available = Pt::from_f32(300.0);
+
+        assert_eq!(
+            parent.collapsible_block_margins(available),
+            Some((Pt::from_f32(40.0), Pt::from_f32(30.0)))
+        );
+        assert_eq!(parent.wrap(available, available).height, Pt::from_f32(90.0));
+        let mut canvas = Canvas::new(Size {
+            width: available,
+            height: available,
+        });
+        parent.draw(&mut canvas, Pt::ZERO, Pt::ZERO, available, available);
+        assert_eq!(drawn_y.lock().unwrap().as_slice(), &[Pt::ZERO]);
+    }
+
+    #[test]
+    fn top_padding_prevents_parent_first_child_margin_collapse() {
+        let drawn_y = Arc::new(Mutex::new(Vec::new()));
+        let child = MarginProbe {
+            size: Size {
+                width: Pt::from_f32(100.0),
+                height: Pt::from_f32(60.0),
+            },
+            top: Pt::from_f32(40.0),
+            bottom: Pt::ZERO,
+            drawn_y: drawn_y.clone(),
+        };
+        let parent = ContainerFlowable::new_pt(
+            vec![Box::new(child)],
+            Pt::from_f32(12.0),
+            Pt::from_f32(12.0),
+        )
+        .with_padding(EdgeSizes {
+            top: LengthSpec::Absolute(Pt::from_f32(10.0)),
+            right: LengthSpec::Absolute(Pt::ZERO),
+            bottom: LengthSpec::Absolute(Pt::ZERO),
+            left: LengthSpec::Absolute(Pt::ZERO),
+        })
+        .with_height(LengthSpec::Absolute(Pt::from_f32(60.0)));
+        let available = Pt::from_f32(300.0);
+
+        assert_eq!(
+            parent.collapsible_block_margins(available),
+            Some((Pt::ZERO, Pt::ZERO))
+        );
+        let mut canvas = Canvas::new(Size {
+            width: available,
+            height: available,
+        });
+        parent.draw(&mut canvas, Pt::ZERO, Pt::ZERO, available, available);
+        assert_eq!(drawn_y.lock().unwrap().as_slice(), &[Pt::from_f32(10.0)]);
     }
 }
 
@@ -20680,6 +25265,15 @@ impl Flowable for ClearFlowable {
         self.child.flex_outer_width_minimum(avail_width)
     }
 
+    fn flex_outer_width_for_basis(&self, basis: Pt, avail_width: Pt) -> Pt {
+        self.child.flex_outer_width_for_basis(basis, avail_width)
+    }
+
+    fn flex_outer_height_for_basis(&self, basis: Pt, avail_width: Pt, avail_height: Pt) -> Pt {
+        self.child
+            .flex_outer_height_for_basis(basis, avail_width, avail_height)
+    }
+
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
         self.child.flex_min_content_width(avail_width)
     }
@@ -20761,31 +25355,88 @@ impl Flowable for ClearFlowable {
 #[derive(Clone)]
 pub(crate) struct ExpandedWidthFlowable {
     child: Box<dyn Flowable>,
+    width_multiplier: i32,
     extra: Pt,
+    extra_height: Pt,
+    column_span: usize,
+    row_span: usize,
 }
 
 impl ExpandedWidthFlowable {
     pub(crate) fn new(child: Box<dyn Flowable>, extra: Pt) -> Self {
         Self {
             child,
+            width_multiplier: 1,
             extra: extra.max(Pt::ZERO),
+            extra_height: Pt::ZERO,
+            column_span: 1,
+            row_span: 1,
+        }
+    }
+
+    pub(crate) fn new_grid_area(
+        child: Box<dyn Flowable>,
+        extra_width: Pt,
+        extra_height: Pt,
+        column_span: usize,
+        row_span: usize,
+    ) -> Self {
+        Self {
+            child,
+            width_multiplier: 1,
+            extra: extra_width.max(Pt::ZERO),
+            extra_height: extra_height.max(Pt::ZERO),
+            column_span: column_span.max(1),
+            row_span: row_span.max(1),
+        }
+    }
+
+    pub(crate) fn new_equal_grid_span(
+        child: Box<dyn Flowable>,
+        width_span: usize,
+        extra_height: Pt,
+        row_span: usize,
+    ) -> Self {
+        Self {
+            child,
+            width_multiplier: width_span.max(1).min(i32::MAX as usize) as i32,
+            extra: Pt::ZERO,
+            extra_height: extra_height.max(Pt::ZERO),
+            column_span: width_span.max(1),
+            row_span: row_span.max(1),
         }
     }
 
     fn expanded_width(&self, avail_width: Pt) -> Pt {
-        avail_width + self.extra
+        avail_width * self.width_multiplier + self.extra
+    }
+
+    fn expanded_height(&self, avail_height: Pt) -> Pt {
+        if avail_height >= huge_pt() {
+            avail_height
+        } else {
+            avail_height + self.extra_height
+        }
+    }
+
+    fn collapse_width_contribution(&self, expanded: Pt) -> Pt {
+        (expanded - self.extra).max(Pt::ZERO) / self.width_multiplier.max(1)
     }
 }
 
 impl Flowable for ExpandedWidthFlowable {
     fn wrap(&self, avail_width: Pt, avail_height: Pt) -> Size {
-        self.child
-            .wrap(self.expanded_width(avail_width), avail_height)
+        self.child.wrap(
+            self.expanded_width(avail_width),
+            self.expanded_height(avail_height),
+        )
     }
 
     fn wrap_flexed_width(&self, avail_width: Pt, avail_height: Pt) -> Size {
-        self.child
-            .wrap_flexed_width(self.expanded_width(avail_width), avail_height)
+        self.child.wrap_flexed_width(
+            self.expanded_width(avail_width),
+            self.expanded_height(avail_height),
+        )
     }
 
     fn split(
@@ -20793,23 +25444,48 @@ impl Flowable for ExpandedWidthFlowable {
         avail_width: Pt,
         avail_height: Pt,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
-        let (first, second) = self
-            .child
-            .split(self.expanded_width(avail_width), avail_height)?;
+        let (first, second) = self.child.split(
+            self.expanded_width(avail_width),
+            self.expanded_height(avail_height),
+        )?;
         Some((
-            Box::new(Self::new(first, self.extra)),
-            Box::new(Self::new(second, self.extra)),
+            Box::new(Self {
+                child: first,
+                width_multiplier: self.width_multiplier,
+                extra: self.extra,
+                extra_height: self.extra_height,
+                column_span: self.column_span,
+                row_span: self.row_span,
+            }),
+            Box::new(Self {
+                child: second,
+                width_multiplier: self.width_multiplier,
+                extra: self.extra,
+                extra_height: self.extra_height,
+                column_span: self.column_span,
+                row_span: self.row_span,
+            }),
         ))
     }
 
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt) {
-        self.child
-            .draw(canvas, x, y, self.expanded_width(avail_width), avail_height);
+        self.child.draw(
+            canvas,
+            x,
+            y,
+            self.expanded_width(avail_width),
+            self.expanded_height(avail_height),
+        );
     }
 
     fn draw_stretched(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt) {
-        self.child
-            .draw_stretched(canvas, x, y, self.expanded_width(avail_width), avail_height);
+        self.child.draw_stretched(
+            canvas,
+            x,
+            y,
+            self.expanded_width(avail_width),
+            self.expanded_height(avail_height),
+        );
     }
 
     fn draw_flexed_width(
@@ -20821,12 +25497,22 @@ impl Flowable for ExpandedWidthFlowable {
         avail_height: Pt,
         stretch_cross_axis: bool,
     ) {
+        if std::env::var_os("FULLBLEED_SCROLL_DEBUG").is_some() {
+            eprintln!(
+                "expanded grid draw input_width={:?} multiplier={} extra={:?} output_width={:?} height={:?}",
+                avail_width,
+                self.width_multiplier,
+                self.extra,
+                self.expanded_width(avail_width),
+                avail_height
+            );
+        }
         self.child.draw_flexed_width(
             canvas,
             x,
             y,
             self.expanded_width(avail_width),
-            avail_height,
+            self.expanded_height(avail_height),
             stretch_cross_axis,
         );
     }
@@ -20839,8 +25525,13 @@ impl Flowable for ExpandedWidthFlowable {
         avail_width: Pt,
         avail_height: Pt,
     ) {
-        self.child
-            .draw_flexed_height(canvas, x, y, self.expanded_width(avail_width), avail_height);
+        self.child.draw_flexed_height(
+            canvas,
+            x,
+            y,
+            self.expanded_width(avail_width),
+            self.expanded_height(avail_height),
+        );
     }
 
     fn accepts_stretched_height(&self) -> bool {
@@ -20852,32 +25543,53 @@ impl Flowable for ExpandedWidthFlowable {
     }
 
     fn flex_outer_width_minimum(&self, avail_width: Pt) -> Pt {
+        self.collapse_width_contribution(
+            self.child
+                .flex_outer_width_minimum(self.expanded_width(avail_width)),
+        )
+    }
+
+    fn flex_outer_width_for_basis(&self, basis: Pt, avail_width: Pt) -> Pt {
         self.child
-            .flex_outer_width_minimum(self.expanded_width(avail_width))
+            .flex_outer_width_for_basis(basis, self.expanded_width(avail_width))
+    }
+
+    fn flex_outer_height_for_basis(&self, basis: Pt, avail_width: Pt, avail_height: Pt) -> Pt {
+        self.child.flex_outer_height_for_basis(
+            basis,
+            self.expanded_width(avail_width),
+            avail_height,
+        )
     }
 
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
         self.child
             .flex_min_content_width(self.expanded_width(avail_width))
+            .map(|width| self.collapse_width_contribution(width))
     }
 
     fn flex_max_content_width(&self, avail_width: Pt) -> Option<Pt> {
         self.child
             .flex_max_content_width(self.expanded_width(avail_width))
+            .map(|width| self.collapse_width_contribution(width))
     }
 
     fn flex_min_main_width(&self, avail_width: Pt) -> Option<Pt> {
         self.child
             .flex_min_main_width(self.expanded_width(avail_width))
+            .map(|width| self.collapse_width_contribution(width))
     }
 
     fn flex_max_main_width(&self, avail_width: Pt) -> Option<Pt> {
         self.child
             .flex_max_main_width(self.expanded_width(avail_width))
+            .map(|width| self.collapse_width_contribution(width))
     }
 
     fn intrinsic_width(&self) -> Option<Pt> {
-        self.child.intrinsic_width()
+        self.child
+            .intrinsic_width()
+            .map(|width| self.collapse_width_contribution(width))
     }
 
     fn first_baseline(&self, avail_width: Pt) -> Option<Pt> {
@@ -20897,8 +25609,90 @@ impl Flowable for ExpandedWidthFlowable {
         self.child.pagination()
     }
 
+    fn out_of_flow(&self) -> bool {
+        self.child.out_of_flow()
+    }
+
+    fn out_of_flow_static_size(&self, avail_width: Pt, avail_height: Pt) -> Option<Size> {
+        self.child.out_of_flow_static_size(
+            self.expanded_width(avail_width),
+            self.expanded_height(avail_height),
+        )
+    }
+
+    fn is_positioned(&self) -> bool {
+        self.child.is_positioned()
+    }
+
+    fn z_index(&self) -> i32 {
+        self.child.z_index()
+    }
+
     fn diagnostic_metadata(&self) -> Vec<(String, String)> {
         self.child.diagnostic_metadata()
+    }
+
+    fn grid_row_span(&self) -> usize {
+        self.row_span
+    }
+
+    fn grid_column_span(&self) -> usize {
+        self.column_span
+    }
+
+    fn grid_span_max_content_width(&self, avail_width: Pt) -> Option<Pt> {
+        (self.column_span > 1)
+            .then(|| self.child.flex_max_content_width(avail_width))
+            .flatten()
+    }
+
+    fn split_grid_row_fragment(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>, bool)> {
+        let (first, second, first_has_content) = self.child.split_grid_row_fragment(
+            self.expanded_width(avail_width),
+            self.expanded_height(avail_height),
+        )?;
+        let fragment = |child| {
+            Box::new(Self {
+                child,
+                width_multiplier: self.width_multiplier,
+                extra: self.extra,
+                extra_height: Pt::ZERO,
+                column_span: self.column_span,
+                row_span: self.row_span,
+            }) as Box<dyn Flowable>
+        };
+        Some((fragment(first), fragment(second), first_has_content))
+    }
+
+    fn split_grid_row_span(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        if self.row_span <= 1 {
+            return None;
+        }
+        let (first, second) = self
+            .child
+            .split(self.expanded_width(avail_width), avail_height)?;
+        let fragment = |child| {
+            Box::new(Self {
+                child,
+                width_multiplier: self.width_multiplier,
+                extra: self.extra,
+                // Each continuation is assigned an explicit sliced track by
+                // FlexFlowable, so expanding it to the original full area
+                // would double-count the rows that were already consumed.
+                extra_height: Pt::ZERO,
+                column_span: self.column_span,
+                row_span: 1,
+            }) as Box<dyn Flowable>
+        };
+        Some((fragment(first), fragment(second)))
     }
 }
 
@@ -21013,6 +25807,15 @@ impl Flowable for MetaFlowable {
         self.child.flex_outer_width_minimum(avail_width)
     }
 
+    fn flex_outer_width_for_basis(&self, basis: Pt, avail_width: Pt) -> Pt {
+        self.child.flex_outer_width_for_basis(basis, avail_width)
+    }
+
+    fn flex_outer_height_for_basis(&self, basis: Pt, avail_width: Pt, avail_height: Pt) -> Pt {
+        self.child
+            .flex_outer_height_for_basis(basis, avail_width, avail_height)
+    }
+
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
         self.child.flex_min_content_width(avail_width)
     }
@@ -21100,6 +25903,72 @@ impl Flowable for MetaFlowable {
             }
         }
         out
+    }
+
+    fn grid_row_span(&self) -> usize {
+        self.child.grid_row_span()
+    }
+
+    fn grid_column_span(&self) -> usize {
+        self.child.grid_column_span()
+    }
+
+    fn grid_span_max_content_width(&self, avail_width: Pt) -> Option<Pt> {
+        self.child.grid_span_max_content_width(avail_width)
+    }
+
+    fn split_grid_row_fragment(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>, bool)> {
+        let (first, second, first_has_content) = self
+            .child
+            .split_grid_row_fragment(avail_width, avail_height)?;
+        let metadata = self.metadata.as_ref().clone();
+        Some((
+            Box::new(Self::new(first, metadata.clone())),
+            Box::new(Self::new(second, metadata)),
+            first_has_content,
+        ))
+    }
+
+    fn split_grid_row_span(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        let (first, second) = self.child.split_grid_row_span(avail_width, avail_height)?;
+        let metadata = self.metadata.as_ref().clone();
+        Some((
+            Box::new(Self::new(first, metadata.clone())),
+            Box::new(Self::new(second, metadata)),
+        ))
+    }
+
+    fn is_grid_placeholder(&self) -> bool {
+        self.child.is_grid_placeholder()
+    }
+
+    fn establish_independent_formatting_context(&self) -> Box<dyn Flowable> {
+        Box::new(Self::new(
+            self.child.establish_independent_formatting_context(),
+            self.metadata.as_ref().clone(),
+        ))
+    }
+
+    fn with_grid_item_baseline_rounding(&self) -> Box<dyn Flowable> {
+        Box::new(Self::new(
+            self.child.with_grid_item_baseline_rounding(),
+            self.metadata.as_ref().clone(),
+        ))
+    }
+
+    fn with_definite_parent_height(&self) -> Box<dyn Flowable> {
+        Box::new(Self::new(
+            self.child.with_definite_parent_height(),
+            self.metadata.as_ref().clone(),
+        ))
     }
 }
 
@@ -21551,6 +26420,15 @@ impl Flowable for RelativePositionedFlowable {
         self.child.flex_outer_width_minimum(avail_width)
     }
 
+    fn flex_outer_width_for_basis(&self, basis: Pt, avail_width: Pt) -> Pt {
+        self.child.flex_outer_width_for_basis(basis, avail_width)
+    }
+
+    fn flex_outer_height_for_basis(&self, basis: Pt, avail_width: Pt, avail_height: Pt) -> Pt {
+        self.child
+            .flex_outer_height_for_basis(basis, avail_width, avail_height)
+    }
+
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
         self.child.flex_min_content_width(avail_width)
     }
@@ -21622,6 +26500,106 @@ mod grid_and_transform_regression_tests {
     use super::*;
     use crate::canvas::Command;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn container_fragmentation_keeps_avoidable_fixed_children_atomic() {
+        let row = || {
+            ContainerFlowable::new_pt(Vec::new(), Pt::from_f32(12.0), Pt::from_f32(12.0))
+                .with_height(LengthSpec::Absolute(Pt::from_f32(70.0)))
+                .with_background(Some(Color::BLACK))
+                .with_pagination(Pagination {
+                    break_inside: BreakInside::Avoid,
+                    ..Pagination::default()
+                })
+        };
+        let parent = ContainerFlowable::new_pt(
+            (0..4)
+                .map(|_| Box::new(row()) as Box<dyn Flowable>)
+                .collect(),
+            Pt::from_f32(12.0),
+            Pt::from_f32(12.0),
+        );
+
+        let (first, second) = parent
+            .split(Pt::from_f32(200.0), Pt::from_f32(150.0))
+            .expect("parent should fragment between rows");
+
+        assert_eq!(
+            first.wrap(Pt::from_f32(200.0), Pt::from_f32(150.0)).height,
+            Pt::from_f32(150.0)
+        );
+        assert_eq!(
+            second.wrap(Pt::from_f32(200.0), huge_pt()).height,
+            Pt::from_f32(140.0)
+        );
+
+        let mut canvas = Canvas::new(Size {
+            width: Pt::from_f32(200.0),
+            height: Pt::from_f32(150.0),
+        });
+        first.draw(
+            &mut canvas,
+            Pt::ZERO,
+            Pt::ZERO,
+            Pt::from_f32(200.0),
+            Pt::from_f32(150.0),
+        );
+        let full_rows = canvas
+            .finish()
+            .pages
+            .into_iter()
+            .flat_map(|page| page.commands)
+            .filter(|command| {
+                matches!(
+                    command,
+                    Command::DrawRect { height, .. } if *height == Pt::from_f32(70.0)
+                )
+            })
+            .count();
+        assert_eq!(full_rows, 2);
+    }
+
+    #[test]
+    fn sliced_fragment_border_retains_uncut_corner_curves() {
+        let ten = Pt::from_f32(10.0);
+        let radius = Pt::from_f32(28.0);
+        let mut canvas = Canvas::new(Size {
+            width: Pt::from_f32(260.0),
+            height: Pt::from_f32(240.0),
+        });
+        ContainerFlowable::draw_rounded_partial_uniform_border_stroke(
+            &mut canvas,
+            Pt::ZERO,
+            Pt::ZERO,
+            Pt::from_f32(260.0),
+            Pt::from_f32(240.0),
+            ResolvedEdges {
+                top: ten,
+                right: ten,
+                bottom: Pt::ZERO,
+                left: ten,
+            },
+            Color::BLACK,
+            ResolvedClipPathRadii {
+                top_left_x: radius,
+                top_left_y: radius,
+                top_right_x: radius,
+                top_right_y: radius,
+                bottom_right_x: Pt::ZERO,
+                bottom_right_y: Pt::ZERO,
+                bottom_left_x: Pt::ZERO,
+                bottom_left_y: Pt::ZERO,
+            },
+        );
+        let curves = canvas
+            .finish()
+            .pages
+            .into_iter()
+            .flat_map(|page| page.commands)
+            .filter(|command| matches!(command, Command::CurveTo { .. }))
+            .count();
+        assert!(curves >= 2, "both retained top corners should be curved");
+    }
 
     #[test]
     fn spread_keeps_square_box_shadow_corners_square() {
@@ -22443,7 +27421,8 @@ mod grid_and_transform_regression_tests {
         .with_grid_tracks(
             2,
             vec![GridTrackSize::fixed(fixed), GridTrackSize::fixed(fixed)],
-        );
+        )
+        .with_grid_definite_height(true);
 
         let layout = flex.compute_layout(Pt::from_f32(147.0), Pt::from_f32(147.0));
         let FlexLayout::RowWrap { lines, container_h } = layout.layout else {
@@ -23191,6 +28170,81 @@ mod grid_and_transform_regression_tests {
     }
 
     #[test]
+    fn column_flex_basis_includes_fixed_item_margins() {
+        let mut first_margin = EdgeSizes::zero();
+        first_margin.bottom = LengthSpec::Absolute(Pt::from_f32(40.0));
+        let first = ContainerFlowable::new_pt(Vec::new(), Pt::from_f32(12.0), Pt::from_f32(12.0))
+            .with_height(LengthSpec::Absolute(Pt::from_f32(70.0)))
+            .with_margin(first_margin)
+            .with_background(Some(Color::BLACK));
+
+        let mut second_margin = EdgeSizes::zero();
+        second_margin.top = LengthSpec::Absolute(Pt::from_f32(30.0));
+        let second = ContainerFlowable::new_pt(Vec::new(), Pt::from_f32(12.0), Pt::from_f32(12.0))
+            .with_height(LengthSpec::Absolute(Pt::from_f32(70.0)))
+            .with_margin(second_margin)
+            .with_background(Some(Color::BLACK));
+
+        let flex = FlexFlowable::new_pt(
+            vec![
+                (
+                    Box::new(first) as Box<dyn Flowable>,
+                    0.0,
+                    1.0,
+                    Some(LengthSpec::Absolute(Pt::from_f32(70.0))),
+                    None,
+                ),
+                (
+                    Box::new(second) as Box<dyn Flowable>,
+                    0.0,
+                    1.0,
+                    Some(LengthSpec::Absolute(Pt::from_f32(70.0))),
+                    None,
+                ),
+            ],
+            FlexDirection::Column,
+            JustifyContent::FlexStart,
+            AlignItems::FlexStart,
+            AlignContent::FlexStart,
+            LengthSpec::Absolute(Pt::ZERO),
+            false,
+            Pt::from_f32(12.0),
+            Pt::from_f32(12.0),
+        );
+
+        let layout = flex.compute_layout(Pt::from_f32(180.0), huge_pt());
+        let FlexLayout::Column { sizes, container_h } = layout.layout else {
+            panic!("expected a column flex layout");
+        };
+        assert_eq!(sizes[0].height, Pt::from_f32(110.0));
+        assert_eq!(sizes[1].height, Pt::from_f32(100.0));
+        assert_eq!(container_h, Pt::from_f32(210.0));
+    }
+
+    #[test]
+    fn border_box_width_never_shrinks_below_its_decorations() {
+        let three = LengthSpec::Absolute(Pt::from_f32(3.0));
+        let box_flowable =
+            ContainerFlowable::new_pt(Vec::new(), Pt::from_f32(12.0), Pt::from_f32(12.0))
+                .with_width(LengthSpec::Absolute(Pt::ZERO))
+                .with_box_sizing(BoxSizingMode::BorderBox)
+                .with_border(
+                    EdgeSizes {
+                        top: LengthSpec::Absolute(Pt::ZERO),
+                        right: three,
+                        bottom: LengthSpec::Absolute(Pt::ZERO),
+                        left: three,
+                    },
+                    Color::BLACK,
+                );
+
+        assert_eq!(
+            box_flowable.wrap(Pt::from_f32(100.0), huge_pt()).width,
+            Pt::from_f32(6.0)
+        );
+    }
+
+    #[test]
     fn flex_width_constraints_freeze_and_redistribute_space() {
         let shrinking_item = |minimum| {
             let mut child =
@@ -23519,6 +28573,13 @@ mod grid_and_transform_regression_tests {
                 .with_aspect_ratio(Some(2.0))
                 .with_box_sizing(BoxSizingMode::BorderBox);
         assert_eq!(transferred.intrinsic_width(), Some(Pt::from_f32(120.0)));
+        assert_eq!(
+            transferred.wrap(Pt::from_f32(220.0), Pt::from_f32(90.0)),
+            Size {
+                width: Pt::from_f32(120.0),
+                height: Pt::from_f32(60.0),
+            }
+        );
 
         let growing_item = || {
             (

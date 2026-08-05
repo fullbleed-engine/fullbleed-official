@@ -115,7 +115,10 @@ pub fn is_supported_font_path(path: &Path) -> bool {
     let Some(ext) = path.extension().and_then(|v| v.to_str()) else {
         return false;
     };
-    matches!(ext.to_ascii_lowercase().as_str(), "ttf" | "otf")
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "ttf" | "otf" | "ttc" | "otc"
+    )
 }
 
 #[cfg_attr(not(feature = "python"), allow(dead_code))]
@@ -512,9 +515,11 @@ mod tests {
     }
 
     #[test]
-    fn supported_font_path_accepts_ttf_and_otf() {
+    fn supported_font_path_accepts_sfnt_fonts_and_collections() {
         assert!(super::is_supported_font_path(Path::new("demo.ttf")));
         assert!(super::is_supported_font_path(Path::new("demo.otf")));
+        assert!(super::is_supported_font_path(Path::new("demo.ttc")));
+        assert!(super::is_supported_font_path(Path::new("demo.otc")));
         assert!(!super::is_supported_font_path(Path::new("demo.woff2")));
     }
 

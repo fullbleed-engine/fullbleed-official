@@ -13,14 +13,18 @@ The measured phase-one implementation ships in Fullbleed 2.1.0 and is recorded i
    Correctness and bounded resource use take priority; a 200x claim does not apply to this lane.
 2. **Warm HTML with stable CSS** reuses the immutable stylesheet, selector indexes, page templates,
    font programs, and resource metadata. HTML and layout remain dynamic.
-3. **Compiled template** fixes DOM structure and geometry, exposes typed value slots, and invalidates
-   only the layout nodes affected by a changed slot. This is the primary 50-200x target lane.
-4. **Compiled batch** executes many bindings in parallel, emits ordered page fragments, and links
-   shared resources once. This is the pages-per-second lane.
+3. **Compiled template** fixes DOM structure and geometry and exposes value slots. Paint-only text
+   bindings execute today; dependency-based invalidation for size-changing values remains the next
+   compiler layer. This is the primary 50-200x target lane.
+4. **Compiled batch** executes columnar fixed-geometry bindings, emits ordered page fragments, and
+   links shared resources once. Parallel fragment production remains future work; the current
+   ordered single-process path already exceeds the 100,000 pages/s gate.
 
-The implemented fixed-document precursor exposes `compile_pdf` and a virtualized fixed-copy batch.
-It freezes the existing fixed-point command display list and shares identical untagged page content
-streams. Typed bindings, partial reflow, and packed bytecode remain later phases.
+The implementation exposes `compile_pdf`, a virtualized fixed-copy batch, and a distinct-record
+fixed-geometry binding batch. It freezes the existing fixed-point command display list, shares
+static page content/resources, and lowers `{{slot}}` text runs into compact per-record overlay
+streams. Typed size policies, partial reflow, complex-script reshaping, and packed bytecode remain
+later phases.
 
 Every benchmark must name its lane. Repeated-input memoization is not a compiled-template result.
 
@@ -122,7 +126,8 @@ reported separately. A compile cache hit must be observable in performance count
 2. **Packed vector IR:** fixed-point bytecode, interned resources, direct PDF lowering, and no
    intermediate `Document` reconstruction.
 3. **Typed template bindings:** dependency graph, paint-only patching, bounded partial reflow, and
-   public Rust/Python compile-bind APIs.
+   public Rust/Python compile-bind APIs. The public columnar API and paint-only fixed-geometry
+   patching are implemented; the dependency graph and bounded reflow are not.
 4. **Parallel virtual linker:** virtual object handles, persistent worker execution, ordered bounded
    streaming, and batch-wide resource closure.
 5. **Shader backend:** SIMD first, optional GPU filters/rasterization second, always checked against

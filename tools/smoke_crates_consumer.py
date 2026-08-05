@@ -135,6 +135,9 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
     audit_version = _dependency_requirement(
         manifest, "fullbleed_audit_contract"
     ).lstrip("=")
+    subsetter_version = _dependency_requirement(manifest, "subsetter").lstrip("=")
+    repository_lock = _read_toml(repo_root / "Cargo.lock")
+    rustc_hash_version = _locked_package(repository_lock, "rustc-hash")["version"]
     audit_root = repo_root / "crates" / "fullbleed_audit_contract"
     audit_manifest = _read_toml(audit_root / "Cargo.toml")
     if audit_manifest["package"]["version"] != audit_version:
@@ -259,10 +262,12 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
             "fullbleed",
             "fullbleed_audit_contract",
             "fullbleed_external_consumer_smoke",
+            "rustc-hash",
+            "subsetter",
         }
         if package_names != expected_package_names:
             raise SmokeFailure(
-                "Fresh consumer graph is not dependency-free: expected "
+                "Fresh consumer graph differs from the audited release graph: expected "
                 f"{sorted(expected_package_names)}, observed {sorted(package_names)}"
             )
         resolved = {
@@ -270,6 +275,8 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
             "fullbleed_audit_contract": _locked_package(
                 consumer_lock, "fullbleed_audit_contract"
             )["version"],
+            "rustc-hash": _locked_package(consumer_lock, "rustc-hash")["version"],
+            "subsetter": _locked_package(consumer_lock, "subsetter")["version"],
         }
         if resolved["fullbleed"] != package_version:
             raise SmokeFailure(
@@ -280,6 +287,16 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
             raise SmokeFailure(
                 "Consumer resolved fullbleed_audit_contract "
                 f"{resolved['fullbleed_audit_contract']}, expected {audit_version}"
+            )
+        if resolved["subsetter"] != subsetter_version:
+            raise SmokeFailure(
+                f"Consumer resolved subsetter {resolved['subsetter']}, "
+                f"expected {subsetter_version}"
+            )
+        if resolved["rustc-hash"] != rustc_hash_version:
+            raise SmokeFailure(
+                f"Consumer resolved rustc-hash {resolved['rustc-hash']}, "
+                f"expected {rustc_hash_version}"
             )
 
     return {

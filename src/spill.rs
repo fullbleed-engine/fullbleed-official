@@ -420,6 +420,7 @@ fn write_command<W: Write>(out: &mut W, command: &Command) -> io::Result<()> {
             height,
             resource_id,
             filter,
+            css_shadow,
         } => {
             write_u8(out, 44)?;
             write_pt(out, *x)?;
@@ -427,7 +428,8 @@ fn write_command<W: Write>(out: &mut W, command: &Command) -> io::Result<()> {
             write_pt(out, *width)?;
             write_pt(out, *height)?;
             write_string(out, resource_id)?;
-            write_paint_filter(out, filter)
+            write_paint_filter(out, filter)?;
+            write_bool(out, *css_shadow)
         }
         Command::BeginArtifact { subtype } => {
             write_u8(out, 36)?;
@@ -663,6 +665,7 @@ fn read_command<R: Read>(input: &mut R) -> io::Result<Command> {
             height: read_pt(input)?,
             resource_id: read_string(input)?,
             filter: read_paint_filter(input)?,
+            css_shadow: read_bool(input)?,
         },
         36 => Command::BeginArtifact {
             subtype: read_option_string(input)?,
@@ -705,8 +708,9 @@ fn write_shading<W: Write>(out: &mut W, shading: &Shading) -> io::Result<()> {
             y1,
             r1,
             stops,
+            hard_stops,
         } => {
-            write_u8(out, 2)?;
+            write_u8(out, if *hard_stops { 3 } else { 2 })?;
             write_f32(out, *x0)?;
             write_f32(out, *y0)?;
             write_f32(out, *r0)?;
@@ -735,7 +739,7 @@ fn read_shading<R: Read>(input: &mut R) -> io::Result<Shading> {
                 stops,
             }
         }
-        2 => {
+        2 | 3 => {
             let x0 = read_f32(input)?;
             let y0 = read_f32(input)?;
             let r0 = read_f32(input)?;
@@ -751,6 +755,7 @@ fn read_shading<R: Read>(input: &mut R) -> io::Result<Shading> {
                 y1,
                 r1,
                 stops,
+                hard_stops: tag == 3,
             }
         }
         _ => {

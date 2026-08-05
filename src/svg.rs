@@ -31,16 +31,24 @@ pub(crate) fn svg_needs_raster_fallback(svg_xml: &str) -> bool {
 
 #[cfg(feature = "svg_raster")]
 pub(crate) fn rasterize_svg_to_data_uri(svg_xml: &str, width: Pt, height: Pt) -> Option<String> {
-    let width = width.max(Pt::from_f32(1.0));
-    let height = height.max(Pt::from_f32(1.0));
-    let mut canvas = Canvas::new(crate::types::Size { width, height });
-    let compiled = compile_svg(svg_xml, width, height);
+    let width = width.max(Pt::from_f32(1.0e-3));
+    let height = height.max(Pt::from_f32(1.0e-3));
+    // Use one canvas point per CSS source pixel, then rasterize one point per
+    // device pixel.  This keeps tiny viewBoxes (for example 2x1) fully covered
+    // instead of encoding their rows with fractional alpha.
+    let raster_width = width * (4.0 / 3.0);
+    let raster_height = height * (4.0 / 3.0);
+    let mut canvas = Canvas::new(crate::types::Size {
+        width: raster_width,
+        height: raster_height,
+    });
+    let compiled = compile_svg(svg_xml, raster_width, raster_height);
     if compiled.is_empty() {
         return None;
     }
     render_compiled_items(&compiled, &mut canvas, Pt::ZERO, Pt::ZERO);
     let document = canvas.finish();
-    let png = crate::raster::document_to_png_pages(&document, 72, None, true)
+    let png = crate::raster::document_to_transparent_png_pages(&document, 72, None, true)
         .ok()?
         .into_iter()
         .next()?;
@@ -336,7 +344,31 @@ pub(crate) fn compile_svg(svg_xml: &str, width: Pt, height: Pt) -> Vec<CompiledI
         root.attribute("viewBox")
             .or_else(|| root.attribute("viewbox")),
     );
-    let viewport = viewbox_to_viewport_matrix(view_box, width.to_f32(), height.to_f32());
+    let viewport_width = width.to_f32();
+    let viewport_height = height.to_f32();
+    let viewport = if view_box.is_some() {
+        viewbox_to_viewport_matrix_with_aspect(
+            view_box,
+            viewport_width,
+            viewport_height,
+            root.attribute("preserveAspectRatio")
+                .or_else(|| root.attribute("preserveaspectratio")),
+        )
+    } else {
+        let intrinsic_width = root.attribute("width").and_then(parse_number);
+        let intrinsic_height = root.attribute("height").and_then(parse_number);
+        match (intrinsic_width, intrinsic_height) {
+            (Some(intrinsic_width), Some(intrinsic_height))
+                if intrinsic_width > 0.0 && intrinsic_height > 0.0 =>
+            {
+                Matrix::scale(
+                    viewport_width / intrinsic_width,
+                    viewport_height / intrinsic_height,
+                )
+            }
+            _ => Matrix::identity(),
+        }
+    };
     let base = viewport;
 
     let style = SvgStyle::default();
@@ -2027,6 +2059,7 @@ fn resolve_gradient_fill(
                 y1: q(cyv),
                 r1: q(rv.max(0.0)),
                 stops: stops.clone(),
+                hard_stops: false,
             })
         }
     }
@@ -2056,6 +2089,7 @@ fn translate_shading(sh: &crate::types::Shading, dx: f32, dy: f32) -> crate::typ
             y1,
             r1,
             stops,
+            hard_stops,
         } => Shading::Radial {
             x0: x0 + dx,
             y0: y0 + dy,
@@ -2064,6 +2098,7 @@ fn translate_shading(sh: &crate::types::Shading, dx: f32, dy: f32) -> crate::typ
             y1: y1 + dy,
             r1: *r1,
             stops: stops.clone(),
+            hard_stops: *hard_stops,
         },
     }
 }
@@ -2328,16 +2363,53 @@ fn parse_viewbox(view_box: Option<&str>) -> Option<(f32, f32, f32, f32)> {
 }
 
 fn viewbox_to_viewport_matrix(view_box: Option<(f32, f32, f32, f32)>, w: f32, h: f32) -> Matrix {
+    viewbox_to_viewport_matrix_with_aspect(view_box, w, h, None)
+}
+
+fn viewbox_to_viewport_matrix_with_aspect(
+    view_box: Option<(f32, f32, f32, f32)>,
+    w: f32,
+    h: f32,
+    preserve_aspect_ratio: Option<&str>,
+) -> Matrix {
     let Some((min_x, min_y, vb_w, vb_h)) = view_box else {
         return Matrix::identity();
     };
 
-    // Opinionated default: "meet" preserveAspectRatio and center.
     let sx = if vb_w > 0.0 { w / vb_w } else { 1.0 };
     let sy = if vb_h > 0.0 { h / vb_h } else { 1.0 };
-    let s = sx.min(sy);
-    let tx = (w - vb_w * s) * 0.5 - min_x * s;
-    let ty = (h - vb_h * s) * 0.5 - min_y * s;
+    let raw = preserve_aspect_ratio.unwrap_or("xMidYMid meet").trim();
+    let mut tokens = raw
+        .split_ascii_whitespace()
+        .filter(|token| *token != "defer");
+    let align = tokens.next().unwrap_or("xMidYMid");
+    if align.eq_ignore_ascii_case("none") {
+        return Matrix::translate(-min_x * sx, -min_y * sy).mul(Matrix::scale(sx, sy));
+    }
+    let meet_or_slice = tokens.next().unwrap_or("meet");
+    let s = if meet_or_slice.eq_ignore_ascii_case("slice") {
+        sx.max(sy)
+    } else {
+        sx.min(sy)
+    };
+    let remaining_x = w - vb_w * s;
+    let remaining_y = h - vb_h * s;
+    let align_x = if align.starts_with("xMin") {
+        0.0
+    } else if align.starts_with("xMax") {
+        1.0
+    } else {
+        0.5
+    };
+    let align_y = if align.ends_with("YMin") {
+        0.0
+    } else if align.ends_with("YMax") {
+        1.0
+    } else {
+        0.5
+    };
+    let tx = remaining_x * align_x - min_x * s;
+    let ty = remaining_y * align_y - min_y * s;
     Matrix::translate(tx, ty).mul(Matrix::scale(s, s))
 }
 
@@ -3995,6 +4067,62 @@ mod tests {
         load_from_memory(&png)
             .expect("raster output should decode")
             .into_rgba8()
+    }
+
+    fn path_bounds(path: &CompiledPath) -> (f32, f32, f32, f32) {
+        let mut xs = Vec::new();
+        let mut ys = Vec::new();
+        for segment in &path.segs {
+            match *segment {
+                PathSeg::MoveTo(x, y) | PathSeg::LineTo(x, y) => {
+                    xs.push(x);
+                    ys.push(y);
+                }
+                PathSeg::CurveTo(x1, y1, x2, y2, x3, y3) => {
+                    xs.extend([x1, x2, x3]);
+                    ys.extend([y1, y2, y3]);
+                }
+                PathSeg::Close => {}
+            }
+        }
+        (
+            xs.iter().copied().fold(f32::INFINITY, f32::min),
+            ys.iter().copied().fold(f32::INFINITY, f32::min),
+            xs.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+            ys.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+        )
+    }
+
+    #[test]
+    fn intrinsic_svg_viewport_scales_when_embedded_without_a_viewbox() {
+        let svg = r##"<svg width="280" height="220"><rect width="280" height="220"/><rect x="40" y="40" width="200" height="140"/></svg>"##;
+        let compiled = compile_svg(svg, Pt::from_f32(224.0), Pt::from_f32(176.0));
+        let paths = compiled
+            .iter()
+            .filter_map(|item| match item {
+                CompiledItem::Path(path) => Some(path),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(path_bounds(paths[0]), (0.0, 0.0, 224.0, 176.0));
+        assert_eq!(path_bounds(paths[1]), (32.0, 32.0, 192.0, 144.0));
+    }
+
+    #[test]
+    fn root_preserve_aspect_ratio_slice_uses_cover_scaling() {
+        let svg = r##"<svg viewBox="0 0 120 60" preserveAspectRatio="xMidYMid slice"><rect width="60" height="60"/><rect x="60" width="60" height="60"/></svg>"##;
+        let compiled = compile_svg(svg, Pt::from_f32(90.0), Pt::from_f32(90.0));
+        let paths = compiled
+            .iter()
+            .filter_map(|item| match item {
+                CompiledItem::Path(path) => Some(path),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(path_bounds(paths[0]), (-45.0, 0.0, 45.0, 90.0));
+        assert_eq!(path_bounds(paths[1]), (45.0, 0.0, 135.0, 90.0));
     }
 
     #[test]

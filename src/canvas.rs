@@ -164,6 +164,7 @@ pub enum Command {
         height: Pt,
         resource_id: String,
         filter: PaintFilterSpec,
+        css_shadow: bool,
     },
     BeginTag {
         role: String,
@@ -363,6 +364,10 @@ impl Canvas {
         }
         self.current_state.stroke_color = color;
         self.current.commands.push(Command::SetStrokeColor(color));
+    }
+
+    pub(crate) fn set_stroke_color_to_fill(&mut self) {
+        self.set_stroke_color(self.current_state.fill_color);
     }
 
     pub fn set_line_width(&mut self, width: Pt) {
@@ -703,6 +708,27 @@ impl Canvas {
             height,
             resource_id: resource_id.into(),
             filter,
+            css_shadow: false,
+        });
+    }
+
+    pub fn draw_css_shadow_filtered_form(
+        &mut self,
+        x: Pt,
+        y: Pt,
+        width: Pt,
+        height: Pt,
+        resource_id: impl Into<String>,
+        filter: PaintFilterSpec,
+    ) {
+        self.current.commands.push(Command::DrawFilteredForm {
+            x,
+            y,
+            width,
+            height,
+            resource_id: resource_id.into(),
+            filter,
+            css_shadow: true,
         });
     }
 

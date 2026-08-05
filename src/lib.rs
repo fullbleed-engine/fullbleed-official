@@ -90,10 +90,23 @@ pub use pdfinspect::{
     require_pdf_composition_compatibility,
 };
 use perf::PerfLogger;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::f32::consts::PI;
 use std::sync::{Arc, Mutex};
 pub use types::{Color, ColorSpace, I32F32, Margins, Pt, Rect, Size};
+
+const FILE_OUTPUT_BUFFER_BYTES: usize = 1024 * 1024;
+
+fn render_to_buffered_file<T>(
+    path: impl AsRef<std::path::Path>,
+    render: impl FnOnce(&mut std::io::BufWriter<std::fs::File>) -> Result<T, FullBleedError>,
+) -> Result<T, FullBleedError> {
+    let file = std::fs::File::create(path)?;
+    let mut writer = std::io::BufWriter::with_capacity(FILE_OUTPUT_BUFFER_BYTES, file);
+    let result = render(&mut writer)?;
+    std::io::Write::flush(&mut writer)?;
+    Ok(result)
+}
 
 pub struct FullBleed {
     default_page_size: Size,
@@ -126,8 +139,8 @@ pub struct FullBleed {
 ///
 /// A compiled document owns the fixed-point display commands and every linker resource required
 /// to render them. It can therefore be linked repeatedly, or from multiple threads, without
-/// reparsing HTML/CSS or rebuilding layout. This is the fixed-document compilation lane; typed
-/// template slots and partial reflow are a separate, future layer.
+/// reparsing HTML/CSS or rebuilding layout. Text markers written as ``{{slot_name}}`` can also
+/// be lowered to fixed-geometry, columnar bindings without rerunning the frontend or layout.
 pub struct CompiledDocument {
     document: Arc<Document>,
     font_registry: Arc<FontRegistry>,
@@ -136,6 +149,49 @@ pub struct CompiledDocument {
     perf: Option<Arc<PerfLogger>>,
     compile_nanos: u64,
     command_count: usize,
+    binding_slots: Vec<String>,
+}
+
+fn valid_binding_slot_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+}
+
+pub(crate) fn binding_slot_names(text: &str) -> Vec<&str> {
+    let mut names = Vec::new();
+    let mut search = 0usize;
+    while let Some(relative_start) = text[search..].find("{{") {
+        let start = search + relative_start + 2;
+        let Some(relative_end) = text[start..].find("}}") else {
+            break;
+        };
+        let end = start + relative_end;
+        let name = text[start..end].trim();
+        if valid_binding_slot_name(name) {
+            names.push(name);
+        }
+        search = end + 2;
+    }
+    names
+}
+
+fn collect_binding_slots(commands: &[Command], slots: &mut BTreeSet<String>) {
+    for command in commands {
+        match command {
+            Command::DrawString { text, .. } | Command::DrawStringTransformed { text, .. } => {
+                for name in binding_slot_names(text) {
+                    slots.insert(name.to_string());
+                }
+            }
+            // Form-local slots require form-coordinate/state capture. Keep this first binding
+            // contract page-local so its fixed-geometry guarantee remains explicit.
+            Command::DefineForm { .. } | Command::DefineIsolatedForm { .. } => {}
+            _ => {}
+        }
+    }
 }
 
 impl CompiledDocument {
@@ -149,6 +205,10 @@ impl CompiledDocument {
 
     pub fn compile_time_ms(&self) -> f64 {
         self.compile_nanos as f64 / 1_000_000.0
+    }
+
+    pub fn binding_slots(&self) -> &[String] {
+        &self.binding_slots
     }
 
     pub fn render_to_buffer(&self) -> Result<Vec<u8>, FullBleedError> {
@@ -183,8 +243,7 @@ impl CompiledDocument {
         &self,
         path: impl AsRef<std::path::Path>,
     ) -> Result<usize, FullBleedError> {
-        let mut file = std::fs::File::create(path)?;
-        self.render_to_writer(&mut file)
+        render_to_buffered_file(path, |writer| self.render_to_writer(writer))
     }
 
     /// Link `copies` of the compiled document into one ordered PDF without cloning the display
@@ -213,6 +272,117 @@ impl CompiledDocument {
         )?;
         pdf_stream.add_compiled_document_copies(0, &self.document, copies)?;
         Ok(pdf_stream.finish()?)
+    }
+
+    fn ordered_binding_columns<'a>(
+        &self,
+        bindings: &'a HashMap<String, Vec<String>>,
+    ) -> Result<(usize, Vec<&'a [String]>), FullBleedError> {
+        if self.binding_slots.is_empty() {
+            return Err(FullBleedError::InvalidConfiguration(
+                "compiled document has no page-local {{slot}} text bindings".to_string(),
+            ));
+        }
+        if bindings.len() != self.binding_slots.len() {
+            let unknown = bindings
+                .keys()
+                .filter(|name| !self.binding_slots.contains(name))
+                .cloned()
+                .collect::<Vec<_>>();
+            let missing = self
+                .binding_slots
+                .iter()
+                .filter(|name| !bindings.contains_key(*name))
+                .cloned()
+                .collect::<Vec<_>>();
+            return Err(FullBleedError::InvalidConfiguration(format!(
+                "binding columns do not match compiled slots (missing={missing:?}, unknown={unknown:?})"
+            )));
+        }
+
+        let mut count = None;
+        let mut ordered = Vec::with_capacity(self.binding_slots.len());
+        for slot in &self.binding_slots {
+            let column = bindings.get(slot).ok_or_else(|| {
+                FullBleedError::InvalidConfiguration(format!(
+                    "missing binding column for slot {slot:?}"
+                ))
+            })?;
+            match count {
+                Some(expected) if expected != column.len() => {
+                    return Err(FullBleedError::InvalidConfiguration(format!(
+                        "binding column {slot:?} has {} rows; expected {expected}",
+                        column.len()
+                    )));
+                }
+                None => count = Some(column.len()),
+                _ => {}
+            }
+            ordered.push(column.as_slice());
+        }
+        let count = count.unwrap_or(0);
+        if count == 0 {
+            return Err(FullBleedError::EmptyDocumentSet);
+        }
+        Ok((count, ordered))
+    }
+
+    /// Execute page-local, fixed-geometry text slots over a columnar record batch.
+    ///
+    /// Static page paint is linked once. Each record receives a distinct, uncompressed text
+    /// overlay stream, so values vary without reparsing HTML or rerunning layout.
+    pub fn render_bindings_to_buffer(
+        &self,
+        bindings: &HashMap<String, Vec<String>>,
+    ) -> Result<Vec<u8>, FullBleedError> {
+        let (record_count, columns) = self.ordered_binding_columns(bindings)?;
+        let estimated = record_count.saturating_mul(512).saturating_add(64 * 1024);
+        let mut out = Vec::with_capacity(estimated);
+        self.render_bindings_to_writer_ordered(record_count, &columns, &mut out)?;
+        Ok(out)
+    }
+
+    fn render_bindings_to_writer_ordered<W: std::io::Write>(
+        &self,
+        record_count: usize,
+        columns: &[&[String]],
+        writer: &mut W,
+    ) -> Result<usize, FullBleedError> {
+        let mut pdf_stream = pdf::PdfStreamWriter::new(
+            writer,
+            self.document.page_size,
+            Some(self.font_registry.as_ref()),
+            self.pdf_options.clone(),
+            self.debug.clone(),
+            self.perf.clone(),
+        )?;
+        pdf_stream.add_compiled_document_bindings(
+            0,
+            &self.document,
+            &self.binding_slots,
+            columns,
+            record_count,
+        )?;
+        Ok(pdf_stream.finish()?)
+    }
+
+    pub fn render_bindings_to_writer<W: std::io::Write>(
+        &self,
+        bindings: &HashMap<String, Vec<String>>,
+        writer: &mut W,
+    ) -> Result<usize, FullBleedError> {
+        let (record_count, columns) = self.ordered_binding_columns(bindings)?;
+        self.render_bindings_to_writer_ordered(record_count, &columns, writer)
+    }
+
+    pub fn render_bindings_to_file(
+        &self,
+        bindings: &HashMap<String, Vec<String>>,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<usize, FullBleedError> {
+        render_to_buffered_file(path, |writer| {
+            self.render_bindings_to_writer(bindings, writer)
+        })
     }
 }
 
@@ -703,6 +873,11 @@ fn apply_html_page_shrink_to_fit(doc: &mut Document) {
         let scale = scale as f32;
         if !scale.is_finite() || !(0.0..1.0).contains(&scale) {
             continue;
+        }
+        if std::env::var_os("FULLBLEED_PAGE_SHRINK_DEBUG").is_some() {
+            eprintln!(
+                "fullbleed page shrink: page_width_milli={page_width_milli} max_right_milli={max_right_milli} scale={scale}"
+            );
         }
 
         let commands = std::mem::take(&mut page.commands);
@@ -4695,10 +4870,11 @@ impl FullBleed {
             width: Pt::ZERO,
             height: Pt::ZERO,
         });
-        let resolver = Arc::new(style::StyleResolver::new_with_debug_and_viewport(
+        let resolver = Arc::new(style::StyleResolver::new_with_debug_viewport_and_fonts(
             &merged_css,
             self.debug.clone(),
             Some(page_size),
+            Some(self.font_registry.clone()),
         ));
         if let Some(logger) = self.debug.as_deref() {
             let css_ms = t_css.elapsed().as_secs_f64() * 1000.0;
@@ -5160,6 +5336,10 @@ impl FullBleed {
         let started = std::time::Instant::now();
         let document = Arc::new(self.render_to_document(html, css)?);
         let command_count = document.pages.iter().map(|page| page.commands.len()).sum();
+        let mut binding_slots = BTreeSet::new();
+        for page in &document.pages {
+            collect_binding_slots(&page.commands, &mut binding_slots);
+        }
         let elapsed = started.elapsed();
         let compile_nanos = u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX);
         if let Some(logger) = self.perf.as_deref() {
@@ -5181,6 +5361,7 @@ impl FullBleed {
             perf: self.perf.clone(),
             compile_nanos,
             command_count,
+            binding_slots: binding_slots.into_iter().collect(),
         })
     }
 
@@ -5465,8 +5646,7 @@ impl FullBleed {
         css: &str,
         path: impl AsRef<std::path::Path>,
     ) -> Result<usize, FullBleedError> {
-        let mut file = std::fs::File::create(path)?;
-        self.render_to_writer(html, css, &mut file)
+        render_to_buffered_file(path, |writer| self.render_to_writer(html, css, writer))
     }
 
     pub fn render_image_pages(
@@ -5648,8 +5828,9 @@ impl FullBleed {
         css: &str,
         path: impl AsRef<std::path::Path>,
     ) -> Result<usize, FullBleedError> {
-        let mut file = std::fs::File::create(path)?;
-        self.render_many_to_writer(html_list, css, &mut file)
+        render_to_buffered_file(path, |writer| {
+            self.render_many_to_writer(html_list, css, writer)
+        })
     }
 
     pub fn render_many_to_buffer_with_css(
@@ -5723,8 +5904,9 @@ impl FullBleed {
         jobs: &[(String, String)],
         path: impl AsRef<std::path::Path>,
     ) -> Result<usize, FullBleedError> {
-        let mut file = std::fs::File::create(path)?;
-        self.render_many_to_writer_with_css(jobs, &mut file)
+        render_to_buffered_file(path, |writer| {
+            self.render_many_to_writer_with_css(jobs, writer)
+        })
     }
 
     // Parallel batch rendering: build documents in parallel, then merge in input order.
@@ -6193,8 +6375,9 @@ impl FullBleed {
         css: &str,
         path: impl AsRef<std::path::Path>,
     ) -> Result<usize, FullBleedError> {
-        let mut file = std::fs::File::create(path)?;
-        self.render_many_to_writer_parallel(html_list, css, &mut file)
+        render_to_buffered_file(path, |writer| {
+            self.render_many_to_writer_parallel(html_list, css, writer)
+        })
     }
 
     pub fn render_many_to_file_parallel_with_page_data(
@@ -6203,8 +6386,9 @@ impl FullBleed {
         css: &str,
         path: impl AsRef<std::path::Path>,
     ) -> Result<(usize, Vec<Option<PageDataContext>>), FullBleedError> {
-        let mut file = std::fs::File::create(path)?;
-        self.render_many_to_writer_parallel_with_page_data(html_list, css, &mut file)
+        render_to_buffered_file(path, |writer| {
+            self.render_many_to_writer_parallel_with_page_data(html_list, css, writer)
+        })
     }
 }
 
@@ -7312,6 +7496,33 @@ mod tests {
     }
 
     #[test]
+    fn auto_height_grid_rows_split_at_fragmentainer_boundaries() {
+        let html = r#"<!doctype html><html><body><div class="grid"><div></div><div></div><div></div></div></body></html>"#;
+        let css = r#"
+            * { margin: 0; box-sizing: border-box; }
+            .grid { display: grid; grid-template-columns: 180px; grid-auto-rows: 90px; width: 180px; border: 2px solid #000; }
+            .grid > div { background: #d7263d; }
+        "#;
+        let resolver = style::StyleResolver::new(css);
+        let story = html::html_to_story_with_resolver_and_fonts_and_report(
+            html, &resolver, None, None, None, false, false, None, None,
+        );
+        assert_eq!(story.len(), 1);
+        let page_width = Pt::from_f32(168.0);
+        let page_height = Pt::from_f32(102.0);
+        let size = story[0].wrap(page_width, page_height);
+        assert!(
+            size.height > page_height,
+            "grid must expose its full row height, got {size:?}"
+        );
+        let (first, remaining) = story[0]
+            .split(page_width, page_height)
+            .expect("grid body should split after its first fixed row");
+        assert!(first.wrap(page_width, page_height).height <= page_height);
+        assert!(remaining.wrap(page_width, page_height).height > Pt::ZERO);
+    }
+
+    #[test]
     fn heading_honors_display_block_on_inline_descendants() {
         let html = r#"
             <!doctype html>
@@ -8298,6 +8509,228 @@ mod tests {
     }
 
     #[test]
+    fn margin_only_empty_block_survives_html_construction_and_collapses() {
+        let html = "<html><body><div class='a'></div><div class='gap'></div><div class='b'></div></body></html>";
+        let css = r#"
+            @page { size: 320px 184px; margin: 0; }
+            html, body { margin: 0; }
+            .a, .b { width: 240px; height: 70px; }
+            .a { background: #2d6cdf; }
+            .gap { margin-top: 40px; margin-bottom: 40px; }
+            .b { background: #d94f4f; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render");
+        let blue = Color::rgb(45.0 / 255.0, 108.0 / 255.0, 223.0 / 255.0);
+        let red = Color::rgb(217.0 / 255.0, 79.0 / 255.0, 79.0 / 255.0);
+        let mut fill = Color::BLACK;
+        let mut blue_y = None;
+        let mut red_y = None;
+        for command in &doc.pages[0].commands {
+            match command {
+                Command::SetFillColor(color) => fill = *color,
+                Command::DrawRect { y, .. } if fill == blue => blue_y = Some(*y),
+                Command::DrawRect { y, .. } if fill == red => red_y = Some(*y),
+                _ => {}
+            }
+        }
+        assert_eq!(blue_y, Some(Pt::ZERO));
+        assert_eq!(red_y, Some(Pt::from_f32(82.5)));
+    }
+
+    #[test]
+    fn html_column_flex_basis_preserves_item_margins() {
+        let html = "<html><body><div class='flex'><div class='a'></div><div class='b'></div></div></body></html>";
+        let css = r#"
+            @page { size: 320px 216px; margin: 0; }
+            html, body { margin: 0; }
+            .flex { display: flex; flex-direction: column; width: 240px; background: #cfd8e3; }
+            .a { height: 70px; margin-bottom: 40px; background: #2d6cdf; }
+            .b { height: 70px; margin-top: 30px; background: #d94f4f; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render");
+        let flex_fill = Color::rgb(207.0 / 255.0, 216.0 / 255.0, 227.0 / 255.0);
+        let blue = Color::rgb(45.0 / 255.0, 108.0 / 255.0, 223.0 / 255.0);
+        let red = Color::rgb(217.0 / 255.0, 79.0 / 255.0, 79.0 / 255.0);
+        let mut fill = Color::BLACK;
+        let mut rectangles = Vec::new();
+        for command in &doc.pages[0].commands {
+            match command {
+                Command::SetFillColor(color) => fill = *color,
+                Command::DrawRect { y, height, .. }
+                    if fill == flex_fill || fill == blue || fill == red =>
+                {
+                    rectangles.push((fill, *y, *height));
+                }
+                _ => {}
+            }
+        }
+        assert!(rectangles.contains(&(flex_fill, Pt::ZERO, Pt::from_f32(157.5))));
+        assert!(rectangles.contains(&(blue, Pt::ZERO, Pt::from_f32(52.5))));
+        assert!(rectangles.contains(&(red, Pt::from_f32(105.0), Pt::from_f32(52.5))));
+    }
+
+    #[test]
+    fn display_contents_discards_its_box_paint_and_promotes_children() {
+        let html = "<html><body><div class='wrapper'><div class='child'></div><div class='child'></div></div></body></html>";
+        let css = r#"
+            @page { size: 184px 120px; margin: 0; }
+            * { margin: 0; box-sizing: border-box; }
+            body { padding: 20px; }
+            .wrapper { display: contents; background: #c62828; padding: 20px; }
+            .child { width: 70px; height: 28px; background: #0a7f2e; margin-bottom: 8px; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render");
+        let discarded_red = Color::rgb(198.0 / 255.0, 40.0 / 255.0, 40.0 / 255.0);
+        let green = Color::rgb(10.0 / 255.0, 127.0 / 255.0, 46.0 / 255.0);
+        let mut fill = Color::BLACK;
+        let mut green_rectangles = Vec::new();
+        let mut painted_discarded_box = false;
+        for command in &doc.pages[0].commands {
+            match command {
+                Command::SetFillColor(color) => fill = *color,
+                Command::DrawRect {
+                    x,
+                    y,
+                    width,
+                    height,
+                } if fill == green => {
+                    green_rectangles.push((*x, *y, *width, *height));
+                }
+                Command::DrawRect { .. } if fill == discarded_red => {
+                    painted_discarded_box = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(!painted_discarded_box);
+        assert_eq!(
+            green_rectangles,
+            vec![
+                (
+                    Pt::from_f32(15.0),
+                    Pt::from_f32(15.0),
+                    Pt::from_f32(52.5),
+                    Pt::from_f32(21.0),
+                ),
+                (
+                    Pt::from_f32(15.0),
+                    Pt::from_f32(42.0),
+                    Pt::from_f32(52.5),
+                    Pt::from_f32(21.0),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn intrinsic_keywords_constrain_authored_block_widths() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let html = "<html><body><div class='wrap'><div class='box'>alpha betabetabeta gamma</div></div></body></html>";
+        let css = r#"
+            @page { size: 264px 112px; margin: 0; }
+            * { margin: 0; box-sizing: border-box; }
+            .wrap { width: 220px; }
+            .box { width: 200px; max-width: min-content; font-family: ParitySans; font-size: 16px; line-height: 24px; background: #0a7f2e; }
+        "#;
+        let min_content = engine
+            .render_to_document(html, css)
+            .expect("render min-content");
+        let green = Color::rgb(10.0 / 255.0, 127.0 / 255.0, 46.0 / 255.0);
+        let green_width = |document: &Document| {
+            let mut fill = Color::BLACK;
+            document.pages[0]
+                .commands
+                .iter()
+                .find_map(|command| match command {
+                    Command::SetFillColor(color) => {
+                        fill = *color;
+                        None
+                    }
+                    Command::DrawRect { width, .. } if fill == green => Some(*width),
+                    _ => None,
+                })
+        };
+        let min_content_width = green_width(&min_content).expect("min-content background");
+        assert!(min_content_width > Pt::ZERO);
+        assert!(min_content_width < Pt::from_f32(150.0));
+
+        let html = "<html><body><div class='wrap'><div class='box'>unbreakablewideword</div></div></body></html>";
+        let css = r#"
+            @page { size: 264px 80px; margin: 0; }
+            * { margin: 0; box-sizing: border-box; }
+            .wrap { width: 220px; }
+            .box { width: 70px; min-width: max-content; white-space: nowrap; font-family: ParitySans; font-size: 16px; line-height: 30px; background: #0a7f2e; }
+        "#;
+        let max_content = engine
+            .render_to_document(html, css)
+            .expect("render max-content");
+        assert!(green_width(&max_content).expect("max-content background") > Pt::from_f32(52.5));
+    }
+
+    #[test]
+    fn zero_font_size_inline_blocks_wrap_without_a_parent_strut_gap() {
+        let html = "<html><body><div class='container'><span class='chip'></span><span class='chip'></span><span class='chip'></span><span class='chip'></span><span class='chip'></span></div></body></html>";
+        let css = r#"
+            @page { size: 400px 184px; margin: 0; }
+            html, body { margin: 0; }
+            .container { width: 320px; font-size: 0; background: #e8eef6; }
+            .chip { display: inline-block; width: 120px; height: 60px; background: #2d6cdf; }
+            .chip:nth-child(even) { background: #d94f4f; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render");
+        let blue = Color::rgb(45.0 / 255.0, 108.0 / 255.0, 223.0 / 255.0);
+        let red = Color::rgb(217.0 / 255.0, 79.0 / 255.0, 79.0 / 255.0);
+        let mut fill = Color::BLACK;
+        let mut blue_y = Vec::new();
+        let mut red_y = Vec::new();
+        for command in &doc.pages[0].commands {
+            match command {
+                Command::SetFillColor(color) => fill = *color,
+                Command::DrawRect { y, .. } if fill == blue => blue_y.push(*y),
+                Command::DrawRect { y, .. } if fill == red => red_y.push(*y),
+                _ => {}
+            }
+        }
+        assert_eq!(
+            blue_y,
+            vec![Pt::ZERO, Pt::from_f32(45.0), Pt::from_f32(90.0)]
+        );
+        assert_eq!(red_y, vec![Pt::ZERO, Pt::from_f32(45.0)]);
+    }
+
+    #[test]
+    fn inside_disc_marker_uses_native_shape_and_css_marker_advance() {
+        let html = "<html><body><div class='item'>mark</div></body></html>";
+        let css = r#"
+            @page { size: 200px 96px; margin: 0; }
+            * { margin: 0; box-sizing: border-box; }
+            .item { display: list-item; list-style: inside disc; width: 150px; height: 48px; font-size: 30px; line-height: 48px; color: #0a7f2e; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render");
+        let text_positions: Vec<Pt> = doc.pages[0]
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::DrawString { text, x, .. } if text == "mark" => Some(*x),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text_positions, vec![Pt::from_f32(30.0)]);
+        assert!(
+            !doc.pages[0].commands.iter().any(|command| matches!(
+                command,
+                Command::DrawString { text, .. } if text.contains('\u{2022}')
+            )),
+            "native bullets must not be serialized as font glyphs"
+        );
+    }
+
+    #[test]
     fn explicit_builder_page_size_logs_page_size_overridden() {
         let log_path = temp_log_path("page_size_override");
         let html = "<!doctype html><html><body><p>hello</p></body></html>";
@@ -8872,6 +9305,146 @@ mod tests {
         assert!(matches!(
             compiled.render_many_to_buffer(0),
             Err(FullBleedError::EmptyDocumentSet)
+        ));
+    }
+
+    #[test]
+    fn compiled_document_binds_distinct_columnar_records_without_relayout() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let html = r#"<!doctype html>
+<html><body>
+  <main class="invoice">
+    <h1>Invoice</h1>
+    <p class="static-copy">Compiled fixed geometry</p>
+    <p><span>Invoice: </span><span>{{invoice_id}}</span></p>
+    <p><span>Customer: </span><span>{{customer}}</span></p>
+    <p><span>Amount: </span><span>{{amount}}</span></p>
+  </main>
+</body></html>"#;
+        let css = r#"
+@page { size: letter; margin: 0.5in; }
+body { margin: 0; font-family: Helvetica, sans-serif; font-size: 12pt; }
+h1 { font-size: 20pt; }
+"#;
+        let compiled = engine
+            .compile_document(html, css)
+            .expect("compile binding template");
+        assert_eq!(
+            compiled.binding_slots(),
+            &[
+                "amount".to_string(),
+                "customer".to_string(),
+                "invoice_id".to_string()
+            ]
+        );
+
+        let bindings = std::collections::HashMap::from([
+            (
+                "invoice_id".to_string(),
+                vec![
+                    "INV-0001".to_string(),
+                    "INV-0002".to_string(),
+                    "INV(0003)".to_string(),
+                ],
+            ),
+            (
+                "customer".to_string(),
+                vec![
+                    "Ada Lovelace".to_string(),
+                    "Grace Hopper".to_string(),
+                    "Katherine Johnson".to_string(),
+                ],
+            ),
+            (
+                "amount".to_string(),
+                vec![
+                    "$101.25".to_string(),
+                    "$202.50".to_string(),
+                    "$303.75".to_string(),
+                ],
+            ),
+        ]);
+        let batch = compiled
+            .render_bindings_to_buffer(&bindings)
+            .expect("render distinct bindings");
+        let inspection = inspect_pdf_bytes(&batch).expect("inspect binding batch");
+        assert_eq!(inspection.page_count, 3);
+
+        let parsed = crate::pdf_native::Document::load_mem(&batch).expect("parse binding batch");
+        let expected = [
+            (
+                b"INV-0001".as_slice(),
+                b"Ada Lovelace".as_slice(),
+                b"$101.25".as_slice(),
+            ),
+            (
+                b"INV-0002".as_slice(),
+                b"Grace Hopper".as_slice(),
+                b"$202.50".as_slice(),
+            ),
+            (
+                b"INV\\(0003\\)".as_slice(),
+                b"Katherine Johnson".as_slice(),
+                b"$303.75".as_slice(),
+            ),
+        ];
+        for ((page_number, page_id), (invoice, customer, amount)) in
+            parsed.get_pages().into_iter().zip(expected)
+        {
+            let page = parsed
+                .get_object(page_id)
+                .and_then(crate::pdf_native::Object::as_dict)
+                .expect("page dictionary");
+            assert_eq!(
+                page.get(b"Contents")
+                    .and_then(crate::pdf_native::Object::as_array)
+                    .expect("static plus dynamic content array")
+                    .len(),
+                2
+            );
+            let content = parsed
+                .get_page_content(page_id)
+                .expect("combined page content");
+            assert!(
+                content
+                    .windows(invoice.len())
+                    .any(|window| window == invoice),
+                "page {page_number} is missing its distinct invoice id"
+            );
+            assert!(
+                content
+                    .windows(customer.len())
+                    .any(|window| window == customer)
+            );
+            assert!(content.windows(amount.len()).any(|window| window == amount));
+            assert!(
+                content
+                    .windows(23)
+                    .any(|window| window == b"Compiled fixed geometry")
+            );
+            assert!(!content.windows(2).any(|window| window == b"{{"));
+        }
+
+        let missing = std::collections::HashMap::from([(
+            "invoice_id".to_string(),
+            vec!["INV-ONLY".to_string()],
+        )]);
+        assert!(matches!(
+            compiled.render_bindings_to_buffer(&missing),
+            Err(FullBleedError::InvalidConfiguration(_))
+        ));
+
+        let uneven = std::collections::HashMap::from([
+            (
+                "invoice_id".to_string(),
+                vec!["A".to_string(), "B".to_string()],
+            ),
+            ("customer".to_string(), vec!["C".to_string()]),
+            ("amount".to_string(), vec!["1".to_string(), "2".to_string()]),
+        ]);
+        assert!(matches!(
+            compiled.render_bindings_to_buffer(&uneven),
+            Err(FullBleedError::InvalidConfiguration(_))
         ));
     }
 

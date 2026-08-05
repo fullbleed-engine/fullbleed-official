@@ -54,7 +54,8 @@ Additional focused references are in `docs/`:
 - Python-first extension surface for hackability and custom workflows.
 - Python render calls release the GIL while Rust rendering executes.
 - Ordered standard-library worker pools for batch rendering and selected internal workloads.
-- No third-party Rust crate graph and no required third-party Python runtime or build packages.
+- A deliberately small, license-audited Rust dependency graph and no required third-party Python
+  runtime or build packages.
 
 ## Concurrency Model
 
@@ -63,11 +64,11 @@ Additional focused references are in `docs/`:
 - The same bounded worker implementation serves selected internal hotspots such as table layout and JIT paint paths.
 - Do not assume every single-document render path will fully saturate all cores end-to-end.
 
-## Performance in 2.1
+## Performance in 2.2
 
-Fullbleed 2.1 embeds exact TrueType glyph subsets instead of complete source font programs. Across
-the five independent benchmark fixtures, PDFs are 95.5-97.3% smaller and ordinary warm rendering
-is 2.90x faster by geometric mean than released 2.0.0.
+Fullbleed 2.2 retains exact TrueType glyph subsetting and adds compiled fixed-geometry variable-data
+binding. Across the five independent benchmark fixtures, PDFs are 95.5-97.3% smaller and ordinary
+warm rendering is 2.90x faster by geometric mean than released 2.0.0.
 
 The new compile-once API freezes an immutable Q32.32 display document and can link it repeatedly
 without rerunning HTML parsing, selector matching, layout, pagination, or command planning. For
@@ -76,8 +77,20 @@ source page's content stream across the copied page dictionaries. The measured 2
 200.7x faster per page by geometric mean than the released 2.0.0 warm renderer; a 1,000-page stress
 run sustained 304,479-666,622 pages/s.
 
-That result is deliberately scoped to fixed compiled copies. It is not a claim that arbitrary new
-HTML or varying records render 200x faster. See
+The 2.2 compiler includes a genuine fixed-geometry variable-data lane. A compiled invoice
+with six bound fields rendered 100,000 distinct records in a five-run median of 283.807 ms to
+memory (**352,352 pages/s**) and 295.999 ms directly to a flushed 88.1 MB PDF
+(**337,839 pages/s**). Including the one-time 4.168 ms compile gives 333,147 direct-file pages/s.
+The harness verified all 100,000 unique invoice IDs in page order, exact page count, resolved
+markers, deterministic bytes, and equal buffer/file SHA-256. Reproduce it with:
+
+```bash
+python tools/benchmark_fullbleed_vdp.py --records 100000 --repeats 5
+```
+
+The fixed-copy result remains scoped to identical content; the variable-data result is scoped to
+paint-only text whose geometry does not reflow. Neither is a claim that arbitrary new HTML or
+size-changing records render 200x faster. See
 [`docs/performance-pass-2026-08-04.md`](docs/performance-pass-2026-08-04.md) for measurements and
 [`docs/performance-architecture.md`](docs/performance-architecture.md) for the packed vector IR,
 typed-binding, virtual-linker, and shader roadmap.
@@ -93,7 +106,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-2.1.0-cp310-abi3-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-2.2.0-cp310-abi3-win_amd64.whl
 ```
 
 From a source checkout with Rust installed, no Python build package is needed:
@@ -935,9 +948,14 @@ Module exports:
 | `render_pdf(deterministic_hash=None)` | `bytes` |
 | `render_pdf_to_file(path, deterministic_hash=None)` | `int` |
 | `render_pdf_batch(copies, deterministic_hash=None)` | `bytes` |
+| `render_pdf_bindings(bindings, deterministic_hash=None)` | `bytes` |
+| `render_pdf_bindings_to_file(bindings, path, deterministic_hash=None)` | `int` |
 
-The compiled lane runs parsing/layout once. Its batch method writes one ordered PDF and virtualizes
-identical untagged page content to a shared stream; it is not a dynamic template-binding API.
+The compiled lane runs parsing/layout once. `render_pdf_batch` virtualizes identical untagged page
+content. The binding methods instead accept columnar `dict[str, list[str]]` data and emit distinct
+fixed-geometry text overlays per record while sharing static paint. They require exact slot keys,
+equal non-zero column lengths, page-local WinAnsi-compatible text, and an untagged profile; bound
+values do not trigger reflow.
 
 When `deterministic_hash` is set, engine writes PDF SHA-256 to the provided file path.
 

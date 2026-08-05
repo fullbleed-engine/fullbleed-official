@@ -23,8 +23,8 @@ IRONPRESS_REPOSITORY = "https://github.com/gastongouron/ironpress.git"
 IRONPRESS_COMMIT = "0d1e53b6d8174d0a5059a8696c24e62759381f6d"
 IMAGE_TAG = "fullbleed-ironpress-parity:0d1e53b6"
 LINUX_WHEEL_PATTERNS = (
-    "fullbleed-2.1.0-cp310-abi3-manylinux*_x86_64.whl",
-    "fullbleed-2.1.0-cp310-abi3-linux_x86_64.whl",
+    "fullbleed-2.2.0-cp310-abi3-manylinux*_x86_64.whl",
+    "fullbleed-2.2.0-cp310-abi3-linux_x86_64.whl",
 )
 
 

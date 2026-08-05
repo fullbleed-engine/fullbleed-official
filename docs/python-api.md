@@ -114,20 +114,56 @@ print(compiled.stats())
 # One ordered PDF containing 1,000 identical compiled copies. Untagged output
 # virtualizes each source page to one shared content stream.
 print_run = compiled.render_pdf_batch(1_000)
+
+# Distinct fixed-geometry records. Every column must have the same non-zero
+# length, and its key must match a {{slot_name}} found in compiled text.
+invoice_template = engine.compile_pdf(
+    "<p>Invoice: {{invoice_id}}</p><p>Customer: {{customer}}</p>",
+    "body { font-family: Helvetica, sans-serif; }",
+)
+records = {
+    "invoice_id": ["INV-0001", "INV-0002", "INV-0003"],
+    "customer": ["Ada", "Grace", "Katherine"],
+}
+variable_pdf = invoice_template.render_pdf_bindings(records)
+invoice_template.render_pdf_bindings_to_file(records, "invoices.pdf")
 ```
 
 Methods:
 
-- `stats() -> dict` with `page_count`, `command_count`, and `compile_ms`
+- `stats() -> dict` with `page_count`, `command_count`, `compile_ms`,
+  `binding_slot_count`, and sorted `binding_slots`
 - `render_pdf(deterministic_hash=None) -> bytes`
 - `render_pdf_to_file(path, deterministic_hash=None) -> int`
 - `render_pdf_batch(copies, deterministic_hash=None) -> bytes`
+- `render_pdf_bindings(bindings, deterministic_hash=None) -> bytes`
+- `render_pdf_bindings_to_file(bindings, path, deterministic_hash=None) -> int`
 
 `render_pdf_batch` is a fixed-copy virtualization API, not a dynamic template-binding API. Each
 page dictionary is distinct and ordered, while identical untagged page content/resources are
 linked once and referenced by every copy. Tagged profiles deliberately use page-specific streams
 so their structure-parent records remain correct. A compiled object is immutable and may be
 rendered concurrently from multiple Python threads.
+
+`render_pdf_bindings` is a compiled fixed-geometry variable-data API. Parsing, selector matching,
+layout, pagination, and static page paint run once. The linker shares the static page stream and
+writes one compact text overlay stream for every record page. It does not copy one immutable page:
+each binding row produces distinct PDF text content.
+
+The current binding contract is deliberately narrow:
+
+- slot markers use `{{name}}`, where `name` is at most 64 ASCII letters, digits, `_`, `-`, or `.`;
+- a marker may be embedded in an ordinary text run such as `Invoice: {{invoice_id}}`;
+- the mapping must contain exactly every compiled slot, and all columns must have equal non-zero
+  lengths;
+- slots must lower to page-local WinAnsi text outside form XObjects and transformed/clipped
+  graphics states; tagged PDF profiles are not accepted by this fast path;
+- values replace paint text only. They do not trigger shaping or reflow, so templates must reserve
+  sufficient geometry and should currently use WinAnsi-compatible values.
+
+Use the ordinary HTML/batch renderer when a value can change line wrapping, element dimensions,
+pagination, complex-script shaping, or accessibility structure. The direct-to-file method uses a
+buffered writer and flushes before returning.
 
 ## `AssetBundle`
 

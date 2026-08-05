@@ -1,13 +1,12 @@
 use crate::canvas::{Command, Document, Page};
 use crate::debug::json_escape;
 use crate::font::{
-    CachedTrueTypeSubset, FontProgramKind, FontRegistry, GlyphOutlineCommand, RegisteredFont,
-    RegisteredGlyphOutline,
+    FontProgramKind, FontRegistry, GlyphOutlineCommand, RegisteredFont, RegisteredGlyphOutline,
 };
 use crate::metrics::{DocumentMetrics, PageMetrics};
 use crate::perf::PerfLogger;
 use crate::sfnt::{Face as SfntFace, GlyphId};
-use crate::types::{Color, ColorSpace, I32F32, MixBlendMode, Pt, Shading, ShadingStop, Size};
+use crate::types::{Color, ColorSpace, MixBlendMode, Pt, Shading, ShadingStop, Size};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{self, Write};
 use std::path::Path;
@@ -293,6 +292,309 @@ struct PdfPageNode {
     kids: Vec<usize>,
 }
 
+enum BindingContentSegment {
+    Static(Box<[u8]>),
+    Slot(usize),
+}
+
+struct BindingPageProgram {
+    static_content_id: usize,
+    static_content_len: usize,
+    dynamic_segments: Vec<BindingContentSegment>,
+    dynamic_capacity: usize,
+    dynamic_slot_occurrences: usize,
+}
+
+fn compile_binding_content_segments(
+    content: &str,
+    slot_lookup: &HashMap<String, usize>,
+) -> (Vec<BindingContentSegment>, usize, usize) {
+    let bytes = content.as_bytes();
+    let mut segments = Vec::new();
+    let mut cursor = 0usize;
+    let mut search = 0usize;
+    let mut occurrences = 0usize;
+    let mut static_bytes = 0usize;
+
+    while search + 3 < bytes.len() {
+        let Some(relative_start) = bytes[search..].windows(2).position(|pair| pair == b"{{") else {
+            break;
+        };
+        let start = search + relative_start;
+        let Some(relative_end) = bytes[start + 2..].windows(2).position(|pair| pair == b"}}")
+        else {
+            break;
+        };
+        let end = start + 2 + relative_end;
+        let name = std::str::from_utf8(&bytes[start + 2..end])
+            .ok()
+            .map(str::trim);
+        let Some(slot_index) = name.and_then(|name| slot_lookup.get(name)).copied() else {
+            search = start + 2;
+            continue;
+        };
+        if start > cursor {
+            let value = bytes[cursor..start].to_vec().into_boxed_slice();
+            static_bytes = static_bytes.saturating_add(value.len());
+            segments.push(BindingContentSegment::Static(value));
+        }
+        segments.push(BindingContentSegment::Slot(slot_index));
+        occurrences = occurrences.saturating_add(1);
+        cursor = end + 2;
+        search = cursor;
+    }
+    if cursor < bytes.len() {
+        let value = bytes[cursor..].to_vec().into_boxed_slice();
+        static_bytes = static_bytes.saturating_add(value.len());
+        segments.push(BindingContentSegment::Static(value));
+    }
+    (segments, occurrences, static_bytes)
+}
+
+fn append_binding_value(out: &mut Vec<u8>, value: &str) {
+    if value.is_ascii() {
+        for byte in value.bytes() {
+            match byte {
+                b'\\' => out.extend_from_slice(b"\\\\"),
+                b'(' => out.extend_from_slice(b"\\("),
+                b')' => out.extend_from_slice(b"\\)"),
+                b'\n' => out.extend_from_slice(b"\\n"),
+                b'\r' => out.extend_from_slice(b"\\r"),
+                0x00..=0x1f | 0x7f => {
+                    out.push(b'\\');
+                    out.push(b'0' + ((byte >> 6) & 0x07));
+                    out.push(b'0' + ((byte >> 3) & 0x07));
+                    out.push(b'0' + (byte & 0x07));
+                }
+                _ => out.push(byte),
+            }
+        }
+    } else {
+        let encoded = encode_winansi_pdf_string(value);
+        out.extend_from_slice(encoded.text.as_bytes());
+    }
+}
+
+fn instantiate_binding_content(
+    segments: &[BindingContentSegment],
+    columns: &[&[String]],
+    row: usize,
+    out: &mut Vec<u8>,
+) {
+    out.clear();
+    for segment in segments {
+        match segment {
+            BindingContentSegment::Static(value) => out.extend_from_slice(value),
+            BindingContentSegment::Slot(slot_index) => {
+                append_binding_value(out, &columns[*slot_index][row]);
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+struct BindingPaintState {
+    font_name: String,
+    font_size: Pt,
+    fill: Color,
+    stroke: Color,
+    opacity_fill: f32,
+    opacity_stroke: f32,
+    blend_mode: MixBlendMode,
+    text_rendering_mode: u8,
+    coordinate_state_changed: bool,
+}
+
+impl Default for BindingPaintState {
+    fn default() -> Self {
+        Self {
+            font_name: "Helvetica".to_string(),
+            font_size: Pt::from_f32(12.0),
+            fill: Color::BLACK,
+            stroke: Color::BLACK,
+            opacity_fill: 1.0,
+            opacity_stroke: 1.0,
+            blend_mode: MixBlendMode::Normal,
+            text_rendering_mode: 0,
+            coordinate_state_changed: false,
+        }
+    }
+}
+
+fn commands_contain_binding_marker(commands: &[Command]) -> bool {
+    commands.iter().any(|command| match command {
+        Command::DrawString { text, .. } | Command::DrawStringTransformed { text, .. } => {
+            !crate::binding_slot_names(text).is_empty()
+        }
+        Command::DefineForm { commands, .. } | Command::DefineIsolatedForm { commands, .. } => {
+            commands_contain_binding_marker(commands)
+        }
+        _ => false,
+    })
+}
+
+fn binding_static_commands(
+    commands: &[Command],
+    slot_lookup: &HashMap<String, usize>,
+) -> Vec<Command> {
+    commands
+        .iter()
+        .filter(|command| match command {
+            Command::DrawString { text, .. } | Command::DrawStringTransformed { text, .. } => {
+                !crate::binding_slot_names(text)
+                    .iter()
+                    .any(|name| slot_lookup.contains_key(*name))
+            }
+            _ => true,
+        })
+        .cloned()
+        .collect()
+}
+
+fn binding_overlay_commands(
+    commands: &[Command],
+    slot_lookup: &HashMap<String, usize>,
+) -> io::Result<(Vec<Command>, Vec<usize>)> {
+    let mut state = BindingPaintState::default();
+    let mut stack = Vec::new();
+    let mut overlay = Vec::new();
+    let mut counts = vec![0usize; slot_lookup.len()];
+
+    for command in commands {
+        match command {
+            Command::SaveState => stack.push(state.clone()),
+            Command::RestoreState => {
+                if let Some(saved) = stack.pop() {
+                    state = saved;
+                }
+            }
+            Command::Translate(..)
+            | Command::CssTransformOrigin { .. }
+            | Command::Scale(..)
+            | Command::Rotate(..)
+            | Command::ConcatMatrix { .. }
+            | Command::ClipRect { .. }
+            | Command::ClipPath { .. } => state.coordinate_state_changed = true,
+            Command::SetFillColor(value) => state.fill = *value,
+            Command::SetStrokeColor(value) => state.stroke = *value,
+            Command::SetOpacity { fill, stroke } => {
+                state.opacity_fill = *fill;
+                state.opacity_stroke = *stroke;
+            }
+            Command::SetBlendMode { mode } => state.blend_mode = *mode,
+            Command::SetFontName(value) => state.font_name.clone_from(value),
+            Command::SetFontSize(value) => state.font_size = *value,
+            Command::SetTextRenderingMode(value) => state.text_rendering_mode = *value,
+            Command::DefineForm { commands, .. } | Command::DefineIsolatedForm { commands, .. }
+                if commands_contain_binding_marker(commands) =>
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "compiled binding slots inside form XObjects are not supported",
+                ));
+            }
+            Command::DrawString { x, y, text } => {
+                let names = crate::binding_slot_names(text);
+                if names.is_empty() {
+                    continue;
+                }
+                let slot_indices = names
+                    .iter()
+                    .filter_map(|name| slot_lookup.get(*name).copied())
+                    .collect::<Vec<_>>();
+                if slot_indices.is_empty() {
+                    continue;
+                }
+                if state.coordinate_state_changed {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!(
+                            "compiled binding text {text:?} is inside a transformed or clipped graphics state"
+                        ),
+                    ));
+                }
+                for slot_index in slot_indices {
+                    counts[slot_index] = counts[slot_index].saturating_add(1);
+                }
+                overlay.push(Command::SaveState);
+                overlay.push(Command::SetFillColor(state.fill));
+                overlay.push(Command::SetStrokeColor(state.stroke));
+                if state.opacity_fill < 1.0 || state.opacity_stroke < 1.0 {
+                    overlay.push(Command::SetOpacity {
+                        fill: state.opacity_fill,
+                        stroke: state.opacity_stroke,
+                    });
+                }
+                if state.blend_mode != MixBlendMode::Normal {
+                    overlay.push(Command::SetBlendMode {
+                        mode: state.blend_mode,
+                    });
+                }
+                overlay.push(Command::SetFontName(state.font_name.clone()));
+                overlay.push(Command::SetFontSize(state.font_size));
+                if state.text_rendering_mode != 0 {
+                    overlay.push(Command::SetTextRenderingMode(state.text_rendering_mode));
+                }
+                overlay.push(Command::DrawString {
+                    x: *x,
+                    y: *y,
+                    text: text.clone(),
+                });
+                overlay.push(Command::RestoreState);
+            }
+            Command::DrawStringTransformed {
+                x,
+                y,
+                text,
+                m00,
+                m01,
+                m10,
+                m11,
+            } => {
+                let names = crate::binding_slot_names(text);
+                if names.is_empty() {
+                    continue;
+                }
+                let slot_indices = names
+                    .iter()
+                    .filter_map(|name| slot_lookup.get(*name).copied())
+                    .collect::<Vec<_>>();
+                if slot_indices.is_empty() {
+                    continue;
+                }
+                if state.coordinate_state_changed {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!(
+                            "compiled binding text {text:?} is inside a transformed or clipped graphics state"
+                        ),
+                    ));
+                }
+                for slot_index in slot_indices {
+                    counts[slot_index] = counts[slot_index].saturating_add(1);
+                }
+                overlay.push(Command::SaveState);
+                overlay.push(Command::SetFillColor(state.fill));
+                overlay.push(Command::SetStrokeColor(state.stroke));
+                overlay.push(Command::SetFontName(state.font_name.clone()));
+                overlay.push(Command::SetFontSize(state.font_size));
+                overlay.push(Command::DrawStringTransformed {
+                    x: *x,
+                    y: *y,
+                    text: text.clone(),
+                    m00: *m00,
+                    m01: *m01,
+                    m10: *m10,
+                    m11: *m11,
+                });
+                overlay.push(Command::RestoreState);
+            }
+            _ => {}
+        }
+    }
+    Ok((overlay, counts))
+}
+
 pub(crate) struct PdfStreamWriter<'a, W: Write> {
     writer: &'a mut W,
     offset: usize,
@@ -541,6 +843,128 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         Ok(())
     }
 
+    /// Add a columnar fixed-geometry binding batch. Static page paint is written once per source
+    /// page; every output page receives only a compact, record-specific text overlay stream.
+    pub(crate) fn add_compiled_document_bindings(
+        &mut self,
+        doc_id: usize,
+        document: &Document,
+        binding_slots: &[String],
+        columns: &[&[String]],
+        record_count: usize,
+    ) -> io::Result<()> {
+        if record_count == 0 || binding_slots.is_empty() || columns.len() != binding_slots.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "compiled binding batch requires non-empty, aligned slot columns",
+            ));
+        }
+        if columns.iter().any(|column| column.len() != record_count) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "compiled binding columns have inconsistent row counts",
+            ));
+        }
+        if self.options.pdf_profile.emits_tagged_structure() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "compiled fixed-geometry bindings do not yet support tagged page structure",
+            ));
+        }
+        if (document.page_size.width - self.page_size.width).abs() > Pt::from_f32(0.01)
+            || (document.page_size.height - self.page_size.height).abs() > Pt::from_f32(0.01)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "mixed page sizes are not supported in a compiled binding batch",
+            ));
+        }
+        validate_profile_font_embedding(document, self.registry, &self.options)?;
+        self.current_doc_id = doc_id;
+        self.shaped_cache.clear();
+        self.ensure_page_node();
+
+        let slot_lookup = binding_slots
+            .iter()
+            .enumerate()
+            .map(|(index, name)| (name.clone(), index))
+            .collect::<HashMap<_, _>>();
+        let mut total_slot_counts = vec![0usize; binding_slots.len()];
+        let mut programs = Vec::with_capacity(document.pages.len());
+
+        for page in &document.pages {
+            let page_index = self.page_ids.len();
+            let (overlay_commands, page_slot_counts) =
+                binding_overlay_commands(&page.commands, &slot_lookup)?;
+            let static_page = Page {
+                commands: binding_static_commands(&page.commands, &slot_lookup),
+            };
+            let static_content = self.render_page(&static_page, page_index)?;
+            let static_content_id = self.alloc_ids(1);
+            self.write_content_stream_object(static_content_id, "", static_content.as_bytes())?;
+            self.page_content_stream_count = self.page_content_stream_count.saturating_add(1);
+
+            for (total, count) in total_slot_counts.iter_mut().zip(page_slot_counts) {
+                *total = total.saturating_add(count);
+            }
+            let overlay_page = Page {
+                commands: overlay_commands,
+            };
+            let overlay_template = self.render_page(&overlay_page, page_index)?;
+            let (dynamic_segments, dynamic_slot_occurrences, dynamic_static_bytes) =
+                compile_binding_content_segments(&overlay_template, &slot_lookup);
+            if dynamic_slot_occurrences == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "compiled slot overlay could not be lowered to patchable WinAnsi text",
+                ));
+            }
+            programs.push(BindingPageProgram {
+                static_content_id,
+                static_content_len: static_content.len(),
+                dynamic_segments,
+                dynamic_capacity: dynamic_static_bytes.saturating_add(128),
+                dynamic_slot_occurrences,
+            });
+        }
+
+        for (index, count) in total_slot_counts.iter().copied().enumerate() {
+            if count == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "compiled binding slot {:?} is not a page-local text command",
+                        binding_slots[index]
+                    ),
+                ));
+            }
+        }
+
+        let max_dynamic_capacity = programs
+            .iter()
+            .map(|program| program.dynamic_capacity)
+            .max()
+            .unwrap_or(0);
+        let mut dynamic_content = Vec::with_capacity(max_dynamic_capacity);
+        for row in 0..record_count {
+            for program in &programs {
+                instantiate_binding_content(
+                    &program.dynamic_segments,
+                    columns,
+                    row,
+                    &mut dynamic_content,
+                );
+                self.add_bound_page(
+                    program.static_content_id,
+                    program.static_content_len,
+                    &dynamic_content,
+                )?;
+                debug_assert!(program.dynamic_slot_occurrences > 0);
+            }
+        }
+        Ok(())
+    }
+
     fn add_page(&mut self, page: &Page) -> io::Result<()> {
         let page_index = self.page_ids.len();
         let parent_id = self.ensure_page_node();
@@ -570,10 +994,47 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         self.write_page_reference(parent_id, content_id, page_id, page_index)
     }
 
+    fn add_bound_page(
+        &mut self,
+        static_content_id: usize,
+        static_content_len: usize,
+        dynamic_content: &[u8],
+    ) -> io::Result<()> {
+        let page_index = self.page_ids.len();
+        let parent_id = self.ensure_page_node();
+        let start = self.alloc_ids(2);
+        let dynamic_content_id = start;
+        let page_id = start + 1;
+        if let Some(node) = self.current_node.as_mut() {
+            node.kids.push(page_id);
+        }
+        self.page_content_bytes
+            .push(static_content_len.saturating_add(dynamic_content.len()));
+        self.write_uncompressed_content_stream_object(dynamic_content_id, "", dynamic_content)?;
+        self.page_content_stream_count = self.page_content_stream_count.saturating_add(1);
+        let contents = format!("[{} 0 R {} 0 R]", static_content_id, dynamic_content_id);
+        self.write_page_reference_contents(parent_id, &contents, page_id, page_index)
+    }
+
     fn write_page_reference(
         &mut self,
         parent_id: usize,
         content_id: usize,
+        page_id: usize,
+        page_index: usize,
+    ) -> io::Result<()> {
+        self.write_page_reference_contents(
+            parent_id,
+            &format!("{} 0 R", content_id),
+            page_id,
+            page_index,
+        )
+    }
+
+    fn write_page_reference_contents(
+        &mut self,
+        parent_id: usize,
+        contents: &str,
         page_id: usize,
         page_index: usize,
     ) -> io::Result<()> {
@@ -590,13 +1051,13 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             .map(|id| format!(" /DPart {} 0 R", id))
             .unwrap_or_default();
         let page_obj = format!(
-            "<< /Type /Page /Parent {} 0 R /MediaBox [0 0 {} {}]{} /Resources {} 0 R /Contents {} 0 R{}{}{} >>",
+            "<< /Type /Page /Parent {} 0 R /MediaBox [0 0 {} {}]{} /Resources {} 0 R /Contents {}{}{}{} >>",
             parent_id,
             fmt_pt(self.page_size.width),
             fmt_pt(self.page_size.height),
             page_boxes,
             PDF_RESOURCES_ID,
-            content_id,
+            contents,
             dpart,
             struct_parents,
             tabs
@@ -686,7 +1147,8 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             .filter(|glyph| *glyph != 0)
                             .collect();
                         let subset = registry.cached_truetype_subset(&font.name, &used_gids);
-                        let base_name = subset_font_name(font, subset.as_deref());
+                        let base_name =
+                            subset_font_name(font, subset.as_ref().map(|value| &value.tag));
                         let program = subset
                             .as_ref()
                             .map(|value| value.data.as_slice())
@@ -731,21 +1193,38 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             }
                         }
                         let used_gids: BTreeSet<u16> = glyph_map.keys().copied().collect();
-                        let subset = registry.cached_truetype_subset(&font.name, &used_gids);
-                        let base_name = subset_font_name(font, subset.as_deref());
-                        let program = subset
+                        let truetype_subset =
+                            registry.cached_truetype_subset(&font.name, &used_gids);
+                        let cff_subset = registry.cached_cff_subset(&font.name, &used_gids);
+                        let subset_tag = truetype_subset
+                            .as_ref()
+                            .map(|value| &value.tag)
+                            .or_else(|| cff_subset.as_ref().map(|value| &value.tag));
+                        let base_name = subset_font_name(font, subset_tag);
+                        let program = truetype_subset
                             .as_ref()
                             .map(|value| value.data.as_slice())
+                            .or_else(|| cff_subset.as_ref().map(|value| value.data.as_slice()))
                             .unwrap_or(font.data.as_slice());
+                        let compressed = truetype_subset
+                            .as_ref()
+                            .and_then(|value| value.compressed.as_deref())
+                            .or_else(|| {
+                                cff_subset
+                                    .as_ref()
+                                    .and_then(|value| value.compressed.as_deref())
+                            });
+                        let subset_glyph_count = truetype_subset
+                            .as_ref()
+                            .map(|value| value.glyph_count)
+                            .or_else(|| cff_subset.as_ref().map(|value| value.glyph_count));
                         self.write_font_file_stream_object(
                             font_file_id,
                             program,
-                            subset
-                                .as_ref()
-                                .and_then(|value| value.compressed.as_deref()),
+                            compressed,
                             font.program_kind,
                             font.data.len(),
-                            subset.as_ref().map(|value| value.glyph_count),
+                            subset_glyph_count,
                         )?;
                         self.write_object(
                             descriptor_id,
@@ -760,16 +1239,39 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             } else {
                                 font.metrics.missing_width
                             };
-                            w_entries.push(format!("{} [{}]", gid, width));
+                            let cid = cff_subset
+                                .as_ref()
+                                .and_then(|subset| subset.old_to_new.get(gid))
+                                .copied()
+                                .unwrap_or(*gid);
+                            w_entries.push(format!("{} [{}]", cid, width));
                         }
                         let w_array = if w_entries.is_empty() {
                             String::new()
                         } else {
                             format!("/W [{}]", w_entries.join(" "))
                         };
-                        let (cid_subtype, cid_to_gid_map) = match font.program_kind {
-                            FontProgramKind::OpenTypeCff => ("CIDFontType0", ""),
-                            FontProgramKind::TrueType => ("CIDFontType2", "/CIDToGIDMap /Identity"),
+                        let (cid_subtype, cid_to_gid_map, encoding) = match font.program_kind {
+                            FontProgramKind::OpenTypeCff => {
+                                let encoding = if let Some(subset) = cff_subset.as_ref() {
+                                    let encoding_id = self.alloc_ids(1);
+                                    let cmap = cid_encoding_cmap(&subset.old_to_new);
+                                    self.write_stream_object_bytes(
+                                        encoding_id,
+                                        "",
+                                        cmap.as_bytes(),
+                                    )?;
+                                    format!("{} 0 R", encoding_id)
+                                } else {
+                                    "/Identity-H".to_string()
+                                };
+                                ("CIDFontType0", "", encoding)
+                            }
+                            FontProgramKind::TrueType => (
+                                "CIDFontType2",
+                                "/CIDToGIDMap /Identity",
+                                "/Identity-H".to_string(),
+                            ),
                         };
                         self.write_object(
                             cid_font_id,
@@ -788,8 +1290,9 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                         self.write_object(
                             type0_font_id,
                             &format!(
-                                "<< /Type /Font /Subtype /Type0 /BaseFont /{} /Encoding /Identity-H /DescendantFonts [{} 0 R] /ToUnicode {} 0 R >>",
+                                "<< /Type /Font /Subtype /Type0 /BaseFont /{} /Encoding {} /DescendantFonts [{} 0 R] /ToUnicode {} 0 R >>",
                                 base_name,
+                                encoding,
                                 cid_font_id,
                                 to_unicode_id
                             ),
@@ -1870,6 +2373,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     height,
                     resource_id,
                     filter,
+                    css_shadow,
                 } => {
                     let Some((form_width, form_height, form_commands)) =
                         self.form_definition_map.get(resource_id).cloned()
@@ -1887,6 +2391,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                         *width,
                         *height,
                         filter,
+                        *css_shadow,
                         PDF_FILTER_RASTER_DPI,
                         self.registry,
                         self.options.shape_text,
@@ -2000,6 +2505,19 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 .saturating_add(content.len());
             self.write_stream_object_bytes(obj_id, dict_entries, content)
         }
+    }
+
+    fn write_uncompressed_content_stream_object(
+        &mut self,
+        obj_id: usize,
+        dict_entries: &str,
+        content: &[u8],
+    ) -> io::Result<()> {
+        self.content_stream_raw_bytes = self.content_stream_raw_bytes.saturating_add(content.len());
+        self.content_stream_encoded_bytes = self
+            .content_stream_encoded_bytes
+            .saturating_add(content.len());
+        self.write_stream_object_bytes(obj_id, dict_entries, content)
     }
 
     fn write_image_smask_stream_object(
@@ -3492,12 +4010,12 @@ fn hash_image(image: &ImageData) -> u64 {
     hasher.finish()
 }
 
-fn subset_font_name(font: &RegisteredFont, subset: Option<&CachedTrueTypeSubset>) -> String {
+fn subset_font_name(font: &RegisteredFont, tag: Option<&[u8; 6]>) -> String {
     let base = sanitize_font_name(&font.name);
-    let Some(subset) = subset else {
+    let Some(tag) = tag else {
         return base;
     };
-    let tag = std::str::from_utf8(&subset.tag).unwrap_or("AAAAAA");
+    let tag = std::str::from_utf8(tag).unwrap_or("AAAAAA");
     format!("{}+{}", tag, base)
 }
 
@@ -4074,8 +4592,10 @@ fn hash_shading(shading: &Shading) -> u64 {
             y1,
             r1,
             stops,
+            hard_stops,
         } => {
             2u8.hash(&mut hasher);
+            hard_stops.hash(&mut hasher);
             hash_f32(&mut hasher, *x0);
             hash_f32(&mut hasher, *y0);
             hash_f32(&mut hasher, *r0);
@@ -4110,6 +4630,7 @@ fn with_shading_stops(shading: &Shading, stops: Vec<ShadingStop>) -> Shading {
             x1,
             y1,
             r1,
+            hard_stops,
             ..
         } => Shading::Radial {
             x0: *x0,
@@ -4119,6 +4640,7 @@ fn with_shading_stops(shading: &Shading, stops: Vec<ShadingStop>) -> Shading {
             y1: *y1,
             r1: *r1,
             stops,
+            hard_stops: *hard_stops,
         },
     }
 }
@@ -4213,8 +4735,18 @@ fn shading_to_objects(
         Shading::Radial { stops, .. } => stops.clone(),
     };
 
-    let (fun_objects, fun_id, new_next) =
-        build_gradient_function_objects(&stops, next_id, color_space);
+    let hard_stops = matches!(
+        shading,
+        Shading::Radial {
+            hard_stops: true,
+            ..
+        }
+    );
+    let (fun_objects, fun_id, new_next) = if hard_stops {
+        build_hard_gradient_function_object(&stops, next_id, color_space)
+    } else {
+        build_gradient_function_objects(&stops, next_id, color_space)
+    };
     objects.extend(fun_objects);
     next_id = new_next;
 
@@ -4233,6 +4765,21 @@ fn shading_to_objects(
             fmt(page_height.to_f32() - *y0),
             fmt(*x1),
             fmt(page_height.to_f32() - *y1),
+            fun_id,
+        ),
+        Shading::Radial {
+            x0,
+            y0,
+            r1,
+            hard_stops: true,
+            ..
+        } => format!(
+            "<< /ShadingType 1 /ColorSpace {} /Domain [-1000 1000 -1000 1000] /Matrix [{} 0 0 -{} {} {}] /Function {} 0 R >>",
+            space,
+            fmt(*r1),
+            fmt(*r1),
+            fmt(*x0),
+            fmt(page_height.to_f32() - *y0),
             fun_id,
         ),
         Shading::Radial {
@@ -4258,6 +4805,59 @@ fn shading_to_objects(
     objects.push(sh_dict);
 
     (objects, sh_obj_id, next_id)
+}
+
+fn build_hard_gradient_function_object(
+    stops: &[ShadingStop],
+    start_id: usize,
+    color_space: ColorSpace,
+) -> (Vec<String>, usize, usize) {
+    let mut stops = stops.to_vec();
+    stops.sort_by(|a, b| {
+        a.offset
+            .partial_cmp(&b.offset)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut bands = Vec::new();
+    for pair in stops.windows(2) {
+        if pair[1].offset - pair[0].offset <= 1.0e-6 {
+            continue;
+        }
+        bands.push((pair[1].offset.clamp(0.0, 1.0), pair[0].color));
+    }
+    if bands.is_empty() {
+        return build_gradient_function_objects(stops.as_slice(), start_id, color_space);
+    }
+
+    let components = |color: Color| {
+        color_components(color, color_space)
+            .iter()
+            .map(|value| fmt(*value))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let mut body = format!("pop {}", components(bands[bands.len() - 1].1));
+    for (end, color) in bands.iter().copied().take(bands.len() - 1).rev() {
+        body = format!(
+            "dup {} le {{ pop {} }} {{ {} }} ifelse",
+            fmt(end),
+            components(color),
+            body
+        );
+    }
+    let program = format!("{{ dup mul exch dup mul add sqrt {} }}", body);
+    let component_count = color_components(Color::BLACK, color_space).len();
+    let range = (0..component_count)
+        .map(|_| "0 1")
+        .collect::<Vec<_>>()
+        .join(" ");
+    let object = format!(
+        "<< /FunctionType 4 /Domain [-1000 1000 -1000 1000] /Range [{}] /Length {} >>\nstream\n{}\nendstream",
+        range,
+        program.as_bytes().len(),
+        program
+    );
+    (vec![object], start_id, start_id + 1)
 }
 
 fn build_gradient_function_objects(
@@ -4867,6 +5467,39 @@ fn push_pdf_declaration(out: &mut String, conforms_to: &str) {
     out.push_str("</rdf:Description>\n");
 }
 
+fn cid_encoding_cmap(old_to_new: &BTreeMap<u16, u16>) -> String {
+    let entries: Vec<(u16, u16)> = old_to_new
+        .iter()
+        .map(|(old_gid, new_cid)| (*old_gid, *new_cid))
+        .collect();
+
+    let mut out = String::new();
+    out.push_str("/CIDInit /ProcSet findresource begin\n");
+    out.push_str("12 dict begin\n");
+    out.push_str("begincmap\n");
+    out.push_str("/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> def\n");
+    out.push_str("/CMapName /FullBleed-CFFSubset def\n");
+    out.push_str("/CMapType 1 def\n");
+    out.push_str("/WMode 0 def\n");
+    out.push_str("1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n");
+
+    let mut index = 0usize;
+    while index < entries.len() {
+        let end = (index + 100).min(entries.len());
+        out.push_str(&format!("{} begincidchar\n", end - index));
+        for (old_gid, new_cid) in &entries[index..end] {
+            out.push_str(&format!("<{:04X}> {}\n", old_gid, new_cid));
+        }
+        out.push_str("endcidchar\n");
+        index = end;
+    }
+
+    out.push_str("endcmap\n");
+    out.push_str("CMapName currentdict /CMap defineresource pop\n");
+    out.push_str("end\nend\n");
+    out
+}
+
 fn to_unicode_cmap(glyph_map: &BTreeMap<u16, String>) -> String {
     let entries: Vec<(u16, String)> = glyph_map.iter().map(|(g, s)| (*g, s.clone())).collect();
 
@@ -5109,9 +5742,19 @@ fn fmt(value: f32) -> String {
     if !value.is_finite() {
         return "0".to_string();
     }
-    let fixed = I32F32::from_num(value);
-    let scaled = (fixed * I32F32::from_num(1_000_000.0)).round();
-    let millionths = scaled.to_i64_floor();
+    // `value` has already crossed the PDF serialization boundary. Multiplying
+    // it by one million in Q32.32 used to saturate at 2_147_483_647, turning a
+    // valid coordinate such as 2830.5 into 2147.483647. Large gradient axes are
+    // common when a one-pixel border-image corner is stretched; use the exact
+    // f32 value in f64 solely for bounded decimal formatting.
+    let scaled = f64::from(value) * 1_000_000.0;
+    let millionths = if scaled >= i64::MAX as f64 {
+        i64::MAX
+    } else if scaled <= i64::MIN as f64 {
+        i64::MIN
+    } else {
+        scaled.round() as i64
+    };
     format_fixed(millionths, 6)
 }
 
@@ -5252,10 +5895,21 @@ mod tests {
     }
 
     #[test]
+    fn cff_subset_encoding_cmap_maps_original_codes_to_dense_cids() {
+        let map = BTreeMap::from([(0u16, 0u16), (42u16, 1u16), (8192u16, 2u16)]);
+        let cmap = cid_encoding_cmap(&map);
+        assert!(cmap.contains("/CMapType 1 def"));
+        assert!(cmap.contains("<002A> 1"));
+        assert!(cmap.contains("<2000> 2"));
+    }
+
+    #[test]
     fn floating_pdf_values_keep_sub_milli_precision() {
         assert_eq!(fmt(252.0 / 255.0), "0.988235");
         assert_eq!(fmt(183.0 / 255.0), "0.717647");
         assert_eq!(fmt(1.0), "1");
+        assert_eq!(fmt(2830.5), "2830.5");
+        assert_eq!(fmt(-2830.5), "-2830.5");
     }
 
     fn one_page_document(commands: Vec<Command>) -> Document {
@@ -5379,6 +6033,7 @@ mod tests {
                         height: size.height,
                         resource_id: "filtered".to_string(),
                         filter,
+                        css_shadow: false,
                     },
                 ],
             }],

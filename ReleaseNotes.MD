@@ -1,99 +1,110 @@
-# Fullbleed Release Notes - 2.1.0
+# Fullbleed Release Notes - 2.2.0
 
 Status: release
 
-Release date: August 4, 2026
+Release date: August 5, 2026
 
 ## Summary
 
-Fullbleed 2.1 is the first compiler and resource-virtualization performance release. It fixes the
-largest material output-size problem in 2.0 by embedding exact TrueType glyph subsets, introduces
-an immutable compile-once rendering API, and gives fixed compiled batches a shared-content PDF
-linking path.
+Fullbleed 2.2 turns the compile-once path into a genuine variable-data engine. A compiled document
+can bind distinct columnar records directly into fixed page geometry without repeating HTML parsing,
+selector matching, layout, pagination, or static paint serialization. This release also carries the
+current CSS/layout coverage expansion, native vector/raster improvements, and exact TrueType font
+subsetting that keeps generated PDFs materially smaller than 2.0.
 
-The authoritative layout and geometry representation remains signed Q32.32 fixed point. The
-release preserves the dependency-free Rust, Python runtime, and Python build graphs introduced in
-2.0.
+The authoritative layout and geometry representation remains signed Q32.32 fixed point. The fast
+path changes how already-resolved work is linked; it does not replace fixed-point layout with
+floating-point geometry.
 
-## Font Subsetting and Output Size
+## Compiled Variable Data
 
-- Embeds deterministic six-letter subset names and only the TrueType glyph closure used by a PDF.
-- Recursively retains composite glyph components and rebuilds `glyf`, `loca`, the SFNT directory,
-  table checksums, and `head.checksumAdjustment`.
-- Flate-compresses embedded subset streams and caches raw and compressed programs in bounded
-  per-engine and process-wide caches.
-- Resolves shaping before subsetting, allowing unused shaping and variable-font tables to be
-  omitted while the default TrueType instance remains valid.
-- Retains a safe full-font fallback for unsupported CFF/color/bitmap/SVG programs.
+- Adds Rust `CompiledDocument::render_bindings_to_buffer`, `render_bindings_to_writer`, and
+  `render_bindings_to_file` APIs.
+- Adds Python `CompiledDocument.render_pdf_bindings(...)` and
+  `render_pdf_bindings_to_file(...)` APIs through the CPython Stable ABI.
+- Compiles `{{slot_name}}` markers into page-local text slots and accepts equal-length columnar
+  values, producing one ordered page set per record.
+- Shares one immutable static content stream while emitting a compact, distinct dynamic text stream
+  for every record page.
+- Reuses native binding buffers and uses a buffered direct-file writer to bound allocation and
+  syscall overhead.
+- Releases the Python GIL for native rendering. This lane does not use Python multiprocessing;
+  throughput comes from eliminating repeated frontend, layout, and static serialization work.
 
-Across the five independent benchmark fixtures, generated PDFs are 95.5-97.3% smaller than
-released 2.0.0 while decoded subset programs remain parseable and expected text remains
-extractable.
-
-## Compiled Rendering
-
-- Adds Rust `FullBleed::compile_document(...)` and immutable `CompiledDocument` rendering APIs.
-- Adds Python `PdfEngine.compile_pdf(...)` plus `CompiledDocument.stats()`, `render_pdf()`,
-  `render_pdf_to_file()`, and `render_pdf_batch()`.
-- Reuses immutable compiled CSS and page-template contexts through a bounded engine cache.
-- Releases the Python GIL during compilation and linking; the same immutable compiled document can
-  be rendered concurrently from multiple Python threads.
-- Virtualizes identical untagged page copies so distinct ordered page dictionaries reference one
-  content stream. Tagged profiles deliberately retain page-specific streams and structure-parent
-  records.
-- Removes redundant compatibility-JIT bounds scans, placement clones, and result sorting from
-  production paths.
+The existing `render_pdf_batch(...)` path remains the right operation for identical compiled copies.
+The new binding methods are the distinct-record path: the output contains different text content for
+every record rather than 100,000 references to one immutable page.
 
 ## Measured Performance
 
-On the independent Windows AMD64 benchmark host:
+On the Windows AMD64 benchmark host, a compiled one-page invoice with six bound fields rendered
+100,000 distinct records with these five-run medians:
 
-- ordinary warm rendering is 2.90x faster by geometric mean than released 2.0.0;
-- link-only compiled rendering is 10.71x faster than released 2.0.0 and 3.69x faster than warm
-  2.1.0;
-- a 20-copy virtualized batch reaches 200.7x per-page geometric-mean throughput versus the released
-  2.0.0 warm renderer;
-- a 1,000-page fixed-copy stress run sustains 304,479-666,622 pages/s while producing 174-270 KB
-  PDFs.
+- in-memory: 283.807 ms, or **352,352 pages/s**;
+- direct flushed file: 295.999 ms, or **337,839 pages/s**;
+- direct file including the one-time 4.168 ms compilation: **333,147 pages/s**.
 
-The 200.7x result applies to identical compiled copies in one ordered PDF. It is not a claim for
-arbitrary unseen HTML or records with varying layout. The current `PlanAndReplay` mode remains a
-compatibility planner; packed vector bytecode, typed binding slots, dependency-based partial
-reflow, and SIMD/GPU filter acceleration remain subsequent compiler phases.
+The 88,138,877-byte PDF was verified to contain exactly 100,000 ordered page dictionaries, all
+invoice IDs from `INV-000000000` through `INV-000099999`, one shared static stream, 100,000 unique
+dynamic streams, and no unresolved markers. Buffer and file output matched SHA-256
+`2fdb268240bf52f87cd75670dac815ce8a6e29603ecfbdc344280df06c0b2540`. PyMuPDF independently
+extracted and rasterized records 1, 50,000, and 100,000.
 
-See `docs/performance-pass-2026-08-04.md` for the measurement ledger and
-`docs/performance-architecture.md` for the compiler and shader roadmap.
+The benchmark is reproducible with:
 
-## Compatibility
+```bash
+python tools/benchmark_fullbleed_vdp.py --records 100000 --repeats 5
+```
 
-- Adds API without removing the 2.0 `PdfEngine`, asset, batch, CLI, and Stable ABI surfaces.
+These figures apply to fixed-geometry, paint-only text bindings. Values that change wrapping,
+element dimensions, pagination, complex-script shaping, or accessibility structure still require
+the ordinary renderer. The independent fixed-copy lane remains separately measured at more than
+200,000 pages/s at 100,000-page scale.
+
+## Fonts, CSS, and Native Rendering
+
+- Retains deterministic TrueType glyph closure and exact subset embedding, including composite
+  glyph components, rebuilt SFNT tables, compressed streams, and safe fallback for unsupported
+  font formats.
+- Uses the audited `subsetter 0.2.6` implementation for broader subset-program correctness while
+  preserving deterministic subset naming and caching.
+- Expands CSS parsing, cascade, layout, and paint coverage across backgrounds and blend modes,
+  borders and outlines, lists and counters, table conflict resolution, logical properties and
+  vertical writing modes, filters, clipping, generated content, and native image/SVG paths.
+- Keeps the coverage claim evidence-scoped: Fullbleed is not presented as a complete browser CSS
+  implementation, and unsupported or partial behavior remains documented in `docs/css-coverage.md`.
+
+## Compatibility and Boundaries
+
+- Adds APIs without removing the 2.1 `PdfEngine`, asset, CLI, batch, compiled-copy, or Stable ABI
+  surfaces.
 - Preserves `cp310-abi3` wheels for standard CPython 3.10 through 3.14 across the 15-platform
-  matrix.
+  release matrix.
 - Preserves Rust 1.85 as the minimum supported toolchain.
-- Preserves deterministic bytes for ordinary and compiled single-document renders.
-- Preserves PDF profile behavior; tagged output bypasses content-stream sharing when structure
-  semantics require page-local records.
-- Keeps both shipped Rust crates and the Python distribution MIT licensed.
+- Keeps Q32.32 fixed-point geometry authoritative in ordinary and compiled lanes.
+- Requires exact slot keys, non-empty equal-length columns, page-local WinAnsi text, and untagged
+  output for the current variable-data fast path.
+- Keeps the compatibility `PlanAndReplay` JIT as a planner. Packed vector bytecode, typed sizing
+  policies, dependency-based partial reflow, and SIMD/GPU shader acceleration remain future work.
 
 ## Package Versions
 
-- `fullbleed 2.1.0` on crates.io and PyPI.
-- `fullbleed_audit_contract 0.1.2` on crates.io, unchanged from 2.0.
+- `fullbleed 2.2.0` on crates.io and PyPI.
+- `fullbleed_audit_contract 0.1.2` on crates.io, unchanged.
+- `subsetter 0.2.6` and transitive `rustc-hash 2.1.3`, both recorded in Cargo metadata, license
+  evidence, and the generated SBOM.
 
 ## Verification Baseline
 
-- Rust library suite: 824 passed, zero failed.
-- Repository Python suite: 254 passed and four skipped.
-- Independent Python benchmark/coverage suite: 31 applicable tests passed; one 2.0 assertion that
-  required complete source-font embedding is intentionally superseded by subset-program validation.
-- Python Stable ABI compiled-document tests: seven passed.
-- PyMuPDF and ImageMagick visual comparison of simple and full-document outputs: zero differing
-  pixels against released 2.0.0.
-- Golden PDF hashes and byte counts were regenerated for font-subset output; every checked-in PNG
-  page hash remained unchanged.
-- A 1,000-page virtualized PDF reports one shared content stream; pages 1, 500, and 1,000 have
-  identical raster hashes, and page 1,000 retains expected extractable text.
+- Rust library suite: 901 passed, zero failed.
+- Repository Python suite: 256 passed and four skipped.
+- Python Stable ABI compiled-document suite: eight passed.
+- Independent CSS/coverage review suite: 33 passed.
+- The 100,000-record benchmark verifies deterministic bytes, page order, unique values, stream
+  topology, extraction, and representative rasterization.
+- The release workflow builds, installs, and smokes 15 `cp310-abi3` wheels plus one source
+  distribution before publication.
 
-The exact `v2.1.0` source is validated by the release workflows before registry publication. The
-release set contains 15 `cp310-abi3` wheels, one source distribution, Cargo package evidence, and
-matching GitHub release assets.
+The exact `v2.2.0` source is validated before registry publication. GitHub, PyPI, and crates.io are
+published from that immutable tagged source, with the complete Python distribution set and its
+SHA-256 manifest attached to the GitHub release.

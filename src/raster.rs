@@ -93,13 +93,40 @@ pub(crate) fn rasterize_filtered_form(
     width: Pt,
     height: Pt,
     filter: &PaintFilterSpec,
+    css_shadow: bool,
     dpi: u32,
     registry: Option<&FontRegistry>,
     shape_text: bool,
 ) -> Result<Option<FilteredFormRaster>, FullBleedError> {
     let dpi = dpi.max(72);
-    let width_px = pt_milli_to_px_u32(page_width.to_milli_i64(), dpi)?;
-    let height_px = pt_milli_to_px_u32(page_height.to_milli_i64(), dpi)?;
+    let full_width_px = pt_milli_to_px_u32(page_width.to_milli_i64(), dpi)? as i64;
+    let full_height_px = pt_milli_to_px_u32(page_height.to_milli_i64(), dpi)? as i64;
+    let coordinate_to_floor_pixel = |coordinate: Pt| -> i64 {
+        let numerator = i128::from(coordinate.to_milli_i64()) * i128::from(dpi);
+        numerator.div_euclid(72_000) as i64
+    };
+    let coordinate_to_ceil_pixel = |coordinate: Pt| -> i64 {
+        let numerator = i128::from(coordinate.to_milli_i64()) * i128::from(dpi);
+        (-(-numerator).div_euclid(72_000)) as i64
+    };
+    let left_px = coordinate_to_floor_pixel(x).clamp(0, full_width_px);
+    let top_px = coordinate_to_floor_pixel(y).clamp(0, full_height_px);
+    let right_px = coordinate_to_ceil_pixel(x + width).clamp(0, full_width_px);
+    let bottom_px = coordinate_to_ceil_pixel(y + height).clamp(0, full_height_px);
+    if left_px >= right_px || top_px >= bottom_px {
+        return Ok(None);
+    }
+    let width_px = (right_px - left_px) as u32;
+    let height_px = (bottom_px - top_px) as u32;
+    let pixel_to_pt = |pixel: i64| -> Pt {
+        let numerator = i128::from(pixel) * 72_000;
+        let milli = (numerator + i128::from(dpi / 2)) / i128::from(dpi);
+        Pt::from_milli_i64(milli as i64)
+    };
+    let origin_x = pixel_to_pt(left_px);
+    let origin_y = pixel_to_pt(top_px);
+    let raster_page_width = pixel_to_pt(i64::from(width_px));
+    let raster_page_height = pixel_to_pt(i64::from(height_px));
     let mut pixmap = Pixmap::new(width_px, height_px).ok_or_else(|| {
         FullBleedError::InvalidConfiguration(format!(
             "invalid filtered-form raster size {}x{} at {} DPI",
@@ -107,8 +134,8 @@ pub(crate) fn rasterize_filtered_form(
         ))
     })?;
 
-    let page_height_pt = page_height.to_f32();
-    let page_width_pt = page_width.to_f32();
+    let page_height_pt = raster_page_height.to_f32();
+    let page_width_pt = raster_page_width.to_f32();
     let scale = dpi as f32 / 72.0;
     let base_transform = Transform::from_row(scale, 0.0, 0.0, -scale, 0.0, page_height_pt * scale);
     let resource_id = "__fullbleed_filtered_form".to_string();
@@ -123,12 +150,13 @@ pub(crate) fn rasterize_filtered_form(
         },
     );
     let draw = [Command::DrawFilteredForm {
-        x,
-        y,
+        x: x - origin_x,
+        y: y - origin_y,
         width,
         height,
         resource_id,
         filter: filter.clone(),
+        css_shadow,
     }];
     let mut image_cache = HashMap::new();
     let mut state = RasterState::default();
@@ -184,8 +212,8 @@ pub(crate) fn rasterize_filtered_form(
 
     let points_per_pixel = 72.0 / dpi as f32;
     Ok(Some(FilteredFormRaster {
-        x: Pt::from_f32(min_x as f32 * points_per_pixel),
-        y: Pt::from_f32(min_y as f32 * points_per_pixel),
+        x: origin_x + Pt::from_f32(min_x as f32 * points_per_pixel),
+        y: origin_y + Pt::from_f32(min_y as f32 * points_per_pixel),
         width: Pt::from_f32(crop_width as f32 * points_per_pixel),
         height: Pt::from_f32(crop_height as f32 * points_per_pixel),
         pixel_width: crop_width,
@@ -199,6 +227,25 @@ pub(crate) fn document_to_png_pages(
     dpi: u32,
     registry: Option<&FontRegistry>,
     shape_text: bool,
+) -> Result<Vec<Vec<u8>>, FullBleedError> {
+    document_to_png_pages_with_background(document, dpi, registry, shape_text, false)
+}
+
+pub(crate) fn document_to_transparent_png_pages(
+    document: &Document,
+    dpi: u32,
+    registry: Option<&FontRegistry>,
+    shape_text: bool,
+) -> Result<Vec<Vec<u8>>, FullBleedError> {
+    document_to_png_pages_with_background(document, dpi, registry, shape_text, true)
+}
+
+fn document_to_png_pages_with_background(
+    document: &Document,
+    dpi: u32,
+    registry: Option<&FontRegistry>,
+    shape_text: bool,
+    transparent: bool,
 ) -> Result<Vec<Vec<u8>>, FullBleedError> {
     let dpi = if dpi == 0 { 150 } else { dpi };
     let width_px = pt_milli_to_px_u32(document.page_size.width.to_milli_i64(), dpi)?;
@@ -219,7 +266,9 @@ pub(crate) fn document_to_png_pages(
                 width_px, height_px, dpi
             ))
         })?;
-        pixmap.fill(RasterColor::from_rgba8(255, 255, 255, 255));
+        if !transparent {
+            pixmap.fill(RasterColor::from_rgba8(255, 255, 255, 255));
+        }
 
         let mut state = RasterState::default();
         let mut stack: Vec<RasterState> = Vec::new();
@@ -745,6 +794,7 @@ fn render_commands(
                 height,
                 resource_id,
                 filter,
+                css_shadow,
             } => {
                 let Some(form) = forms.get(resource_id).cloned() else {
                     continue;
@@ -786,7 +836,14 @@ fn render_commands(
                     registry,
                     shape_text,
                 )?;
-                apply_foreground_filter_group(pixmap, &offscreen, state, filter, filter_transform);
+                apply_foreground_filter_group(
+                    pixmap,
+                    &offscreen,
+                    state,
+                    filter,
+                    filter_transform,
+                    *css_shadow,
+                );
             }
         }
     }
@@ -1237,6 +1294,7 @@ fn apply_foreground_filter_group(
     state: &RasterState,
     filter: &PaintFilterSpec,
     device_transform: Transform,
+    css_shadow: bool,
 ) {
     let width = offscreen.width();
     let height = offscreen.height();
@@ -1262,7 +1320,11 @@ fn apply_foreground_filter_group(
         else {
             return;
         };
-        filtered_data = crate::image_native::blur_rgba(&base_img, blur_px).into_raw();
+        filtered_data = if css_shadow {
+            crate::image_native::blur_rgba_css_shadow(&base_img, blur_px).into_raw()
+        } else {
+            crate::image_native::blur_rgba(&base_img, blur_px).into_raw()
+        };
     }
 
     apply_filter_to_premul_rgba(&mut filtered_data, filter);
@@ -1670,6 +1732,7 @@ fn build_shading_shader(
             y1,
             r1,
             stops,
+            ..
         } => {
             let start = Point::from_xy(*x0, page_height_pt - *y0);
             let end = Point::from_xy(*x1, page_height_pt - *y1);

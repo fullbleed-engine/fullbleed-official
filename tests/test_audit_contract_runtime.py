@@ -56,9 +56,13 @@ def test_audit_contract_runtime_registries_match_spec_artifacts() -> None:
     spec_wcag = (SPECS / "wcag20aa_registry.v1.yaml").read_bytes().decode("utf-8")
     spec_s508 = (SPECS / "section508_html_registry.v1.yaml").read_bytes().decode("utf-8")
 
-    assert embedded_audit == spec_audit
-    assert embedded_wcag == spec_wcag
-    assert embedded_s508 == spec_s508
+    # Rust embeds canonical LF text even when Git checks the artifact out with CRLF on Windows.
+    def canonical(value: str) -> str:
+        return value.replace("\r\n", "\n")
+
+    assert embedded_audit == canonical(spec_audit)
+    assert embedded_wcag == canonical(spec_wcag)
+    assert embedded_s508 == canonical(spec_s508)
     assert json.loads(embedded_audit) == json.loads(spec_audit)
     assert json.loads(embedded_wcag) == json.loads(spec_wcag)
     assert json.loads(embedded_s508) == json.loads(spec_s508)

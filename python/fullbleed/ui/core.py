@@ -9,6 +9,25 @@ from typing import Any, Callable
 from .style import style_to_css
 
 
+_HTML_VOID_ELEMENTS = frozenset(
+    {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "source",
+        "track",
+        "wbr",
+    }
+)
+
+
 def _normalize_css_href(value: str | None) -> str | None:
     if value is None:
         return None
@@ -256,6 +275,8 @@ def render_node(node: Any) -> str:
         return ""
     if isinstance(node, Element):
         attrs = _render_attrs(node.props)
+        if node.tag.casefold() in _HTML_VOID_ELEMENTS:
+            return f"<{node.tag}{attrs}>"
         children_html = "".join(render_node(child) for child in node.children)
         return f"<{node.tag}{attrs}>{children_html}</{node.tag}>"
     return escape(str(node))

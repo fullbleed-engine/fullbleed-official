@@ -376,7 +376,7 @@ fn sfnt_search_fields(table_count: u16) -> (u16, u16, u16) {
     (search_range, selector, range_shift)
 }
 
-fn deterministic_subset_tag(source: &[u8], glyphs: &BTreeSet<u16>) -> [u8; 6] {
+pub(crate) fn deterministic_subset_tag(source: &[u8], glyphs: &BTreeSet<u16>) -> [u8; 6] {
     // FNV-1a over the compact SFNT identity (directory) and closed glyph set. This is a PDF
     // pseudo-unique tag, not a security boundary; avoiding a whole-font hash keeps linking cheap.
     let directory_len = read_u16(source, 4)

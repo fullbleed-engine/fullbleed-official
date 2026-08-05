@@ -103,6 +103,34 @@ tree reported 1,000 pages with one content stream. PyMuPDF raster hashes for pag
 were identical, and page 1,000 retained all expected extractable text. Tagged profiles bypass stream
 sharing and retain page-specific content streams/structure parents.
 
+## Fullbleed 2.2.0 compiled variable-data lane
+
+Fullbleed 2.2.0 adds columnar `{{slot}}` text bindings to `CompiledDocument`. It compiles
+HTML/CSS and fixed-point geometry once, lowers all static page paint to one shared stream, and emits
+one compact record-specific overlay stream per page. Unlike `render_pdf_batch`, these pages are not
+immutable copies: the benchmark binds six independently supplied invoice columns and gives every
+record a unique invoice ID.
+
+The optimized `cp310-abi3` wheel was measured on the same Windows AMD64 host with Python 3.11.8.
+Each figure is the median of five 100,000-record runs and includes Python-to-Rust column conversion:
+
+| Output lane | Median | Pages/s | Including one-time 4.168 ms compile |
+|---|---:|---:|---:|
+| In-memory PDF | 283.807 ms | 352,352 | 347,252 pages/s |
+| Direct flushed file | 295.999 ms | 337,839 | 333,147 pages/s |
+
+The PDF is 88,138,877 bytes. The harness verified exactly 100,000 page dictionaries and all invoice
+IDs from `INV-000000000` through `INV-000099999` in page order, one shared static content stream,
+100,000 unique dynamic content streams, and no unresolved markers. It obtained identical SHA-256
+`2fdb268240bf52f87cd75670dac815ce8a6e29603ecfbdc344280df06c0b2540` from every buffer and direct-file
+run. PyMuPDF independently parsed the 100,000-page result; pages 1, 50,000, and 100,000 extracted
+their expected distinct values and rasterized at 612 x 792 pt without clipping.
+
+This path does not use multiprocessing. Its throughput comes from removing per-record HTML parsing,
+style resolution, layout, pagination, and static paint serialization. A reusable binding buffer and
+buffered file writer keep allocation and syscall counts bounded while the linker preserves page
+order. The Python GIL is released during native execution.
+
 ## Validation
 
 - `cargo test --lib`: 824 passed, zero failed.
@@ -113,6 +141,8 @@ sharing and retain page-specific content streams/structure parents.
   against the released renderer was zero pixels for both.
 - Production and compatibility-JIT PDFs are byte-identical for the five benchmark fixtures.
 - The authoritative geometry and layout representation remains signed Q32.32 fixed point.
+- Fullbleed 2.2.0 source: `cargo test --lib` reports 901 passed, zero failed; the repository
+  Python suite reports 256 passed and four skipped against the optimized wheel.
 
 ## Scope of the result
 
@@ -120,6 +150,8 @@ Fullbleed 2.1.0 implements TrueType glyph closure, deterministic subset naming, 
 bounded raw/compressed subset caches, immutable CSS/page-template reuse, linker counters, removal of
 redundant compatibility-JIT scans/clones, an immutable compiled-document API, and shared-content page
 virtualization. The current `PlanAndReplay` JIT remains a compatibility planner, and the compiled
-document still holds the existing command enum rather than packed vector bytecode. Dynamic typed
-slots, dependency-based partial reflow, and shader acceleration remain future phases. The 200.7x
-result applies only to fixed compiled copies in one PDF, not arbitrary unseen HTML or varying records.
+document still holds the existing command enum rather than packed vector bytecode. Fullbleed 2.2.0
+adds fixed-geometry text slots; typed size policies, dependency-based partial reflow, and
+shader acceleration remain future phases. The 200.7x result applies only to fixed compiled copies;
+the 337,839 pages/s direct-file result applies to distinct paint-only text bindings. Neither result
+applies to arbitrary unseen HTML or records that require reflow.

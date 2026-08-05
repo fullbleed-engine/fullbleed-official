@@ -295,6 +295,14 @@ impl<'a> Face<'a> {
         read_i16(os2, 88)
     }
 
+    pub(crate) fn x_height(&self) -> Option<i16> {
+        let os2 = self.table(*b"OS/2")?;
+        if read_u16(os2, 0)? < 2 {
+            return None;
+        }
+        read_i16(os2, 86)
+    }
+
     pub(crate) fn underline_metrics(&self) -> Option<LineMetrics> {
         let post = self.table(*b"post")?;
         Some(LineMetrics {

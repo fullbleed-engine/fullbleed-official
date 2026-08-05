@@ -200,6 +200,25 @@ class CompiledDocument(metaclass=_NativeFacadeType):
             deterministic_hash,
         )
 
+    def render_pdf_bindings(self, /, bindings, deterministic_hash=None):
+        """Render one fixed-geometry page set per row of columnar text bindings."""
+        return _call(
+            self._handle,
+            "CompiledDocument.render_pdf_bindings",
+            bindings,
+            deterministic_hash,
+        )
+
+    def render_pdf_bindings_to_file(self, /, bindings, path, deterministic_hash=None):
+        """Stream a columnar fixed-geometry binding batch directly to ``path``."""
+        return _call(
+            self._handle,
+            "CompiledDocument.render_pdf_bindings_to_file",
+            bindings,
+            path,
+            deterministic_hash,
+        )
+
 
 class PdfEngine(metaclass=_NativeFacadeType):
     __slots__ = ("_handle",)

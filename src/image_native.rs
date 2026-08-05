@@ -1068,6 +1068,159 @@ pub(crate) fn blur_rgba(image: &RgbaImage, sigma: f32) -> RgbaImage {
     }
 }
 
+/// Chromium's CSS shadow masks use Skia's three-pass box approximation rather
+/// than the image-filter Gaussian used by `filter: blur()`. This linear-time
+/// implementation follows Skia's window plan and keeps the source in
+/// premultiplied RGBA throughout the passes.
+pub(crate) fn blur_rgba_css_shadow(image: &RgbaImage, sigma: f32) -> RgbaImage {
+    if !sigma.is_finite() || sigma <= 0.0 || image.width == 0 || image.height == 0 {
+        return image.clone();
+    }
+
+    // SkMaskBlurFilter::PlanGauss:
+    // floor(sigma * 3 * sqrt(2*pi) / 4 + 0.5).
+    const SKIA_WINDOW_FACTOR: f64 = 1.879_971_205_973_250_3;
+    let window = ((f64::from(sigma) * SKIA_WINDOW_FACTOR + 0.5).floor() as usize).max(1);
+    if window <= 1 {
+        return image.clone();
+    }
+
+    let pass_widths = if window & 1 == 1 {
+        [window, window, window]
+    } else {
+        [window, window, window + 1]
+    };
+    let mut current: Vec<f32> = image.data.iter().map(|value| f32::from(*value)).collect();
+    for (pass, pass_width) in pass_widths.into_iter().enumerate() {
+        let half = pass_width / 2;
+        let (left, right) = if pass_width & 1 == 1 {
+            (half, half)
+        } else if pass == 0 {
+            (half.saturating_sub(1), half)
+        } else {
+            (half, half.saturating_sub(1))
+        };
+        current = box_blur_horizontal_rgba(
+            &current,
+            image.width as usize,
+            image.height as usize,
+            left,
+            right,
+        );
+    }
+    for (pass, pass_width) in pass_widths.into_iter().enumerate() {
+        let half = pass_width / 2;
+        let (top, bottom) = if pass_width & 1 == 1 {
+            (half, half)
+        } else if pass == 0 {
+            (half.saturating_sub(1), half)
+        } else {
+            (half, half.saturating_sub(1))
+        };
+        current = box_blur_vertical_rgba(
+            &current,
+            image.width as usize,
+            image.height as usize,
+            top,
+            bottom,
+        );
+    }
+
+    let mut data = Vec::with_capacity(current.len());
+    for pixel in current.chunks_exact(4) {
+        let alpha = pixel[3].round().clamp(0.0, 255.0) as u8;
+        data.push(pixel[0].round().clamp(0.0, f32::from(alpha)) as u8);
+        data.push(pixel[1].round().clamp(0.0, f32::from(alpha)) as u8);
+        data.push(pixel[2].round().clamp(0.0, f32::from(alpha)) as u8);
+        data.push(alpha);
+    }
+    RgbaImage {
+        width: image.width,
+        height: image.height,
+        data,
+    }
+}
+
+fn box_blur_horizontal_rgba(
+    source: &[f32],
+    width: usize,
+    height: usize,
+    left: usize,
+    right: usize,
+) -> Vec<f32> {
+    let mut output = vec![0.0f32; source.len()];
+    let divisor = (left + right + 1) as f32;
+    for y in 0..height {
+        let mut sums = [0.0f32; 4];
+        for source_x in 0..=right.min(width.saturating_sub(1)) {
+            let source_index = (y * width + source_x) * 4;
+            for channel in 0..4 {
+                sums[channel] += source[source_index + channel];
+            }
+        }
+        for x in 0..width {
+            let destination = (y * width + x) * 4;
+            for channel in 0..4 {
+                output[destination + channel] = sums[channel] / divisor;
+            }
+            if x >= left {
+                let remove = (y * width + x - left) * 4;
+                for channel in 0..4 {
+                    sums[channel] -= source[remove + channel];
+                }
+            }
+            let add_x = x + right + 1;
+            if add_x < width {
+                let add = (y * width + add_x) * 4;
+                for channel in 0..4 {
+                    sums[channel] += source[add + channel];
+                }
+            }
+        }
+    }
+    output
+}
+
+fn box_blur_vertical_rgba(
+    source: &[f32],
+    width: usize,
+    height: usize,
+    top: usize,
+    bottom: usize,
+) -> Vec<f32> {
+    let mut output = vec![0.0f32; source.len()];
+    let divisor = (top + bottom + 1) as f32;
+    for x in 0..width {
+        let mut sums = [0.0f32; 4];
+        for source_y in 0..=bottom.min(height.saturating_sub(1)) {
+            let source_index = (source_y * width + x) * 4;
+            for channel in 0..4 {
+                sums[channel] += source[source_index + channel];
+            }
+        }
+        for y in 0..height {
+            let destination = (y * width + x) * 4;
+            for channel in 0..4 {
+                output[destination + channel] = sums[channel] / divisor;
+            }
+            if y >= top {
+                let remove = ((y - top) * width + x) * 4;
+                for channel in 0..4 {
+                    sums[channel] -= source[remove + channel];
+                }
+            }
+            let add_y = y + bottom + 1;
+            if add_y < height {
+                let add = (add_y * width + x) * 4;
+                for channel in 0..4 {
+                    sums[channel] += source[add + channel];
+                }
+            }
+        }
+    }
+    output
+}
+
 #[cfg(any(feature = "python", test))]
 pub(crate) fn resize_triangle_gray(
     image: &GrayImage,
@@ -1472,6 +1625,23 @@ mod tests {
         assert_eq!(blurred.get_pixel(1, 0), blurred.get_pixel(5, 0));
         assert_eq!(blurred.get_pixel(2, 0), blurred.get_pixel(4, 0));
         assert!(blurred.get_pixel(3, 0)[0] > blurred.get_pixel(2, 0)[0]);
+    }
+
+    #[test]
+    fn css_shadow_box_blur_is_centered_and_conserves_an_impulse() {
+        let mut impulse = RgbaImage::new(41, 41);
+        impulse.put_pixel(20, 20, Rgba([128, 64, 32, 255]));
+        let blurred = blur_rgba_css_shadow(&impulse, 2.0);
+
+        assert_eq!(blurred.get_pixel(17, 20), blurred.get_pixel(23, 20));
+        assert_eq!(blurred.get_pixel(20, 17), blurred.get_pixel(20, 23));
+        let alpha_sum: u32 = blurred.pixels().map(|pixel| u32::from(pixel[3])).sum();
+        assert!((250..=260).contains(&alpha_sum));
+        assert!(
+            blurred.pixels().all(|pixel| {
+                pixel[0] <= pixel[3] && pixel[1] <= pixel[3] && pixel[2] <= pixel[3]
+            })
+        );
     }
 
     #[test]

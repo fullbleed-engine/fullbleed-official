@@ -141,6 +141,9 @@ def test_pdf_engine_constructor_and_method_signatures_remain_explicit() -> None:
     assert str(inspect.signature(fullbleed.CompiledDocument.render_pdf)) == (
         "(self, /, deterministic_hash=None)"
     )
+    assert str(inspect.signature(fullbleed.CompiledDocument.render_pdf_bindings)) == (
+        "(self, /, bindings, deterministic_hash=None)"
+    )
     assert str(inspect.signature(fullbleed.PdfEngine.verify_accessibility_html)) == (
         "(self, /, html, css='', profile='strict', mode='error', "
         "render_preview_png_path=None, a11y_report=None, claim_evidence=None, "
@@ -207,6 +210,42 @@ def test_facade_routes_assets_and_pdf_rendering_through_capsules(tmp_path) -> No
     assert compiled.stats()["page_count"] == 1
     assert compiled.stats()["command_count"] > 0
     assert compiled.render_pdf_batch(2).count(b"/Type /Page ") == 2
+
+
+def test_compiled_document_renders_distinct_columnar_bindings(tmp_path) -> None:
+    engine = fullbleed.PdfEngine()
+    compiled = engine.compile_pdf(
+        "<main><h1>Invoice</h1>"
+        "<p>Invoice: {{invoice_id}}</p>"
+        "<p>Customer: {{customer}}</p>"
+        "<p>Amount: {{amount}}</p></main>",
+        "body { font-family: Helvetica, sans-serif; font-size: 12pt; }",
+    )
+    assert compiled.stats()["binding_slots"] == ["amount", "customer", "invoice_id"]
+    bindings = {
+        "invoice_id": ["INV-0001", "INV-0002", "INV-0003"],
+        "customer": ["Ada Lovelace", "Grace Hopper", "Katherine Johnson"],
+        "amount": ["$101.25", "$202.50", "$303.75"],
+    }
+
+    pdf = compiled.render_pdf_bindings(bindings)
+    assert pdf.count(b"/Type /Page ") == 3
+    assert b"INV-0001" in pdf
+    assert b"INV-0002" in pdf
+    assert b"INV-0003" in pdf
+    assert b"Ada Lovelace" in pdf
+    assert b"Katherine Johnson" in pdf
+    assert b"{{" not in pdf
+
+    output = tmp_path / "bound.pdf"
+    digest = tmp_path / "bound.sha256"
+    written = compiled.render_pdf_bindings_to_file(bindings, str(output), str(digest))
+    assert written == output.stat().st_size
+    assert output.read_bytes() == pdf
+    assert len(digest.read_text(encoding="utf-8").strip()) == 64
+
+    with pytest.raises(ValueError, match="binding columns do not match compiled slots"):
+        compiled.render_pdf_bindings({"invoice_id": ["INV-ONLY"]})
 
 
 def test_capsule_reentry_raises_instead_of_aliasing_native_state(monkeypatch) -> None:

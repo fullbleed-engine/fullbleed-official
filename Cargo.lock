@@ -4,11 +4,27 @@ version = 4
 
 [[package]]
 name = "fullbleed"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "fullbleed_audit_contract",
+ "subsetter",
 ]
 
 [[package]]
 name = "fullbleed_audit_contract"
 version = "0.1.2"
+
+[[package]]
+name = "rustc-hash"
+version = "2.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b1e7f9a428571be2dc5bc0505c13fb6bf936822b894ec87abf8a08a4e51742d"
+
+[[package]]
+name = "subsetter"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38803281d1c23166c5ebcb455439a5d2afe711cc909cf88af72448c297756ad6"
+dependencies = [
+ "rustc-hash",
+]

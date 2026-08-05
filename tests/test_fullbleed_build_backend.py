@@ -189,7 +189,11 @@ def test_cyclonedx_sbom_is_deterministic_and_covers_optional_build_graph(
     assert document["metadata"]["timestamp"] == "1980-01-01T00:00:00Z"
     assert document["metadata"]["component"]["name"] == "fullbleed"
     components = {component["name"]: component for component in document["components"]}
-    assert set(components) == {"fullbleed_audit_contract"}
+    assert set(components) == {
+        "fullbleed_audit_contract",
+        "rustc-hash",
+        "subsetter",
+    }
     assert "pyo3" not in components
     assert "kuchiki" not in components
     assert "lopdf" not in components
@@ -208,6 +212,14 @@ def test_cyclonedx_sbom_is_deterministic_and_covers_optional_build_graph(
         }
     ]
     assert len(document["dependencies"]) == len(document["components"]) + 1
+    dependencies = {
+        row["ref"]: set(row["dependsOn"]) for row in document["dependencies"]
+    }
+    assert dependencies["pkg:cargo/fullbleed@2.2.0"] == {
+        "pkg:cargo/fullbleed_audit_contract@0.1.2",
+        "pkg:cargo/subsetter@0.2.6",
+    }
+    assert dependencies["pkg:cargo/subsetter@0.2.6"] == {"pkg:cargo/rustc-hash@2.1.3"}
 
 
 def test_api_compatibility_extra_has_no_third_party_requirements(backend) -> None:

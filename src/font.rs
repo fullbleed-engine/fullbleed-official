@@ -5,7 +5,7 @@ use crate::sfnt_outline::OutlineBuilder;
 use crate::text_shape;
 use crate::types::Pt;
 use fullbleed_audit_contract::sha256::Sha256;
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -35,7 +35,8 @@ struct FontSubsetKey {
 
 #[derive(Debug, Clone)]
 enum FontSubsetCacheValue {
-    Subset(Arc<CachedTrueTypeSubset>),
+    TrueType(Arc<CachedTrueTypeSubset>),
+    Cff(Arc<CachedCffSubset>),
     Unsupported,
 }
 
@@ -91,10 +92,20 @@ impl FontSubsetCache {
 
 fn font_subset_cache_value_bytes(value: &FontSubsetCacheValue) -> usize {
     match value {
-        FontSubsetCacheValue::Subset(subset) => subset
+        FontSubsetCacheValue::TrueType(subset) => subset
             .data
             .len()
             .saturating_add(subset.compressed.as_ref().map_or(0, |data| data.len())),
+        FontSubsetCacheValue::Cff(subset) => subset
+            .data
+            .len()
+            .saturating_add(subset.compressed.as_ref().map_or(0, |data| data.len()))
+            .saturating_add(
+                subset
+                    .old_to_new
+                    .len()
+                    .saturating_mul(std::mem::size_of::<(u16, u16)>()),
+            ),
         FontSubsetCacheValue::Unsupported => 0,
     }
 }
@@ -105,6 +116,15 @@ pub(crate) struct CachedTrueTypeSubset {
     pub(crate) compressed: Option<Vec<u8>>,
     pub(crate) tag: [u8; 6],
     pub(crate) glyph_count: usize,
+}
+
+#[derive(Debug)]
+pub(crate) struct CachedCffSubset {
+    pub(crate) data: Vec<u8>,
+    pub(crate) compressed: Option<Vec<u8>>,
+    pub(crate) tag: [u8; 6],
+    pub(crate) glyph_count: usize,
+    pub(crate) old_to_new: BTreeMap<u16, u16>,
 }
 
 impl TextWidthCache {
@@ -352,16 +372,18 @@ impl FontRegistry {
         };
         let faces = if matches!(ext.as_str(), "ttc" | "otc") {
             // Collection tables are commonly shared and can be tens of megabytes.
-            // Register the default face without duplicating every regional face
-            // into the per-engine registry; callers can supply standalone faces
-            // when they need a non-default collection index.
-            extract_collection_face_at(&data, 0)
-                .map(|face| vec![face])
+            // Register one deterministic face without duplicating every regional
+            // face into the per-engine registry. Well-known Noto CJK collections
+            // select their SC face, matching the engine's deterministic generic
+            // CJK fallback; other collections use a source-name match or face 0.
+            let face_index = preferred_collection_face_index(&data, &path.to_string_lossy());
+            extract_collection_face_at(&data, face_index)
+                .map(|face| vec![(face_index, face)])
                 .unwrap_or_default()
         } else {
-            vec![data]
+            vec![(0, data)]
         };
-        for (face_index, face_data) in faces.into_iter().enumerate() {
+        for (face_index, face_data) in faces {
             let Ok(face) = SfntFace::parse(&face_data, 0) else {
                 continue;
             };
@@ -426,6 +448,15 @@ impl FontRegistry {
         source_kind: RegisteredFontSourceKind,
     ) -> Result<String, FullBleedError> {
         let source = source_name.unwrap_or("EmbeddedFont");
+        let (data, collection_face_index) = if data.get(0..4) == Some(b"ttcf") {
+            let index = preferred_collection_face_index(&data, source);
+            let face = extract_collection_face_at(&data, index).ok_or_else(|| {
+                FullBleedError::Asset(format!("invalid font collection data for {source}"))
+            })?;
+            (face, Some(index))
+        } else {
+            (data, None)
+        };
         let Ok(face) = SfntFace::parse(&data, 0) else {
             return Err(FullBleedError::Asset(format!(
                 "invalid font data for {source}"
@@ -443,7 +474,9 @@ impl FontRegistry {
             program_kind,
             source: RegisteredFontSourceInfo {
                 kind: source_kind,
-                identifier: source.to_string(),
+                identifier: collection_face_index
+                    .map(|index| format!("{source}#{index}"))
+                    .unwrap_or_else(|| source.to_string()),
             },
         });
 
@@ -486,8 +519,8 @@ impl FontRegistry {
         if let Ok(cache) = self.font_subset_cache.lock() {
             if let Some(value) = cache.get(&key) {
                 return match value {
-                    FontSubsetCacheValue::Subset(subset) => Some(subset),
-                    FontSubsetCacheValue::Unsupported => None,
+                    FontSubsetCacheValue::TrueType(subset) => Some(subset),
+                    FontSubsetCacheValue::Cff(_) | FontSubsetCacheValue::Unsupported => None,
                 };
             }
         }
@@ -498,8 +531,8 @@ impl FontRegistry {
                     local_cache.insert(key, value.clone());
                 }
                 return match value {
-                    FontSubsetCacheValue::Subset(subset) => Some(subset),
-                    FontSubsetCacheValue::Unsupported => None,
+                    FontSubsetCacheValue::TrueType(subset) => Some(subset),
+                    FontSubsetCacheValue::Cff(_) | FontSubsetCacheValue::Unsupported => None,
                 };
             }
         }
@@ -516,7 +549,81 @@ impl FontRegistry {
         });
         let value = computed
             .as_ref()
-            .map(|subset| FontSubsetCacheValue::Subset(subset.clone()))
+            .map(|subset| FontSubsetCacheValue::TrueType(subset.clone()))
+            .unwrap_or(FontSubsetCacheValue::Unsupported);
+        if let Ok(mut cache) = global_font_subset_cache().lock() {
+            cache.insert(key.clone(), value.clone());
+        }
+        if let Ok(mut cache) = self.font_subset_cache.lock() {
+            cache.insert(key, value);
+        }
+        computed
+    }
+
+    pub(crate) fn cached_cff_subset(
+        &self,
+        name: &str,
+        glyphs: &BTreeSet<u16>,
+    ) -> Option<Arc<CachedCffSubset>> {
+        let normalized = normalize_name(name);
+        let font_index = *self.lookup.get(&normalized)?;
+        let font = self.fonts.get(font_index)?;
+        if !matches!(font.program_kind, FontProgramKind::OpenTypeCff) {
+            return None;
+        }
+        let ordered_glyphs: Vec<u16> = glyphs.iter().copied().collect();
+        let key = FontSubsetKey {
+            font_fingerprint: font.fingerprint,
+            glyphs: ordered_glyphs.clone(),
+        };
+        if let Ok(cache) = self.font_subset_cache.lock() {
+            if let Some(value) = cache.get(&key) {
+                return match value {
+                    FontSubsetCacheValue::Cff(subset) => Some(subset),
+                    FontSubsetCacheValue::TrueType(_) | FontSubsetCacheValue::Unsupported => None,
+                };
+            }
+        }
+
+        if let Ok(cache) = global_font_subset_cache().lock() {
+            if let Some(value) = cache.get(&key) {
+                if let Ok(mut local_cache) = self.font_subset_cache.lock() {
+                    local_cache.insert(key, value.clone());
+                }
+                return match value {
+                    FontSubsetCacheValue::Cff(subset) => Some(subset),
+                    FontSubsetCacheValue::TrueType(_) | FontSubsetCacheValue::Unsupported => None,
+                };
+            }
+        }
+
+        let mapper = subsetter::GlyphRemapper::new_from_glyphs_sorted(&ordered_glyphs);
+        let computed = subsetter::subset(&font.data, 0, &mapper)
+            .ok()
+            .filter(|data| data.len() < font.data.len())
+            .map(|data| {
+                let compressed = crate::flate_native::zlib_deflate_parallel(&data);
+                let compressed = (compressed.len() < data.len()).then_some(compressed);
+                let old_to_new = mapper
+                    .remapped_gids()
+                    .enumerate()
+                    .filter_map(|(new_gid, old_gid)| {
+                        u16::try_from(new_gid)
+                            .ok()
+                            .map(|new_gid| (old_gid, new_gid))
+                    })
+                    .collect();
+                Arc::new(CachedCffSubset {
+                    tag: crate::font_subset::deterministic_subset_tag(&font.data, glyphs),
+                    glyph_count: usize::from(mapper.num_gids()),
+                    data,
+                    compressed,
+                    old_to_new,
+                })
+            });
+        let value = computed
+            .as_ref()
+            .map(|subset| FontSubsetCacheValue::Cff(subset.clone()))
             .unwrap_or(FontSubsetCacheValue::Unsupported);
         if let Ok(mut cache) = global_font_subset_cache().lock() {
             cache.insert(key.clone(), value.clone());
@@ -696,6 +803,58 @@ impl FontRegistry {
         Some((ascent, descent))
     }
 
+    /// CSS font-relative used-value metrics for `ex`, `ch`, and `cap`.
+    ///
+    /// OpenType's OS/2 metrics are authoritative when present. CSS defines
+    /// `ch` from the advance of U+0030, so it deliberately goes through the
+    /// same fixed-point text measurement path as layout.
+    pub(crate) fn css_font_relative_metrics(
+        &self,
+        name: &str,
+        font_size: Pt,
+    ) -> Option<(Pt, Pt, Pt)> {
+        let font = self.resolve(name)?;
+        let face = SfntFace::parse(&font.data, 0).ok()?;
+        let units_per_em = i32::from(face.units_per_em().max(1));
+        let ex = face
+            .x_height()
+            .filter(|value| *value > 0)
+            .map(|value| font_size.mul_ratio(i32::from(value), units_per_em))
+            .or_else(|| {
+                self.glyph_bounds_for_char(name, 'x').map(|bounds| {
+                    let raw = font_size.mul_ratio(
+                        i32::from(bounds.y_max).max(0),
+                        i32::from(bounds.units_per_em.max(1)),
+                    );
+                    ceil_font_metric_to_css_pixel(raw)
+                })
+            })
+            .unwrap_or_else(|| font_size.mul_ratio(1, 2));
+        let cap = face
+            .capital_height()
+            .filter(|value| *value > 0)
+            .map(|value| font_size.mul_ratio(i32::from(value), units_per_em))
+            .or_else(|| {
+                self.glyph_bounds_for_char(name, 'H').map(|bounds| {
+                    let raw = font_size.mul_ratio(
+                        i32::from(bounds.y_max).max(0),
+                        i32::from(bounds.units_per_em.max(1)),
+                    );
+                    round_font_metric_to_css_pixel(raw)
+                })
+            })
+            .unwrap_or_else(|| {
+                let value = i32::from(font.metrics.cap_height.max(0));
+                if value > 0 {
+                    font_size.mul_ratio(value, 1_000)
+                } else {
+                    font_size.mul_ratio(7, 10)
+                }
+            });
+        let ch = self.measure_text_width(name, font_size, "0");
+        Some((ex, ch, cap))
+    }
+
     pub(crate) fn map_glyph_id_for_char(&self, name: &str, ch: char) -> u16 {
         let Some(font) = self.resolve(name) else {
             return 0;
@@ -711,13 +870,9 @@ impl FontRegistry {
 
     pub(crate) fn font_supports_char(&self, name: &str, ch: char) -> bool {
         let Some(font) = self.resolve(name) else {
-            return false;
+            return base14_font_supports_char(name, ch);
         };
-        if let Ok(face) = SfntFace::parse(&font.data, 0) {
-            let (_symbolic, symbol_subtable) = select_symbol_subtable(&face);
-            return glyph_index_for_codepoint(&face, ch as u32, symbol_subtable).is_some();
-        }
-        false
+        registered_font_supports_char(font, ch)
     }
 
     pub(crate) fn split_text_by_fallbacks(
@@ -752,6 +907,22 @@ impl FontRegistry {
                 if *supported {
                     chosen = Some(font_name.clone());
                     break;
+                }
+            }
+            if chosen.is_none() {
+                // Authored families keep priority. Once every authored face is
+                // missing the scalar, walk registered assets in deterministic
+                // registration order so bundle-provided CJK/symbol coverage is
+                // usable as a real fallback instead of viewer-side tofu.
+                for (font_index, font) in self.fonts.iter().enumerate() {
+                    let cache_index = stack.len() + font_index;
+                    let supported = support_cache
+                        .entry((cache_index, ch))
+                        .or_insert_with(|| registered_font_supports_char(font, ch));
+                    if *supported {
+                        chosen = Some(Arc::<str>::from(font.name.as_str()));
+                        break;
+                    }
                 }
             }
             let chosen = chosen.unwrap_or_else(|| stack[0].clone());
@@ -835,6 +1006,18 @@ impl FontRegistry {
                 }
             }
             if !supported {
+                for (font_index, font) in self.fonts.iter().enumerate() {
+                    let cache_index = resolved.len() + font_index;
+                    let ok = support_cache
+                        .entry((cache_index, ch))
+                        .or_insert_with(|| registered_font_supports_char(font, ch));
+                    if *ok {
+                        supported = true;
+                        break;
+                    }
+                }
+            }
+            if !supported {
                 let fonts_tried = resolved.iter().map(|s| s.to_string()).collect::<Vec<_>>();
                 report.record_missing(ch, fonts_tried);
             }
@@ -853,6 +1036,24 @@ impl FontRegistry {
         }
         0
     }
+}
+
+fn ceil_font_metric_to_css_pixel(value: Pt) -> Pt {
+    let milli = value.to_milli_i64();
+    if milli <= 0 {
+        return value;
+    }
+    Pt::from_milli_i64(((milli + 749) / 750) * 750)
+}
+
+fn round_font_metric_to_css_pixel(value: Pt) -> Pt {
+    let milli = value.to_milli_i64();
+    let rounded = if milli >= 0 {
+        ((milli + 375) / 750) * 750
+    } else {
+        ((milli - 375) / 750) * 750
+    };
+    Pt::from_milli_i64(rounded)
 }
 
 impl FontMetrics {
@@ -1102,6 +1303,49 @@ fn build_kerning_pairs(
     out
 }
 
+fn registered_font_supports_char(font: &RegisteredFont, ch: char) -> bool {
+    if let Ok(face) = SfntFace::parse(&font.data, 0) {
+        let (_symbolic, symbol_subtable) = select_symbol_subtable(&face);
+        return glyph_index_for_codepoint(&face, ch as u32, symbol_subtable).is_some();
+    }
+    false
+}
+
+fn base14_font_supports_char(name: &str, ch: char) -> bool {
+    let normalized = normalize_name(name);
+    let is_base14 = normalized.starts_with("helvetica")
+        || normalized.starts_with("times-")
+        || normalized.starts_with("courier")
+        || normalized == "symbol"
+        || normalized == "zapfdingbats";
+    if !is_base14 {
+        return false;
+    }
+    matches!(
+        ch,
+        '\u{0000}'..='\u{00ff}'
+            | '\u{0152}'
+            | '\u{0153}'
+            | '\u{0160}'
+            | '\u{0161}'
+            | '\u{0178}'
+            | '\u{017d}'
+            | '\u{017e}'
+            | '\u{0192}'
+            | '\u{02c6}'
+            | '\u{02dc}'
+            | '\u{2013}'..='\u{2014}'
+            | '\u{2018}'..='\u{201a}'
+            | '\u{201c}'..='\u{201e}'
+            | '\u{2020}'..='\u{2022}'
+            | '\u{2026}'
+            | '\u{2030}'
+            | '\u{2039}'..='\u{203a}'
+            | '\u{20ac}'
+            | '\u{2122}'
+    )
+}
+
 fn measure_text_width_full(font: &RegisteredFont, font_size: Pt, text: &str) -> Option<Pt> {
     let shaped = text_shape::shape(&font.data, text)?;
     if shaped.glyphs.is_empty() {
@@ -1138,6 +1382,59 @@ fn extract_collection_faces(data: &[u8]) -> Option<Vec<Vec<u8>>> {
         faces.push(extract_collection_face(data, face_offset)?);
     }
     Some(faces)
+}
+
+fn preferred_collection_face_index(data: &[u8], source: &str) -> usize {
+    if data.get(0..4) != Some(b"ttcf") {
+        return 0;
+    }
+    let Some(count) = font_be_u32(data, 8).and_then(|value| usize::try_from(value).ok()) else {
+        return 0;
+    };
+    if count == 0 || count > 256 {
+        return 0;
+    }
+
+    let source_path = Path::new(source);
+    let source_stem = source_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or(source);
+    let normalized_source = normalize_name(source_stem);
+    let compact_source = compact_font_name(source_stem);
+    let noto_cjk_collection = compact_source.contains("notosanscjk");
+    let mut noto_sc = None;
+
+    for index in 0..count {
+        let Ok(face) = SfntFace::parse(data, index as u32) else {
+            continue;
+        };
+        for entry in face.names() {
+            if !matches!(
+                entry.name_id,
+                sfnt::name_id::TYPOGRAPHIC_FAMILY
+                    | sfnt::name_id::FAMILY
+                    | sfnt::name_id::FULL_NAME
+                    | sfnt::name_id::POST_SCRIPT_NAME
+            ) {
+                continue;
+            }
+            let Some(name) = decode_font_name(entry) else {
+                continue;
+            };
+            let normalized = normalize_name(&name);
+            let compact = compact_font_name(&name);
+            if normalized == normalized_source || compact == compact_source {
+                return index;
+            }
+            if noto_cjk_collection && compact.contains("notosanscjksc") && !compact.contains("mono")
+            {
+                noto_sc.get_or_insert(index);
+            }
+        }
+    }
+
+    noto_sc.unwrap_or(0)
 }
 
 fn extract_collection_face_at(data: &[u8], index: usize) -> Option<Vec<u8>> {
@@ -1337,10 +1634,11 @@ pub(crate) fn font_primary_name_from_bytes(
     data: &[u8],
     source_name: Option<&str>,
 ) -> Option<String> {
-    let Ok(face) = SfntFace::parse(data, 0) else {
+    let source = source_name.unwrap_or("EmbeddedFont");
+    let face_index = preferred_collection_face_index(data, source) as u32;
+    let Ok(face) = SfntFace::parse(data, face_index) else {
         return None;
     };
-    let source = source_name.unwrap_or("EmbeddedFont");
     let (primary, _) = font_names(&face, Path::new(source));
     Some(primary)
 }
@@ -1348,10 +1646,10 @@ pub(crate) fn font_primary_name_from_bytes(
 #[cfg(test)]
 mod tests {
     use super::{
-        FontRegistry, decode_font_name, extract_collection_faces, font_be_u16, font_be_u32,
-        font_checksum, font_write_u32,
+        FontRegistry, compact_font_name, decode_font_name, extract_collection_faces, font_be_u16,
+        font_be_u32, font_checksum, font_write_u32, preferred_collection_face_index,
     };
-    use crate::sfnt::{Face, NameRecord, PlatformId};
+    use crate::sfnt::{Face, GlyphId, NameRecord, PlatformId};
     use std::collections::BTreeSet;
     use std::sync::Arc;
 
@@ -1435,6 +1733,101 @@ mod tests {
         let face = Face::parse(&extracted[0], 0).unwrap();
         assert!(face.glyph_index('A' as u32).is_some());
         assert_eq!(font_checksum(&extracted[0]), 0xB1B0_AFBA);
+
+        let mut registry = FontRegistry::new();
+        let registered = registry
+            .register_bundle_font_bytes(collection, Some("NotoSans-Regular.ttc"))
+            .expect("register collection through the bundle boundary");
+        assert!(registry.resolve(&registered).is_some());
+
+        let runs =
+            registry.split_text_by_fallbacks(&Arc::<str>::from("Helvetica"), &[], "A\u{03a9}");
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].font_name.as_ref(), "Helvetica");
+        assert_eq!(runs[0].text, "A");
+        assert_eq!(runs[1].font_name.as_ref(), registered);
+    }
+
+    #[test]
+    fn compact_font_names_match_collection_stems_and_family_names() {
+        assert_eq!(
+            compact_font_name("Noto Sans CJK SC"),
+            compact_font_name("NotoSansCJKSC")
+        );
+        assert_ne!(
+            compact_font_name("Noto Sans Mono CJK SC"),
+            compact_font_name("Noto Sans CJK SC")
+        );
+    }
+
+    #[test]
+    fn collection_face_selection_uses_declared_names_not_the_source_alias() {
+        let header_len = 20usize;
+        let first_offset = header_len;
+        let second_offset = first_offset + NOTO.len();
+        let mut collection = vec![0u8; second_offset + NOTO_MATH.len()];
+        collection[0..4].copy_from_slice(b"ttcf");
+        font_write_u32(&mut collection, 4, 0x0001_0000).unwrap();
+        font_write_u32(&mut collection, 8, 2).unwrap();
+        font_write_u32(&mut collection, 12, first_offset as u32).unwrap();
+        font_write_u32(&mut collection, 16, second_offset as u32).unwrap();
+        collection[first_offset..second_offset].copy_from_slice(NOTO);
+        collection[second_offset..].copy_from_slice(NOTO_MATH);
+
+        for (font, face_offset) in [(NOTO, first_offset), (NOTO_MATH, second_offset)] {
+            let table_count = usize::from(font_be_u16(font, 4).unwrap());
+            for table_index in 0..table_count {
+                let record = face_offset + 12 + table_index * 16;
+                let old_offset = font_be_u32(&collection, record + 8).unwrap();
+                font_write_u32(&mut collection, record + 8, old_offset + face_offset as u32)
+                    .unwrap();
+            }
+        }
+
+        assert_eq!(
+            preferred_collection_face_index(&collection, "NotoSansMath-Regular.ttc"),
+            1
+        );
+    }
+
+    #[test]
+    fn external_cff_collection_is_densely_subset_when_configured() {
+        let Some(path) = std::env::var_os("FULLBLEED_CFF_FONT").map(std::path::PathBuf::from)
+        else {
+            return;
+        };
+        let data = std::fs::read(&path).expect("read external CFF font or collection");
+        let source_name = path.file_name().and_then(|name| name.to_str());
+        let mut registry = FontRegistry::new();
+        let name = registry
+            .register_bundle_font_bytes(data, source_name)
+            .expect("register external CFF font or collection");
+        let registered = registry
+            .resolve(&name)
+            .expect("resolve registered CFF face");
+        assert!(matches!(
+            registered.program_kind,
+            super::FontProgramKind::OpenTypeCff
+        ));
+        let source_len = registered.data.len();
+
+        let glyphs: BTreeSet<u16> = "汉字，世界。"
+            .chars()
+            .map(|ch| registry.map_glyph_id_for_char(&name, ch))
+            .filter(|gid| *gid != 0)
+            .collect();
+        assert_eq!(glyphs.len(), 6);
+        let subset = registry
+            .cached_cff_subset(&name, &glyphs)
+            .expect("subset external CFF face");
+        assert!(subset.data.len() < source_len / 10);
+        assert_eq!(subset.glyph_count, glyphs.len() + 1);
+
+        let face = Face::parse(&subset.data, 0).expect("parse CFF subset");
+        for old_gid in glyphs {
+            let new_gid = subset.old_to_new[&old_gid];
+            assert!(face.glyph_hor_advance(GlyphId(new_gid)).is_some());
+        }
     }
 }
 
@@ -1443,4 +1836,11 @@ fn normalize_name(name: &str) -> String {
         .trim_matches('"')
         .trim_matches('\'')
         .to_ascii_lowercase()
+}
+
+fn compact_font_name(name: &str) -> String {
+    normalize_name(name)
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect()
 }
