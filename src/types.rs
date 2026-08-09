@@ -294,6 +294,95 @@ impl Size {
     }
 }
 
+/// Final sheet orientation applied after layout. Keeping this out of the
+/// layout coordinate system lets compiled pages and variable-data overlays
+/// reuse the same display list regardless of how the physical sheet is
+/// presented.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum PageOrientation {
+    #[default]
+    Upright,
+    RotateLeft,
+    RotateRight,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct PageMarks {
+    pub crop: bool,
+    pub cross: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PagePresentation {
+    pub bleed: Pt,
+    pub marks: PageMarks,
+    pub orientation: PageOrientation,
+}
+
+impl Default for PagePresentation {
+    fn default() -> Self {
+        Self {
+            bleed: Pt::ZERO,
+            marks: PageMarks::default(),
+            orientation: PageOrientation::Upright,
+        }
+    }
+}
+
+impl PagePresentation {
+    /// CSS marks reserve eight CSS pixels (six PDF points) when the authored
+    /// bleed is smaller. This matches the print geometry used by browsers and
+    /// leaves layout coordinates anchored at the trim box.
+    pub(crate) fn media_extent(self) -> Pt {
+        let authored = self.bleed.max(Pt::ZERO);
+        let marks_default = if self.marks.crop || self.marks.cross {
+            Pt::from_f32(6.0)
+        } else {
+            Pt::ZERO
+        };
+        if authored > marks_default {
+            authored
+        } else {
+            marks_default
+        }
+    }
+
+    pub(crate) fn encode(self) -> String {
+        format!(
+            "{},{},{},{}",
+            self.bleed.max(Pt::ZERO).to_milli_i64(),
+            u8::from(self.marks.crop),
+            u8::from(self.marks.cross),
+            match self.orientation {
+                PageOrientation::Upright => 0,
+                PageOrientation::RotateLeft => 1,
+                PageOrientation::RotateRight => 2,
+            }
+        )
+    }
+
+    pub(crate) fn decode(raw: &str) -> Option<Self> {
+        let mut values = raw.split(',');
+        let bleed = Pt::from_milli_i64(values.next()?.parse().ok()?).max(Pt::ZERO);
+        let crop = values.next()? == "1";
+        let cross = values.next()? == "1";
+        let orientation = match values.next()? {
+            "0" => PageOrientation::Upright,
+            "1" => PageOrientation::RotateLeft,
+            "2" => PageOrientation::RotateRight,
+            _ => return None,
+        };
+        if values.next().is_some() {
+            return None;
+        }
+        Some(Self {
+            bleed,
+            marks: PageMarks { crop, cross },
+            orientation,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rect {
     pub x: Pt,
@@ -439,6 +528,17 @@ pub enum Shading {
         x1: f32,
         y1: f32,
         r1: f32,
+        stops: Vec<ShadingStop>,
+        hard_stops: bool,
+    },
+    // Compact sweep/conic shader IR. Backends execute this analytically or
+    // lower it once at emission time instead of expanding hundreds of wedges
+    // into every compiled page program.
+    Conic {
+        center_x: f32,
+        center_y: f32,
+        radius: f32,
+        start_angle_deg: f32,
         stops: Vec<ShadingStop>,
         hard_stops: bool,
     },

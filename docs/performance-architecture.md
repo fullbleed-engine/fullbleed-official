@@ -15,7 +15,9 @@ The measured phase-one implementation ships in Fullbleed 2.1.0 and is recorded i
    font programs, and resource metadata. HTML and layout remain dynamic.
 3. **Compiled template** fixes DOM structure and geometry and exposes value slots. Paint-only text
    bindings execute today; dependency-based invalidation for size-changing values remains the next
-   compiler layer. This is the primary 50-200x target lane.
+   compiler layer. Immutable page-space transform and clip state is compiled into the binding
+   overlay rather than forcing records back through layout. This is the primary 50-200x target
+   lane.
 4. **Compiled batch** executes columnar fixed-geometry bindings, emits ordered page fragments, and
    links shared resources once. Parallel fragment production remains future work; the current
    ordered single-process path already exceeds the 100,000 pages/s gate.

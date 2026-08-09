@@ -193,6 +193,7 @@ def test_cyclonedx_sbom_is_deterministic_and_covers_optional_build_graph(
         "fullbleed_audit_contract",
         "rustc-hash",
         "subsetter",
+        "unicode-bidi",
     }
     assert "pyo3" not in components
     assert "kuchiki" not in components
@@ -215,9 +216,10 @@ def test_cyclonedx_sbom_is_deterministic_and_covers_optional_build_graph(
     dependencies = {
         row["ref"]: set(row["dependsOn"]) for row in document["dependencies"]
     }
-    assert dependencies["pkg:cargo/fullbleed@2.2.0"] == {
-        "pkg:cargo/fullbleed_audit_contract@0.1.2",
+    assert dependencies["pkg:cargo/fullbleed@2.2.1"] == {
+        "pkg:cargo/fullbleed_audit_contract@0.1.3",
         "pkg:cargo/subsetter@0.2.6",
+        "pkg:cargo/unicode-bidi@0.3.18",
     }
     assert dependencies["pkg:cargo/subsetter@0.2.6"] == {"pkg:cargo/rustc-hash@2.1.3"}
 

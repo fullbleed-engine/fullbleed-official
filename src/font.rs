@@ -197,6 +197,7 @@ pub(crate) struct RegisteredGlyphBounds {
 
 #[derive(Debug, Clone)]
 pub(crate) struct RegisteredPositionedGlyphOutline {
+    pub(crate) glyph_id: u16,
     pub(crate) commands: Vec<GlyphOutlineCommand>,
     pub(crate) units_per_em: u16,
     pub(crate) x_advance: i32,
@@ -309,9 +310,13 @@ pub(crate) struct FontMetrics {
     pub(crate) first_char: u8,
     pub(crate) last_char: u8,
     pub(crate) widths: Vec<u16>,
+    native_widths: Vec<u16>,
     pub(crate) glyph_ids: Vec<u16>,
+    units_per_em: u16,
     pub(crate) ascent: i16,
     pub(crate) descent: i16,
+    native_ascent: i16,
+    native_descent: i16,
     pub(crate) line_gap: i16,
     pub(crate) cap_height: i16,
     pub(crate) italic_angle: i16,
@@ -321,8 +326,9 @@ pub(crate) struct FontMetrics {
     pub(crate) underline_metrics: Option<DecorationMetrics>,
     pub(crate) strikeout_metrics: Option<DecorationMetrics>,
     pub(crate) missing_width: u16,
+    native_missing_width: u16,
     pub(crate) is_fixed_pitch: bool,
-    pub(crate) kerning: HashMap<(u16, u16), i16>,
+    native_kerning: HashMap<(u16, u16), i16>,
     symbolic: bool,
 }
 
@@ -373,9 +379,9 @@ impl FontRegistry {
         let faces = if matches!(ext.as_str(), "ttc" | "otc") {
             // Collection tables are commonly shared and can be tens of megabytes.
             // Register one deterministic face without duplicating every regional
-            // face into the per-engine registry. Well-known Noto CJK collections
-            // select their SC face, matching the engine's deterministic generic
-            // CJK fallback; other collections use a source-name match or face 0.
+            // face into the per-engine registry. A source-name match selects an
+            // explicitly requested regional face; an unqualified collection uses
+            // face 0, matching fontconfig/Chromium when no language hint exists.
             let face_index = preferred_collection_face_index(&data, &path.to_string_lossy());
             extract_collection_face_at(&data, face_index)
                 .map(|face| vec![(face_index, face)])
@@ -661,9 +667,23 @@ impl FontRegistry {
         name: &str,
         text: &str,
     ) -> Option<Vec<RegisteredPositionedGlyphOutline>> {
+        self.positioned_glyph_outlines_with_shape_options(
+            name,
+            text,
+            text_shape::ShapeOptions::default(),
+        )
+    }
+
+    pub(crate) fn positioned_glyph_outlines_with_shape_options(
+        &self,
+        name: &str,
+        text: &str,
+        options: text_shape::ShapeOptions,
+    ) -> Option<Vec<RegisteredPositionedGlyphOutline>> {
         let font = self.resolve(name)?;
         let face = SfntFace::parse(&font.data, 0).ok()?;
-        let shaped = text_shape::shape(&font.data, text)?;
+        let encoded = text_shape::encode_shape_options(text, options);
+        let shaped = text_shape::shape(&font.data, &encoded)?;
         if shaped.glyphs.is_empty() {
             return Some(Vec::new());
         }
@@ -676,6 +696,7 @@ impl FontRegistry {
             // outline. Keep their shaped advances in the run.
             let _ = face.outline_glyph(GlyphId(glyph.glyph_id), &mut collector);
             outlines.push(RegisteredPositionedGlyphOutline {
+                glyph_id: glyph.glyph_id,
                 commands: collector.commands,
                 units_per_em,
                 x_advance: glyph.x_advance,
@@ -744,10 +765,29 @@ impl FontRegistry {
     }
 
     pub(crate) fn measure_text_width(&self, name: &str, font_size: Pt, text: &str) -> Pt {
+        self.measure_text_width_encoded(name, font_size, text)
+    }
+
+    pub(crate) fn measure_text_width_with_shape_options(
+        &self,
+        name: &str,
+        font_size: Pt,
+        text: &str,
+        options: text_shape::ShapeOptions,
+    ) -> Pt {
+        if options == text_shape::ShapeOptions::default() {
+            return self.measure_text_width(name, font_size, text);
+        }
+        let encoded = text_shape::encode_shape_options(text, options);
+        self.measure_text_width_encoded(name, font_size, &encoded)
+    }
+
+    fn measure_text_width_encoded(&self, name: &str, font_size: Pt, text: &str) -> Pt {
+        let (shape_options, clean_text) = text_shape::decode_shape_options(text);
         let key = normalize_name(name);
         let Some(index) = self.lookup.get(&key).copied() else {
             let char_width = (font_size * 0.6).max(Pt::from_f32(1.0));
-            return char_width * (text.chars().count() as i32);
+            return char_width * (clean_text.chars().count() as i32);
         };
         let cache_key = TextWidthKey {
             font_index: index,
@@ -761,24 +801,26 @@ impl FontRegistry {
         }
         let Some(font) = self.fonts.get(index) else {
             let char_width = (font_size * 0.6).max(Pt::from_f32(1.0));
-            return char_width * (text.chars().count() as i32);
+            return char_width * (clean_text.chars().count() as i32);
         };
-        if !self.use_full_unicode_metrics {
-            let value = font.metrics.measure_text_width(font_size, text);
+        if !self.use_full_unicode_metrics && shape_options == text_shape::ShapeOptions::default() {
+            let value = font.metrics.measure_text_width(font_size, clean_text);
             if let Ok(mut cache) = self.text_width_cache.lock() {
                 cache.insert(cache_key, value);
             }
             return value;
         }
-        if font.metrics.is_within_basic_latin(text) {
-            let value = font.metrics.measure_text_width(font_size, text);
+        if shape_options == text_shape::ShapeOptions::default()
+            && font.metrics.is_within_basic_latin(clean_text)
+        {
+            let value = font.metrics.measure_text_width(font_size, clean_text);
             if let Ok(mut cache) = self.text_width_cache.lock() {
                 cache.insert(cache_key, value);
             }
             return value;
         }
         let value = measure_text_width_full(font, font_size, text)
-            .unwrap_or_else(|| font.metrics.measure_text_width(font_size, text));
+            .unwrap_or_else(|| font.metrics.measure_text_width(font_size, clean_text));
         if let Ok(mut cache) = self.text_width_cache.lock() {
             cache.insert(cache_key, value);
         }
@@ -794,13 +836,42 @@ impl FontRegistry {
 
     pub(crate) fn vertical_metrics(&self, name: &str, font_size: Pt) -> Option<(Pt, Pt)> {
         let font = self.resolve(name)?;
-        if font.metrics.ascent <= 0 {
+        if font.metrics.native_ascent <= 0 {
             return None;
         }
-        let ascent = font_size.mul_ratio(font.metrics.ascent as i32, 1000);
-        let descent_units = (-(font.metrics.descent as i32)).max(0);
-        let descent = font_size.mul_ratio(descent_units, 1000);
+        let units_per_em = i32::from(font.metrics.units_per_em.max(1));
+        let ascent = font_size.mul_ratio(i32::from(font.metrics.native_ascent), units_per_em);
+        let descent_units = (-i32::from(font.metrics.native_descent)).max(0);
+        let descent = font_size.mul_ratio(descent_units, units_per_em);
         Some((ascent, descent))
+    }
+
+    /// OpenType vertical advance and horizontal-baseline origin for one glyph.
+    ///
+    /// `vmtx` stores the advance along the vertical inline axis and a top side
+    /// bearing. Adding that bearing to the outline's y-max reconstructs the
+    /// vertical origin used by browser shapers. Callers can therefore place an
+    /// upright glyph without substituting horizontal hhea extents for `vmtx`.
+    pub(crate) fn vertical_glyph_metrics(
+        &self,
+        name: &str,
+        font_size: Pt,
+        ch: char,
+    ) -> Option<(Pt, Pt)> {
+        let font = self.resolve(name)?;
+        let face = SfntFace::parse(&font.data, 0).ok()?;
+        let (_symbolic, symbol_subtable) = select_symbol_subtable(&face);
+        let glyph = glyph_index_for_codepoint(&face, ch as u32, symbol_subtable)?;
+        let advance = face.glyph_ver_advance(glyph)?;
+        let top_side_bearing = face.glyph_ver_side_bearing(glyph)?;
+        let mut collector = GlyphOutlineCollector::default();
+        let bounds = face.outline_glyph(glyph, &mut collector)?;
+        let origin_y = i32::from(bounds.y_max) + i32::from(top_side_bearing);
+        let units_per_em = i32::from(face.units_per_em().max(1));
+        Some((
+            font_size.mul_ratio(i32::from(advance), units_per_em),
+            font_size.mul_ratio(origin_y, units_per_em),
+        ))
     }
 
     /// CSS font-relative used-value metrics for `ex`, `ch`, and `cap`.
@@ -881,6 +952,16 @@ impl FontRegistry {
         fallbacks: &[Arc<str>],
         text: &str,
     ) -> Vec<FontRun> {
+        self.split_text_by_fallbacks_with_ranges(primary, fallbacks, &[], text)
+    }
+
+    pub(crate) fn split_text_by_fallbacks_with_ranges(
+        &self,
+        primary: &Arc<str>,
+        fallbacks: &[Arc<str>],
+        unicode_ranges: &[Option<Arc<[(u32, u32)]>>],
+        text: &str,
+    ) -> Vec<FontRun> {
         let mut stack: Vec<Arc<str>> = Vec::with_capacity(1 + fallbacks.len());
         stack.push(primary.clone());
         stack.extend(fallbacks.iter().cloned());
@@ -901,6 +982,18 @@ impl FontRegistry {
         for ch in text.chars() {
             let mut chosen: Option<Arc<str>> = None;
             for (idx, font_name) in stack.iter().enumerate() {
+                let range_allows = unicode_ranges
+                    .get(idx)
+                    .and_then(Option::as_deref)
+                    .is_none_or(|ranges| {
+                        let scalar = ch as u32;
+                        ranges
+                            .iter()
+                            .any(|(start, end)| (*start..=*end).contains(&scalar))
+                    });
+                if !range_allows {
+                    continue;
+                }
                 let supported = support_cache
                     .entry((idx, ch))
                     .or_insert_with(|| self.font_supports_char(font_name, ch));
@@ -949,6 +1042,7 @@ impl FontRegistry {
         runs
     }
 
+    #[allow(dead_code)]
     pub(crate) fn measure_text_width_with_fallbacks(
         &self,
         primary: &Arc<str>,
@@ -956,10 +1050,76 @@ impl FontRegistry {
         font_size: Pt,
         text: &str,
     ) -> Pt {
+        self.measure_text_width_with_fallbacks_and_shape_options(
+            primary,
+            fallbacks,
+            font_size,
+            text,
+            text_shape::ShapeOptions::default(),
+        )
+    }
+
+    pub(crate) fn measure_text_width_with_fallbacks_and_shape_options(
+        &self,
+        primary: &Arc<str>,
+        fallbacks: &[Arc<str>],
+        font_size: Pt,
+        text: &str,
+        options: text_shape::ShapeOptions,
+    ) -> Pt {
         let runs = self.split_text_by_fallbacks(primary, fallbacks, text);
         let mut total = Pt::ZERO;
         for run in runs {
-            total = total + self.measure_text_width(&run.font_name, font_size, &run.text);
+            total = total
+                + self.measure_text_width_with_shape_options(
+                    &run.font_name,
+                    font_size,
+                    &run.text,
+                    options,
+                );
+        }
+        total
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn measure_text_width_with_fallbacks_and_ranges(
+        &self,
+        primary: &Arc<str>,
+        fallbacks: &[Arc<str>],
+        unicode_ranges: &[Option<Arc<[(u32, u32)]>>],
+        font_size: Pt,
+        text: &str,
+    ) -> Pt {
+        self.measure_text_width_with_fallbacks_ranges_and_shape_options(
+            primary,
+            fallbacks,
+            unicode_ranges,
+            font_size,
+            text,
+            text_shape::ShapeOptions::default(),
+        )
+    }
+
+    pub(crate) fn measure_text_width_with_fallbacks_ranges_and_shape_options(
+        &self,
+        primary: &Arc<str>,
+        fallbacks: &[Arc<str>],
+        unicode_ranges: &[Option<Arc<[(u32, u32)]>>],
+        font_size: Pt,
+        text: &str,
+        options: text_shape::ShapeOptions,
+    ) -> Pt {
+        let runs =
+            self.split_text_by_fallbacks_with_ranges(primary, fallbacks, unicode_ranges, text);
+        let mut total = Pt::ZERO;
+        for run in runs {
+            total = total
+                + self.measure_text_width_with_shape_options(
+                    &run.font_name,
+                    font_size,
+                    &run.text,
+                    options,
+                );
         }
         total
     }
@@ -1025,16 +1185,21 @@ impl FontRegistry {
     }
 
     pub(crate) fn glyph_advance(&self, name: &str, gid: u16) -> u16 {
-        let Some(font) = self.resolve(name) else {
+        let Some((advance, units_per_em)) = self.glyph_advance_units(name, gid) else {
             return 0;
         };
-        if let Ok(face) = SfntFace::parse(&font.data, 0) {
-            let advance = face.glyph_hor_advance(GlyphId(gid)).unwrap_or(0);
-            let units = face.units_per_em().max(1) as i64;
-            let scaled = ((advance as i64) * 1000 + (units / 2)) / units;
-            return scaled.clamp(0, u16::MAX as i64) as u16;
-        }
-        0
+        let scaled =
+            (i64::from(advance) * 1000 + i64::from(units_per_em) / 2) / i64::from(units_per_em);
+        scaled.clamp(0, i64::from(u16::MAX)) as u16
+    }
+
+    pub(crate) fn glyph_advance_units(&self, name: &str, gid: u16) -> Option<(u16, u16)> {
+        let font = self.resolve(name)?;
+        let face = SfntFace::parse(&font.data, 0).ok()?;
+        Some((
+            face.glyph_hor_advance(GlyphId(gid)).unwrap_or(0),
+            face.units_per_em().max(1),
+        ))
     }
 }
 
@@ -1065,13 +1230,20 @@ impl FontMetrics {
         let (symbolic, symbol_subtable) = select_symbol_subtable(face);
         let glyph_ids = build_glyph_ids(face, first_char, last_char, symbol_subtable);
         let widths = build_widths(face, scale, first_char, last_char, symbol_subtable);
+        let native_widths = build_native_widths(face, first_char, last_char, symbol_subtable);
         let missing_width = widths
             .get((b' ' - first_char) as usize)
             .copied()
             .unwrap_or(0);
+        let native_missing_width = native_widths
+            .get((b' ' - first_char) as usize)
+            .copied()
+            .unwrap_or(0);
 
-        let ascent = scale_i16(face.ascender(), scale);
-        let descent = scale_i16(face.descender(), scale);
+        let native_ascent = face.ascender();
+        let native_descent = face.descender();
+        let ascent = scale_i16(native_ascent, scale);
+        let descent = scale_i16(native_descent, scale);
         let line_gap = scale_i16(face.line_gap(), scale);
         let cap_height = face
             .capital_height()
@@ -1104,16 +1276,19 @@ impl FontMetrics {
             FontProgramKind::TrueType
         };
 
-        let kerning = build_kerning_pairs(face, &glyph_ids, scale);
-
+        let native_kerning = build_native_kerning_pairs(face, &glyph_ids);
         (
             Self {
                 first_char,
                 last_char,
                 widths,
+                native_widths,
                 glyph_ids,
+                units_per_em,
                 ascent,
                 descent,
+                native_ascent,
+                native_descent,
                 line_gap,
                 cap_height,
                 italic_angle,
@@ -1123,8 +1298,9 @@ impl FontMetrics {
                 underline_metrics,
                 strikeout_metrics,
                 missing_width,
+                native_missing_width,
                 is_fixed_pitch: face.is_monospaced(),
-                kerning,
+                native_kerning,
                 symbolic,
             },
             program_kind,
@@ -1148,27 +1324,30 @@ impl FontMetrics {
         self.glyph_ids.get(idx).copied().unwrap_or(0)
     }
 
-    fn advance_for_char(&self, ch: char) -> u16 {
+    fn native_advance_for_char(&self, ch: char) -> u16 {
         let code = ch as u32;
         let first = self.first_char as u32;
         let last = self.last_char as u32;
         if code < first || code > last {
-            return self.missing_width;
+            return self.native_missing_width;
         }
         let idx = (code - first) as usize;
-        self.widths.get(idx).copied().unwrap_or(self.missing_width)
+        self.native_widths
+            .get(idx)
+            .copied()
+            .unwrap_or(self.native_missing_width)
     }
 
     fn measure_text_width(&self, font_size: Pt, text: &str) -> Pt {
-        let mut total_units: i32 = 0;
+        let mut total_units: i64 = 0;
         let mut prev: Option<u16> = None;
         for ch in text.chars() {
             let gid = self.glyph_id_for_char(ch);
-            let adv = self.advance_for_char(ch) as i32;
+            let adv = i64::from(self.native_advance_for_char(ch));
             total_units = total_units.saturating_add(adv);
             if let Some(prev_gid) = prev {
-                if let Some(k) = self.kerning.get(&(prev_gid, gid)) {
-                    total_units = total_units.saturating_add(*k as i32);
+                if let Some(k) = self.native_kerning.get(&(prev_gid, gid)) {
+                    total_units = total_units.saturating_add(i64::from(*k));
                 }
             }
             prev = Some(gid);
@@ -1176,7 +1355,10 @@ impl FontMetrics {
         if total_units <= 0 {
             return Pt::ZERO;
         }
-        font_size.mul_ratio(total_units, 1000)
+        font_size.mul_ratio(
+            total_units.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+            i32::from(self.units_per_em.max(1)),
+        )
     }
 
     fn is_within_basic_latin(&self, text: &str) -> bool {
@@ -1273,11 +1455,23 @@ fn build_widths(
     widths
 }
 
-fn build_kerning_pairs(
+fn build_native_widths(
     face: &SfntFace<'_>,
-    glyph_ids: &[u16],
-    scale: f32,
-) -> HashMap<(u16, u16), i16> {
+    first: u8,
+    last: u8,
+    fallback: Option<CmapSubtable<'_>>,
+) -> Vec<u16> {
+    let mut widths = Vec::with_capacity((last - first + 1) as usize);
+    for code in first..=last {
+        let width = glyph_index_for_codepoint(face, u32::from(code), fallback)
+            .and_then(|id| face.glyph_hor_advance(id))
+            .unwrap_or(0);
+        widths.push(width);
+    }
+    widths
+}
+
+fn build_native_kerning_pairs(face: &SfntFace<'_>, glyph_ids: &[u16]) -> HashMap<(u16, u16), i16> {
     let mut out = HashMap::new();
 
     for &left in glyph_ids {
@@ -1293,10 +1487,7 @@ fn build_kerning_pairs(
             let total = i32::from(face.legacy_kerning(left_id, right_id));
             if total != 0 {
                 let clamped = total.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
-                let scaled = scale_i16(clamped, scale);
-                if scaled != 0 {
-                    out.insert((left, right), scaled);
-                }
+                out.insert((left, right), clamped);
             }
         }
     }
@@ -1351,17 +1542,18 @@ fn measure_text_width_full(font: &RegisteredFont, font_size: Pt, text: &str) -> 
     if shaped.glyphs.is_empty() {
         return None;
     }
-    let units_per_em = i64::from(shaped.units_per_em);
-    let mut total_units: i32 = 0;
+    let units_per_em = i32::from(shaped.units_per_em.max(1));
+    let mut total_units: i64 = 0;
     for glyph in shaped.glyphs {
-        let adv =
-            (((i64::from(glyph.x_advance)) * 1000 + (units_per_em / 2)) / units_per_em) as i32;
-        total_units = total_units.saturating_add(adv);
+        total_units = total_units.saturating_add(i64::from(glyph.x_advance));
     }
     if total_units <= 0 {
         return Some(Pt::ZERO);
     }
-    Some(font_size.mul_ratio(total_units, 1000))
+    Some(font_size.mul_ratio(
+        total_units.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        units_per_em,
+    ))
 }
 
 #[cfg(test)]
@@ -1402,9 +1594,6 @@ fn preferred_collection_face_index(data: &[u8], source: &str) -> usize {
         .unwrap_or(source);
     let normalized_source = normalize_name(source_stem);
     let compact_source = compact_font_name(source_stem);
-    let noto_cjk_collection = compact_source.contains("notosanscjk");
-    let mut noto_sc = None;
-
     for index in 0..count {
         let Ok(face) = SfntFace::parse(data, index as u32) else {
             continue;
@@ -1427,14 +1616,10 @@ fn preferred_collection_face_index(data: &[u8], source: &str) -> usize {
             if normalized == normalized_source || compact == compact_source {
                 return index;
             }
-            if noto_cjk_collection && compact.contains("notosanscjksc") && !compact.contains("mono")
-            {
-                noto_sc.get_or_insert(index);
-            }
         }
     }
 
-    noto_sc.unwrap_or(0)
+    0
 }
 
 fn extract_collection_face_at(data: &[u8], index: usize) -> Option<Vec<u8>> {
@@ -1650,12 +1835,14 @@ mod tests {
         font_be_u32, font_checksum, font_write_u32, preferred_collection_face_index,
     };
     use crate::sfnt::{Face, GlyphId, NameRecord, PlatformId};
+    use crate::types::Pt;
     use std::collections::BTreeSet;
     use std::sync::Arc;
 
     const NOTO: &[u8] = include_bytes!("../python/fullbleed_assets/fonts/NotoSans-Regular.ttf");
     const NOTO_MATH: &[u8] =
         include_bytes!("../python/fullbleed_assets/fonts/NotoSansMath-Regular.ttf");
+    const INTER: &[u8] = include_bytes!("../python/fullbleed_assets/fonts/Inter-Variable.ttf");
 
     fn name(platform_id: PlatformId, encoding_id: u16, bytes: &[u8]) -> NameRecord<'_> {
         NameRecord {
@@ -1680,6 +1867,29 @@ mod tests {
         assert!(decode_font_name(name(PlatformId::Unicode, 4, &[0, 65, 0])).is_none());
         assert!(decode_font_name(name(PlatformId::Unicode, 4, &[0xd8, 0x00])).is_none());
         assert!(decode_font_name(name(PlatformId::Macintosh, 0, b"FullBleed")).is_none());
+    }
+
+    #[test]
+    fn vertical_layout_metrics_retain_native_font_unit_precision() {
+        let mut registry = FontRegistry::new();
+        let name = registry
+            .register_bytes(NOTO.to_vec(), Some("NotoSans-Regular.ttf"))
+            .expect("register native-metric font");
+        let face = Face::parse(NOTO, 0).expect("parse native-metric font");
+        let font_size = Pt::from_f32(39.0);
+        let (ascent, descent) = registry
+            .vertical_metrics(&name, font_size)
+            .expect("registered vertical metrics");
+        let units_per_em = i32::from(face.units_per_em().max(1));
+
+        assert_eq!(
+            ascent,
+            font_size.mul_ratio(i32::from(face.ascender()), units_per_em)
+        );
+        assert_eq!(
+            descent,
+            font_size.mul_ratio((-i32::from(face.descender())).max(0), units_per_em)
+        );
     }
 
     #[test]
@@ -1749,6 +1959,46 @@ mod tests {
     }
 
     #[test]
+    fn unicode_ranges_route_each_scalar_to_its_compiled_face() {
+        let registry = FontRegistry::new();
+        let primary = Arc::<str>::from("Helvetica");
+        let fallbacks = vec![Arc::<str>::from("Times-Roman")];
+        let ranges = vec![
+            Some(Arc::<[(u32, u32)]>::from([(0x41, 0x41)])),
+            Some(Arc::<[(u32, u32)]>::from([(0x42, 0x42)])),
+        ];
+
+        let runs =
+            registry.split_text_by_fallbacks_with_ranges(&primary, &fallbacks, &ranges, "ABBA");
+        assert_eq!(runs.len(), 3);
+        assert_eq!(runs[0].font_name.as_ref(), "Helvetica");
+        assert_eq!(runs[0].text, "A");
+        assert_eq!(runs[1].font_name.as_ref(), "Times-Roman");
+        assert_eq!(runs[1].text, "BB");
+        assert_eq!(runs[2].font_name.as_ref(), "Helvetica");
+        assert_eq!(runs[2].text, "A");
+    }
+
+    #[test]
+    fn basic_latin_measurement_preserves_native_font_units() {
+        let mut registry = FontRegistry::new();
+        let registered = registry
+            .register_bytes(INTER.to_vec(), Some("Inter-Variable.ttf"))
+            .expect("register Inter fixture");
+        let face = Face::parse(INTER, 0).expect("parse Inter fixture");
+        let glyph = face.glyph_index('A' as u32).expect("Inter contains A");
+        let advance = face.glyph_hor_advance(glyph).expect("A has an advance");
+        let units_per_em = face.units_per_em().max(1);
+        let font_size = crate::types::Pt::from_f32(21.0);
+        let expected = font_size.mul_ratio(i32::from(advance), i32::from(units_per_em));
+
+        assert_eq!(
+            registry.measure_text_width(&registered, font_size, "A"),
+            expected
+        );
+    }
+
+    #[test]
     fn compact_font_names_match_collection_stems_and_family_names() {
         assert_eq!(
             compact_font_name("Noto Sans CJK SC"),
@@ -1787,6 +2037,11 @@ mod tests {
         assert_eq!(
             preferred_collection_face_index(&collection, "NotoSansMath-Regular.ttc"),
             1
+        );
+        assert_eq!(
+            preferred_collection_face_index(&collection, "NotoSansCJK-Regular.ttc"),
+            0,
+            "an unqualified collection keeps its fontconfig-compatible default face"
         );
     }
 

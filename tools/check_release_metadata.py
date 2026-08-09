@@ -27,7 +27,10 @@ REQUIRED_WHEEL_TARGETS = (
     "macos-x86_64",
     "macos-aarch64",
 )
-REQUIRED_CARGO_PINS = {"subsetter": "0.2.6"}
+REQUIRED_CARGO_PINS = {
+    "subsetter": "0.2.6",
+    "unicode-bidi": "0.3.18",
+}
 BANNED_PYTHON_DISTRIBUTIONS = ("fastapi", "uvicorn", "httpx", "maturin")
 BANNED_DIRECT_RUST_DEPENDENCIES = (
     "base64",
@@ -215,7 +218,7 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
                 )
 
     expected_manifest_dependencies = {
-        "Cargo.toml": {"fullbleed_audit_contract", "subsetter"},
+        "Cargo.toml": {"fullbleed_audit_contract", "subsetter", "unicode-bidi"},
         "crates/fullbleed_audit_contract/Cargo.toml": set(),
     }
     for target, manifest in (
@@ -238,6 +241,7 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
         "fullbleed_audit_contract",
         "rustc-hash",
         "subsetter",
+        "unicode-bidi",
     }
     if lock_packages != expected_lock_packages:
         _flag(

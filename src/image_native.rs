@@ -1008,10 +1008,80 @@ pub(crate) fn encode_png_premultiplied_rgba8(
 }
 
 pub(crate) fn blur_rgba(image: &RgbaImage, sigma: f32) -> RgbaImage {
+    blur_rgba_with_support(image, sigma, 2.0)
+}
+
+/// Chrome's raster PDF path lowers SVG Gaussian blur through Skia's
+/// three-pass PlanGauss approximation. Keep the entry point explicit so the
+/// filter VM can select the linear-time shader without changing legacy
+/// callers of the compact scalar convolution.
+pub(crate) fn blur_rgba_svg_filter(image: &RgbaImage, sigma: f32) -> RgbaImage {
     if !sigma.is_finite() || sigma <= 0.0 || image.width == 0 || image.height == 0 {
         return image.clone();
     }
-    let radius = (2.0 * sigma).ceil().max(1.0) as usize;
+
+    // A filter surface has transparent pixels beyond its current raster
+    // bounds. Running each PlanGauss pass directly against a cropped buffer
+    // incorrectly discards intermediate samples that leave the surface and
+    // would feed back into later passes. Pad by the complete three-pass support,
+    // execute the linear kernel once, then crop back to the virtual surface.
+    // This keeps edge behavior equivalent to an unbounded transparent shader
+    // without making the retained PDF image any larger.
+    const SKIA_WINDOW_FACTOR: f64 = 1.879_971_205_973_250_3;
+    let window = ((f64::from(sigma) * SKIA_WINDOW_FACTOR + 0.5).floor() as usize).max(1);
+    if window <= 1 {
+        return image.clone();
+    }
+    let padding = 3usize.saturating_mul((window + 1) / 2);
+    let Some(padded_width) = (image.width as usize).checked_add(padding.saturating_mul(2)) else {
+        return image.clone();
+    };
+    let Some(padded_height) = (image.height as usize).checked_add(padding.saturating_mul(2)) else {
+        return image.clone();
+    };
+    let Ok(padded_width_u32) = u32::try_from(padded_width) else {
+        return image.clone();
+    };
+    let Ok(padded_height_u32) = u32::try_from(padded_height) else {
+        return image.clone();
+    };
+    let Some(padded_len) = image_buffer_len(padded_width_u32, padded_height_u32, 4) else {
+        return image.clone();
+    };
+    let mut padded = vec![0u8; padded_len];
+    let source_stride = image.width as usize * 4;
+    let padded_stride = padded_width * 4;
+    for row in 0..image.height as usize {
+        let source_start = row * source_stride;
+        let target_start = (row + padding) * padded_stride + padding * 4;
+        padded[target_start..target_start + source_stride]
+            .copy_from_slice(&image.data[source_start..source_start + source_stride]);
+    }
+    let padded = RgbaImage {
+        width: padded_width_u32,
+        height: padded_height_u32,
+        data: padded,
+    };
+    let blurred = blur_rgba_plan_gauss(&padded, sigma);
+    let mut data = vec![0u8; image.data.len()];
+    for row in 0..image.height as usize {
+        let source_start = (row + padding) * padded_stride + padding * 4;
+        let target_start = row * source_stride;
+        data[target_start..target_start + source_stride]
+            .copy_from_slice(&blurred.data[source_start..source_start + source_stride]);
+    }
+    RgbaImage {
+        width: image.width,
+        height: image.height,
+        data,
+    }
+}
+
+fn blur_rgba_with_support(image: &RgbaImage, sigma: f32, support: f32) -> RgbaImage {
+    if !sigma.is_finite() || sigma <= 0.0 || image.width == 0 || image.height == 0 {
+        return image.clone();
+    }
+    let radius = (support * sigma).ceil().max(1.0) as usize;
     let denominator = 2.0 * f64::from(sigma) * f64::from(sigma);
     let mut kernel = Vec::with_capacity(radius * 2 + 1);
     let mut kernel_sum = 0.0f64;
@@ -1068,70 +1138,279 @@ pub(crate) fn blur_rgba(image: &RgbaImage, sigma: f32) -> RgbaImage {
     }
 }
 
+#[derive(Clone, Copy)]
+struct CssShadowPlanGauss {
+    pass_sizes: [usize; 3],
+    border: usize,
+    sliding_window: usize,
+    weight: u64,
+}
+
+impl CssShadowPlanGauss {
+    fn new(sigma: f32) -> Option<Self> {
+        // SkMaskBlurFilter::PlanGauss:
+        // floor(sigma * 3 * sqrt(2*pi) / 4 + 0.5).
+        const SKIA_WINDOW_FACTOR: f64 = 1.879_971_205_973_250_3;
+        let window = ((f64::from(sigma) * SKIA_WINDOW_FACTOR + 0.5).floor() as usize).max(1);
+        if window <= 1 {
+            return None;
+        }
+
+        let pass_sizes = [
+            window - 1,
+            window - 1,
+            if window & 1 == 1 { window - 1 } else { window },
+        ];
+        let border = if window & 1 == 1 {
+            3 * ((window - 1) / 2)
+        } else {
+            3 * (window / 2) - 1
+        };
+        let window_squared = (window as u64) * (window as u64);
+        let window_cubed = window_squared * (window as u64);
+        let divisor = if window & 1 == 1 {
+            window_cubed
+        } else {
+            window_cubed + window_squared
+        };
+        let weight = ((1u64 << 32) + divisor / 2) / divisor;
+        Some(Self {
+            pass_sizes,
+            border,
+            sliding_window: border * 2 + 1,
+            weight,
+        })
+    }
+
+    fn buffer_size(self) -> usize {
+        self.pass_sizes.into_iter().sum()
+    }
+}
+
+fn css_shadow_plan_gauss_step(
+    leading_edge: u8,
+    plan: CssShadowPlanGauss,
+    sums: &mut [u32; 3],
+    buffers: &mut [u32],
+    starts: [usize; 3],
+    ends: [usize; 3],
+    cursors: &mut [usize; 3],
+) -> u8 {
+    sums[0] += u32::from(leading_edge);
+    sums[1] += sums[0];
+    sums[2] += sums[1];
+    let output = ((plan.weight * u64::from(sums[2]) + (1u64 << 31)) >> 32) as u8;
+
+    let cursor = cursors[2];
+    sums[2] -= buffers[cursor];
+    buffers[cursor] = sums[1];
+    cursors[2] = if cursor + 1 < ends[2] {
+        cursor + 1
+    } else {
+        starts[2]
+    };
+
+    let cursor = cursors[1];
+    sums[1] -= buffers[cursor];
+    buffers[cursor] = sums[0];
+    cursors[1] = if cursor + 1 < ends[1] {
+        cursor + 1
+    } else {
+        starts[1]
+    };
+
+    let cursor = cursors[0];
+    sums[0] -= buffers[cursor];
+    buffers[cursor] = u32::from(leading_edge);
+    cursors[0] = if cursor + 1 < ends[0] {
+        cursor + 1
+    } else {
+        starts[0]
+    };
+
+    output
+}
+
+fn css_shadow_plan_gauss_scan(
+    source: &[u8],
+    plan: CssShadowPlanGauss,
+    destination: &mut Vec<u8>,
+    buffers: &mut [u32],
+) {
+    let destination_length = source.len() + plan.border * 2;
+    destination.resize(destination_length, 0);
+    buffers.fill(0);
+    let starts = [
+        0,
+        plan.pass_sizes[0],
+        plan.pass_sizes[0] + plan.pass_sizes[1],
+    ];
+    let ends = [
+        plan.pass_sizes[0],
+        plan.pass_sizes[0] + plan.pass_sizes[1],
+        plan.buffer_size(),
+    ];
+    let mut cursors = starts;
+    let mut sums = [0u32; 3];
+    let mut destination_index = 0usize;
+
+    for &leading_edge in source {
+        destination[destination_index] = css_shadow_plan_gauss_step(
+            leading_edge,
+            plan,
+            &mut sums,
+            buffers,
+            starts,
+            ends,
+            &mut cursors,
+        );
+        destination_index += 1;
+    }
+    for _ in 0..plan.sliding_window.saturating_sub(source.len()) {
+        destination[destination_index] =
+            css_shadow_plan_gauss_step(0, plan, &mut sums, buffers, starts, ends, &mut cursors);
+        destination_index += 1;
+    }
+
+    // The forward scan has emitted the left side of the expanded mask. Scan
+    // backward from the other edge to fill the remaining pixels without ever
+    // materializing three intermediate box-filter surfaces.
+    buffers.fill(0);
+    cursors = starts;
+    sums = [0u32; 3];
+    let mut source_index = source.len();
+    let mut reverse_destination = destination_length;
+    while reverse_destination > destination_index {
+        reverse_destination -= 1;
+        source_index -= 1;
+        destination[reverse_destination] = css_shadow_plan_gauss_step(
+            source[source_index],
+            plan,
+            &mut sums,
+            buffers,
+            starts,
+            ends,
+            &mut cursors,
+        );
+    }
+}
+
+/// Execute Skia's three-box PlanGauss approximation independently over all
+/// premultiplied RGBA channels. Unlike a shadow mask, a CSS/SVG filter source
+/// can contain unrelated colours and descendants, so reducing it to one alpha
+/// plane plus a representative colour would destroy the source graphic.
+fn blur_rgba_plan_gauss(image: &RgbaImage, sigma: f32) -> RgbaImage {
+    if !sigma.is_finite() || sigma <= 0.0 || image.width == 0 || image.height == 0 {
+        return image.clone();
+    }
+    let Some(plan) = CssShadowPlanGauss::new(sigma) else {
+        return image.clone();
+    };
+
+    let width = image.width as usize;
+    let height = image.height as usize;
+    let mut horizontal = vec![0u8; image.data.len()];
+    let mut output = vec![0u8; image.data.len()];
+    let mut line = vec![0u8; width.max(height)];
+    let mut expanded = Vec::with_capacity(width.max(height) + plan.border * 2);
+    let mut buffers = vec![0u32; plan.buffer_size()];
+
+    for channel in 0..4 {
+        for y in 0..height {
+            for (x, sample) in line[..width].iter_mut().enumerate() {
+                *sample = image.data[(y * width + x) * 4 + channel];
+            }
+            css_shadow_plan_gauss_scan(&line[..width], plan, &mut expanded, &mut buffers);
+            for x in 0..width {
+                horizontal[(y * width + x) * 4 + channel] = expanded[plan.border + x];
+            }
+        }
+
+        for x in 0..width {
+            for (y, sample) in line[..height].iter_mut().enumerate() {
+                *sample = horizontal[(y * width + x) * 4 + channel];
+            }
+            css_shadow_plan_gauss_scan(&line[..height], plan, &mut expanded, &mut buffers);
+            for y in 0..height {
+                output[(y * width + x) * 4 + channel] = expanded[plan.border + y];
+            }
+        }
+    }
+
+    RgbaImage {
+        width: image.width,
+        height: image.height,
+        data: output,
+    }
+}
+
 /// Chromium's CSS shadow masks use Skia's three-pass box approximation rather
-/// than the image-filter Gaussian used by `filter: blur()`. This linear-time
-/// implementation follows Skia's window plan and keeps the source in
-/// premultiplied RGBA throughout the passes.
+/// than the image-filter Gaussian used by `filter: blur()`. Compile the solid
+/// shadow paint to one A8 mask and execute Skia's three cascaded windows as a
+/// single fixed-point scan per axis. Besides matching its axis quantization,
+/// this avoids six full-size floating-point RGBA buffers.
 pub(crate) fn blur_rgba_css_shadow(image: &RgbaImage, sigma: f32) -> RgbaImage {
     if !sigma.is_finite() || sigma <= 0.0 || image.width == 0 || image.height == 0 {
         return image.clone();
     }
+    let Some(plan) = CssShadowPlanGauss::new(sigma) else {
+        return image.clone();
+    };
 
-    // SkMaskBlurFilter::PlanGauss:
-    // floor(sigma * 3 * sqrt(2*pi) / 4 + 0.5).
-    const SKIA_WINDOW_FACTOR: f64 = 1.879_971_205_973_250_3;
-    let window = ((f64::from(sigma) * SKIA_WINDOW_FACTOR + 0.5).floor() as usize).max(1);
-    if window <= 1 {
+    let width = image.width as usize;
+    let height = image.height as usize;
+    let mut alpha = Vec::with_capacity(width * height);
+    let mut strongest = [0u8; 4];
+    for pixel in image.data.chunks_exact(4) {
+        alpha.push(pixel[3]);
+        if pixel[3] > strongest[3] {
+            strongest.copy_from_slice(pixel);
+        }
+    }
+    if strongest[3] == 0 {
         return image.clone();
     }
+    let straight_color = [
+        ((u32::from(strongest[0]) * 255 + u32::from(strongest[3]) / 2) / u32::from(strongest[3]))
+            .min(255) as u8,
+        ((u32::from(strongest[1]) * 255 + u32::from(strongest[3]) / 2) / u32::from(strongest[3]))
+            .min(255) as u8,
+        ((u32::from(strongest[2]) * 255 + u32::from(strongest[3]) / 2) / u32::from(strongest[3]))
+            .min(255) as u8,
+    ];
 
-    let pass_widths = if window & 1 == 1 {
-        [window, window, window]
-    } else {
-        [window, window, window + 1]
-    };
-    let mut current: Vec<f32> = image.data.iter().map(|value| f32::from(*value)).collect();
-    for (pass, pass_width) in pass_widths.into_iter().enumerate() {
-        let half = pass_width / 2;
-        let (left, right) = if pass_width & 1 == 1 {
-            (half, half)
-        } else if pass == 0 {
-            (half.saturating_sub(1), half)
-        } else {
-            (half, half.saturating_sub(1))
-        };
-        current = box_blur_horizontal_rgba(
-            &current,
-            image.width as usize,
-            image.height as usize,
-            left,
-            right,
+    let mut horizontal = vec![0u8; width * height];
+    let mut expanded = Vec::with_capacity(width.max(height) + plan.border * 2);
+    let mut buffers = vec![0u32; plan.buffer_size()];
+    for y in 0..height {
+        let row_start = y * width;
+        css_shadow_plan_gauss_scan(
+            &alpha[row_start..row_start + width],
+            plan,
+            &mut expanded,
+            &mut buffers,
         );
-    }
-    for (pass, pass_width) in pass_widths.into_iter().enumerate() {
-        let half = pass_width / 2;
-        let (top, bottom) = if pass_width & 1 == 1 {
-            (half, half)
-        } else if pass == 0 {
-            (half.saturating_sub(1), half)
-        } else {
-            (half, half.saturating_sub(1))
-        };
-        current = box_blur_vertical_rgba(
-            &current,
-            image.width as usize,
-            image.height as usize,
-            top,
-            bottom,
-        );
+        horizontal[row_start..row_start + width]
+            .copy_from_slice(&expanded[plan.border..plan.border + width]);
     }
 
-    let mut data = Vec::with_capacity(current.len());
-    for pixel in current.chunks_exact(4) {
-        let alpha = pixel[3].round().clamp(0.0, 255.0) as u8;
-        data.push(pixel[0].round().clamp(0.0, f32::from(alpha)) as u8);
-        data.push(pixel[1].round().clamp(0.0, f32::from(alpha)) as u8);
-        data.push(pixel[2].round().clamp(0.0, f32::from(alpha)) as u8);
+    let mut blurred_alpha = vec![0u8; width * height];
+    let mut column = vec![0u8; height];
+    for x in 0..width {
+        for y in 0..height {
+            column[y] = horizontal[y * width + x];
+        }
+        css_shadow_plan_gauss_scan(&column, plan, &mut expanded, &mut buffers);
+        for y in 0..height {
+            blurred_alpha[y * width + x] = expanded[plan.border + y];
+        }
+    }
+
+    let mut data = Vec::with_capacity(image.data.len());
+    for alpha in blurred_alpha {
+        data.push(((u16::from(straight_color[0]) * u16::from(alpha) + 127) / 255) as u8);
+        data.push(((u16::from(straight_color[1]) * u16::from(alpha) + 127) / 255) as u8);
+        data.push(((u16::from(straight_color[2]) * u16::from(alpha) + 127) / 255) as u8);
         data.push(alpha);
     }
     RgbaImage {
@@ -1139,86 +1418,6 @@ pub(crate) fn blur_rgba_css_shadow(image: &RgbaImage, sigma: f32) -> RgbaImage {
         height: image.height,
         data,
     }
-}
-
-fn box_blur_horizontal_rgba(
-    source: &[f32],
-    width: usize,
-    height: usize,
-    left: usize,
-    right: usize,
-) -> Vec<f32> {
-    let mut output = vec![0.0f32; source.len()];
-    let divisor = (left + right + 1) as f32;
-    for y in 0..height {
-        let mut sums = [0.0f32; 4];
-        for source_x in 0..=right.min(width.saturating_sub(1)) {
-            let source_index = (y * width + source_x) * 4;
-            for channel in 0..4 {
-                sums[channel] += source[source_index + channel];
-            }
-        }
-        for x in 0..width {
-            let destination = (y * width + x) * 4;
-            for channel in 0..4 {
-                output[destination + channel] = sums[channel] / divisor;
-            }
-            if x >= left {
-                let remove = (y * width + x - left) * 4;
-                for channel in 0..4 {
-                    sums[channel] -= source[remove + channel];
-                }
-            }
-            let add_x = x + right + 1;
-            if add_x < width {
-                let add = (y * width + add_x) * 4;
-                for channel in 0..4 {
-                    sums[channel] += source[add + channel];
-                }
-            }
-        }
-    }
-    output
-}
-
-fn box_blur_vertical_rgba(
-    source: &[f32],
-    width: usize,
-    height: usize,
-    top: usize,
-    bottom: usize,
-) -> Vec<f32> {
-    let mut output = vec![0.0f32; source.len()];
-    let divisor = (top + bottom + 1) as f32;
-    for x in 0..width {
-        let mut sums = [0.0f32; 4];
-        for source_y in 0..=bottom.min(height.saturating_sub(1)) {
-            let source_index = (source_y * width + x) * 4;
-            for channel in 0..4 {
-                sums[channel] += source[source_index + channel];
-            }
-        }
-        for y in 0..height {
-            let destination = (y * width + x) * 4;
-            for channel in 0..4 {
-                output[destination + channel] = sums[channel] / divisor;
-            }
-            if y >= top {
-                let remove = ((y - top) * width + x) * 4;
-                for channel in 0..4 {
-                    sums[channel] -= source[remove + channel];
-                }
-            }
-            let add_y = y + bottom + 1;
-            if add_y < height {
-                let add = (add_y * width + x) * 4;
-                for channel in 0..4 {
-                    sums[channel] += source[add + channel];
-                }
-            }
-        }
-    }
-    output
 }
 
 #[cfg(any(feature = "python", test))]
@@ -1628,6 +1827,22 @@ mod tests {
     }
 
     #[test]
+    fn svg_gaussian_blur_uses_skia_plan_gauss_profile() {
+        let mut step = RgbaImage::new(161, 161);
+        for y in 0..161 {
+            for x in 80..161 {
+                step.put_pixel(x, y, Rgba([255, 255, 255, 255]));
+            }
+        }
+        let svg = blur_rgba_svg_filter(&step, 18.75);
+
+        assert_eq!(svg.get_pixel(40, 80)[3], 2);
+        assert_eq!(svg.get_pixel(50, 80)[3], 12);
+        assert_eq!(svg.get_pixel(80, 80)[3], 130);
+        assert_eq!(svg.get_pixel(120, 80)[3], 252);
+    }
+
+    #[test]
     fn css_shadow_box_blur_is_centered_and_conserves_an_impulse() {
         let mut impulse = RgbaImage::new(41, 41);
         impulse.put_pixel(20, 20, Rgba([128, 64, 32, 255]));
@@ -1636,7 +1851,9 @@ mod tests {
         assert_eq!(blurred.get_pixel(17, 20), blurred.get_pixel(23, 20));
         assert_eq!(blurred.get_pixel(20, 17), blurred.get_pixel(20, 23));
         let alpha_sum: u32 = blurred.pixels().map(|pixel| u32::from(pixel[3])).sum();
-        assert!((250..=260).contains(&alpha_sum));
+        // Skia rounds once after each separable axis. Its fixed-point window
+        // scale therefore retains 248/255 of this small impulse's alpha.
+        assert_eq!(alpha_sum, 248);
         assert!(
             blurred.pixels().all(|pixel| {
                 pixel[0] <= pixel[3] && pixel[1] <= pixel[3] && pixel[2] <= pixel[3]

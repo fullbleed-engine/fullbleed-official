@@ -88,6 +88,10 @@ markers, deterministic bytes, and equal buffer/file SHA-256. Reproduce it with:
 python tools/benchmark_fullbleed_vdp.py --records 100000 --repeats 5
 ```
 
+Fixed-geometry slots may remain inside immutable page-space transforms and clips. The compiler
+captures that active coordinate-state program once and replays it in each compact record overlay;
+it does not rerun layout or clone the complete page display list.
+
 The fixed-copy result remains scoped to identical content; the variable-data result is scoped to
 paint-only text whose geometry does not reflow. Neither is a claim that arbitrary new HTML or
 size-changing records render 200x faster. See
@@ -106,7 +110,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-2.2.0-cp310-abi3-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-2.2.1-cp310-abi3-win_amd64.whl
 ```
 
 From a source checkout with Rust installed, no Python build package is needed:
@@ -751,6 +755,20 @@ Summary as of May 19, 2026:
 - Canonical validation artifact: `_css_working/css_parity_status.json`
 - Canonical validation artifact: `_css_working/tmp/fixture_full_latest.json`
 - Canonical validation artifact: `_css_working/css_broad_coverage_sprint_s14.md`
+
+The complete pinned independent Wheel265 gate closed on August 9, 2026 with `1,642 PASS`,
+`0 FAIL`, and `20 REFERENCE-DISPUTED` across 1,662 fixtures. That is strict `100%` parity for
+every adjudicable fixture in this named corpus; disputed references remain visible and are not
+relabeled as implementation passes. Broader web-platform coverage remains bounded by the module
+and known-gap contract in `docs/css-coverage.md`.
+
+Flow/reflow hardening validated on August 5, 2026 adds fixed-height block,
+one-column grid, and column-flex continuation slicing; avoids content
+duplication; retains empty styled captions inside avoided figures; preserves
+`display: contents` grid paint phase; and keeps positioned containing blocks
+atomic. The independent review's targeted 18-case regression cluster passes
+`18/18` (13 pixel-exact, maximum above-floor difference `0.97030199%`). This
+targeted diagnostic does not replace the full external-corpus report.
 
 Current validated behavior includes first-class parser -> evaluator -> calculator -> layout/paint coverage across broad static-document CSS domains (values math, layout primitives, pagination/fragmentation baselines, transforms phase-1, gradient/effects subsets including color-first and interleaved-color `filter: drop-shadow(...)` with computed lengths, modern `rgb()` shadow colors with `mm` lengths, duplicate `drop-shadow(...)` color rejection, empty optional filter-function defaults, explicit/currentColor `backdrop-filter: drop-shadow(...)` raster paint, strict `box-shadow` length/color grammar with modern `rgb()` plus `mm` paint coverage, softened blurred inset edge paint, and directional inset offset edge paint, overflow-gated `text-overflow: ellipsis`, physical min/max box constraints, horizontal-tb RTL `direction` inline inset/margin/padding/border mapping, vertical writing-mode `direction: rtl` inline inset remapping, vertical-rl logical sizing/insets/margin/padding/border/min-max constraints, vertical-lr logical sizing/min-max/insets/margin/padding/border remapping, basic vertical text columns with `vertical-rl` leftward and `vertical-lr` rightward line progression, and deterministic diagnostics).
 

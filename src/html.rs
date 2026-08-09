@@ -3,27 +3,34 @@ use crate::assets::{
     renderable_image_source,
 };
 use crate::flowable::{
-    AbsolutePositionedFlowable, AlignContent, AlignItems, BackgroundPaintFlowable, BorderRadiiSpec,
-    BorderSpacingSpec, BorderSpec, CalcLength, CjkDecimalMarkerFlowable, ClearFlowable,
+    AbsolutePositionedFlowable, AlignContent, AlignItems, BackgroundPaint, BackgroundPaintFlowable,
+    BorderRadiiSpec, BorderSpacingSpec, BorderSpec, CalcLength, CjkDecimalMarkerFlowable,
+    ClearFlowable, ClipPathCircleSpec, ClipPathEllipseSpec, ClipPathPathCommand, ClipPathPathSpec,
+    ClipPathRectSpec, ClipPathShapeRadius, ClipPathShapeSpec, ClipPathXywhSpec,
     CollapsibleSpaceFlowable, ContainerFlowable, CssLineBoxFlowable, CssPixelHeightFlowable,
-    EdgeSizes, ExpandedWidthFlowable, FlexDirection, FlexFlowable, FloatClear, FloatFlowable,
-    FloatSide, GridTrackBreadth, GridTrackSize, ImageFlowable, InlineBackgroundFlowable,
-    InlineBlockLayoutFlowable, JustifyContent, LengthSpec, ListBulletFlowable, ListBulletKind,
-    ListItemFlowable, MetaFlowable, MultiColumnFlowable, OutlineLineStyle, OverlayFlowable,
-    Paragraph, RelativePositionedFlowable, Spacer, SvgFlowable, TableCell, TableColumnBorder,
-    TableColumnGroupBorder, TableColumnWidthHint, TableFlowable, TableLayoutMode, TextAlign,
-    TextStyle, VerticalAlign,
+    EdgeSizes, ExpandedWidthFlowable, FilterDropShadowSpec, FlexDirection, FlexFlowable,
+    FloatClear, FloatFlowable, FloatSide, FootnoteCallFlowable, GridTrackBreadth, GridTrackSize,
+    ImageFlowable, InlineBackgroundFlowable, InlineBlockLayoutFlowable, JustifyContent,
+    LeaderFlowable, LengthSpec, ListBulletFlowable, ListBulletKind, ListItemFlowable, MaskMode,
+    MetaFlowable, MultiColumnFlowable, OutlineLineStyle, OverlayFlowable, PageFootnoteAreaStyle,
+    PageFootnoteEntry, PaintFilterOperation, PaintFilterSpec, Paragraph,
+    RelativePositionedFlowable, RunningElementFlowable, Spacer, SvgComponentTransferFunction,
+    SvgFilterInput, SvgFilterNode, SvgFilterPrimitive, SvgFilterProgram, SvgFilterRegion,
+    SvgFlowable, SvgMorphologyOperator, TableCell, TableColumnBorder, TableColumnGroupBorder,
+    TableColumnWidthHint, TableFlowable, TableLayoutMode, TextAlign, TextStyle, VerticalAlign,
+    css_direct_text_prefers_nearest_baseline_snap, css_print_line_prefers_nearest_baseline_snap,
 };
 use crate::font::FontRegistry;
 use crate::glyph_report::GlyphCoverageReport;
 use crate::html_dom::{NodeData, NodeRef, parse_html};
 use crate::style::{
-    AlignContentMode, AlignItemsMode, AlignSelfMode, ClearMode, ComputedStyle, DirectionMode,
-    DisplayMode, ElementInfo, FlexDirectionMode, FlexWrapMode, FloatMode, GeneratedContentPart,
-    GeneratedCounterContent, GeneratedCounterStyle, GeneratedCountersContent, GridAutoFlowMode,
-    GridAutoRepeatMode, GridLineSpec, JustifyContentMode, ListStylePositionMode, ListStyleTypeMode,
-    OverflowMode, PositionMode, StyleResolver, TextAlignLastMode, TextAlignMode, TextWrapMode,
-    VerticalAlignMode, VisibilityMode, WhiteSpaceMode, WritingModeMode,
+    AlignContentMode, AlignItemsMode, AlignSelfMode, ClearMode, ColumnSpanMode, ComputedStyle,
+    DirectionMode, DisplayMode, ElementInfo, FlexDirectionMode, FlexWrapMode, FloatMode,
+    GeneratedContentPart, GeneratedCounterContent, GeneratedCounterStyle, GeneratedCountersContent,
+    GridAutoFlowMode, GridAutoRepeatMode, GridLineSpec, JustifyContentMode, ListStylePositionMode,
+    ListStyleTypeMode, NamedStringSource, OverflowMode, PositionMode, StyleResolver,
+    TextAlignLastMode, TextAlignMode, TextWrapMode, VerticalAlignMode, VisibilityMode,
+    WhiteSpaceMode, WritingModeMode,
 };
 use crate::types::{Pt, Size};
 use crate::{BreakAfter, BreakBefore, BreakInside, Color, Flowable};
@@ -91,9 +98,39 @@ pub struct HtmlAssetWarning {
 #[derive(Debug, Clone, Default)]
 struct CounterState {
     values: HashMap<String, Vec<i32>>,
+    quote_depth: usize,
+    target_texts: Arc<HashMap<String, String>>,
+    target_pages: Arc<HashMap<String, usize>>,
 }
 
 impl CounterState {
+    fn with_target_context(
+        target_texts: HashMap<String, String>,
+        target_pages: Arc<HashMap<String, usize>>,
+    ) -> Self {
+        Self {
+            target_texts: Arc::new(target_texts),
+            target_pages,
+            ..Self::default()
+        }
+    }
+
+    fn target_text(&self, reference: &str) -> Option<&str> {
+        let (_, fragment) = reference.rsplit_once('#')?;
+        if fragment.is_empty() {
+            return None;
+        }
+        self.target_texts.get(fragment).map(String::as_str)
+    }
+
+    fn target_page(&self, reference: &str) -> Option<usize> {
+        let (_, fragment) = reference.rsplit_once('#')?;
+        if fragment.is_empty() {
+            return None;
+        }
+        self.target_pages.get(fragment).copied()
+    }
+
     fn reset(&mut self, name: &str, value: i32) {
         self.values.entry(name.to_string()).or_default().push(value);
     }
@@ -145,6 +182,54 @@ impl CounterState {
             self.pop_reset_scope(name);
         }
     }
+
+    fn open_quote(&mut self, quotes: &[(String, String)], paint: bool) -> Option<String> {
+        let text = paint
+            .then(|| quote_pair_at_depth(quotes, self.quote_depth).map(|pair| pair.0.clone()))
+            .flatten();
+        self.quote_depth = self.quote_depth.saturating_add(1);
+        text
+    }
+
+    fn close_quote(&mut self, quotes: &[(String, String)], paint: bool) -> Option<String> {
+        if self.quote_depth == 0 {
+            return None;
+        }
+        self.quote_depth -= 1;
+        paint
+            .then(|| quote_pair_at_depth(quotes, self.quote_depth).map(|pair| pair.1.clone()))
+            .flatten()
+    }
+}
+
+fn document_target_texts(document: &NodeRef) -> HashMap<String, String> {
+    let mut targets = HashMap::new();
+    for node in document.descendants() {
+        let Some(element) = node.as_element() else {
+            continue;
+        };
+        let id = element
+            .attributes
+            .borrow()
+            .get("id")
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string);
+        let Some(id) = id else {
+            continue;
+        };
+        let text = node
+            .text_contents()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        targets.entry(id).or_insert(text);
+    }
+    targets
+}
+
+fn quote_pair_at_depth(quotes: &[(String, String)], depth: usize) -> Option<&(String, String)> {
+    quotes.get(depth).or_else(|| quotes.last())
 }
 
 fn apply_counter_mutations(
@@ -389,6 +474,19 @@ fn counter_set_value(style: &ComputedStyle, name: &str) -> Option<i32> {
 
 fn vertical_align_from_style(style: &ComputedStyle) -> VerticalAlign {
     vertical_align_from_style_with_font_size(style, style.font_size)
+}
+
+fn anonymous_text_vertical_align(style: &ComputedStyle) -> VerticalAlign {
+    // `vertical-align` positions an inline-level principal box in its parent
+    // line, but has a separate meaning on table cells. Anonymous text inside
+    // a block/table-cell formatting context therefore starts on the baseline;
+    // only a transparent inline element transfers its own alignment to the
+    // flattened text run that represents that principal box.
+    if matches!(style.display, DisplayMode::Inline) {
+        vertical_align_from_style(style)
+    } else {
+        VerticalAlign::Baseline
+    }
 }
 
 fn vertical_align_from_style_with_font_size(
@@ -776,6 +874,32 @@ pub fn html_to_story_with_resolver_and_fonts_and_report(
     perf: Option<&crate::perf::PerfLogger>,
     doc_id: Option<usize>,
 ) -> Vec<Box<dyn Flowable>> {
+    html_to_story_with_resolver_and_fonts_and_report_and_target_pages(
+        html,
+        resolver,
+        font_registry,
+        asset_bundle,
+        report,
+        svg_form,
+        svg_raster_fallback,
+        perf,
+        doc_id,
+        None,
+    )
+}
+
+pub(crate) fn html_to_story_with_resolver_and_fonts_and_report_and_target_pages(
+    html: &str,
+    resolver: &StyleResolver,
+    font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<Arc<AssetBundle>>,
+    report: Option<&mut GlyphCoverageReport>,
+    svg_form: bool,
+    svg_raster_fallback: bool,
+    perf: Option<&crate::perf::PerfLogger>,
+    doc_id: Option<usize>,
+    target_pages: Option<Arc<HashMap<String, usize>>>,
+) -> Vec<Box<dyn Flowable>> {
     let t_parse = std::time::Instant::now();
     let document = parse_html(html);
     if let Some(perf_logger) = perf {
@@ -798,7 +922,10 @@ pub fn html_to_story_with_resolver_and_fonts_and_report(
     let base_style = resolver.default_style();
     let mut ancestors: Vec<ElementInfo> = Vec::new();
     let mut report = report;
-    let mut counters = CounterState::default();
+    let mut counters = CounterState::with_target_context(
+        document_target_texts(&document),
+        target_pages.unwrap_or_else(|| Arc::new(HashMap::new())),
+    );
 
     let mut root_style = base_style.clone();
     if let Ok(html_el) = document.select_first("html") {
@@ -978,6 +1105,7 @@ fn authored_owner_metadata(
         || !info.classes.is_empty()
         || info.attrs.contains_key("data-fb-role")
         || info.attrs.contains_key("data-fb-component")
+        || !style.transform.is_empty()
         || matches!(
             info.tag.as_str(),
             "main"
@@ -1060,7 +1188,12 @@ fn anonymous_table_cell_run_flowables(
     ancestors: &[ElementInfo],
     counters: &mut CounterState,
     font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<Arc<AssetBundle>>,
     mut report: Option<&mut GlyphCoverageReport>,
+    svg_form: bool,
+    svg_raster_fallback: bool,
+    perf: Option<&crate::perf::PerfLogger>,
+    doc_id: Option<usize>,
 ) -> Option<Vec<LayoutItem>> {
     if node.children().any(
         |child| matches!(child.data(), NodeData::Text(text) if !text.borrow().trim().is_empty()),
@@ -1077,14 +1210,26 @@ fn anonymous_table_cell_run_flowables(
 
     let include_prev_siblings = resolver.has_sibling_selectors();
     let mut styled_cells = Vec::with_capacity(children.len());
+    let mut trailing_replaced = Vec::new();
     for child in children {
+        let child_element = child.as_element().expect("filtered element child");
         let info = element_info(&child, include_prev_siblings);
         let inline_style = node_inline_style_attr(&child);
         let style = resolver.compute_style(&info, parent_style, inline_style.as_deref(), ancestors);
         if matches!(style.display, DisplayMode::None) {
             continue;
         }
-        if !matches!(style.display, DisplayMode::TableCell) {
+        let is_table_cell = matches!(style.display, DisplayMode::TableCell);
+        let is_inline_replaced_sibling = child_element.name.local.as_ref() == "img"
+            && matches!(
+                style.display,
+                DisplayMode::Inline | DisplayMode::InlineBlock
+            );
+        if is_inline_replaced_sibling {
+            trailing_replaced.push(child);
+            continue;
+        }
+        if !is_table_cell || !trailing_replaced.is_empty() {
             return None;
         }
         // Rich descendants use the general CSS table path; the anonymous
@@ -1095,14 +1240,14 @@ fn anonymous_table_cell_run_flowables(
         {
             return None;
         }
-        styled_cells.push((child, style));
+        styled_cells.push((child, info, style));
     }
     if styled_cells.is_empty() {
         return None;
     }
 
     let mut cells = Vec::with_capacity(styled_cells.len());
-    for (child, cell_style) in styled_cells {
+    for (child, cell_info, cell_style) in styled_cells {
         if style_can_mutate_counters(&cell_style) {
             apply_style_counters(&cell_style, counters);
         }
@@ -1112,7 +1257,36 @@ fn anonymous_table_cell_run_flowables(
         }
         text = apply_text_transform(&text, cell_style.text_transform);
         let text_style = text_style_for_flow_text(&cell_style);
-        if !text.is_empty() {
+        let mut before_counter_probe = counters.clone();
+        let before_items = pseudo_items_for(
+            resolver,
+            &cell_info,
+            &cell_style,
+            ancestors,
+            &mut before_counter_probe,
+            font_registry.clone(),
+            asset_bundle.as_deref(),
+            report.as_deref_mut(),
+            svg_form,
+            svg_raster_fallback,
+            crate::style::PseudoTarget::Before,
+        );
+        let mut after_counter_probe = counters.clone();
+        let after_items = pseudo_items_for(
+            resolver,
+            &cell_info,
+            &cell_style,
+            ancestors,
+            &mut after_counter_probe,
+            font_registry.clone(),
+            asset_bundle.as_deref(),
+            report.as_deref_mut(),
+            svg_form,
+            svg_raster_fallback,
+            crate::style::PseudoTarget::After,
+        );
+        let has_generated_content = !before_items.is_empty() || !after_items.is_empty();
+        if !has_generated_content && !text.is_empty() {
             report_missing_glyphs(
                 report.as_deref_mut(),
                 font_registry.as_deref(),
@@ -1120,7 +1294,47 @@ fn anonymous_table_cell_run_flowables(
                 &text,
             );
         }
+        let cell_content = if has_generated_content {
+            let mut items = before_items;
+            items.extend(text_node_to_flowables(
+                &text,
+                &cell_style,
+                true,
+                true,
+                font_registry.clone(),
+                report.as_deref_mut(),
+                perf,
+                doc_id,
+                true,
+            ));
+            items.extend(after_items);
+            let items = coerce_items_to_inline_run(
+                items,
+                VerticalAlign::Baseline,
+                &cell_style,
+                font_registry.clone(),
+                false,
+            );
+            let mut flowables = layout_children_to_flowables(items, None);
+            if flowables.is_empty() {
+                None
+            } else if flowables.len() == 1 {
+                Some(flowables.remove(0))
+            } else {
+                Some(Box::new(
+                    ContainerFlowable::new_pt(
+                        flowables,
+                        cell_style.font_size,
+                        cell_style.root_font_size,
+                    )
+                    .with_self_visible(cell_style.visibility.paints()),
+                ) as Box<dyn Flowable>)
+            }
+        } else {
+            None
+        };
         let border_colors = cell_style.resolved_border_colors(cell_style.color);
+        let border_opacities = cell_style.resolved_border_opacities();
         let border_styles = cell_style.resolved_border_styles();
         let hidden_borders = cell_style.border_hidden_sides();
         let min_height = match cell_style.height {
@@ -1130,7 +1344,11 @@ fn anonymous_table_cell_run_flowables(
                 .max(Pt::ZERO),
         };
         let mut cell = TableCell::new(
-            text,
+            if cell_content.is_some() {
+                String::new()
+            } else {
+                text
+            },
             text_style,
             text_align_from_style(&cell_style),
             vertical_align_from_style(&cell_style),
@@ -1161,6 +1379,12 @@ fn anonymous_table_cell_run_flowables(
             border_colors.bottom,
             border_colors.left,
         )
+        .with_border_opacities(
+            border_opacities.top,
+            border_opacities.right,
+            border_opacities.bottom,
+            border_opacities.left,
+        )
         .with_hidden_borders(
             hidden_borders.top,
             hidden_borders.right,
@@ -1174,6 +1398,9 @@ fn anonymous_table_cell_run_flowables(
             cell_style.overflow,
             OverflowMode::Hidden | OverflowMode::Clip
         ));
+        if let Some(content) = cell_content {
+            cell = cell.with_content(content).with_inline_content_phase(true);
+        }
         if !matches!(
             cell_style.width,
             LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
@@ -1203,13 +1430,31 @@ fn anonymous_table_cell_run_flowables(
         parent_style.root_font_size,
     )
     .with_width(LengthSpec::Absolute(used_width));
-    Some(vec![LayoutItem::Block {
+    let mut items = vec![LayoutItem::Block {
         flowable: Box::new(container),
         flex_grow: 0.0,
         flex_shrink: 1.0,
         width_spec: Some(LengthSpec::Absolute(used_width)),
         order: 0,
-    }])
+    }];
+    for child in trailing_replaced {
+        let mut child_ancestors = ancestors.to_vec();
+        items.extend(node_to_flowables(
+            &child,
+            resolver,
+            parent_style,
+            &mut child_ancestors,
+            counters,
+            font_registry.clone(),
+            asset_bundle.clone(),
+            report.as_deref_mut(),
+            svg_form,
+            svg_raster_fallback,
+            perf,
+            doc_id,
+        ));
+    }
+    Some(items)
 }
 
 fn collect_children(
@@ -1235,7 +1480,12 @@ fn collect_children(
         ancestors,
         counters,
         font_registry.clone(),
+        asset_bundle.clone(),
         report.as_deref_mut(),
+        svg_form,
+        svg_raster_fallback,
+        perf,
+        doc_id,
     ) {
         return anonymous_table;
     }
@@ -1248,7 +1498,8 @@ fn collect_children(
         NodeData::Text(text) => text.borrow().chars().any(char::is_whitespace),
         _ => false,
     });
-    let inline_context = has_boundary_space_candidate
+    let inline_context = (matches!(parent_style.display, DisplayMode::Inline)
+        || has_boundary_space_candidate)
         && !matches!(
             parent_style.display,
             DisplayMode::Flex
@@ -1362,7 +1613,7 @@ fn text_node_to_flowables(
         if inline_context {
             LayoutItem::Inline {
                 flowable,
-                valign: vertical_align_from_style(parent_style),
+                valign: anonymous_text_vertical_align(parent_style),
                 flex_grow: 0.0,
                 flex_shrink: 1.0,
                 width_spec: None,
@@ -1499,6 +1750,221 @@ fn adopt_parent_subgrid_tracks(style: &mut ComputedStyle, parent: &ComputedStyle
     }
 }
 
+fn compiled_page_footnote_area(resolver: &StyleResolver) -> PageFootnoteAreaStyle {
+    let area = resolver.page_footnote_area();
+    PageFootnoteAreaStyle {
+        border_top_width: area.border_top_width.unwrap_or(Pt::ZERO).max(Pt::ZERO),
+        border_top_color: area.border_top_color.unwrap_or(Color::BLACK),
+        border_top_visible: area
+            .border_top_visible
+            .unwrap_or_else(|| area.border_top_width.is_some_and(|width| width > Pt::ZERO)),
+        padding_top: area.padding_top.unwrap_or(Pt::ZERO).max(Pt::ZERO),
+        max_height: area.max_height.map(|height| height.max(Pt::ZERO)),
+    }
+}
+
+fn footnote_pseudo_text_item(
+    text: String,
+    style: &ComputedStyle,
+    containing_font_size: Pt,
+    default_superscript: bool,
+    font_registry: Option<Arc<FontRegistry>>,
+    report: Option<&mut GlyphCoverageReport>,
+) -> LayoutItem {
+    let text = apply_text_transform(&text, style.text_transform);
+    let mut text_style = text_style_for_flow_text(style);
+    if default_superscript {
+        // CSS Fonts synthesizes a missing superscript form at 80% of the
+        // originating em. Its paint is shifted separately so the generated
+        // call does not participate in the owning line's baseline union.
+        text_style.font_size = containing_font_size.mul_ratio(4, 5);
+        text_style.line_height = text_style.font_size;
+        text_style.line_height_is_auto = true;
+    }
+    report_missing_glyphs(report, font_registry.as_deref(), &text_style, &text);
+    let paragraph = Paragraph::new(text)
+        .with_style(text_style)
+        .with_align(text_align_from_style(style))
+        .with_last_align(text_align_last_from_style(style))
+        .with_whitespace(false, true)
+        .with_font_registry(font_registry);
+    let valign = if default_superscript {
+        VerticalAlign::Baseline
+    } else {
+        vertical_align_from_style_with_font_size(style, containing_font_size)
+    };
+    LayoutItem::Inline {
+        flowable: Box::new(paragraph),
+        valign,
+        flex_grow: 0.0,
+        flex_shrink: 1.0,
+        width_spec: None,
+        order: 0,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn footnote_node_to_layout_item(
+    node: &NodeRef,
+    resolver: &StyleResolver,
+    info: &ElementInfo,
+    style: &ComputedStyle,
+    ancestors: &mut Vec<ElementInfo>,
+    counters: &mut CounterState,
+    font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<Arc<AssetBundle>>,
+    mut report: Option<&mut GlyphCoverageReport>,
+    svg_form: bool,
+    svg_raster_fallback: bool,
+    perf: Option<&crate::perf::PerfLogger>,
+    doc_id: Option<usize>,
+) -> LayoutItem {
+    if !style
+        .counter_increment
+        .iter()
+        .any(|mutation| mutation.name == "footnote")
+    {
+        counters.increment("footnote", 1);
+    }
+    let number = counters.get("footnote");
+
+    let call_pseudo = resolver.compute_pseudo_style(
+        info,
+        style,
+        ancestors,
+        crate::style::PseudoTarget::FootnoteCall,
+    );
+    let call_style = call_pseudo.as_ref().unwrap_or(style);
+    let call_text = call_pseudo
+        .as_ref()
+        .and_then(|pseudo| generated_content_text(pseudo, counters))
+        .unwrap_or_else(|| number.to_string());
+    let call_item = footnote_pseudo_text_item(
+        call_text,
+        call_style,
+        style.font_size,
+        call_pseudo.is_none(),
+        font_registry.clone(),
+        report.as_deref_mut(),
+    );
+    let (call_flowable, call_valign) = match call_item {
+        LayoutItem::Inline {
+            flowable, valign, ..
+        } => (flowable, valign),
+        LayoutItem::Block { .. } => unreachable!("footnote calls compile as inline content"),
+    };
+
+    let marker_pseudo = resolver.compute_pseudo_style(
+        info,
+        style,
+        ancestors,
+        crate::style::PseudoTarget::FootnoteMarker,
+    );
+    let marker_style = marker_pseudo.as_ref().unwrap_or(style);
+    let marker_text = marker_pseudo
+        .as_ref()
+        .and_then(|pseudo| generated_content_text(pseudo, counters))
+        .unwrap_or_else(|| format!("{number}. "));
+    let direct_text_body = marker_pseudo.is_none()
+        && node
+            .children()
+            .all(|child| matches!(child.data(), NodeData::Text(_)));
+    let note_body = if direct_text_body {
+        // Compile a default marker and its plain body into one paragraph. This
+        // lets the marker take part in the first line's shaping and wrapping;
+        // treating a multi-line body as an atomic inline would align the
+        // marker to its last baseline and create clipped visual overflow.
+        let body_text = extract_text(node, style.white_space);
+        let body_text = apply_text_transform(&body_text, style.text_transform);
+        let text = format!("{marker_text}{body_text}");
+        let text_style = text_style_for_flow_text(style);
+        report_missing_glyphs(
+            report.as_deref_mut(),
+            font_registry.as_deref(),
+            &text_style,
+            &text,
+        );
+        Box::new(
+            Paragraph::new(text)
+                .with_style(text_style)
+                .with_align(text_align_from_style(style))
+                .with_last_align(text_align_last_from_style(style))
+                .with_whitespace(preserve_whitespace(style.white_space), no_wrap(style))
+                .with_break_spaces(matches!(style.white_space, WhiteSpaceMode::BreakSpaces))
+                .with_pagination(style.pagination)
+                .with_font_registry(font_registry.clone())
+                .with_tag_role("P"),
+        ) as Box<dyn Flowable>
+    } else {
+        let marker_item = footnote_pseudo_text_item(
+            marker_text,
+            marker_style,
+            style.font_size,
+            false,
+            font_registry.clone(),
+            report.as_deref_mut(),
+        );
+
+        ancestors.push(info.clone());
+        let body_items = collect_children(
+            node,
+            resolver,
+            style,
+            ancestors,
+            counters,
+            font_registry.clone(),
+            asset_bundle,
+            report.as_deref_mut(),
+            svg_form,
+            svg_raster_fallback,
+            perf,
+            doc_id,
+        );
+        ancestors.pop();
+        let mut note_items = vec![marker_item];
+        note_items.extend(coerce_items_to_inline_run(
+            body_items,
+            VerticalAlign::Baseline,
+            style,
+            font_registry,
+            false,
+        ));
+        let mut note_flowables = layout_children_to_flowables(note_items, None);
+        if note_flowables.len() == 1 {
+            note_flowables.pop().expect("one compiled footnote body")
+        } else {
+            Box::new(
+                ContainerFlowable::new_pt(note_flowables, style.font_size, style.root_font_size)
+                    .with_self_visible(style.visibility.paints()),
+            ) as Box<dyn Flowable>
+        }
+    };
+
+    let entry = PageFootnoteEntry {
+        body: note_body,
+        display: style.footnote_display,
+        policy: style.footnote_policy,
+        area: compiled_page_footnote_area(resolver),
+    };
+    let call = FootnoteCallFlowable::new(call_flowable, entry);
+    let call = if call_pseudo.is_none() {
+        // GCPM's default `font-variant-position: super` keeps the call's
+        // baseline-aligned inline metrics and translates only the synthesized
+        // glyph paint by 0.38em.
+        call.with_paint_shift_y(-style.font_size.mul_ratio(38, 100))
+    } else {
+        call
+    };
+    LayoutItem::Inline {
+        flowable: Box::new(call),
+        valign: call_valign,
+        flex_grow: 0.0,
+        flex_shrink: 1.0,
+        width_spec: None,
+        order: style.order,
+    }
+}
+
 fn node_to_flowables(
     node: &NodeRef,
     resolver: &StyleResolver,
@@ -1565,12 +2031,22 @@ fn node_to_flowables(
             let t_style = std::time::Instant::now();
             let mut style =
                 resolver.compute_style(&info, parent_style, inline_style.as_deref(), ancestors);
+            resolve_html_auto_direction(node, &mut style);
+            resolve_inline_svg_mask_sources(node, &mut style);
+            resolve_inline_svg_clip_source(node, &mut style);
+            resolve_inline_svg_filter_sources(node, &mut style);
             adopt_parent_subgrid_tracks(&mut style, parent_style);
             info.apply_computed_container_style(&style);
             if let Some(perf_logger) = perf {
                 let ms = t_style.elapsed().as_secs_f64() * 1000.0;
                 perf_logger.log_span_ms("story.style.compute", doc_id, ms);
             }
+            let parent_is_grid = matches!(
+                parent_style.display,
+                DisplayMode::Grid | DisplayMode::InlineGrid
+            );
+            let suppress_unused_multicol_rule =
+                parent_is_grid || style.word_spacing != parent_style.word_spacing;
             let parent_is_flex = matches!(
                 parent_style.display,
                 DisplayMode::Flex
@@ -1630,6 +2106,26 @@ fn node_to_flowables(
                 apply_implicit_list_item_counter(&style, counters);
             }
 
+            if matches!(style.float_mode, FloatMode::Footnote) {
+                let item = footnote_node_to_layout_item(
+                    node,
+                    resolver,
+                    &info,
+                    &style,
+                    ancestors,
+                    counters,
+                    font_registry,
+                    asset_bundle,
+                    report.as_deref_mut(),
+                    svg_form,
+                    svg_raster_fallback,
+                    perf,
+                    doc_id,
+                );
+                counters.pop_reset_scopes(&counter_reset_scopes);
+                return vec![item];
+            }
+
             let mut before_counter_probe = counters.clone();
             let before_items = pseudo_items_for(
                 resolver,
@@ -1638,7 +2134,10 @@ fn node_to_flowables(
                 ancestors,
                 &mut before_counter_probe,
                 font_registry.clone(),
+                asset_bundle.as_deref(),
                 report.as_deref_mut(),
+                svg_form,
+                svg_raster_fallback,
                 crate::style::PseudoTarget::Before,
             );
             let mut after_counter_probe = counters.clone();
@@ -1649,7 +2148,10 @@ fn node_to_flowables(
                 ancestors,
                 &mut after_counter_probe,
                 font_registry.clone(),
+                asset_bundle.as_deref(),
                 report.as_deref_mut(),
+                svg_form,
+                svg_raster_fallback,
                 crate::style::PseudoTarget::After,
             );
             let first_letter_style = resolver.compute_pseudo_style(
@@ -1658,6 +2160,9 @@ fn node_to_flowables(
                 ancestors,
                 crate::style::PseudoTarget::FirstLetter,
             );
+            let pseudo_quote_depth_changes = before_counter_probe.quote_depth
+                != counters.quote_depth
+                || after_counter_probe.quote_depth != counters.quote_depth;
             let has_structured_pseudo = !before_items.is_empty() || !after_items.is_empty();
 
             // Maintain an ancestor stack instead of cloning it for every element.
@@ -1704,23 +2209,89 @@ fn node_to_flowables(
                     // absolute/relative flowable survives into the parent's layout.
                     // Returning the children directly here silently discarded
                     // `position` and left absolute text in the inline run.
-                    && matches!(style.position, PositionMode::Static);
+                    && matches!(style.position, PositionMode::Static)
+                    && style.running_name.is_none()
+                    && style.string_set.is_empty();
             if transparent_inline {
-                let out = collect_children(
-                    node,
-                    resolver,
-                    &style,
-                    ancestors,
-                    counters,
-                    font_registry.clone(),
-                    asset_bundle.clone(),
-                    report.as_deref_mut(),
-                    svg_form,
-                    svg_raster_fallback,
-                    perf,
-                    doc_id,
-                );
-                let out = inject_pseudo_items(out, &before_items, &after_items);
+                let out = if pseudo_quote_depth_changes {
+                    // Quote nesting is a document-order state machine. Resolve
+                    // an opening pseudo against the live state before walking
+                    // descendants, then resolve the closing pseudo afterward.
+                    // Ordinary pseudo probes remain isolated so counter sizing
+                    // and fast-path selection stay side-effect free.
+                    let pseudo_ancestors = ancestors[..ancestors.len().saturating_sub(1)].to_vec();
+                    let ordered_before = pseudo_items_for(
+                        resolver,
+                        &info,
+                        &style,
+                        &pseudo_ancestors,
+                        counters,
+                        font_registry.clone(),
+                        asset_bundle.as_deref(),
+                        report.as_deref_mut(),
+                        svg_form,
+                        svg_raster_fallback,
+                        crate::style::PseudoTarget::Before,
+                    );
+                    let children = collect_children(
+                        node,
+                        resolver,
+                        &style,
+                        ancestors,
+                        counters,
+                        font_registry.clone(),
+                        asset_bundle.clone(),
+                        report.as_deref_mut(),
+                        svg_form,
+                        svg_raster_fallback,
+                        perf,
+                        doc_id,
+                    );
+                    let ordered_after = pseudo_items_for(
+                        resolver,
+                        &info,
+                        &style,
+                        &pseudo_ancestors,
+                        counters,
+                        font_registry.clone(),
+                        asset_bundle.as_deref(),
+                        report.as_deref_mut(),
+                        svg_form,
+                        svg_raster_fallback,
+                        crate::style::PseudoTarget::After,
+                    );
+                    inject_transparent_inline_pseudo_items(
+                        children,
+                        &ordered_before,
+                        &ordered_after,
+                        node,
+                        &style,
+                        font_registry.clone(),
+                    )
+                } else {
+                    let children = collect_children(
+                        node,
+                        resolver,
+                        &style,
+                        ancestors,
+                        counters,
+                        font_registry.clone(),
+                        asset_bundle.clone(),
+                        report.as_deref_mut(),
+                        svg_form,
+                        svg_raster_fallback,
+                        perf,
+                        doc_id,
+                    );
+                    inject_transparent_inline_pseudo_items(
+                        children,
+                        &before_items,
+                        &after_items,
+                        node,
+                        &style,
+                        font_registry.clone(),
+                    )
+                };
                 let out = if matches!(
                     style.vertical_align,
                     VerticalAlignMode::Sub | VerticalAlignMode::Super
@@ -1740,13 +2311,13 @@ fn node_to_flowables(
                     style.background_paint.is_none()
                         && style.border_width == EdgeSizes::zero()
                         && style.padding == EdgeSizes::zero()
-                        && out.len() == 1
+                        && !out.is_empty()
+                        && out
+                            .iter()
+                            .all(|item| matches!(item, LayoutItem::Inline { .. }))
                 });
                 if let Some(background) = simple_background {
-                    let child = match out.into_iter().next().expect("one inline child") {
-                        LayoutItem::Block { flowable, .. }
-                        | LayoutItem::Inline { flowable, .. } => flowable,
-                    };
+                    let fragmented_inline = out.len() > 1;
                     let font_box_height = font_registry
                         .as_deref()
                         .and_then(|registry| {
@@ -1754,36 +2325,54 @@ fn node_to_flowables(
                         })
                         .map(|(ascent, descent)| ascent + descent)
                         .unwrap_or(style.font_size * 1.2);
-                    let paint_offset_y = if matches!(style.white_space, WhiteSpaceMode::BreakSpaces)
+                    let paint_offset_y = if fragmented_inline
+                        || matches!(style.white_space, WhiteSpaceMode::BreakSpaces)
                     {
                         // LayoutNG places the inherited break-spaces inline
                         // paint box one CSS pixel below the legacy collapsed-
-                        // whitespace phase.
+                        // whitespace phase. Multi-fragment inline boxes use
+                        // the same line-fragment phase instead of the atomic
+                        // single-child correction.
                         Pt::ZERO
                     } else {
                         -Pt::from_f32(0.75)
                     };
-                    let flowable = InlineBackgroundFlowable::new_pt(
-                        child,
-                        background,
-                        font_box_height,
-                        paint_offset_y,
-                    )
-                    .with_css_pixel_snap(text_style_for_flow_text(&style).css_pixel_snap_metrics)
-                    .with_pagination(style.pagination);
+                    let css_pixel_snap = text_style_for_flow_text(&style).css_pixel_snap_metrics;
+                    let out = out
+                        .into_iter()
+                        .map(|item| match item {
+                            LayoutItem::Inline {
+                                flowable,
+                                valign,
+                                flex_grow,
+                                flex_shrink,
+                                width_spec,
+                                order,
+                            } => LayoutItem::Inline {
+                                flowable: Box::new(
+                                    InlineBackgroundFlowable::new_pt(
+                                        flowable,
+                                        background,
+                                        font_box_height,
+                                        paint_offset_y,
+                                    )
+                                    .with_css_pixel_snap(css_pixel_snap)
+                                    .with_pagination(style.pagination),
+                                ),
+                                valign,
+                                flex_grow,
+                                flex_shrink,
+                                width_spec,
+                                order,
+                            },
+                            LayoutItem::Block { .. } => unreachable!(
+                                "simple inline backgrounds require inline layout fragments"
+                            ),
+                        })
+                        .collect();
                     ancestors.pop();
                     counters.pop_reset_scopes(&counter_reset_scopes);
-                    return vec![LayoutItem::Inline {
-                        flowable: Box::new(flowable),
-                        valign: vertical_align_from_style_with_font_size(
-                            &style,
-                            parent_style.font_size,
-                        ),
-                        flex_grow: style.flex_grow,
-                        flex_shrink: style.flex_shrink,
-                        width_spec: flex_item_basis(&style),
-                        order: 0,
-                    }];
+                    return out;
                 }
                 if decorated_inline {
                     let intrinsic_width = out
@@ -1861,6 +2450,18 @@ fn node_to_flowables(
                         if inline_children_only(node, resolver, &style, ancestors)
                             && !has_structured_pseudo
                         {
+                            // Resolve the large computed pseudo style only once
+                            // the single-paragraph compiler path is selected.
+                            // Retaining it on every recursive element frame can
+                            // exhaust the smaller Windows test-thread stack on
+                            // deeply nested display:contents/grid documents.
+                            let pseudo_ancestors = &ancestors[..ancestors.len().saturating_sub(1)];
+                            let first_line_style = resolver.compute_pseudo_style(
+                                &info,
+                                &style,
+                                pseudo_ancestors,
+                                crate::style::PseudoTarget::FirstLine,
+                            );
                             let t_extract = std::time::Instant::now();
                             let mut text = extract_text(node, style.white_space);
                             if let Some(perf_logger) = perf {
@@ -1895,11 +2496,18 @@ fn node_to_flowables(
                             } else {
                                 let t_transform = std::time::Instant::now();
                                 let text = apply_text_transform(&text, style.text_transform);
+                                let text_style = text_style_for_flow_text(&style);
                                 let initial_letter =
                                     first_letter_style.as_ref().and_then(|pseudo_style| {
-                                        let value = pseudo_style.initial_letter?;
-                                        let first = text.chars().next()?;
-                                        let end = first.len_utf8();
+                                        let first_style = text_style_for_flow_text(pseudo_style);
+                                        let material = pseudo_style.initial_letter.is_some()
+                                            || first_style != text_style
+                                            || pseudo_style.background_color.is_some()
+                                            || pseudo_style.text_transform != style.text_transform;
+                                        if !material {
+                                            return None;
+                                        }
+                                        let end = css_first_letter_prefix_end(&text)?;
                                         let first = apply_text_transform(
                                             &text[..end],
                                             pseudo_style.text_transform,
@@ -1907,15 +2515,30 @@ fn node_to_flowables(
                                         Some((
                                             first,
                                             text[end..].to_string(),
-                                            text_style_for_flow_text(pseudo_style),
-                                            value,
+                                            first_style,
+                                            pseudo_style.initial_letter,
+                                            pseudo_style.background_color,
+                                            pseudo_style.background_alpha,
                                         ))
                                     });
                                 if let Some(perf_logger) = perf {
                                     let ms = t_transform.elapsed().as_secs_f64() * 1000.0;
                                     perf_logger.log_span_ms("story.text.transform", doc_id, ms);
                                 }
-                                let text_style = text_style_for_flow_text(&style);
+                                let first_line =
+                                    first_line_style.as_ref().and_then(|pseudo_style| {
+                                        let pseudo_text_style =
+                                            text_style_for_flow_text(pseudo_style);
+                                        (pseudo_text_style != text_style
+                                            || pseudo_style.background_color.is_some()
+                                            || pseudo_style.text_transform != style.text_transform)
+                                            .then_some((
+                                                pseudo_text_style,
+                                                pseudo_style.background_color,
+                                                pseudo_style.background_alpha,
+                                                pseudo_style.text_transform,
+                                            ))
+                                    });
                                 let t_glyph = std::time::Instant::now();
                                 report_missing_glyphs(
                                     report.as_deref_mut(),
@@ -1923,14 +2546,36 @@ fn node_to_flowables(
                                     &text_style,
                                     &text,
                                 );
+                                if let Some((first, _, first_style, _, _, _)) = &initial_letter {
+                                    report_missing_glyphs(
+                                        report.as_deref_mut(),
+                                        font_registry.as_deref(),
+                                        first_style,
+                                        first,
+                                    );
+                                }
+                                if let Some((first_style, _, _, transform)) = &first_line {
+                                    let transformed = apply_text_transform(&text, *transform);
+                                    report_missing_glyphs(
+                                        report.as_deref_mut(),
+                                        font_registry.as_deref(),
+                                        first_style,
+                                        &transformed,
+                                    );
+                                }
                                 if let Some(perf_logger) = perf {
                                     let ms = t_glyph.elapsed().as_secs_f64() * 1000.0;
                                     perf_logger.log_span_ms("story.glyph.report", doc_id, ms);
                                 }
                                 let paragraph_text = initial_letter
                                     .as_ref()
-                                    .map(|(_, remainder, _, _)| remainder.clone())
+                                    .map(|(_, remainder, _, _, _, _)| remainder.clone())
                                     .unwrap_or_else(|| text.clone());
+                                let round_baseline = css_direct_text_prefers_nearest_baseline_snap(
+                                    &text_style,
+                                    font_registry.as_deref(),
+                                );
+                                let block_owns_top_overflow = text_style.text_shadows.is_empty();
                                 let mut paragraph = Paragraph::new(paragraph_text)
                                     .with_style(text_style)
                                     .with_align(text_align_from_style(&style))
@@ -1946,12 +2591,45 @@ fn node_to_flowables(
                                     .with_pagination(style.pagination)
                                     .with_font_registry(font_registry.clone())
                                     .with_tag_role(role);
-                                if let Some((first, _, first_style, value)) = initial_letter {
-                                    paragraph =
-                                        paragraph.with_initial_letter(first, first_style, value);
+                                if let Some((
+                                    first_style,
+                                    background,
+                                    background_opacity,
+                                    transform,
+                                )) = first_line
+                                {
+                                    paragraph = paragraph.with_first_line_style(
+                                        first_style,
+                                        background,
+                                        background_opacity,
+                                        transform,
+                                    );
+                                }
+                                if let Some((
+                                    first,
+                                    _,
+                                    first_style,
+                                    value,
+                                    background,
+                                    background_opacity,
+                                )) = initial_letter
+                                {
+                                    paragraph = paragraph.with_first_letter(
+                                        first,
+                                        first_style,
+                                        value,
+                                        background,
+                                        background_opacity,
+                                    );
                                 }
                                 let items = vec![LayoutItem::Block {
-                                    flowable: Box::new(CssLineBoxFlowable::new(Box::new(paragraph)))
+                                    flowable: Box::new(
+                                        CssLineBoxFlowable::new(Box::new(paragraph))
+                                            .with_round_baseline(round_baseline)
+                                            .with_parent_positioned_top_overflow(
+                                                block_owns_top_overflow,
+                                            ),
+                                    )
                                         as Box<dyn Flowable>,
                                     flex_grow: 0.0,
                                     flex_shrink: 1.0,
@@ -2101,7 +2779,6 @@ fn node_to_flowables(
                             .or_else(|| attrs.get("aria-label"))
                             .or_else(|| attrs.get("title"))
                             .map(|s| s.to_string());
-                        let width_spec = flex_item_basis(&style);
                         if let Some(xml) = svg_xml {
                             if svg_raster_fallback && crate::svg::svg_needs_raster_fallback(&xml) {
                                 if let Some(data_uri) =
@@ -2122,10 +2799,12 @@ fn node_to_flowables(
                                     let xml_len = xml.len() as u64;
                                     let t_svg = std::time::Instant::now();
                                     let svg = SvgFlowable::new_pt(width, height, xml)
-                                        .with_pagination(style.pagination)
                                         .with_form_enabled(svg_form)
+                                        .with_object_fit(style.object_fit)
+                                        .with_object_position(style.object_position)
+                                        .with_intrinsic_size(intrinsic_size)
+                                        .with_font_metrics(style.font_size, style.root_font_size)
                                         .with_visible(style.visibility.paints())
-                                        .with_mix_blend_mode(style.mix_blend_mode)
                                         .with_tag_role("Figure")
                                         .with_alt(alt);
                                     if let Some(perf_logger) = perf {
@@ -2137,22 +2816,18 @@ fn node_to_flowables(
                                             &[("bytes", xml_len)],
                                         );
                                     }
-                                    vec![LayoutItem::Block {
-                                        flowable: Box::new(svg) as Box<dyn Flowable>,
-                                        flex_grow: 0.0,
-                                        flex_shrink: 1.0,
-                                        width_spec,
-                                        order: 0,
-                                    }]
+                                    replaced_svg_image_flowables(svg, &style, replaced_sizing)
                                 }
                             } else {
                                 let xml_len = xml.len() as u64;
                                 let t_svg = std::time::Instant::now();
                                 let svg = SvgFlowable::new_pt(width, height, xml)
-                                    .with_pagination(style.pagination)
                                     .with_form_enabled(svg_form)
+                                    .with_object_fit(style.object_fit)
+                                    .with_object_position(style.object_position)
+                                    .with_intrinsic_size(intrinsic_size)
+                                    .with_font_metrics(style.font_size, style.root_font_size)
                                     .with_visible(style.visibility.paints())
-                                    .with_mix_blend_mode(style.mix_blend_mode)
                                     .with_tag_role("Figure")
                                     .with_alt(alt);
                                 if let Some(perf_logger) = perf {
@@ -2164,13 +2839,7 @@ fn node_to_flowables(
                                         &[("bytes", xml_len)],
                                     );
                                 }
-                                vec![LayoutItem::Block {
-                                    flowable: Box::new(svg) as Box<dyn Flowable>,
-                                    flex_grow: 0.0,
-                                    flex_shrink: 1.0,
-                                    width_spec,
-                                    order: 0,
-                                }]
+                                replaced_svg_image_flowables(svg, &style, replaced_sizing)
                             }
                         } else {
                             let image_source =
@@ -2652,26 +3321,39 @@ fn node_to_flowables(
                             style.background_sizes.clone(),
                             style.background_positions.clone(),
                             style.background_repeats.clone(),
+                            style.background_attachments.clone(),
                             style.background_origins.clone(),
                             style.background_clips.clone(),
                         )
                         .with_background_blend_modes(style.background_blend_modes.clone())
                         .with_clip_path(style.clip_path.clone())
                         .with_clip_path_reference_box(style.clip_path_reference_box)
+                        .with_legacy_clip(effective_legacy_clip(&style))
                         .with_box_shadows(style.box_shadows.clone())
                         .with_paint_filter(style.paint_filter.clone())
                         .with_backdrop_filter(style.backdrop_filter.clone())
                         .with_will_change_backdrop_root(style.will_change_backdrop_root)
+                        .with_mask(style.mask.clone())
                         .with_mask_backdrop_root(style.mask_backdrop_root)
                         .with_mix_blend_mode(style.mix_blend_mode)
                         .with_isolation(style.isolation)
                         .with_opacity(style.opacity)
                         .with_transforms(style.transform.clone())
                         .with_transform_origin(style.transform_origin)
-                        .with_overflow_hidden(matches!(
-                            style.overflow,
-                            OverflowMode::Hidden | OverflowMode::Clip
-                        ))
+                        .with_transform_box(style.transform_box)
+                        .with_perspective(style.perspective, style.perspective_origin)
+                        .with_transform_style(style.transform_style)
+                        .with_overflow_modes(style.overflow_x, style.overflow_y)
+                        .with_overflow_clip_margin(style.overflow_clip_margin)
+                        .with_scrollbar_gutter(
+                            style.scrollbar_gutter,
+                            style.direction,
+                            style.writing_mode,
+                        )
+                        .with_line_clamp(
+                            style.line_clamp,
+                            text_style_for_flow_text(&style).line_height,
+                        )
                         .with_self_visible(style.visibility.paints())
                         .with_pagination(style.pagination);
 
@@ -2778,8 +3460,9 @@ fn node_to_flowables(
                             }]
                         }
                     }
-                    "body" | "div" | "span" | "section" | "article" | "header" | "footer"
-                    | "aside" | "nav" | "main" | "blockquote" | "dl" | "dt" | "dd" => {
+                    "body" | "div" | "span" | "i" | "section" | "article" | "header" | "footer"
+                    | "aside" | "nav" | "main" | "blockquote" | "figure" | "figcaption" | "dl"
+                    | "dt" | "dd" => {
                         let dl_container_role = definition_list_container_role(info.tag.as_str());
                         let dl_inline_text_role =
                             definition_list_inline_text_role(info.tag.as_str());
@@ -2797,6 +3480,8 @@ fn node_to_flowables(
                                 svg_raster_fallback,
                                 perf,
                                 doc_id,
+                                &before_items,
+                                &after_items,
                             )
                         } else if matches!(
                             style.display,
@@ -2852,19 +3537,32 @@ fn node_to_flowables(
                             if !before.is_empty() || !after.is_empty() {
                                 text = format!("{before}{text}{after}");
                             }
+                            let container_options = ContainerCompilationOptions {
+                                suppress_single_used_column_rule: suppress_unused_multicol_rule,
+                            };
                             if text.is_empty() {
                                 if matches!(info.tag.as_str(), "dl") {
-                                    container_flowables_with_role(
+                                    container_flowables_with_role_options(
                                         Vec::new(),
                                         &style,
                                         dl_container_role,
+                                        container_options,
                                     )
                                 } else {
-                                    container_flowables(Vec::new(), &style)
+                                    container_flowables_with_options(
+                                        Vec::new(),
+                                        &style,
+                                        container_options,
+                                    )
                                 }
                             } else {
                                 let text = apply_text_transform(&text, style.text_transform);
                                 let text_style = text_style_for_flow_text(&style);
+                                let round_baseline = css_direct_text_prefers_nearest_baseline_snap(
+                                    &text_style,
+                                    font_registry.as_deref(),
+                                );
+                                let block_owns_top_overflow = text_style.text_shadows.is_empty();
                                 report_missing_glyphs(
                                     report.as_deref_mut(),
                                     font_registry.as_deref(),
@@ -2891,7 +3589,13 @@ fn node_to_flowables(
                                     paragraph
                                 };
                                 let items = vec![LayoutItem::Block {
-                                    flowable: Box::new(CssLineBoxFlowable::new(Box::new(paragraph)))
+                                    flowable: Box::new(
+                                        CssLineBoxFlowable::new(Box::new(paragraph))
+                                            .with_round_baseline(round_baseline)
+                                            .with_parent_positioned_top_overflow(
+                                                block_owns_top_overflow,
+                                            ),
+                                    )
                                         as Box<dyn Flowable>,
                                     flex_grow: 0.0,
                                     flex_shrink: 1.0,
@@ -2899,9 +3603,18 @@ fn node_to_flowables(
                                     order: 0,
                                 }];
                                 if matches!(info.tag.as_str(), "dl") {
-                                    container_flowables_with_role(items, &style, dl_container_role)
+                                    container_flowables_with_role_options(
+                                        items,
+                                        &style,
+                                        dl_container_role,
+                                        container_options,
+                                    )
                                 } else {
-                                    container_flowables(items, &style)
+                                    container_flowables_with_options(
+                                        items,
+                                        &style,
+                                        container_options,
+                                    )
                                 }
                             }
                         } else {
@@ -2955,9 +3668,24 @@ fn node_to_flowables(
                                 children
                             };
                             if dl_container_role.is_some() {
-                                container_flowables_with_role(children, &style, dl_container_role)
+                                container_flowables_with_role_options(
+                                    children,
+                                    &style,
+                                    dl_container_role,
+                                    ContainerCompilationOptions {
+                                        suppress_single_used_column_rule:
+                                            suppress_unused_multicol_rule,
+                                    },
+                                )
                             } else {
-                                container_flowables(children, &style)
+                                container_flowables_with_options(
+                                    children,
+                                    &style,
+                                    ContainerCompilationOptions {
+                                        suppress_single_used_column_rule:
+                                            suppress_unused_multicol_rule,
+                                    },
+                                )
                             }
                         }
                     }
@@ -2976,6 +3704,8 @@ fn node_to_flowables(
                                 svg_raster_fallback,
                                 perf,
                                 doc_id,
+                                &before_items,
+                                &after_items,
                             )
                         } else {
                             let children = collect_children(
@@ -3032,6 +3762,13 @@ fn node_to_flowables(
             }
             if !parent_is_flex && !matches!(style.clear_mode, ClearMode::None) {
                 flowables = wrap_clear(flowables, &style);
+            }
+            let named_strings = named_string_values_for_node(node, &style);
+            if let Some(running_name) = style.running_name.as_ref() {
+                flowables =
+                    wrap_running_element(flowables, &style, running_name.clone(), named_strings);
+            } else if !named_strings.is_empty() {
+                flowables = wrap_named_string_occurrence(flowables, named_strings);
             }
 
             let width_spec_override = if parent_is_flex {
@@ -3118,13 +3855,24 @@ fn node_to_flowables(
                     })
                     .collect();
             }
-            if matches!(
-                style.display,
-                DisplayMode::InlineBlock
-                    | DisplayMode::InlineTable
-                    | DisplayMode::InlineFlex
-                    | DisplayMode::InlineGrid
-            ) {
+            // Absolute/fixed boxes, floats, flex items, and grid items have a
+            // blockified outer display. Their inner formatting context remains
+            // inline-block/table/flex/grid, but converting the completed outer
+            // wrapper back into a LayoutItem::Inline would hide out-of-flow and
+            // z-index traits inside an anonymous line box.
+            let blockified_outer_display =
+                matches!(style.position, PositionMode::Absolute | PositionMode::Fixed)
+                    || !matches!(style.float_mode, FloatMode::None)
+                    || parent_is_flex;
+            if !blockified_outer_display
+                && matches!(
+                    style.display,
+                    DisplayMode::InlineBlock
+                        | DisplayMode::InlineTable
+                        | DisplayMode::InlineFlex
+                        | DisplayMode::InlineGrid
+                )
+            {
                 let valign = vertical_align_from_style(&style);
                 items = items
                     .into_iter()
@@ -3169,6 +3917,627 @@ fn serialize_svg_node(node: &NodeRef) -> String {
     let mut out = String::new();
     write_svg_xml(node, &mut out);
     out
+}
+
+fn resolve_inline_svg_mask_sources(node: &NodeRef, style: &mut ComputedStyle) {
+    if !style.mask.paints.iter().any(|paint| {
+        matches!(paint, BackgroundPaint::Image { source } if source.trim().starts_with('#'))
+    }) {
+        return;
+    }
+    let Some(root) = node.ancestors().last() else {
+        return;
+    };
+    if style.mask.modes.len() < style.mask.paints.len() {
+        style
+            .mask
+            .modes
+            .resize(style.mask.paints.len(), MaskMode::MatchSource);
+    }
+
+    for (index, paint) in style.mask.paints.iter_mut().enumerate() {
+        let BackgroundPaint::Image { source } = paint else {
+            continue;
+        };
+        let Some(id) = source.trim().strip_prefix('#') else {
+            continue;
+        };
+        if id.is_empty() {
+            continue;
+        }
+        let Ok(selected) = root.select_first(&format!("#{id}")) else {
+            continue;
+        };
+        let mask_node = selected.as_node();
+        let Some(mask_element) = mask_node.as_element() else {
+            continue;
+        };
+        if !mask_element
+            .name
+            .local
+            .as_ref()
+            .eq_ignore_ascii_case("mask")
+        {
+            continue;
+        }
+        let attrs = mask_element.attributes.borrow();
+        let x = attrs.get("x").unwrap_or("0");
+        let y = attrs.get("y").unwrap_or("0");
+        let width = attrs.get("width").unwrap_or("100");
+        let height = attrs.get("height").unwrap_or("100");
+        let mask_type = attrs
+            .get("mask-type")
+            .map(str::to_ascii_lowercase)
+            .unwrap_or_else(|| "luminance".to_string());
+        let mut xml = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"{x} {y} {width} {height}\">"
+        );
+        drop(attrs);
+        for child in mask_node.children() {
+            write_svg_xml(&child, &mut xml);
+        }
+        xml.push_str("</svg>");
+        *source = format!(
+            "data:image/svg+xml;base64,{}",
+            crate::base64::encode_standard(xml.as_bytes())
+        );
+        if style.mask.modes[index] == MaskMode::MatchSource {
+            style.mask.modes[index] = if mask_type == "alpha" {
+                MaskMode::Alpha
+            } else {
+                MaskMode::Luminance
+            };
+        }
+    }
+}
+
+fn resolve_inline_svg_clip_source(node: &NodeRef, style: &mut ComputedStyle) {
+    let Some(ClipPathShapeSpec::Url(source)) = style.clip_path.as_ref() else {
+        return;
+    };
+    let Some(id) = source.trim().strip_prefix('#').map(str::to_string) else {
+        return;
+    };
+    if id.is_empty() {
+        return;
+    }
+    let Some(root) = node.ancestors().last() else {
+        return;
+    };
+    let Ok(selected) = root.select_first(&format!("#{id}")) else {
+        return;
+    };
+    let clip_node = selected.as_node();
+    let Some(element) = clip_node.as_element() else {
+        return;
+    };
+    if !element.name.local.as_ref().eq_ignore_ascii_case("clipPath") {
+        return;
+    }
+
+    let object_bounding_box = node_attribute(clip_node, "clipPathUnits")
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("objectBoundingBox"));
+    let evenodd = clip_path_rule_is_evenodd(clip_node);
+    let children = clip_node
+        .children()
+        .filter(|child| child.as_element().is_some())
+        .collect::<Vec<_>>();
+    let Some(resolved) = resolve_single_svg_clip_shape(&children, object_bounding_box, evenodd)
+        .or_else(|| resolve_svg_clip_paths(&children, object_bounding_box, evenodd))
+    else {
+        return;
+    };
+
+    style.clip_path = Some(resolved);
+    style.clip_path_inset = None;
+}
+
+fn node_attribute(node: &NodeRef, name: &str) -> Option<String> {
+    let element = node.as_element()?;
+    element
+        .attributes
+        .borrow()
+        .map
+        .iter()
+        .find(|(key, _)| key.local.as_ref().eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.value.clone())
+}
+
+fn clip_path_rule_is_evenodd(clip_node: &NodeRef) -> bool {
+    std::iter::once(clip_node.clone())
+        .chain(clip_node.children())
+        .any(|node| {
+            node_attribute(&node, "clip-rule")
+                .is_some_and(|value| value.trim().eq_ignore_ascii_case("evenodd"))
+                || node_attribute(&node, "style").is_some_and(|value| {
+                    value.to_ascii_lowercase().split(';').any(|declaration| {
+                        declaration.split_once(':').is_some_and(|(name, value)| {
+                            name.trim() == "clip-rule" && value.trim() == "evenodd"
+                        })
+                    })
+                })
+        })
+}
+
+fn svg_bbox_fraction(raw: Option<String>, default: f32) -> Option<f32> {
+    let Some(raw) = raw else {
+        return Some(default);
+    };
+    let raw = raw.trim();
+    let value = if let Some(percent) = raw.strip_suffix('%') {
+        percent.trim().parse::<f32>().ok()? / 100.0
+    } else {
+        raw.parse::<f32>().ok()?
+    };
+    value.is_finite().then_some(value)
+}
+
+fn svg_user_pt(raw: Option<String>, default: f32) -> Option<Pt> {
+    let Some(raw) = raw else {
+        return Some(Pt::from_f32(default * 0.75));
+    };
+    let raw = raw.trim();
+    let number = raw.strip_suffix("px").unwrap_or(raw).trim();
+    let value = number.parse::<f32>().ok()?;
+    value
+        .is_finite()
+        .then_some(Pt::from_f32(value * (72.0 / 96.0)))
+}
+
+fn resolve_single_svg_clip_shape(
+    children: &[NodeRef],
+    object_bounding_box: bool,
+    _evenodd: bool,
+) -> Option<ClipPathShapeSpec> {
+    let [child] = children else {
+        return None;
+    };
+    let tag = child.as_element()?.name.local.to_string();
+    if object_bounding_box {
+        match tag.to_ascii_lowercase().as_str() {
+            "circle" => {
+                let cx = svg_bbox_fraction(node_attribute(child, "cx"), 0.0)?;
+                let cy = svg_bbox_fraction(node_attribute(child, "cy"), 0.0)?;
+                let radius = svg_bbox_fraction(node_attribute(child, "r"), 0.0)?.max(0.0);
+                Some(ClipPathShapeSpec::Ellipse(ClipPathEllipseSpec {
+                    radius_x: ClipPathShapeRadius::Length(LengthSpec::Percent(radius)),
+                    radius_y: ClipPathShapeRadius::Length(LengthSpec::Percent(radius)),
+                    center_x: LengthSpec::Percent(cx),
+                    center_y: LengthSpec::Percent(cy),
+                }))
+            }
+            "ellipse" => Some(ClipPathShapeSpec::Ellipse(ClipPathEllipseSpec {
+                radius_x: ClipPathShapeRadius::Length(LengthSpec::Percent(
+                    svg_bbox_fraction(node_attribute(child, "rx"), 0.0)?.max(0.0),
+                )),
+                radius_y: ClipPathShapeRadius::Length(LengthSpec::Percent(
+                    svg_bbox_fraction(node_attribute(child, "ry"), 0.0)?.max(0.0),
+                )),
+                center_x: LengthSpec::Percent(svg_bbox_fraction(node_attribute(child, "cx"), 0.0)?),
+                center_y: LengthSpec::Percent(svg_bbox_fraction(node_attribute(child, "cy"), 0.0)?),
+            })),
+            "rect" => Some(ClipPathShapeSpec::Xywh(ClipPathXywhSpec {
+                x: LengthSpec::Percent(svg_bbox_fraction(node_attribute(child, "x"), 0.0)?),
+                y: LengthSpec::Percent(svg_bbox_fraction(node_attribute(child, "y"), 0.0)?),
+                width: LengthSpec::Percent(
+                    svg_bbox_fraction(node_attribute(child, "width"), 0.0)?.max(0.0),
+                ),
+                height: LengthSpec::Percent(
+                    svg_bbox_fraction(node_attribute(child, "height"), 0.0)?.max(0.0),
+                ),
+                radius: None,
+            })),
+            _ => None,
+        }
+    } else {
+        match tag.to_ascii_lowercase().as_str() {
+            "circle" => Some(ClipPathShapeSpec::Circle(ClipPathCircleSpec {
+                radius: ClipPathShapeRadius::Length(LengthSpec::Absolute(
+                    svg_user_pt(node_attribute(child, "r"), 0.0)?.max(Pt::ZERO),
+                )),
+                center_x: LengthSpec::Absolute(svg_user_pt(node_attribute(child, "cx"), 0.0)?),
+                center_y: LengthSpec::Absolute(svg_user_pt(node_attribute(child, "cy"), 0.0)?),
+            })),
+            "ellipse" => Some(ClipPathShapeSpec::Ellipse(ClipPathEllipseSpec {
+                radius_x: ClipPathShapeRadius::Length(LengthSpec::Absolute(
+                    svg_user_pt(node_attribute(child, "rx"), 0.0)?.max(Pt::ZERO),
+                )),
+                radius_y: ClipPathShapeRadius::Length(LengthSpec::Absolute(
+                    svg_user_pt(node_attribute(child, "ry"), 0.0)?.max(Pt::ZERO),
+                )),
+                center_x: LengthSpec::Absolute(svg_user_pt(node_attribute(child, "cx"), 0.0)?),
+                center_y: LengthSpec::Absolute(svg_user_pt(node_attribute(child, "cy"), 0.0)?),
+            })),
+            "rect" => Some(ClipPathShapeSpec::Xywh(ClipPathXywhSpec {
+                x: LengthSpec::Absolute(svg_user_pt(node_attribute(child, "x"), 0.0)?),
+                y: LengthSpec::Absolute(svg_user_pt(node_attribute(child, "y"), 0.0)?),
+                width: LengthSpec::Absolute(
+                    svg_user_pt(node_attribute(child, "width"), 0.0)?.max(Pt::ZERO),
+                ),
+                height: LengthSpec::Absolute(
+                    svg_user_pt(node_attribute(child, "height"), 0.0)?.max(Pt::ZERO),
+                ),
+                radius: None,
+            })),
+            _ => None,
+        }
+    }
+}
+
+fn resolve_svg_clip_paths(
+    children: &[NodeRef],
+    object_bounding_box: bool,
+    evenodd: bool,
+) -> Option<ClipPathShapeSpec> {
+    if object_bounding_box {
+        return None;
+    }
+    let mut data = Vec::new();
+    let mut commands = Vec::new();
+    for child in children {
+        let Some(element) = child.as_element() else {
+            continue;
+        };
+        if !element.name.local.as_ref().eq_ignore_ascii_case("path") {
+            continue;
+        }
+        let path_data = node_attribute(child, "d")?;
+        for command in crate::svg::parse_svg_path_data(&path_data) {
+            let to_pt = |value: f32| Pt::from_f32(value * (72.0 / 96.0));
+            commands.push(match command {
+                crate::svg::SvgPathSegment::MoveTo(x, y) => ClipPathPathCommand::MoveTo {
+                    x: to_pt(x),
+                    y: to_pt(y),
+                },
+                crate::svg::SvgPathSegment::LineTo(x, y) => ClipPathPathCommand::LineTo {
+                    x: to_pt(x),
+                    y: to_pt(y),
+                },
+                crate::svg::SvgPathSegment::CurveTo(x1, y1, x2, y2, x, y) => {
+                    ClipPathPathCommand::CurveTo {
+                        x1: to_pt(x1),
+                        y1: to_pt(y1),
+                        x2: to_pt(x2),
+                        y2: to_pt(y2),
+                        x: to_pt(x),
+                        y: to_pt(y),
+                    }
+                }
+                crate::svg::SvgPathSegment::Close => ClipPathPathCommand::Close,
+            });
+        }
+        data.push(path_data);
+    }
+    if commands.is_empty() {
+        return None;
+    }
+    Some(ClipPathShapeSpec::Path(ClipPathPathSpec {
+        evenodd,
+        fill_rule_explicit: true,
+        data: data.join(" "),
+        commands,
+    }))
+}
+
+fn resolve_inline_svg_filter_sources(node: &NodeRef, style: &mut ComputedStyle) {
+    let Some(root) = node.ancestors().last() else {
+        return;
+    };
+    style.paint_filter = style
+        .paint_filter
+        .take()
+        .and_then(|filter| resolve_inline_svg_filter(&root, filter));
+    style.backdrop_filter = style
+        .backdrop_filter
+        .take()
+        .and_then(|filter| resolve_inline_svg_filter(&root, filter));
+}
+
+fn resolve_inline_svg_filter(
+    root: &NodeRef,
+    mut filter: PaintFilterSpec,
+) -> Option<PaintFilterSpec> {
+    for operation in &mut filter.operations {
+        let PaintFilterOperation::Url(source) = operation else {
+            continue;
+        };
+        let program = compile_inline_svg_filter(root, source)?;
+        *operation = PaintFilterOperation::Svg(program);
+    }
+    Some(filter)
+}
+
+fn compile_inline_svg_filter(root: &NodeRef, source: &str) -> Option<SvgFilterProgram> {
+    let id = source.trim().strip_prefix('#')?;
+    if id.is_empty() {
+        return None;
+    }
+    let selected = root.select_first(&format!("#{id}")).ok()?;
+    let filter_node = selected.as_node();
+    let element = filter_node.as_element()?;
+    if !element.name.local.as_ref().eq_ignore_ascii_case("filter") {
+        return None;
+    }
+
+    let region = SvgFilterRegion {
+        x: svg_bbox_fraction(node_attribute(filter_node, "x"), -0.1)?,
+        y: svg_bbox_fraction(node_attribute(filter_node, "y"), -0.1)?,
+        width: svg_bbox_fraction(node_attribute(filter_node, "width"), 1.2)?.max(0.0),
+        height: svg_bbox_fraction(node_attribute(filter_node, "height"), 1.2)?.max(0.0),
+    };
+    let linear_rgb = !node_attribute(filter_node, "color-interpolation-filters")
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("srgb"));
+    let mut nodes = Vec::new();
+    for child in filter_node
+        .children()
+        .filter(|node| node.as_element().is_some())
+    {
+        let primitive = compile_svg_filter_primitive(&child)?;
+        nodes.push(SvgFilterNode {
+            primitive,
+            result: node_attribute(&child, "result"),
+        });
+    }
+    (!nodes.is_empty()).then_some(SvgFilterProgram {
+        nodes,
+        region,
+        linear_rgb,
+    })
+}
+
+fn svg_filter_input(node: &NodeRef, attribute: &str) -> SvgFilterInput {
+    match node_attribute(node, attribute).as_deref().map(str::trim) {
+        Some(value) if value.eq_ignore_ascii_case("SourceGraphic") => SvgFilterInput::SourceGraphic,
+        Some(value) if value.eq_ignore_ascii_case("SourceAlpha") => SvgFilterInput::SourceAlpha,
+        Some(value) if !value.is_empty() => SvgFilterInput::Named(value.to_string()),
+        _ => SvgFilterInput::Previous,
+    }
+}
+
+fn svg_number_list(raw: Option<String>) -> Option<Vec<f32>> {
+    raw?.split(|ch: char| ch.is_ascii_whitespace() || ch == ',')
+        .filter(|part| !part.is_empty())
+        .map(|part| part.parse::<f32>().ok().filter(|value| value.is_finite()))
+        .collect()
+}
+
+fn svg_number(raw: Option<String>, default: f32) -> Option<f32> {
+    let Some(raw) = raw else {
+        return Some(default);
+    };
+    raw.trim()
+        .parse::<f32>()
+        .ok()
+        .filter(|value| value.is_finite())
+}
+
+fn svg_filter_pt(raw: Option<String>, default: f32) -> Option<Pt> {
+    svg_number(raw, default).map(|value| Pt::from_f32(value * (72.0 / 96.0)))
+}
+
+fn svg_filter_color(node: &NodeRef, name: &str, default: Color) -> (Color, f32) {
+    node_attribute(node, name)
+        .and_then(|value| crate::style::parse_color_string(&value))
+        .unwrap_or((default, 1.0))
+}
+
+fn svg_saturate_matrix(amount: f32) -> [f32; 20] {
+    let amount = amount.max(0.0);
+    [
+        0.213 + 0.787 * amount,
+        0.715 - 0.715 * amount,
+        0.072 - 0.072 * amount,
+        0.0,
+        0.0,
+        0.213 - 0.213 * amount,
+        0.715 + 0.285 * amount,
+        0.072 - 0.072 * amount,
+        0.0,
+        0.0,
+        0.213 - 0.213 * amount,
+        0.715 - 0.715 * amount,
+        0.072 + 0.928 * amount,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+    ]
+}
+
+fn svg_luminance_to_alpha_matrix() -> [f32; 20] {
+    [
+        0.0, 0.0, 0.0, 0.0, 0.0, // R
+        0.0, 0.0, 0.0, 0.0, 0.0, // G
+        0.0, 0.0, 0.0, 0.0, 0.0, // B
+        0.2125, 0.7154, 0.0721, 0.0, 0.0, // A
+    ]
+}
+
+fn compile_svg_component_transfer_function(node: &NodeRef) -> SvgComponentTransferFunction {
+    match node_attribute(node, "type")
+        .unwrap_or_else(|| "identity".to_string())
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "table" => SvgComponentTransferFunction::Table(
+            svg_number_list(node_attribute(node, "tableValues")).unwrap_or_default(),
+        ),
+        "discrete" => SvgComponentTransferFunction::Discrete(
+            svg_number_list(node_attribute(node, "tableValues")).unwrap_or_default(),
+        ),
+        "linear" => SvgComponentTransferFunction::Linear {
+            slope: svg_number(node_attribute(node, "slope"), 1.0).unwrap_or(1.0),
+            intercept: svg_number(node_attribute(node, "intercept"), 0.0).unwrap_or(0.0),
+        },
+        "gamma" => SvgComponentTransferFunction::Gamma {
+            amplitude: svg_number(node_attribute(node, "amplitude"), 1.0).unwrap_or(1.0),
+            exponent: svg_number(node_attribute(node, "exponent"), 1.0).unwrap_or(1.0),
+            offset: svg_number(node_attribute(node, "offset"), 0.0).unwrap_or(0.0),
+        },
+        _ => SvgComponentTransferFunction::Identity,
+    }
+}
+
+fn compile_svg_filter_primitive(node: &NodeRef) -> Option<SvgFilterPrimitive> {
+    let tag = node
+        .as_element()?
+        .name
+        .local
+        .to_string()
+        .to_ascii_lowercase();
+    let input = || svg_filter_input(node, "in");
+    match tag.as_str() {
+        "fegaussianblur" => {
+            let values = svg_number_list(node_attribute(node, "stdDeviation"))?;
+            let x = *values.first().unwrap_or(&0.0);
+            let y = *values.get(1).unwrap_or(&x);
+            Some(SvgFilterPrimitive::GaussianBlur {
+                input: input(),
+                std_deviation_x: Pt::from_f32(x.max(0.0) * 0.75),
+                std_deviation_y: Pt::from_f32(y.max(0.0) * 0.75),
+            })
+        }
+        "feoffset" => Some(SvgFilterPrimitive::Offset {
+            input: input(),
+            dx: svg_filter_pt(node_attribute(node, "dx"), 0.0)?,
+            dy: svg_filter_pt(node_attribute(node, "dy"), 0.0)?,
+        }),
+        "fecolormatrix" => {
+            let matrix = match node_attribute(node, "type")
+                .unwrap_or_else(|| "matrix".to_string())
+                .to_ascii_lowercase()
+                .as_str()
+            {
+                "saturate" => {
+                    svg_saturate_matrix(svg_number(node_attribute(node, "values"), 1.0)?.max(0.0))
+                }
+                "luminancetoalpha" => svg_luminance_to_alpha_matrix(),
+                "matrix" => svg_number_list(node_attribute(node, "values"))?
+                    .try_into()
+                    .ok()?,
+                _ => return None,
+            };
+            Some(SvgFilterPrimitive::ColorMatrix {
+                input: input(),
+                matrix,
+            })
+        }
+        "fecomponenttransfer" => {
+            let mut functions = [
+                SvgComponentTransferFunction::Identity,
+                SvgComponentTransferFunction::Identity,
+                SvgComponentTransferFunction::Identity,
+                SvgComponentTransferFunction::Identity,
+            ];
+            for child in node.children().filter(|node| node.as_element().is_some()) {
+                let channel = child
+                    .as_element()?
+                    .name
+                    .local
+                    .to_string()
+                    .to_ascii_lowercase();
+                let index = match channel.as_str() {
+                    "fefuncr" => 0,
+                    "fefuncg" => 1,
+                    "fefuncb" => 2,
+                    "fefunca" => 3,
+                    _ => continue,
+                };
+                functions[index] = compile_svg_component_transfer_function(&child);
+            }
+            Some(SvgFilterPrimitive::ComponentTransfer {
+                input: input(),
+                functions,
+            })
+        }
+        "feflood" => {
+            let (color, color_opacity) = svg_filter_color(node, "flood-color", Color::BLACK);
+            let opacity = svg_number(node_attribute(node, "flood-opacity"), 1.0)?.clamp(0.0, 1.0)
+                * color_opacity;
+            Some(SvgFilterPrimitive::Flood { color, opacity })
+        }
+        "fecomposite"
+            if node_attribute(node, "operator")
+                .is_some_and(|value| value.trim().eq_ignore_ascii_case("in")) =>
+        {
+            Some(SvgFilterPrimitive::CompositeIn {
+                input: input(),
+                input2: svg_filter_input(node, "in2"),
+            })
+        }
+        "femorphology" => {
+            let values = svg_number_list(node_attribute(node, "radius"))?;
+            let x = *values.first().unwrap_or(&0.0);
+            let y = *values.get(1).unwrap_or(&x);
+            Some(SvgFilterPrimitive::Morphology {
+                input: input(),
+                operator: if node_attribute(node, "operator")
+                    .is_some_and(|value| value.trim().eq_ignore_ascii_case("dilate"))
+                {
+                    SvgMorphologyOperator::Dilate
+                } else {
+                    SvgMorphologyOperator::Erode
+                },
+                radius_x: Pt::from_f32(x.max(0.0) * 0.75),
+                radius_y: Pt::from_f32(y.max(0.0) * 0.75),
+            })
+        }
+        "fedropshadow" => {
+            let (color, color_opacity) = svg_filter_color(node, "flood-color", Color::BLACK);
+            let opacity = svg_number(node_attribute(node, "flood-opacity"), 1.0)?.clamp(0.0, 1.0)
+                * color_opacity;
+            let deviations =
+                svg_number_list(node_attribute(node, "stdDeviation")).unwrap_or_else(|| vec![0.0]);
+            Some(SvgFilterPrimitive::DropShadow {
+                input: input(),
+                shadow: FilterDropShadowSpec {
+                    offset_x: svg_filter_pt(node_attribute(node, "dx"), 2.0)?,
+                    offset_y: svg_filter_pt(node_attribute(node, "dy"), 2.0)?,
+                    blur_radius: Pt::from_f32(
+                        deviations.iter().copied().sum::<f32>() / deviations.len().max(1) as f32
+                            * 0.75,
+                    ),
+                    color,
+                    opacity,
+                    color_is_current_color: false,
+                },
+            })
+        }
+        "femerge" => Some(SvgFilterPrimitive::Merge {
+            inputs: node
+                .children()
+                .filter(|child| {
+                    child.as_element().is_some_and(|element| {
+                        element
+                            .name
+                            .local
+                            .as_ref()
+                            .eq_ignore_ascii_case("feMergeNode")
+                    })
+                })
+                .map(|child| svg_filter_input(&child, "in"))
+                .collect(),
+        }),
+        "feblend" => Some(SvgFilterPrimitive::Blend {
+            input: input(),
+            input2: svg_filter_input(node, "in2"),
+            mode: match node_attribute(node, "mode")
+                .unwrap_or_else(|| "normal".to_string())
+                .to_ascii_lowercase()
+                .as_str()
+            {
+                "multiply" => crate::types::MixBlendMode::Multiply,
+                "screen" => crate::types::MixBlendMode::Screen,
+                "darken" => crate::types::MixBlendMode::Darken,
+                "lighten" => crate::types::MixBlendMode::Lighten,
+                _ => crate::types::MixBlendMode::Normal,
+            },
+        }),
+        _ => None,
+    }
 }
 
 fn write_svg_xml(node: &NodeRef, out: &mut String) {
@@ -3246,11 +4615,31 @@ fn text_align_mode_to_flow(align: TextAlignMode, direction: DirectionMode) -> Te
             DirectionMode::Rtl => TextAlign::Left,
             DirectionMode::Ltr => TextAlign::Right,
         },
+        TextAlignMode::MatchParent => match direction {
+            DirectionMode::Rtl => TextAlign::Right,
+            DirectionMode::Ltr => TextAlign::Left,
+        },
         TextAlignMode::Center => TextAlign::Center,
         TextAlignMode::Right => TextAlign::Right,
         TextAlignMode::Left => TextAlign::Left,
         TextAlignMode::Justify | TextAlignMode::JustifyAll => TextAlign::Justify,
     }
+}
+
+fn resolve_html_auto_direction(node: &NodeRef, style: &mut ComputedStyle) {
+    let is_auto = node
+        .as_element()
+        .and_then(|element| element.attributes.borrow().get("dir").map(str::to_string))
+        .is_some_and(|value| value.eq_ignore_ascii_case("auto"));
+    if !is_auto {
+        return;
+    }
+
+    style.direction = match unicode_bidi::get_base_direction(node.text_contents().as_str()) {
+        unicode_bidi::Direction::Rtl => DirectionMode::Rtl,
+        unicode_bidi::Direction::Ltr => DirectionMode::Ltr,
+        unicode_bidi::Direction::Mixed => style.direction,
+    };
 }
 
 fn text_align_from_style(style: &ComputedStyle) -> TextAlign {
@@ -3303,6 +4692,118 @@ fn inject_pseudo_items(
     }
 }
 
+fn starts_with_collapsible_dom_space(node: &NodeRef) -> bool {
+    for child in node.children() {
+        match child.data() {
+            NodeData::Text(text) => {
+                let text = text.borrow();
+                if text.is_empty() {
+                    continue;
+                }
+                return text
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| matches!(ch, ' ' | '\n' | '\r' | '\t' | '\u{000c}'));
+            }
+            NodeData::Element(element)
+                if matches!(element.name.local.as_ref(), "script" | "style") =>
+            {
+                continue;
+            }
+            NodeData::Comment(_) => continue,
+            _ => return false,
+        }
+    }
+    false
+}
+
+fn ends_with_collapsible_dom_space(node: &NodeRef) -> bool {
+    let children = node.children().collect::<Vec<_>>();
+    for child in children.iter().rev() {
+        match child.data() {
+            NodeData::Text(text) => {
+                let text = text.borrow();
+                if text.is_empty() {
+                    continue;
+                }
+                return text
+                    .chars()
+                    .next_back()
+                    .is_some_and(|ch| matches!(ch, ' ' | '\n' | '\r' | '\t' | '\u{000c}'));
+            }
+            NodeData::Element(element)
+                if matches!(element.name.local.as_ref(), "script" | "style") =>
+            {
+                continue;
+            }
+            NodeData::Comment(_) => continue,
+            _ => return false,
+        }
+    }
+    false
+}
+
+fn collapsible_boundary_space_item(
+    style: &ComputedStyle,
+    font_registry: Option<Arc<FontRegistry>>,
+) -> LayoutItem {
+    LayoutItem::Inline {
+        flowable: Box::new(CollapsibleSpaceFlowable::new(
+            text_style_for_flow_text(style),
+            font_registry,
+        )),
+        valign: anonymous_text_vertical_align(style),
+        flex_grow: 0.0,
+        flex_shrink: 1.0,
+        width_spec: None,
+        order: 0,
+    }
+}
+
+fn inject_transparent_inline_pseudo_items(
+    mut children: Vec<LayoutItem>,
+    before_items: &[LayoutItem],
+    after_items: &[LayoutItem],
+    node: &NodeRef,
+    style: &ComputedStyle,
+    font_registry: Option<Arc<FontRegistry>>,
+) -> Vec<LayoutItem> {
+    let preserve_before_space = !preserve_whitespace(style.white_space)
+        && !before_items.is_empty()
+        && starts_with_collapsible_dom_space(node)
+        && before_items.last().is_some_and(|item| match item {
+            LayoutItem::Inline { flowable, .. } => !flowable.is_collapsible_inline_space(),
+            LayoutItem::Block { .. } => false,
+        });
+    let preserve_after_space = !preserve_whitespace(style.white_space)
+        && !after_items.is_empty()
+        && ends_with_collapsible_dom_space(node)
+        && after_items.first().is_some_and(|item| match item {
+            LayoutItem::Inline { flowable, .. } => !flowable.is_collapsible_inline_space(),
+            LayoutItem::Block { .. } => false,
+        });
+    let mut merged = Vec::with_capacity(
+        before_items.len()
+            + children.len()
+            + after_items.len()
+            + usize::from(preserve_before_space)
+            + usize::from(preserve_after_space),
+    );
+    merged.extend(before_items.iter().cloned());
+    if preserve_before_space {
+        merged.push(collapsible_boundary_space_item(
+            style,
+            font_registry.clone(),
+        ));
+    }
+    merged.append(&mut children);
+    if preserve_after_space {
+        merged.push(collapsible_boundary_space_item(style, font_registry));
+    }
+    merged.extend(after_items.iter().cloned());
+    merged
+}
+
 fn pseudo_items_are_inline(before_items: &[LayoutItem], after_items: &[LayoutItem]) -> bool {
     before_items
         .iter()
@@ -3310,46 +4811,456 @@ fn pseudo_items_are_inline(before_items: &[LayoutItem], after_items: &[LayoutIte
         .all(|item| matches!(item, LayoutItem::Inline { .. }))
 }
 
-fn generated_content_text(style: &ComputedStyle, counters: &CounterState) -> Option<String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ResolvedGeneratedContentPart {
+    Text(String),
+    Image(String),
+    Leader(String),
+}
+
+fn push_resolved_generated_text(parts: &mut Vec<ResolvedGeneratedContentPart>, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    match parts.last_mut() {
+        Some(ResolvedGeneratedContentPart::Text(existing)) => existing.push_str(text),
+        _ => parts.push(ResolvedGeneratedContentPart::Text(text.to_string())),
+    }
+}
+
+fn generated_content_parts(
+    style: &ComputedStyle,
+    counters: &mut CounterState,
+) -> Option<Vec<ResolvedGeneratedContentPart>> {
     let Some(parts) = &style.generated_content else {
-        return style.content.clone();
+        return style
+            .content
+            .as_ref()
+            .map(|text| vec![ResolvedGeneratedContentPart::Text(text.clone())]);
     };
-    let mut out = String::new();
+    let mut out = Vec::new();
     for part in parts {
         match part {
-            GeneratedContentPart::Text(text) => out.push_str(text),
+            GeneratedContentPart::Text(text) => push_resolved_generated_text(&mut out, text),
+            GeneratedContentPart::Image(source) => {
+                out.push(ResolvedGeneratedContentPart::Image(source.clone()));
+            }
+            GeneratedContentPart::Leader(pattern) => {
+                out.push(ResolvedGeneratedContentPart::Leader(pattern.clone()));
+            }
             GeneratedContentPart::Counter(counter) => {
-                out.push_str(&generated_counter_text(
-                    counter,
-                    counters.get(&counter.name),
-                ));
+                push_resolved_generated_text(
+                    &mut out,
+                    &generated_counter_text(counter, counters.get(&counter.name)),
+                );
             }
             GeneratedContentPart::Counters(counter) => {
-                out.push_str(&generated_counters_text(
-                    counter,
-                    &counters.get_all(&counter.name),
-                ));
+                push_resolved_generated_text(
+                    &mut out,
+                    &generated_counters_text(counter, &counters.get_all(&counter.name)),
+                );
+            }
+            GeneratedContentPart::TargetText(target) => {
+                if let Some(text) = counters.target_text(target) {
+                    push_resolved_generated_text(&mut out, text);
+                }
+            }
+            GeneratedContentPart::TargetCounter(counter) => {
+                let value = if counter.name.eq_ignore_ascii_case("page") {
+                    counters
+                        .target_page(&counter.target)
+                        .and_then(|page| i32::try_from(page).ok())
+                        .unwrap_or(0)
+                } else {
+                    0
+                };
+                push_resolved_generated_text(
+                    &mut out,
+                    &generated_counter_text(
+                        &GeneratedCounterContent {
+                            name: counter.name.clone(),
+                            style: counter.style.clone(),
+                        },
+                        value,
+                    ),
+                );
+            }
+            GeneratedContentPart::OpenQuote => {
+                if let Some(quote) = counters.open_quote(&style.quotes, true) {
+                    push_resolved_generated_text(&mut out, &quote);
+                }
+            }
+            GeneratedContentPart::CloseQuote => {
+                if let Some(quote) = counters.close_quote(&style.quotes, true) {
+                    push_resolved_generated_text(&mut out, &quote);
+                }
+            }
+            GeneratedContentPart::NoOpenQuote => {
+                counters.open_quote(&style.quotes, false);
+            }
+            GeneratedContentPart::NoCloseQuote => {
+                counters.close_quote(&style.quotes, false);
             }
         }
     }
     Some(out)
 }
 
+fn generated_content_text(style: &ComputedStyle, counters: &mut CounterState) -> Option<String> {
+    generated_content_parts(style, counters).map(|parts| {
+        let mut text = String::new();
+        for part in parts {
+            if let ResolvedGeneratedContentPart::Text(value) = part {
+                text.push_str(&value);
+            }
+        }
+        text
+    })
+}
+
+fn pseudo_inline_text_paint_phase_y(pseudo: crate::style::PseudoTarget, style: &TextStyle) -> Pt {
+    // Chromium's generated synthetic-bold glyph programs land slightly ahead
+    // of ordinary DOM text on the CSS raster grid. Regular registered-font
+    // counter text does not use that Type 3 phase. The closing pseudo has the
+    // later inline cursor phase, so it needs the larger correction. Keep these
+    // in fixed point; they are paint offsets and never alter line measurement.
+    let synthetic_bold = style.font_synthesis_weight
+        && !style.font_face_satisfies_weight
+        && style.font_weight >= 600;
+    if !synthetic_bold {
+        return Pt::ZERO;
+    }
+    match pseudo {
+        crate::style::PseudoTarget::Before => -Pt::from_milli_i64(75),
+        crate::style::PseudoTarget::After => -Pt::from_milli_i64(225),
+        _ => Pt::ZERO,
+    }
+}
+
+fn phase_inline_pseudo_text(
+    paragraph: Paragraph,
+    pseudo: crate::style::PseudoTarget,
+    style: &TextStyle,
+) -> Paragraph {
+    let phase_y = pseudo_inline_text_paint_phase_y(pseudo, style);
+    paragraph.with_paint_offset_y(phase_y)
+}
+
+fn generated_content_image_flowable(
+    source: &str,
+    style: &ComputedStyle,
+    asset_bundle: Option<&AssetBundle>,
+    svg_form: bool,
+    svg_raster_fallback: bool,
+) -> Option<Box<dyn Flowable>> {
+    let source = source.trim();
+    if source.is_empty() {
+        return None;
+    }
+    let svg_xml = load_svg_xml_from_image_source(asset_bundle, source);
+    let intrinsic_size = raster_image_intrinsic_dimensions(asset_bundle, source)
+        .map(|(width, height)| {
+            (
+                Pt::from_f32(width as f32 * 0.75),
+                Pt::from_f32(height as f32 * 0.75),
+            )
+        })
+        .or_else(|| svg_xml.as_deref().and_then(svg_image_intrinsic_dimensions));
+    let fallback = style.font_size.max(Pt::from_f32(1.0));
+    let (width, height) = intrinsic_size.unwrap_or((fallback, fallback));
+
+    if let Some(xml) = svg_xml {
+        if svg_raster_fallback && crate::svg::svg_needs_raster_fallback(&xml) {
+            if let Some(data_uri) = crate::svg::rasterize_svg_to_data_uri(&xml, width, height) {
+                let image = ImageFlowable::new_pt(width, height, data_uri)
+                    .with_intrinsic_size(intrinsic_size)
+                    .with_object_fit(style.object_fit)
+                    .with_object_position(style.object_position)
+                    .with_image_rendering(style.image_rendering)
+                    .with_font_metrics(style.font_size, style.root_font_size)
+                    .with_pagination(style.pagination)
+                    .with_visible(style.visibility.paints())
+                    .with_mix_blend_mode(style.mix_blend_mode)
+                    .with_paint_filter(style.paint_filter.clone())
+                    .with_css_pixel_paint_origin_snap(true)
+                    .with_tag_role("Artifact");
+                return Some(Box::new(image));
+            }
+        }
+        let svg = SvgFlowable::new_pt(width, height, xml)
+            .with_intrinsic_size(intrinsic_size)
+            .with_font_metrics(style.font_size, style.root_font_size)
+            .with_pagination(style.pagination)
+            .with_form_enabled(svg_form)
+            .with_visible(style.visibility.paints())
+            .with_mix_blend_mode(style.mix_blend_mode)
+            .with_tag_role("Artifact");
+        return Some(Box::new(svg));
+    }
+
+    let image_source =
+        renderable_image_source(asset_bundle, source).unwrap_or_else(|| source.to_string());
+    let image = ImageFlowable::new_pt(width, height, image_source)
+        .with_intrinsic_size(intrinsic_size)
+        .with_object_fit(style.object_fit)
+        .with_object_position(style.object_position)
+        .with_image_rendering(style.image_rendering)
+        .with_font_metrics(style.font_size, style.root_font_size)
+        .with_pagination(style.pagination)
+        .with_visible(style.visibility.paints())
+        .with_mix_blend_mode(style.mix_blend_mode)
+        .with_paint_filter(style.paint_filter.clone())
+        .with_css_pixel_paint_origin_snap(true)
+        .with_tag_role("Artifact");
+    Some(Box::new(image))
+}
+
+fn generated_content_part_text_items(
+    text: &str,
+    style: &ComputedStyle,
+    font_registry: Option<Arc<FontRegistry>>,
+    report: Option<&mut GlyphCoverageReport>,
+    pseudo: crate::style::PseudoTarget,
+) -> Vec<LayoutItem> {
+    let text = apply_text_transform(text, style.text_transform);
+    let text = normalize_text(&text, style.white_space, false);
+    if text.is_empty() {
+        return Vec::new();
+    }
+    let text_style = text_style_for_flow_text(style);
+    report_missing_glyphs(report, font_registry.as_deref(), &text_style, &text);
+    let valign = vertical_align_from_style(style);
+    let make_item = |flowable: Box<dyn Flowable>| LayoutItem::Inline {
+        flowable,
+        valign,
+        flex_grow: style.flex_grow,
+        flex_shrink: style.flex_shrink,
+        width_spec: flex_item_basis(style),
+        order: 0,
+    };
+
+    if preserve_whitespace(style.white_space) {
+        let paragraph = Paragraph::new(text)
+            .with_style(text_style.clone())
+            .with_align(text_align_from_style(style))
+            .with_last_align(text_align_last_from_style(style))
+            .with_whitespace(true, no_wrap(style))
+            .with_break_spaces(matches!(style.white_space, WhiteSpaceMode::BreakSpaces))
+            .with_pagination(style.pagination)
+            .with_font_registry(font_registry);
+        return vec![make_item(Box::new(phase_inline_pseudo_text(
+            paragraph,
+            pseudo,
+            &text_style,
+        )))];
+    }
+
+    let leading_space = text.starts_with(' ');
+    let trailing_space = text.ends_with(' ');
+    let core = text.trim_matches(' ');
+    let mut items = Vec::with_capacity(3);
+    if leading_space || (core.is_empty() && trailing_space) {
+        items.push(make_item(Box::new(CollapsibleSpaceFlowable::new(
+            text_style.clone(),
+            font_registry.clone(),
+        ))));
+    }
+    if !core.is_empty() {
+        let paragraph = Paragraph::new(core)
+            .with_style(text_style.clone())
+            .with_align(text_align_from_style(style))
+            .with_last_align(text_align_last_from_style(style))
+            .with_whitespace(false, no_wrap(style))
+            .with_pagination(style.pagination)
+            .with_font_registry(font_registry.clone());
+        items.push(make_item(Box::new(phase_inline_pseudo_text(
+            paragraph,
+            pseudo,
+            &text_style,
+        ))));
+    }
+    if trailing_space && !core.is_empty() {
+        items.push(make_item(Box::new(CollapsibleSpaceFlowable::new(
+            text_style,
+            font_registry,
+        ))));
+    }
+    items
+}
+
+fn pseudo_image_content_items(
+    parts: &[ResolvedGeneratedContentPart],
+    style: &ComputedStyle,
+    font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<&AssetBundle>,
+    mut report: Option<&mut GlyphCoverageReport>,
+    svg_form: bool,
+    svg_raster_fallback: bool,
+    pseudo: crate::style::PseudoTarget,
+) -> Vec<LayoutItem> {
+    let is_inline = matches!(
+        style.display,
+        DisplayMode::Inline
+            | DisplayMode::InlineBlock
+            | DisplayMode::InlineTable
+            | DisplayMode::InlineFlex
+            | DisplayMode::InlineGrid
+    );
+    let valign = vertical_align_from_style(style);
+    let mut children = Vec::new();
+    for part in parts {
+        match part {
+            ResolvedGeneratedContentPart::Text(text) => {
+                children.extend(generated_content_part_text_items(
+                    text,
+                    style,
+                    font_registry.clone(),
+                    report.as_deref_mut(),
+                    pseudo,
+                ));
+            }
+            ResolvedGeneratedContentPart::Image(source) => {
+                if let Some(flowable) = generated_content_image_flowable(
+                    source,
+                    style,
+                    asset_bundle,
+                    svg_form,
+                    svg_raster_fallback,
+                ) {
+                    children.push(LayoutItem::Inline {
+                        flowable,
+                        valign,
+                        flex_grow: style.flex_grow,
+                        flex_shrink: style.flex_shrink,
+                        width_spec: None,
+                        order: 0,
+                    });
+                }
+            }
+            ResolvedGeneratedContentPart::Leader(pattern) => {
+                let text_style = text_style_for_flow_text(style);
+                report_missing_glyphs(
+                    report.as_deref_mut(),
+                    font_registry.as_deref(),
+                    &text_style,
+                    pattern,
+                );
+                let leader =
+                    LeaderFlowable::new(pattern, text_style.clone(), font_registry.clone())
+                        .with_pagination(style.pagination)
+                        .with_paint_offset_y(pseudo_inline_text_paint_phase_y(pseudo, &text_style));
+                children.push(LayoutItem::Inline {
+                    flowable: Box::new(leader),
+                    valign,
+                    flex_grow: style.flex_grow,
+                    flex_shrink: style.flex_shrink,
+                    width_spec: None,
+                    order: 0,
+                });
+            }
+        }
+    }
+    if children.is_empty() {
+        return Vec::new();
+    }
+
+    let has_inline_box_paint = style.margin != EdgeSizes::zero()
+        || style.padding != EdgeSizes::zero()
+        || style.border_width != EdgeSizes::zero()
+        || style.border_image.source.is_some()
+        || style.background_color.is_some()
+        || style.background_paint.is_some()
+        || !style.background_paints.is_empty()
+        || style.border_radius != BorderRadiiSpec::zero()
+        || style.outline_visible
+        || style.box_shadow.is_some()
+        || style.paint_filter.is_some()
+        || style.opacity < 1.0 - 1.0e-6
+        || !style.transform.is_empty();
+    if matches!(style.display, DisplayMode::Inline) && !has_inline_box_paint {
+        // Width and height do not apply to a non-atomic inline pseudo box. The
+        // generated replaced child therefore keeps its intrinsic dimensions.
+        return children;
+    }
+
+    let mut box_style = style.clone();
+    if matches!(style.display, DisplayMode::Inline) {
+        box_style.width = LengthSpec::Auto;
+        box_style.height = LengthSpec::Auto;
+        box_style.min_width = LengthSpec::Auto;
+        box_style.max_width = LengthSpec::Auto;
+        box_style.min_height = LengthSpec::Auto;
+        box_style.max_height = LengthSpec::Auto;
+    }
+    let Some(flowable) = container_flowable_with_role(children, &box_style, None) else {
+        return Vec::new();
+    };
+    if is_inline {
+        vec![LayoutItem::Inline {
+            flowable,
+            valign,
+            flex_grow: style.flex_grow,
+            flex_shrink: style.flex_shrink,
+            width_spec: flex_item_basis(style),
+            order: 0,
+        }]
+    } else {
+        vec![LayoutItem::Block {
+            flowable,
+            flex_grow: style.flex_grow,
+            flex_shrink: style.flex_shrink,
+            width_spec: flex_item_basis(style),
+            order: 0,
+        }]
+    }
+}
+
 fn pseudo_content_items(
     style: &ComputedStyle,
     counters: &mut CounterState,
     font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<&AssetBundle>,
     report: Option<&mut GlyphCoverageReport>,
+    svg_form: bool,
+    svg_raster_fallback: bool,
+    pseudo: crate::style::PseudoTarget,
 ) -> Vec<LayoutItem> {
     if !style_can_mutate_counters(style) {
         return Vec::new();
     }
     apply_style_counters(style, counters);
-    let Some(content) = generated_content_text(style, counters) else {
+    let Some(parts) = generated_content_parts(style, counters) else {
         return Vec::new();
     };
+    if parts.iter().any(|part| {
+        matches!(
+            part,
+            ResolvedGeneratedContentPart::Image(_) | ResolvedGeneratedContentPart::Leader(_)
+        )
+    }) {
+        return pseudo_image_content_items(
+            &parts,
+            style,
+            font_registry,
+            asset_bundle,
+            report,
+            svg_form,
+            svg_raster_fallback,
+            pseudo,
+        );
+    }
+    let content = parts
+        .into_iter()
+        .filter_map(|part| match part {
+            ResolvedGeneratedContentPart::Text(text) => Some(text),
+            ResolvedGeneratedContentPart::Image(_) | ResolvedGeneratedContentPart::Leader(_) => {
+                None
+            }
+        })
+        .collect::<String>();
     let text = apply_text_transform(&content, style.text_transform);
     let text = normalize_text(&text, style.white_space, false);
+    let content_is_empty = text.is_empty();
     let text_style = text_style_for_flow_text(style);
     let has_styled_box = !matches!(style.width, LengthSpec::Auto)
         || !matches!(style.height, LengthSpec::Auto)
@@ -3410,7 +5321,11 @@ fn pseudo_content_items(
                 .with_whitespace(false, no_wrap(style))
                 .with_pagination(style.pagination)
                 .with_font_registry(font_registry.clone());
-            items.push(make_item(Box::new(paragraph) as Box<dyn Flowable>));
+            items.push(make_item(Box::new(phase_inline_pseudo_text(
+                paragraph,
+                pseudo,
+                &text_style,
+            ))));
         }
         if trailing_space && !core.is_empty() {
             items.push(make_item(Box::new(CollapsibleSpaceFlowable::new(
@@ -3422,6 +5337,7 @@ fn pseudo_content_items(
     }
 
     report_missing_glyphs(report, font_registry.as_deref(), &text_style, &text);
+    let inline_paint_phase_y = pseudo_inline_text_paint_phase_y(pseudo, &text_style);
     let paragraph = Paragraph::new(text)
         .with_style(text_style)
         .with_align(text_align_from_style(style))
@@ -3430,33 +5346,66 @@ fn pseudo_content_items(
         .with_break_spaces(matches!(style.white_space, WhiteSpaceMode::BreakSpaces))
         .with_pagination(style.pagination)
         .with_font_registry(font_registry);
-    let flowable = if has_styled_box {
-        // Generated text inside a CSS box follows browser line-box phase: its
-        // centered glyph origin sits slightly before the raw PDF text origin.
-        // Keep the adjustment in layout units so it remains deterministic at
-        // every raster resolution.
-        let paragraph = RelativePositionedFlowable::new_pt(
-            Box::new(paragraph) as Box<dyn Flowable>,
-            LengthSpec::Absolute(-Pt::from_f32(0.25)),
-            LengthSpec::Absolute(-Pt::from_f32(0.5)),
-            LengthSpec::Auto,
-            LengthSpec::Auto,
-            style.font_size,
-            style.root_font_size,
-        )
-        .with_pagination(style.pagination);
-        let child = LayoutItem::Block {
-            flowable: Box::new(paragraph) as Box<dyn Flowable>,
-            flex_grow: 0.0,
-            flex_shrink: 1.0,
-            width_spec: None,
-            order: 0,
+    let mut flowable = if has_styled_box {
+        // Generated text inside an inline CSS box follows browser line-box
+        // phase: its centered glyph origin sits slightly before the raw PDF
+        // text origin. A block pseudo starts an ordinary block line box and
+        // must keep the unshifted content origin.
+        let children = if content_is_empty {
+            // An empty generated inline-block has no line box. Its synthesized
+            // inline baseline therefore comes from the bottom margin edge;
+            // retaining an empty Paragraph invents a font baseline and pulls
+            // the decorative box above adjacent text.
+            Vec::new()
+        } else {
+            let paragraph: Box<dyn Flowable> = if is_inline {
+                Box::new(
+                    RelativePositionedFlowable::new_pt(
+                        Box::new(paragraph) as Box<dyn Flowable>,
+                        LengthSpec::Absolute(-Pt::from_f32(0.25)),
+                        LengthSpec::Absolute(-Pt::from_f32(0.5)),
+                        LengthSpec::Auto,
+                        LengthSpec::Auto,
+                        style.font_size,
+                        style.root_font_size,
+                    )
+                    .with_pagination(style.pagination),
+                )
+            } else {
+                Box::new(paragraph)
+            };
+            vec![LayoutItem::Block {
+                flowable: paragraph,
+                flex_grow: 0.0,
+                flex_shrink: 1.0,
+                width_spec: None,
+                order: 0,
+            }]
         };
-        container_flowable_with_role(vec![child], style, None)
+        container_flowable_with_role(children, style, None)
             .expect("generated content with a styled box must produce a flowable")
     } else {
-        Box::new(paragraph) as Box<dyn Flowable>
+        if is_inline {
+            Box::new(paragraph.with_paint_offset_y(inline_paint_phase_y)) as Box<dyn Flowable>
+        } else {
+            Box::new(paragraph) as Box<dyn Flowable>
+        }
     };
+    if style_is_css_list_item(style) {
+        if let Some((label, outside_gap)) = native_list_bullet_flowable(style, false) {
+            let marker_inside = matches!(style.list_style_position, ListStylePositionMode::Inside);
+            let gap = if marker_inside {
+                let label_width = label.intrinsic_width().unwrap_or(Pt::ZERO);
+                (style.font_size.mul_ratio(4, 3) - label_width).max(Pt::ZERO)
+            } else {
+                outside_gap
+            };
+            let list_item = ListItemFlowable::new_with_label(label, flowable, gap)
+                .with_marker_inside(marker_inside)
+                .with_pagination(style.pagination);
+            flowable = Box::new(CssLineBoxFlowable::new(Box::new(list_item))) as Box<dyn Flowable>;
+        }
+    }
     if is_inline {
         let valign = vertical_align_from_style(style);
         vec![LayoutItem::Inline {
@@ -3485,13 +5434,41 @@ fn pseudo_items_for(
     ancestors: &[ElementInfo],
     counters: &mut CounterState,
     font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<&AssetBundle>,
     report: Option<&mut GlyphCoverageReport>,
+    svg_form: bool,
+    svg_raster_fallback: bool,
     pseudo: crate::style::PseudoTarget,
 ) -> Vec<LayoutItem> {
     let Some(pseudo_style) = resolver.compute_pseudo_style(info, style, ancestors, pseudo) else {
         return Vec::new();
     };
-    pseudo_content_items(&pseudo_style, counters, font_registry, report)
+    let items = pseudo_content_items(
+        &pseudo_style,
+        counters,
+        font_registry,
+        asset_bundle,
+        report,
+        svg_form,
+        svg_raster_fallback,
+        pseudo,
+    );
+    // Pseudo-elements generate real CSS boxes and participate in positioned
+    // layout exactly like element-backed boxes. Their content used to be
+    // injected before the ordinary element wrapper stage, which discarded
+    // both the inset geometry and stacking level (`::before` therefore painted
+    // at its parent's content origin and at z-index zero). Blockify and wrap
+    // positioned pseudo boxes before they enter the parent's child stream.
+    if matches!(
+        pseudo_style.position,
+        PositionMode::Absolute | PositionMode::Fixed
+    ) {
+        wrap_absolute(items, &pseudo_style)
+    } else if matches!(pseudo_style.position, PositionMode::Relative) {
+        wrap_relative(items, &pseudo_style)
+    } else {
+        items
+    }
 }
 
 fn pseudo_text_for(
@@ -3525,7 +5502,7 @@ fn marker_presentation(
     info: &ElementInfo,
     style: &ComputedStyle,
     ancestors: &[ElementInfo],
-    counters: &CounterState,
+    counters: &mut CounterState,
 ) -> (Option<Option<String>>, Option<ComputedStyle>) {
     let Some(marker_style) = resolver.compute_marker_style(info, style, ancestors) else {
         return (None, None);
@@ -3756,10 +5733,12 @@ fn inline_style_can_flatten_into(style: &ComputedStyle, parent: &ComputedStyle) 
         && style.paint_filter.is_none()
         && style.backdrop_filter.is_none()
         && style.clip_path.is_none()
+        && style.legacy_clip.is_none()
         && !style.outline_visible
         && style.opacity >= 1.0 - 1.0e-6
         && style.transform.is_empty()
         && matches!(style.position, PositionMode::Static)
+        && matches!(style.float_mode, FloatMode::None)
         && matches!(style.width, LengthSpec::Auto)
         && matches!(style.height, LengthSpec::Auto)
         && style.content.is_none()
@@ -3901,27 +5880,27 @@ fn coerce_items_to_inline_run(
                 } if *shift < Pt::ZERO && shift.to_milli_i64().rem_euclid(750) != 0
             )
         });
+    let parent_text_style = parent_style.to_text_style();
     let round_nested_baseline = snap_baseline_phase
         && !preserve_nested_floor
-        && parent_style
-            .to_text_style()
-            .line_height
-            .to_milli_i64()
-            .rem_euclid(750)
-            != 0
-        && items.iter().any(|item| {
-            matches!(
-                item,
-                LayoutItem::Inline {
-                    valign: VerticalAlign::Bottom,
-                    ..
-                }
-            )
-        });
+        && (css_print_line_prefers_nearest_baseline_snap(
+            &parent_text_style,
+            font_registry.as_deref(),
+        ) || (parent_text_style.line_height.to_milli_i64().rem_euclid(750) != 0
+            && items.iter().any(|item| {
+                matches!(
+                    item,
+                    LayoutItem::Inline {
+                        valign: VerticalAlign::Bottom,
+                        ..
+                    }
+                )
+            })));
     let wrap_line_box = |flowable: Box<dyn Flowable>| -> Box<dyn Flowable> {
         let line = CssLineBoxFlowable::new(flowable)
             .with_round_baseline(round_nested_baseline)
-            .with_nested_floor_compensation(preserve_nested_floor);
+            .with_nested_floor_compensation(preserve_nested_floor)
+            .with_parent_positioned_top_overflow(true);
         Box::new(line) as Box<dyn Flowable>
     };
     let make_strut = || {
@@ -4194,9 +6173,405 @@ fn css_display_list_item_flowables(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canvas::{Canvas, Command};
 
     fn approx_eq_pt(value: Pt, expected: f32) -> bool {
         (value.to_f32() - expected).abs() <= 0.01
+    }
+
+    #[test]
+    fn percentage_length_components_request_child_paint_snapping() {
+        assert!(length_has_percentage_component(LengthSpec::Percent(0.05)));
+        assert!(length_has_percentage_component(LengthSpec::Calc(
+            CalcLength {
+                abs: Pt::from_f32(2.0),
+                percent: 0.05,
+                em: 0.0,
+                rem: 0.0,
+            }
+        )));
+        assert!(!length_has_percentage_component(LengthSpec::Absolute(
+            Pt::from_f32(3.5)
+        )));
+    }
+
+    fn resolved_clip_path_from_html(html: &str, css: &str) -> ClipPathShapeSpec {
+        let document = parse_html(html);
+        let box_node = document
+            .select_first("#box")
+            .expect("select clipped box")
+            .as_node()
+            .clone();
+        let resolver = StyleResolver::new(css);
+        let parent = resolver.default_style();
+        let info = element_info(&box_node, resolver.has_sibling_selectors());
+        let mut style = resolver.compute_style(&info, &parent, None, &[]);
+        resolve_inline_svg_clip_source(&box_node, &mut style);
+        style.clip_path.expect("resolved clip path")
+    }
+
+    fn resolved_filter_from_html(html: &str, css: &str) -> PaintFilterSpec {
+        let document = parse_html(html);
+        let box_node = document
+            .select_first("#box")
+            .expect("select filtered box")
+            .as_node()
+            .clone();
+        let resolver = StyleResolver::new(css);
+        let parent = resolver.default_style();
+        let info = element_info(&box_node, resolver.has_sibling_selectors());
+        let mut style = resolver.compute_style(&info, &parent, None, &[]);
+        resolve_inline_svg_filter_sources(&box_node, &mut style);
+        style.paint_filter.expect("resolved filter program")
+    }
+
+    #[test]
+    fn inline_svg_object_bbox_circle_compiles_to_scalable_vector_clip() {
+        let clip = resolved_clip_path_from_html(
+            r#"<html><body><svg><defs><clipPath id="clip" clipPathUnits="objectBoundingBox"><circle cx="0.5" cy="0.5" r="0.42"/></clipPath></defs></svg><div id="box"></div></body></html>"#,
+            "#box { clip-path: url(#clip); }",
+        );
+        assert_eq!(
+            clip,
+            ClipPathShapeSpec::Ellipse(ClipPathEllipseSpec {
+                radius_x: ClipPathShapeRadius::Length(LengthSpec::Percent(0.42)),
+                radius_y: ClipPathShapeRadius::Length(LengthSpec::Percent(0.42)),
+                center_x: LengthSpec::Percent(0.5),
+                center_y: LengthSpec::Percent(0.5),
+            })
+        );
+    }
+
+    #[test]
+    fn inline_svg_user_space_path_preserves_evenodd_holes() {
+        let clip = resolved_clip_path_from_html(
+            r#"<html><body><svg><defs><clipPath id="ring" clipPathUnits="userSpaceOnUse"><path clip-rule="evenodd" d="M0 0H200V140H0Z M60 40H140V100H60Z"/></clipPath></defs></svg><div id="box"></div></body></html>"#,
+            "#box { clip-path: url(#ring); }",
+        );
+        let ClipPathShapeSpec::Path(path) = clip else {
+            panic!("expected vector path clip");
+        };
+        assert!(path.evenodd);
+        assert_eq!(path.commands.len(), 10);
+    }
+
+    #[test]
+    fn inline_svg_filter_compiles_to_ordered_vector_program() {
+        let filter = resolved_filter_from_html(
+            r##"<html><body><svg><defs><filter id="fx" x="-20%" width="140%"><feFlood flood-color="#1565c0" result="blue"/><feBlend in="SourceGraphic" in2="blue" mode="multiply"/></filter></defs></svg><div id="box"></div></body></html>"##,
+            "#box { filter: url(#fx); }",
+        );
+        let [PaintFilterOperation::Svg(program)] = filter.operations.as_slice() else {
+            panic!("expected compiled SVG filter operation");
+        };
+        assert!(program.linear_rgb);
+        assert_eq!(program.region.x, -0.2);
+        assert_eq!(program.region.width, 1.4);
+        assert_eq!(program.nodes.len(), 2);
+        assert_eq!(program.nodes[0].result.as_deref(), Some("blue"));
+        assert!(matches!(
+            program.nodes[1].primitive,
+            SvgFilterPrimitive::Blend {
+                input: SvgFilterInput::SourceGraphic,
+                input2: SvgFilterInput::Named(ref name),
+                mode: crate::types::MixBlendMode::Multiply,
+            } if name == "blue"
+        ));
+    }
+
+    #[test]
+    fn inline_svg_filter_retains_srgb_color_interpolation_mode() {
+        let filter = resolved_filter_from_html(
+            r#"<html><body><svg><defs><filter id="fx" color-interpolation-filters="sRGB"><feColorMatrix type="saturate" values="0"/></filter></defs></svg><div id="box"></div></body></html>"#,
+            "#box { filter: url(#fx); }",
+        );
+        let [PaintFilterOperation::Svg(program)] = filter.operations.as_slice() else {
+            panic!("expected compiled SVG filter operation");
+        };
+        assert!(!program.linear_rgb);
+        assert!(matches!(
+            program.nodes[0].primitive,
+            SvgFilterPrimitive::ColorMatrix { .. }
+        ));
+    }
+
+    #[test]
+    fn styled_empty_i_compiles_a_principal_box() {
+        let document = parse_html("<html><body><i id='swatch'></i></body></html>");
+        let resolver = StyleResolver::new(
+            "#swatch { display: block; position: absolute; width: 96px; height: 24px; background: red; }",
+        );
+        let root = resolver.default_style();
+        let swatch = document.select_first("#swatch").expect("styled i element");
+        let items = node_to_flowables(
+            swatch.as_node(),
+            &resolver,
+            &root,
+            &mut Vec::new(),
+            &mut CounterState::default(),
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        );
+
+        assert_eq!(items.len(), 1, "a styled empty phrasing element owns a box");
+        let LayoutItem::Block { flowable, .. } = &items[0] else {
+            panic!("display:block must compile a block principal box");
+        };
+        assert!(flowable.out_of_flow());
+    }
+
+    #[test]
+    fn css_filter_is_compiled_before_vector_clip_path() {
+        let document = parse_html("<html><body><div id='box'></div></body></html>");
+        let resolver = StyleResolver::new(
+            "#box { width: 120px; height: 120px; background: red; filter: blur(10px); clip-path: circle(46px at 60px 60px); }",
+        );
+        let root = resolver.default_style();
+        let node = document.select_first("#box").expect("filtered box");
+        let items = node_to_flowables(
+            node.as_node(),
+            &resolver,
+            &root,
+            &mut Vec::new(),
+            &mut CounterState::default(),
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        );
+        let [LayoutItem::Block { flowable, .. }] = items.as_slice() else {
+            panic!("expected one filtered block");
+        };
+        let page = Size {
+            width: Pt::from_f32(180.0),
+            height: Pt::from_f32(180.0),
+        };
+        let mut canvas = Canvas::new(page);
+        flowable.draw(&mut canvas, Pt::ZERO, Pt::ZERO, page.width, page.height);
+        let commands = &canvas.finish().pages[0].commands;
+        let clip = commands
+            .iter()
+            .position(|command| matches!(command, Command::ClipPath { .. }))
+            .expect("post-filter vector clip");
+        let filter = commands
+            .iter()
+            .position(|command| matches!(command, Command::DrawFilteredForm { .. }))
+            .expect("compiled filter surface");
+        assert!(clip < filter, "clip must consume the filtered surface");
+    }
+
+    #[test]
+    fn zero_sized_absolute_svg_definitions_do_not_consume_flow_height() {
+        let document = parse_html(
+            "<html><body><svg class='defs' width='0' height='0' aria-hidden='true'><defs><filter id='fx'><feColorMatrix type='saturate' values='0'/></filter></defs></svg></body></html>",
+        );
+        let resolver = StyleResolver::new(
+            "svg.defs { position: absolute; width: 0; height: 0; overflow: hidden; }",
+        );
+        let root = resolver.default_style();
+        let node = document.select_first("svg.defs").expect("definition svg");
+        let items = node_to_flowables(
+            node.as_node(),
+            &resolver,
+            &root,
+            &mut Vec::new(),
+            &mut CounterState::default(),
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        );
+        assert_eq!(items.len(), 1, "expected one positioned SVG carrier");
+        let flowable = match &items[0] {
+            LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => flowable,
+        };
+        assert!(flowable.out_of_flow());
+        assert_eq!(
+            flowable
+                .wrap(Pt::from_f32(180.0), Pt::from_f32(90.0))
+                .height,
+            Pt::ZERO
+        );
+    }
+
+    #[test]
+    fn synthetic_bold_inline_pseudo_text_uses_fixed_browser_paint_phases() {
+        let regular = TextStyle::default();
+        assert_eq!(
+            pseudo_inline_text_paint_phase_y(crate::style::PseudoTarget::Before, &regular),
+            Pt::ZERO
+        );
+
+        let mut synthetic_bold = regular.clone();
+        synthetic_bold.font_weight = 700;
+        assert_eq!(
+            pseudo_inline_text_paint_phase_y(crate::style::PseudoTarget::Before, &synthetic_bold,),
+            -Pt::from_milli_i64(75)
+        );
+        assert_eq!(
+            pseudo_inline_text_paint_phase_y(crate::style::PseudoTarget::After, &synthetic_bold,),
+            -Pt::from_milli_i64(225)
+        );
+
+        synthetic_bold.font_face_satisfies_weight = true;
+        assert_eq!(
+            pseudo_inline_text_paint_phase_y(crate::style::PseudoTarget::Before, &synthetic_bold,),
+            Pt::ZERO
+        );
+    }
+
+    #[test]
+    fn generated_quote_tokens_share_document_order_depth() {
+        let resolver = StyleResolver::new("");
+        let mut style = resolver.default_style();
+        style.quotes = vec![
+            ("<".to_string(), ">".to_string()),
+            ("[".to_string(), "]".to_string()),
+        ];
+        style.generated_content = Some(vec![
+            GeneratedContentPart::OpenQuote,
+            GeneratedContentPart::Text("outer ".to_string()),
+            GeneratedContentPart::OpenQuote,
+            GeneratedContentPart::Text("inner".to_string()),
+            GeneratedContentPart::CloseQuote,
+            GeneratedContentPart::CloseQuote,
+        ]);
+        let mut state = CounterState::default();
+        assert_eq!(
+            generated_content_text(&style, &mut state).as_deref(),
+            Some("<outer [inner]>")
+        );
+        assert_eq!(state.quote_depth, 0);
+
+        style.generated_content = Some(vec![GeneratedContentPart::NoOpenQuote]);
+        assert_eq!(
+            generated_content_text(&style, &mut state).as_deref(),
+            Some("")
+        );
+        assert_eq!(state.quote_depth, 1);
+        style.generated_content = Some(vec![
+            GeneratedContentPart::OpenQuote,
+            GeneratedContentPart::Text("nested".to_string()),
+            GeneratedContentPart::CloseQuote,
+        ]);
+        assert_eq!(
+            generated_content_text(&style, &mut state).as_deref(),
+            Some("[nested]")
+        );
+        assert_eq!(state.quote_depth, 1);
+        style.generated_content = Some(vec![GeneratedContentPart::NoCloseQuote]);
+        generated_content_text(&style, &mut state);
+        assert_eq!(state.quote_depth, 0);
+    }
+
+    #[test]
+    fn first_letter_prefix_includes_leading_and_trailing_punctuation() {
+        let text = "\u{201c}Q\u{201d}uoted";
+        let end = css_first_letter_prefix_end(text).expect("first-letter prefix");
+        assert_eq!(&text[..end], "\u{201c}Q\u{201d}");
+        assert_eq!(&text[end..], "uoted");
+        assert_eq!(
+            css_first_letter_prefix_end("Hello").map(|end| &"Hello"[..end]),
+            Some("H")
+        );
+    }
+
+    #[test]
+    fn multicol_span_boundaries_compile_independent_column_runs() {
+        let resolver = StyleResolver::new("");
+        let mut style = resolver.default_style();
+        style.column_count = 2;
+        style.column_count_auto = false;
+        style.gap = LengthSpec::Absolute(Pt::ZERO);
+        style.column_gap_normal = false;
+
+        let block = || {
+            Box::new(
+                ContainerFlowable::new_pt(Vec::new(), style.font_size, style.root_font_size)
+                    .with_height(LengthSpec::Absolute(Pt::from_f32(40.0))),
+            ) as Box<dyn Flowable>
+        };
+        let span = Box::new(
+            ContainerFlowable::new_pt(Vec::new(), style.font_size, style.root_font_size)
+                .with_height(LengthSpec::Absolute(Pt::from_f32(32.0)))
+                .with_column_span_all(true),
+        ) as Box<dyn Flowable>;
+
+        let compiled = compile_multicol_child_stream(
+            vec![block(), block(), span, block(), block()],
+            &style,
+            ContainerCompilationOptions::default(),
+        );
+
+        assert_eq!(compiled.len(), 3);
+        assert!(compiled[0].debug_name().contains("MultiColumnFlowable"));
+        assert!(compiled[1].spans_all_columns());
+        assert!(compiled[2].debug_name().contains("MultiColumnFlowable"));
+        assert_eq!(
+            compiled[0]
+                .wrap(Pt::from_f32(200.0), Pt::from_f32(500.0))
+                .height,
+            Pt::from_f32(40.0)
+        );
+        assert_eq!(
+            compiled[1]
+                .wrap(Pt::from_f32(200.0), Pt::from_f32(500.0))
+                .height,
+            Pt::from_f32(32.0)
+        );
+    }
+
+    #[test]
+    fn empty_block_column_span_survives_dom_lowering() {
+        let document = parse_html(
+            "<html><body><div class='cols'><div class='banner'></div></div></body></html>",
+        );
+        let resolver = StyleResolver::new(
+            ".cols { column-count: 3; } .banner { column-span: all; height: 40px; background: red; }",
+        );
+        let root = resolver.default_style();
+        let cols = document.select_first(".cols").expect("column container");
+        let mut cols_info = element_info(cols.as_node(), resolver.has_sibling_selectors());
+        let cols_style = resolver.compute_style(&cols_info, &root, None, &[]);
+        cols_info.apply_computed_container_style(&cols_style);
+        let banner = document.select_first(".banner").expect("spanning block");
+        let mut ancestors = vec![cols_info];
+        let mut counters = CounterState::default();
+        let items = node_to_flowables(
+            banner.as_node(),
+            &resolver,
+            &cols_style,
+            &mut ancestors,
+            &mut counters,
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        );
+
+        assert_eq!(items.len(), 1);
+        let flowable = match &items[0] {
+            LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => flowable,
+        };
+        assert!(
+            flowable.spans_all_columns(),
+            "column-span marker lost on {}",
+            flowable.debug_name()
+        );
     }
 
     #[test]
@@ -4232,6 +6607,71 @@ mod tests {
         assert_eq!(sizing.width, style.width);
         assert_eq!(sizing.nominal_width, Pt::from_f32(75.0));
         assert_eq!(sizing.nominal_height, Pt::from_f32(37.5));
+    }
+
+    #[test]
+    fn replaced_max_height_compiles_a_ratio_preserving_used_size() {
+        let resolver = StyleResolver::new("");
+        let mut style = resolver.default_style();
+        // 22px wide with an 18:100 intrinsic ratio tentatively produces a
+        // 122.222px height. A 118px cap transfers back to a 21.24px width.
+        style.width = LengthSpec::Absolute(Pt::from_f32(16.5));
+        style.height = LengthSpec::Auto;
+        style.max_height = LengthSpec::Absolute(Pt::from_f32(88.5));
+        let sizing = resolve_replaced_image_sizing(
+            &style,
+            None,
+            None,
+            Some((Pt::from_f32(13.5), Pt::from_f32(75.0))),
+        );
+
+        assert_eq!(sizing.width, LengthSpec::Absolute(Pt::from_f32(15.93)));
+        assert_eq!(sizing.height, LengthSpec::Absolute(Pt::from_f32(88.5)));
+        assert_eq!(sizing.nominal_width, Pt::from_f32(15.93));
+        assert_eq!(sizing.nominal_height, Pt::from_f32(88.5));
+    }
+
+    #[test]
+    fn replaced_constraint_table_preserves_ratio_until_constraints_conflict() {
+        let w = Pt::from_f32(100.0);
+        let h = Pt::from_f32(50.0);
+        assert_eq!(
+            constrain_replaced_size(w, h, None, None, None, Some(Pt::from_f32(40.0)),),
+            (Pt::from_f32(80.0), Pt::from_f32(40.0))
+        );
+        assert_eq!(
+            constrain_replaced_size(
+                w,
+                h,
+                None,
+                Some(Pt::from_f32(90.0)),
+                None,
+                Some(Pt::from_f32(40.0)),
+            ),
+            (Pt::from_f32(80.0), Pt::from_f32(40.0))
+        );
+        assert_eq!(
+            constrain_replaced_size(
+                w,
+                h,
+                Some(Pt::from_f32(120.0)),
+                None,
+                Some(Pt::from_f32(80.0)),
+                None,
+            ),
+            (Pt::from_f32(160.0), Pt::from_f32(80.0))
+        );
+        assert_eq!(
+            constrain_replaced_size(
+                w,
+                h,
+                Some(Pt::from_f32(120.0)),
+                None,
+                None,
+                Some(Pt::from_f32(40.0)),
+            ),
+            (Pt::from_f32(120.0), Pt::from_f32(40.0))
+        );
     }
 
     #[test]
@@ -4359,12 +6799,99 @@ mod tests {
             &mut CounterState::default(),
             None,
             None,
+            None,
+            false,
+            false,
             crate::style::PseudoTarget::Before,
         );
 
         assert_eq!(before.len(), 1);
         assert!(matches!(before[0], LayoutItem::Block { .. }));
         assert!(!pseudo_items_are_inline(&before, &[]));
+    }
+
+    #[test]
+    fn empty_styled_inline_pseudo_synthesizes_its_bottom_edge_baseline() {
+        let document = parse_html("<html><body><span class='item'>marker</span></body></html>");
+        let resolver = StyleResolver::new(
+            ".item::before { content: ''; display: inline-block; width: 18px; height: 18px; border: 2px solid black; }",
+        );
+        let root = resolver.default_style();
+        let item = document.select_first(".item").expect("item");
+        let info = element_info(item.as_node(), resolver.has_sibling_selectors());
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        let before = pseudo_items_for(
+            &resolver,
+            &info,
+            &style,
+            &[],
+            &mut CounterState::default(),
+            None,
+            None,
+            None,
+            false,
+            false,
+            crate::style::PseudoTarget::Before,
+        );
+
+        let LayoutItem::Inline { flowable, .. } = &before[0] else {
+            panic!("inline-block pseudo must remain inline")
+        };
+        let available = Pt::from_f32(200.0);
+        assert!(flowable.wrap(available, available).height > Pt::ZERO);
+        assert_eq!(
+            flowable.inline_baseline(available),
+            None,
+            "an empty inline-block has no internal line baseline"
+        );
+    }
+
+    #[test]
+    fn generated_list_item_compiles_a_native_square_marker() {
+        let document = parse_html("<html><body><div class='box'>Body</div></body></html>");
+        let resolver = StyleResolver::new(
+            ".box::before { content: 'Generated item'; display: list-item; list-style-type: square; color: red; }",
+        );
+        let root = resolver.default_style();
+        let item = document.select_first(".box").expect("box");
+        let info = element_info(item.as_node(), resolver.has_sibling_selectors());
+        let style = resolver.compute_style(&info, &root, None, &[]);
+        let before = pseudo_items_for(
+            &resolver,
+            &info,
+            &style,
+            &[],
+            &mut CounterState::default(),
+            None,
+            None,
+            None,
+            false,
+            false,
+            crate::style::PseudoTarget::Before,
+        );
+
+        let LayoutItem::Block { flowable, .. } = &before[0] else {
+            panic!("generated list-item must be a block")
+        };
+        let available = Pt::from_f32(200.0);
+        let mut canvas = Canvas::new(Size {
+            width: available,
+            height: available,
+        });
+        flowable.draw(
+            &mut canvas,
+            Pt::from_f32(40.0),
+            Pt::ZERO,
+            available,
+            available,
+        );
+        assert!(canvas.finish().pages[0].commands.iter().any(|command| {
+            matches!(
+                command,
+                Command::DrawRect { width, height, .. }
+                    if *width > Pt::ZERO && *width == *height
+            )
+        }));
     }
 
     #[test]
@@ -4614,10 +7141,129 @@ mod tests {
             &mut counters,
             None,
             None,
+            None,
+            false,
+            false,
+            None,
+            None,
         )
         .expect("visible table-cell siblings should form one anonymous table");
 
         assert_eq!(items.len(), 1);
+    }
+
+    #[test]
+    fn replaced_sibling_follows_the_anonymous_authored_cell_row() {
+        let document = parse_html(
+            "<html><body><div class='own'><span class='token'>A</span><span class='token'>B</span><img class='asset' alt='' src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAECAIAAAA8r+mnAAAAIElEQVR42mM4IScHR3I9NnDEgFNCzu0EHN1ZJQJHOCUAni4lgeO2HLIAAAAASUVORK5CYII='></div></body></html>",
+        );
+        let resolver = StyleResolver::new(
+            ".own { height: 22px; white-space: nowrap; border-spacing: 3px; } \
+             .token { display: table-cell; vertical-align: middle; } \
+             .asset { display: inline-block; width: 34px; height: 24px; }",
+        );
+        let root = resolver.default_style();
+        let own = document.select_first(".own").expect("own");
+        let own_info = element_info(own.as_node(), false);
+        let own_style = resolver.compute_style(&own_info, &root, None, &[]);
+        let items = anonymous_table_cell_run_flowables(
+            own.as_node(),
+            &resolver,
+            &own_style,
+            std::slice::from_ref(&own_info),
+            &mut CounterState::default(),
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        )
+        .expect("the table-cell run should retain the trailing replaced sibling");
+        assert_eq!(items.len(), 2);
+        let flowable = ContainerFlowable::new_pt(
+            layout_children_to_flowables(items, None),
+            own_style.font_size,
+            own_style.root_font_size,
+        );
+        let page = Size {
+            width: Pt::from_f32(200.0),
+            height: Pt::from_f32(80.0),
+        };
+        let size = flowable.wrap(page.width, page.height);
+        let mut canvas = Canvas::new(page);
+        flowable.draw(&mut canvas, Pt::ZERO, Pt::ZERO, size.width, size.height);
+        let page = &canvas.finish().pages[0];
+        let text_position = |needle: &str| {
+            page.commands.iter().find_map(|command| match command {
+                Command::DrawString { text, x, y, .. } if text == needle => Some((*x, *y)),
+                _ => None,
+            })
+        };
+        let image_position = page.commands.iter().find_map(|command| match command {
+            Command::DrawImage { x, y, .. } => Some((*x, *y)),
+            _ => None,
+        });
+        let first = text_position("A").expect("first cell text");
+        let second = text_position("B").expect("second cell text");
+        let image = image_position.expect("trailing image");
+
+        assert!(first.0 < second.0, "authored cells must share one row");
+        assert!(
+            image.1 > first.1.max(second.1),
+            "the improper sibling follows the synthesized table row"
+        );
+    }
+
+    #[test]
+    fn anonymous_table_cells_compile_generated_counter_content() {
+        let document = parse_html(
+            "<html><body><div class='own'><span class='token'>Ag</span><span class='token'>Bb</span></div></body></html>",
+        );
+        let resolver = StyleResolver::new(
+            ".own { counter-reset: pair-item; } \
+             .token { display: table-cell; counter-increment: pair-item; } \
+             .token::before { content: counter(pair-item) '.'; color: #d62828; }",
+        );
+        let root = resolver.default_style();
+        let own = document.select_first(".own").expect("own");
+        let own_info = element_info(own.as_node(), false);
+        let own_style = resolver.compute_style(&own_info, &root, None, &[]);
+        let mut counters = CounterState::default();
+        apply_style_counters(&own_style, &mut counters);
+        let mut items = anonymous_table_cell_run_flowables(
+            own.as_node(),
+            &resolver,
+            &own_style,
+            std::slice::from_ref(&own_info),
+            &mut counters,
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        )
+        .expect("generated table-cell siblings should retain anonymous table fixup");
+        let flowable = match items.remove(0) {
+            LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => flowable,
+        };
+        let page = Size {
+            width: Pt::from_f32(200.0),
+            height: Pt::from_f32(80.0),
+        };
+        let mut canvas = Canvas::new(page);
+        flowable.draw(&mut canvas, Pt::ZERO, Pt::ZERO, page.width, page.height);
+        let red = Color::rgb(214.0 / 255.0, 40.0 / 255.0, 40.0 / 255.0);
+
+        assert!(
+            canvas.finish().pages[0]
+                .commands
+                .iter()
+                .any(|command| matches!(command, Command::SetFillColor(color) if *color == red))
+        );
     }
 
     #[test]
@@ -4651,6 +7297,11 @@ mod tests {
             &mut counters,
             None,
             None,
+            None,
+            false,
+            false,
+            None,
+            None,
         )
         .expect("table-cell siblings should form one anonymous table");
         let width = match &items[0] {
@@ -4669,6 +7320,11 @@ mod tests {
             &zero_style,
             &ancestors,
             &mut CounterState::default(),
+            None,
+            None,
+            None,
+            false,
+            false,
             None,
             None,
         )
@@ -4713,6 +7369,105 @@ mod tests {
                 .wrap(Pt::from_f32(100.0), Pt::from_f32(100.0))
                 .height,
             Pt::from_f32(9.5)
+        );
+    }
+
+    #[test]
+    fn generated_table_pseudos_participate_in_anonymous_table_fixup() {
+        let document = parse_html(
+            "<html><body><div class='table'><div class='own'>AB</div></div></body></html>",
+        );
+        let resolver = StyleResolver::new(
+            ".table { display: table; height: 20px; border-spacing: 3px; box-sizing: border-box; } \
+             .table::before { content: '['; } \
+             .table::after { content: ']'; }",
+        );
+        let root = resolver.default_style();
+        let table = document.select_first(".table").expect("table");
+        let mut counters = CounterState::default();
+        let mut ancestors = Vec::new();
+        let items = node_to_flowables(
+            table.as_node(),
+            &resolver,
+            &root,
+            &mut ancestors,
+            &mut counters,
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        );
+        let flowable = match items.as_slice() {
+            [LayoutItem::Block { flowable, .. }] => flowable,
+            _ => panic!("expected one generated table flowable"),
+        };
+        let page = Size {
+            width: Pt::from_f32(200.0),
+            height: Pt::from_f32(200.0),
+        };
+        let mut canvas = Canvas::new(page);
+        let size = flowable.wrap(page.width, page.height);
+        assert!(
+            size.height > Pt::from_f32(15.0),
+            "generated anonymous rows must expand a table beyond its authored minimum height: {size:?}"
+        );
+        flowable.draw(&mut canvas, Pt::ZERO, Pt::ZERO, size.width, size.height);
+        let rendered = canvas.finish();
+        let texts = rendered.pages[0]
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::DrawString { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert!(texts.contains(&"["), "missing table ::before in {texts:?}");
+        assert!(texts.contains(&"]"), "missing table ::after in {texts:?}");
+    }
+
+    #[test]
+    fn anonymous_table_height_minimum_is_bounded_by_max_height() {
+        let document = parse_html(
+            "<html><body><div class='table'><div class='own'></div></div></body></html>",
+        );
+        let resolver = StyleResolver::new(
+            ".table { display: table; height: 68px; max-height: 58px; \
+             border-spacing: 0; box-sizing: border-box; } \
+             .own { height: 10px; }",
+        );
+        let root = resolver.default_style();
+        let table = document.select_first(".table").expect("table");
+        let mut counters = CounterState::default();
+        let mut ancestors = Vec::new();
+        let items = node_to_flowables(
+            table.as_node(),
+            &resolver,
+            &root,
+            &mut ancestors,
+            &mut counters,
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        );
+        let flowable = match items.as_slice() {
+            [LayoutItem::Block { flowable, .. }] => flowable,
+            _ => panic!("expected one anonymous table flowable"),
+        };
+
+        assert_eq!(
+            flowable
+                .wrap(Pt::from_f32(200.0), Pt::from_f32(200.0))
+                .height,
+            Pt::from_f32(43.5),
+            "58 CSS px should cap the table's 68 CSS px minimum height"
         );
     }
 
@@ -4766,6 +7521,144 @@ mod tests {
             Pt::from_f32(31.5),
             "10px content plus 16px body padding on both block-axis edges"
         );
+    }
+
+    #[test]
+    fn html_absolute_siblings_paint_in_positive_z_index_order() {
+        let resolver = StyleResolver::new(
+            "* { box-sizing: border-box; margin: 0; padding: 0; } \
+             html, body { width: 120px; height: 120px; } \
+             .panel { position: absolute; z-index: 0; width: 100px; height: 100px; overflow: hidden; border: 4px solid #111827; background: #e5e7eb; } \
+             .panel::before { content: ''; display: block; position: absolute; z-index: 3; width: 80px; height: 80px; background: #ef233c; } \
+             .low { position: absolute; z-index: 2; width: 80px; height: 80px; background: #2563eb; }",
+        );
+        let story = html_to_story_with_resolver_and_fonts_and_report(
+            "<!doctype html><html><body><section class='panel'><div class='low'></div></section></body></html>",
+            &resolver,
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        );
+        let page = Size {
+            width: Pt::from_f32(90.0),
+            height: Pt::from_f32(90.0),
+        };
+        let mut canvas = Canvas::new(page);
+        for flowable in story {
+            flowable.draw(&mut canvas, Pt::ZERO, Pt::ZERO, page.width, page.height);
+        }
+        let low = Color::rgb(37.0 / 255.0, 99.0 / 255.0, 235.0 / 255.0);
+        let high = Color::rgb(239.0 / 255.0, 35.0 / 255.0, 60.0 / 255.0);
+        let paint_order = canvas.finish().pages[0]
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::SetFillColor(color) if *color == low => Some("low"),
+                Command::SetFillColor(color) if *color == high => Some("high"),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(paint_order, vec!["low", "high"]);
+    }
+
+    #[test]
+    fn absolute_replaced_sibling_retains_positive_z_index() {
+        let resolver = StyleResolver::new(
+            "* { box-sizing: border-box; margin: 0; padding: 0; } \
+             html, body { width: 90px; height: 90px; } \
+             .panel { position: absolute; z-index: 0; width: 80px; height: 80px; overflow: hidden; } \
+             .high { position: absolute; z-index: 3; width: 64px; height: 64px; } \
+             .low { position: absolute; z-index: 2; width: 64px; height: 64px; background: #2563eb; }",
+        );
+        let story = html_to_story_with_resolver_and_fonts_and_report(
+            "<!doctype html><html><body><section class='panel'><img class='high' alt='' src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAECAIAAAA8r+mnAAAAIElEQVR42mM4IScHR3I9NnDEgFNCzu0EHN1ZJQJHOCUAni4lgeO2HLIAAAAASUVORK5CYII='><div class='low'></div></section></body></html>",
+            &resolver,
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        );
+        let page = Size {
+            width: Pt::from_f32(90.0),
+            height: Pt::from_f32(90.0),
+        };
+        let mut canvas = Canvas::new(page);
+        for flowable in story {
+            flowable.draw(&mut canvas, Pt::ZERO, Pt::ZERO, page.width, page.height);
+        }
+        let low = Color::rgb(37.0 / 255.0, 99.0 / 255.0, 235.0 / 255.0);
+        let rendered = canvas.finish();
+        let paint_order = rendered.pages[0]
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::SetFillColor(color) if *color == low => Some("low"),
+                Command::DrawImage { .. } => Some("high"),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(paint_order, vec!["low", "high"]);
+    }
+
+    #[test]
+    fn overlapping_grid_items_use_order_modified_paint_order() {
+        std::thread::Builder::new()
+            .name("grid-order-paint-regression".to_string())
+            .stack_size(8 * 1024 * 1024)
+            .spawn(|| {
+                let resolver = StyleResolver::new(
+            "* { box-sizing: border-box; margin: 0; padding: 0; } \
+             html, body { width: 90px; height: 90px; } \
+             .grid { position: absolute; display: grid; grid-template: 80px / 80px; width: 80px; height: 80px; } \
+             .item { grid-area: 1 / 1; width: 80px; height: 80px; } \
+             .high { order: 2; background: #ef233c; } \
+             .low { order: 1; background: #2563eb; }",
+        );
+        let story = html_to_story_with_resolver_and_fonts_and_report(
+            "<!doctype html><html><body><section class='grid'><div class='item high'></div><div class='item low'></div></section></body></html>",
+            &resolver,
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        );
+        let page = Size {
+            width: Pt::from_f32(90.0),
+            height: Pt::from_f32(90.0),
+        };
+        let mut canvas = Canvas::new(page);
+        for flowable in story {
+            flowable.draw(&mut canvas, Pt::ZERO, Pt::ZERO, page.width, page.height);
+        }
+        let low = Color::rgb(37.0 / 255.0, 99.0 / 255.0, 235.0 / 255.0);
+        let high = Color::rgb(239.0 / 255.0, 35.0 / 255.0, 60.0 / 255.0);
+        let paint_order = canvas.finish().pages[0]
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::SetFillColor(color) if *color == low => Some("low"),
+                Command::SetFillColor(color) if *color == high => Some("high"),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+                assert_eq!(paint_order, vec!["low", "high"]);
+            })
+            .expect("spawn grid paint-order regression")
+            .join()
+            .expect("grid paint-order regression");
     }
 
     #[test]
@@ -4876,6 +7769,36 @@ mod tests {
         assert!(
             flowable.out_of_flow(),
             "position:absolute on an inline box must survive transparent-inline handling"
+        );
+    }
+
+    #[test]
+    fn absolute_terminal_baseline_rounding_uses_resolved_line_height_phase() {
+        let document = parse_html(
+            "<html><body><span class='normal'>A</span><span class='early'>B</span><span class='late'>C</span></body></html>",
+        );
+        let resolver = StyleResolver::new(
+            ".normal, .early, .late { position: absolute; right: 4px; bottom: 4px; } \
+             .early { line-height: 1.2; } \
+             .late { line-height: 1.35; }",
+        );
+        let root = resolver.default_style();
+
+        let computed = |selector: &str| {
+            let node = document.select_first(selector).expect("absolute token");
+            let info = element_info(node.as_node(), resolver.has_sibling_selectors());
+            resolver.compute_style(&info, &root, None, &[])
+        };
+
+        assert!(absolute_needs_terminal_baseline_rounding(&computed(
+            ".normal"
+        )));
+        assert!(absolute_needs_terminal_baseline_rounding(&computed(
+            ".early"
+        )));
+        assert!(
+            !absolute_needs_terminal_baseline_rounding(&computed(".late")),
+            "a late fractional line-height phase has already rounded upward"
         );
     }
 
@@ -5005,6 +7928,94 @@ mod tests {
             size.height,
             Pt::from_f32(31.5),
             "40px text plus a 2px border should form a 42px box with Base-14 metrics"
+        );
+    }
+
+    #[test]
+    fn direct_text_block_does_not_reapply_inline_top_overflow() {
+        let resolver = StyleResolver::new(
+            "* { margin: 0; padding: 0; } \
+             html, body, div { display: block; } \
+             .t { font-family: Helvetica; font-size: 42px; line-height: 1; }",
+        );
+        let story = html_to_story_with_resolver_and_fonts_and_report(
+            "<html><body><div class='t'>Direct</div></body></html>",
+            &resolver,
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        );
+        assert_eq!(story.len(), 1);
+
+        let page = Size {
+            width: Pt::from_f32(200.0),
+            height: Pt::from_f32(80.0),
+        };
+        let size = story[0].wrap(page.width, page.height);
+        let mut canvas = Canvas::new(page);
+        story[0].draw(&mut canvas, Pt::ZERO, Pt::ZERO, size.width, size.height);
+        let draw_y = canvas.finish().pages[0]
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                Command::DrawString { text, y, .. } if text == "Direct" => Some(*y),
+                _ => None,
+            })
+            .expect("direct text draw command");
+
+        assert_eq!(
+            draw_y,
+            Pt::from_f32(-6.75),
+            "the standalone block owns its line origin; inline-union overflow must not shift it down"
+        );
+    }
+
+    #[test]
+    fn direct_text_shadow_retains_its_shadow_form_line_phase() {
+        let resolver = StyleResolver::new(
+            "* { margin: 0; padding: 0; } \
+             html, body, div { display: block; } \
+             .t { font-family: Helvetica; font-size: 42px; line-height: 1; \
+                  text-shadow: 1px 1px 0 #000; }",
+        );
+        let story = html_to_story_with_resolver_and_fonts_and_report(
+            "<html><body><div class='t'>Shadow</div></body></html>",
+            &resolver,
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        );
+        assert_eq!(story.len(), 1);
+
+        let page = Size {
+            width: Pt::from_f32(200.0),
+            height: Pt::from_f32(80.0),
+        };
+        let size = story[0].wrap(page.width, page.height);
+        let mut canvas = Canvas::new(page);
+        story[0].draw(&mut canvas, Pt::ZERO, Pt::ZERO, size.width, size.height);
+        let draw_y = canvas.finish().pages[0]
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::DrawString { text, y, .. } if text == "Shadow" => Some(*y),
+                _ => None,
+            })
+            .last()
+            .expect("shadowed direct text draw command");
+
+        assert_eq!(
+            draw_y,
+            Pt::from_f32(-6.0),
+            "the shadow form keeps the inline-union phase shared by its source glyph run"
         );
     }
 
@@ -5795,7 +8806,10 @@ fn list_flowables(
                 ancestors,
                 &mut before_counter_probe,
                 font_registry.clone(),
+                asset_bundle.as_deref(),
                 report.as_deref_mut(),
+                svg_form,
+                svg_raster_fallback,
                 crate::style::PseudoTarget::Before,
             );
             let mut after_counter_probe = counters.clone();
@@ -5806,7 +8820,10 @@ fn list_flowables(
                 ancestors,
                 &mut after_counter_probe,
                 font_registry.clone(),
+                asset_bundle.as_deref(),
                 report.as_deref_mut(),
+                svg_form,
+                svg_raster_fallback,
                 crate::style::PseudoTarget::After,
             );
             let has_structured_pseudo = !before_items.is_empty() || !after_items.is_empty();
@@ -7448,8 +10465,44 @@ fn container_flowables(children: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<
     container_flowables_with_role(children, style, None)
 }
 
+#[derive(Clone, Copy)]
+struct ContainerCompilationOptions {
+    suppress_single_used_column_rule: bool,
+}
+
+impl Default for ContainerCompilationOptions {
+    fn default() -> Self {
+        Self {
+            suppress_single_used_column_rule: false,
+        }
+    }
+}
+
+fn container_flowables_with_options(
+    children: Vec<LayoutItem>,
+    style: &ComputedStyle,
+    options: ContainerCompilationOptions,
+) -> Vec<LayoutItem> {
+    container_flowables_with_role_options(children, style, None, options)
+}
+
 fn establishes_abs_containing_block(style: &ComputedStyle) -> bool {
     !matches!(style.position, PositionMode::Static) || !style.transform.is_empty()
+}
+
+fn establishes_stacking_context(style: &ComputedStyle) -> bool {
+    matches!(style.position, PositionMode::Fixed | PositionMode::Sticky)
+        || (!style.z_index_auto && !matches!(style.position, PositionMode::Static))
+        || style.opacity < 1.0 - 1.0e-6
+        || style.paint_filter_stacking_context
+        || style.backdrop_filter.is_some()
+        || !style.transform.is_empty()
+        || style.perspective.is_some()
+        || style.isolation
+        || !matches!(style.mix_blend_mode, crate::types::MixBlendMode::Normal)
+        || style.mask_backdrop_root
+        || style.will_change_backdrop_root
+        || style.clip_path.is_some()
 }
 
 fn mixes_inline_and_block_children(children: &[LayoutItem]) -> bool {
@@ -7498,10 +10551,110 @@ fn normal_flow_container_width(style: &ComputedStyle) -> LengthSpec {
     }
 }
 
+fn length_has_percentage_component(length: LengthSpec) -> bool {
+    match length {
+        LengthSpec::Percent(value) => value.abs() > f32::EPSILON,
+        LengthSpec::Calc(value) => value.percent.abs() > f32::EPSILON,
+        LengthSpec::Clamped(value) => value.value.percent.abs() > f32::EPSILON,
+        LengthSpec::FontRelative(value) => value.base.percent.abs() > f32::EPSILON,
+        _ => false,
+    }
+}
+
+fn compiled_multicol_run(
+    children: Vec<Box<dyn Flowable>>,
+    style: &ComputedStyle,
+    options: ContainerCompilationOptions,
+) -> Box<dyn Flowable> {
+    let suppress_single_used_column_rule = options.suppress_single_used_column_rule
+        || children.iter().any(|child| child.has_replaced_descendant());
+    Box::new(
+        MultiColumnFlowable::new_pt(
+            children,
+            style.column_count,
+            style.column_count_auto,
+            style.column_width,
+            style.column_fill,
+            style.direction,
+            style.gap,
+            style.column_gap_normal,
+            style.column_rule_width,
+            style.column_rule_style,
+            style.resolved_column_rule_color(),
+            style.column_rule_visible,
+            style.font_size,
+            style.root_font_size,
+        )
+        .with_writing_mode(style.writing_mode)
+        .with_column_item_inline_paint_snapping(matches!(
+            style.writing_mode,
+            WritingModeMode::HorizontalTb
+        ))
+        .with_single_used_column_rule_suppression(
+            suppress_single_used_column_rule && matches!(style.position, PositionMode::Static),
+        ),
+    )
+}
+
+fn compile_multicol_child_stream(
+    flowables: Vec<Box<dyn Flowable>>,
+    style: &ComputedStyle,
+    options: ContainerCompilationOptions,
+) -> Vec<Box<dyn Flowable>> {
+    if !flowables.iter().any(|child| child.spans_all_columns()) {
+        return vec![compiled_multicol_run(flowables, style, options)];
+    }
+
+    // A spanning child terminates the current column row, participates in the
+    // parent's ordinary block flow at full width, and starts a fresh balanced
+    // row afterward. Lower that structure once here so wrap/draw can reuse the
+    // same compiled runs instead of rediscovering span boundaries per page.
+    let mut compiled = Vec::new();
+    let mut run = Vec::new();
+    for child in flowables {
+        if child.spans_all_columns() {
+            if !run.is_empty() {
+                compiled.push(compiled_multicol_run(
+                    std::mem::take(&mut run),
+                    style,
+                    options,
+                ));
+            }
+            compiled.push(child);
+        } else {
+            run.push(child);
+        }
+    }
+    if !run.is_empty() {
+        compiled.push(compiled_multicol_run(run, style, options));
+    }
+    compiled
+}
+
 fn container_flowable_with_role(
     children: Vec<LayoutItem>,
     style: &ComputedStyle,
     role: Option<&str>,
+) -> Option<Box<dyn Flowable>> {
+    container_flowable_with_role_options(
+        children,
+        style,
+        role,
+        ContainerCompilationOptions::default(),
+    )
+}
+
+fn effective_legacy_clip(style: &ComputedStyle) -> Option<ClipPathRectSpec> {
+    matches!(style.position, PositionMode::Absolute | PositionMode::Fixed)
+        .then_some(style.legacy_clip)
+        .flatten()
+}
+
+fn container_flowable_with_role_options(
+    children: Vec<LayoutItem>,
+    style: &ComputedStyle,
+    role: Option<&str>,
+    options: ContainerCompilationOptions,
 ) -> Option<Box<dyn Flowable>> {
     let has_box = !matches!(style.width, LengthSpec::Auto)
         || !matches!(style.height, LengthSpec::Auto)
@@ -7514,6 +10667,7 @@ fn container_flowable_with_role(
         || style.background_color.is_some()
         || style.background_paint.is_some()
         || style.clip_path.is_some()
+        || style.legacy_clip.is_some()
         || style.box_shadow.is_some()
         || style.paint_filter.is_some()
         || style.backdrop_filter.is_some()
@@ -7535,9 +10689,14 @@ fn container_flowable_with_role(
             let mut container =
                 ContainerFlowable::new_pt(Vec::new(), style.font_size, style.root_font_size)
                     .with_establishes_abs_containing_block(establishes_abs_containing_block(style))
+                    .with_establishes_stacking_context(establishes_stacking_context(style))
                     .with_transforms(style.transform.clone())
                     .with_transform_origin(style.transform_origin)
+                    .with_transform_box(style.transform_box)
+                    .with_perspective(style.perspective, style.perspective_origin)
+                    .with_transform_style(style.transform_style)
                     .with_self_visible(style.visibility.paints())
+                    .with_column_span_all(matches!(style.column_span, ColumnSpanMode::All))
                     .with_pagination(style.pagination);
             if let Some(role) = role {
                 container = container.with_tag_role(role);
@@ -7555,32 +10714,41 @@ fn container_flowable_with_role(
         forced_line_height,
         no_wrap(style),
         !anonymous_block_lines,
+        anonymous_block_lines,
     );
-    if style.column_count > 1
+    let is_multicol_container = (style.column_count > 1
+        || !matches!(style.column_width, LengthSpec::Auto))
         && matches!(
             style.display,
             DisplayMode::Block | DisplayMode::FlowRoot | DisplayMode::InlineBlock
-        )
+        );
+    if is_multicol_container {
+        flowables = compile_multicol_child_stream(flowables, style, options);
+    }
+    if matches!(style.writing_mode, WritingModeMode::HorizontalTb)
+        && length_has_percentage_component(style.padding.left)
     {
-        flowables = vec![Box::new(MultiColumnFlowable::new_pt(
-            flowables,
-            style.column_count,
-            style.gap,
-            style.column_rule_width,
-            style.column_rule_style,
-            style.resolved_column_rule_color(),
-            style.column_rule_visible,
-            style.font_size,
-            style.root_font_size,
-        )) as Box<dyn Flowable>];
+        // LayoutNG retains the fractional content origin created by percentage
+        // padding, but snaps each in-flow child's painted border box to CSS
+        // pixels. Reuse the paint-only transform already used by grid items so
+        // text/replaced content keeps its fixed-point layout phase.
+        flowables = flowables
+            .into_iter()
+            .map(|child| child.with_grid_item_inline_paint_snap())
+            .collect();
     }
     let mut container = ContainerFlowable::new_pt(flowables, style.font_size, style.root_font_size)
         .with_establishes_abs_containing_block(establishes_abs_containing_block(style))
+        .with_establishes_stacking_context(establishes_stacking_context(style))
         .with_float_containment(
             matches!(style.display, DisplayMode::FlowRoot)
                 || matches!(style.overflow, OverflowMode::Hidden),
         )
         .with_margin(style.margin)
+        .with_inline_paint_snapping(
+            matches!(style.margin.left, LengthSpec::Auto)
+                && matches!(style.margin.right, LengthSpec::Auto),
+        )
         .with_border(
             style.border_width,
             style.border_color.unwrap_or(style.color),
@@ -7630,27 +10798,37 @@ fn container_flowable_with_role(
             style.background_sizes.clone(),
             style.background_positions.clone(),
             style.background_repeats.clone(),
+            style.background_attachments.clone(),
             style.background_origins.clone(),
             style.background_clips.clone(),
         )
         .with_background_blend_modes(style.background_blend_modes.clone())
         .with_clip_path(style.clip_path.clone())
         .with_clip_path_reference_box(style.clip_path_reference_box)
+        .with_legacy_clip(effective_legacy_clip(style))
         .with_box_shadows(style.box_shadows.clone())
         .with_paint_filter(style.paint_filter.clone())
         .with_backdrop_filter(style.backdrop_filter.clone())
         .with_will_change_backdrop_root(style.will_change_backdrop_root)
+        .with_mask(style.mask.clone())
         .with_mask_backdrop_root(style.mask_backdrop_root)
         .with_mix_blend_mode(style.mix_blend_mode)
         .with_isolation(style.isolation)
         .with_opacity(style.opacity)
         .with_transforms(style.transform.clone())
         .with_transform_origin(style.transform_origin)
-        .with_overflow_hidden(matches!(
-            style.overflow,
-            OverflowMode::Hidden | OverflowMode::Clip
-        ))
+        .with_transform_box(style.transform_box)
+        .with_perspective(style.perspective, style.perspective_origin)
+        .with_transform_style(style.transform_style)
+        .with_overflow_modes(style.overflow_x, style.overflow_y)
+        .with_overflow_clip_margin(style.overflow_clip_margin)
+        .with_scrollbar_gutter(style.scrollbar_gutter, style.direction, style.writing_mode)
+        .with_line_clamp(
+            style.line_clamp,
+            text_style_for_flow_text(style).line_height,
+        )
         .with_self_visible(style.visibility.paints())
+        .with_column_span_all(matches!(style.column_span, ColumnSpanMode::All))
         .with_pagination(style.pagination);
     if let Some(role) = role {
         container = container.with_tag_role(role);
@@ -7663,7 +10841,22 @@ fn container_flowables_with_role(
     style: &ComputedStyle,
     role: Option<&str>,
 ) -> Vec<LayoutItem> {
-    let Some(container) = container_flowable_with_role(children, style, role) else {
+    container_flowables_with_role_options(
+        children,
+        style,
+        role,
+        ContainerCompilationOptions::default(),
+    )
+}
+
+fn container_flowables_with_role_options(
+    children: Vec<LayoutItem>,
+    style: &ComputedStyle,
+    role: Option<&str>,
+    options: ContainerCompilationOptions,
+) -> Vec<LayoutItem> {
+    let Some(container) = container_flowable_with_role_options(children, style, role, options)
+    else {
         return Vec::new();
     };
     vec![LayoutItem::Block {
@@ -7782,7 +10975,7 @@ fn layout_children_to_flowables(
     items: Vec<LayoutItem>,
     forced_line_height: Option<Pt>,
 ) -> Vec<Box<dyn Flowable>> {
-    layout_children_to_flowables_with_options(items, forced_line_height, false, true)
+    layout_children_to_flowables_with_options(items, forced_line_height, false, true, false)
 }
 
 fn layout_children_to_flowables_with_options(
@@ -7790,6 +10983,7 @@ fn layout_children_to_flowables_with_options(
     forced_line_height: Option<Pt>,
     prevent_soft_wrap: bool,
     snap_line_height_to_css_pixel: bool,
+    anonymous_block_context: bool,
 ) -> Vec<Box<dyn Flowable>> {
     let mut out: Vec<Box<dyn Flowable>> = Vec::new();
     let mut inline_group: Vec<(Box<dyn Flowable>, VerticalAlign)> = Vec::new();
@@ -7808,6 +11002,7 @@ fn layout_children_to_flowables_with_options(
                             forced_line_height,
                         )
                         .with_css_pixel_line_snap(snap_line_height_to_css_pixel)
+                        .with_anonymous_block_context(anonymous_block_context)
                         .with_no_wrap(prevent_soft_wrap),
                     ));
                     inline_group = Vec::new();
@@ -7821,11 +11016,142 @@ fn layout_children_to_flowables_with_options(
         out.push(Box::new(
             InlineBlockLayoutFlowable::new_pt(inline_group, Pt::ZERO, forced_line_height)
                 .with_css_pixel_line_snap(snap_line_height_to_css_pixel)
+                .with_anonymous_block_context(anonymous_block_context)
                 .with_no_wrap(prevent_soft_wrap),
         ));
     }
 
     out
+}
+
+fn absolute_needs_terminal_baseline_rounding(style: &ComputedStyle) -> bool {
+    let line_height = style.to_text_style().line_height.to_milli_i64();
+    let css_pixel = 750_i64;
+    let line_height_phase = line_height.rem_euclid(css_pixel);
+    !matches!(style.inset_bottom, LengthSpec::Auto)
+        && matches!(style.inset_top, LengthSpec::Auto)
+        && matches!(style.height, LengthSpec::Auto)
+        && line_height_phase > 0
+        && line_height_phase < css_pixel / 2
+}
+
+fn collapse_named_string_whitespace(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn named_string_values_for_node(node: &NodeRef, style: &ComputedStyle) -> Vec<(String, String)> {
+    if style.string_set.is_empty() {
+        return Vec::new();
+    }
+    let attributes = node.as_element().map(|element| element.attributes.borrow());
+    style
+        .string_set
+        .iter()
+        .map(|assignment| {
+            let value = match &assignment.source {
+                NamedStringSource::Content => node.text_contents(),
+                NamedStringSource::Attribute(name) => attributes
+                    .as_ref()
+                    .and_then(|attributes| attributes.get(name))
+                    .unwrap_or("")
+                    .to_string(),
+                NamedStringSource::Text(value) => value.clone(),
+            };
+            (
+                assignment.name.clone(),
+                collapse_named_string_whitespace(&value),
+            )
+        })
+        .collect()
+}
+
+fn wrap_named_string_occurrence(
+    flowables: Vec<LayoutItem>,
+    named_strings: Vec<(String, String)>,
+) -> Vec<LayoutItem> {
+    let metadata = named_strings
+        .into_iter()
+        .map(|(name, value)| {
+            (
+                format!("{}{name}", crate::canvas::META_NAMED_STRING_PREFIX),
+                value,
+            )
+        })
+        .collect::<Vec<_>>();
+    flowables
+        .into_iter()
+        .enumerate()
+        .map(|(index, item)| {
+            if index != 0 {
+                return item;
+            }
+            match item {
+                LayoutItem::Block {
+                    flowable,
+                    flex_grow,
+                    flex_shrink,
+                    width_spec,
+                    order,
+                } => LayoutItem::Block {
+                    flowable: Box::new(MetaFlowable::new(flowable, metadata.clone())),
+                    flex_grow,
+                    flex_shrink,
+                    width_spec,
+                    order,
+                },
+                LayoutItem::Inline {
+                    flowable,
+                    valign,
+                    flex_grow,
+                    flex_shrink,
+                    width_spec,
+                    order,
+                } => LayoutItem::Inline {
+                    flowable: Box::new(MetaFlowable::new(flowable, metadata.clone())),
+                    valign,
+                    flex_grow,
+                    flex_shrink,
+                    width_spec,
+                    order,
+                },
+            }
+        })
+        .collect()
+}
+
+fn wrap_running_element(
+    flowables: Vec<LayoutItem>,
+    style: &ComputedStyle,
+    name: Arc<str>,
+    named_strings: Vec<(String, String)>,
+) -> Vec<LayoutItem> {
+    if flowables.is_empty() {
+        return Vec::new();
+    }
+    let child: Box<dyn Flowable> = if flowables.len() == 1 {
+        match flowables.into_iter().next().expect("one running element") {
+            LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => flowable,
+        }
+    } else {
+        Box::new(
+            ContainerFlowable::new_pt(
+                layout_children_to_flowables(flowables, None),
+                style.font_size,
+                style.root_font_size,
+            )
+            .with_self_visible(style.visibility.paints()),
+        )
+    };
+    let marker = RunningElementFlowable::new(child, name)
+        .with_named_strings(named_strings)
+        .with_pagination(style.pagination);
+    vec![LayoutItem::Block {
+        flowable: Box::new(marker),
+        flex_grow: 0.0,
+        flex_shrink: 0.0,
+        width_spec: None,
+        order: style.order,
+    }]
 }
 
 fn wrap_absolute(flowables: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<LayoutItem> {
@@ -7845,6 +11171,14 @@ fn wrap_absolute(flowables: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<Layou
                 .with_self_visible(style.visibility.paints()),
         )
     };
+    let round_terminal_baseline = absolute_needs_terminal_baseline_rounding(style);
+    let explicit_grid_area = !matches!(&style.grid_column_line_start, GridLineSpec::Auto)
+        || !matches!(&style.grid_column_line_end, GridLineSpec::Auto)
+        || !matches!(&style.grid_row_line_start, GridLineSpec::Auto)
+        || !matches!(&style.grid_row_line_end, GridLineSpec::Auto)
+        || style.grid_column_start.is_some()
+        || style.grid_row_start.is_some()
+        || style.grid_area_name.is_some();
     let abs = AbsolutePositionedFlowable::new_pt(
         boxed,
         style.inset_left,
@@ -7857,6 +11191,8 @@ fn wrap_absolute(flowables: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<Layou
         style.font_size,
         style.root_font_size,
     )
+    .with_css_terminal_baseline_rounding(round_terminal_baseline)
+    .with_explicit_grid_area_containing_block(explicit_grid_area)
     .with_pagination(style.pagination)
     .with_fixed_positioned(matches!(style.position, PositionMode::Fixed));
     vec![LayoutItem::Block {
@@ -7912,7 +11248,7 @@ fn wrap_float(flowables: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<LayoutIt
     let side = match style.float_mode {
         FloatMode::Left => FloatSide::Left,
         FloatMode::Right => FloatSide::Right,
-        FloatMode::None => return flowables,
+        FloatMode::None | FloatMode::Footnote => return flowables,
     };
     let boxed: Box<dyn Flowable> = if flowables.len() == 1 {
         match flowables.into_iter().next().unwrap() {
@@ -7975,6 +11311,7 @@ type StagedFlexItem = (
     Option<LengthSpec>,
     Option<AlignItems>,
     Option<AlignItems>,
+    i32,
     i32,
 );
 
@@ -8062,6 +11399,7 @@ fn push_generated_flex_item(
         effective_width_spec,
         None,
         None,
+        order,
         z_index,
     ));
 }
@@ -8431,6 +11769,7 @@ fn flex_container_flowables(
                     effective_width_spec,
                     None,
                     None,
+                    order,
                     z_index,
                 ));
             }
@@ -8565,6 +11904,7 @@ fn flex_container_flowables(
             effective_width_spec,
             align_self,
             justify_self,
+            order,
             child_style.as_ref().map_or(0, |style| style.z_index),
         ));
     }
@@ -8604,7 +11944,7 @@ fn flex_container_flowables(
         )> = Vec::new();
         let max_slot = items_with_order
             .iter()
-            .map(|(slot, _, _, _, _, _, _, _, _)| *slot)
+            .map(|(slot, _, _, _, _, _, _, _, _, _)| *slot)
             .max()
             .unwrap_or(-1)
             .max(
@@ -8634,7 +11974,7 @@ fn flex_container_flowables(
             loop {
                 let should_take = iter
                     .peek()
-                    .map(|(item_slot, _, _, _, _, _, _, _, _)| *item_slot == slot)
+                    .map(|(item_slot, _, _, _, _, _, _, _, _, _)| *item_slot == slot)
                     .unwrap_or(false);
                 if !should_take {
                     break;
@@ -8648,6 +11988,7 @@ fn flex_container_flowables(
                     width_spec,
                     align_self,
                     justify_self,
+                    paint_order,
                     z_index,
                 )) = iter.next()
                 {
@@ -8658,6 +11999,7 @@ fn flex_container_flowables(
                         width_spec,
                         align_self,
                         justify_self,
+                        paint_order,
                         z_index,
                     ));
                 }
@@ -8679,14 +12021,30 @@ fn flex_container_flowables(
                     0,
                 ));
             } else if slot_items.len() == 1 {
-                padded_items.push(slot_items.pop().expect("one grid slot item"));
+                let (boxed, grow, shrink, width_spec, align_self, justify_self, _, z_index) =
+                    slot_items.pop().expect("one grid slot item");
+                padded_items.push((
+                    boxed,
+                    grow,
+                    shrink,
+                    width_spec,
+                    align_self,
+                    justify_self,
+                    z_index,
+                ));
             } else {
+                // Grid item painting uses order-modified document order before
+                // the z-index stacking buckets are applied. Layout placement
+                // and paint order are independent: explicitly overlapping
+                // items share one slot but still honor `order`.
+                slot_items.sort_by_key(|(_, _, _, _, _, _, paint_order, _)| *paint_order);
                 let mut layers = Vec::with_capacity(slot_items.len());
                 let mut slot_items = slot_items.into_iter();
-                let (boxed, grow, shrink, width_spec, align_self, justify_self, z_index) =
+                let (boxed, grow, shrink, width_spec, align_self, justify_self, _, z_index) =
                     slot_items.next().expect("overlapping grid slot items");
                 layers.push((boxed, z_index));
-                layers.extend(slot_items.map(|(boxed, _, _, _, _, _, z_index)| (boxed, z_index)));
+                layers
+                    .extend(slot_items.map(|(boxed, _, _, _, _, _, _, z_index)| (boxed, z_index)));
                 padded_items.push((
                     Box::new(OverlayFlowable::new(layers)) as Box<dyn Flowable>,
                     grow,
@@ -8698,8 +12056,18 @@ fn flex_container_flowables(
                 ));
             }
         }
-        while let Some((_, _, boxed, grow, shrink, width_spec, align_self, justify_self, z_index)) =
-            iter.next()
+        while let Some((
+            _,
+            _,
+            boxed,
+            grow,
+            shrink,
+            width_spec,
+            align_self,
+            justify_self,
+            _,
+            z_index,
+        )) = iter.next()
         {
             padded_items.push((
                 boxed,
@@ -8716,7 +12084,7 @@ fn flex_container_flowables(
         items_with_order
             .into_iter()
             .map(
-                |(_, _, boxed, grow, shrink, width_spec, align_self, justify_self, z_index)| {
+                |(_, _, boxed, grow, shrink, width_spec, align_self, justify_self, _, z_index)| {
                     (
                         boxed,
                         grow,
@@ -8865,6 +12233,7 @@ fn flex_container_flowables(
     .with_item_z_indices(z_indices)
     .with_reversals(reverse_main, wrap_reverse)
     .with_cross_reversal(reverse_cross)
+    .with_css_pixel_main_axis_alignment_snap(matches!(style.display, DisplayMode::InlineFlex))
     .with_axis_gaps(physical_row_gap, physical_column_gap);
     let flex = if is_grid_like && grid_track_count > 0 {
         flex.with_grid_tracks(grid_track_count, effective_grid_row_tracks)
@@ -8873,6 +12242,15 @@ fn flex_container_flowables(
                 style.height,
                 LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
             ))
+            .with_grid_resolved_parent_height(
+                !matches!(
+                    style.min_height,
+                    LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
+                ) || !matches!(
+                    style.max_height,
+                    LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
+                ),
+            )
             .with_grid_item_justification(grid_justify_items, grid_justify_self)
     } else {
         flex
@@ -8908,6 +12286,10 @@ fn flex_container_flowables(
         ContainerFlowable::new_pt(vec![Box::new(flex)], style.font_size, style.root_font_size)
             .with_establishes_abs_containing_block(establishes_abs_containing_block(&style))
             .with_margin(style.margin)
+            .with_inline_paint_snapping(
+                matches!(style.margin.left, LengthSpec::Auto)
+                    && matches!(style.margin.right, LengthSpec::Auto),
+            )
             .with_border(
                 style.border_width,
                 style.border_color.unwrap_or(style.color),
@@ -8957,26 +12339,35 @@ fn flex_container_flowables(
                 style.background_sizes.clone(),
                 style.background_positions.clone(),
                 style.background_repeats.clone(),
+                style.background_attachments.clone(),
                 style.background_origins.clone(),
                 style.background_clips.clone(),
             )
             .with_background_blend_modes(style.background_blend_modes.clone())
             .with_clip_path(style.clip_path.clone())
             .with_clip_path_reference_box(style.clip_path_reference_box)
+            .with_legacy_clip(effective_legacy_clip(style))
             .with_box_shadows(style.box_shadows.clone())
             .with_paint_filter(style.paint_filter.clone())
             .with_backdrop_filter(style.backdrop_filter.clone())
             .with_will_change_backdrop_root(style.will_change_backdrop_root)
+            .with_mask(style.mask.clone())
             .with_mask_backdrop_root(style.mask_backdrop_root)
             .with_mix_blend_mode(style.mix_blend_mode)
             .with_isolation(style.isolation)
             .with_opacity(style.opacity)
             .with_transforms(style.transform.clone())
             .with_transform_origin(style.transform_origin)
-            .with_overflow_hidden(matches!(
-                style.overflow,
-                OverflowMode::Hidden | OverflowMode::Clip
-            ))
+            .with_transform_box(style.transform_box)
+            .with_perspective(style.perspective, style.perspective_origin)
+            .with_transform_style(style.transform_style)
+            .with_overflow_modes(style.overflow_x, style.overflow_y)
+            .with_overflow_clip_margin(style.overflow_clip_margin)
+            .with_scrollbar_gutter(style.scrollbar_gutter, style.direction, style.writing_mode)
+            .with_line_clamp(
+                style.line_clamp,
+                text_style_for_flow_text(&style).line_height,
+            )
             .with_self_visible(style.visibility.paints())
             .with_pagination(style.pagination);
 
@@ -9369,26 +12760,35 @@ fn native_css_table_container_flowables(
                 style.background_sizes.clone(),
                 style.background_positions.clone(),
                 style.background_repeats.clone(),
+                style.background_attachments.clone(),
                 style.background_origins.clone(),
                 style.background_clips.clone(),
             )
             .with_background_blend_modes(style.background_blend_modes.clone())
             .with_clip_path(style.clip_path.clone())
             .with_clip_path_reference_box(style.clip_path_reference_box)
+            .with_legacy_clip(effective_legacy_clip(style))
             .with_box_shadows(style.box_shadows.clone())
             .with_paint_filter(style.paint_filter.clone())
             .with_backdrop_filter(style.backdrop_filter.clone())
             .with_will_change_backdrop_root(style.will_change_backdrop_root)
+            .with_mask(style.mask.clone())
             .with_mask_backdrop_root(style.mask_backdrop_root)
             .with_mix_blend_mode(style.mix_blend_mode)
             .with_isolation(style.isolation)
             .with_opacity(style.opacity)
             .with_transforms(style.transform.clone())
             .with_transform_origin(style.transform_origin)
-            .with_overflow_hidden(matches!(
-                style.overflow,
-                OverflowMode::Hidden | OverflowMode::Clip
-            ))
+            .with_transform_box(style.transform_box)
+            .with_perspective(style.perspective, style.perspective_origin)
+            .with_transform_style(style.transform_style)
+            .with_overflow_modes(style.overflow_x, style.overflow_y)
+            .with_overflow_clip_margin(style.overflow_clip_margin)
+            .with_scrollbar_gutter(style.scrollbar_gutter, style.direction, style.writing_mode)
+            .with_line_clamp(
+                style.line_clamp,
+                text_style_for_flow_text(&style).line_height,
+            )
             .with_self_visible(style.visibility.paints())
             .with_pagination(style.pagination);
 
@@ -9426,23 +12826,27 @@ fn table_container_flowables(
     svg_raster_fallback: bool,
     perf: Option<&crate::perf::PerfLogger>,
     doc_id: Option<usize>,
+    before_items: &[LayoutItem],
+    after_items: &[LayoutItem],
 ) -> Vec<LayoutItem> {
     let mut report = report;
-    if let Some(native) = native_css_table_container_flowables(
-        node,
-        resolver,
-        style,
-        ancestors,
-        counters,
-        font_registry.clone(),
-        asset_bundle.clone(),
-        report.as_deref_mut(),
-        svg_form,
-        svg_raster_fallback,
-        perf,
-        doc_id,
-    ) {
-        return native;
+    if before_items.is_empty() && after_items.is_empty() {
+        if let Some(native) = native_css_table_container_flowables(
+            node,
+            resolver,
+            style,
+            ancestors,
+            counters,
+            font_registry.clone(),
+            asset_bundle.clone(),
+            report.as_deref_mut(),
+            svg_form,
+            svg_raster_fallback,
+            perf,
+            doc_id,
+        ) {
+            return native;
+        }
     }
     let include_prev_siblings = resolver.has_sibling_selectors();
     let mut table_children: Vec<Box<dyn Flowable>> = Vec::new();
@@ -9460,6 +12864,11 @@ fn table_container_flowables(
         ancestors,
         include_prev_siblings,
     );
+
+    if !before_items.is_empty() {
+        has_improper_table_child = true;
+        table_children.extend(layout_children_to_flowables(before_items.to_vec(), None));
+    }
 
     for child in node.children() {
         let Some(child_element) = child.as_element() else {
@@ -9667,6 +13076,10 @@ fn table_container_flowables(
     ) {
         table_children.push(row_flowable);
     }
+    if !after_items.is_empty() {
+        has_improper_table_child = true;
+        table_children.extend(layout_children_to_flowables(after_items.to_vec(), None));
+    }
 
     let mut ordered_table_children = Vec::with_capacity(
         top_caption_flowables.len()
@@ -9696,7 +13109,47 @@ fn table_container_flowables(
         })
         .collect();
 
-    let Some(table_flowable) = container_flowable_with_role(table_items, style, Some("Table"))
+    // CSS 2.1 defines a table's computed `height` as a minimum height for the
+    // table box. The generic path is used for anonymous-table fixup (including
+    // generated content), so leaving the authored height as a fixed container
+    // height clips overflowing anonymous rows instead of growing the table.
+    let mut table_box_style = style.clone();
+    if !matches!(
+        style.height,
+        LengthSpec::Auto
+            | LengthSpec::Inherit
+            | LengthSpec::Initial
+            | LengthSpec::Content
+            | LengthSpec::MinContent
+            | LengthSpec::MaxContent
+            | LengthSpec::FitContent
+    ) {
+        table_box_style.height = LengthSpec::Auto;
+        let table_height_minimum = match (style.height, style.max_height) {
+            // A table's `height` is a content-driven minimum, but it is still
+            // bounded by an applicable max-height. Converting it directly into
+            // an ordinary min-height would invoke the generic min-wins conflict
+            // rule and incorrectly keep an overlarge anonymous table box.
+            (LengthSpec::Absolute(height), LengthSpec::Absolute(maximum)) => {
+                LengthSpec::Absolute(height.min(maximum))
+            }
+            _ => style.height,
+        };
+        table_box_style.min_height = match (table_height_minimum, style.min_height) {
+            (LengthSpec::Absolute(height), LengthSpec::Absolute(minimum)) => {
+                LengthSpec::Absolute(height.max(minimum))
+            }
+            (_, LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial) => {
+                table_height_minimum
+            }
+            // Retain an explicit min-height when the two authored constraints
+            // cannot be combined without the containing block available.
+            (_, minimum) => minimum,
+        };
+    }
+
+    let Some(table_flowable) =
+        container_flowable_with_role(table_items, &table_box_style, Some("Table"))
     else {
         return Vec::new();
     };
@@ -11545,7 +14998,10 @@ fn table_flowable(
                     ancestors,
                     counters,
                     font_registry.clone(),
+                    asset_bundle.as_deref(),
                     report.as_deref_mut(),
+                    svg_form,
+                    svg_raster_fallback,
                     crate::style::PseudoTarget::Before,
                 );
                 let after_items = pseudo_items_for(
@@ -11555,7 +15011,10 @@ fn table_flowable(
                     ancestors,
                     counters,
                     font_registry.clone(),
+                    asset_bundle.as_deref(),
                     report.as_deref_mut(),
+                    svg_form,
+                    svg_raster_fallback,
                     crate::style::PseudoTarget::After,
                 );
 
@@ -11691,10 +15150,15 @@ fn table_flowable(
                     .unwrap_or(cell_style.color)
             };
             let resolved_cell_border_colors = cell_style.resolved_border_colors(base_border_color);
+            let resolved_cell_border_opacities = cell_style.resolved_border_opacities();
             let mut border_color_top = resolved_cell_border_colors.top;
             let mut border_color_right = resolved_cell_border_colors.right;
             let mut border_color_bottom = resolved_cell_border_colors.bottom;
             let mut border_color_left = resolved_cell_border_colors.left;
+            let mut border_opacity_top = resolved_cell_border_opacities.top;
+            let mut border_opacity_right = resolved_cell_border_opacities.right;
+            let mut border_opacity_bottom = resolved_cell_border_opacities.bottom;
+            let mut border_opacity_left = resolved_cell_border_opacities.left;
             if legacy_border_width.is_some()
                 && length_spec_is_zero(border_widths.top)
                 && length_spec_is_zero(border_widths.right)
@@ -11722,6 +15186,10 @@ fn table_flowable(
                 border_color_left = dark;
                 border_color_right = light;
                 border_color_bottom = light;
+                border_opacity_top = 1.0;
+                border_opacity_right = 1.0;
+                border_opacity_bottom = 1.0;
+                border_opacity_left = 1.0;
             }
             let border = BorderSpec {
                 widths: border_widths,
@@ -11779,6 +15247,12 @@ fn table_flowable(
                     border_color_right,
                     border_color_bottom,
                     border_color_left,
+                )
+                .with_border_opacities(
+                    border_opacity_top,
+                    border_opacity_right,
+                    border_opacity_bottom,
+                    border_opacity_left,
                 )
                 .with_hidden_borders(
                     hidden_borders.top,
@@ -12266,6 +15740,159 @@ fn css_size_is_auto(spec: LengthSpec) -> bool {
     )
 }
 
+/// Resolve a length that does not depend on the eventual containing block.
+///
+/// Replaced-element sizing runs while the HTML tree is compiled. Resolving
+/// absolute and font-relative constraints here turns the final used image
+/// size into immutable layout input that compiled documents can reuse. Any
+/// percentage-bearing value stays deferred to the normal container layout.
+fn resolve_compile_time_css_dimension(
+    spec: LengthSpec,
+    font_size: Pt,
+    root_font_size: Pt,
+    is_height: bool,
+) -> Option<Pt> {
+    let definite = match spec {
+        LengthSpec::Absolute(_) | LengthSpec::Em(_) | LengthSpec::Rem(_) => true,
+        LengthSpec::Calc(calc) => calc.percent == 0.0,
+        LengthSpec::Clamped(clamped) => clamped.value.percent == 0.0,
+        LengthSpec::FontRelative(relative) => relative.base.percent == 0.0,
+        _ => false,
+    };
+    if !definite {
+        return None;
+    }
+    let resolved = if is_height {
+        spec.resolve_height(Pt::ZERO, font_size, root_font_size)
+    } else {
+        spec.resolve_width(Pt::ZERO, font_size, root_font_size)
+    };
+    Some(resolved.max(Pt::ZERO))
+}
+
+/// `Some(None)` is an unbounded automatic constraint, while `None` means the
+/// constraint depends on layout and therefore cannot be compiled yet.
+fn resolve_compile_time_replaced_constraint(
+    spec: LengthSpec,
+    font_size: Pt,
+    root_font_size: Pt,
+    is_height: bool,
+) -> Option<Option<Pt>> {
+    if css_size_is_auto(spec) {
+        return Some(None);
+    }
+    resolve_compile_time_css_dimension(spec, font_size, root_font_size, is_height).map(Some)
+}
+
+fn scale_replaced_dimension(value: Pt, target: Pt, original: Pt) -> Pt {
+    if value <= Pt::ZERO || target <= Pt::ZERO || original <= Pt::ZERO {
+        return Pt::ZERO;
+    }
+    Pt::from_f32(value.to_f32() * target.to_f32() / original.to_f32())
+}
+
+/// Apply the CSS replaced-element min/max constraint table while retaining
+/// the tentative aspect ratio whenever the constraints are compatible.
+fn constrain_replaced_size(
+    width: Pt,
+    height: Pt,
+    min_width: Option<Pt>,
+    max_width: Option<Pt>,
+    min_height: Option<Pt>,
+    max_height: Option<Pt>,
+) -> (Pt, Pt) {
+    if width <= Pt::ZERO || height <= Pt::ZERO {
+        return (width.max(Pt::ZERO), height.max(Pt::ZERO));
+    }
+
+    let min_width = min_width.unwrap_or(Pt::ZERO).max(Pt::ZERO);
+    let min_height = min_height.unwrap_or(Pt::ZERO).max(Pt::ZERO);
+    // CSS requires max(min, max) for this table so contradictory authored
+    // constraints still have a deterministic result.
+    let max_width = max_width.map(|value| value.max(min_width));
+    let max_height = max_height.map(|value| value.max(min_height));
+    let width_high = max_width.is_some_and(|value| width > value);
+    let width_low = width < min_width;
+    let height_high = max_height.is_some_and(|value| height > value);
+    let height_low = height < min_height;
+
+    if width_high && height_high {
+        let max_width = max_width.expect("high width has a maximum");
+        let max_height = max_height.expect("high height has a maximum");
+        let width_scale = max_width.to_f32() / width.to_f32();
+        let height_scale = max_height.to_f32() / height.to_f32();
+        if width_scale <= height_scale {
+            return (
+                max_width,
+                scale_replaced_dimension(height, max_width, width).max(min_height),
+            );
+        }
+        return (
+            scale_replaced_dimension(width, max_height, height).max(min_width),
+            max_height,
+        );
+    }
+    if width_low && height_low {
+        let width_scale = min_width.to_f32() / width.to_f32();
+        let height_scale = min_height.to_f32() / height.to_f32();
+        if width_scale <= height_scale {
+            let resolved_width = scale_replaced_dimension(width, min_height, height);
+            return (
+                max_width
+                    .map(|maximum| resolved_width.min(maximum))
+                    .unwrap_or(resolved_width),
+                min_height,
+            );
+        }
+        let resolved_height = scale_replaced_dimension(height, min_width, width);
+        return (
+            min_width,
+            max_height
+                .map(|maximum| resolved_height.min(maximum))
+                .unwrap_or(resolved_height),
+        );
+    }
+    if width_low && height_high {
+        return (min_width, max_height.expect("high height has a maximum"));
+    }
+    if width_high && height_low {
+        return (max_width.expect("high width has a maximum"), min_height);
+    }
+    if width_high {
+        let max_width = max_width.expect("high width has a maximum");
+        return (
+            max_width,
+            scale_replaced_dimension(height, max_width, width).max(min_height),
+        );
+    }
+    if width_low {
+        let resolved_height = scale_replaced_dimension(height, min_width, width);
+        return (
+            min_width,
+            max_height
+                .map(|maximum| resolved_height.min(maximum))
+                .unwrap_or(resolved_height),
+        );
+    }
+    if height_high {
+        let max_height = max_height.expect("high height has a maximum");
+        return (
+            scale_replaced_dimension(width, max_height, height).max(min_width),
+            max_height,
+        );
+    }
+    if height_low {
+        let resolved_width = scale_replaced_dimension(width, min_height, height);
+        return (
+            max_width
+                .map(|maximum| resolved_width.min(maximum))
+                .unwrap_or(resolved_width),
+            min_height,
+        );
+    }
+    (width, height)
+}
+
 fn resolve_replaced_image_sizing(
     style: &ComputedStyle,
     attr_width: Option<Pt>,
@@ -12281,7 +15908,7 @@ fn resolve_replaced_image_sizing(
     } else {
         style.width
     };
-    let height = if css_size_is_auto(style.height) {
+    let mut height = if css_size_is_auto(style.height) {
         attr_height
             .map(LengthSpec::Absolute)
             .unwrap_or(LengthSpec::Auto)
@@ -12295,6 +15922,9 @@ fn resolve_replaced_image_sizing(
             .filter(|ratio| ratio.is_finite() && *ratio > 0.0)
     });
     let aspect_ratio = style.aspect_ratio.or(intrinsic_ratio).or(Some(4.0 / 3.0));
+
+    let width_was_auto = css_size_is_auto(width);
+    let height_was_auto = css_size_is_auto(height);
 
     // A replaced element with both axes auto uses its natural width rather
     // than the fill-available width of an ordinary block box. Keeping height
@@ -12331,6 +15961,68 @@ fn resolve_replaced_image_sizing(
             nominal_height = Some(Pt::from_f32(width.to_f32() / ratio));
         }
     }
+    if width_was_auto || height_was_auto {
+        let compile_time_width =
+            resolve_compile_time_css_dimension(width, style.font_size, style.root_font_size, false);
+        let compile_time_height =
+            resolve_compile_time_css_dimension(height, style.font_size, style.root_font_size, true);
+        let tentative = match (compile_time_width, compile_time_height, aspect_ratio) {
+            (Some(width), Some(height), _) => Some((width, height)),
+            (Some(width), None, Some(ratio)) if height_was_auto => {
+                Some((width, Pt::from_f32(width.to_f32() / ratio)))
+            }
+            (None, Some(height), Some(ratio)) if width_was_auto => {
+                Some((Pt::from_f32(height.to_f32() * ratio), height))
+            }
+            _ => None,
+        };
+        let constraints = (
+            resolve_compile_time_replaced_constraint(
+                style.min_width,
+                style.font_size,
+                style.root_font_size,
+                false,
+            ),
+            resolve_compile_time_replaced_constraint(
+                style.max_width,
+                style.font_size,
+                style.root_font_size,
+                false,
+            ),
+            resolve_compile_time_replaced_constraint(
+                style.min_height,
+                style.font_size,
+                style.root_font_size,
+                true,
+            ),
+            resolve_compile_time_replaced_constraint(
+                style.max_height,
+                style.font_size,
+                style.root_font_size,
+                true,
+            ),
+        );
+        if let (
+            Some((tentative_width, tentative_height)),
+            (Some(min_width), Some(max_width), Some(min_height), Some(max_height)),
+        ) = (tentative, constraints)
+        {
+            let (used_width, used_height) = constrain_replaced_size(
+                tentative_width,
+                tentative_height,
+                min_width,
+                max_width,
+                min_height,
+                max_height,
+            );
+            if used_width != tentative_width || used_height != tentative_height {
+                width = LengthSpec::Absolute(used_width);
+                height = LengthSpec::Absolute(used_height);
+                nominal_width = Some(used_width);
+                nominal_height = Some(used_height);
+            }
+        }
+    }
     let nominal_width = nominal_width
         .or_else(|| intrinsic_size.map(|size| size.0))
         .unwrap_or(style.font_size * 4.0)
@@ -12349,12 +16041,8 @@ fn resolve_replaced_image_sizing(
     }
 }
 
-fn replaced_image_flowables(
-    mut image: ImageFlowable,
-    style: &ComputedStyle,
-    sizing: ReplacedImageSizing,
-) -> Vec<LayoutItem> {
-    let direct_fixed_image = matches!(sizing.width, LengthSpec::Absolute(_))
+fn is_direct_fixed_replaced_box(style: &ComputedStyle, sizing: ReplacedImageSizing) -> bool {
+    matches!(sizing.width, LengthSpec::Absolute(_))
         && matches!(sizing.height, LengthSpec::Absolute(_))
         && matches!(style.min_width, LengthSpec::Auto)
         && matches!(style.max_width, LengthSpec::Auto)
@@ -12370,13 +16058,24 @@ fn replaced_image_flowables(
         && style.background_paint.is_none()
         && style.background_paints.is_empty()
         && style.clip_path.is_none()
+        && style.legacy_clip.is_none()
         && style.box_shadow.is_none()
         && style.box_shadows.is_empty()
         && !style.outline_visible
         && style.transform.is_empty()
         && !style.isolation
-        && (style.opacity - 1.0).abs() <= 1.0e-6;
-    if direct_fixed_image {
+        && (style.opacity - 1.0).abs() <= 1.0e-6
+}
+
+fn replaced_image_flowables(
+    mut image: ImageFlowable,
+    style: &ComputedStyle,
+    sizing: ReplacedImageSizing,
+) -> Vec<LayoutItem> {
+    // Blink raster-paints replaced-element origins on CSS-pixel boundaries
+    // while their inline advance remains in fixed-point layout space.
+    image = image.with_css_pixel_paint_origin_snap(true);
+    if is_direct_fixed_replaced_box(style, sizing) {
         image = image
             .with_available_size(false)
             .with_pagination(style.pagination)
@@ -12403,6 +16102,39 @@ fn replaced_image_flowables(
         order: 0,
     };
     container_flowables(vec![image], &replaced_style)
+}
+
+fn replaced_svg_image_flowables(
+    mut svg: SvgFlowable,
+    style: &ComputedStyle,
+    sizing: ReplacedImageSizing,
+) -> Vec<LayoutItem> {
+    if is_direct_fixed_replaced_box(style, sizing) {
+        svg = svg
+            .with_available_size(false)
+            .with_pagination(style.pagination)
+            .with_mix_blend_mode(style.mix_blend_mode);
+        return vec![LayoutItem::Block {
+            flowable: Box::new(svg) as Box<dyn Flowable>,
+            flex_grow: style.flex_grow,
+            flex_shrink: style.flex_shrink,
+            width_spec: flex_item_basis(style),
+            order: 0,
+        }];
+    }
+
+    let mut replaced_style = style.clone();
+    replaced_style.width = sizing.width;
+    replaced_style.height = sizing.height;
+    replaced_style.aspect_ratio = sizing.aspect_ratio;
+    let child = LayoutItem::Block {
+        flowable: Box::new(svg.with_available_size(true)) as Box<dyn Flowable>,
+        flex_grow: 0.0,
+        flex_shrink: 1.0,
+        width_spec: None,
+        order: 0,
+    };
+    container_flowables(vec![child], &replaced_style)
 }
 
 fn replaced_svg_flowables(
@@ -12751,6 +16483,32 @@ fn apply_text_transform(text: &str, mode: crate::style::TextTransformMode) -> St
             out
         }
     }
+}
+
+fn css_first_letter_prefix_end(text: &str) -> Option<usize> {
+    let mut found_base = false;
+    let mut end = 0;
+    for (index, ch) in text.char_indices() {
+        let next = index + ch.len_utf8();
+        if ch.is_whitespace() && !found_base {
+            continue;
+        }
+        let punctuation = ch.is_ascii_punctuation()
+            || matches!(ch as u32, 0x2000..=0x206f | 0x2e00..=0x2e7f | 0x3001..=0x303f | 0xff01..=0xff65);
+        if !found_base {
+            end = next;
+            if !punctuation {
+                found_base = true;
+            }
+            continue;
+        }
+        if punctuation {
+            end = next;
+        } else {
+            break;
+        }
+    }
+    found_base.then_some(end)
 }
 
 fn preserve_whitespace(mode: WhiteSpaceMode) -> bool {

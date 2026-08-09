@@ -3,6 +3,54 @@
 //! Keeping the shaping contract in one module lets layout, measurement, and rasterization share
 //! identical glyph positions through FullBleed's native OpenType implementation.
 
+const SHAPE_DISABLE_KERNING: char = '\u{f0000}';
+const SHAPE_DISABLE_COMMON_LIGATURES: char = '\u{f0001}';
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct ShapeOptions {
+    pub(crate) kerning: bool,
+    pub(crate) common_ligatures: bool,
+}
+
+impl Default for ShapeOptions {
+    fn default() -> Self {
+        Self {
+            kerning: true,
+            common_ligatures: true,
+        }
+    }
+}
+
+pub(crate) fn encode_shape_options(text: &str, options: ShapeOptions) -> String {
+    let mut encoded = String::with_capacity(text.len() + 8);
+    if !options.kerning {
+        encoded.push(SHAPE_DISABLE_KERNING);
+    }
+    if !options.common_ligatures {
+        encoded.push(SHAPE_DISABLE_COMMON_LIGATURES);
+    }
+    encoded.push_str(text);
+    encoded
+}
+
+pub(crate) fn decode_shape_options(mut text: &str) -> (ShapeOptions, &str) {
+    let mut options = ShapeOptions::default();
+    loop {
+        let mut chars = text.chars();
+        match chars.next() {
+            Some(SHAPE_DISABLE_KERNING) => {
+                options.kerning = false;
+                text = chars.as_str();
+            }
+            Some(SHAPE_DISABLE_COMMON_LIGATURES) => {
+                options.common_ligatures = false;
+                text = chars.as_str();
+            }
+            _ => return (options, text),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TextDirection {
     LeftToRight,
@@ -26,25 +74,39 @@ pub(crate) struct ShapedText {
 }
 
 pub(crate) fn shape(font_data: &[u8], text: &str) -> Option<ShapedText> {
-    crate::native_shape::shape(font_data, text)
+    let (options, text) = decode_shape_options(text);
+    crate::native_shape::shape(font_data, text, options)
 }
 
 pub(crate) fn detect_direction(text: &str) -> TextDirection {
-    if text.chars().any(|ch| {
-        matches!(
-            ch as u32,
-            0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF | 0x1EE00..=0x1EEFF
-        )
-    }) {
-        TextDirection::RightToLeft
-    } else {
-        TextDirection::LeftToRight
+    for ch in text.chars() {
+        match ch {
+            // Explicit embeddings/overrides are useful at the shaping boundary:
+            // higher-level bidi compilation can force the run direction while
+            // leaving these default-ignorable controls at zero advance.
+            '\u{202a}' | '\u{202d}' | '\u{2066}' => return TextDirection::LeftToRight,
+            '\u{202b}' | '\u{202e}' | '\u{2067}' => return TextDirection::RightToLeft,
+            _ if matches!(
+                ch as u32,
+                0x0590..=0x08FF
+                    | 0xFB1D..=0xFDFF
+                    | 0xFE70..=0xFEFF
+                    | 0x1EE00..=0x1EEFF
+            ) =>
+            {
+                return TextDirection::RightToLeft;
+            }
+            _ => {}
+        }
     }
+    TextDirection::LeftToRight
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ShapedGlyph, TextDirection, detect_direction, shape};
+    use super::{
+        ShapeOptions, ShapedGlyph, TextDirection, detect_direction, encode_shape_options, shape,
+    };
     use fullbleed_audit_contract::sha256::Sha256;
 
     const INTER: &[u8] = include_bytes!("../python/fullbleed_assets/fonts/Inter-Variable.ttf");
@@ -105,6 +167,46 @@ mod tests {
             )
             .collect();
         assert_eq!(actual, expected, "{label} glyph contract");
+    }
+
+    #[test]
+    fn shaping_controls_disable_kerning_without_leaking_marker_glyphs() {
+        let normal = shape(INTER, "AVAV").expect("normal shape");
+        let encoded = encode_shape_options(
+            "AVAV",
+            ShapeOptions {
+                kerning: false,
+                common_ligatures: false,
+            },
+        );
+        let unkerned = shape(INTER, &encoded).expect("controlled shape");
+
+        assert_eq!(normal.glyphs.len(), 4);
+        assert_eq!(unkerned.glyphs.len(), 4);
+        assert_eq!(
+            normal
+                .glyphs
+                .iter()
+                .map(|glyph| glyph.glyph_id)
+                .collect::<Vec<_>>(),
+            unkerned
+                .glyphs
+                .iter()
+                .map(|glyph| glyph.glyph_id)
+                .collect::<Vec<_>>()
+        );
+        assert_ne!(
+            normal
+                .glyphs
+                .iter()
+                .map(|glyph| glyph.x_advance)
+                .sum::<i32>(),
+            unkerned
+                .glyphs
+                .iter()
+                .map(|glyph| glyph.x_advance)
+                .sum::<i32>()
+        );
     }
 
     #[test]
@@ -206,6 +308,14 @@ mod tests {
         );
 
         assert_eq!(detect_direction("hello"), TextDirection::LeftToRight);
+        assert_eq!(
+            detect_direction("\u{202e}ABC\u{202c}"),
+            TextDirection::RightToLeft
+        );
+        assert_eq!(
+            detect_direction("\u{202d}\u{5e9}\u{5dc}\u{5d5}\u{5dd}\u{202c}"),
+            TextDirection::LeftToRight
+        );
         assert_eq!(
             detect_direction("\u{5e9}\u{5dc}\u{5d5}\u{5dd}"),
             TextDirection::RightToLeft

@@ -875,6 +875,14 @@ fn dispatch_compiled(
             out.set_item("compile_ms", compiled.compile_time_ms())?;
             out.set_item("binding_slot_count", compiled.binding_slots().len())?;
             out.set_item("binding_slots", PyList::new(py, compiled.binding_slots())?)?;
+            out.set_item(
+                "binding_program_page_count",
+                compiled.binding_program_page_count(),
+            )?;
+            out.set_item(
+                "binding_program_command_count",
+                compiled.binding_program_command_count(),
+            )?;
             Ok(out.unbind().into_any())
         }
         "CompiledDocument.render_pdf" => {

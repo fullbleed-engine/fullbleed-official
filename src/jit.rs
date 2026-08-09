@@ -640,6 +640,13 @@ fn commands_bbox(commands: &[Command], font_registry: Option<&FontRegistry>) -> 
                 width,
                 height,
                 ..
+            }
+            | Command::DrawMaskedForm {
+                x,
+                y,
+                width,
+                height,
+                ..
             } => {
                 let x0 = x.to_f32();
                 let y0 = y.to_f32();
@@ -739,6 +746,55 @@ fn commands_bbox(commands: &[Command], font_registry: Option<&FontRegistry>) -> 
                     max_y = max_y.max(pen_y);
                 }
                 let pad = font_size.to_f32().max(1.0);
+                let corners = [
+                    transform.apply(min_x - pad, min_y - pad),
+                    transform.apply(max_x + pad, min_y - pad),
+                    transform.apply(max_x + pad, max_y + pad),
+                    transform.apply(min_x - pad, max_y + pad),
+                ];
+                let mut bx0 = corners[0].0;
+                let mut by0 = corners[0].1;
+                let mut bx1 = corners[0].0;
+                let mut by1 = corners[0].1;
+                for (cx, cy) in &corners[1..] {
+                    bx0 = bx0.min(*cx);
+                    by0 = by0.min(*cy);
+                    bx1 = bx1.max(*cx);
+                    by1 = by1.max(*cy);
+                }
+                union_bounds(&mut bounds, (bx0, by0, bx1, by1));
+            }
+            Command::DrawSyntheticBoldGlyphRun {
+                x,
+                y,
+                advances,
+                offsets,
+                stroke_width,
+                ..
+            } => {
+                let mut pen_x = x.to_f32();
+                let mut pen_y = y.to_f32();
+                let mut min_x = pen_x;
+                let mut min_y = pen_y;
+                let mut max_x = pen_x;
+                let mut max_y = pen_y;
+                for (index, (dx, dy)) in advances.iter().enumerate() {
+                    let (offset_x, offset_y) = offsets
+                        .get(index)
+                        .map(|(ox, oy)| (ox.to_f32(), oy.to_f32()))
+                        .unwrap_or((0.0, 0.0));
+                    min_x = min_x.min(pen_x + offset_x);
+                    min_y = min_y.min(pen_y + offset_y);
+                    max_x = max_x.max(pen_x + offset_x);
+                    max_y = max_y.max(pen_y + offset_y);
+                    pen_x += dx.to_f32();
+                    pen_y += dy.to_f32();
+                }
+                min_x = min_x.min(pen_x);
+                min_y = min_y.min(pen_y);
+                max_x = max_x.max(pen_x);
+                max_y = max_y.max(pen_y);
+                let pad = font_size.to_f32().max(1.0) + stroke_width.to_f32() * 0.5;
                 let corners = [
                     transform.apply(min_x - pad, min_y - pad),
                     transform.apply(max_x + pad, min_y - pad),

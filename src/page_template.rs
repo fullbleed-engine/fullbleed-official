@@ -1,7 +1,7 @@
 use crate::Canvas;
 use crate::doc_context::DocContext;
 use crate::frame::Frame;
-use crate::types::{Rect, Size};
+use crate::types::{PagePresentation, Rect, Size};
 use std::sync::Arc;
 
 #[derive(Clone, Copy)]
@@ -18,6 +18,14 @@ pub(crate) enum PageSelector {
     First,
     Left,
     Right,
+    BlankLeft,
+    BlankRight,
+    NamedAny(u64),
+    NamedFirst(u64),
+    NamedLeft(u64),
+    NamedRight(u64),
+    NamedBlankLeft(u64),
+    NamedBlankRight(u64),
 }
 
 #[derive(Clone)]
@@ -26,6 +34,10 @@ pub struct PageTemplate {
     pub page_size: Size,
     frames: Vec<FrameSpec>,
     on_page: Option<OnPageCallback>,
+    on_page_finalize: Option<OnPageCallback>,
+    page_counter_reset: Option<i32>,
+    page_counter_increment: Option<i32>,
+    page_presentation: PagePresentation,
     selector: PageSelector,
 }
 
@@ -36,6 +48,10 @@ impl PageTemplate {
             page_size: page_size.quantized(),
             frames: Vec::new(),
             on_page: None,
+            on_page_finalize: None,
+            page_counter_reset: None,
+            page_counter_increment: None,
+            page_presentation: PagePresentation::default(),
             selector: PageSelector::Sequence,
         }
     }
@@ -71,6 +87,47 @@ impl PageTemplate {
 
     pub fn on_page(&self) -> Option<&OnPageCallback> {
         self.on_page.as_ref()
+    }
+
+    pub(crate) fn append_on_page_finalize<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(&mut Canvas, &DocContext) + Send + Sync + 'static,
+    {
+        let previous = self.on_page_finalize.take();
+        self.on_page_finalize = Some(Arc::new(move |canvas, context| {
+            if let Some(previous) = previous.as_ref() {
+                previous(canvas, context);
+            }
+            callback(canvas, context);
+        }));
+        self
+    }
+
+    pub(crate) fn on_page_finalize(&self) -> Option<&OnPageCallback> {
+        self.on_page_finalize.as_ref()
+    }
+
+    pub(crate) fn with_page_counter(mut self, reset: Option<i32>, increment: Option<i32>) -> Self {
+        self.page_counter_reset = reset;
+        self.page_counter_increment = increment;
+        self
+    }
+
+    pub(crate) fn page_counter_reset(&self) -> Option<i32> {
+        self.page_counter_reset
+    }
+
+    pub(crate) fn page_counter_increment(&self) -> Option<i32> {
+        self.page_counter_increment
+    }
+
+    pub(crate) fn with_page_presentation(mut self, presentation: PagePresentation) -> Self {
+        self.page_presentation = presentation;
+        self
+    }
+
+    pub(crate) fn page_presentation(&self) -> PagePresentation {
+        self.page_presentation
     }
 
     pub(crate) fn with_page_selector(mut self, selector: PageSelector) -> Self {

@@ -221,7 +221,10 @@ def test_compiled_document_renders_distinct_columnar_bindings(tmp_path) -> None:
         "<p>Amount: {{amount}}</p></main>",
         "body { font-family: Helvetica, sans-serif; font-size: 12pt; }",
     )
-    assert compiled.stats()["binding_slots"] == ["amount", "customer", "invoice_id"]
+    stats = compiled.stats()
+    assert stats["binding_slots"] == ["amount", "customer", "invoice_id"]
+    assert stats["binding_program_page_count"] == 1
+    assert stats["binding_program_command_count"] > 0
     bindings = {
         "invoice_id": ["INV-0001", "INV-0002", "INV-0003"],
         "customer": ["Ada Lovelace", "Grace Hopper", "Katherine Johnson"],

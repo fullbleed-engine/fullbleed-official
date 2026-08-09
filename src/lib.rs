@@ -150,6 +150,7 @@ pub struct CompiledDocument {
     compile_nanos: u64,
     command_count: usize,
     binding_slots: Vec<String>,
+    binding_plan: Option<Result<Arc<pdf::CompiledBindingPlan>, Arc<str>>>,
 }
 
 fn valid_binding_slot_name(name: &str) -> bool {
@@ -209,6 +210,20 @@ impl CompiledDocument {
 
     pub fn binding_slots(&self) -> &[String] {
         &self.binding_slots
+    }
+
+    pub fn binding_program_page_count(&self) -> usize {
+        self.binding_plan
+            .as_ref()
+            .and_then(|plan| plan.as_ref().ok())
+            .map_or(0, |plan| plan.page_count())
+    }
+
+    pub fn binding_program_command_count(&self) -> usize {
+        self.binding_plan
+            .as_ref()
+            .and_then(|plan| plan.as_ref().ok())
+            .map_or(0, |plan| plan.command_count())
     }
 
     pub fn render_to_buffer(&self) -> Result<Vec<u8>, FullBleedError> {
@@ -348,6 +363,16 @@ impl CompiledDocument {
         columns: &[&[String]],
         writer: &mut W,
     ) -> Result<usize, FullBleedError> {
+        let binding_plan = self
+            .binding_plan
+            .as_ref()
+            .ok_or_else(|| {
+                FullBleedError::InvalidConfiguration(
+                    "compiled document has no binding command plan".to_string(),
+                )
+            })?
+            .as_ref()
+            .map_err(|error| FullBleedError::InvalidConfiguration(error.to_string()))?;
         let mut pdf_stream = pdf::PdfStreamWriter::new(
             writer,
             self.document.page_size,
@@ -359,7 +384,7 @@ impl CompiledDocument {
         pdf_stream.add_compiled_document_bindings(
             0,
             &self.document,
-            &self.binding_slots,
+            binding_plan,
             columns,
             record_count,
         )?;
@@ -420,6 +445,19 @@ pub struct FullBleedBuilder {
 struct RenderContext {
     resolver: Arc<style::StyleResolver>,
     page_templates: Arc<[PageTemplate]>,
+}
+
+struct ResolvedCssPageContext {
+    page_size: Size,
+    base_margins: Margins,
+    page_margins: std::collections::BTreeMap<usize, Margins>,
+    page_styles: style::CssPageStyles,
+}
+
+#[derive(Clone)]
+struct PageRootTextContext {
+    style: TextStyle,
+    line_height: Option<style::CssPageLineHeight>,
 }
 
 const RENDER_CONTEXT_CACHE_MAX_ENTRIES: usize = 32;
@@ -839,7 +877,56 @@ fn document_layout_signature(doc: &Document) -> u64 {
     hash_bytes_local(debug_repr.as_bytes())
 }
 
+fn document_target_pages(doc: &Document) -> HashMap<String, usize> {
+    fn collect_target_ids(
+        commands: &[Command],
+        page_number: usize,
+        targets: &mut HashMap<String, usize>,
+    ) {
+        for command in commands {
+            match command {
+                Command::Meta { key, value } if key == "fb.owner.id" => {
+                    if !value.is_empty() {
+                        targets.entry(value.clone()).or_insert(page_number);
+                    }
+                }
+                Command::DefineForm { commands, .. }
+                | Command::DefineIsolatedForm { commands, .. } => {
+                    collect_target_ids(commands, page_number, targets);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut targets = HashMap::new();
+    for (page_index, page) in doc.pages.iter().enumerate() {
+        collect_target_ids(&page.commands, page_index + 1, &mut targets);
+    }
+    targets
+}
+
 fn apply_html_page_shrink_to_fit(doc: &mut Document) {
+    fn html_page_area(commands: &[Command]) -> Option<Rect> {
+        commands.iter().find_map(|command| {
+            let Command::Meta { key, value } = command else {
+                return None;
+            };
+            if key != canvas::META_HTML_PAGE_AREA_KEY {
+                return None;
+            }
+            let mut values = value.split(',').filter_map(|part| part.parse::<i64>().ok());
+            let rect = Rect {
+                x: Pt::from_milli_i64(values.next()?),
+                y: Pt::from_milli_i64(values.next()?),
+                width: Pt::from_milli_i64(values.next()?),
+                height: Pt::from_milli_i64(values.next()?),
+            };
+            (values.next().is_none() && rect.width > Pt::ZERO && rect.height > Pt::ZERO)
+                .then_some(rect)
+        })
+    }
+
     fn max_scrollable_right_milli(commands: &[Command], max_right: &mut i64) {
         for command in commands {
             match command {
@@ -857,46 +944,506 @@ fn apply_html_page_shrink_to_fit(doc: &mut Document) {
         }
     }
 
-    let page_width_milli = doc.page_size.width.to_milli_i64();
-    if page_width_milli <= 0 {
+    fn min_scrollable_top_milli(commands: &[Command], min_top: &mut Option<i64>) {
+        for command in commands {
+            match command {
+                Command::Meta { key, value } if key == canvas::META_HTML_SCROLLABLE_TOP_KEY => {
+                    if let Ok(top) = value.parse::<i64>() {
+                        *min_top = Some(min_top.map_or(top, |current| current.min(top)));
+                    }
+                }
+                Command::DefineForm { commands, .. }
+                | Command::DefineIsolatedForm { commands, .. } => {
+                    min_scrollable_top_milli(commands, min_top);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn max_scrollable_bottom_milli(commands: &[Command], max_bottom: &mut Option<i64>) {
+        for command in commands {
+            match command {
+                Command::Meta { key, value } if key == canvas::META_HTML_SCROLLABLE_BOTTOM_KEY => {
+                    if let Ok(bottom) = value.parse::<i64>() {
+                        *max_bottom =
+                            Some(max_bottom.map_or(bottom, |current| current.max(bottom)));
+                    }
+                }
+                Command::DefineForm { commands, .. }
+                | Command::DefineIsolatedForm { commands, .. } => {
+                    max_scrollable_bottom_milli(commands, max_bottom);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[derive(Clone)]
+    struct HtmlBlockEndOverflowScope {
+        owner: String,
+        start: usize,
+        end: usize,
+    }
+
+    struct OpenDiagnosticScope {
+        start: usize,
+        owner: Option<String>,
+        max_bottom_milli: Option<i64>,
+    }
+
+    fn html_block_end_overflow_scopes(
+        commands: &[Command],
+        allowed_bottom_milli: i64,
+    ) -> Vec<HtmlBlockEndOverflowScope> {
+        let mut stack: Vec<OpenDiagnosticScope> = Vec::new();
+        let mut scopes = Vec::new();
+        for (index, command) in commands.iter().enumerate() {
+            match command {
+                Command::Meta { key, .. } if key == canvas::META_DIAGNOSTIC_SCOPE_BEGIN_KEY => {
+                    stack.push(OpenDiagnosticScope {
+                        start: index,
+                        owner: None,
+                        max_bottom_milli: None,
+                    });
+                }
+                Command::Meta { key, value } if key == "fb.owner.dom_path" => {
+                    if let Some(scope) = stack.last_mut() {
+                        scope.owner = Some(value.clone());
+                    }
+                }
+                Command::Meta { key, value } if key == canvas::META_HTML_SCROLLABLE_BOTTOM_KEY => {
+                    if let (Some(scope), Ok(bottom)) = (stack.last_mut(), value.parse::<i64>()) {
+                        scope.max_bottom_milli = Some(
+                            scope
+                                .max_bottom_milli
+                                .map_or(bottom, |current| current.max(bottom)),
+                        );
+                    }
+                }
+                Command::Meta { key, .. } if key == canvas::META_DIAGNOSTIC_SCOPE_END_KEY => {
+                    let Some(scope) = stack.pop() else {
+                        continue;
+                    };
+                    if scope
+                        .max_bottom_milli
+                        .is_some_and(|bottom| bottom > allowed_bottom_milli)
+                    {
+                        if let Some(owner) = scope.owner {
+                            scopes.push(HtmlBlockEndOverflowScope {
+                                owner,
+                                start: scope.start,
+                                end: index,
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // If both a transformed ancestor and descendant cross the fragment
+        // edge, replaying the ancestor already includes the descendant's paint.
+        // Keep only the outermost overflowing visual scopes.
+        scopes.sort_by(|left, right| {
+            left.start
+                .cmp(&right.start)
+                .then_with(|| right.end.cmp(&left.end))
+        });
+        let mut outermost: Vec<HtmlBlockEndOverflowScope> = Vec::new();
+        for scope in scopes {
+            if outermost
+                .iter()
+                .any(|parent| parent.start <= scope.start && parent.end >= scope.end)
+            {
+                continue;
+            }
+            outermost.push(scope);
+        }
+        outermost
+    }
+
+    fn diagnostic_owner_scope_start(commands: &[Command], owner: &str) -> Option<usize> {
+        let mut scope_starts = Vec::new();
+        for (index, command) in commands.iter().enumerate() {
+            match command {
+                Command::Meta { key, .. } if key == canvas::META_DIAGNOSTIC_SCOPE_BEGIN_KEY => {
+                    scope_starts.push(index);
+                }
+                Command::Meta { key, value } if key == "fb.owner.dom_path" && value == owner => {
+                    if let Some(start) = scope_starts.last() {
+                        return Some(*start);
+                    }
+                }
+                Command::Meta { key, .. } if key == canvas::META_DIAGNOSTIC_SCOPE_END_KEY => {
+                    scope_starts.pop();
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn visual_replay_commands(commands: &[Command]) -> Vec<Command> {
+        commands
+            .iter()
+            .filter_map(|command| match command {
+                // A cross-fragment paint replay is an artifact of the owning
+                // element, not a second semantic occurrence.
+                Command::Meta { .. } | Command::BeginTag { .. } | Command::EndTag => None,
+                Command::DefineForm {
+                    resource_id,
+                    width,
+                    height,
+                    commands,
+                } => Some(Command::DefineForm {
+                    resource_id: resource_id.clone(),
+                    width: *width,
+                    height: *height,
+                    commands: visual_replay_commands(commands),
+                }),
+                Command::DefineIsolatedForm {
+                    resource_id,
+                    width,
+                    height,
+                    commands,
+                } => Some(Command::DefineIsolatedForm {
+                    resource_id: resource_id.clone(),
+                    width: *width,
+                    height: *height,
+                    commands: visual_replay_commands(commands),
+                }),
+                _ => Some(command.clone()),
+            })
+            .collect()
+    }
+
+    fn extend_html_canvas_background_block_end(commands: &mut [Command], guard: Pt) {
+        let mut scope_depth = 0usize;
+        for command in commands {
+            match command {
+                Command::Meta { key, value }
+                    if key == canvas::META_HTML_CANVAS_BACKGROUND_KEY && value == "begin" =>
+                {
+                    scope_depth = scope_depth.saturating_add(1);
+                }
+                Command::Meta { key, value }
+                    if key == canvas::META_HTML_CANVAS_BACKGROUND_KEY && value == "end" =>
+                {
+                    scope_depth = scope_depth.saturating_sub(1);
+                }
+                Command::DrawRect { height, .. } if scope_depth > 0 => {
+                    *height += guard;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct HtmlPageFit {
+        page_width_milli: i64,
+        page_size: Size,
+        page_area: Rect,
+        max_right_milli: i64,
+        min_top_milli: Option<i64>,
+        max_bottom_milli: Option<i64>,
+        local_scale: f32,
+        content_start: usize,
+    }
+
+    let default_page_size = doc.page_size;
+    let page_fits: Vec<_> = doc
+        .pages
+        .iter()
+        .map(|page| {
+            let named_page_size = page
+                .commands
+                .iter()
+                .rev()
+                .find_map(|command| match command {
+                    Command::Meta { key, value } if key == canvas::META_PAGE_SIZE_KEY => {
+                        value.split_once(',').and_then(|(width, height)| {
+                            Some((width.parse::<i64>().ok()?, height.parse::<i64>().ok()?))
+                        })
+                    }
+                    _ => None,
+                })
+                .unwrap_or((
+                    default_page_size.width.to_milli_i64(),
+                    default_page_size.height.to_milli_i64(),
+                ));
+            let page_width_milli = named_page_size.0;
+            let page_size = Size {
+                width: Pt::from_milli_i64(named_page_size.0),
+                height: Pt::from_milli_i64(named_page_size.1),
+            };
+            let page_area = html_page_area(&page.commands).unwrap_or(Rect {
+                x: Pt::ZERO,
+                y: Pt::ZERO,
+                width: Pt::from_milli_i64(page_width_milli),
+                height: Pt::from_milli_i64(named_page_size.1),
+            });
+            let allowed_right_milli = (page_area.x + page_area.width).to_milli_i64();
+            let mut max_right_milli = allowed_right_milli;
+            max_scrollable_right_milli(&page.commands, &mut max_right_milli);
+            let mut min_top_milli = None;
+            min_scrollable_top_milli(&page.commands, &mut min_top_milli);
+            let mut max_bottom_milli = None;
+            max_scrollable_bottom_milli(&page.commands, &mut max_bottom_milli);
+            let overflow_width_milli = max_right_milli - page_area.x.to_milli_i64();
+            let local_scale = if page_width_milli > 0
+                && max_right_milli > allowed_right_milli
+                && overflow_width_milli > 0
+            {
+                (page_area.width.to_milli_i64() as f64 / overflow_width_milli as f64) as f32
+            } else {
+                1.0
+            };
+            let content_start = page
+                .commands
+                .iter()
+                .position(|command| {
+                    matches!(command, Command::Meta { key, .. } if key == META_PAGE_TEMPLATE_KEY)
+                })
+                .map_or(0, |index| index + 1);
+            HtmlPageFit {
+                page_width_milli,
+                page_size,
+                page_area,
+                max_right_milli,
+                min_top_milli,
+                max_bottom_milli,
+                local_scale,
+                content_start,
+            }
+        })
+        .collect();
+    let scale = page_fits
+        .iter()
+        .map(|fit| fit.local_scale)
+        .filter(|scale| scale.is_finite() && *scale > 0.0)
+        .fold(1.0_f32, f32::min);
+    let should_scale = (0.0..1.0).contains(&scale);
+    let has_previous_fragment_overflow = page_fits.iter().skip(1).any(|fit| {
+        fit.min_top_milli
+            .is_some_and(|top| top < fit.page_area.y.to_milli_i64())
+    });
+    let has_next_fragment_overflow = page_fits
+        .iter()
+        .take(page_fits.len().saturating_sub(1))
+        .any(|fit| {
+            fit.max_bottom_milli.is_some_and(|bottom| {
+                bottom > (fit.page_area.y + fit.page_area.height).to_milli_i64()
+            })
+        });
+    if !should_scale && !has_previous_fragment_overflow && !has_next_fragment_overflow {
         return;
     }
 
-    for page in &mut doc.pages {
-        let mut max_right_milli = page_width_milli;
-        max_scrollable_right_milli(&page.commands, &mut max_right_milli);
-        if max_right_milli <= page_width_milli {
+    if should_scale {
+        // Blink paints the propagated root canvas through its fitted surface.
+        // Retain the resulting quarter-point block-end coverage phase while
+        // leaving @page backgrounds and margin boxes outside the fit program.
+        let block_end_guard = Pt::from_f32(0.25);
+        for page in &mut doc.pages {
+            extend_html_canvas_background_block_end(&mut page.commands, block_end_guard);
+        }
+    }
+
+    let pristine_contents: Vec<_> = doc
+        .pages
+        .iter()
+        .zip(&page_fits)
+        .map(|(page, fit)| page.commands[fit.content_start..].to_vec())
+        .collect();
+    let mut original_contents = pristine_contents.clone();
+
+    // A transformed fragment's block-end visual overflow paints on the next
+    // fragmentainer before that element's continuation. Key the carry layer by
+    // the stable DOM owner scope retained across split clones, so unrelated
+    // transformed elements cannot reorder one another. The replay stays as
+    // display-list bytecode and inherits the destination page's single global
+    // fit transform; no raster surface or second layout pass is required.
+    for source_index in 0..page_fits.len().saturating_sub(1) {
+        let source_fit = page_fits[source_index];
+        let source_bottom = source_fit.page_area.y + source_fit.page_area.height;
+        if !source_fit
+            .max_bottom_milli
+            .is_some_and(|bottom| bottom > source_bottom.to_milli_i64())
+        {
             continue;
         }
+        let destination_index = source_index + 1;
+        let destination_fit = page_fits[destination_index];
+        let scopes = html_block_end_overflow_scopes(
+            &pristine_contents[source_index],
+            source_bottom.to_milli_i64(),
+        );
+        for scope in scopes {
+            let Some(insert_at) =
+                diagnostic_owner_scope_start(&original_contents[destination_index], &scope.owner)
+            else {
+                continue;
+            };
+            let replay =
+                visual_replay_commands(&pristine_contents[source_index][scope.start..=scope.end]);
+            if replay.is_empty() {
+                continue;
+            }
+            let destination_area = destination_fit.page_area;
+            let source_area = source_fit.page_area;
+            let mut carry = Vec::with_capacity(replay.len() + 6);
+            carry.push(Command::SaveState);
+            carry.push(Command::ClipRect {
+                x: destination_area.x,
+                y: destination_area.y,
+                width: destination_area.width,
+                height: destination_area.height,
+            });
+            carry.push(Command::BeginArtifact { subtype: None });
+            carry.push(Command::ConcatMatrix {
+                a: 1.0,
+                b: 0.0,
+                c: 0.0,
+                d: 1.0,
+                e: destination_area.x - source_area.x,
+                f: destination_area.y - source_area.y - source_area.height,
+            });
+            carry.extend(replay);
+            carry.push(Command::EndMarkedContent);
+            carry.push(Command::RestoreState);
+            original_contents[destination_index].splice(insert_at..insert_at, carry);
+        }
+    }
 
-        let scale = page_width_milli as f64 / max_right_milli as f64;
-        let scale = scale as f32;
-        if !scale.is_finite() || !(0.0..1.0).contains(&scale) {
+    // Chromium chooses one document-wide print fit, then anchors it to each
+    // page's own asymmetric page area. Overflow discovered on a later page
+    // therefore scales earlier pages by the same amount.
+    if !should_scale {
+        for (page_index, (page, fit)) in doc.pages.iter_mut().zip(&page_fits).enumerate() {
+            page.commands.truncate(fit.content_start);
+            page.commands
+                .extend(original_contents[page_index].iter().cloned());
+        }
+    }
+    if should_scale {
+        for (page_index, (page, fit)) in doc.pages.iter_mut().zip(&page_fits).enumerate() {
+            let page_area = fit.page_area;
+            if std::env::var_os("FULLBLEED_PAGE_SHRINK_DEBUG").is_some() {
+                eprintln!(
+                    "fullbleed page shrink: page_width_milli={} page_area={page_area:?} max_right_milli={} local_scale={} document_scale={scale}",
+                    fit.page_width_milli, fit.max_right_milli, fit.local_scale,
+                );
+            }
+
+            // Page backgrounds, print marks, and margin boxes are installed by
+            // the selected template before its metadata marker. Browser page
+            // fitting scales only the document content after that marker.
+            page.commands.truncate(fit.content_start);
+            let commands = original_contents[page_index].clone();
+            let mut scaled = Vec::with_capacity(commands.len() + 6);
+            // Keep the fitted document surface just inside a nonzero
+            // block-start page-area edge. PDF fill paths own a coincident
+            // raster row differently from Chromium, and the propagated root
+            // canvas would otherwise cover one row of the @page background.
+            // One serialized millipoint changes only that boundary decision;
+            // it is far below a device pixel at normal print resolutions.
+            let block_start_guard = Pt::from_milli_i64(1);
+            let clip_guard = if page_area.y > Pt::ZERO && page_area.height > block_start_guard {
+                block_start_guard
+            } else {
+                Pt::ZERO
+            };
+            scaled.push(Command::SaveState);
+            scaled.push(Command::ClipRect {
+                x: page_area.x,
+                y: page_area.y + clip_guard,
+                width: page_area.width,
+                height: page_area.height - clip_guard,
+            });
+            scaled.push(Command::CssTransformOrigin {
+                x: page_area.x,
+                y: page_area.y,
+                inverse: false,
+            });
+            scaled.push(Command::Scale(scale, scale));
+            scaled.push(Command::CssTransformOrigin {
+                x: page_area.x,
+                y: page_area.y,
+                inverse: true,
+            });
+            scaled.extend(commands);
+            scaled.push(Command::RestoreState);
+            page.commands.extend(scaled);
+        }
+    }
+
+    // A transformed box that crosses the block-start edge belongs visually to
+    // the preceding fragmentainer. Replay only its clipped visual surface on
+    // that page; tags and metadata remain owned by the source page.
+    for source_index in 1..page_fits.len() {
+        let source_fit = page_fits[source_index];
+        if !source_fit
+            .min_top_milli
+            .is_some_and(|top| top < source_fit.page_area.y.to_milli_i64())
+        {
             continue;
         }
-        if std::env::var_os("FULLBLEED_PAGE_SHRINK_DEBUG").is_some() {
-            eprintln!(
-                "fullbleed page shrink: page_width_milli={page_width_milli} max_right_milli={max_right_milli} scale={scale}"
-            );
+        let destination_index = source_index - 1;
+        let destination_fit = page_fits[destination_index];
+        let destination_area = destination_fit.page_area;
+        let source_area = source_fit.page_area;
+        let replay = visual_replay_commands(&pristine_contents[source_index]);
+        if replay.is_empty() {
+            continue;
         }
-
-        let commands = std::mem::take(&mut page.commands);
-        let mut scaled = Vec::with_capacity(commands.len() + 5);
-        scaled.push(Command::SaveState);
-        scaled.push(Command::CssTransformOrigin {
-            x: Pt::ZERO,
-            y: Pt::ZERO,
-            inverse: false,
+        let page = &mut doc.pages[destination_index];
+        page.commands.push(Command::SaveState);
+        page.commands.push(Command::ClipRect {
+            x: destination_area.x,
+            y: destination_area.y,
+            width: destination_area.width,
+            height: destination_area.height,
         });
-        scaled.push(Command::Scale(scale, scale));
-        scaled.push(Command::CssTransformOrigin {
-            x: Pt::ZERO,
-            y: Pt::ZERO,
-            inverse: true,
-        });
-        scaled.extend(commands);
-        scaled.push(Command::RestoreState);
-        page.commands = scaled;
+        let replay_x = destination_area.x - source_area.x * scale;
+        let replay_y = destination_area.y + destination_area.height - source_area.y * scale
+            + Pt::from_f32(0.25);
+        page.commands.push(Command::BeginArtifact { subtype: None });
+        if source_fit.page_size == destination_fit.page_size {
+            // Replay the original vector program directly. Besides avoiding a
+            // surface allocation, this keeps edge antialiasing on the same
+            // device phase as Chromium's continuous fragment paint stream.
+            page.commands.push(Command::ConcatMatrix {
+                a: scale,
+                b: 0.0,
+                c: 0.0,
+                d: scale,
+                e: replay_x,
+                f: replay_y + source_fit.page_size.height * scale
+                    - destination_fit.page_size.height,
+            });
+            page.commands.extend(replay);
+        } else {
+            // Mixed physical page sizes need an explicit source coordinate
+            // space. Keep that uncommon path vector-backed through a form.
+            let resource_id = format!("html-fragment-overflow:{}", source_index + 1);
+            page.commands.push(Command::DefineIsolatedForm {
+                resource_id: resource_id.clone(),
+                width: source_fit.page_size.width,
+                height: source_fit.page_size.height,
+                commands: replay,
+            });
+            page.commands.push(Command::DrawForm {
+                x: replay_x,
+                y: replay_y,
+                width: source_fit.page_size.width * scale,
+                height: source_fit.page_size.height * scale,
+                resource_id,
+            });
+        }
+        page.commands.push(Command::EndMarkedContent);
+        page.commands.push(Command::RestoreState);
     }
 }
 
@@ -1556,6 +2103,7 @@ fn build_watermark_commands(
                 height: size.height,
                 resource_id: resolved_path,
                 interpolate: true,
+                source_clip: None,
             });
             commands.push(Command::RestoreState);
         }
@@ -4628,7 +5176,10 @@ impl FullBleed {
         report: Option<&mut GlyphCoverageReport>,
     ) -> Result<LayoutBuildResult, FullBleedError> {
         let lazy = self.layout_strategy == LayoutStrategy::Lazy;
-        let pass_limit = self.layout_pass_limit();
+        let uses_target_counters = resolver.has_target_counter_content();
+        let pass_limit = self
+            .layout_pass_limit()
+            .max(if uses_target_counters { 4 } else { 1 });
         let started = std::time::Instant::now();
         let mut story_ms = 0.0;
         let mut layout_ms = 0.0;
@@ -4636,6 +5187,7 @@ impl FullBleed {
         let mut converged = false;
         let mut budget_hit = false;
         let mut previous_signature: Option<u64> = None;
+        let mut target_pages = Arc::new(HashMap::new());
         let mut built: Option<Document> = None;
         let mut report = report;
         let collect_report = report.is_some();
@@ -4650,13 +5202,33 @@ impl FullBleed {
                             return template;
                         };
                         template.append_on_page(move |canvas, _| {
+                            // A PDF rectangle grows from its block-end edge
+                            // toward block-start.  Poppler owns the exact far
+                            // edge for the fill, while Chromium leaves that
+                            // coincident row to the page background.  Retire
+                            // one serialized millipoint at a nonzero page-area
+                            // start without moving the block-end edge.
+                            let far_edge_guard = Pt::from_milli_i64(1);
+                            let block_start_guard =
+                                if frame.y > Pt::ZERO && frame.height > far_edge_guard {
+                                    far_edge_guard
+                                } else {
+                                    Pt::ZERO
+                                };
+                            canvas.meta(canvas::META_HTML_CANVAS_BACKGROUND_KEY, "begin");
                             canvas.save_state();
                             canvas.set_fill_color(color);
                             if alpha < 1.0 {
                                 canvas.set_opacity(alpha, alpha);
                             }
-                            canvas.draw_rect(frame.x, frame.y, frame.width, frame.height);
+                            canvas.draw_rect(
+                                frame.x,
+                                frame.y + block_start_guard,
+                                frame.width,
+                                frame.height - block_start_guard,
+                            );
                             canvas.restore_state();
+                            canvas.meta(canvas::META_HTML_CANVAS_BACKGROUND_KEY, "end");
                         })
                     })
                     .collect::<Vec<_>>()
@@ -4665,7 +5237,11 @@ impl FullBleed {
             };
 
         for pass in 0..pass_limit {
-            if lazy && pass > 0 && started.elapsed().as_secs_f64() * 1000.0 >= self.lazy_budget_ms {
+            if lazy
+                && !uses_target_counters
+                && pass > 0
+                && started.elapsed().as_secs_f64() * 1000.0 >= self.lazy_budget_ms
+            {
                 budget_hit = true;
                 break;
             }
@@ -4679,7 +5255,7 @@ impl FullBleed {
 
             passes += 1;
             let t_story = std::time::Instant::now();
-            let story = html::html_to_story_with_resolver_and_fonts_and_report(
+            let story = html::html_to_story_with_resolver_and_fonts_and_report_and_target_pages(
                 html,
                 resolver,
                 Some(self.font_registry.clone()),
@@ -4689,6 +5265,7 @@ impl FullBleed {
                 self.svg_raster_fallback,
                 self.perf.as_deref(),
                 Some(doc_id),
+                uses_target_counters.then(|| target_pages.clone()),
             );
             story_ms += t_story.elapsed().as_secs_f64() * 1000.0;
 
@@ -4707,8 +5284,14 @@ impl FullBleed {
             layout_ms += t_layout.elapsed().as_secs_f64() * 1000.0;
 
             let signature = document_layout_signature(&next_built);
-            converged = !lazy || previous_signature.is_some_and(|last| last == signature);
+            let next_target_pages = document_target_pages(&next_built);
+            let target_pages_converged =
+                !uses_target_counters || (pass > 0 && target_pages.as_ref() == &next_target_pages);
+            let layout_converged =
+                !lazy || previous_signature.is_some_and(|last| last == signature);
+            converged = layout_converged && target_pages_converged;
             previous_signature = Some(signature);
+            target_pages = Arc::new(next_target_pages);
             built = Some(next_built);
             if collect_report {
                 final_report = Some(pass_report);
@@ -4746,11 +5329,11 @@ impl FullBleed {
         })
     }
 
-    fn resolve_page_templates_for_css(
+    fn resolve_css_page_context(
         &self,
         merged_css: &str,
         doc_id: Option<usize>,
-    ) -> Vec<PageTemplate> {
+    ) -> ResolvedCssPageContext {
         let mut page_size = self.default_page_size;
         let mut base_margins = self.default_margins;
         let mut page_margins = self.page_margins.clone();
@@ -4759,7 +5342,7 @@ impl FullBleed {
             self.debug.as_deref(),
             Some(self.default_page_size),
         );
-        let page_setup = page_styles.base;
+        let page_setup = page_styles.base.clone();
 
         if let Some(css_size) = page_setup.size {
             if self.page_size_explicit {
@@ -4783,7 +5366,7 @@ impl FullBleed {
             }
         }
 
-        if let Some(css_margins) = page_setup.resolve_margins(base_margins) {
+        if let Some(css_margins) = page_setup.resolve_margins(base_margins, page_size) {
             if self.margins_explicit {
                 if let Some(logger) = self.debug.as_deref() {
                     logger.increment("jit.page_margin.css_overridden", 1);
@@ -4800,11 +5383,34 @@ impl FullBleed {
                 &mut page_styles.first,
                 &mut page_styles.left,
                 &mut page_styles.right,
+                &mut page_styles.blank,
             ] {
                 setup.margin_top = None;
                 setup.margin_right = None;
                 setup.margin_bottom = None;
                 setup.margin_left = None;
+                setup.margin_top_percent = None;
+                setup.margin_right_percent = None;
+                setup.margin_bottom_percent = None;
+                setup.margin_left_percent = None;
+            }
+            for named in &mut page_styles.named {
+                for setup in [
+                    &mut named.base,
+                    &mut named.first,
+                    &mut named.left,
+                    &mut named.right,
+                    &mut named.blank,
+                ] {
+                    setup.margin_top = None;
+                    setup.margin_right = None;
+                    setup.margin_bottom = None;
+                    setup.margin_left = None;
+                    setup.margin_top_percent = None;
+                    setup.margin_right_percent = None;
+                    setup.margin_bottom_percent = None;
+                    setup.margin_left_percent = None;
+                }
             }
         }
 
@@ -4835,7 +5441,61 @@ impl FullBleed {
             logger.log_json(&json);
         }
 
-        build_page_templates(page_size, base_margins, &page_margins, page_styles)
+        ResolvedCssPageContext {
+            page_size,
+            base_margins,
+            page_margins,
+            page_styles,
+        }
+    }
+
+    fn compile_css_render_parts(
+        &self,
+        merged_css: &str,
+        doc_id: Option<usize>,
+    ) -> (Vec<PageTemplate>, Arc<style::StyleResolver>) {
+        let resolved = self.resolve_css_page_context(merged_css, doc_id);
+        let resolver_viewport =
+            if resolved.page_margins.is_empty() && resolved.page_styles.has_pseudo_rules() {
+                resolved
+                    .page_styles
+                    .base
+                    .cascaded_with(&resolved.page_styles.right)
+                    .cascaded_with(&resolved.page_styles.first)
+                    .size
+                    .unwrap_or(resolved.page_size)
+            } else {
+                resolved.page_size
+            };
+        let resolver = Arc::new(style::StyleResolver::new_with_debug_viewport_and_fonts(
+            merged_css,
+            self.debug.clone(),
+            Some(resolver_viewport),
+            Some(self.font_registry.clone()),
+        ));
+        let root_style = resolver.computed_root_element_style();
+        let root_text = PageRootTextContext {
+            style: root_style.to_text_style(),
+            line_height: root_style.page_context_line_height(),
+        };
+        let page_templates = build_page_templates(
+            resolved.page_size,
+            resolved.base_margins,
+            &resolved.page_margins,
+            resolved.page_styles,
+            self.font_registry.clone(),
+            root_text,
+        );
+        (page_templates, resolver)
+    }
+
+    #[cfg(test)]
+    fn resolve_page_templates_for_css(
+        &self,
+        merged_css: &str,
+        doc_id: Option<usize>,
+    ) -> Vec<PageTemplate> {
+        self.compile_css_render_parts(merged_css, doc_id).0
     }
 
     fn build_render_context(&self, css: &str, doc_id: Option<usize>) -> RenderContext {
@@ -4865,17 +5525,7 @@ impl FullBleed {
             return context;
         }
         let merged_css = self.merge_css(css);
-        let page_templates = self.resolve_page_templates_for_css(&merged_css, doc_id);
-        let page_size = page_templates.get(0).map(|t| t.page_size).unwrap_or(Size {
-            width: Pt::ZERO,
-            height: Pt::ZERO,
-        });
-        let resolver = Arc::new(style::StyleResolver::new_with_debug_viewport_and_fonts(
-            &merged_css,
-            self.debug.clone(),
-            Some(page_size),
-            Some(self.font_registry.clone()),
-        ));
+        let (page_templates, resolver) = self.compile_css_render_parts(&merged_css, doc_id);
         if let Some(logger) = self.debug.as_deref() {
             let css_ms = t_css.elapsed().as_secs_f64() * 1000.0;
             let doc_id = doc_id
@@ -5340,6 +5990,12 @@ impl FullBleed {
         for page in &document.pages {
             collect_binding_slots(&page.commands, &mut binding_slots);
         }
+        let binding_slots = binding_slots.into_iter().collect::<Vec<_>>();
+        let binding_plan = (!binding_slots.is_empty()).then(|| {
+            pdf::compile_binding_plan(&document, &binding_slots)
+                .map(Arc::new)
+                .map_err(|error| Arc::<str>::from(error.to_string()))
+        });
         let elapsed = started.elapsed();
         let compile_nanos = u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX);
         if let Some(logger) = self.perf.as_deref() {
@@ -5361,7 +6017,8 @@ impl FullBleed {
             perf: self.perf.clone(),
             compile_nanos,
             command_count,
-            binding_slots: binding_slots.into_iter().collect(),
+            binding_slots,
+            binding_plan,
         })
     }
 
@@ -6815,6 +7472,8 @@ fn build_page_templates(
     base_margins: Margins,
     page_margins: &std::collections::BTreeMap<usize, Margins>,
     page_styles: style::CssPageStyles,
+    font_registry: Arc<FontRegistry>,
+    root_text: PageRootTextContext,
 ) -> Vec<PageTemplate> {
     let base_margins = base_margins.quantized();
     let content_width = (page_size.width - base_margins.left - base_margins.right).max(Pt::ZERO);
@@ -6832,40 +7491,154 @@ fn build_page_templates(
         if page_styles.has_pseudo_rules() {
             let first = page_styles
                 .base
-                .cascaded_with(page_styles.right)
-                .cascaded_with(page_styles.first);
+                .cascaded_with(&page_styles.right)
+                .cascaded_with(&page_styles.first);
             templates.push(build_css_page_template(
                 "First",
                 page_size,
                 base_margins,
                 first,
                 PageSelector::First,
+                font_registry.clone(),
+                root_text.clone(),
             ));
             templates.push(build_css_page_template(
                 "Left",
                 page_size,
                 base_margins,
-                page_styles.base.cascaded_with(page_styles.left),
+                page_styles.base.cascaded_with(&page_styles.left),
                 PageSelector::Left,
+                font_registry.clone(),
+                root_text.clone(),
             ));
             templates.push(build_css_page_template(
                 "Right",
                 page_size,
                 base_margins,
-                page_styles.base.cascaded_with(page_styles.right),
+                page_styles.base.cascaded_with(&page_styles.right),
                 PageSelector::Right,
+                font_registry.clone(),
+                root_text.clone(),
             ));
+            templates.push(build_css_page_template(
+                "BlankLeft",
+                page_size,
+                base_margins,
+                page_styles
+                    .base
+                    .cascaded_with(&page_styles.left)
+                    .cascaded_with(&page_styles.blank),
+                PageSelector::BlankLeft,
+                font_registry.clone(),
+                root_text.clone(),
+            ));
+            templates.push(build_css_page_template(
+                "BlankRight",
+                page_size,
+                base_margins,
+                page_styles
+                    .base
+                    .cascaded_with(&page_styles.right)
+                    .cascaded_with(&page_styles.blank),
+                PageSelector::BlankRight,
+                font_registry.clone(),
+                root_text.clone(),
+            ));
+            for named in &page_styles.named {
+                let base = page_styles.base.cascaded_with(&named.base);
+                templates.push(build_css_page_template(
+                    format!("Named:{}:First", named.name),
+                    page_size,
+                    base_margins,
+                    page_styles
+                        .base
+                        .cascaded_with(&page_styles.right)
+                        .cascaded_with(&named.base)
+                        .cascaded_with(&named.right)
+                        .cascaded_with(&named.first),
+                    PageSelector::NamedFirst(named.id),
+                    font_registry.clone(),
+                    root_text.clone(),
+                ));
+                templates.push(build_css_page_template(
+                    format!("Named:{}:Left", named.name),
+                    page_size,
+                    base_margins,
+                    page_styles
+                        .base
+                        .cascaded_with(&page_styles.left)
+                        .cascaded_with(&named.base)
+                        .cascaded_with(&named.left),
+                    PageSelector::NamedLeft(named.id),
+                    font_registry.clone(),
+                    root_text.clone(),
+                ));
+                templates.push(build_css_page_template(
+                    format!("Named:{}:Right", named.name),
+                    page_size,
+                    base_margins,
+                    page_styles
+                        .base
+                        .cascaded_with(&page_styles.right)
+                        .cascaded_with(&named.base)
+                        .cascaded_with(&named.right),
+                    PageSelector::NamedRight(named.id),
+                    font_registry.clone(),
+                    root_text.clone(),
+                ));
+                templates.push(build_css_page_template(
+                    format!("Named:{}:BlankLeft", named.name),
+                    page_size,
+                    base_margins,
+                    page_styles
+                        .base
+                        .cascaded_with(&page_styles.left)
+                        .cascaded_with(&page_styles.blank)
+                        .cascaded_with(&named.base)
+                        .cascaded_with(&named.left)
+                        .cascaded_with(&named.blank),
+                    PageSelector::NamedBlankLeft(named.id),
+                    font_registry.clone(),
+                    root_text.clone(),
+                ));
+                templates.push(build_css_page_template(
+                    format!("Named:{}:BlankRight", named.name),
+                    page_size,
+                    base_margins,
+                    page_styles
+                        .base
+                        .cascaded_with(&page_styles.right)
+                        .cascaded_with(&page_styles.blank)
+                        .cascaded_with(&named.base)
+                        .cascaded_with(&named.right)
+                        .cascaded_with(&named.blank),
+                    PageSelector::NamedBlankRight(named.id),
+                    font_registry.clone(),
+                    root_text.clone(),
+                ));
+                templates.push(build_css_page_template(
+                    format!("Named:{}", named.name),
+                    page_size,
+                    base_margins,
+                    base,
+                    PageSelector::NamedAny(named.id),
+                    font_registry.clone(),
+                    root_text.clone(),
+                ));
+            }
             templates.push(build_css_page_template(
                 "Page",
                 page_size,
                 base_margins,
-                page_styles.base,
+                page_styles.base.clone(),
                 PageSelector::Any,
+                font_registry.clone(),
+                root_text.clone(),
             ));
         } else {
             let mut template = PageTemplate::new("Page1", page_size).with_frame(frame_rect);
             if let Some(background) = page_styles.base.background {
-                template = with_page_background(template, page_size, background);
+                template = with_page_background(template, page_size, Pt::ZERO, background);
             }
             templates.push(template);
         }
@@ -6888,11 +7661,15 @@ fn build_page_templates(
             height: content_height,
         }
         .quantized();
-        let mut template =
-            PageTemplate::new(format!("Page{page_number}"), page_size).with_frame(rect);
+        let mut template = PageTemplate::new(format!("Page{page_number}"), page_size)
+            .with_frame(rect)
+            .with_page_presentation(page_styles.base.page_presentation());
+        let presentation = page_styles.base.page_presentation();
         if let Some(background) = page_styles.base.background {
-            template = with_page_background(template, page_size, background);
+            template =
+                with_page_background(template, page_size, presentation.media_extent(), background);
         }
+        template = with_page_print_marks(template, page_size, presentation);
         templates.push(template);
     }
     templates
@@ -6904,9 +7681,12 @@ fn build_css_page_template(
     base_margins: Margins,
     setup: style::CssPageSetup,
     selector: PageSelector,
+    font_registry: Arc<FontRegistry>,
+    root_text: PageRootTextContext,
 ) -> PageTemplate {
+    let page_size = setup.size.unwrap_or(page_size).quantized();
     let margins = setup
-        .resolve_margins(base_margins)
+        .resolve_margins(base_margins, page_size)
         .unwrap_or(base_margins)
         .quantized();
     let rect = Rect {
@@ -6918,9 +7698,362 @@ fn build_css_page_template(
     .quantized();
     let mut template = PageTemplate::new(name, page_size)
         .with_frame(rect)
-        .with_page_selector(selector);
+        .with_page_selector(selector)
+        .with_page_counter(setup.page_counter_reset, setup.page_counter_increment)
+        .with_page_presentation(setup.page_presentation());
+    let presentation = setup.page_presentation();
     if let Some(background) = setup.background {
-        template = with_page_background(template, page_size, background);
+        template =
+            with_page_background(template, page_size, presentation.media_extent(), background);
+    }
+    template = with_page_print_marks(template, page_size, presentation);
+    template = with_page_margin_boxes(
+        template,
+        page_size,
+        margins,
+        setup,
+        font_registry,
+        root_text,
+    );
+    template
+}
+
+fn page_margin_box_rect(
+    page_size: Size,
+    margins: Margins,
+    kind: style::CssPageMarginBoxKind,
+    width_override: Option<Pt>,
+) -> (Rect, flowable::TextAlign) {
+    use flowable::TextAlign;
+    use style::CssPageMarginBoxKind::*;
+
+    let content_width = (page_size.width - margins.left - margins.right).max(Pt::ZERO);
+    let content_height = (page_size.height - margins.top - margins.bottom).max(Pt::ZERO);
+    let half_width = content_width / 2;
+    let half_height = content_height / 2;
+    let (mut rect, align) = match kind {
+        TopLeftCorner => (
+            Rect {
+                x: Pt::ZERO,
+                y: Pt::ZERO,
+                width: margins.left,
+                height: margins.top,
+            },
+            TextAlign::Right,
+        ),
+        TopLeft => (
+            Rect {
+                x: margins.left,
+                y: Pt::ZERO,
+                width: half_width,
+                height: margins.top,
+            },
+            TextAlign::Left,
+        ),
+        TopCenter => (
+            Rect {
+                x: margins.left,
+                y: Pt::ZERO,
+                width: content_width,
+                height: margins.top,
+            },
+            TextAlign::Center,
+        ),
+        TopRight => (
+            Rect {
+                x: margins.left + half_width,
+                y: Pt::ZERO,
+                width: half_width,
+                height: margins.top,
+            },
+            TextAlign::Right,
+        ),
+        TopRightCorner => (
+            Rect {
+                x: page_size.width - margins.right,
+                y: Pt::ZERO,
+                width: margins.right,
+                height: margins.top,
+            },
+            TextAlign::Left,
+        ),
+        BottomLeftCorner => (
+            Rect {
+                x: Pt::ZERO,
+                y: page_size.height - margins.bottom,
+                width: margins.left,
+                height: margins.bottom,
+            },
+            TextAlign::Right,
+        ),
+        BottomLeft => (
+            Rect {
+                x: margins.left,
+                y: page_size.height - margins.bottom,
+                width: half_width,
+                height: margins.bottom,
+            },
+            TextAlign::Left,
+        ),
+        BottomCenter => (
+            Rect {
+                x: margins.left,
+                y: page_size.height - margins.bottom,
+                width: content_width,
+                height: margins.bottom,
+            },
+            TextAlign::Center,
+        ),
+        BottomRight => (
+            Rect {
+                x: margins.left + half_width,
+                y: page_size.height - margins.bottom,
+                width: half_width,
+                height: margins.bottom,
+            },
+            TextAlign::Right,
+        ),
+        BottomRightCorner => (
+            Rect {
+                x: page_size.width - margins.right,
+                y: page_size.height - margins.bottom,
+                width: margins.right,
+                height: margins.bottom,
+            },
+            TextAlign::Left,
+        ),
+        LeftTop => (
+            Rect {
+                x: Pt::ZERO,
+                y: margins.top,
+                width: margins.left,
+                height: half_height,
+            },
+            TextAlign::Center,
+        ),
+        LeftMiddle => (
+            Rect {
+                x: Pt::ZERO,
+                y: margins.top,
+                width: margins.left,
+                height: content_height,
+            },
+            TextAlign::Center,
+        ),
+        LeftBottom => (
+            Rect {
+                x: Pt::ZERO,
+                y: margins.top + half_height,
+                width: margins.left,
+                height: half_height,
+            },
+            TextAlign::Center,
+        ),
+        RightTop => (
+            Rect {
+                x: page_size.width - margins.right,
+                y: margins.top,
+                width: margins.right,
+                height: half_height,
+            },
+            TextAlign::Center,
+        ),
+        RightMiddle => (
+            Rect {
+                x: page_size.width - margins.right,
+                y: margins.top,
+                width: margins.right,
+                height: content_height,
+            },
+            TextAlign::Center,
+        ),
+        RightBottom => (
+            Rect {
+                x: page_size.width - margins.right,
+                y: margins.top + half_height,
+                width: margins.right,
+                height: half_height,
+            },
+            TextAlign::Center,
+        ),
+    };
+    if let Some(width) = width_override {
+        let width = width.max(Pt::ZERO).min(page_size.width);
+        match kind {
+            TopLeft | BottomLeft => rect.width = width,
+            TopCenter | BottomCenter => {
+                rect.x = (page_size.width - width) / 2;
+                rect.width = width;
+            }
+            TopRight | BottomRight => {
+                rect.x = page_size.width - width;
+                rect.width = width;
+            }
+            _ => {}
+        }
+    }
+    (rect.quantized(), align)
+}
+
+fn with_page_margin_boxes(
+    mut template: PageTemplate,
+    page_size: Size,
+    margins: Margins,
+    setup: style::CssPageSetup,
+    font_registry: Arc<FontRegistry>,
+    root_text: PageRootTextContext,
+) -> PageTemplate {
+    for margin_box in &setup.margin_boxes {
+        let Some(kind) = margin_box.kind else {
+            continue;
+        };
+        let Some(parts) = margin_box.content.clone() else {
+            continue;
+        };
+        if parts.is_empty() {
+            continue;
+        }
+        let (rect, align) = page_margin_box_rect(page_size, margins, kind, margin_box.width);
+        if rect.width <= Pt::ZERO || rect.height <= Pt::ZERO {
+            continue;
+        }
+        let font_size = margin_box
+            .font_size
+            .or(setup.font_size)
+            .unwrap_or(root_text.style.font_size);
+        let line_height_spec = margin_box
+            .line_height
+            .or(setup.line_height)
+            .or(root_text.line_height);
+        let (line_height, line_height_is_auto) = match line_height_spec {
+            Some(style::CssPageLineHeight::Absolute(value)) => (value, false),
+            Some(style::CssPageLineHeight::Number(value)) => (font_size * value, false),
+            None => (font_size.mul_ratio(6, 5), true),
+        };
+        let mut text_style = root_text.style.clone();
+        text_style.font_size = font_size;
+        text_style.line_height = line_height.max(Pt::ZERO);
+        text_style.line_height_is_auto = line_height_is_auto;
+        text_style.color = margin_box
+            .color
+            .or(setup.color)
+            .unwrap_or(root_text.style.color);
+        if let Some(font_name) = margin_box
+            .font_name
+            .as_deref()
+            .or(setup.font_name.as_deref())
+        {
+            text_style.font_name = Arc::<str>::from(font_name);
+            text_style.font_fallbacks.clear();
+            text_style.font_unicode_ranges.clear();
+            text_style.font_unicode_ranges.push(None);
+            text_style.font_face_satisfies_weight = false;
+            text_style.font_face_satisfies_style = false;
+        }
+        if let Some(font_weight) = margin_box.font_weight.or(setup.font_weight) {
+            text_style.font_weight = font_weight;
+            text_style.font_face_satisfies_weight = false;
+        }
+        text_style.css_pixel_snap_metrics = true;
+
+        let background = margin_box.background;
+        let auto_width = margin_box.width.is_none();
+        let registry = font_registry.clone();
+        template = template.append_on_page_finalize(move |canvas, context| {
+            let mut content_rect = rect;
+            if auto_width {
+                for part in &parts {
+                    let style::CssPageMarginContentPart::RunningElement { name, position } = part
+                    else {
+                        continue;
+                    };
+                    let Some(element) = context.running_element(name, position) else {
+                        continue;
+                    };
+                    if element.width > content_rect.width {
+                        content_rect =
+                            page_margin_box_rect(page_size, margins, kind, Some(element.width)).0;
+                    }
+                }
+            }
+            canvas.save_state();
+            if let Some((color, alpha)) = background {
+                if alpha > 0.0 {
+                    canvas.save_state();
+                    canvas.set_fill_color(color);
+                    if alpha < 1.0 {
+                        canvas.set_opacity(alpha, alpha);
+                    }
+                    canvas.draw_rect(
+                        content_rect.x,
+                        content_rect.y,
+                        content_rect.width,
+                        content_rect.height,
+                    );
+                    canvas.restore_state();
+                }
+            }
+            let mut text = String::new();
+            for part in &parts {
+                match part {
+                    style::CssPageMarginContentPart::Text(value) => text.push_str(value),
+                    style::CssPageMarginContentPart::PageCounter => {
+                        text.push_str(&context.page_counter.to_string());
+                    }
+                    style::CssPageMarginContentPart::PagesCounter => {
+                        text.push_str(&context.total_pages.to_string());
+                    }
+                    style::CssPageMarginContentPart::NamedString { name, position } => {
+                        if let Some(value) = context.named_string(name, position) {
+                            text.push_str(value);
+                        }
+                    }
+                    style::CssPageMarginContentPart::RunningElement { name, position } => {
+                        if let Some(element) = context.running_element(name, position) {
+                            let x = match align {
+                                flowable::TextAlign::Left | flowable::TextAlign::Justify => {
+                                    content_rect.x
+                                }
+                                flowable::TextAlign::Center => {
+                                    content_rect.x + (content_rect.width - element.width) / 2
+                                }
+                                flowable::TextAlign::Right => {
+                                    content_rect.x + content_rect.width - element.width
+                                }
+                            };
+                            let y = content_rect.y + (content_rect.height - element.height) / 2;
+                            canvas.draw_form(
+                                x,
+                                y,
+                                element.width,
+                                element.height,
+                                element.resource_id.clone(),
+                            );
+                        }
+                    }
+                }
+            }
+            if !text.is_empty() {
+                let paragraph = Paragraph::new(text)
+                    .with_style(text_style.clone())
+                    .with_align(align)
+                    .with_font_registry(Some(registry.clone()));
+                let text_size = paragraph.wrap(content_rect.width, content_rect.height);
+                // CSS page-margin boxes use `vertical-align: middle` by
+                // default. Oversized line boxes therefore overflow equally
+                // above and below the margin area instead of being pinned to
+                // its top edge.
+                let y = content_rect.y + (content_rect.height - text_size.height) / 2;
+                paragraph.draw(
+                    canvas,
+                    content_rect.x,
+                    y,
+                    content_rect.width,
+                    content_rect.height,
+                );
+            }
+            canvas.restore_state();
+        });
     }
     template
 }
@@ -6928,6 +8061,7 @@ fn build_css_page_template(
 fn with_page_background(
     template: PageTemplate,
     page_size: Size,
+    media_extent: Pt,
     (color, alpha): (Color, f32),
 ) -> PageTemplate {
     template.set_on_page(move |canvas, _| {
@@ -6939,7 +8073,105 @@ fn with_page_background(
         if alpha < 1.0 {
             canvas.set_opacity(alpha, alpha);
         }
-        canvas.draw_rect(Pt::ZERO, Pt::ZERO, page_size.width, page_size.height);
+        canvas.draw_rect(
+            -media_extent,
+            -media_extent,
+            page_size.width + media_extent + media_extent,
+            page_size.height + media_extent + media_extent,
+        );
+        canvas.restore_state();
+    })
+}
+
+fn with_page_print_marks(
+    template: PageTemplate,
+    page_size: Size,
+    presentation: types::PagePresentation,
+) -> PageTemplate {
+    if !presentation.marks.crop && !presentation.marks.cross {
+        return template;
+    }
+    let extent = presentation.media_extent();
+    if extent <= Pt::ZERO {
+        return template;
+    }
+    template.append_on_page(move |canvas, _| {
+        canvas.save_state();
+        canvas.begin_artifact(Some("Pagination".to_string()));
+        canvas.set_stroke_color(Color::BLACK);
+        canvas.set_line_cap(0);
+        canvas.set_line_join(0);
+
+        if presentation.marks.crop {
+            let half = extent / 2;
+            canvas.set_line_width(Pt::from_f32(0.75));
+
+            // Horizontal crop marks at the top and bottom trim edges.
+            for y in [Pt::ZERO, page_size.height] {
+                canvas.move_to(-extent, y);
+                canvas.line_to(-half, y);
+                canvas.move_to(page_size.width + half, y);
+                canvas.line_to(page_size.width + extent, y);
+            }
+            // Vertical crop marks at the left and right trim edges.
+            for x in [Pt::ZERO, page_size.width] {
+                canvas.move_to(x, -extent);
+                canvas.line_to(x, -half);
+                canvas.move_to(x, page_size.height + half);
+                canvas.line_to(x, page_size.height + extent);
+            }
+            canvas.stroke();
+        }
+
+        if presentation.marks.cross {
+            let center_offset = extent.mul_ratio(3, 4);
+            let half_span = extent / 4;
+            let radius = extent / 8;
+            let circle_width = extent / 32;
+            let cross_width = extent / 16;
+            let kappa = Pt::from_f32(radius.to_f32() * 0.552_284_8);
+            let centers = [
+                (page_size.width / 2, -center_offset, true),
+                (page_size.width / 2, page_size.height + center_offset, true),
+                (-center_offset, page_size.height / 2, false),
+                (page_size.width + center_offset, page_size.height / 2, false),
+            ];
+            for (x, y, vertical_lane) in centers {
+                canvas.set_line_width(circle_width);
+                canvas.move_to(x + radius, y);
+                canvas.curve_to(x + radius, y + kappa, x + kappa, y + radius, x, y + radius);
+                canvas.curve_to(x - kappa, y + radius, x - radius, y + kappa, x - radius, y);
+                canvas.curve_to(x - radius, y - kappa, x - kappa, y - radius, x, y - radius);
+                canvas.curve_to(x + kappa, y - radius, x + radius, y - kappa, x + radius, y);
+                canvas.close_path();
+                canvas.stroke();
+
+                canvas.set_line_width(cross_width);
+                if vertical_lane {
+                    canvas.move_to(x - half_span, y);
+                    canvas.line_to(x + half_span, y);
+                    if y < Pt::ZERO {
+                        canvas.move_to(x, -extent);
+                        canvas.line_to(x, -extent / 2);
+                    } else {
+                        canvas.move_to(x, page_size.height + extent / 2);
+                        canvas.line_to(x, page_size.height + extent);
+                    }
+                } else {
+                    canvas.move_to(x, y - half_span);
+                    canvas.line_to(x, y + half_span);
+                    if x < Pt::ZERO {
+                        canvas.move_to(-extent, y);
+                        canvas.line_to(-extent / 2, y);
+                    } else {
+                        canvas.move_to(page_size.width + extent / 2, y);
+                        canvas.line_to(page_size.width + extent, y);
+                    }
+                }
+                canvas.stroke();
+            }
+        }
+        canvas.end_marked_content();
         canvas.restore_state();
     })
 }
@@ -6972,7 +8204,9 @@ pub fn merge_documents(documents: Vec<Document>) -> Result<Document, FullBleedEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flowable::{BorderCollapseMode, BorderSpec, TableCell, TextAlign, VerticalAlign};
+    use crate::flowable::{
+        BorderCollapseMode, BorderSpec, TableCell, TableLayoutMode, TextAlign, VerticalAlign,
+    };
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -7011,6 +8245,12 @@ mod tests {
         })
     }
 
+    fn page_contains_fill_color(page: &Page, color: Color) -> bool {
+        page.commands
+            .iter()
+            .any(|command| matches!(command, Command::SetFillColor(value) if *value == color))
+    }
+
     fn empty_document(page_count: usize) -> Document {
         Document {
             page_size: Size::a4(),
@@ -7041,12 +8281,561 @@ mod tests {
 
         apply_html_page_shrink_to_fit(&mut doc);
 
-        let Command::Scale(scale_x, scale_y) = doc.pages[0].commands[2] else {
-            panic!("expected a page shrink transform");
-        };
+        let (scale_x, scale_y) = doc.pages[0]
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                Command::Scale(scale_x, scale_y) => Some((*scale_x, *scale_y)),
+                _ => None,
+            })
+            .expect("expected a page shrink transform");
         let expected = page_width.to_f32() / overflow_right.to_f32();
         assert!((scale_x - expected).abs() < 1.0e-6);
         assert!((scale_y - expected).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn html_page_shrink_anchors_to_page_area_and_preserves_template_paint() {
+        let page_size = Size {
+            width: Pt::from_f32(144.0),
+            height: Pt::from_f32(150.0),
+        };
+        let page_area = Rect {
+            x: Pt::from_f32(24.0),
+            y: Pt::from_f32(12.0),
+            width: Pt::from_f32(114.0),
+            height: Pt::from_f32(132.0),
+        };
+        let overflow_right = Pt::from_f32(143.0);
+        let template_color = Color::rgb(1.0, 0.0, 0.0);
+        let mut doc = Document {
+            page_size,
+            pages: vec![Page {
+                commands: vec![
+                    Command::SetFillColor(template_color),
+                    Command::DrawRect {
+                        x: Pt::ZERO,
+                        y: Pt::ZERO,
+                        width: page_size.width,
+                        height: page_size.height,
+                    },
+                    Command::Meta {
+                        key: META_PAGE_TEMPLATE_KEY.to_string(),
+                        value: "Right".to_string(),
+                    },
+                    Command::Meta {
+                        key: canvas::META_HTML_PAGE_AREA_KEY.to_string(),
+                        value: format!(
+                            "{},{},{},{}",
+                            page_area.x.to_milli_i64(),
+                            page_area.y.to_milli_i64(),
+                            page_area.width.to_milli_i64(),
+                            page_area.height.to_milli_i64(),
+                        ),
+                    },
+                    Command::Meta {
+                        key: canvas::META_HTML_SCROLLABLE_RIGHT_KEY.to_string(),
+                        value: overflow_right.to_milli_i64().to_string(),
+                    },
+                ],
+            }],
+        };
+
+        apply_html_page_shrink_to_fit(&mut doc);
+
+        assert!(matches!(
+            doc.pages[0].commands.first(),
+            Some(Command::SetFillColor(color)) if *color == template_color
+        ));
+        assert!(matches!(
+            doc.pages[0].commands.get(1),
+            Some(Command::DrawRect { x, y, width, height })
+                if *x == Pt::ZERO
+                    && *y == Pt::ZERO
+                    && *width == page_size.width
+                    && *height == page_size.height
+        ));
+        let block_start_guard = Pt::from_milli_i64(1);
+        assert!(doc.pages[0].commands.iter().any(|command| matches!(
+            command,
+            Command::ClipRect { x, y, width, height }
+                if *x == page_area.x
+                    && *y == page_area.y + block_start_guard
+                    && *width == page_area.width
+                    && *height == page_area.height - block_start_guard
+        )));
+        assert!(doc.pages[0].commands.iter().any(|command| matches!(
+            command,
+            Command::CssTransformOrigin { x, y, inverse: false }
+                if *x == page_area.x && *y == page_area.y
+        )));
+        let scale = doc.pages[0]
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                Command::Scale(scale_x, scale_y) => Some((*scale_x, *scale_y)),
+                _ => None,
+            })
+            .expect("expected page-area shrink transform");
+        let expected = page_area.width.to_f32() / (overflow_right - page_area.x).to_f32();
+        assert!((scale.0 - expected).abs() < 1.0e-6);
+        assert!((scale.1 - expected).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn html_page_shrink_extends_only_propagated_canvas_background_block_end() {
+        let page_size = Size {
+            width: Pt::from_f32(144.0),
+            height: Pt::from_f32(150.0),
+        };
+        let page_area = Rect {
+            x: Pt::from_f32(24.0),
+            y: Pt::from_f32(12.0),
+            width: Pt::from_f32(114.0),
+            height: Pt::from_f32(132.0),
+        };
+        let canvas_height = Pt::from_f32(132.0);
+        let content_height = Pt::from_f32(9.0);
+        let mut doc = Document {
+            page_size,
+            pages: vec![Page {
+                commands: vec![
+                    Command::Meta {
+                        key: META_PAGE_TEMPLATE_KEY.to_string(),
+                        value: "Right".to_string(),
+                    },
+                    Command::Meta {
+                        key: canvas::META_HTML_PAGE_AREA_KEY.to_string(),
+                        value: format!(
+                            "{},{},{},{}",
+                            page_area.x.to_milli_i64(),
+                            page_area.y.to_milli_i64(),
+                            page_area.width.to_milli_i64(),
+                            page_area.height.to_milli_i64(),
+                        ),
+                    },
+                    Command::Meta {
+                        key: canvas::META_HTML_SCROLLABLE_RIGHT_KEY.to_string(),
+                        value: Pt::from_f32(143.0).to_milli_i64().to_string(),
+                    },
+                    Command::Meta {
+                        key: canvas::META_HTML_CANVAS_BACKGROUND_KEY.to_string(),
+                        value: "begin".to_string(),
+                    },
+                    Command::DrawRect {
+                        x: Pt::ZERO,
+                        y: Pt::ZERO,
+                        width: page_area.width,
+                        height: canvas_height,
+                    },
+                    Command::Meta {
+                        key: canvas::META_HTML_CANVAS_BACKGROUND_KEY.to_string(),
+                        value: "end".to_string(),
+                    },
+                    Command::DrawRect {
+                        x: Pt::ZERO,
+                        y: Pt::ZERO,
+                        width: Pt::from_f32(7.0),
+                        height: content_height,
+                    },
+                ],
+            }],
+        };
+
+        apply_html_page_shrink_to_fit(&mut doc);
+
+        assert!(doc.pages[0].commands.iter().any(|command| matches!(
+            command,
+            Command::DrawRect { width, height, .. }
+                if *width == page_area.width
+                    && *height == canvas_height + Pt::from_f32(0.25)
+        )));
+        assert!(doc.pages[0].commands.iter().any(|command| matches!(
+            command,
+            Command::DrawRect { width, height, .. }
+                if *width == Pt::from_f32(7.0) && *height == content_height
+        )));
+    }
+
+    #[test]
+    fn html_page_shrink_uses_one_document_scale_across_asymmetric_page_areas() {
+        let first_area = Rect {
+            x: Pt::from_f32(6.0),
+            y: Pt::from_f32(6.0),
+            width: Pt::from_f32(114.0),
+            height: Pt::from_f32(126.0),
+        };
+        let second_area = Rect {
+            x: Pt::from_f32(24.0),
+            y: Pt::from_f32(12.0),
+            width: Pt::from_f32(114.0),
+            height: Pt::from_f32(132.0),
+        };
+        let page = |area: Rect, scrollable_right: Pt| Page {
+            commands: vec![
+                Command::Meta {
+                    key: META_PAGE_TEMPLATE_KEY.to_string(),
+                    value: "Page".to_string(),
+                },
+                Command::Meta {
+                    key: canvas::META_HTML_PAGE_AREA_KEY.to_string(),
+                    value: format!(
+                        "{},{},{},{}",
+                        area.x.to_milli_i64(),
+                        area.y.to_milli_i64(),
+                        area.width.to_milli_i64(),
+                        area.height.to_milli_i64(),
+                    ),
+                },
+                Command::Meta {
+                    key: canvas::META_HTML_SCROLLABLE_RIGHT_KEY.to_string(),
+                    value: scrollable_right.to_milli_i64().to_string(),
+                },
+            ],
+        };
+        let overflow_right = Pt::from_f32(143.0);
+        let mut doc = Document {
+            page_size: Size {
+                width: Pt::from_f32(144.0),
+                height: Pt::from_f32(150.0),
+            },
+            pages: vec![
+                page(first_area, first_area.x + first_area.width),
+                page(second_area, overflow_right),
+            ],
+        };
+
+        apply_html_page_shrink_to_fit(&mut doc);
+
+        let expected = second_area.width.to_f32() / (overflow_right - second_area.x).to_f32();
+        for page in &doc.pages {
+            let scale = page.commands.iter().find_map(|command| match command {
+                Command::Scale(scale_x, scale_y) => Some((*scale_x, *scale_y)),
+                _ => None,
+            });
+            assert_eq!(scale, Some((expected, expected)));
+        }
+        assert!(doc.pages[0].commands.iter().any(|command| matches!(
+            command,
+            Command::CssTransformOrigin { x, y, inverse: false }
+                if *x == first_area.x && *y == first_area.y
+        )));
+        assert!(doc.pages[1].commands.iter().any(|command| matches!(
+            command,
+            Command::CssTransformOrigin { x, y, inverse: false }
+                if *x == second_area.x && *y == second_area.y
+        )));
+    }
+
+    #[test]
+    fn html_transformed_block_start_overflow_replays_on_previous_fragmentainer() {
+        let first_area = Rect {
+            x: Pt::from_f32(6.0),
+            y: Pt::from_f32(6.0),
+            width: Pt::from_f32(114.0),
+            height: Pt::from_f32(126.0),
+        };
+        let second_area = Rect {
+            x: Pt::from_f32(24.0),
+            y: Pt::from_f32(12.0),
+            width: Pt::from_f32(114.0),
+            height: Pt::from_f32(132.0),
+        };
+        let area_meta = |area: Rect| Command::Meta {
+            key: canvas::META_HTML_PAGE_AREA_KEY.to_string(),
+            value: format!(
+                "{},{},{},{}",
+                area.x.to_milli_i64(),
+                area.y.to_milli_i64(),
+                area.width.to_milli_i64(),
+                area.height.to_milli_i64(),
+            ),
+        };
+        let mut doc = Document {
+            page_size: Size {
+                width: Pt::from_f32(144.0),
+                height: Pt::from_f32(150.0),
+            },
+            pages: vec![
+                Page {
+                    commands: vec![
+                        Command::Meta {
+                            key: META_PAGE_TEMPLATE_KEY.to_string(),
+                            value: "Left".to_string(),
+                        },
+                        area_meta(first_area),
+                    ],
+                },
+                Page {
+                    commands: vec![
+                        Command::Meta {
+                            key: META_PAGE_TEMPLATE_KEY.to_string(),
+                            value: "Right".to_string(),
+                        },
+                        area_meta(second_area),
+                        Command::Meta {
+                            key: canvas::META_HTML_SCROLLABLE_TOP_KEY.to_string(),
+                            value: (second_area.y - Pt::from_f32(3.0))
+                                .to_milli_i64()
+                                .to_string(),
+                        },
+                        Command::BeginTag {
+                            role: "P".to_string(),
+                            mcid: Some(0),
+                            alt: None,
+                            scope: None,
+                            table_id: None,
+                            col_index: None,
+                            group_only: false,
+                        },
+                        Command::DrawRect {
+                            x: second_area.x,
+                            y: second_area.y - Pt::from_f32(3.0),
+                            width: Pt::from_f32(12.0),
+                            height: Pt::from_f32(6.0),
+                        },
+                        Command::EndTag,
+                    ],
+                },
+            ],
+        };
+
+        apply_html_page_shrink_to_fit(&mut doc);
+
+        assert!(
+            !doc.pages
+                .iter()
+                .flat_map(|page| &page.commands)
+                .any(|command| matches!(command, Command::Scale(..)))
+        );
+        let artifact_start = doc.pages[0]
+            .commands
+            .iter()
+            .position(|command| matches!(command, Command::BeginArtifact { subtype: None }))
+            .expect("expected a visual overflow artifact");
+        let artifact_end = doc.pages[0].commands[artifact_start + 1..]
+            .iter()
+            .position(|command| matches!(command, Command::EndMarkedContent))
+            .map(|index| artifact_start + 1 + index)
+            .expect("expected the visual overflow artifact terminator");
+        let replay = &doc.pages[0].commands[artifact_start + 1..artifact_end];
+        assert!(
+            replay
+                .iter()
+                .any(|command| matches!(command, Command::DrawRect { .. }))
+        );
+        assert!(!replay.iter().any(|command| matches!(
+            command,
+            Command::Meta { .. } | Command::BeginTag { .. } | Command::EndTag
+        )));
+        let expected_x = first_area.x - second_area.x;
+        let expected_y = first_area.y + first_area.height - second_area.y + Pt::from_f32(0.25);
+        assert!(doc.pages[0].commands.iter().any(|command| matches!(
+            command,
+            Command::ConcatMatrix { a, b, c, d, e, f }
+                if (*a - 1.0).abs() < f32::EPSILON
+                    && b.abs() < f32::EPSILON
+                    && c.abs() < f32::EPSILON
+                    && (*d - 1.0).abs() < f32::EPSILON
+                    && *e == expected_x
+                    && *f == expected_y
+        )));
+        assert!(
+            doc.pages[0]
+                .commands
+                .iter()
+                .any(|command| matches!(command, Command::BeginArtifact { subtype: None }))
+        );
+    }
+
+    #[test]
+    fn html_transformed_block_end_overflow_replays_before_matching_continuation() {
+        let page_size = Size {
+            width: Pt::from_f32(144.0),
+            height: Pt::from_f32(150.0),
+        };
+        let page_area = Rect {
+            x: Pt::ZERO,
+            y: Pt::ZERO,
+            width: page_size.width,
+            height: page_size.height,
+        };
+        let owner = "html:nth-of-type(1) > body:nth-of-type(1) > div:nth-of-type(1)";
+        let area_meta = || Command::Meta {
+            key: canvas::META_HTML_PAGE_AREA_KEY.to_string(),
+            value: format!(
+                "{},{},{},{}",
+                page_area.x.to_milli_i64(),
+                page_area.y.to_milli_i64(),
+                page_area.width.to_milli_i64(),
+                page_area.height.to_milli_i64(),
+            ),
+        };
+        let scope_begin = || Command::Meta {
+            key: canvas::META_DIAGNOSTIC_SCOPE_BEGIN_KEY.to_string(),
+            value: "flowable".to_string(),
+        };
+        let scope_end = || Command::Meta {
+            key: canvas::META_DIAGNOSTIC_SCOPE_END_KEY.to_string(),
+            value: "flowable".to_string(),
+        };
+        let owner_meta = || Command::Meta {
+            key: "fb.owner.dom_path".to_string(),
+            value: owner.to_string(),
+        };
+        let source_rect = Rect {
+            x: Pt::from_f32(11.0),
+            y: Pt::from_f32(120.0),
+            width: Pt::from_f32(80.0),
+            height: Pt::from_f32(36.0),
+        };
+        let continuation_color = Color::rgb(0.2, 0.4, 0.6);
+        let mut doc = Document {
+            page_size,
+            pages: vec![
+                Page {
+                    commands: vec![
+                        Command::Meta {
+                            key: META_PAGE_TEMPLATE_KEY.to_string(),
+                            value: "Source".to_string(),
+                        },
+                        area_meta(),
+                        scope_begin(),
+                        owner_meta(),
+                        Command::Meta {
+                            key: canvas::META_HTML_SCROLLABLE_BOTTOM_KEY.to_string(),
+                            value: (page_area.y + page_area.height + Pt::from_f32(6.0))
+                                .to_milli_i64()
+                                .to_string(),
+                        },
+                        Command::BeginTag {
+                            role: "Div".to_string(),
+                            mcid: Some(0),
+                            alt: None,
+                            scope: None,
+                            table_id: None,
+                            col_index: None,
+                            group_only: false,
+                        },
+                        Command::DrawRect {
+                            x: source_rect.x,
+                            y: source_rect.y,
+                            width: source_rect.width,
+                            height: source_rect.height,
+                        },
+                        Command::EndTag,
+                        scope_end(),
+                    ],
+                },
+                Page {
+                    commands: vec![
+                        Command::Meta {
+                            key: META_PAGE_TEMPLATE_KEY.to_string(),
+                            value: "Destination".to_string(),
+                        },
+                        area_meta(),
+                        Command::SetFillColor(continuation_color),
+                        scope_begin(),
+                        owner_meta(),
+                        Command::DrawRect {
+                            x: Pt::from_f32(11.0),
+                            y: Pt::ZERO,
+                            width: Pt::from_f32(80.0),
+                            height: Pt::from_f32(24.0),
+                        },
+                        scope_end(),
+                    ],
+                },
+            ],
+        };
+
+        apply_html_page_shrink_to_fit(&mut doc);
+
+        let commands = &doc.pages[1].commands;
+        let ancestor_paint = commands
+            .iter()
+            .position(|command| {
+                matches!(command, Command::SetFillColor(color) if *color == continuation_color)
+            })
+            .expect("expected continuation ancestor paint");
+        let artifact_start = commands
+            .iter()
+            .position(|command| matches!(command, Command::BeginArtifact { subtype: None }))
+            .expect("expected a carried block-end artifact");
+        let artifact_end = commands[artifact_start + 1..]
+            .iter()
+            .position(|command| matches!(command, Command::EndMarkedContent))
+            .map(|index| artifact_start + 1 + index)
+            .expect("expected the carried block-end artifact terminator");
+        let continuation_scope = commands[artifact_end + 1..]
+            .iter()
+            .position(|command| {
+                matches!(
+                    command,
+                    Command::Meta { key, .. } if key == canvas::META_DIAGNOSTIC_SCOPE_BEGIN_KEY
+                )
+            })
+            .map(|index| artifact_end + 1 + index)
+            .expect("expected the matching continuation scope");
+        assert!(ancestor_paint < artifact_start);
+        assert!(artifact_end < continuation_scope);
+        let replay = &commands[artifact_start + 1..artifact_end];
+        assert!(replay.iter().any(|command| matches!(
+            command,
+            Command::ConcatMatrix { a, b, c, d, e, f }
+                if (*a - 1.0).abs() < f32::EPSILON
+                    && b.abs() < f32::EPSILON
+                    && c.abs() < f32::EPSILON
+                    && (*d - 1.0).abs() < f32::EPSILON
+                    && *e == Pt::ZERO
+                    && *f == -page_area.height
+        )));
+        assert!(replay.iter().any(|command| matches!(
+            command,
+            Command::DrawRect { x, y, width, height }
+                if *x == source_rect.x
+                    && *y == source_rect.y
+                    && *width == source_rect.width
+                    && *height == source_rect.height
+        )));
+        assert!(!replay.iter().any(|command| matches!(
+            command,
+            Command::Meta { .. } | Command::BeginTag { .. } | Command::EndTag
+        )));
+    }
+
+    #[test]
+    fn html_page_shrink_uses_each_pages_named_physical_width() {
+        let default_width = Pt::from_f32(252.0);
+        let named_width = Pt::from_f32(841.89);
+        let mut doc = Document {
+            page_size: Size {
+                width: default_width,
+                height: Pt::from_f32(228.0),
+            },
+            pages: vec![Page {
+                commands: vec![
+                    Command::Meta {
+                        key: canvas::META_PAGE_SIZE_KEY.to_string(),
+                        value: format!("{},1190551", named_width.to_milli_i64()),
+                    },
+                    Command::Meta {
+                        key: canvas::META_HTML_SCROLLABLE_RIGHT_KEY.to_string(),
+                        value: Pt::from_f32(817.89).to_milli_i64().to_string(),
+                    },
+                ],
+            }],
+        };
+
+        apply_html_page_shrink_to_fit(&mut doc);
+
+        assert!(
+            !doc.pages[0]
+                .commands
+                .iter()
+                .any(|command| matches!(command, Command::Scale(..))),
+            "content inside the named page width must not be scaled to the document default"
+        );
     }
 
     fn temp_log_path(tag: &str) -> PathBuf {
@@ -7404,6 +9193,170 @@ mod tests {
     }
 
     #[test]
+    fn paged_footnotes_compile_calls_counters_and_bottom_area() {
+        let html = r#"<!doctype html><html><body>
+            <p>One<span class="fn">first note</span> two<span class="fn">second note</span>.</p>
+        </body></html>"#;
+        let css = r#"
+            @page { size: 200px 152px; margin: 10px; }
+            html { font-family: Helvetica; line-height: 1.5; font-size: 12px; }
+            * { margin: 0; box-sizing: border-box; }
+            body { counter-reset: footnote 4; }
+            p { background: #e0f2fe; }
+            .fn { float: footnote; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine.render_to_document(html, css).expect("render");
+        assert_eq!(document.pages.len(), 1);
+        let page = &document.pages[0];
+        assert!(page_contains_text(page, "One"));
+        assert!(page_contains_text(page, "5"));
+        assert!(page_contains_text(page, "6"));
+        assert!(page_contains_text(page, "first note"));
+        assert!(page_contains_text(page, "second note"));
+
+        let body_y = page
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                Command::DrawString { text, y, .. } if text.contains("One") => Some(*y),
+                _ => None,
+            })
+            .expect("body text");
+        let note_y = page
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                Command::DrawString { text, y, .. } if text.contains("first note") => Some(*y),
+                _ => None,
+            })
+            .expect("footnote text");
+        assert!(note_y > body_y + Pt::from_f32(40.0));
+
+        let control = engine
+            .render_to_document(
+                r#"<!doctype html><html><body><p>One two.</p></body></html>"#,
+                css,
+            )
+            .expect("control render");
+        let control_body_y = control.pages[0]
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                Command::DrawString { text, y, .. } if text.contains("One") => Some(*y),
+                _ => None,
+            })
+            .expect("control body text");
+        assert_eq!(
+            body_y, control_body_y,
+            "a synthesized footnote call must not enlarge the owning line box"
+        );
+    }
+
+    #[test]
+    fn footnote_policy_block_moves_the_owning_paragraph() {
+        let html = r#"<!doctype html><html><body>
+            <div class="lead"></div><p>Body<span class="fn">note body</span></p>
+        </body></html>"#;
+        let css = r#"
+            @page { size: 200px 144px; margin: 16px; }
+            * { margin: 0; box-sizing: border-box; }
+            .lead { height: 64px; background: #1d4ed8; }
+            p { height: 40px; font-size: 0; line-height: 20px; background: #facc15; }
+            .fn { float: footnote; footnote-policy: block; font-size: 12px; color: #fff; }
+            .fn::footnote-call { color: #fde68a; }
+            .fn::footnote-marker { content: ""; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine.render_to_document(html, css).expect("render");
+        assert_eq!(document.pages.len(), 2);
+        assert!(!page_contains_text(&document.pages[0], "Body"));
+        assert!(page_contains_text(&document.pages[1], "Body"));
+    }
+
+    #[test]
+    fn footnote_policy_line_keeps_the_preceding_compiled_line() {
+        let html = r#"<!doctype html><html><body>
+            <div class="lead"></div>
+            <p>First line stays here<br>Second line has notes<span class="fn">first note</span><span class="fn">second note</span></p>
+        </body></html>"#;
+        let css = r#"
+            @page {
+                size: 192px 136px;
+                margin: 8px;
+                @footnote { border-top: 8px solid #111; padding-top: 8px; }
+            }
+            html { font-family: Helvetica; font-size: 12px; line-height: 20px; }
+            * { margin: 0; box-sizing: border-box; }
+            .lead { width: 176px; height: 72px; background: #1d4ed8; }
+            p { width: 176px; line-height: 20px; background: #fde68a; }
+            .fn { float: footnote; footnote-display: inline; footnote-policy: line; color: #d00000; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine.render_to_document(html, css).expect("render");
+        assert_eq!(document.pages.len(), 2);
+        assert!(page_contains_text(
+            &document.pages[0],
+            "First line stays here"
+        ));
+        assert!(!page_contains_text(
+            &document.pages[0],
+            "Second line has notes"
+        ));
+        assert!(page_contains_text(
+            &document.pages[1],
+            "Second line has notes"
+        ));
+        assert!(page_contains_text(&document.pages[1], "first note"));
+        assert!(page_contains_text(&document.pages[1], "second note"));
+        assert!(document.pages[1].commands.iter().any(|command| {
+            matches!(
+                command,
+                Command::DrawRect { width, height, .. }
+                    if *width == Pt::from_f32(132.0) && *height == Pt::from_f32(6.0)
+            )
+        }));
+    }
+
+    #[test]
+    fn footnote_max_height_uses_a_compiled_footnote_only_continuation_page() {
+        let html = r#"<!doctype html><html><body>
+            <div class="lead"></div><p>Line with note<span class="fn">long note one long note two long note three long note four</span></p>
+        </body></html>"#;
+        let css = r#"
+            @page {
+                size: 200px 150px;
+                margin: 10px;
+                @footnote { max-height: 30px; border-top: 2px solid #111; }
+            }
+            html { font-family: Helvetica; line-height: 1.5; font-size: 12px; }
+            * { margin: 0; box-sizing: border-box; }
+            .lead { height: 80px; background: #bfdbfe; }
+            .fn { float: footnote; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine.render_to_document(html, css).expect("render");
+        assert_eq!(document.pages.len(), 2);
+        assert!(page_contains_text(&document.pages[0], "Line with note"));
+        assert!(!page_contains_text(&document.pages[0], "long note one"));
+        assert!(page_contains_text(&document.pages[1], "long note one"));
+        assert!(page_contains_text(&document.pages[1], "four"));
+        assert!(document.pages[1].commands.iter().any(|command| {
+            matches!(
+                command,
+                Command::DrawString { text, .. } if text.starts_with("1. long note one")
+            )
+        }));
+        assert!(document.pages[1].commands.iter().any(|command| {
+            matches!(
+                command,
+                Command::DrawRect { width, height, .. }
+                    if *width == Pt::from_f32(135.0) && *height == Pt::from_f32(1.5)
+            )
+        }));
+    }
+
+    #[test]
     fn display_table_cells_share_a_single_row() {
         let html = r#"
             <!doctype html>
@@ -7496,6 +9449,69 @@ mod tests {
     }
 
     #[test]
+    fn vertical_rl_multicol_renders_compiled_x_axis_plan_and_blank_tail_page() {
+        let html = r#"
+            <!doctype html>
+            <html><body><div class="cols">
+              <div class="item a">A</div><div class="item b">B</div><div class="item c">C</div>
+            </div></body></html>
+        "#;
+        let css = r#"
+            @page { size: 224px 160px; margin: 0; }
+            html { line-height: 1.5; }
+            * { margin: 0; box-sizing: border-box; }
+            .cols { writing-mode: vertical-rl; width: 200px; height: 140px;
+                    column-count: 2; column-gap: 20px; column-fill: auto;
+                    background: #f8fafc; }
+            .item { width: 40px; height: 80px; font-size: 12px; }
+            .a { background: #ef476f; } .b { background: #ffd166; }
+            .c { background: #06d6a0; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine.render_to_document(html, css).expect("render");
+
+        assert_eq!(document.pages.len(), 2);
+        let rects: Vec<(Pt, Pt)> = document.pages[0]
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::DrawRect {
+                    x,
+                    y,
+                    width,
+                    height,
+                } if *width == Pt::from_f32(30.0) && *height == Pt::from_f32(60.0) => {
+                    Some((*x, *y))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            rects,
+            vec![
+                (Pt::from_f32(120.0), Pt::ZERO),
+                (Pt::from_f32(90.0), Pt::ZERO),
+                (Pt::from_f32(60.0), Pt::ZERO),
+            ]
+        );
+        assert_eq!(
+            document.pages[0]
+                .commands
+                .iter()
+                .filter(|command| matches!(command, Command::Rotate(_)))
+                .count(),
+            3
+        );
+        assert!(
+            document.pages[1]
+                .commands
+                .iter()
+                .all(|command| matches!(command, Command::Meta { .. })),
+            "the Chromium-compatible tail page must remain paint-empty"
+        );
+    }
+
+    #[test]
     fn auto_height_grid_rows_split_at_fragmentainer_boundaries() {
         let html = r#"<!doctype html><html><body><div class="grid"><div></div><div></div><div></div></div></body></html>"#;
         let css = r#"
@@ -7520,6 +9536,1147 @@ mod tests {
             .expect("grid body should split after its first fixed row");
         assert!(first.wrap(page_width, page_height).height <= page_height);
         assert!(remaining.wrap(page_width, page_height).height > Pt::ZERO);
+    }
+
+    #[test]
+    fn paged_grid_slices_fixed_height_items_into_remaining_page_space() {
+        let html = r#"<!doctype html><html><body><div class="grid"><div class="a">A</div><div class="b">B</div><div class="c">C</div><div class="d">D</div><div class="e">E</div><div class="f">F</div></div></body></html>"#;
+        let css = r#"
+            @page { size: 160px 144px; margin: 0; }
+            * { margin: 0; box-sizing: border-box; }
+            .grid { display: grid; grid-template-columns: 160px; width: 160px; }
+            .grid > div { height: 50px; border-bottom: 2px solid #fff; }
+            .a { background: #ef476f; } .b { background: #ffd166; }
+            .c { background: #06d6a0; } .d { background: #118ab2; }
+            .e { background: #a78bfa; } .f { background: #f97316; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render");
+        let green = Color::rgb(6.0 / 255.0, 214.0 / 255.0, 160.0 / 255.0);
+
+        assert_eq!(doc.pages.len(), 3, "grid continuations must survive");
+
+        let mut fill = Color::BLACK;
+        let first_page_has_green_fragment =
+            doc.pages[0].commands.iter().any(|command| match command {
+                Command::SetFillColor(color) => {
+                    fill = *color;
+                    false
+                }
+                Command::DrawRect { height, .. } => fill == green && *height > Pt::ZERO,
+                _ => false,
+            });
+        assert!(
+            first_page_has_green_fragment,
+            "row C should fill page 1's remainder"
+        );
+    }
+
+    #[test]
+    fn paged_column_flex_slices_fixed_height_items_into_remaining_page_space() {
+        let html = r#"<!doctype html><html><body><div class="flex"><div class="a">A</div><div class="b">B</div><div class="c">C</div><div class="d">D</div><div class="e">E</div><div class="f">F</div></div></body></html>"#;
+        let css = r#"
+            @page { size: 160px 144px; margin: 0; }
+            * { margin: 0; box-sizing: border-box; }
+            .flex { display: flex; flex-direction: column; width: 160px; }
+            .flex > div { height: 50px; border-bottom: 2px solid #fff; }
+            .a { background: #ef476f; } .b { background: #ffd166; }
+            .c { background: #06d6a0; } .d { background: #118ab2; }
+            .e { background: #a78bfa; } .f { background: #f97316; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render");
+        let green = Color::rgb(6.0 / 255.0, 214.0 / 255.0, 160.0 / 255.0);
+
+        assert_eq!(doc.pages.len(), 3, "flex continuations must survive");
+
+        let mut fill = Color::BLACK;
+        let first_page_has_green_fragment =
+            doc.pages[0].commands.iter().any(|command| match command {
+                Command::SetFillColor(color) => {
+                    fill = *color;
+                    false
+                }
+                Command::DrawRect { height, .. } => fill == green && *height > Pt::ZERO,
+                _ => false,
+            });
+        assert!(
+            first_page_has_green_fragment,
+            "item C should fill page 1's remainder"
+        );
+    }
+
+    #[test]
+    fn tall_svg_backed_images_reuse_one_vector_surface_across_page_fragments() {
+        let image = "data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20width%3D%2780%27%20height%3D%27260%27%3E%3Crect%20width%3D%2780%27%20height%3D%27260%27%20fill%3D%27%23118ab2%27/%3E%3Crect%20width%3D%2780%27%20height%3D%2765%27%20fill%3D%27%23ef476f%27/%3E%3C/svg%3E";
+        let engine = FullBleed::builder().build().expect("engine");
+
+        let plain = engine
+            .render_to_document(
+                &format!("<!doctype html><html><body><img src='{image}'></body></html>"),
+                "@page { size: 144px 120px; margin: 0; } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 img { display: block; width: 80px; height: 260px; object-fit: fill; }",
+            )
+            .expect("render plain tall SVG image");
+        assert_eq!(plain.pages.len(), 3);
+
+        let bordered = engine
+            .render_to_document(
+                &format!("<!doctype html><html><body><img src='{image}'></body></html>"),
+                "@page { size: 152px 120px; margin: 0; } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 img { display: block; width: 90px; height: 260px; object-fit: fill; border: 8px solid #111; }",
+            )
+            .expect("render bordered tall SVG image");
+        let border = Color::rgb(17.0 / 255.0, 17.0 / 255.0, 17.0 / 255.0);
+        assert_eq!(
+            bordered.pages.len(),
+            3,
+            "command counts: {:?}",
+            bordered
+                .pages
+                .iter()
+                .map(|page| page.commands.len())
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            bordered
+                .pages
+                .iter()
+                .all(|page| page.commands.iter().any(|command| {
+                    matches!(
+                        command,
+                        Command::SetFillColor(color) | Command::SetStrokeColor(color)
+                            if *color == border
+                    )
+                })),
+            "sliced border sides must remain painted on every fragment"
+        );
+    }
+
+    #[test]
+    fn tall_raster_images_reuse_one_full_source_lattice_across_page_fragments() {
+        let rgba = [
+            255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255,
+        ];
+        let png = crate::image_native::encode_png_rgba8(&rgba, 2, 2).expect("encode raster");
+        let image = format!(
+            "data:image/png;base64,{}",
+            crate::base64::encode_standard(png)
+        );
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine
+            .render_to_document(
+                &format!("<!doctype html><html><body><img src='{image}'></body></html>"),
+                "@page { size: 144px 120px; margin: 0; } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 img { display: block; width: 80px; height: 260px; object-fit: fill; }",
+            )
+            .expect("render tall raster image");
+
+        assert_eq!(document.pages.len(), 3);
+        let expected_y = [Pt::ZERO, Pt::from_f32(-90.0), Pt::from_f32(-180.0)];
+        for (page, expected_y) in document.pages.iter().zip(expected_y) {
+            let draw = page
+                .commands
+                .iter()
+                .find_map(|command| match command {
+                    Command::DrawImage {
+                        y,
+                        width,
+                        height,
+                        resource_id,
+                        source_clip,
+                        ..
+                    } => Some((*y, *width, *height, resource_id, source_clip)),
+                    _ => None,
+                })
+                .expect("each fragment should draw the same raster source");
+            assert_eq!(draw.0, expected_y);
+            assert_eq!(draw.1, Pt::from_f32(60.0));
+            assert_eq!(draw.2, Pt::from_f32(195.0));
+            assert_eq!(draw.3, &image);
+            assert!(draw.4.is_none());
+        }
+    }
+
+    #[test]
+    fn oversized_single_table_row_reuses_one_compiled_surface_across_pages() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine
+            .render_to_document(
+                "<!doctype html><html><body><table><tr><td></td></tr></table></body></html>",
+                "@page { size: 320px 200px; margin: 32px; } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 table { border-collapse: collapse; width: 100%; } \
+                 td { background: #cfe3ff; height: 360px; vertical-align: top; }",
+            )
+            .expect("render oversized table row");
+
+        assert_eq!(document.pages.len(), 3);
+        let draws: Vec<_> = document
+            .pages
+            .iter()
+            .map(|page| {
+                page.commands
+                    .iter()
+                    .find_map(|command| match command {
+                        Command::DrawForm {
+                            y,
+                            width,
+                            height,
+                            resource_id,
+                            ..
+                        } if resource_id.starts_with("table-row-fragment:") => {
+                            Some((*y, *width, *height, resource_id.clone()))
+                        }
+                        _ => None,
+                    })
+                    .expect("each page should draw the compiled row surface")
+            })
+            .collect();
+        assert_eq!(draws[0].0, Pt::from_f32(24.0));
+        assert_eq!(draws[1].0, Pt::from_f32(-78.0));
+        assert_eq!(draws[2].0, Pt::from_f32(-180.0));
+        assert!(draws.iter().all(|draw| {
+            draw.1 == Pt::from_f32(192.0) && draw.2 == Pt::from_f32(270.0) && draw.3 == draws[0].3
+        }));
+    }
+
+    #[test]
+    fn named_page_transition_reflows_continuations_in_named_geometry() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let html = "<!doctype html><html><body><div class='cover'></div><div class='chapter'></div></body></html>";
+        let css = "@page { size: 160px 120px; margin: 0; } \
+                   @page chapter { size: 160px 104px; margin: 20px; } \
+                   * { margin: 0; box-sizing: border-box; } \
+                   .cover { height: 120px; background: #1d4ed8; } \
+                   .chapter { page: chapter; height: 220px; background: #16a34a; }";
+        let document = engine
+            .render_to_document(html, css)
+            .expect("render named page continuation");
+
+        assert_eq!(document.pages.len(), 5);
+        assert_eq!(
+            document.page_size,
+            Size {
+                width: Pt::from_f32(120.0),
+                height: Pt::from_f32(90.0),
+            }
+        );
+        for page in &document.pages[1..] {
+            assert!(page.commands.iter().any(|command| {
+                matches!(command, Command::Meta { key, value }
+                    if key == canvas::META_PAGE_SIZE_KEY && value == "120000,78000")
+            }));
+        }
+        let pdf = engine
+            .render_to_buffer(html, css)
+            .expect("emit mixed-size named-page PDF");
+        let pdf = String::from_utf8_lossy(&pdf);
+        assert!(pdf.contains("/MediaBox [0 0 120 90]"));
+        assert_eq!(pdf.matches("/MediaBox [0 0 120 78]").count(), 4);
+    }
+
+    #[test]
+    fn explicit_builder_margins_override_named_page_margins() {
+        let engine = FullBleed::builder()
+            .margin_all(9.0)
+            .build()
+            .expect("engine");
+        let document = engine
+            .render_to_document(
+                "<!doctype html><html><body><div class='chapter'></div></body></html>",
+                "@page chapter { size: 160px 120px; margin: 40px; } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 .chapter { page: chapter; height: 40px; background: #16a34a; }",
+            )
+            .expect("render named page with explicit runtime margins");
+
+        assert_eq!(document.pages.len(), 1);
+        assert!(document.pages[0].commands.iter().any(|command| {
+            matches!(command, Command::DrawRect { x, y, .. }
+                if *x == Pt::from_f32(9.0) && *y == Pt::from_f32(9.0))
+        }));
+    }
+
+    #[test]
+    fn compiled_named_page_copies_preserve_page_sizes() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let compiled = engine
+            .compile_document(
+                "<!doctype html><html><body><div class='cover'></div><div class='chapter'></div></body></html>",
+                "@page { size: 160px 120px; margin: 0; } \
+                 @page chapter { size: 160px 104px; margin: 0; } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 .cover { height: 120px; background: #1d4ed8; } \
+                 .chapter { page: chapter; height: 104px; background: #16a34a; }",
+            )
+            .expect("compile mixed-size named pages");
+        assert_eq!(compiled.page_count(), 2);
+
+        let batch = compiled
+            .render_many_to_buffer(3)
+            .expect("link mixed-size compiled copies");
+        let pdf = String::from_utf8_lossy(&batch);
+        assert_eq!(pdf.matches("/MediaBox [0 0 120 90]").count(), 3);
+        assert_eq!(pdf.matches("/MediaBox [0 0 120 78]").count(), 3);
+    }
+
+    #[test]
+    fn compiled_named_page_bindings_preserve_page_sizes() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let compiled = engine
+            .compile_document(
+                "<!doctype html><html><body><div class='cover'>{{record}}</div><div class='chapter'>{{record}}</div></body></html>",
+                "@page { size: 160px 120px; margin: 0; } \
+                 @page chapter { size: 160px 104px; margin: 0; } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 .cover { height: 120px; background: #1d4ed8; } \
+                 .chapter { page: chapter; height: 104px; background: #16a34a; }",
+            )
+            .expect("compile mixed-size named-page bindings");
+        assert_eq!(compiled.page_count(), 2);
+
+        let bindings = std::collections::HashMap::from([(
+            "record".to_string(),
+            vec!["A-001".to_string(), "A-002".to_string()],
+        )]);
+        let batch = compiled
+            .render_bindings_to_buffer(&bindings)
+            .expect("link mixed-size binding records");
+        let pdf = String::from_utf8_lossy(&batch);
+        assert_eq!(pdf.matches("/MediaBox [0 0 120 90]").count(), 2);
+        assert_eq!(pdf.matches("/MediaBox [0 0 120 78]").count(), 2);
+    }
+
+    #[test]
+    fn named_page_selector_lists_and_physical_sides_select_compiled_templates() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let listed = engine
+            .render_to_document(
+                "<!doctype html><html><body><div class='title'></div><div class='chapter'></div></body></html>",
+                "@page { size: 184px 120px; margin: 0; } \
+                 @page title, chapter { size: 184px 120px; margin-left: 40px; } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 .title { page: title; height: 120px; background: #ffd166; } \
+                 .chapter { page: chapter; height: 120px; background: #118ab2; }",
+            )
+            .expect("render named selector list");
+        assert_eq!(listed.pages.len(), 2);
+        for page in &listed.pages {
+            assert!(page.commands.iter().any(|command| {
+                matches!(command, Command::DrawRect { x, .. } if *x == Pt::from_f32(30.0))
+            }));
+        }
+
+        let sided = engine
+            .render_to_document(
+                "<!doctype html><html><body><div class='cover'></div><div class='chapter'></div></body></html>",
+                "@page { size: 184px 120px; margin: 0; } \
+                 @page chapter:left { size: 184px 120px; margin-left: 40px; } \
+                 @page chapter:right { size: 184px 120px; margin-left: 0; } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 .cover { height: 120px; background: #1d4ed8; } \
+                 .chapter { page: chapter; height: 240px; background: #16a34a; }",
+            )
+            .expect("render named page sides");
+        assert_eq!(sided.pages.len(), 3);
+        assert!(sided.pages[1].commands.iter().any(|command| {
+            matches!(command, Command::DrawRect { x, .. } if *x == Pt::from_f32(30.0))
+        }));
+        assert!(
+            sided.pages[2].commands.iter().any(|command| {
+                matches!(command, Command::DrawRect { x, .. } if *x == Pt::ZERO)
+            })
+        );
+    }
+
+    #[test]
+    fn named_page_cascades_its_margin_box_paint() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine
+            .render_to_document(
+                "<!doctype html><html><body><div class='page'></div><div class='page chapter'></div></body></html>",
+                "@page { size: 160px 120px; margin: 24px 0 0; \
+                         @top-center { content: ' '; background: #1d4ed8; width: 160px; } } \
+                 @page chapter { size: 160px 120px; margin: 24px 0 0; \
+                                 @top-center { content: ' '; background: #16a34a; width: 160px; } } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 .page { height: 96px; } .chapter { page: chapter; }",
+            )
+            .expect("render named page margin box");
+        let blue = Color::rgb(29.0 / 255.0, 78.0 / 255.0, 216.0 / 255.0);
+        let green = Color::rgb(22.0 / 255.0, 163.0 / 255.0, 74.0 / 255.0);
+
+        assert_eq!(document.pages.len(), 2);
+        assert!(page_contains_fill_color(&document.pages[0], blue));
+        assert!(!page_contains_fill_color(&document.pages[0], green));
+        assert!(
+            page_contains_fill_color(&document.pages[1], green),
+            "named-page commands: {:#?}",
+            document.pages[1].commands
+        );
+    }
+
+    #[test]
+    fn page_margin_boxes_compile_content_regions_and_page_context() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let regions = engine
+            .render_to_document(
+                "<!doctype html><html><body><div class='box'></div></body></html>",
+                "@page { size: 200px 144px; margin: 24px 0; \
+                   @top-left { content: 'TL'; } @top-center { content: 'TC'; } \
+                   @top-right { content: 'TR'; } @bottom-center { content: 'BC'; } } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 .box { height: 60px; background: #06d6a0; }",
+            )
+            .expect("render page margin regions");
+        assert_eq!(regions.pages.len(), 1);
+        for text in ["TL", "TC", "TR", "BC"] {
+            assert!(
+                page_contains_text(&regions.pages[0], text),
+                "missing {text}"
+            );
+        }
+
+        let cascaded = engine
+            .render_to_document(
+                "<!doctype html><html><body><div class='p'></div><div class='q'></div></body></html>",
+                "@page { size: 184px 120px; margin: 20px 0 0; font-size: 16px; \
+                         @top-center { content: 'BASE'; } } \
+                 @page :first { font-size: 20px; @top-center { content: 'FIRST'; } } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 .p, .q { height: 100px; }",
+            )
+            .expect("render cascaded page margin text");
+        assert_eq!(cascaded.pages.len(), 2);
+        assert!(page_contains_text(&cascaded.pages[0], "FIRST"));
+        assert!(!page_contains_text(&cascaded.pages[0], "BASE"));
+        assert!(page_contains_text(&cascaded.pages[1], "BASE"));
+        assert!(cascaded.pages[0].commands.iter().any(
+            |command| matches!(command, Command::SetFontSize(size) if *size == Pt::from_f32(15.0))
+        ));
+        assert!(!cascaded.pages[1].commands.iter().any(
+            |command| matches!(command, Command::SetFontSize(size) if *size == Pt::from_f32(15.0))
+        ));
+    }
+
+    #[test]
+    fn page_margin_box_counter_is_bound_from_the_compiled_page_context() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine
+            .render_to_document(
+                "<!doctype html><html><body><div></div><div></div></body></html>",
+                "@page { size: 160px 120px; margin: 24px 0 0; \
+                         @top-center { content: 'P' counter(page); } } \
+                 * { margin: 0; box-sizing: border-box; } div { height: 96px; }",
+            )
+            .expect("render margin-box page counters");
+        assert_eq!(document.pages.len(), 2);
+        assert!(page_contains_text(&document.pages[0], "P1"));
+        assert!(page_contains_text(&document.pages[1], "P2"));
+    }
+
+    #[test]
+    fn page_counter_programs_finalize_after_pagination() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let incremented = engine
+            .render_to_document(
+                "<!doctype html><html><body><div></div><div></div><div></div></body></html>",
+                "@page { size: 160px 104px; margin: 20px 0 0; \
+                         counter-increment: page 2; \
+                         @top-center { content: 'P' counter(page); } } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 div { height: 40px; } div + div { break-before: page; }",
+            )
+            .expect("render incremented page counter");
+        assert_eq!(incremented.pages.len(), 3);
+        for (page, expected) in incremented.pages.iter().zip(["P2", "P4", "P6"]) {
+            assert!(page_contains_text(page, expected), "missing {expected}");
+        }
+
+        let reset = engine
+            .render_to_document(
+                "<!doctype html><html><body><div></div><div></div></body></html>",
+                "@page { size: 160px 104px; margin: 20px 0 0; \
+                         counter-reset: page 7; counter-increment: page 2; \
+                         @top-center { content: 'R' counter(page) ' of ' counter(pages); } } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 div { height: 40px; } div + div { break-before: page; }",
+            )
+            .expect("render reset and total page counters");
+        assert_eq!(reset.pages.len(), 2);
+        for page in &reset.pages {
+            assert!(page_contains_text(page, "R9 of 2"));
+            assert!(matches!(page.commands.first(), Some(Command::SaveState)));
+            let overlay_text = page
+                .commands
+                .iter()
+                .position(|command| {
+                    matches!(command, Command::DrawString { text, .. } if text == "R9 of 2")
+                })
+                .expect("finalized page-counter text");
+            assert!(
+                page.commands[..overlay_text]
+                    .windows(2)
+                    .any(|commands| matches!(
+                        commands,
+                        [Command::RestoreState, Command::SaveState]
+                    ))
+            );
+        }
+    }
+
+    #[test]
+    fn running_element_first_except_reuses_a_compiled_vector_surface() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine
+            .render_to_document(
+                "<!doctype html><html><body><h2>RUN HEAD</h2><div class='p'></div><div class='q'></div></body></html>",
+                "@page { size: 180px 120px; margin: 22px 0 0; \
+                         @top-center { content: element(head, first-except); } } \
+                 html { font-family: Helvetica; line-height: 1.5; } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 h2 { position: running(head); height: 18px; background: #ffd166; font-size: 12px; } \
+                 .p { height: 98px; background: #dbeafe; } \
+                 .q { height: 98px; background: #bbf7d0; }",
+            )
+            .expect("render running header");
+        assert_eq!(document.pages.len(), 2);
+        assert!(!document.pages[0].commands.iter().any(|command| {
+            matches!(command, Command::DrawForm { resource_id, .. } if resource_id.starts_with("css-running-"))
+        }));
+        let selected = document.pages[1]
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                Command::DrawForm { resource_id, .. }
+                    if resource_id.starts_with("css-running-") =>
+                {
+                    Some(resource_id.clone())
+                }
+                _ => None,
+            })
+            .expect("running element form on page two");
+        let surface = document
+            .pages
+            .iter()
+            .flat_map(|page| page.commands.iter())
+            .find_map(|command| match command {
+                Command::DefineForm {
+                    resource_id,
+                    commands,
+                    ..
+                } if resource_id == &selected => Some(commands),
+                _ => None,
+            })
+            .expect("compiled running element surface");
+        assert!(surface.iter().any(
+            |command| matches!(command, Command::DrawString { text, .. } if text == "RUN HEAD")
+        ));
+    }
+
+    #[test]
+    fn running_element_marker_does_not_force_an_empty_fixed_box_to_fragment() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine
+            .render_to_document(
+                "<!doctype html><html><body><div class='head'></div><div class='first'></div><div class='spacer'></div><div class='next'></div></body></html>",
+                "@page { size: 250px 170px; margin: 40px 0 0; \
+                         @top-left { content: element(head); } } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 body { padding: 0 12px 12px; } \
+                 .head { position: running(head); width: 96px; height: 24px; background: #d7263d; } \
+                 .first, .next { height: 28px; background: #dbeafe; } \
+                 .next { background: #bbf7d0; } \
+                 .spacer { height: 76px; }",
+            )
+            .expect("render running-element fragmentation fixture");
+        assert_eq!(document.pages.len(), 2);
+
+        let green = Color::rgb(187.0 / 255.0, 247.0 / 255.0, 208.0 / 255.0);
+        let green_rect_heights = |page: &Page| {
+            let mut fill = Color::BLACK;
+            let mut fill_stack = Vec::new();
+            page.commands
+                .iter()
+                .filter_map(|command| match command {
+                    Command::SaveState => {
+                        fill_stack.push(fill);
+                        None
+                    }
+                    Command::RestoreState => {
+                        if let Some(saved) = fill_stack.pop() {
+                            fill = saved;
+                        }
+                        None
+                    }
+                    Command::SetFillColor(color) => {
+                        fill = *color;
+                        None
+                    }
+                    Command::DrawRect { height, .. } if fill == green => Some(*height),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert!(
+            green_rect_heights(&document.pages[0]).is_empty(),
+            "the final empty block must not leave a painted fragment on page one"
+        );
+        assert_eq!(
+            green_rect_heights(&document.pages[1]),
+            [Pt::from_f32(21.0)],
+            "the complete 28px block must paint on page two"
+        );
+    }
+
+    #[test]
+    fn running_element_last_and_named_string_share_finalized_page_state() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine
+            .render_to_document(
+                "<!doctype html><html><body><h2>ONE</h2><div class='spacer'></div><h2>TWO</h2><p>body</p></body></html>",
+                "@page { size: 200px 150px; margin: 24px 0 0; \
+                         @top-left { content: string(section, last); background: #1d4ed8; } \
+                         @top-right { content: element(head, last); background: #16a34a; } } \
+                 html { font-family: Helvetica; line-height: 1.5; } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 h2 { position: running(head); string-set: section content(); \
+                      width: 200px; height: 18px; font-size: 12px; line-height: 18px; } \
+                 .spacer { width: 200px; height: 42px; } \
+                 p { width: 200px; height: 60px; font-size: 12px; }",
+            )
+            .expect("render last running content");
+        assert_eq!(document.pages.len(), 1);
+        assert!(page_contains_text(&document.pages[0], "TWO"));
+        let selected = document.pages[0]
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                Command::DrawForm { resource_id, .. }
+                    if resource_id.starts_with("css-running-") =>
+                {
+                    Some(resource_id.clone())
+                }
+                _ => None,
+            })
+            .expect("selected last running element");
+        let selected_surface = document.pages[0]
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                Command::DefineForm {
+                    resource_id,
+                    commands,
+                    ..
+                } if resource_id == &selected => Some(commands),
+                _ => None,
+            })
+            .expect("selected surface definition");
+        assert!(
+            selected_surface.iter().any(
+                |command| matches!(command, Command::DrawString { text, .. } if text == "TWO")
+            )
+        );
+
+        let green = Color::rgb(22.0 / 255.0, 163.0 / 255.0, 74.0 / 255.0);
+        let mut fill = Color::BLACK;
+        let mut fill_stack = Vec::new();
+        let expanded_green_rect = document.pages[0]
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                Command::SaveState => {
+                    fill_stack.push(fill);
+                    None
+                }
+                Command::RestoreState => {
+                    if let Some(saved) = fill_stack.pop() {
+                        fill = saved;
+                    }
+                    None
+                }
+                Command::SetFillColor(color) => {
+                    fill = *color;
+                    None
+                }
+                Command::DrawRect { x, width, .. } if fill == green => Some((*x, *width)),
+                _ => None,
+            })
+            .expect("expanded running-element margin background");
+        assert_eq!(expanded_green_rect, (Pt::ZERO, Pt::from_f32(150.0)));
+    }
+
+    #[test]
+    fn named_string_start_carries_attribute_value_to_following_pages() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine
+            .render_to_document(
+                "<!doctype html><html><body><h2 data-title='ALPHA'>ignored text</h2><div></div></body></html>",
+                "@page { size: 192px 136px; margin: 24px 0 0; \
+                         @top-center { content: string(section, start); } } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 h2 { string-set: section attr(data-title); height: 20px; font-size: 12px; } \
+                 div { height: 100px; break-before: page; }",
+            )
+            .expect("render carried named string");
+        assert_eq!(document.pages.len(), 2);
+        for page in &document.pages {
+            assert!(page_contains_text(page, "ALPHA"));
+        }
+    }
+
+    #[test]
+    fn page_margin_boxes_inherit_root_typography_and_corner_alignment() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine
+            .render_to_document(
+                "<!doctype html><html><body><div></div></body></html>",
+                "@page { size: 200px 144px; margin: 24px; \
+                         @top-left-corner { content: 'C'; } \
+                         @top-left { content: 'L'; } } \
+                 html { font-family: Courier; font-size: 20px; line-height: 1.5; } \
+                 * { margin: 0; box-sizing: border-box; } div { height: 70px; }",
+            )
+            .expect("render inherited page typography");
+
+        assert!(
+            document.pages[0]
+                .commands
+                .iter()
+                .any(|command| matches!(command, Command::SetFontName(name) if name == "Courier"))
+        );
+        assert!(document.pages[0].commands.iter().any(
+            |command| matches!(command, Command::SetFontSize(size) if *size == Pt::from_f32(15.0))
+        ));
+        let page_size = Size {
+            width: Pt::from_f32(150.0),
+            height: Pt::from_f32(108.0),
+        };
+        let margins = Margins {
+            top: Pt::from_f32(18.0),
+            right: Pt::from_f32(18.0),
+            bottom: Pt::from_f32(18.0),
+            left: Pt::from_f32(18.0),
+        };
+        let (_, left_corner_align) = page_margin_box_rect(
+            page_size,
+            margins,
+            style::CssPageMarginBoxKind::TopLeftCorner,
+            None,
+        );
+        let (_, right_corner_align) = page_margin_box_rect(
+            page_size,
+            margins,
+            style::CssPageMarginBoxKind::TopRightCorner,
+            None,
+        );
+        assert_eq!(left_corner_align, TextAlign::Right);
+        assert_eq!(right_corner_align, TextAlign::Left);
+    }
+
+    #[test]
+    fn paragraph_reflows_intact_when_page_remainder_cannot_satisfy_orphans() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine
+            .render_to_document(
+                "<!doctype html><html><body><div class='spacer'></div>\
+                 <p class='para'>Orphans line one<br>Orphans line two<br>\
+                 Orphans line three<br>Orphans line four<br>Orphans line five</p>\
+                 </body></html>",
+                "@page { size: 600px 192px; margin: 0; } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 .spacer { height: 100px; } \
+                 .para { font-size: 20px; line-height: 1.5; orphans: 4; widows: 2; }",
+            )
+            .expect("render orphan-constrained paragraph");
+
+        assert_eq!(document.pages.len(), 2);
+        assert!(!page_contains_text(&document.pages[0], "Orphans"));
+        for suffix in ["one", "two", "three", "four", "five"] {
+            assert!(
+                page_contains_text(&document.pages[1], suffix),
+                "page two is missing line {suffix}"
+            );
+        }
+    }
+
+    #[test]
+    fn named_page_custom_idents_remain_case_sensitive() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine
+            .render_to_document(
+                "<!doctype html><html><body>\
+                 <div class='sheet chapter'></div><div class='sheet chapter'></div>\
+                 <div class='sheet appendix'></div><div class='sheet appendix'></div>\
+                 <div class='sheet lowercase'></div></body></html>",
+                "@page { size: 160px 120px; margin: 0; background: #ef476f; } \
+                 @page Chapter { background: #ffd166; } \
+                 @page Chapter:left, Appendix:right { background: #3a86ff; } \
+                 @page Chapter:first { background: #06d6a0; } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 .sheet { width: 48px; height: 40px; background: #111827; } \
+                 .sheet + .sheet { break-before: page; } \
+                 .chapter { page: Chapter; } .appendix { page: Appendix; } \
+                 .lowercase { page: chapter; }",
+            )
+            .expect("render case-sensitive named pages");
+        let green = Color::rgb(6.0 / 255.0, 214.0 / 255.0, 160.0 / 255.0);
+        let blue = Color::rgb(58.0 / 255.0, 134.0 / 255.0, 1.0);
+        let red = Color::rgb(239.0 / 255.0, 71.0 / 255.0, 111.0 / 255.0);
+
+        assert_eq!(document.pages.len(), 5);
+        assert!(page_contains_fill_color(&document.pages[0], green));
+        assert!(page_contains_fill_color(&document.pages[1], blue));
+        assert!(page_contains_fill_color(&document.pages[2], blue));
+        assert!(page_contains_fill_color(&document.pages[3], red));
+        assert!(page_contains_fill_color(&document.pages[4], red));
+    }
+
+    #[test]
+    fn forced_page_sides_compile_required_blank_pages_and_boundary_precedence() {
+        let cases = [
+            (
+                "<div class='block first'></div><div class='block second'></div>",
+                ".first { break-after: right; }",
+                3,
+            ),
+            (
+                "<div class='block a'></div><div class='block b'></div><div class='block c'></div>",
+                ".b { break-after: left; }",
+                4,
+            ),
+            (
+                "<div class='block a'></div><div class='block b'></div><div class='block c'></div>",
+                ".c { break-before: verso; }",
+                4,
+            ),
+            (
+                "<div class='block first'></div><div class='block second'></div>",
+                ".first { break-after: left; } .second { break-before: right; }",
+                3,
+            ),
+        ];
+        let engine = FullBleed::builder().build().expect("engine");
+        for (body, rule, expected_pages) in cases {
+            let html = format!("<!doctype html><html><body>{body}</body></html>");
+            let css = format!(
+                "@page {{ size: 160px 120px; margin: 0; }} \
+                 * {{ margin: 0; box-sizing: border-box; }} \
+                 .block {{ width: 160px; height: 120px; }} {rule}"
+            );
+            let document = engine
+                .render_to_document(&html, &css)
+                .expect("render forced page side");
+            assert_eq!(
+                document.pages.len(),
+                expected_pages,
+                "unexpected page count for {rule}",
+            );
+        }
+    }
+
+    #[test]
+    fn terminal_break_after_does_not_create_a_trailing_blank_page() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine
+            .render_to_document(
+                "<!doctype html><html><body><div class='only'></div></body></html>",
+                "@page { size: 160px 120px; margin: 0; } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 .only { width: 160px; height: 120px; break-after: always; }",
+            )
+            .expect("render terminal break-after");
+
+        assert_eq!(document.pages.len(), 1);
+    }
+
+    #[test]
+    fn generated_blank_page_uses_the_blank_page_pseudo_style() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine
+            .render_to_document(
+                "<!doctype html><html><body><div class='block first'></div><div class='block second'></div><div class='block third'></div></body></html>",
+                "@page { size: 160px 120px; margin: 0; background: #ffffff; } \
+                 @page :left { background: #ef476f; } \
+                 @page :blank { background: #ffd166; } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 .block { width: 64px; height: 48px; } \
+                 .first { break-after: right; } \
+                 .third { break-before: page; }",
+            )
+            .expect("render blank page style");
+        let blank_yellow = Color::rgb(1.0, 209.0 / 255.0, 102.0 / 255.0);
+        let left_red = Color::rgb(239.0 / 255.0, 71.0 / 255.0, 111.0 / 255.0);
+
+        assert_eq!(document.pages.len(), 4);
+        assert!(page_contains_fill_color(&document.pages[1], blank_yellow));
+        assert!(!page_contains_fill_color(&document.pages[1], left_red));
+    }
+
+    #[test]
+    fn generated_blank_page_cascades_top_center_margin_box_paint() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine
+            .render_to_document(
+                "<!doctype html><html><body><div class='block'></div><div class='full'></div><div class='tail'></div></body></html>",
+                "@page { size: 160px 120px; margin: 24px 0 0 0; } \
+                 @page :right { @top-center { content: ' '; background: #ef476f; width: 160px; } } \
+                 @page :blank { @top-center { content: ' '; background: #118ab2; width: 160px; } } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 .block { height: 96px; } \
+                 .full { height: 96px; break-after: left; } \
+                 .tail { height: 96px; }",
+            )
+            .expect("render blank margin box");
+        let blank_blue = Color::rgb(17.0 / 255.0, 138.0 / 255.0, 178.0 / 255.0);
+        let right_red = Color::rgb(239.0 / 255.0, 71.0 / 255.0, 111.0 / 255.0);
+        let blank_page = &document.pages[2];
+        let mut fill = Color::BLACK;
+        let has_blank_bar = blank_page.commands.iter().any(|command| match command {
+            Command::SetFillColor(color) => {
+                fill = *color;
+                false
+            }
+            Command::DrawRect {
+                x,
+                y,
+                width,
+                height,
+            } => {
+                fill == blank_blue
+                    && *x == Pt::ZERO
+                    && *y == Pt::ZERO
+                    && *width == Pt::from_f32(120.0)
+                    && *height == Pt::from_f32(18.0)
+            }
+            _ => false,
+        });
+
+        assert_eq!(document.pages.len(), 4);
+        assert!(has_blank_bar);
+        assert!(!page_contains_fill_color(blank_page, right_red));
+    }
+
+    #[test]
+    fn descendant_forced_breaks_propagate_to_their_parent_box() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let html = "<!doctype html><html><body><div class='top'></div><div class='wrap'><div class='child'></div></div></body></html>";
+        let css = "@page { size: 184px 120px; margin: 0; } \
+                   * { margin: 0; box-sizing: border-box; } \
+                   .top { height: 80px; background: #1d4ed8; } \
+                   .wrap { padding: 10px; background: #fde68a; } \
+                   .child { height: 60px; background: #16a34a; break-before: page; }";
+        let document = engine
+            .render_to_document(html, css)
+            .expect("render propagated child break");
+        let yellow = Color::rgb(253.0 / 255.0, 230.0 / 255.0, 138.0 / 255.0);
+        let green = Color::rgb(22.0 / 255.0, 163.0 / 255.0, 74.0 / 255.0);
+
+        assert_eq!(document.pages.len(), 2);
+        assert!(!page_contains_fill_color(&document.pages[0], yellow));
+        assert!(!page_contains_fill_color(&document.pages[0], green));
+        assert!(page_contains_fill_color(&document.pages[1], yellow));
+        assert!(page_contains_fill_color(&document.pages[1], green));
+    }
+
+    #[test]
+    fn avoid_page_boundary_moves_both_boxes_to_the_next_page() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let html = "<!doctype html><html><body><div class='spacer'></div><div class='head'></div><div class='next'></div></body></html>";
+        let css = "@page { size: 160px 120px; margin: 0; } \
+                   * { margin: 0; box-sizing: border-box; } \
+                   .spacer { height: 72px; background: #bfdbfe; } \
+                   .head { height: 24px; background: #f59e0b; break-after: avoid; } \
+                   .next { height: 32px; background: #22c55e; }";
+        let document = engine
+            .render_to_document(html, css)
+            .expect("render avoided page boundary");
+        let orange = Color::rgb(245.0 / 255.0, 158.0 / 255.0, 11.0 / 255.0);
+        let green = Color::rgb(34.0 / 255.0, 197.0 / 255.0, 94.0 / 255.0);
+
+        assert_eq!(document.pages.len(), 2);
+        assert!(!page_contains_fill_color(&document.pages[0], orange));
+        assert!(!page_contains_fill_color(&document.pages[0], green));
+        assert!(page_contains_fill_color(&document.pages[1], orange));
+        assert!(page_contains_fill_color(&document.pages[1], green));
+    }
+
+    #[test]
+    fn fragmented_min_height_box_does_not_repaint_a_full_minimum_on_continuation() {
+        let html = r#"<!doctype html><html><body><div class="outer"><div class="a"></div><div class="b"></div></div></body></html>"#;
+        let css = r#"
+            @page { size: 160px 100px; margin: 0; }
+            * { margin: 0; box-sizing: border-box; }
+            .outer { min-height: 80px; background: #ef476f; }
+            .a { height: 30px; background: #1d4ed8; }
+            .b { height: 20px; background: #16a34a; break-before: page; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render");
+        let outer = Color::rgb(239.0 / 255.0, 71.0 / 255.0, 111.0 / 255.0);
+
+        assert_eq!(
+            doc.pages.len(),
+            2,
+            "the forced child break should make two pages"
+        );
+        let mut fill = Color::BLACK;
+        let (background_index, virtual_background_height) = doc.pages[1]
+            .commands
+            .iter()
+            .enumerate()
+            .find_map(|(index, command)| match command {
+                Command::SetFillColor(color) => {
+                    fill = *color;
+                    None
+                }
+                Command::DrawRect { height, .. } if fill == outer => Some((index, *height)),
+                _ => None,
+            })
+            .expect("continuation should paint the outer background");
+        let scope_start = doc.pages[1].commands[..background_index]
+            .iter()
+            .rposition(|command| matches!(command, Command::SaveState))
+            .expect("virtual background should have an isolated clip scope");
+        let continuation_height = doc.pages[1].commands[scope_start..background_index]
+            .iter()
+            .find_map(|command| match command {
+                Command::ClipRect { height, .. } => Some(*height),
+                _ => None,
+            })
+            .expect("virtual background should be clipped to the continuation");
+        assert_eq!(
+            continuation_height,
+            Pt::from_f32(15.0),
+            "the second fragment should follow its 20 CSS-pixel child, not reapply 80px"
+        );
+        assert!(
+            virtual_background_height >= continuation_height,
+            "the shared decoration surface must cover its visible continuation slice"
+        );
+    }
+
+    #[test]
+    fn bottom_anchored_absolute_paints_in_final_containing_block_fragment() {
+        let html = r#"<!doctype html><html><body><div class="outer"><div class="own"><span>Ag</span><span class="token">Bb</span></div><div class="inner">AB</div></div></body></html>"#;
+        let css = r#"
+            @page { size: 192px 200px; margin: 0; }
+            * { box-sizing: border-box; margin: 0; }
+            html { font-size: 16px; line-height: 1.2; }
+            body { font-size: 16px; }
+            .outer {
+                position: relative;
+                width: 126px;
+                min-height: 96px;
+                padding: 7px;
+                border: 2px solid #577590;
+            }
+            .own { height: 22px; white-space: nowrap; }
+            .token { position: absolute; right: 4px; bottom: 4px; }
+            .inner {
+                width: 58px;
+                height: 48px;
+                padding: 5px;
+                break-before: page;
+                break-inside: avoid;
+            }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render");
+
+        assert_eq!(
+            doc.pages.len(),
+            2,
+            "the forced descendant break should fragment the containing block"
+        );
+        assert!(page_contains_text(&doc.pages[0], "Ag"));
+        assert!(
+            !page_contains_text(&doc.pages[0], "Bb"),
+            "a bottom-anchored absolute must not paint in the first fragment"
+        );
+        assert!(page_contains_text(&doc.pages[1], "AB"));
+        assert!(
+            page_contains_text(&doc.pages[1], "Bb"),
+            "the final containing-block fragment owns the bottom-anchored absolute"
+        );
+    }
+
+    #[test]
+    fn avoided_figure_keeps_its_empty_fixed_height_caption() {
+        let html = r#"<!doctype html><html><body><div class="spacer"></div><figure><img alt="box" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='360' height='120'%3E%3Crect width='360' height='120' fill='%23f4a259'/%3E%3C/svg%3E"><figcaption></figcaption></figure></body></html>"#;
+        let css = r#"
+            @page { size: 360px 304px; margin: 0; }
+            * { margin: 0; box-sizing: border-box; }
+            .spacer { height: 200px; background: #eef1f5; border-bottom: 3px solid #6b7785; }
+            figure { break-inside: avoid; }
+            figure img { display: block; width: 360px; height: 120px; }
+            figcaption { height: 56px; background: #34506b; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render");
+        let caption = Color::rgb(52.0 / 255.0, 80.0 / 255.0, 107.0 / 255.0);
+
+        assert_eq!(
+            doc.pages.len(),
+            2,
+            "the avoided figure should move to page 2"
+        );
+        let mut fill = Color::BLACK;
+        let second_page_has_caption = doc.pages[1].commands.iter().any(|command| match command {
+            Command::SetFillColor(color) => {
+                fill = *color;
+                false
+            }
+            Command::DrawRect { height, .. } => fill == caption && *height > Pt::ZERO,
+            _ => false,
+        });
+        assert!(
+            second_page_has_caption,
+            "empty figcaption box must be painted"
+        );
+    }
+
+    #[test]
+    fn page_height_fixed_container_with_positioned_descendant_stays_atomic() {
+        let html = r#"<!doctype html><html><body><div class="cb"><div class="mid"><div class="abs"></div></div></div></body></html>"#;
+        let css = r#"
+            @page { size: 4in 2in; margin: 0; }
+            body { margin: 0; background: #fff; }
+            .cb { position: relative; width: 2in; height: 2in; margin-left: 1in; background: #f00; }
+            .mid { width: 1in; height: 1in; margin-left: 1in; margin-top: 0.5in; background: #0f0; }
+            .abs { position: absolute; left: 0.25in; top: 0.25in; width: 0.5in; height: 0.5in; background: #00f; z-index: 1; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render");
+
+        assert_eq!(
+            doc.pages.len(),
+            1,
+            "a page-height containing block must not create a tail fragment"
+        );
+        let red = Color::rgb(1.0, 0.0, 0.0);
+        let blue = Color::rgb(0.0, 0.0, 1.0);
+        let mut fill = Color::BLACK;
+        let mut painted_red = false;
+        let mut painted_blue = false;
+        for command in &doc.pages[0].commands {
+            match command {
+                Command::SetFillColor(color) => fill = *color,
+                Command::DrawRect { width, height, .. }
+                    if *width > Pt::ZERO && *height > Pt::ZERO =>
+                {
+                    painted_red |= fill == red;
+                    painted_blue |= fill == blue;
+                }
+                _ => {}
+            }
+        }
+        assert!(painted_red, "the positioned containing block must paint");
+        assert!(painted_blue, "the absolute descendant must paint");
     }
 
     #[test]
@@ -8008,6 +11165,84 @@ mod tests {
     }
 
     #[test]
+    fn separate_table_cell_transparent_border_keeps_geometry_without_paint() {
+        let html = r#"<!doctype html><html><body><table><tr><td></td></tr></table></body></html>"#;
+        let css = r#"
+            @page { size: 120px 80px; margin: 0; }
+            * { margin: 0; box-sizing: border-box; }
+            html, body { background: #fff; }
+            table { border-collapse: separate; border-spacing: 0; }
+            td { width: 40px; height: 24px; border: 2px solid transparent; background: #eaf2f8; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
+        let page = doc.pages.first().expect("page");
+        let background = Color::rgb(234.0 / 255.0, 242.0 / 255.0, 248.0 / 255.0);
+        let mut fill = Color::BLACK;
+        let mut black_rectangles = 0usize;
+        let mut background_rectangles = 0usize;
+        for command in &page.commands {
+            match command {
+                Command::SetFillColor(color) => fill = *color,
+                Command::DrawRect { .. } if fill == Color::BLACK => black_rectangles += 1,
+                Command::DrawRect { .. } if fill == background => background_rectangles += 1,
+                _ => {}
+            }
+        }
+
+        assert_eq!(black_rectangles, 0, "transparent borders must not paint");
+        assert_eq!(background_rectangles, 1, "the cell box still participates");
+    }
+
+    #[test]
+    fn table_cell_vertical_align_does_not_leak_into_anonymous_text() {
+        let html = r#"
+            <!doctype html><html><body>
+              <table>
+                <tr>
+                  <td>alpha beta gamma<span class="suffix">!</span></td>
+                </tr>
+              </table>
+            </body></html>
+        "#;
+        let css = r#"
+            @page { size: 280px 136px; margin: 0; }
+            * { box-sizing: border-box; margin: 0; }
+            body { padding: 14px; color: #17202a; font: 16px/20px Inter; }
+            table { width: auto; table-layout: auto; border-collapse: separate; border-spacing: 0; }
+            td { padding: 7px 9px; border: 2px solid transparent; background: #eaf2f8; white-space: normal; vertical-align: middle; }
+            .suffix { color: #b03a2e; }
+        "#;
+        let engine = FullBleed::builder()
+            .register_font_file(repo_font_path("Inter-Variable.ttf"))
+            .build()
+            .expect("engine");
+        let doc = engine
+            .render_to_document(html, css)
+            .expect("render document");
+        assert_eq!(doc.pages.len(), 1);
+        let text_y = doc.pages[0]
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::DrawString { text, y, .. }
+                    if text == "alpha beta gamma" || text == "!" =>
+                {
+                    Some((text.as_str(), *y))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(text_y.len(), 2);
+        assert_eq!(
+            text_y[0].1, text_y[1].1,
+            "table-cell vertical-align positions the cell contents, not descendant text runs"
+        );
+    }
+
+    #[test]
     fn html_table_rowspan_minimum_is_distributed_across_rows() {
         let html = r#"
             <!doctype html>
@@ -8450,9 +11685,9 @@ mod tests {
                 command,
                 Command::DrawRect { x, y, width, height }
                     if *x == Pt::from_f32(24.0)
-                        && *y == Pt::from_f32(12.0)
+                        && *y == Pt::from_f32(12.0) + Pt::from_milli_i64(1)
                         && *width == Pt::from_f32(114.0)
-                        && *height == Pt::from_f32(132.0)
+                        && *height == Pt::from_f32(132.0) - Pt::from_milli_i64(1)
             )
         }));
     }
@@ -8485,6 +11720,204 @@ mod tests {
             ["L", "M", "R"]
         );
         assert!(draws[0].1 < draws[1].1 && draws[1].1 < draws[2].1);
+    }
+
+    #[test]
+    fn generated_block_before_precedes_the_anonymous_body_lines() {
+        let html = "<html><body><div class='card'>Body text follows the block header pseudo-element.</div></body></html>";
+        let css = r#"
+            @page { size: 432px 208px; margin: 0; }
+            * { box-sizing: border-box; margin: 0; }
+            .card {
+                width: 300px; margin: 24px; padding: 12px;
+                border: 2px solid #0b3954; background: #bfd7ea;
+                font-size: 22px; line-height: 1.5; color: #0b3954;
+            }
+            .card::before {
+                content: 'HEADER'; display: block; padding: 4px 8px;
+                background: #ff6b6b; color: #ffffff;
+            }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render");
+        let draws: Vec<_> = doc.pages[0]
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::DrawString { text, x, y }
+                    if text == "HEADER" || text.starts_with("Body text") =>
+                {
+                    Some((text.as_str(), *x, *y))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(draws.len(), 2, "expected pseudo and body text: {draws:?}");
+        assert!(
+            draws[0].0 == "HEADER" && draws[0].2 < draws[1].2,
+            "block ::before must occupy flow before body text: {draws:?}"
+        );
+        assert_eq!(
+            (draws[0].1, draws[0].2),
+            (Pt::from_f32(34.5), Pt::from_f32(32.25)),
+            "block pseudo text must use its unshifted padding-box content origin"
+        );
+    }
+
+    #[test]
+    fn generated_target_text_resolves_document_fragment_content() {
+        let html = "<html><body><a href='#target'>Jump</a><div id='target'>Deep <span>Section</span></div></body></html>";
+        let css = r#"
+            @page { size: 344px 152px; margin: 0; }
+            * { box-sizing: border-box; margin: 0; }
+            body { padding: 12px; font-size: 20px; line-height: 30px; }
+            a::after { content: 'REF ' target-text(attr(href)); }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render");
+        assert!(doc.pages[0].commands.iter().any(
+            |command| matches!(command, Command::DrawString { text, .. } if text == "REF Deep Section")
+        ));
+    }
+
+    #[test]
+    fn generated_target_page_counter_recompiles_after_pagination() {
+        let html = "<html><body><a href='#target'>See target</a><div id='target'>Target</div></body></html>";
+        let css = r#"
+            @page { size: 240px 120px; margin: 0; }
+            * { box-sizing: border-box; margin: 0; }
+            body { padding: 12px; font-size: 20px; line-height: 30px; }
+            a::after { content: ' p.' target-counter(attr(href), page); }
+            #target { break-before: page; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render");
+        assert_eq!(document_target_pages(&doc).get("target"), Some(&2));
+        assert!(doc.pages[0].commands.iter().any(
+            |command| matches!(command, Command::DrawString { text, .. } if text.contains("p.2"))
+        ));
+    }
+
+    #[test]
+    fn generated_content_url_emits_an_intrinsically_sized_inline_image() {
+        let html = "<html><body><span class='icon'> label</span></body></html>";
+        let css = r#"
+            @page { size: 240px 100px; margin: 0; }
+            * { box-sizing: border-box; margin: 0; }
+            body { padding: 12px; font-size: 20px; line-height: 30px; }
+            .icon::before {
+                content: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAIAAABvFaqvAAAAIklEQVQ4y2N8ZunGQA3ARBVTRg0aNWjUoFGDRg0aNYgiAAA0vAGVKP7aoAAAAABJRU5ErkJggg==");
+                width: 40px;
+                height: 40px;
+            }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render");
+        let image = doc.pages[0]
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                Command::DrawImage {
+                    x, width, height, ..
+                } if *width == Pt::from_f32(18.0) && *height == Pt::from_f32(18.0) => {
+                    Some((*x, *width))
+                }
+                _ => None,
+            })
+            .expect("intrinsically sized generated image");
+        let label_x = doc.pages[0]
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                Command::DrawString { text, x, .. } if text == "label" => Some(*x),
+                _ => None,
+            })
+            .expect("label following generated image");
+        assert!(
+            label_x > image.0 + image.1,
+            "the collapsible DOM space after generated content must advance the label"
+        );
+    }
+
+    #[test]
+    fn generated_content_leader_expands_before_its_suffix() {
+        let html = "<html><body><div class='toc'><a href='#s1'>Chapter title</a></div><span id='s1'></span></body></html>";
+        let css = r#"
+            @page { size: 330px 130px; margin: 0; }
+            * { box-sizing: border-box; margin: 0; }
+            body { padding: 12px; font-size: 20px; line-height: 30px; }
+            .toc { width: 280px; }
+            .toc a { display: block; }
+            .toc a::after { content: leader('.') ' 7'; color: #d7263d; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render");
+        let draws = doc.pages[0]
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::DrawString { text, x, .. } => Some((text.as_str(), *x)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let leader = draws
+            .iter()
+            .find(|(text, _)| !text.is_empty() && text.chars().all(|ch| ch == '.'))
+            .unwrap_or_else(|| panic!("expanded leader run missing from {draws:?}"));
+        let suffix = draws
+            .iter()
+            .find(|(text, _)| *text == "7")
+            .expect("leader suffix");
+        assert!(leader.1 < suffix.1);
+        assert!(
+            suffix.1 > Pt::from_f32(180.0),
+            "suffix must reach the line end: {draws:?}"
+        );
+    }
+
+    #[test]
+    fn balanced_multicol_fragments_a_generated_fixed_height_child() {
+        let html = "<html><body><div class='node outer multicol'><div class='own'>AgBb</div><div class='node inner generated'><div class='own'>AB</div></div></div></body></html>";
+        let css = r#"
+            @page { size: 180px 120px; margin: 0; }
+            html { font-size: 16px; line-height: 1.2; }
+            * { box-sizing: border-box; margin: 0; }
+            body { margin: 0; }
+            .node { padding: 7px; border: 2px solid #577590; }
+            .outer { width: 126px; height: 96px; }
+            .inner { width: 58px; height: 48px; padding: 5px; }
+            .own { height: 22px; white-space: nowrap; }
+            .generated::before { content: '‹'; }
+            .generated::after { content: '›'; }
+            .multicol { column-count: 2; column-gap: 7px; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render");
+        let draws = doc.pages[0]
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::DrawString { text, x, y, .. }
+                    if matches!(text.as_str(), "AgBb" | "AB" | "‹" | "›") =>
+                {
+                    Some((text.as_str(), *x, *y))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let position = |text: &str| {
+            draws
+                .iter()
+                .find(|(candidate, _, _)| *candidate == text)
+                .map(|(_, x, y)| (*x, *y))
+                .unwrap_or_else(|| panic!("missing {text:?} in {draws:?}"))
+        };
+        let before = position("‹");
+        let own = position("AgBb");
+        let inner = position("AB");
+        let after = position("›");
+        assert!(before.0 > own.0 && before.0 < inner.0, "{draws:?}");
+        assert_eq!(after.0, inner.0, "{draws:?}");
     }
 
     #[test]
@@ -9026,6 +12459,60 @@ mod tests {
     }
 
     #[test]
+    fn collapsed_vertical_winner_paints_after_the_adjacent_cell_junctions() {
+        let teal = Color::rgb(42.0 / 255.0, 157.0 / 255.0, 143.0 / 255.0);
+        let blue = Color::rgb(69.0 / 255.0, 123.0 / 255.0, 157.0 / 255.0);
+        let widths = EdgeSizes {
+            top: abs(10.0),
+            right: abs(10.0),
+            bottom: abs(10.0),
+            left: abs(10.0),
+        };
+        let left = table_cell_with_border("", widths, teal);
+        let right = table_cell_with_border("", widths, blue);
+        let table = TableFlowable::new(vec![vec![left, right]])
+            .with_border_collapse(BorderCollapseMode::Collapse)
+            .with_table_layout(TableLayoutMode::Fixed);
+        let mut frame = Frame::new(Rect {
+            x: Pt::ZERO,
+            y: Pt::ZERO,
+            width: Pt::from_f32(200.0),
+            height: Pt::from_f32(60.0),
+        });
+        let mut canvas = Canvas::new(Size {
+            width: Pt::from_f32(200.0),
+            height: Pt::from_f32(60.0),
+        });
+
+        assert!(matches!(
+            frame.add(Box::new(table), &mut canvas),
+            AddResult::Placed(_)
+        ));
+        let document = canvas.finish();
+        let border_inks = document.pages[0]
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::SetFillColor(color) if *color == teal || *color == blue => Some(*color),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            border_inks.last(),
+            Some(&teal),
+            "the LTR shared vertical winner must cover the later blue cell's two junctions"
+        );
+        assert!(
+            document.pages[0]
+                .commands
+                .iter()
+                .all(|command| !matches!(command, Command::ClipPath { .. })),
+            "solid collapsed-border winners must meet as square segments without miter clips"
+        );
+    }
+
+    #[test]
     fn rendered_pages_emit_page_template_meta_for_finalize_binding() {
         let html = "<!doctype html><html><body><p>hello</p></body></html>";
         let css = "@page { size: letter; margin: 0.5in; }";
@@ -9337,6 +12824,8 @@ h1 { font-size: 20pt; }
                 "invoice_id".to_string()
             ]
         );
+        assert_eq!(compiled.binding_program_page_count(), 1);
+        assert!(compiled.binding_program_command_count() > 0);
 
         let bindings = std::collections::HashMap::from([
             (
@@ -9449,6 +12938,81 @@ h1 { font-size: 20pt; }
     }
 
     #[test]
+    fn compiled_document_bindings_virtualize_transform_and_clip_state() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let template = r#"<!doctype html><html><body>
+<main>
+  <div class="card"><span>{{account}}</span></div>
+  <p class="plain"><span>{{region}}</span></p>
+</main>
+</body></html>"#;
+        let css = r#"
+@page { size: 300px 180px; margin: 10px; }
+body { margin: 0; font-family: Helvetica, sans-serif; font-size: 16px; }
+.card {
+  width: 160px;
+  height: 36px;
+  overflow: hidden;
+  transform: translate(18px, 9px) rotate(3deg);
+  background: #dcecff;
+}
+.plain { margin-top: 24px; }
+"#;
+        let compiled = engine
+            .compile_document(template, css)
+            .expect("compile transformed binding template");
+        assert_eq!(
+            compiled.binding_slots(),
+            &["account".to_string(), "region".to_string()]
+        );
+        assert_eq!(compiled.binding_program_page_count(), 1);
+
+        let bindings = std::collections::HashMap::from([
+            ("account".to_string(), vec!["ACCT-001".to_string()]),
+            ("region".to_string(), vec!["North".to_string()]),
+        ]);
+        let bound = compiled
+            .render_bindings_to_buffer(&bindings)
+            .expect("render transformed binding overlay");
+        let fixed = engine
+            .render_to_buffer(
+                &template
+                    .replace("{{account}}", "ACCT-001")
+                    .replace("{{region}}", "North"),
+                css,
+            )
+            .expect("render equivalent fixed document");
+
+        let parsed = crate::pdf_native::Document::load_mem(&bound).expect("parse binding PDF");
+        let page_id = *parsed.get_pages().values().next().expect("bound page");
+        let content = parsed
+            .get_page_content(page_id)
+            .expect("combined bound page content");
+        let account_offset = content
+            .windows(b"ACCT-001".len())
+            .position(|window| window == b"ACCT-001")
+            .expect("bound account text");
+        let account_program = &content[..account_offset];
+        assert!(
+            account_program.windows(4).any(|window| window == b" cm\n"),
+            "the dynamic account program should replay its compiled transform"
+        );
+        assert!(
+            account_program.windows(4).any(|window| window == b"W\nn\n"),
+            "the dynamic account program should replay its compiled clip"
+        );
+
+        let bound_pages = crate::pdf_raster::pdf_bytes_to_png_pages(&bound, 144, None, false)
+            .expect("raster bound PDF");
+        let fixed_pages = crate::pdf_raster::pdf_bytes_to_png_pages(&fixed, 144, None, false)
+            .expect("raster fixed PDF");
+        assert_eq!(
+            bound_pages, fixed_pages,
+            "compiled transform/clip replay must be pixel-identical to ordinary fixed paint"
+        );
+    }
+
+    #[test]
     fn compiled_tagged_copies_keep_page_specific_content_streams() {
         let engine = FullBleed::builder()
             .pdf_profile(PdfProfile::Tagged)
@@ -9551,5 +13115,158 @@ h1 { font-size: 20pt; }
             pages_a, pages_b,
             "render_finalized_pdf_image_pages should be byte deterministic for identical input"
         );
+    }
+
+    #[test]
+    fn css_mask_program_affects_raster_and_pdf_output() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let html = "<!doctype html><html><body><div class='masked'></div></body></html>";
+        let css = "
+            @page { size: 100px 100px; margin: 0; }
+            html, body { margin: 0; padding: 0; }
+            .masked {
+                width: 100px;
+                height: 100px;
+                background: red;
+                mask-image: linear-gradient(90deg, black 0 50%, transparent 50% 100%);
+                mask-repeat: no-repeat;
+            }
+        ";
+
+        let pages = engine
+            .render_image_pages(html, css, 96)
+            .expect("masked raster render");
+        let image = crate::image_native::load_from_memory(&pages[0])
+            .expect("decode masked preview")
+            .to_rgba8();
+        let left = image.get_pixel(20, 50).0;
+        let right = image.get_pixel(80, 50).0;
+        assert!(
+            left[0] > 220 && left[1] < 40 && left[2] < 40,
+            "left={left:?}"
+        );
+        assert!(
+            right[0] > 220 && right[1] > 220 && right[2] > 220,
+            "right={right:?}"
+        );
+
+        let pdf = engine
+            .render_to_buffer(html, css)
+            .expect("masked pdf render");
+        let pdf_text = String::from_utf8_lossy(&pdf);
+        assert_eq!(
+            pdf_text.matches("/Subtype /Image").count(),
+            0,
+            "the PDF should compile the linear mask shader without rasterizing either surface"
+        );
+        assert!(pdf_text.contains("/CS /DeviceRGB"));
+        assert!(pdf_text.contains("/ShadingType 2"));
+        assert!(pdf_text.contains("/Subtype /Form"));
+        assert!(pdf_text.contains("/SMask"));
+    }
+
+    #[test]
+    fn css_mask_program_handles_svg_alpha_inline_refs_and_border_slices() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let page_css =
+            "@page { size: 200px 140px; margin: 0; } html, body { margin: 0; padding: 0; }";
+        let render = |html: &str, css: &str| {
+            let pages = engine
+                .render_image_pages(html, css, 96)
+                .expect("mask feature raster");
+            crate::image_native::load_from_memory(&pages[0])
+                .expect("decode mask feature preview")
+                .to_rgba8()
+        };
+        let is_green = |pixel: [u8; 4]| pixel[1] > 90 && pixel[0] < 100 && pixel[2] < 100;
+        let is_white = |pixel: [u8; 4]| pixel[0] > 220 && pixel[1] > 220 && pixel[2] > 220;
+
+        let svg_source = "data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%22180%22%20height=%22100%22%3E%3Crect%20width=%2260%22%20height=%22100%22%20fill=%22green%22/%3E%3Crect%20x=%2260%22%20width=%2260%22%20height=%22100%22%20fill=%22transparent%22/%3E%3Crect%20x=%22120%22%20width=%2260%22%20height=%22100%22%20fill=%22white%22/%3E%3C/svg%3E";
+        let data_css = format!(
+            "{page_css} .box {{ width: 180px; height: 100px; background: #2e7d32; mask-image: url(\"{svg_source}\"); mask-mode: alpha; mask-size: 180px 100px; mask-repeat: no-repeat; }}"
+        );
+        let data_image = render(
+            "<html><body><div class='box'></div></body></html>",
+            &data_css,
+        );
+        assert!(is_green(data_image.get_pixel(30, 50).0));
+        assert!(is_white(data_image.get_pixel(90, 50).0));
+        assert!(is_green(data_image.get_pixel(150, 50).0));
+
+        let inline_html = "<html><body><svg style='position:absolute;width:0;height:0'><defs><mask id='alpha-mask' maskUnits='userSpaceOnUse' x='0' y='0' width='180' height='100' mask-type='alpha'><rect width='60' height='100' fill='black'/><rect x='60' width='60' height='100' fill='transparent'/><rect x='120' width='60' height='100' fill='black'/></mask></defs></svg><div class='inline'></div></body></html>";
+        let inline_css = format!(
+            "{page_css} .inline {{ width: 180px; height: 100px; background: #2e7d32; mask-image: url(#alpha-mask); }}"
+        );
+        let inline_image = render(inline_html, &inline_css);
+        assert!(is_green(inline_image.get_pixel(30, 50).0));
+        assert!(is_white(inline_image.get_pixel(90, 50).0));
+        assert!(is_green(inline_image.get_pixel(150, 50).0));
+
+        let conic_css = "@page { size: 200px 200px; margin: 0; } html, body { margin: 0; } .fan { width: 200px; height: 200px; background: #ef6c00; mask-image: conic-gradient(from 0deg, black 0 50%, transparent 50% 100%); }";
+        let conic_image = render(
+            "<html><body><div class='fan'></div></body></html>",
+            conic_css,
+        );
+        let orange_pixels = conic_image
+            .pixels()
+            .filter(|pixel| pixel.0[0] > 180 && pixel.0[1] < 160 && pixel.0[2] < 60)
+            .count();
+        assert!(
+            (15_000..=25_000).contains(&orange_pixels),
+            "orange_pixels={orange_pixels}"
+        );
+        let conic_program = engine
+            .render_to_document(
+                "<html><body><div class='fan'></div></body></html>",
+                conic_css,
+            )
+            .expect("compile conic mask program");
+        fn count_conic_commands(commands: &[Command]) -> usize {
+            commands
+                .iter()
+                .map(|command| match command {
+                    Command::ShadingFill(crate::types::Shading::Conic { .. }) => 1,
+                    Command::DefineForm { commands, .. }
+                    | Command::DefineIsolatedForm { commands, .. } => {
+                        count_conic_commands(commands)
+                    }
+                    _ => 0,
+                })
+                .sum()
+        }
+        let conic_commands = conic_program
+            .pages
+            .iter()
+            .map(|page| count_conic_commands(&page.commands))
+            .sum::<usize>();
+        assert_eq!(
+            conic_commands, 1,
+            "a conic mask should remain one compiled shader command"
+        );
+
+        let radial_css = "@page { size: 224px 144px; margin: 0; } html, body { margin: 0; } .disc { width: 220px; height: 140px; background: #1565c0; mask-image: radial-gradient(circle 30px at 40px 40px, #000 0 30px, transparent 31px); mask-size: 80px 80px; mask-repeat: no-repeat; mask-position: 120px 54px; }";
+        let radial_image = render(
+            "<html><body><div class='disc'></div></body></html>",
+            radial_css,
+        );
+        let disc_center = radial_image.get_pixel(160, 94).0;
+        let tile_corner = radial_image.get_pixel(125, 59).0;
+        assert!(
+            disc_center[2] > 140 && disc_center[0] < 80,
+            "disc_center={disc_center:?}"
+        );
+        assert!(is_white(tile_corner), "tile_corner={tile_corner:?}");
+
+        let border_css = format!(
+            "{page_css} .ring {{ width: 200px; height: 140px; background: #d32f2f; mask-border-source: linear-gradient(black, black); mask-border-slice: 28; mask-border-width: 28px; mask-border-repeat: stretch; }}"
+        );
+        let border_image = render(
+            "<html><body><div class='ring'></div></body></html>",
+            &border_css,
+        );
+        let edge = border_image.get_pixel(10, 70).0;
+        let center = border_image.get_pixel(100, 70).0;
+        assert!(edge[0] > 180 && edge[1] < 100, "edge={edge:?}");
+        assert!(is_white(center), "center={center:?}");
     }
 }

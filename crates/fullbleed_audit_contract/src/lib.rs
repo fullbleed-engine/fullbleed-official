@@ -298,6 +298,9 @@ fn hash_memoized(cell: &OnceLock<String>, text: &str) -> String {
 static AUDIT_REGISTRY_HASH: OnceLock<String> = OnceLock::new();
 static WCAG20AA_REGISTRY_HASH: OnceLock<String> = OnceLock::new();
 static SECTION508_HTML_REGISTRY_HASH: OnceLock<String> = OnceLock::new();
+static AUDIT_REGISTRY_TEXT: OnceLock<String> = OnceLock::new();
+static WCAG20AA_REGISTRY_TEXT: OnceLock<String> = OnceLock::new();
+static SECTION508_HTML_REGISTRY_TEXT: OnceLock<String> = OnceLock::new();
 static CONTRACT_FINGERPRINT: OnceLock<String> = OnceLock::new();
 static AUDIT_REGISTRY_JSON_VALUE: OnceLock<Value> = OnceLock::new();
 static WCAG20AA_REGISTRY_JSON_VALUE: OnceLock<Value> = OnceLock::new();
@@ -306,23 +309,45 @@ static A11Y_DEFAULT_GATE_LEVELS: OnceLock<BTreeMap<String, String>> = OnceLock::
 static A11Y_PROFILE_GATE_OVERRIDES: OnceLock<BTreeMap<String, BTreeMap<String, String>>> =
     OnceLock::new();
 
+fn canonical_lf(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn audit_registry_text() -> &'static str {
+    AUDIT_REGISTRY_TEXT
+        .get_or_init(|| canonical_lf(AUDIT_REGISTRY_V1_JSON))
+        .as_str()
+}
+
+fn wcag20aa_registry_text() -> &'static str {
+    WCAG20AA_REGISTRY_TEXT
+        .get_or_init(|| canonical_lf(WCAG20AA_REGISTRY_V1_JSON))
+        .as_str()
+}
+
+fn section508_html_registry_text() -> &'static str {
+    SECTION508_HTML_REGISTRY_TEXT
+        .get_or_init(|| canonical_lf(SECTION508_HTML_REGISTRY_V1_JSON))
+        .as_str()
+}
+
 fn audit_registry_value() -> &'static Value {
     AUDIT_REGISTRY_JSON_VALUE.get_or_init(|| {
-        json::parse(AUDIT_REGISTRY_V1_JSON)
+        json::parse(audit_registry_text())
             .expect("embedded audit registry must be valid JSON-formatted YAML")
     })
 }
 
 fn wcag20aa_registry_value() -> &'static Value {
     WCAG20AA_REGISTRY_JSON_VALUE.get_or_init(|| {
-        json::parse(WCAG20AA_REGISTRY_V1_JSON)
+        json::parse(wcag20aa_registry_text())
             .expect("embedded wcag20aa registry must be valid JSON-formatted YAML")
     })
 }
 
 fn section508_html_registry_value() -> &'static Value {
     SECTION508_HTML_REGISTRY_JSON_VALUE.get_or_init(|| {
-        json::parse(SECTION508_HTML_REGISTRY_V1_JSON)
+        json::parse(section508_html_registry_text())
             .expect("embedded section508 html registry must be valid JSON-formatted YAML")
     })
 }
@@ -350,25 +375,25 @@ fn worst_verdict<'a>(verdicts: impl IntoIterator<Item = &'a str>) -> Option<&'a 
 }
 
 pub fn audit_registry_v1_json() -> &'static str {
-    AUDIT_REGISTRY_V1_JSON
+    audit_registry_text()
 }
 
 pub fn wcag20aa_registry_v1_json() -> &'static str {
-    WCAG20AA_REGISTRY_V1_JSON
+    wcag20aa_registry_text()
 }
 
 pub fn audit_registry_v1_hash_sha256() -> String {
-    hash_memoized(&AUDIT_REGISTRY_HASH, AUDIT_REGISTRY_V1_JSON)
+    hash_memoized(&AUDIT_REGISTRY_HASH, audit_registry_text())
 }
 
 pub fn wcag20aa_registry_v1_hash_sha256() -> String {
-    hash_memoized(&WCAG20AA_REGISTRY_HASH, WCAG20AA_REGISTRY_V1_JSON)
+    hash_memoized(&WCAG20AA_REGISTRY_HASH, wcag20aa_registry_text())
 }
 
 pub fn section508_html_registry_v1_hash_sha256() -> String {
     hash_memoized(
         &SECTION508_HTML_REGISTRY_HASH,
-        SECTION508_HTML_REGISTRY_V1_JSON,
+        section508_html_registry_text(),
     )
 }
 
@@ -404,15 +429,15 @@ pub fn contract_fingerprint_sha256() -> String {
 
 pub fn registry_json(name: &str) -> Option<&'static str> {
     match name {
-        AUDIT_REGISTRY_ID => Some(AUDIT_REGISTRY_V1_JSON),
-        WCAG20AA_REGISTRY_ID => Some(WCAG20AA_REGISTRY_V1_JSON),
-        SECTION508_HTML_REGISTRY_ID => Some(SECTION508_HTML_REGISTRY_V1_JSON),
+        AUDIT_REGISTRY_ID => Some(audit_registry_text()),
+        WCAG20AA_REGISTRY_ID => Some(wcag20aa_registry_text()),
+        SECTION508_HTML_REGISTRY_ID => Some(section508_html_registry_text()),
         _ => None,
     }
 }
 
 pub fn section508_html_registry_v1_json() -> &'static str {
-    SECTION508_HTML_REGISTRY_V1_JSON
+    section508_html_registry_text()
 }
 
 pub fn wcag20aa_coverage_from_rule_verdicts<'a, I>(rule_verdicts: I) -> Wcag20AaCoverageSummary
@@ -860,7 +885,7 @@ pub fn metadata() -> AuditContractMetadata {
 mod tests {
     use super::*;
     fn parse_embedded_audit_registry() -> Value {
-        json::parse(AUDIT_REGISTRY_V1_JSON).expect("embedded audit registry JSON should parse")
+        json::parse(audit_registry_text()).expect("embedded audit registry JSON should parse")
     }
 
     #[test]
@@ -871,7 +896,7 @@ mod tests {
         );
         assert_eq!(
             wcag20aa_registry_v1_hash_sha256(),
-            "3ff936a514baac7b528b2745ec88c9e8d2b4c52c56bd63b39478a897ac52f30c"
+            "108d4e5062ede7c5c3893fff78153a58f35749d2dd9df58173fc2dd0dbcd36b6"
         );
         assert_eq!(
             section508_html_registry_v1_hash_sha256(),
@@ -882,8 +907,20 @@ mod tests {
         assert_eq!(a, b);
         assert_eq!(
             a,
-            "db3f5de6ea0c6cd5b3c1828c58f2023d093cc4a46c9302c2ac3bed47c5277de5"
+            "83123c2d5ff2a8b459326a360e3eeac1134fb1eef4c704c433dadfd3e32606d5"
         );
+    }
+
+    #[test]
+    fn registry_payloads_are_canonical_lf() {
+        for id in [
+            AUDIT_REGISTRY_ID,
+            WCAG20AA_REGISTRY_ID,
+            SECTION508_HTML_REGISTRY_ID,
+        ] {
+            let payload = registry_json(id).expect("known registry should have a payload");
+            assert!(!payload.contains('\r'), "{id} contains a carriage return");
+        }
     }
 
     #[test]

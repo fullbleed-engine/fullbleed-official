@@ -156,8 +156,9 @@ The current binding contract is deliberately narrow:
 - a marker may be embedded in an ordinary text run such as `Invoice: {{invoice_id}}`;
 - the mapping must contain exactly every compiled slot, and all columns must have equal non-zero
   lengths;
-- slots must lower to page-local WinAnsi text outside form XObjects and transformed/clipped
-  graphics states; tagged PDF profiles are not accepted by this fast path;
+- slots must lower to page-local WinAnsi text outside form XObjects; immutable page-space
+  transforms and rectangular/path clips are compiled into the dynamic overlay program, while
+  tagged PDF profiles are not accepted by this fast path;
 - values replace paint text only. They do not trigger shaping or reflow, so templates must reserve
   sufficient geometry and should currently use WinAnsi-compatible values.
 

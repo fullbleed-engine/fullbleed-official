@@ -2720,7 +2720,7 @@ fn collect_font_usage_in_commands(
                     entry.transformed_text_draw_count.saturating_add(1);
                 record_font_usage_sample(entry, Some(text));
             }
-            Command::DrawGlyphRun { .. } => {
+            Command::DrawGlyphRun { .. } | Command::DrawSyntheticBoldGlyphRun { .. } => {
                 let usage_key = RenderTimeFontUsageKey {
                     requested_name: pending_requested_name
                         .take()
@@ -3195,6 +3195,7 @@ fn is_visible_command(cmd: &Command) -> bool {
         Command::DrawString { .. }
             | Command::DrawStringTransformed { .. }
             | Command::DrawGlyphRun { .. }
+            | Command::DrawSyntheticBoldGlyphRun { .. }
             | Command::DrawImage { .. }
             | Command::DrawForm { .. }
             | Command::DrawFilteredForm { .. }

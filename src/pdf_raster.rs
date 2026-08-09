@@ -944,6 +944,7 @@ fn parse_xobject(
                     height: Pt::from_f32(height),
                     resource_id: data_uri,
                     interpolate: false,
+                    source_clip: None,
                 });
             }
         }

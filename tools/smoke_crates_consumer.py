@@ -136,6 +136,7 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
         manifest, "fullbleed_audit_contract"
     ).lstrip("=")
     subsetter_version = _dependency_requirement(manifest, "subsetter").lstrip("=")
+    unicode_bidi_version = _dependency_requirement(manifest, "unicode-bidi").lstrip("=")
     repository_lock = _read_toml(repo_root / "Cargo.lock")
     rustc_hash_version = _locked_package(repository_lock, "rustc-hash")["version"]
     audit_root = repo_root / "crates" / "fullbleed_audit_contract"
@@ -264,6 +265,7 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
             "fullbleed_external_consumer_smoke",
             "rustc-hash",
             "subsetter",
+            "unicode-bidi",
         }
         if package_names != expected_package_names:
             raise SmokeFailure(
@@ -277,6 +279,7 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
             )["version"],
             "rustc-hash": _locked_package(consumer_lock, "rustc-hash")["version"],
             "subsetter": _locked_package(consumer_lock, "subsetter")["version"],
+            "unicode-bidi": _locked_package(consumer_lock, "unicode-bidi")["version"],
         }
         if resolved["fullbleed"] != package_version:
             raise SmokeFailure(
@@ -297,6 +300,11 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
             raise SmokeFailure(
                 f"Consumer resolved rustc-hash {resolved['rustc-hash']}, "
                 f"expected {rustc_hash_version}"
+            )
+        if resolved["unicode-bidi"] != unicode_bidi_version:
+            raise SmokeFailure(
+                f"Consumer resolved unicode-bidi {resolved['unicode-bidi']}, "
+                f"expected {unicode_bidi_version}"
             )
 
     return {

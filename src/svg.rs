@@ -2100,6 +2100,21 @@ fn translate_shading(sh: &crate::types::Shading, dx: f32, dy: f32) -> crate::typ
             stops: stops.clone(),
             hard_stops: *hard_stops,
         },
+        Shading::Conic {
+            center_x,
+            center_y,
+            radius,
+            start_angle_deg,
+            stops,
+            hard_stops,
+        } => Shading::Conic {
+            center_x: center_x + dx,
+            center_y: center_y + dy,
+            radius: *radius,
+            start_angle_deg: *start_angle_deg,
+            stops: stops.clone(),
+            hard_stops: *hard_stops,
+        },
     }
 }
 
@@ -2679,10 +2694,14 @@ fn apply_presentation_and_style(
 ) {
     // Presentation attributes are the baseline.
     if let Some(fill) = node.attribute("fill") {
-        parse_paint_into(fill, &mut style.fill);
+        if let Some(alpha) = apply_svg_paint_value(fill, &mut style.fill) {
+            style.fill_opacity *= alpha;
+        }
     }
     if let Some(stroke) = node.attribute("stroke") {
-        parse_paint_into(stroke, &mut style.stroke);
+        if let Some(alpha) = apply_svg_paint_value(stroke, &mut style.stroke) {
+            style.stroke_opacity *= alpha;
+        }
     }
     if let Some(sw) = node.attribute("stroke-width") {
         if let Some(v) = parse_number(sw) {
@@ -3006,29 +3025,6 @@ fn parse_length_list(input: &str) -> Vec<f32> {
         .filter(|s| !s.is_empty())
         .filter_map(parse_number)
         .collect()
-}
-
-fn parse_paint_into(input: &str, out: &mut Paint) {
-    let v = input.trim();
-    if v.eq_ignore_ascii_case("none") {
-        out.color = None;
-        out.gradient_id = None;
-        return;
-    }
-
-    if let Some(id) = parse_url_ref(v) {
-        out.color = None;
-        out.gradient_id = Some(id);
-        return;
-    }
-
-    if let Some(c) = parse_svg_color(v) {
-        out.color = Some(c);
-        out.gradient_id = None;
-        return;
-    }
-
-    // Unknown paint (e.g. currentColor): ignore and keep inherited/current.
 }
 
 fn parse_url_ref(input: &str) -> Option<String> {

@@ -1,24 +1,75 @@
-use crate::canvas::{Command, Document};
+use crate::canvas::{Command, CompiledMaskLayer, Document};
 use crate::error::FullBleedError;
-use crate::flowable::{FilterDropShadowSpec, PaintFilterSpec};
+use crate::flowable::{
+    FilterDropShadowSpec, MaskComposite, MaskMode, PaintFilterOperation, PaintFilterSpec,
+    SvgComponentTransferFunction, SvgFilterInput, SvgFilterPrimitive, SvgFilterProgram,
+    SvgMorphologyOperator,
+};
 use crate::font::FontRegistry;
 use crate::raster_native::{
-    BlendMode as SkBlendMode, Color as RasterColor, FillRule, FilterQuality, GradientStop, IntSize,
-    LineCap, LineJoin, LinearGradient, Mask, Paint, Path, PathBuilder, Pixmap, PixmapPaint,
-    PixmapRef, Point, RadialGradient, Rect, Shader, SpreadMode, Stroke, StrokeDash, Transform,
+    BlendMode as SkBlendMode, Color as RasterColor, ConicGradient, FillRule, FilterQuality,
+    GradientStop, IntSize, LineCap, LineJoin, LinearGradient, Mask, Paint, Path, PathBuilder,
+    Pixmap, PixmapPaint, PixmapRef, Point, RadialGradient, Rect, Shader, SpreadMode, Stroke,
+    StrokeDash, Transform,
 };
 use crate::sfnt::{Face as SfntFace, GlyphId as SfntGlyphId};
 use crate::sfnt_cff::{Cff2Outlines, CffOutlines};
 use crate::sfnt_outline::OutlineBuilder as NativeOutlineBuilder;
 use crate::text_shape;
 use crate::types::{Color, MixBlendMode, Pt, Shading, ShadingStop};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path as FsPath;
 use std::sync::{Arc, Mutex, OnceLock};
 
-// Skia's filtered-surface sampling retains a small positive horizontal coverage
-// phase after converting CSS drop-shadow offsets to device pixels.
-const FILTER_DROP_SHADOW_DIRECTIONAL_PHASE_BIAS_PX: f32 = 3.0 / 16.0;
+type PixelBounds = (u32, u32, u32, u32);
+
+// The authenticated Chrome PDF oracle samples CSS mask shaders on a half
+// 300-DPI device-pixel phase relative to our analytic pixel-center convention.
+const MASK_SHADER_PHASE_PT: f32 = 0.5 * 72.0 / 300.0;
+
+fn filter_retains_css_surface_guard(filter: &PaintFilterSpec) -> bool {
+    if !filter.operations.is_empty() {
+        let mut has_adjustment = false;
+        for operation in &filter.operations {
+            match operation {
+                PaintFilterOperation::Saturate(_)
+                | PaintFilterOperation::Brightness(_)
+                | PaintFilterOperation::Contrast(_)
+                | PaintFilterOperation::Invert(_)
+                | PaintFilterOperation::Sepia(_)
+                | PaintFilterOperation::HueRotate(_)
+                | PaintFilterOperation::Opacity(_) => has_adjustment = true,
+                PaintFilterOperation::DropShadow(shadow) if shadow.blur_radius <= Pt::ZERO => {}
+                _ => return false,
+            }
+        }
+        return has_adjustment;
+    }
+
+    filter.blur_radius <= Pt::ZERO
+        && filter
+            .drop_shadows
+            .iter()
+            .all(|shadow| shadow.blur_radius <= Pt::ZERO)
+        && ((filter.saturate - 1.0).abs() > 1.0e-6
+            || (filter.brightness - 1.0).abs() > 1.0e-6
+            || (filter.contrast - 1.0).abs() > 1.0e-6
+            || filter.invert.abs() > 1.0e-6
+            || filter.sepia.abs() > 1.0e-6
+            || filter.hue_rotate.abs() > 1.0e-6
+            || (filter.opacity - 1.0).abs() > 1.0e-6)
+}
+
+fn filter_surface_guard_uses_effect_bounds(filter: &PaintFilterSpec) -> bool {
+    if !filter.operations.is_empty() {
+        filter
+            .operations
+            .iter()
+            .any(|operation| matches!(operation, PaintFilterOperation::DropShadow(_)))
+    } else {
+        !filter.drop_shadows.is_empty()
+    }
+}
 
 #[derive(Clone)]
 struct RasterState {
@@ -38,6 +89,9 @@ struct RasterState {
     font_size: Pt,
     text_rendering_mode: u8,
     clip_mask: Option<Mask>,
+    mask_shader_phase: (f32, f32),
+    filtered_output_bounds: Option<PixelBounds>,
+    discrete_image_sampling: bool,
 }
 
 impl Default for RasterState {
@@ -59,6 +113,9 @@ impl Default for RasterState {
             font_size: Pt::from_f32(12.0),
             text_rendering_mode: 0,
             clip_mask: None,
+            mask_shader_phase: (0.0, 0.0),
+            filtered_output_bounds: None,
+            discrete_image_sampling: false,
         }
     }
 }
@@ -71,14 +128,28 @@ struct FormDefinition {
     commands: Vec<Command>,
 }
 
+#[derive(Clone)]
 pub(crate) struct FilteredFormRaster {
     pub x: Pt,
     pub y: Pt,
-    pub width: Pt,
-    pub height: Pt,
     pub pixel_width: u32,
     pub pixel_height: u32,
     pub premultiplied_rgba: Vec<u8>,
+}
+
+#[derive(Clone)]
+pub(crate) struct MaskedFormRasterLayer {
+    pub program: CompiledMaskLayer,
+    pub width: Pt,
+    pub height: Pt,
+    pub commands: Vec<Command>,
+}
+
+#[derive(Clone)]
+pub(crate) struct MaskCoverageRaster {
+    pub pixel_width: u32,
+    pub pixel_height: u32,
+    pub coverage: Vec<u8>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -101,6 +172,13 @@ pub(crate) fn rasterize_filtered_form(
     let dpi = dpi.max(72);
     let full_width_px = pt_milli_to_px_u32(page_width.to_milli_i64(), dpi)? as i64;
     let full_height_px = pt_milli_to_px_u32(page_height.to_milli_i64(), dpi)? as i64;
+    // Blink's adjustment filters, including chains followed by a zero-blur
+    // shadow, allocate a one-device-pixel transparent guard around the source
+    // surface. Retaining that compiled metadata keeps downstream PDF image
+    // interpolation on the same lattice without adding work to the kernels.
+    let surface_guard_px = i64::from(filter_retains_css_surface_guard(filter));
+    let surface_guard_uses_effect_bounds =
+        surface_guard_px != 0 && filter_surface_guard_uses_effect_bounds(filter);
     let coordinate_to_floor_pixel = |coordinate: Pt| -> i64 {
         let numerator = i128::from(coordinate.to_milli_i64()) * i128::from(dpi);
         numerator.div_euclid(72_000) as i64
@@ -109,10 +187,17 @@ pub(crate) fn rasterize_filtered_form(
         let numerator = i128::from(coordinate.to_milli_i64()) * i128::from(dpi);
         (-(-numerator).div_euclid(72_000)) as i64
     };
-    let left_px = coordinate_to_floor_pixel(x).clamp(0, full_width_px);
-    let top_px = coordinate_to_floor_pixel(y).clamp(0, full_height_px);
-    let right_px = coordinate_to_ceil_pixel(x + width).clamp(0, full_width_px);
-    let bottom_px = coordinate_to_ceil_pixel(y + height).clamp(0, full_height_px);
+    let minimum_surface_pixel = -surface_guard_px;
+    let maximum_surface_x = full_width_px + surface_guard_px;
+    let maximum_surface_y = full_height_px + surface_guard_px;
+    let left_px = (coordinate_to_floor_pixel(x) - surface_guard_px)
+        .clamp(minimum_surface_pixel, maximum_surface_x);
+    let top_px = (coordinate_to_floor_pixel(y) - surface_guard_px)
+        .clamp(minimum_surface_pixel, maximum_surface_y);
+    let right_px = (coordinate_to_ceil_pixel(x + width) + surface_guard_px)
+        .clamp(minimum_surface_pixel, maximum_surface_x);
+    let bottom_px = (coordinate_to_ceil_pixel(y + height) + surface_guard_px)
+        .clamp(minimum_surface_pixel, maximum_surface_y);
     if left_px >= right_px || top_px >= bottom_px {
         return Ok(None);
     }
@@ -120,7 +205,12 @@ pub(crate) fn rasterize_filtered_form(
     let height_px = (bottom_px - top_px) as u32;
     let pixel_to_pt = |pixel: i64| -> Pt {
         let numerator = i128::from(pixel) * 72_000;
-        let milli = (numerator + i128::from(dpi / 2)) / i128::from(dpi);
+        let adjustment = if numerator >= 0 {
+            i128::from(dpi / 2)
+        } else {
+            -i128::from(dpi / 2)
+        };
+        let milli = (numerator + adjustment) / i128::from(dpi);
         Pt::from_milli_i64(milli as i64)
     };
     let origin_x = pixel_to_pt(left_px);
@@ -160,24 +250,215 @@ pub(crate) fn rasterize_filtered_form(
     }];
     let mut image_cache = HashMap::new();
     let mut state = RasterState::default();
+    state.discrete_image_sampling = true;
     let mut stack = Vec::new();
     let mut path_builder = PathBuilder::new();
     let mut has_path = false;
-    render_commands(
-        &mut pixmap,
-        page_height_pt,
-        page_width_pt,
-        &draw,
-        base_transform,
-        &mut state,
-        &mut stack,
-        &mut path_builder,
-        &mut has_path,
-        &mut forms,
-        &mut image_cache,
-        registry,
-        shape_text,
-    )?;
+    crate::raster_native::with_precise_antialias(|| {
+        render_commands(
+            &mut pixmap,
+            page_height_pt,
+            page_width_pt,
+            &draw,
+            base_transform,
+            &mut state,
+            &mut stack,
+            &mut path_builder,
+            &mut has_path,
+            &mut forms,
+            &mut image_cache,
+            registry,
+            shape_text,
+        )
+    })?;
+
+    let mut min_x = width_px;
+    let mut min_y = height_px;
+    let mut max_x = 0u32;
+    let mut max_y = 0u32;
+    for (index, pixel) in pixmap.data().chunks_exact(4).enumerate() {
+        if pixel[3] == 0 {
+            continue;
+        }
+        let px = index as u32 % width_px;
+        let py = index as u32 / width_px;
+        min_x = min_x.min(px);
+        min_y = min_y.min(py);
+        max_x = max_x.max(px + 1);
+        max_y = max_y.max(py + 1);
+    }
+    if min_x >= max_x || min_y >= max_y {
+        return Ok(None);
+    }
+    if let Some((left, top, right, bottom)) = state.filtered_output_bounds {
+        let left = left.min(width_px);
+        let top = top.min(height_px);
+        let right = right.min(width_px);
+        let bottom = bottom.min(height_px);
+        if left < right && top < bottom {
+            min_x = left;
+            min_y = top;
+            max_x = right;
+            max_y = bottom;
+        }
+    }
+    if surface_guard_px != 0 {
+        if surface_guard_uses_effect_bounds {
+            min_x = min_x.saturating_sub(1);
+            min_y = min_y.saturating_sub(1);
+            max_x = max_x.saturating_add(1).min(width_px);
+            max_y = max_y.saturating_add(1).min(height_px);
+        } else {
+            min_x = 0;
+            min_y = 0;
+            max_x = width_px;
+            max_y = height_px;
+        }
+    }
+
+    let crop_width = max_x - min_x;
+    let crop_height = max_y - min_y;
+    let source_stride = width_px as usize * 4;
+    let crop_stride = crop_width as usize * 4;
+    let mut cropped = vec![0u8; crop_stride * crop_height as usize];
+    for row in 0..crop_height as usize {
+        let source_start = (min_y as usize + row) * source_stride + min_x as usize * 4;
+        let target_start = row * crop_stride;
+        cropped[target_start..target_start + crop_stride]
+            .copy_from_slice(&pixmap.data()[source_start..source_start + crop_stride]);
+    }
+
+    let points_per_pixel = 72.0 / dpi as f32;
+    Ok(Some(FilteredFormRaster {
+        x: origin_x + Pt::from_f32(min_x as f32 * points_per_pixel),
+        y: origin_y + Pt::from_f32(min_y as f32 * points_per_pixel),
+        pixel_width: crop_width,
+        pixel_height: crop_height,
+        premultiplied_rgba: cropped,
+    }))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn rasterize_masked_form(
+    page_width: Pt,
+    page_height: Pt,
+    form_width: Pt,
+    form_height: Pt,
+    commands: &[Command],
+    layers: &[MaskedFormRasterLayer],
+    form_definitions: &HashMap<String, (Pt, Pt, Vec<Command>)>,
+    form_isolated: &HashMap<String, bool>,
+    x: Pt,
+    y: Pt,
+    width: Pt,
+    height: Pt,
+    dpi: u32,
+    registry: Option<&FontRegistry>,
+    shape_text: bool,
+) -> Result<Option<FilteredFormRaster>, FullBleedError> {
+    let dpi = dpi.max(72);
+    let full_width_px = pt_milli_to_px_u32(page_width.to_milli_i64(), dpi)? as i64;
+    let full_height_px = pt_milli_to_px_u32(page_height.to_milli_i64(), dpi)? as i64;
+    let coordinate_to_floor_pixel = |coordinate: Pt| -> i64 {
+        let numerator = i128::from(coordinate.to_milli_i64()) * i128::from(dpi);
+        numerator.div_euclid(72_000) as i64
+    };
+    let coordinate_to_ceil_pixel = |coordinate: Pt| -> i64 {
+        let numerator = i128::from(coordinate.to_milli_i64()) * i128::from(dpi);
+        (-(-numerator).div_euclid(72_000)) as i64
+    };
+    let left_px = coordinate_to_floor_pixel(x).clamp(0, full_width_px);
+    let top_px = coordinate_to_floor_pixel(y).clamp(0, full_height_px);
+    let right_px = coordinate_to_ceil_pixel(x + width).clamp(0, full_width_px);
+    let bottom_px = coordinate_to_ceil_pixel(y + height).clamp(0, full_height_px);
+    if left_px >= right_px || top_px >= bottom_px {
+        return Ok(None);
+    }
+    let width_px = (right_px - left_px) as u32;
+    let height_px = (bottom_px - top_px) as u32;
+    let pixel_to_pt = |pixel: i64| -> Pt {
+        let numerator = i128::from(pixel) * 72_000;
+        let milli = (numerator + i128::from(dpi / 2)) / i128::from(dpi);
+        Pt::from_milli_i64(milli as i64)
+    };
+    let origin_x = pixel_to_pt(left_px);
+    let origin_y = pixel_to_pt(top_px);
+    let raster_page_width = pixel_to_pt(i64::from(width_px));
+    let raster_page_height = pixel_to_pt(i64::from(height_px));
+    let mut pixmap = Pixmap::new(width_px, height_px).ok_or_else(|| {
+        FullBleedError::InvalidConfiguration(format!(
+            "invalid masked-form raster size {}x{} at {} DPI",
+            width_px, height_px, dpi
+        ))
+    })?;
+
+    let page_height_pt = raster_page_height.to_f32();
+    let page_width_pt = raster_page_width.to_f32();
+    let scale = dpi as f32 / 72.0;
+    let base_transform = Transform::from_row(scale, 0.0, 0.0, -scale, 0.0, page_height_pt * scale);
+    let source_id = "__fullbleed_masked_form_source".to_string();
+    let mut forms = HashMap::new();
+    for (resource_id, (width, height, commands)) in form_definitions {
+        forms.insert(
+            resource_id.clone(),
+            FormDefinition {
+                width: *width,
+                height: *height,
+                isolated: form_isolated.get(resource_id).copied().unwrap_or(false),
+                commands: commands.clone(),
+            },
+        );
+    }
+    forms.insert(
+        source_id.clone(),
+        FormDefinition {
+            width: form_width,
+            height: form_height,
+            isolated: true,
+            commands: commands.to_vec(),
+        },
+    );
+    for layer in layers {
+        forms.insert(
+            layer.program.resource_id.clone(),
+            FormDefinition {
+                width: layer.width,
+                height: layer.height,
+                isolated: false,
+                commands: layer.commands.clone(),
+            },
+        );
+    }
+    let draw = [Command::DrawMaskedForm {
+        x: x - origin_x,
+        y: y - origin_y,
+        width,
+        height,
+        resource_id: source_id,
+        layers: layers.iter().map(|layer| layer.program.clone()).collect(),
+    }];
+    let mut image_cache = HashMap::new();
+    let mut state = RasterState::default();
+    let mut stack = Vec::new();
+    let mut path_builder = PathBuilder::new();
+    let mut has_path = false;
+    crate::raster_native::with_precise_antialias(|| {
+        render_commands(
+            &mut pixmap,
+            page_height_pt,
+            page_width_pt,
+            &draw,
+            base_transform,
+            &mut state,
+            &mut stack,
+            &mut path_builder,
+            &mut has_path,
+            &mut forms,
+            &mut image_cache,
+            registry,
+            shape_text,
+        )
+    })?;
 
     let mut min_x = width_px;
     let mut min_y = height_px;
@@ -214,11 +495,85 @@ pub(crate) fn rasterize_filtered_form(
     Ok(Some(FilteredFormRaster {
         x: origin_x + Pt::from_f32(min_x as f32 * points_per_pixel),
         y: origin_y + Pt::from_f32(min_y as f32 * points_per_pixel),
-        width: Pt::from_f32(crop_width as f32 * points_per_pixel),
-        height: Pt::from_f32(crop_height as f32 * points_per_pixel),
         pixel_width: crop_width,
         pixel_height: crop_height,
         premultiplied_rgba: cropped,
+    }))
+}
+
+/// Execute only the immutable mask program into a local grayscale coverage
+/// surface. PDF emission can apply this cached surface to a vector source form,
+/// so variable-data changes do not invalidate or rerun mask compilation.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn rasterize_mask_coverage(
+    layers: &[MaskedFormRasterLayer],
+    width: Pt,
+    height: Pt,
+    dpi: u32,
+    registry: Option<&FontRegistry>,
+    shape_text: bool,
+) -> Result<Option<MaskCoverageRaster>, FullBleedError> {
+    let dpi = dpi.max(72);
+    let pixel_width = pt_milli_to_px_u32(width.to_milli_i64(), dpi)?;
+    let pixel_height = pt_milli_to_px_u32(height.to_milli_i64(), dpi)?;
+    let page_width_pt = width.to_f32();
+    let page_height_pt = height.to_f32();
+    let scale = dpi as f32 / 72.0;
+    let base_transform = Transform::from_row(scale, 0.0, 0.0, -scale, 0.0, page_height_pt * scale);
+
+    let mut forms = HashMap::new();
+    for layer in layers {
+        forms.insert(
+            layer.program.resource_id.clone(),
+            FormDefinition {
+                width: layer.width,
+                height: layer.height,
+                isolated: false,
+                commands: layer.commands.clone(),
+            },
+        );
+    }
+    let programs = layers
+        .iter()
+        .map(|layer| layer.program.clone())
+        .collect::<Vec<_>>();
+    let mut image_cache = HashMap::new();
+    let state = RasterState::default();
+    let pdf_mask_shader_phase = (MASK_SHADER_PHASE_PT, MASK_SHADER_PHASE_PT);
+    let coverage = crate::raster_native::with_precise_antialias(|| {
+        render_mask_coverage(
+            pixel_width,
+            pixel_height,
+            page_height_pt,
+            page_width_pt,
+            &programs,
+            Pt::ZERO,
+            Pt::ZERO,
+            width,
+            height,
+            base_transform,
+            &state,
+            pdf_mask_shader_phase,
+            &mut forms,
+            &mut image_cache,
+            registry,
+            shape_text,
+        )
+    })?;
+    let Some(coverage) = coverage else {
+        return Ok(None);
+    };
+    let coverage = coverage
+        .into_iter()
+        .map(|alpha| (alpha * 255.0).round().clamp(0.0, 255.0) as u8)
+        .collect::<Vec<_>>();
+    if !coverage.iter().any(|alpha| *alpha != 0) {
+        return Ok(None);
+    }
+    Ok(Some(MaskCoverageRaster {
+        pixel_width,
+        pixel_height,
+        coverage,
     }))
 }
 
@@ -301,6 +656,148 @@ fn document_to_png_pages_with_background(
     }
 
     Ok(png_pages)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_form_to_surface(
+    pixel_width: u32,
+    pixel_height: u32,
+    page_height_pt: f32,
+    page_width_pt: f32,
+    form: &FormDefinition,
+    x: Pt,
+    y: Pt,
+    width: Pt,
+    height: Pt,
+    base_transform: Transform,
+    parent_state: &RasterState,
+    forms: &mut HashMap<String, FormDefinition>,
+    image_cache: &mut HashMap<String, Option<Pixmap>>,
+    registry: Option<&FontRegistry>,
+    shape_text: bool,
+) -> Result<Option<Pixmap>, FullBleedError> {
+    let Some(mut surface) = Pixmap::new(pixel_width, pixel_height) else {
+        return Ok(None);
+    };
+    let draw_y = page_height_pt - y.to_f32() - height.to_f32();
+    let sx = if form.width.to_f32() > 0.0 {
+        width.to_f32() / form.width.to_f32()
+    } else {
+        1.0
+    };
+    let sy = if form.height.to_f32() > 0.0 {
+        height.to_f32() / form.height.to_f32()
+    } else {
+        1.0
+    };
+    let form_transform = Transform::from_row(sx, 0.0, 0.0, sy, x.to_f32(), draw_y);
+    let mut form_state = parent_state.clone();
+    form_state.blend_mode = MixBlendMode::Normal;
+    form_state.fill_opacity = 1.0;
+    form_state.stroke_opacity = 1.0;
+    form_state.transform = form_state.transform.post_concat(form_transform);
+    let mut form_stack = Vec::new();
+    let mut form_path = PathBuilder::new();
+    let mut form_has_path = false;
+    render_commands(
+        &mut surface,
+        form.height.to_f32(),
+        form.width.to_f32(),
+        &form.commands,
+        base_transform,
+        &mut form_state,
+        &mut form_stack,
+        &mut form_path,
+        &mut form_has_path,
+        forms,
+        image_cache,
+        registry,
+        shape_text,
+    )?;
+    let _ = page_width_pt;
+    Ok(Some(surface))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_mask_coverage(
+    pixel_width: u32,
+    pixel_height: u32,
+    page_height_pt: f32,
+    page_width_pt: f32,
+    layers: &[CompiledMaskLayer],
+    x: Pt,
+    y: Pt,
+    width: Pt,
+    height: Pt,
+    base_transform: Transform,
+    parent_state: &RasterState,
+    mask_shader_phase: (f32, f32),
+    forms: &mut HashMap<String, FormDefinition>,
+    image_cache: &mut HashMap<String, Option<Pixmap>>,
+    registry: Option<&FontRegistry>,
+    shape_text: bool,
+) -> Result<Option<Vec<f32>>, FullBleedError> {
+    let mut coverage: Option<Vec<f32>> = None;
+    let mut mask_state = parent_state.clone();
+    mask_state.mask_shader_phase = mask_shader_phase;
+    for index in (0..layers.len()).rev() {
+        let layer = &layers[index];
+        let Some(mask_form) = forms.get(&layer.resource_id).cloned() else {
+            continue;
+        };
+        let Some(mask_surface) = render_form_to_surface(
+            pixel_width,
+            pixel_height,
+            page_height_pt,
+            page_width_pt,
+            &mask_form,
+            x,
+            y,
+            width,
+            height,
+            base_transform,
+            &mask_state,
+            forms,
+            image_cache,
+            registry,
+            shape_text,
+        )?
+        else {
+            continue;
+        };
+        let layer_coverage = mask_surface
+            .data()
+            .chunks_exact(4)
+            .map(|pixel| match layer.mode {
+                MaskMode::MatchSource | MaskMode::Alpha => pixel[3] as f32 / 255.0,
+                // The pixmap is premultiplied, so luminance of its RGB
+                // channels already includes source alpha.
+                MaskMode::Luminance => {
+                    (0.2126 * pixel[0] as f32 + 0.7152 * pixel[1] as f32 + 0.0722 * pixel[2] as f32)
+                        / 255.0
+                }
+            })
+            .collect::<Vec<_>>();
+        if let Some(destination) = coverage.as_mut() {
+            for (dst, source_alpha) in destination.iter_mut().zip(layer_coverage.into_iter()) {
+                let destination_alpha = *dst;
+                *dst = match layer.composite {
+                    MaskComposite::Add => source_alpha + destination_alpha * (1.0 - source_alpha),
+                    MaskComposite::Subtract => source_alpha * (1.0 - destination_alpha),
+                    MaskComposite::DestinationOut => destination_alpha * (1.0 - source_alpha),
+                    MaskComposite::Intersect => source_alpha * destination_alpha,
+                    MaskComposite::Exclude => {
+                        source_alpha * (1.0 - destination_alpha)
+                            + destination_alpha * (1.0 - source_alpha)
+                    }
+                }
+                .clamp(0.0, 1.0);
+            }
+        } else {
+            coverage = Some(layer_coverage);
+        }
+    }
+    Ok(coverage)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -594,6 +1091,28 @@ fn render_commands(
                     registry,
                 );
             }
+            Command::DrawSyntheticBoldGlyphRun {
+                x,
+                y,
+                glyph_ids,
+                advances,
+                offsets,
+                stroke_width,
+            } => {
+                draw_synthetic_bold_glyph_run(
+                    pixmap,
+                    state,
+                    x.to_f32(),
+                    y.to_f32(),
+                    glyph_ids,
+                    advances,
+                    offsets,
+                    *stroke_width,
+                    page_height_pt,
+                    base_transform,
+                    registry,
+                );
+            }
             Command::DrawRect {
                 x,
                 y,
@@ -624,16 +1143,50 @@ fn render_commands(
                 height,
                 resource_id,
                 interpolate,
+                source_clip,
             } => {
+                let (source_width, source_height) = {
+                    let source = image_cache
+                        .entry(resource_id.clone())
+                        .or_insert_with(|| load_image_pixmap(resource_id));
+                    source
+                        .as_ref()
+                        .map(|image| (image.width(), image.height()))
+                        .unwrap_or((0, 0))
+                };
+                let source_crop = source_clip
+                    .and_then(|clip| clip.resolve(*width, *height, source_width, source_height));
+                let (image_key, draw_x, draw_y, draw_width, draw_height) =
+                    if let Some(crop) = source_crop {
+                        let image_key = format!(
+                            "{resource_id}\0fullbleed-source-crop:{}:{}:{}:{}",
+                            crop.x, crop.y, crop.width, crop.height,
+                        );
+                        if !image_cache.contains_key(&image_key) {
+                            let cropped = image_cache
+                                .get(resource_id)
+                                .and_then(|source| source.as_ref())
+                                .and_then(|source| {
+                                    source.crop(crop.x, crop.y, crop.width, crop.height)
+                                });
+                            image_cache.insert(image_key.clone(), cropped);
+                        }
+                        let (draw_x, draw_y, draw_width, draw_height) = source_clip
+                            .expect("resolved crop has a source clip")
+                            .snap_target_rect(crop.target_rect(*x, *y, *width, *height));
+                        (image_key, draw_x, draw_y, draw_width, draw_height)
+                    } else {
+                        (resource_id.clone(), *x, *y, *width, *height)
+                    };
                 let source = image_cache
-                    .entry(resource_id.clone())
-                    .or_insert_with(|| load_image_pixmap(resource_id));
-                if let Some(image) = source.as_ref() {
+                    .get(&image_key)
+                    .and_then(|source| source.as_ref());
+                if let Some(image) = source {
                     let src_w = image.width() as f32;
                     let src_h = image.height() as f32;
                     if src_w > 0.0 && src_h > 0.0 {
-                        let sx = width.to_f32() / src_w;
-                        let sy = height.to_f32() / src_h;
+                        let sx = draw_width.to_f32() / src_w;
+                        let sy = draw_height.to_f32() / src_h;
                         // DrawImage coordinates are top-left based. Convert to user-space with a
                         // local y-flip so source row 0 lands at the visual top, matching PDF /Im Do.
                         let image_ts = Transform::from_row(
@@ -641,14 +1194,14 @@ fn render_commands(
                             0.0,
                             0.0,
                             -sy,
-                            x.to_f32(),
-                            page_height_pt - y.to_f32(),
+                            draw_x.to_f32(),
+                            page_height_pt - draw_y.to_f32(),
                         );
                         // Image placement is in local object space; then apply current state CTM.
                         let ctm = state.transform.pre_concat(image_ts);
                         let device_ts = base_transform.pre_concat(ctm);
                         let mut paint = PixmapPaint::default();
-                        paint.quality = if *interpolate {
+                        paint.quality = if *interpolate && !state.discrete_image_sampling {
                             FilterQuality::Bilinear
                         } else {
                             FilterQuality::Nearest
@@ -836,13 +1389,93 @@ fn render_commands(
                     registry,
                     shape_text,
                 )?;
-                apply_foreground_filter_group(
+                let output_bounds = apply_foreground_filter_group(
                     pixmap,
                     &offscreen,
                     state,
                     filter,
                     filter_transform,
                     *css_shadow,
+                );
+                if output_bounds.is_some() {
+                    state.filtered_output_bounds = output_bounds;
+                }
+            }
+            Command::DrawMaskedForm {
+                x,
+                y,
+                width,
+                height,
+                resource_id,
+                layers,
+            } => {
+                let Some(source_form) = forms.get(resource_id).cloned() else {
+                    continue;
+                };
+                let Some(mut source) = render_form_to_surface(
+                    pixmap.width(),
+                    pixmap.height(),
+                    page_height_pt,
+                    page_width_pt,
+                    &source_form,
+                    *x,
+                    *y,
+                    *width,
+                    *height,
+                    base_transform,
+                    state,
+                    forms,
+                    image_cache,
+                    registry,
+                    shape_text,
+                )?
+                else {
+                    continue;
+                };
+
+                let Some(coverage) = render_mask_coverage(
+                    pixmap.width(),
+                    pixmap.height(),
+                    page_height_pt,
+                    page_width_pt,
+                    layers,
+                    *x,
+                    *y,
+                    *width,
+                    *height,
+                    base_transform,
+                    state,
+                    (MASK_SHADER_PHASE_PT, MASK_SHADER_PHASE_PT),
+                    forms,
+                    image_cache,
+                    registry,
+                    shape_text,
+                )?
+                else {
+                    continue;
+                };
+                for (pixel, alpha) in source
+                    .data_mut()
+                    .chunks_exact_mut(4)
+                    .zip(coverage.into_iter())
+                {
+                    for channel in pixel {
+                        *channel = ((*channel as f32 * alpha).round().clamp(0.0, 255.0)) as u8;
+                    }
+                }
+                let mut paint = PixmapPaint::default();
+                paint.quality = FilterQuality::Bilinear;
+                paint.opacity = state.fill_opacity.clamp(0.0, 1.0);
+                paint.blend_mode = sk_blend_mode(state.blend_mode);
+                draw_pixmap_blended(
+                    pixmap,
+                    0,
+                    0,
+                    source.as_ref(),
+                    &paint,
+                    Transform::identity(),
+                    state.clip_mask.as_ref(),
+                    state.blend_mode,
                 );
             }
         }
@@ -1295,45 +1928,65 @@ fn apply_foreground_filter_group(
     filter: &PaintFilterSpec,
     device_transform: Transform,
     css_shadow: bool,
-) {
+) -> Option<PixelBounds> {
     let width = offscreen.width();
     let height = offscreen.height();
     if width == 0 || height == 0 {
-        return;
+        return None;
     }
 
-    for drop_shadow in &filter.drop_shadows {
-        draw_filter_drop_shadow(
-            pixmap,
-            offscreen,
-            state,
-            *drop_shadow,
-            filter.opacity,
+    let (filtered_data, output_bounds) = if filter.operations.is_empty() {
+        for drop_shadow in &filter.drop_shadows {
+            draw_filter_drop_shadow(
+                pixmap,
+                offscreen,
+                state,
+                *drop_shadow,
+                filter.opacity,
+                device_transform,
+            );
+        }
+
+        let mut filtered_data = offscreen.data().to_vec();
+        let blur_px = backdrop_blur_sigma_px(filter.blur_radius, device_transform);
+        if blur_px > 0.05 {
+            let Some(base_img) =
+                crate::image_native::RgbaImage::from_raw(width, height, filtered_data)
+            else {
+                return None;
+            };
+            filtered_data = if css_shadow {
+                crate::image_native::blur_rgba_css_shadow(&base_img, blur_px).into_raw()
+            } else {
+                // Blink routes CSS filter blur through Skia's PlanGauss path,
+                // the same linear-time three-box kernel used by SVG filters.
+                // Keeping foreground filters on that compiled kernel both
+                // matches the browser alpha profile and removes radius-scaled
+                // convolution work from variable-data rendering.
+                crate::image_native::blur_rgba_svg_filter(&base_img, blur_px).into_raw()
+            };
+        }
+        apply_filter_to_premul_rgba(&mut filtered_data, filter);
+        (filtered_data, None)
+    } else {
+        let Some(filtered) = apply_ordered_filter_operations(
+            offscreen.data(),
+            width,
+            height,
+            &filter.operations,
             device_transform,
-        );
-    }
-
-    let mut filtered_data = offscreen.data().to_vec();
-    let blur_px = backdrop_blur_sigma_px(filter.blur_radius, device_transform);
-    if blur_px > 0.05 {
-        let Some(base_img) = crate::image_native::RgbaImage::from_raw(width, height, filtered_data)
-        else {
-            return;
+            css_shadow,
+        ) else {
+            return None;
         };
-        filtered_data = if css_shadow {
-            crate::image_native::blur_rgba_css_shadow(&base_img, blur_px).into_raw()
-        } else {
-            crate::image_native::blur_rgba(&base_img, blur_px).into_raw()
-        };
-    }
-
-    apply_filter_to_premul_rgba(&mut filtered_data, filter);
+        filtered
+    };
 
     let Some(size) = IntSize::from_wh(width, height) else {
-        return;
+        return None;
     };
     let Some(filtered_pixmap) = Pixmap::from_vec(filtered_data, size) else {
-        return;
+        return None;
     };
 
     let mut paint = PixmapPaint::default();
@@ -1350,6 +2003,789 @@ fn apply_foreground_filter_group(
         state.clip_mask.as_ref(),
         state.blend_mode,
     );
+    output_bounds
+}
+
+fn apply_ordered_filter_operations(
+    source: &[u8],
+    width: u32,
+    height: u32,
+    operations: &[PaintFilterOperation],
+    device_transform: Transform,
+    css_shadow: bool,
+) -> Option<(Vec<u8>, Option<PixelBounds>)> {
+    let mut data = source.to_vec();
+    let mut output_bounds = None;
+    let mut effect_bounds = alpha_pixel_bounds(source, width, height);
+    let mut operation_index = 0usize;
+    while operation_index < operations.len() {
+        if is_color_filter_operation(&operations[operation_index]) {
+            let run_start = operation_index;
+            while operation_index < operations.len()
+                && is_color_filter_operation(&operations[operation_index])
+            {
+                operation_index += 1;
+            }
+            // Skia executes adjacent colour filters in one floating-point
+            // raster pipeline. Preserve authored order but quantize only once
+            // at the spatial-operation boundary.
+            apply_color_filter_operation_chain(&mut data, &operations[run_start..operation_index]);
+            continue;
+        }
+
+        let operation = &operations[operation_index];
+        match operation {
+            PaintFilterOperation::Saturate(_)
+            | PaintFilterOperation::Brightness(_)
+            | PaintFilterOperation::Contrast(_)
+            | PaintFilterOperation::Invert(_)
+            | PaintFilterOperation::Sepia(_)
+            | PaintFilterOperation::HueRotate(_)
+            | PaintFilterOperation::Opacity(_) => unreachable!("colour run handled above"),
+            PaintFilterOperation::Blur(radius) => {
+                let blur_px = backdrop_blur_sigma_px(*radius, device_transform);
+                if blur_px > 0.05 {
+                    let image = crate::image_native::RgbaImage::from_raw(width, height, data)?;
+                    data = if css_shadow {
+                        crate::image_native::blur_rgba_css_shadow(&image, blur_px).into_raw()
+                    } else {
+                        crate::image_native::blur_rgba_svg_filter(&image, blur_px).into_raw()
+                    };
+                    if let Some((left, top, right, bottom)) = effect_bounds {
+                        // CSS filter regions retain three standard deviations of
+                        // transparent visual overflow. Preserve that virtual
+                        // surface instead of alpha-cropping it away so PDF image
+                        // placement and interpolation stay phase-identical to the
+                        // browser while the retained pixel payload remains bounded.
+                        let outset = (blur_px * 3.0).ceil().max(0.0) as i64;
+                        let expanded = (
+                            (i64::from(left) - outset).clamp(0, i64::from(width)) as u32,
+                            (i64::from(top) - outset).clamp(0, i64::from(height)) as u32,
+                            (i64::from(right) + outset).clamp(0, i64::from(width)) as u32,
+                            (i64::from(bottom) + outset).clamp(0, i64::from(height)) as u32,
+                        );
+                        effect_bounds = Some(expanded);
+                        output_bounds = Some(expanded);
+                    }
+                }
+            }
+            PaintFilterOperation::DropShadow(shadow) => {
+                data = filter_drop_shadow_buffer(
+                    &data,
+                    width,
+                    height,
+                    *shadow,
+                    device_transform,
+                    false,
+                    false,
+                )?;
+                effect_bounds = alpha_pixel_bounds(&data, width, height);
+            }
+            PaintFilterOperation::Svg(program) => {
+                let filtered =
+                    apply_svg_filter_program(&data, width, height, program, device_transform)?;
+                data = filtered.0;
+                effect_bounds = Some(filtered.1);
+                if svg_filter_retains_transparent_region(program) {
+                    output_bounds = Some(filtered.1);
+                }
+            }
+            // HTML compilation resolves local URLs into Svg bytecode. Keep an
+            // unresolved operation transparent for non-HTML callers.
+            PaintFilterOperation::Url(_) => {}
+        }
+        operation_index += 1;
+    }
+    Some((data, output_bounds))
+}
+
+fn is_color_filter_operation(operation: &PaintFilterOperation) -> bool {
+    matches!(
+        operation,
+        PaintFilterOperation::Saturate(_)
+            | PaintFilterOperation::Brightness(_)
+            | PaintFilterOperation::Contrast(_)
+            | PaintFilterOperation::Invert(_)
+            | PaintFilterOperation::Sepia(_)
+            | PaintFilterOperation::HueRotate(_)
+            | PaintFilterOperation::Opacity(_)
+    )
+}
+
+fn svg_filter_retains_transparent_region(program: &SvgFilterProgram) -> bool {
+    program.nodes.iter().any(|node| match &node.primitive {
+        SvgFilterPrimitive::GaussianBlur {
+            std_deviation_x,
+            std_deviation_y,
+            ..
+        } => *std_deviation_x > Pt::ZERO || *std_deviation_y > Pt::ZERO,
+        SvgFilterPrimitive::DropShadow { shadow, .. } => shadow.blur_radius > Pt::ZERO,
+        _ => false,
+    })
+}
+
+fn apply_color_filter_operation_chain(data: &mut [u8], operations: &[PaintFilterOperation]) {
+    for px in data.chunks_exact_mut(4) {
+        let alpha = px[3];
+        if alpha == 0 {
+            px[0] = 0;
+            px[1] = 0;
+            px[2] = 0;
+            continue;
+        }
+        let (r, g, b, _) = unpremul_rgba(px[0], px[1], px[2], alpha);
+        let mut r = r as f32;
+        let mut g = g as f32;
+        let mut b = b as f32;
+        let mut out_alpha = alpha as f32;
+        for operation in operations {
+            match operation {
+                PaintFilterOperation::Saturate(value) => {
+                    apply_saturate_rgb(&mut r, &mut g, &mut b, value.max(0.0));
+                }
+                PaintFilterOperation::Brightness(value) => {
+                    apply_brightness_rgb(&mut r, &mut g, &mut b, value.max(0.0));
+                }
+                PaintFilterOperation::Contrast(value) => {
+                    apply_contrast_rgb(&mut r, &mut g, &mut b, value.max(0.0));
+                }
+                PaintFilterOperation::Invert(value) => {
+                    apply_invert_rgb(&mut r, &mut g, &mut b, value.clamp(0.0, 1.0));
+                }
+                PaintFilterOperation::Sepia(value) => {
+                    apply_sepia_rgb(&mut r, &mut g, &mut b, value.clamp(0.0, 1.0));
+                }
+                PaintFilterOperation::HueRotate(value) => {
+                    apply_hue_rotate_rgb(&mut r, &mut g, &mut b, *value);
+                }
+                PaintFilterOperation::Opacity(value) => {
+                    out_alpha *= value.clamp(0.0, 1.0);
+                }
+                _ => unreachable!("spatial operation in colour filter run"),
+            }
+        }
+        let out_alpha = out_alpha.round().clamp(0.0, 255.0) as u8;
+        px[0] = premul_u8(r.round().clamp(0.0, 255.0) as u8, out_alpha);
+        px[1] = premul_u8(g.round().clamp(0.0, 255.0) as u8, out_alpha);
+        px[2] = premul_u8(b.round().clamp(0.0, 255.0) as u8, out_alpha);
+        px[3] = out_alpha;
+    }
+}
+
+fn filter_drop_shadow_buffer(
+    source: &[u8],
+    width: u32,
+    height: u32,
+    shadow: FilterDropShadowSpec,
+    device_transform: Transform,
+    linear_rgb: bool,
+    svg_filter: bool,
+) -> Option<Vec<u8>> {
+    let (sx, sy) = device_transform.get_scale();
+    let dx = shadow.offset_x.to_f32() * sx.abs();
+    let dy = shadow.offset_y.to_f32() * sy.abs();
+    let opacity = shadow.opacity.clamp(0.0, 1.0);
+    let mut shadow_data = vec![0u8; source.len()];
+    let color = filter_working_color(shadow.color, linear_rgb);
+    let sample_alpha = |x: i32, y: i32| -> f32 {
+        if x < 0 || y < 0 || x >= width as i32 || y >= height as i32 {
+            return 0.0;
+        }
+        source[((y as usize * width as usize + x as usize) * 4) + 3] as f32
+    };
+    for target_y in 0..height {
+        let source_y = target_y as f32 - dy;
+        let source_y0 = source_y.floor() as i32;
+        let fy = source_y - source_y0 as f32;
+        for target_x in 0..width {
+            let source_x = target_x as f32 - dx;
+            let source_x0 = source_x.floor() as i32;
+            let fx = source_x - source_x0 as f32;
+            let top = sample_alpha(source_x0, source_y0) * (1.0 - fx)
+                + sample_alpha(source_x0 + 1, source_y0) * fx;
+            let bottom = sample_alpha(source_x0, source_y0 + 1) * (1.0 - fx)
+                + sample_alpha(source_x0 + 1, source_y0 + 1) * fx;
+            let alpha = ((top * (1.0 - fy) + bottom * fy) * opacity)
+                .round()
+                .clamp(0.0, 255.0) as u8;
+            if alpha == 0 {
+                continue;
+            }
+            let index = (target_y as usize * width as usize + target_x as usize) * 4;
+            shadow_data[index] = color[0];
+            shadow_data[index + 1] = color[1];
+            shadow_data[index + 2] = color[2];
+            shadow_data[index + 3] = alpha;
+        }
+    }
+    let blur_px = backdrop_blur_sigma_px(shadow.blur_radius, device_transform);
+    if blur_px > 0.05 {
+        let image = crate::image_native::RgbaImage::from_raw(width, height, shadow_data)?;
+        shadow_data = if svg_filter {
+            crate::image_native::blur_rgba_svg_filter(&image, blur_px).into_raw()
+        } else {
+            crate::image_native::blur_rgba(&image, blur_px).into_raw()
+        };
+    }
+    premultiply_rgba(&mut shadow_data);
+    composite_source_over(&mut shadow_data, source);
+    Some(shadow_data)
+}
+
+fn composite_source_over(destination: &mut [u8], source: &[u8]) {
+    for (dst, src) in destination.chunks_exact_mut(4).zip(source.chunks_exact(4)) {
+        let inverse_alpha = 255u16.saturating_sub(src[3] as u16);
+        for channel in 0..3 {
+            dst[channel] = (src[channel] as u16
+                + ((dst[channel] as u16 * inverse_alpha + 127) / 255))
+                .min(255) as u8;
+        }
+        dst[3] = (src[3] as u16 + ((dst[3] as u16 * inverse_alpha + 127) / 255)).min(255) as u8;
+    }
+}
+
+fn apply_svg_filter_program(
+    source: &[u8],
+    width: u32,
+    height: u32,
+    program: &SvgFilterProgram,
+    device_transform: Transform,
+) -> Option<(Vec<u8>, PixelBounds)> {
+    let mut source_graphic = source.to_vec();
+    if program.linear_rgb {
+        convert_filter_buffer_to_linear(&mut source_graphic);
+    }
+    let mut source_alpha = vec![0u8; source.len()];
+    for (dst, src) in source_alpha.chunks_exact_mut(4).zip(source.chunks_exact(4)) {
+        dst[3] = src[3];
+    }
+    let region = svg_filter_region_bounds(source, width, height, program.region);
+    let mut previous = source_graphic.clone();
+    let mut named: HashMap<String, Vec<u8>> = HashMap::new();
+
+    let resolve =
+        |input: &SvgFilterInput, previous: &[u8], named: &HashMap<String, Vec<u8>>| -> Vec<u8> {
+            match input {
+                SvgFilterInput::SourceGraphic => source_graphic.clone(),
+                SvgFilterInput::SourceAlpha => source_alpha.clone(),
+                SvgFilterInput::Previous => previous.to_vec(),
+                SvgFilterInput::Named(name) => named
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_else(|| vec![0u8; source.len()]),
+            }
+        };
+
+    for node in &program.nodes {
+        let output = match &node.primitive {
+            SvgFilterPrimitive::GaussianBlur {
+                input,
+                std_deviation_x,
+                std_deviation_y,
+            } => {
+                let input = resolve(input, &previous, &named);
+                let sigma = (backdrop_blur_sigma_px(*std_deviation_x, device_transform)
+                    + backdrop_blur_sigma_px(*std_deviation_y, device_transform))
+                    * 0.5;
+                if sigma <= 0.05 {
+                    input
+                } else {
+                    let image = crate::image_native::RgbaImage::from_raw(width, height, input)?;
+                    crate::image_native::blur_rgba_svg_filter(&image, sigma).into_raw()
+                }
+            }
+            SvgFilterPrimitive::Offset { input, dx, dy } => {
+                let input = resolve(input, &previous, &named);
+                offset_filter_buffer(&input, width, height, *dx, *dy, device_transform)
+            }
+            SvgFilterPrimitive::ColorMatrix { input, matrix } => {
+                let mut input = resolve(input, &previous, &named);
+                apply_svg_color_matrix(&mut input, matrix);
+                input
+            }
+            SvgFilterPrimitive::ComponentTransfer { input, functions } => {
+                let mut input = resolve(input, &previous, &named);
+                apply_svg_component_transfer(&mut input, functions);
+                input
+            }
+            SvgFilterPrimitive::Flood { color, opacity } => flood_filter_buffer(
+                source.len(),
+                width,
+                *color,
+                *opacity,
+                region,
+                program.linear_rgb,
+            ),
+            SvgFilterPrimitive::CompositeIn { input, input2 } => {
+                let mut input = resolve(input, &previous, &named);
+                let input2 = resolve(input2, &previous, &named);
+                composite_in(&mut input, &input2);
+                input
+            }
+            SvgFilterPrimitive::Morphology {
+                input,
+                operator,
+                radius_x,
+                radius_y,
+            } => {
+                let input = resolve(input, &previous, &named);
+                let (sx, sy) = device_transform.get_scale();
+                let radius_x = (radius_x.to_f32() * sx.abs()).round().max(0.0) as usize;
+                let radius_y = (radius_y.to_f32() * sy.abs()).round().max(0.0) as usize;
+                morphology_filter_buffer(
+                    &input,
+                    width,
+                    height,
+                    radius_x,
+                    radius_y,
+                    matches!(operator, SvgMorphologyOperator::Dilate),
+                )
+            }
+            SvgFilterPrimitive::DropShadow { input, shadow } => {
+                let input = resolve(input, &previous, &named);
+                filter_drop_shadow_buffer(
+                    &input,
+                    width,
+                    height,
+                    *shadow,
+                    device_transform,
+                    program.linear_rgb,
+                    true,
+                )?
+            }
+            SvgFilterPrimitive::Merge { inputs } => {
+                let mut merged = vec![0u8; source.len()];
+                for input in inputs {
+                    let input = resolve(input, &previous, &named);
+                    composite_source_over(&mut merged, &input);
+                }
+                merged
+            }
+            SvgFilterPrimitive::Blend {
+                input,
+                input2,
+                mode,
+            } => {
+                let input = resolve(input, &previous, &named);
+                let input2 = resolve(input2, &previous, &named);
+                blend_filter_buffers(&input, &input2, *mode)
+            }
+        };
+        if let Some(name) = node.result.as_ref() {
+            named.insert(name.clone(), output.clone());
+        }
+        previous = output;
+    }
+
+    clear_outside_filter_region(&mut previous, width, height, region);
+    if program.linear_rgb {
+        convert_filter_buffer_to_srgb(&mut previous);
+    }
+    Some((previous, region))
+}
+
+fn svg_filter_region_bounds(
+    source: &[u8],
+    width: u32,
+    height: u32,
+    region: crate::flowable::SvgFilterRegion,
+) -> (u32, u32, u32, u32) {
+    let Some((min_x, min_y, max_x, max_y)) = alpha_pixel_bounds(source, width, height) else {
+        return (0, 0, 0, 0);
+    };
+    let source_width = (max_x - min_x) as f32;
+    let source_height = (max_y - min_y) as f32;
+    let left = (min_x as f32 + region.x * source_width).floor() as i64;
+    let top = (min_y as f32 + region.y * source_height).floor() as i64;
+    let right = (min_x as f32 + (region.x + region.width) * source_width).ceil() as i64;
+    let bottom = (min_y as f32 + (region.y + region.height) * source_height).ceil() as i64;
+    (
+        left.clamp(0, width as i64) as u32,
+        top.clamp(0, height as i64) as u32,
+        right.clamp(0, width as i64) as u32,
+        bottom.clamp(0, height as i64) as u32,
+    )
+}
+
+fn alpha_pixel_bounds(source: &[u8], width: u32, height: u32) -> Option<PixelBounds> {
+    let mut min_x = width;
+    let mut min_y = height;
+    let mut max_x = 0;
+    let mut max_y = 0;
+    for (index, pixel) in source.chunks_exact(4).enumerate() {
+        if pixel[3] == 0 {
+            continue;
+        }
+        let x = index as u32 % width;
+        let y = index as u32 / width;
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x + 1);
+        max_y = max_y.max(y + 1);
+    }
+    (min_x < max_x && min_y < max_y).then_some((min_x, min_y, max_x, max_y))
+}
+
+fn clear_outside_filter_region(
+    data: &mut [u8],
+    width: u32,
+    height: u32,
+    region: (u32, u32, u32, u32),
+) {
+    let (left, top, right, bottom) = region;
+    for y in 0..height {
+        for x in 0..width {
+            if x >= left && x < right && y >= top && y < bottom {
+                continue;
+            }
+            let index = (y as usize * width as usize + x as usize) * 4;
+            data[index..index + 4].fill(0);
+        }
+    }
+}
+
+fn flood_filter_buffer(
+    length: usize,
+    width: u32,
+    color: Color,
+    opacity: f32,
+    region: (u32, u32, u32, u32),
+    linear_rgb: bool,
+) -> Vec<u8> {
+    let mut data = vec![0u8; length];
+    let alpha = unit_to_u8(opacity);
+    let working = filter_working_color(color, linear_rgb);
+    let color = [
+        premul_u8(working[0], alpha),
+        premul_u8(working[1], alpha),
+        premul_u8(working[2], alpha),
+        alpha,
+    ];
+    for y in region.1..region.3 {
+        for x in region.0..region.2 {
+            let index = (y as usize * width as usize + x as usize) * 4;
+            data[index..index + 4].copy_from_slice(&color);
+        }
+    }
+    data
+}
+
+fn offset_filter_buffer(
+    source: &[u8],
+    width: u32,
+    height: u32,
+    dx: Pt,
+    dy: Pt,
+    device_transform: Transform,
+) -> Vec<u8> {
+    let (sx, sy) = device_transform.get_scale();
+    let dx = dx.to_f32() * sx.abs();
+    let dy = dy.to_f32() * sy.abs();
+    let mut output = vec![0u8; source.len()];
+    let sample = |x: i32, y: i32, channel: usize| -> f32 {
+        if x < 0 || y < 0 || x >= width as i32 || y >= height as i32 {
+            0.0
+        } else {
+            source[((y as usize * width as usize + x as usize) * 4) + channel] as f32
+        }
+    };
+    for y in 0..height {
+        let source_y = y as f32 - dy;
+        let y0 = source_y.floor() as i32;
+        let fy = source_y - y0 as f32;
+        for x in 0..width {
+            let source_x = x as f32 - dx;
+            let x0 = source_x.floor() as i32;
+            let fx = source_x - x0 as f32;
+            let index = (y as usize * width as usize + x as usize) * 4;
+            for channel in 0..4 {
+                let top = sample(x0, y0, channel) * (1.0 - fx) + sample(x0 + 1, y0, channel) * fx;
+                let bottom =
+                    sample(x0, y0 + 1, channel) * (1.0 - fx) + sample(x0 + 1, y0 + 1, channel) * fx;
+                output[index + channel] =
+                    (top * (1.0 - fy) + bottom * fy).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    output
+}
+
+fn srgb_to_linear(value: f32) -> f32 {
+    if value <= 0.04045 {
+        value / 12.92
+    } else {
+        ((value + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn linear_to_srgb(value: f32) -> f32 {
+    if value <= 0.0031308 {
+        value * 12.92
+    } else {
+        1.055 * value.powf(1.0 / 2.4) - 0.055
+    }
+}
+
+fn filter_working_color(color: Color, linear_rgb: bool) -> [u8; 3] {
+    let convert = |value: f32| {
+        let value = value.clamp(0.0, 1.0);
+        unit_to_u8(if linear_rgb {
+            srgb_to_linear(value)
+        } else {
+            value
+        })
+    };
+    [convert(color.r), convert(color.g), convert(color.b)]
+}
+
+fn convert_filter_buffer_to_linear(data: &mut [u8]) {
+    convert_filter_buffer_color_space(data, srgb_to_linear);
+}
+
+fn convert_filter_buffer_to_srgb(data: &mut [u8]) {
+    convert_filter_buffer_color_space(data, linear_to_srgb);
+}
+
+fn convert_filter_buffer_color_space(data: &mut [u8], convert: fn(f32) -> f32) {
+    for pixel in data.chunks_exact_mut(4) {
+        let alpha = pixel[3];
+        if alpha == 0 {
+            pixel.fill(0);
+            continue;
+        }
+        let (r, g, b, _) = unpremul_rgba(pixel[0], pixel[1], pixel[2], alpha);
+        pixel[0] = premul_u8(unit_to_u8(convert(r as f32 / 255.0)), alpha);
+        pixel[1] = premul_u8(unit_to_u8(convert(g as f32 / 255.0)), alpha);
+        pixel[2] = premul_u8(unit_to_u8(convert(b as f32 / 255.0)), alpha);
+    }
+}
+
+fn apply_svg_color_matrix(data: &mut [u8], matrix: &[f32; 20]) {
+    for pixel in data.chunks_exact_mut(4) {
+        let alpha = pixel[3];
+        if alpha == 0 {
+            pixel.fill(0);
+            continue;
+        }
+        let (r, g, b, _) = unpremul_rgba(pixel[0], pixel[1], pixel[2], alpha);
+        let channels = [
+            r as f32 / 255.0,
+            g as f32 / 255.0,
+            b as f32 / 255.0,
+            alpha as f32 / 255.0,
+        ];
+        let mut output = [0.0; 4];
+        for row in 0..4 {
+            output[row] = (matrix[row * 5] * channels[0]
+                + matrix[row * 5 + 1] * channels[1]
+                + matrix[row * 5 + 2] * channels[2]
+                + matrix[row * 5 + 3] * channels[3]
+                + matrix[row * 5 + 4])
+                .clamp(0.0, 1.0);
+        }
+        let output_alpha = unit_to_u8(output[3]);
+        pixel[0] = premul_u8(unit_to_u8(output[0]), output_alpha);
+        pixel[1] = premul_u8(unit_to_u8(output[1]), output_alpha);
+        pixel[2] = premul_u8(unit_to_u8(output[2]), output_alpha);
+        pixel[3] = output_alpha;
+    }
+}
+
+fn component_transfer_value(function: &SvgComponentTransferFunction, value: f32) -> f32 {
+    match function {
+        SvgComponentTransferFunction::Identity => value,
+        SvgComponentTransferFunction::Table(values) => {
+            if values.is_empty() {
+                return value;
+            }
+            if values.len() == 1 {
+                return values[0];
+            }
+            let position = value.clamp(0.0, 1.0) * (values.len() - 1) as f32;
+            let index = position.floor() as usize;
+            let next = (index + 1).min(values.len() - 1);
+            values[index] + (values[next] - values[index]) * (position - index as f32)
+        }
+        SvgComponentTransferFunction::Discrete(values) => {
+            if values.is_empty() {
+                value
+            } else {
+                values[((value.clamp(0.0, 1.0) * values.len() as f32).floor() as usize)
+                    .min(values.len() - 1)]
+            }
+        }
+        SvgComponentTransferFunction::Linear { slope, intercept } => slope * value + intercept,
+        SvgComponentTransferFunction::Gamma {
+            amplitude,
+            exponent,
+            offset,
+        } => amplitude * value.max(0.0).powf(*exponent) + offset,
+    }
+    .clamp(0.0, 1.0)
+}
+
+fn apply_svg_component_transfer(data: &mut [u8], functions: &[SvgComponentTransferFunction; 4]) {
+    for pixel in data.chunks_exact_mut(4) {
+        let alpha = pixel[3];
+        if alpha == 0 {
+            pixel.fill(0);
+            continue;
+        }
+        let (r, g, b, _) = unpremul_rgba(pixel[0], pixel[1], pixel[2], alpha);
+        let mut channels = [
+            r as f32 / 255.0,
+            g as f32 / 255.0,
+            b as f32 / 255.0,
+            alpha as f32 / 255.0,
+        ];
+        for index in 0..4 {
+            channels[index] = component_transfer_value(&functions[index], channels[index]);
+        }
+        let output_alpha = unit_to_u8(channels[3]);
+        pixel[0] = premul_u8(unit_to_u8(channels[0]), output_alpha);
+        pixel[1] = premul_u8(unit_to_u8(channels[1]), output_alpha);
+        pixel[2] = premul_u8(unit_to_u8(channels[2]), output_alpha);
+        pixel[3] = output_alpha;
+    }
+}
+
+fn composite_in(input: &mut [u8], input2: &[u8]) {
+    for (first, second) in input.chunks_exact_mut(4).zip(input2.chunks_exact(4)) {
+        let alpha = second[3] as u16;
+        for channel in first.iter_mut() {
+            *channel = ((*channel as u16 * alpha + 127) / 255) as u8;
+        }
+    }
+}
+
+fn blend_filter_buffers(foreground: &[u8], background: &[u8], mode: MixBlendMode) -> Vec<u8> {
+    let mut output = vec![0u8; foreground.len()];
+    for ((out, source), backdrop) in output
+        .chunks_exact_mut(4)
+        .zip(foreground.chunks_exact(4))
+        .zip(background.chunks_exact(4))
+    {
+        let source_alpha = source[3] as f32 / 255.0;
+        let backdrop_alpha = backdrop[3] as f32 / 255.0;
+        let source_rgb = if source[3] == 0 {
+            [0.0; 3]
+        } else {
+            let (r, g, b, _) = unpremul_rgba(source[0], source[1], source[2], source[3]);
+            [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]
+        };
+        let backdrop_rgb = if backdrop[3] == 0 {
+            [0.0; 3]
+        } else {
+            let (r, g, b, _) = unpremul_rgba(backdrop[0], backdrop[1], backdrop[2], backdrop[3]);
+            [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]
+        };
+        let source_space = source_rgb;
+        let backdrop_space = backdrop_rgb;
+        let output_alpha = source_alpha + backdrop_alpha - source_alpha * backdrop_alpha;
+        for channel in 0..3 {
+            let blended = match mode {
+                MixBlendMode::Multiply => source_space[channel] * backdrop_space[channel],
+                MixBlendMode::Screen => {
+                    source_space[channel] + backdrop_space[channel]
+                        - source_space[channel] * backdrop_space[channel]
+                }
+                MixBlendMode::Darken => source_space[channel].min(backdrop_space[channel]),
+                MixBlendMode::Lighten => source_space[channel].max(backdrop_space[channel]),
+                _ => source_space[channel],
+            };
+            let premultiplied = (1.0 - backdrop_alpha) * source_space[channel] * source_alpha
+                + (1.0 - source_alpha) * backdrop_space[channel] * backdrop_alpha
+                + source_alpha * backdrop_alpha * blended;
+            let unpremultiplied = if output_alpha <= f32::EPSILON {
+                0.0
+            } else {
+                premultiplied / output_alpha
+            };
+            out[channel] = premul_u8(unit_to_u8(unpremultiplied), unit_to_u8(output_alpha));
+        }
+        out[3] = unit_to_u8(output_alpha);
+    }
+    output
+}
+
+fn morphology_filter_buffer(
+    source: &[u8],
+    width: u32,
+    height: u32,
+    radius_x: usize,
+    radius_y: usize,
+    dilate: bool,
+) -> Vec<u8> {
+    if radius_x == 0 && radius_y == 0 {
+        return source.to_vec();
+    }
+    let width = width as usize;
+    let height = height as usize;
+    let mut horizontal = vec![0u8; source.len()];
+    let mut output = vec![0u8; source.len()];
+    for y in 0..height {
+        for channel in 0..4 {
+            let line = (0..width)
+                .map(|x| source[(y * width + x) * 4 + channel])
+                .collect::<Vec<_>>();
+            let filtered = sliding_extreme(&line, radius_x, dilate);
+            for (x, value) in filtered.into_iter().enumerate() {
+                horizontal[(y * width + x) * 4 + channel] = value;
+            }
+        }
+    }
+    for x in 0..width {
+        for channel in 0..4 {
+            let line = (0..height)
+                .map(|y| horizontal[(y * width + x) * 4 + channel])
+                .collect::<Vec<_>>();
+            let filtered = sliding_extreme(&line, radius_y, dilate);
+            for (y, value) in filtered.into_iter().enumerate() {
+                output[(y * width + x) * 4 + channel] = value;
+            }
+        }
+    }
+    output
+}
+
+fn sliding_extreme(values: &[u8], radius: usize, maximum: bool) -> Vec<u8> {
+    if radius == 0 || values.is_empty() {
+        return values.to_vec();
+    }
+    let mut output = vec![0u8; values.len()];
+    let mut deque: VecDeque<(isize, u8)> = VecDeque::new();
+    let radius = radius as isize;
+    for index in -radius..values.len() as isize + radius {
+        let value = if index < 0 || index >= values.len() as isize {
+            0
+        } else {
+            values[index as usize]
+        };
+        while deque.back().is_some_and(|(_, candidate)| {
+            if maximum {
+                *candidate <= value
+            } else {
+                *candidate >= value
+            }
+        }) {
+            deque.pop_back();
+        }
+        deque.push_back((index, value));
+        let minimum_index = index - radius * 2;
+        while deque
+            .front()
+            .is_some_and(|(candidate, _)| *candidate < minimum_index)
+        {
+            deque.pop_front();
+        }
+        if index >= radius {
+            let output_index = (index - radius) as usize;
+            if output_index < output.len() {
+                output[output_index] = deque.front().map(|(_, value)| *value).unwrap_or(0);
+            }
+        }
+    }
+    output
 }
 
 fn draw_filter_drop_shadow(
@@ -1367,15 +2803,7 @@ fn draw_filter_drop_shadow(
     }
 
     let (sx, sy) = device_transform.get_scale();
-    let offset_x = shadow.offset_x.to_f32();
-    let directional_phase = if offset_x > 0.0 {
-        FILTER_DROP_SHADOW_DIRECTIONAL_PHASE_BIAS_PX
-    } else if offset_x < 0.0 {
-        -FILTER_DROP_SHADOW_DIRECTIONAL_PHASE_BIAS_PX
-    } else {
-        0.0
-    };
-    let dx = offset_x * sx.abs() + directional_phase;
+    let dx = shadow.offset_x.to_f32() * sx.abs();
     let dy = shadow.offset_y.to_f32() * sy.abs();
     let alpha_scale = (shadow.opacity * filter_opacity.clamp(0.0, 1.0)).clamp(0.0, 1.0);
     if alpha_scale <= 0.0 {
@@ -1688,7 +3116,12 @@ fn draw_shading_fill(
         return;
     };
     let page_path = PathBuilder::from_rect(page_rect);
-    let Some(shader) = build_shading_shader(shading, page_height_pt, state.fill_opacity) else {
+    let Some(shader) = build_shading_shader(
+        shading,
+        page_height_pt,
+        state.fill_opacity,
+        state.mask_shader_phase,
+    ) else {
         return;
     };
     let mut paint = Paint::default();
@@ -1710,6 +3143,7 @@ fn build_shading_shader(
     shading: &Shading,
     page_height_pt: f32,
     opacity: f32,
+    mask_phase: (f32, f32),
 ) -> Option<Shader<'static>> {
     match shading {
         Shading::Axial {
@@ -1734,8 +3168,8 @@ fn build_shading_shader(
             stops,
             ..
         } => {
-            let start = Point::from_xy(*x0, page_height_pt - *y0);
-            let end = Point::from_xy(*x1, page_height_pt - *y1);
+            let start = Point::from_xy(*x0 + mask_phase.0, page_height_pt - *y0 - mask_phase.1);
+            let end = Point::from_xy(*x1 + mask_phase.0, page_height_pt - *y1 - mask_phase.1);
             let radius = (*r1 - *r0).abs().max(0.0001);
             let stops = shading_stops(stops, opacity);
             RadialGradient::new(
@@ -1746,6 +3180,20 @@ fn build_shading_shader(
                 SpreadMode::Pad,
                 Transform::identity(),
             )
+        }
+        Shading::Conic {
+            center_x,
+            center_y,
+            start_angle_deg,
+            stops,
+            ..
+        } => {
+            let center = Point::from_xy(
+                *center_x + mask_phase.0,
+                page_height_pt - *center_y - mask_phase.1,
+            );
+            let stops = shading_stops(stops, opacity);
+            ConicGradient::new(center, *start_angle_deg, stops, Transform::identity())
         }
     }
 }
@@ -2008,6 +3456,100 @@ fn draw_glyph_run(
     base_transform: Transform,
     registry: Option<&FontRegistry>,
 ) {
+    draw_glyph_run_impl(
+        pixmap,
+        state,
+        x,
+        y,
+        glyph_ids,
+        advances,
+        &[],
+        None,
+        m00,
+        m01,
+        m10,
+        m11,
+        page_height_pt,
+        base_transform,
+        registry,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_synthetic_bold_glyph_run(
+    pixmap: &mut Pixmap,
+    state: &RasterState,
+    x: f32,
+    y: f32,
+    glyph_ids: &[u16],
+    advances: &[(Pt, Pt)],
+    offsets: &[(Pt, Pt)],
+    stroke_width: Pt,
+    page_height_pt: f32,
+    base_transform: Transform,
+    registry: Option<&FontRegistry>,
+) {
+    let stroke_width = browser_effect_synthetic_bold_stroke_width(state.font_size, stroke_width);
+    draw_glyph_run_impl(
+        pixmap,
+        state,
+        x,
+        y,
+        glyph_ids,
+        advances,
+        offsets,
+        Some(stroke_width.max(Pt::ZERO)),
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        page_height_pt,
+        base_transform,
+        registry,
+    );
+}
+
+fn browser_effect_synthetic_bold_stroke_width(font_size: Pt, stroke_width: Pt) -> Pt {
+    if stroke_width <= Pt::ZERO || font_size <= Pt::ZERO {
+        return Pt::ZERO;
+    }
+
+    // Skia's fake-bold raster paint interpolates its added stroke from 1/24em
+    // at 9 CSS px to 1/32em at 36 CSS px.  Fullbleed's reusable vector glyph
+    // program stores the stable 1/32em width used by the PDF path; apply only
+    // the missing raster-paint multiplier while compiling an effect surface.
+    // This keeps layout, advances, extraction text, and direct Type 3 output
+    // immutable while matching the browser shader at its actual CSS size.
+    let css_px = font_size.to_f32() * (4.0 / 3.0);
+    let multiplier = if css_px <= 9.0 {
+        4.0 / 3.0
+    } else if css_px >= 36.0 {
+        1.0
+    } else {
+        let progress = (css_px - 9.0) / 27.0;
+        (4.0 / 3.0) + progress * (1.0 - 4.0 / 3.0)
+    };
+    Pt::from_f32(stroke_width.to_f32() * multiplier)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_glyph_run_impl(
+    pixmap: &mut Pixmap,
+    state: &RasterState,
+    x: f32,
+    y: f32,
+    glyph_ids: &[u16],
+    advances: &[(Pt, Pt)],
+    offsets: &[(Pt, Pt)],
+    synthetic_stroke_width: Option<Pt>,
+    m00: f32,
+    m01: f32,
+    m10: f32,
+    m11: f32,
+    page_height_pt: f32,
+    base_transform: Transform,
+    registry: Option<&FontRegistry>,
+) {
     if glyph_ids.is_empty() {
         return;
     }
@@ -2024,6 +3566,18 @@ fn draw_glyph_run(
     let baseline_x = x;
     let baseline_y = page_height_pt - y;
     let paint = fill_paint(state.fill_color, state.fill_opacity, state.blend_mode);
+    let stroke_paint = fill_paint(state.stroke_color, state.stroke_opacity, state.blend_mode);
+    let synthetic_stroke = synthetic_stroke_width.and_then(|width| {
+        if width <= Pt::ZERO {
+            return None;
+        }
+        let mut stroke = Stroke::default();
+        stroke.width = width.to_f32();
+        stroke.miter_limit = 4.0;
+        stroke.line_cap = LineCap::Butt;
+        stroke.line_join = LineJoin::Miter;
+        Some(stroke)
+    });
     let device_transform = base_transform.pre_concat(state.transform);
 
     let mut try_draw = |font_data: &[u8], used_system_fallback: bool| -> Result<(), &'static str> {
@@ -2044,7 +3598,18 @@ fn draw_glyph_run(
                 let mut builder = GlyphPathBuilder::new(0.0, 0.0, scale);
                 if outline_raster_glyph(&face, &outlines, *gid, &mut builder) {
                     if let Some(path) = builder.finish() {
-                        let local = Transform::from_row(m00, m01, m10, m11, pen_x, pen_y);
+                        let (offset_x, offset_y) = offsets
+                            .get(idx)
+                            .map(|(ox, oy)| (ox.to_f32(), oy.to_f32()))
+                            .unwrap_or((0.0, 0.0));
+                        let local = Transform::from_row(
+                            m00,
+                            m01,
+                            m10,
+                            m11,
+                            pen_x + offset_x,
+                            pen_y - offset_y,
+                        );
                         fill_path_blended(
                             pixmap,
                             &path,
@@ -2054,6 +3619,17 @@ fn draw_glyph_run(
                             state.clip_mask.as_ref(),
                             state.blend_mode,
                         );
+                        if let Some(stroke) = synthetic_stroke.as_ref() {
+                            stroke_path_blended(
+                                pixmap,
+                                &path,
+                                &stroke_paint,
+                                stroke,
+                                device_transform.pre_concat(local),
+                                state.clip_mask.as_ref(),
+                                state.blend_mode,
+                            );
+                        }
                         drawn += 1;
                     }
                 } else if face.glyph_hor_advance(SfntGlyphId(*gid)).is_some() {
@@ -3215,6 +4791,7 @@ fn parse_data_uri(uri: &str) -> Option<(String, Vec<u8>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::flowable::{SvgFilterNode, SvgFilterRegion};
     use crate::image_native::{Rgba, RgbaImage};
 
     fn has_non_white_pixel(img: &RgbaImage) -> bool {
@@ -3222,6 +4799,231 @@ mod tests {
             let [r, g, b, _a] = p.0;
             !(r == 255 && g == 255 && b == 255)
         })
+    }
+
+    #[test]
+    fn svg_filter_graph_quantizes_once_in_linear_rgb_working_space() {
+        let program = SvgFilterProgram {
+            nodes: vec![
+                SvgFilterNode {
+                    primitive: SvgFilterPrimitive::Flood {
+                        color: Color::rgb(21.0 / 255.0, 101.0 / 255.0, 192.0 / 255.0),
+                        opacity: 1.0,
+                    },
+                    result: Some("blue".to_string()),
+                },
+                SvgFilterNode {
+                    primitive: SvgFilterPrimitive::Blend {
+                        input: SvgFilterInput::SourceGraphic,
+                        input2: SvgFilterInput::Named("blue".to_string()),
+                        mode: MixBlendMode::Multiply,
+                    },
+                    result: None,
+                },
+            ],
+            region: SvgFilterRegion::default(),
+            linear_rgb: true,
+        };
+
+        let output =
+            apply_svg_filter_program(&[213, 0, 0, 255], 1, 1, &program, Transform::identity())
+                .expect("linear RGB filter output");
+        assert_eq!(output.0, [13, 0, 0, 255]);
+        assert_eq!(output.1, (0, 0, 1, 1));
+    }
+
+    #[test]
+    fn svg_filter_graph_uses_srgb_math_when_requested() {
+        let program = SvgFilterProgram {
+            nodes: vec![
+                SvgFilterNode {
+                    primitive: SvgFilterPrimitive::Flood {
+                        color: Color::rgb(21.0 / 255.0, 101.0 / 255.0, 192.0 / 255.0),
+                        opacity: 1.0,
+                    },
+                    result: Some("blue".to_string()),
+                },
+                SvgFilterNode {
+                    primitive: SvgFilterPrimitive::Blend {
+                        input: SvgFilterInput::SourceGraphic,
+                        input2: SvgFilterInput::Named("blue".to_string()),
+                        mode: MixBlendMode::Multiply,
+                    },
+                    result: None,
+                },
+            ],
+            region: SvgFilterRegion::default(),
+            linear_rgb: false,
+        };
+
+        let output =
+            apply_svg_filter_program(&[213, 0, 0, 255], 1, 1, &program, Transform::identity())
+                .expect("sRGB filter output");
+        assert_eq!(output.0, [18, 0, 0, 255]);
+        assert_eq!(output.1, (0, 0, 1, 1));
+    }
+
+    #[test]
+    fn filtered_form_retains_transparent_svg_filter_region() {
+        let mut filter = PaintFilterSpec::identity();
+        filter
+            .operations
+            .push(PaintFilterOperation::Svg(SvgFilterProgram {
+                nodes: vec![SvgFilterNode {
+                    primitive: SvgFilterPrimitive::GaussianBlur {
+                        input: SvgFilterInput::SourceGraphic,
+                        std_deviation_x: Pt::from_f32(1.0),
+                        std_deviation_y: Pt::from_f32(1.0),
+                    },
+                    result: None,
+                }],
+                region: SvgFilterRegion::default(),
+                linear_rgb: false,
+            }));
+        let page = Pt::from_f32(72.0);
+        let raster = rasterize_filtered_form(
+            page,
+            page,
+            page,
+            page,
+            &[Command::DrawRect {
+                x: Pt::from_f32(24.0),
+                y: Pt::from_f32(24.0),
+                width: Pt::from_f32(24.0),
+                height: Pt::from_f32(24.0),
+            }],
+            Pt::ZERO,
+            Pt::ZERO,
+            page,
+            page,
+            &filter,
+            false,
+            300,
+            None,
+            false,
+        )
+        .expect("filter raster")
+        .expect("non-empty filter raster");
+
+        assert_eq!(raster.pixel_width, 120);
+        assert_eq!(raster.pixel_height, 120);
+        assert_eq!(raster.x, Pt::from_f32(90.0 * 72.0 / 300.0));
+        assert_eq!(raster.y, Pt::from_f32(90.0 * 72.0 / 300.0));
+    }
+
+    #[test]
+    fn color_filter_surface_retains_one_device_pixel_guard() {
+        let mut filter = PaintFilterSpec::identity();
+        filter
+            .operations
+            .push(PaintFilterOperation::Brightness(0.75));
+        let page = Pt::from_f32(72.0);
+        let raster = rasterize_filtered_form(
+            page,
+            page,
+            page,
+            page,
+            &[Command::DrawRect {
+                x: Pt::ZERO,
+                y: Pt::ZERO,
+                width: page,
+                height: page,
+            }],
+            Pt::ZERO,
+            Pt::ZERO,
+            page,
+            page,
+            &filter,
+            false,
+            300,
+            None,
+            false,
+        )
+        .expect("filter raster")
+        .expect("non-empty filter raster");
+
+        assert_eq!(raster.pixel_width, 302);
+        assert_eq!(raster.pixel_height, 302);
+        assert_eq!(raster.x, Pt::from_milli_i64(-240));
+        assert_eq!(raster.y, Pt::from_milli_i64(-240));
+        let first_alpha = raster.premultiplied_rgba[3];
+        let last_alpha = raster.premultiplied_rgba[raster.premultiplied_rgba.len() - 1];
+        assert_eq!((first_alpha, last_alpha), (0, 0));
+    }
+
+    #[test]
+    fn mixed_adjustment_and_zero_blur_shadow_retains_surface_guard() {
+        let shadow = FilterDropShadowSpec {
+            offset_x: Pt::from_f32(1.5),
+            offset_y: Pt::from_f32(0.75),
+            blur_radius: Pt::ZERO,
+            color: Color::BLACK,
+            opacity: 1.0,
+            color_is_current_color: false,
+        };
+        let mut filter = PaintFilterSpec::identity();
+        filter.operations = vec![
+            PaintFilterOperation::Saturate(0.82),
+            PaintFilterOperation::Contrast(1.08),
+            PaintFilterOperation::DropShadow(shadow),
+        ];
+        assert!(filter_retains_css_surface_guard(&filter));
+        assert!(filter_surface_guard_uses_effect_bounds(&filter));
+
+        filter.operations = vec![PaintFilterOperation::DropShadow(shadow)];
+        assert!(!filter_retains_css_surface_guard(&filter));
+        filter.operations = vec![
+            PaintFilterOperation::Contrast(1.08),
+            PaintFilterOperation::DropShadow(FilterDropShadowSpec {
+                blur_radius: Pt::from_f32(0.75),
+                ..shadow
+            }),
+        ];
+        assert!(!filter_retains_css_surface_guard(&filter));
+
+        filter.operations = vec![
+            PaintFilterOperation::Saturate(0.82),
+            PaintFilterOperation::DropShadow(shadow),
+        ];
+        let page = Pt::from_f32(72.0);
+        let raster = rasterize_filtered_form(
+            page,
+            page,
+            page,
+            page,
+            &[Command::DrawRect {
+                x: Pt::from_f32(24.0),
+                y: Pt::from_f32(24.0),
+                width: Pt::from_f32(24.0),
+                height: Pt::from_f32(24.0),
+            }],
+            Pt::ZERO,
+            Pt::ZERO,
+            page,
+            page,
+            &filter,
+            false,
+            300,
+            None,
+            false,
+        )
+        .expect("mixed filter raster")
+        .expect("non-empty mixed filter raster");
+        assert!((100..150).contains(&raster.pixel_width));
+        assert!((100..150).contains(&raster.pixel_height));
+    }
+
+    #[test]
+    fn adjacent_color_filters_quantize_once_at_pipeline_boundary() {
+        let mut pixel = [220, 238, 255, 255];
+        apply_color_filter_operation_chain(
+            &mut pixel,
+            &[
+                PaintFilterOperation::Saturate(0.82),
+                PaintFilterOperation::Contrast(1.08),
+            ],
+        );
+        assert_eq!(pixel, [230, 246, 255, 255]);
     }
 
     #[test]
@@ -3365,13 +5167,13 @@ mod tests {
             &RasterState::default(),
             shadow,
             1.0,
-            Transform::identity(),
+            Transform::from_scale(1.25, 1.0),
         );
 
         let leading_alpha = target.data()[(6 + 2) * 4 + 3];
         let trailing_alpha = target.data()[(6 + 3) * 4 + 3];
-        assert_eq!(leading_alpha, 207);
-        assert_eq!(trailing_alpha, 48);
+        assert_eq!(leading_alpha, 191);
+        assert_eq!(trailing_alpha, 64);
     }
 
     #[test]
@@ -3445,6 +5247,27 @@ mod tests {
     }
 
     #[test]
+    fn effect_synthetic_bold_interpolates_browser_raster_strength_by_css_size() {
+        let small = Pt::from_f32(6.75); // 9 CSS px.
+        let medium = Pt::from_f32(22.5); // 30 CSS px.
+        let large = Pt::from_f32(39.0); // 52 CSS px.
+
+        let small_width = browser_effect_synthetic_bold_stroke_width(small, small.mul_ratio(1, 32));
+        let medium_width =
+            browser_effect_synthetic_bold_stroke_width(medium, medium.mul_ratio(1, 32));
+        let large_width = browser_effect_synthetic_bold_stroke_width(large, large.mul_ratio(1, 32));
+
+        // Pt intentionally stores millipoint-rounded author coordinates.
+        assert!((small_width.to_f32() - small.to_f32() / 24.0).abs() < 6.0e-4);
+        assert!((medium_width.to_f32() - 0.755_208_3).abs() < 6.0e-4);
+        assert!((large_width.to_f32() - large.to_f32() / 32.0).abs() < 6.0e-4);
+        assert_eq!(
+            browser_effect_synthetic_bold_stroke_width(medium, Pt::ZERO),
+            Pt::ZERO
+        );
+    }
+
+    #[test]
     fn system_font_candidates_alias_helvetica_world_family() {
         let candidates = system_font_file_candidates("ABCDEF+HelveticaWorld-Bold");
         assert!(!candidates.is_empty());
@@ -3508,6 +5331,7 @@ mod tests {
                         resource_id: "missing-image-for-raster-parity-should-not-exist.png"
                             .to_string(),
                         interpolate: true,
+                        source_clip: None,
                     },
                 ],
             }],
@@ -3595,6 +5419,7 @@ mod tests {
                     height: Pt::from_f32(20.0),
                     resource_id: data_uri,
                     interpolate: true,
+                    source_clip: None,
                 }],
             }],
         };

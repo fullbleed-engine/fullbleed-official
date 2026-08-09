@@ -5,12 +5,42 @@
 //! subpixel scan conversion, strokes are rasterized as the union of their geometric primitives,
 //! and all compositing operates on premultiplied RGBA8 pixels.
 
+use std::cell::Cell;
 use std::marker::PhantomData;
 
-const SUBPIXEL_SCALE: i32 = 4;
-const SUBPIXEL_SAMPLES: u32 = (SUBPIXEL_SCALE * SUBPIXEL_SCALE) as u32;
+const DEFAULT_SUBPIXEL_SCALE: i32 = 4;
+const PRECISE_SUBPIXEL_SCALE: i32 = 8;
 const CURVE_TOLERANCE: f32 = 0.18;
 const MAX_CURVE_DEPTH: u8 = 12;
+
+thread_local! {
+    static SUBPIXEL_SCALE: Cell<i32> = const { Cell::new(DEFAULT_SUBPIXEL_SCALE) };
+}
+
+pub(crate) fn with_precise_antialias<T>(render: impl FnOnce() -> T) -> T {
+    struct RestoreScale<'a> {
+        scale: &'a Cell<i32>,
+        previous: i32,
+    }
+
+    impl Drop for RestoreScale<'_> {
+        fn drop(&mut self) {
+            self.scale.set(self.previous);
+        }
+    }
+
+    SUBPIXEL_SCALE.with(|scale| {
+        let previous = scale.replace(PRECISE_SUBPIXEL_SCALE);
+        let restore = RestoreScale { scale, previous };
+        let output = render();
+        drop(restore);
+        output
+    })
+}
+
+fn subpixel_scale() -> i32 {
+    SUBPIXEL_SCALE.with(Cell::get)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Color {
@@ -504,6 +534,12 @@ enum ShaderKind {
         stops: Vec<GradientStop>,
         transform: Transform,
     },
+    Conic {
+        center: Point,
+        start_angle_deg: f32,
+        stops: Vec<GradientStop>,
+        transform: Transform,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -565,6 +601,21 @@ impl<'a> Shader<'a> {
                 let c = q.x * q.x + q.y * q.y;
                 let t = solve_gradient_parameter(a, b, c).unwrap_or(0.0);
                 sample_stops(stops, t.clamp(0.0, 1.0))
+            }
+            ShaderKind::Conic {
+                center,
+                start_angle_deg,
+                stops,
+                transform,
+            } => {
+                let point = transform
+                    .inverse()
+                    .map_or(point, |inverse| inverse.map(point));
+                let dx = point.x - center.x;
+                let dy = point.y - center.y;
+                let angle_deg = dx.atan2(dy).to_degrees();
+                let t = (angle_deg - *start_angle_deg).rem_euclid(360.0) / 360.0;
+                sample_stops(stops, t)
             }
         }
     }
@@ -680,6 +731,31 @@ impl RadialGradient {
                 start,
                 end,
                 radius,
+                stops,
+                transform,
+            },
+            marker: PhantomData,
+        })
+    }
+}
+
+pub(crate) struct ConicGradient;
+
+impl ConicGradient {
+    pub(crate) fn new(
+        center: Point,
+        start_angle_deg: f32,
+        mut stops: Vec<GradientStop>,
+        transform: Transform,
+    ) -> Option<Shader<'static>> {
+        if !finite_point(center) || !start_angle_deg.is_finite() || stops.is_empty() {
+            return None;
+        }
+        stops.sort_by(|left, right| left.offset.total_cmp(&right.offset));
+        Some(Shader {
+            kind: ShaderKind::Conic {
+                center,
+                start_angle_deg,
                 stops,
                 transform,
             },
@@ -830,6 +906,30 @@ impl Pixmap {
             height: self.height,
             data: &self.data,
         }
+    }
+
+    pub(crate) fn crop(&self, x: u32, y: u32, width: u32, height: u32) -> Option<Self> {
+        let right = x.checked_add(width)?;
+        let bottom = y.checked_add(height)?;
+        if width == 0 || height == 0 || right > self.width || bottom > self.height {
+            return None;
+        }
+        let mut cropped = Self::new(width, height)?;
+        let source_stride = (self.width as usize).checked_mul(4)?;
+        let target_stride = (width as usize).checked_mul(4)?;
+        let source_x = (x as usize).checked_mul(4)?;
+        for row in 0..height as usize {
+            let source_start = (y as usize)
+                .checked_add(row)?
+                .checked_mul(source_stride)?
+                .checked_add(source_x)?;
+            let source_end = source_start.checked_add(target_stride)?;
+            let target_start = row.checked_mul(target_stride)?;
+            let target_end = target_start.checked_add(target_stride)?;
+            cropped.data[target_start..target_end]
+                .copy_from_slice(self.data.get(source_start..source_end)?);
+        }
+        Some(cropped)
     }
 
     pub(crate) fn fill(&mut self, color: Color) {
@@ -1142,9 +1242,9 @@ fn rasterize_contours(
     let (min_x, min_y, max_x, max_y) = pixel_bounds(&all_points, canvas_width, canvas_height)?;
     let width = max_x - min_x;
     let height = max_y - min_y;
-    let scale = if anti_alias { SUBPIXEL_SCALE } else { 1 };
+    let scale = if anti_alias { subpixel_scale() } else { 1 };
     let sample_count = (scale * scale) as u32;
-    let mut samples = vec![0u16; width as usize * height as usize];
+    let mut samples = vec![0u64; width as usize * height as usize];
     let start_sample_y = min_y as i32 * scale;
     let end_sample_y = max_y as i32 * scale;
     let mut intersections = Vec::with_capacity(edges.len());
@@ -1234,7 +1334,7 @@ fn rasterize_contours(
 
 #[allow(clippy::too_many_arguments)]
 fn mark_sample_span(
-    samples: &mut [u16],
+    samples: &mut [u64],
     min_x: u32,
     min_y: u32,
     width: u32,
@@ -1264,11 +1364,11 @@ fn mark_sample_span(
         if pixel_x < 0 || pixel_y < 0 || pixel_x >= width as i32 || pixel_y >= height as i32 {
             continue;
         }
-        let sub_x = sample_x.rem_euclid(scale) as u16;
-        let sub_y = sample_y.rem_euclid(scale) as u16;
-        let bit = sub_y * scale as u16 + sub_x;
+        let sub_x = sample_x.rem_euclid(scale) as u32;
+        let sub_y = sample_y.rem_euclid(scale) as u32;
+        let bit = sub_y * scale as u32 + sub_x;
         let index = pixel_y as usize * width as usize + pixel_x as usize;
-        samples[index] |= 1u16 << bit;
+        samples[index] |= 1u64 << bit;
     }
 }
 
@@ -1699,9 +1799,9 @@ fn rasterize_polygon_union(
     let (min_x, min_y, max_x, max_y) = pixel_bounds(&all_points, canvas_width, canvas_height)?;
     let width = max_x - min_x;
     let height = max_y - min_y;
-    let scale = if anti_alias { SUBPIXEL_SCALE } else { 1 };
-    let sample_count = if anti_alias { SUBPIXEL_SAMPLES } else { 1 };
-    let mut samples = vec![0u16; width as usize * height as usize];
+    let scale = if anti_alias { subpixel_scale() } else { 1 };
+    let sample_count = (scale * scale) as u32;
+    let mut samples = vec![0u64; width as usize * height as usize];
     for polygon in polygons {
         if polygon.len() < 3 {
             continue;
@@ -2217,6 +2317,42 @@ mod tests {
         let restored = transform.inverse().expect("invertible").map(mapped);
         assert!((restored.x - point.x).abs() < 1.0e-4);
         assert!((restored.y - point.y).abs() < 1.0e-4);
+    }
+
+    #[test]
+    fn precise_antialias_scope_restores_the_thread_default() {
+        assert_eq!(subpixel_scale(), DEFAULT_SUBPIXEL_SCALE);
+        with_precise_antialias(|| {
+            assert_eq!(subpixel_scale(), PRECISE_SUBPIXEL_SCALE);
+            with_precise_antialias(|| {
+                assert_eq!(subpixel_scale(), PRECISE_SUBPIXEL_SCALE);
+            });
+            assert_eq!(subpixel_scale(), PRECISE_SUBPIXEL_SCALE);
+        });
+        assert_eq!(subpixel_scale(), DEFAULT_SUBPIXEL_SCALE);
+    }
+
+    #[test]
+    fn precise_antialias_resolves_fractional_edge_coverage() {
+        let path = PathBuilder::from_rect(Rect::from_xywh(0.4, 0.0, 2.0, 1.0).unwrap());
+        let render = || {
+            let mut pixmap = Pixmap::new(3, 1).unwrap();
+            let mut paint = Paint::default();
+            paint.set_color(opaque(0, 0, 0));
+            pixmap.fill_path(
+                &path,
+                &paint,
+                FillRule::Winding,
+                Transform::identity(),
+                None,
+            );
+            pixmap.data()[3]
+        };
+
+        let fast_alpha = render();
+        let precise_alpha = with_precise_antialias(render);
+        assert_eq!(fast_alpha, 128);
+        assert_eq!(precise_alpha, 159);
     }
 
     #[test]

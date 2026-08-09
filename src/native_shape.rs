@@ -1,7 +1,7 @@
 //! Dependency-free OpenType shaping for the layout contract used by FullBleed.
 
 use crate::sfnt::{Face, GlyphId};
-use crate::text_shape::{ShapedGlyph, ShapedText};
+use crate::text_shape::{ShapeOptions, ShapedGlyph, ShapedText};
 
 type Tag = [u8; 4];
 
@@ -37,6 +37,29 @@ const FRACTION_NUMERATOR: u8 = 0x01;
 const FRACTION_DENOMINATOR: u8 = 0x02;
 const FRACTION_ALL: u8 = 0x04;
 
+fn configured_features(features: &[Tag], options: ShapeOptions) -> Vec<Tag> {
+    features
+        .iter()
+        .copied()
+        .filter(|feature| {
+            (options.kerning || *feature != *b"kern")
+                && (options.common_ligatures || (*feature != *b"liga" && *feature != *b"clig"))
+        })
+        .collect()
+}
+
+fn apply_configured_gsub_features(
+    table: &[u8],
+    gdef: Option<&[u8]>,
+    script: Tag,
+    features: &[Tag],
+    options: ShapeOptions,
+    glyphs: &mut Vec<BufferGlyph>,
+) -> Option<()> {
+    let configured = configured_features(features, options);
+    apply_gsub_features(table, gdef, script, &configured, glyphs)
+}
+
 #[derive(Clone, Debug)]
 struct BufferGlyph {
     id: u16,
@@ -65,7 +88,7 @@ struct LookupFilter {
     mark_filtering_set: Option<u16>,
 }
 
-pub(crate) fn shape(font_data: &[u8], text: &str) -> Option<ShapedText> {
+pub(crate) fn shape(font_data: &[u8], text: &str, options: ShapeOptions) -> Option<ShapedText> {
     let face = Face::parse(font_data, 0).ok()?;
     let right_to_left =
         crate::text_shape::detect_direction(text) == crate::text_shape::TextDirection::RightToLeft;
@@ -132,11 +155,32 @@ pub(crate) fn shape(font_data: &[u8], text: &str) -> Option<ShapedText> {
             }
             apply_gsub_features(gsub, gdef, script, &ARABIC_REQUIRED_FEATURES, &mut glyphs)?;
             apply_gsub_features(gsub, gdef, script, &ARABIC_CONTEXT_FEATURES, &mut glyphs)?;
-            apply_gsub_features(gsub, gdef, script, &ARABIC_FINAL_FEATURES, &mut glyphs)?;
+            apply_configured_gsub_features(
+                gsub,
+                gdef,
+                script,
+                &ARABIC_FINAL_FEATURES,
+                options,
+                &mut glyphs,
+            )?;
         } else if script == *b"hang" {
-            apply_gsub_features(gsub, gdef, script, &HANGUL_GSUB_FEATURES, &mut glyphs)?;
+            apply_configured_gsub_features(
+                gsub,
+                gdef,
+                script,
+                &HANGUL_GSUB_FEATURES,
+                options,
+                &mut glyphs,
+            )?;
         } else {
-            apply_gsub_features(gsub, gdef, script, &GSUB_FEATURES, &mut glyphs)?;
+            apply_configured_gsub_features(
+                gsub,
+                gdef,
+                script,
+                &GSUB_FEATURES,
+                options,
+                &mut glyphs,
+            )?;
         }
         apply_fraction_features(gsub, gdef, script, &mut glyphs)?;
     }
@@ -168,8 +212,9 @@ pub(crate) fn shape(font_data: &[u8], text: &str) -> Option<ShapedText> {
         } else {
             &GPOS_FEATURES[..]
         };
-        apply_gpos(gpos, gdef, script, features, &mut glyphs, right_to_left)?;
-    } else {
+        let configured = configured_features(features, options);
+        apply_gpos(gpos, gdef, script, &configured, &mut glyphs, right_to_left)?;
+    } else if options.kerning {
         apply_legacy_kerning(&face, &mut glyphs);
     }
     resolve_cursive_offsets(&mut glyphs);

@@ -7,7 +7,7 @@ on:
         description: "Annotated release tag whose exact source commit will be published"
         required: true
         type: string
-        default: "v2.2.0"
+        default: "v2.2.1"
       publish:
         description: "Publish after all validation gates pass"
         required: true

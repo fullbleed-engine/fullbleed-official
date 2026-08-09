@@ -1,6 +1,6 @@
 [package]
 name = "fullbleed"
-version = "2.2.0"
+version = "2.2.1"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -37,5 +37,6 @@ inherits = "release"
 debug = true
 
 [dependencies]
-fullbleed_audit_contract = { version = "0.1.2", path = "crates/fullbleed_audit_contract" }
+fullbleed_audit_contract = { version = "0.1.3", path = "crates/fullbleed_audit_contract" }
 subsetter = { version = "0.2.6", default-features = false }
+unicode-bidi = "0.3.18"

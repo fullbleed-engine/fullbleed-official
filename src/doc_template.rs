@@ -1,18 +1,126 @@
-use crate::canvas::{Canvas, Document, META_PAGINATION_EVENT_KEY};
+use crate::canvas::{
+    Canvas, Command, Document, META_NAMED_STRING_PREFIX, META_PAGINATION_EVENT_KEY,
+    META_RUNNING_ELEMENT_PREFIX,
+};
 use crate::debug::{DebugLogger, json_escape};
-use crate::doc_context::DocContext;
+use crate::doc_context::{DocContext, GeneratedContentValues, RunningElementValue};
 use crate::error::FullBleedError;
-use crate::flowable::Flowable;
+use crate::flowable::{BreakBefore, Flowable, FootnoteContinuationFlowable};
 use crate::frame::{AddResult, AddTrace};
 use crate::metrics::{DocumentMetrics, PageMetrics};
 use crate::page_template::{PageSelector, PageTemplate};
 use crate::types::Pt;
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
 fn bool_to_flag(value: bool) -> u8 {
     if value { 1 } else { 0 }
+}
+
+#[derive(Debug, Clone, Default)]
+struct PageGeneratedContent {
+    running_elements: HashMap<String, GeneratedContentValues<RunningElementValue>>,
+    named_strings: HashMap<String, GeneratedContentValues<String>>,
+}
+
+fn resolve_page_generated_values<T: Clone>(
+    occurrences: &HashMap<String, Vec<T>>,
+    carried: &mut HashMap<String, T>,
+) -> HashMap<String, GeneratedContentValues<T>> {
+    let names = carried
+        .keys()
+        .chain(occurrences.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut resolved = HashMap::with_capacity(names.len());
+    for name in names {
+        let previous = carried.get(&name).cloned();
+        let on_page = occurrences.get(&name).map(Vec::as_slice).unwrap_or(&[]);
+        let first_on_page = on_page.first().cloned();
+        let last_on_page = on_page.last().cloned();
+        let values = GeneratedContentValues {
+            // `start` retains a value already established before the page;
+            // on the first page, its first assignment establishes the value.
+            start: previous.clone().or_else(|| first_on_page.clone()),
+            first: first_on_page.clone().or_else(|| previous.clone()),
+            last: last_on_page.clone().or_else(|| previous.clone()),
+            first_except: on_page.is_empty().then_some(previous.clone()).flatten(),
+        };
+        if let Some(value) = last_on_page {
+            carried.insert(name.clone(), value);
+        }
+        resolved.insert(name, values);
+    }
+    resolved
+}
+
+fn collect_page_generated_content(pages: &[crate::canvas::Page]) -> Vec<PageGeneratedContent> {
+    let mut form_sizes = HashMap::<String, (Pt, Pt)>::new();
+    for page in pages {
+        for command in &page.commands {
+            if let Command::DefineForm {
+                resource_id,
+                width,
+                height,
+                ..
+            }
+            | Command::DefineIsolatedForm {
+                resource_id,
+                width,
+                height,
+                ..
+            } = command
+            {
+                form_sizes
+                    .entry(resource_id.clone())
+                    .or_insert((*width, *height));
+            }
+        }
+    }
+
+    let mut carried_running = HashMap::<String, RunningElementValue>::new();
+    let mut carried_strings = HashMap::<String, String>::new();
+    let mut pages_resolved = Vec::with_capacity(pages.len());
+    for page in pages {
+        let mut running = HashMap::<String, Vec<RunningElementValue>>::new();
+        let mut strings = HashMap::<String, Vec<String>>::new();
+        for command in &page.commands {
+            let Command::Meta { key, value } = command else {
+                continue;
+            };
+            if let Some(name) = key.strip_prefix(META_RUNNING_ELEMENT_PREFIX) {
+                if let Some((width, height)) = form_sizes.get(value) {
+                    running
+                        .entry(name.to_string())
+                        .or_default()
+                        .push(RunningElementValue {
+                            resource_id: value.clone(),
+                            width: *width,
+                            height: *height,
+                        });
+                }
+            } else if let Some(name) = key.strip_prefix(META_NAMED_STRING_PREFIX) {
+                strings
+                    .entry(name.to_string())
+                    .or_default()
+                    .push(value.clone());
+            }
+        }
+        pages_resolved.push(PageGeneratedContent {
+            running_elements: resolve_page_generated_values(&running, &mut carried_running),
+            named_strings: resolve_page_generated_values(&strings, &mut carried_strings),
+        });
+    }
+    pages_resolved
+}
+
+fn page_satisfies_break_before(page_number: usize, value: BreakBefore) -> bool {
+    match value {
+        BreakBefore::Left | BreakBefore::Verso => page_number % 2 == 0,
+        BreakBefore::Right | BreakBefore::Recto => page_number % 2 == 1,
+        _ => true,
+    }
 }
 
 fn trace_b64(value: &str) -> String {
@@ -187,12 +295,42 @@ impl DocTemplate {
         fn select_template<'a>(
             page_templates: &'a [PageTemplate],
             page_number: usize,
+            blank: bool,
+            named_page: Option<u64>,
         ) -> &'a PageTemplate {
             let uses_page_selectors = page_templates
                 .iter()
                 .any(|template| template.page_selector() != PageSelector::Sequence);
             if uses_page_selectors {
-                let selector = if page_number == 1 {
+                if let Some(named_page) = named_page {
+                    let selector = if blank && page_number % 2 == 0 {
+                        PageSelector::NamedBlankLeft(named_page)
+                    } else if blank {
+                        PageSelector::NamedBlankRight(named_page)
+                    } else if page_number == 1 {
+                        PageSelector::NamedFirst(named_page)
+                    } else if page_number % 2 == 0 {
+                        PageSelector::NamedLeft(named_page)
+                    } else {
+                        PageSelector::NamedRight(named_page)
+                    };
+                    if let Some(template) = page_templates
+                        .iter()
+                        .find(|template| template.page_selector() == selector)
+                        .or_else(|| {
+                            page_templates.iter().find(|template| {
+                                template.page_selector() == PageSelector::NamedAny(named_page)
+                            })
+                        })
+                    {
+                        return template;
+                    }
+                }
+                let selector = if blank && page_number % 2 == 0 {
+                    PageSelector::BlankLeft
+                } else if blank {
+                    PageSelector::BlankRight
+                } else if page_number == 1 {
                     PageSelector::First
                 } else if page_number % 2 == 0 {
                     PageSelector::Left
@@ -219,7 +357,8 @@ impl DocTemplate {
             &page_templates[idx]
         }
 
-        let template = select_template(&self.page_templates, 1);
+        let mut active_named_page = None;
+        let template = select_template(&self.page_templates, 1, false, active_named_page);
         let mut canvas = Canvas::new(template.page_size);
         let mut page_number = 1usize;
         let mut frames = template.instantiate_frames();
@@ -313,6 +452,37 @@ impl DocTemplate {
             *page_start = Instant::now();
         };
 
+        macro_rules! advance_page {
+            ($blank:expr) => {{
+                finish_page(
+                    &mut canvas,
+                    page_number,
+                    &mut page_flowables,
+                    &mut metrics,
+                    &mut page_start,
+                    &fixed_overlays_front,
+                    &root_out_of_flow_front,
+                );
+                page_number += 1;
+                let template =
+                    select_template(&self.page_templates, page_number, $blank, active_named_page);
+                canvas.set_page_size(template.page_size);
+                canvas.set_page_presentation(template.page_presentation());
+                frames = template.instantiate_frames();
+                frame_index = 0;
+                placed_on_page = false;
+                if let Some(callback) = template.on_page() {
+                    callback(&mut canvas, &DocContext::new(page_number, &template.name));
+                }
+                canvas.meta(
+                    crate::META_PAGE_TEMPLATE_KEY.to_string(),
+                    template.name.clone(),
+                );
+                draw_fixed_overlays(&mut canvas, &fixed_overlays_back, &mut page_flowables);
+            }};
+        }
+
+        canvas.set_page_presentation(template.page_presentation());
         if let Some(callback) = template.on_page() {
             callback(&mut canvas, &DocContext::new(page_number, &template.name));
         }
@@ -333,9 +503,60 @@ impl DocTemplate {
                 let current_name = current.debug_name().to_string();
                 let current_owner_meta = current.diagnostic_metadata();
                 let pagination = current.pagination();
-                if !suppress_break_before
+                let ends_with_vertical_fragmentainer = current.ends_with_vertical_fragmentainer();
+                let mut named_page_advanced = false;
+                if pagination.page_name != active_named_page {
+                    active_named_page = pagination.page_name;
+                    if placed_on_page || frame_index > 0 {
+                        emit_pagination_transition_event(
+                            &mut canvas,
+                            debug.as_deref(),
+                            debug_doc_id,
+                            page_number,
+                            page_number + 1,
+                            frame_index,
+                            0,
+                            "named_page_transition",
+                            Some(&current_name),
+                            &current_owner_meta,
+                            Some(current_source_order),
+                            Some(segment_index),
+                        );
+                        advance_page!(false);
+                        named_page_advanced = true;
+                    } else {
+                        let template = select_template(
+                            &self.page_templates,
+                            page_number,
+                            false,
+                            active_named_page,
+                        );
+                        canvas.restart_current_page(template.page_size);
+                        canvas.set_page_presentation(template.page_presentation());
+                        frames = template.instantiate_frames();
+                        frame_index = 0;
+                        if let Some(callback) = template.on_page() {
+                            callback(&mut canvas, &DocContext::new(page_number, &template.name));
+                        }
+                        canvas.meta(
+                            crate::META_PAGE_TEMPLATE_KEY.to_string(),
+                            template.name.clone(),
+                        );
+                        draw_fixed_overlays(&mut canvas, &fixed_overlays_back, &mut page_flowables);
+                        if page_number == 1 {
+                            draw_fixed_overlays(
+                                &mut canvas,
+                                &root_out_of_flow_back,
+                                &mut page_flowables,
+                            );
+                        }
+                    }
+                }
+                if !named_page_advanced
+                    && !suppress_break_before
                     && pagination.break_before.forces_page()
-                    && (placed_on_page || frame_index > 0)
+                    && ((placed_on_page || frame_index > 0)
+                        || !page_satisfies_break_before(page_number, pagination.break_before))
                 {
                     emit_pagination_transition_event(
                         &mut canvas,
@@ -351,28 +572,26 @@ impl DocTemplate {
                         Some(current_source_order),
                         Some(segment_index),
                     );
-                    finish_page(
-                        &mut canvas,
-                        page_number,
-                        &mut page_flowables,
-                        &mut metrics,
-                        &mut page_start,
-                        &fixed_overlays_front,
-                        &root_out_of_flow_front,
-                    );
-                    page_number += 1;
-                    let template = select_template(&self.page_templates, page_number);
-                    frames = template.instantiate_frames();
-                    frame_index = 0;
-                    placed_on_page = false;
-                    if let Some(callback) = template.on_page() {
-                        callback(&mut canvas, &DocContext::new(page_number, &template.name));
+                    let next_is_blank =
+                        !page_satisfies_break_before(page_number + 1, pagination.break_before);
+                    advance_page!(next_is_blank);
+                    while !page_satisfies_break_before(page_number, pagination.break_before) {
+                        emit_pagination_transition_event(
+                            &mut canvas,
+                            debug.as_deref(),
+                            debug_doc_id,
+                            page_number,
+                            page_number + 1,
+                            frame_index,
+                            0,
+                            "break_before_side_blank",
+                            Some(&current_name),
+                            &current_owner_meta,
+                            Some(current_source_order),
+                            Some(segment_index),
+                        );
+                        advance_page!(false);
                     }
-                    canvas.meta(
-                        crate::META_PAGE_TEMPLATE_KEY.to_string(),
-                        template.name.clone(),
-                    );
-                    draw_fixed_overlays(&mut canvas, &fixed_overlays_back, &mut page_flowables);
                 }
 
                 if frame_index >= frames.len() {
@@ -390,28 +609,28 @@ impl DocTemplate {
                         Some(current_source_order),
                         Some(segment_index),
                     );
-                    finish_page(
-                        &mut canvas,
-                        page_number,
-                        &mut page_flowables,
-                        &mut metrics,
-                        &mut page_start,
-                        &fixed_overlays_front,
-                        &root_out_of_flow_front,
-                    );
-                    page_number += 1;
-                    let template = select_template(&self.page_templates, page_number);
-                    frames = template.instantiate_frames();
-                    frame_index = 0;
-                    placed_on_page = false;
-                    if let Some(callback) = template.on_page() {
-                        callback(&mut canvas, &DocContext::new(page_number, &template.name));
+                    let next_is_blank = suppress_break_before
+                        && !page_satisfies_break_before(page_number + 1, pagination.break_before);
+                    advance_page!(next_is_blank);
+                    if suppress_break_before {
+                        while !page_satisfies_break_before(page_number, pagination.break_before) {
+                            emit_pagination_transition_event(
+                                &mut canvas,
+                                debug.as_deref(),
+                                debug_doc_id,
+                                page_number,
+                                page_number + 1,
+                                frame_index,
+                                0,
+                                "fragment_side_blank",
+                                Some(&current_name),
+                                &current_owner_meta,
+                                Some(current_source_order),
+                                Some(segment_index),
+                            );
+                            advance_page!(false);
+                        }
                     }
-                    canvas.meta(
-                        crate::META_PAGE_TEMPLATE_KEY.to_string(),
-                        template.name.clone(),
-                    );
-                    draw_fixed_overlays(&mut canvas, &fixed_overlays_back, &mut page_flowables);
                 }
 
                 if frames.is_empty() {
@@ -439,7 +658,9 @@ impl DocTemplate {
                 };
 
                 let frame = &mut frames[frame_index];
-                match frame.add(current, &mut canvas) {
+                let add_result = frame.add(current, &mut canvas);
+                let deferred_footnotes = frame.take_deferred_footnotes();
+                match add_result {
                     AddResult::Placed(trace) => {
                         emit_pagination_layout_event(
                             &mut canvas,
@@ -455,7 +676,14 @@ impl DocTemplate {
                         );
                         placed_on_page = true;
                         page_flowables += 1;
-                        if pagination.break_after.forces_page() {
+                        if !deferred_footnotes.is_empty() {
+                            story.push_front(Box::new(FootnoteContinuationFlowable::new(
+                                deferred_footnotes,
+                            )));
+                        }
+                        if pagination.break_after.forces_page()
+                            && (!story.is_empty() || ends_with_vertical_fragmentainer)
+                        {
                             emit_pagination_transition_event(
                                 &mut canvas,
                                 debug.as_deref(),
@@ -470,35 +698,30 @@ impl DocTemplate {
                                 Some(current_source_order),
                                 Some(segment_index),
                             );
-                            finish_page(
-                                &mut canvas,
-                                page_number,
-                                &mut page_flowables,
-                                &mut metrics,
-                                &mut page_start,
-                                &fixed_overlays_front,
-                                &root_out_of_flow_front,
-                            );
-                            page_number += 1;
-                            let template = select_template(&self.page_templates, page_number);
-                            frames = template.instantiate_frames();
-                            frame_index = 0;
-                            placed_on_page = false;
-                            if let Some(callback) = template.on_page() {
-                                callback(
-                                    &mut canvas,
-                                    &DocContext::new(page_number, &template.name),
-                                );
+                            let target = pagination.break_after.continuation_break_before();
+                            let next_is_blank = target.is_some_and(|target| {
+                                !page_satisfies_break_before(page_number + 1, target)
+                            });
+                            advance_page!(next_is_blank);
+                            if let Some(target) = target {
+                                while !page_satisfies_break_before(page_number, target) {
+                                    emit_pagination_transition_event(
+                                        &mut canvas,
+                                        debug.as_deref(),
+                                        debug_doc_id,
+                                        page_number,
+                                        page_number + 1,
+                                        frame_index,
+                                        0,
+                                        "break_after_side_blank",
+                                        Some(&current_name),
+                                        &current_owner_meta,
+                                        Some(current_source_order),
+                                        Some(segment_index),
+                                    );
+                                    advance_page!(false);
+                                }
                             }
-                            canvas.meta(
-                                crate::META_PAGE_TEMPLATE_KEY.to_string(),
-                                template.name.clone(),
-                            );
-                            draw_fixed_overlays(
-                                &mut canvas,
-                                &fixed_overlays_back,
-                                &mut page_flowables,
-                            );
                         }
                         break;
                     }
@@ -531,12 +754,20 @@ impl DocTemplate {
                         );
                         placed_on_page = true;
                         page_flowables += 1;
+                        if !deferred_footnotes.is_empty() {
+                            story.push_front(remaining);
+                            story.push_front(Box::new(FootnoteContinuationFlowable::new(
+                                deferred_footnotes,
+                            )));
+                            break;
+                        }
                         suppress_break_before = true;
                         current = remaining;
                         segment_index = segment_index.saturating_add(1);
                         frame_index += 1;
                     }
                     AddResult::Overflow(remaining, trace) => {
+                        debug_assert!(deferred_footnotes.is_empty());
                         let overflow_severity = if !placed_on_page && is_last_frame {
                             "fatal_unplaceable"
                         } else if is_last_frame {
@@ -593,6 +824,89 @@ impl DocTemplate {
             );
         }
 
-        Ok((canvas.finish_without_show(), metrics))
+        let mut document = canvas.finish_without_show();
+        let total_pages = document.pages.len();
+        let generated_content = collect_page_generated_content(&document.pages);
+        let mut page_counter = 0i32;
+        for (index, page) in document.pages.iter_mut().enumerate() {
+            let template_name = page.commands.iter().find_map(|command| match command {
+                crate::Command::Meta { key, value } if key == crate::META_PAGE_TEMPLATE_KEY => {
+                    Some(value.as_str())
+                }
+                _ => None,
+            });
+            let template = template_name
+                .and_then(|name| {
+                    self.page_templates
+                        .iter()
+                        .find(|template| template.name == name)
+                })
+                .unwrap_or(&self.page_templates[0]);
+            match (
+                template.page_counter_reset(),
+                template.page_counter_increment(),
+            ) {
+                (Some(reset), Some(increment)) => {
+                    page_counter = reset.saturating_add(increment);
+                }
+                (Some(reset), None) => page_counter = reset,
+                (None, Some(increment)) => {
+                    page_counter = page_counter.saturating_add(increment);
+                }
+                (None, None) => page_counter = page_counter.saturating_add(1),
+            }
+            let Some(callback) = template.on_page_finalize() else {
+                continue;
+            };
+            let mut overlay = Canvas::new(template.page_size);
+            callback(
+                &mut overlay,
+                &DocContext::finalized(
+                    index + 1,
+                    total_pages,
+                    page_counter,
+                    &template.name,
+                    generated_content
+                        .get(index)
+                        .map(|content| content.running_elements.clone())
+                        .unwrap_or_default(),
+                    generated_content
+                        .get(index)
+                        .map(|content| content.named_strings.clone())
+                        .unwrap_or_default(),
+                ),
+            );
+            let mut overlay_document = overlay.finish();
+            let Some(overlay_page) = overlay_document.pages.pop() else {
+                continue;
+            };
+            let overlay_command_count = overlay_page.commands.len();
+            let mut finalized_commands = Vec::with_capacity(
+                page.commands
+                    .len()
+                    .saturating_add(overlay_command_count)
+                    .saturating_add(4),
+            );
+            // Both streams were compiled from a fresh Canvas and may omit
+            // assignments for default paint state. Scope the existing page,
+            // restore the physical page's initial graphics state, then scope
+            // the late-bound overlay independently so neither stream can
+            // inherit or leak fill/stroke/transform state.
+            finalized_commands.push(crate::Command::SaveState);
+            finalized_commands.append(&mut page.commands);
+            finalized_commands.push(crate::Command::RestoreState);
+            finalized_commands.push(crate::Command::SaveState);
+            finalized_commands.extend(overlay_page.commands);
+            finalized_commands.push(crate::Command::RestoreState);
+            page.commands = finalized_commands;
+            if let Some(page_metrics) = metrics.pages.get_mut(index) {
+                page_metrics.command_count = page_metrics
+                    .command_count
+                    .saturating_add(overlay_command_count)
+                    .saturating_add(4);
+            }
+        }
+
+        Ok((document, metrics))
     }
 }

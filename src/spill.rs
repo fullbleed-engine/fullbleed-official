@@ -1,5 +1,9 @@
-use crate::canvas::{Command, Document, Page};
-use crate::flowable::{FilterDropShadowSpec, PaintFilterSpec};
+use crate::canvas::{Command, CompiledMaskLayer, Document, ImageSourceClip, Page};
+use crate::flowable::{
+    FilterDropShadowSpec, MaskComposite, MaskMode, PaintFilterOperation, PaintFilterSpec,
+    SvgComponentTransferFunction, SvgFilterInput, SvgFilterNode, SvgFilterPrimitive,
+    SvgFilterProgram, SvgFilterRegion, SvgMorphologyOperator,
+};
 use crate::types::{Color, MixBlendMode, Pt, Shading, ShadingStop, Size};
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
@@ -320,6 +324,33 @@ fn write_command<W: Write>(out: &mut W, command: &Command) -> io::Result<()> {
             write_f32(out, *m11)?;
             Ok(())
         }
+        Command::DrawSyntheticBoldGlyphRun {
+            x,
+            y,
+            glyph_ids,
+            advances,
+            offsets,
+            stroke_width,
+        } => {
+            write_u8(out, 48)?;
+            write_pt(out, *x)?;
+            write_pt(out, *y)?;
+            write_u32(out, glyph_ids.len() as u32)?;
+            for gid in glyph_ids {
+                write_u16(out, *gid)?;
+            }
+            write_u32(out, advances.len() as u32)?;
+            for (dx, dy) in advances {
+                write_pt(out, *dx)?;
+                write_pt(out, *dy)?;
+            }
+            write_u32(out, offsets.len() as u32)?;
+            for (dx, dy) in offsets {
+                write_pt(out, *dx)?;
+                write_pt(out, *dy)?;
+            }
+            write_pt(out, *stroke_width)
+        }
         Command::DrawRect {
             x,
             y,
@@ -339,14 +370,23 @@ fn write_command<W: Write>(out: &mut W, command: &Command) -> io::Result<()> {
             height,
             resource_id,
             interpolate,
+            source_clip,
         } => {
-            write_u8(out, 31)?;
+            write_u8(out, if source_clip.is_some() { 50 } else { 31 })?;
             write_pt(out, *x)?;
             write_pt(out, *y)?;
             write_pt(out, *width)?;
             write_pt(out, *height)?;
             write_string(out, resource_id)?;
-            write_bool(out, *interpolate)
+            write_bool(out, *interpolate)?;
+            if let Some(source_clip) = source_clip {
+                write_pt(out, source_clip.left)?;
+                write_pt(out, source_clip.top)?;
+                write_pt(out, source_clip.right)?;
+                write_pt(out, source_clip.bottom)?;
+                write_bool(out, source_clip.snap_target_origin_to_css_pixel)?;
+            }
+            Ok(())
         }
         Command::BeginTag {
             role,
@@ -430,6 +470,44 @@ fn write_command<W: Write>(out: &mut W, command: &Command) -> io::Result<()> {
             write_string(out, resource_id)?;
             write_paint_filter(out, filter)?;
             write_bool(out, *css_shadow)
+        }
+        Command::DrawMaskedForm {
+            x,
+            y,
+            width,
+            height,
+            resource_id,
+            layers,
+        } => {
+            write_u8(out, 49)?;
+            write_pt(out, *x)?;
+            write_pt(out, *y)?;
+            write_pt(out, *width)?;
+            write_pt(out, *height)?;
+            write_string(out, resource_id)?;
+            write_u32(out, layers.len() as u32)?;
+            for layer in layers {
+                write_string(out, &layer.resource_id)?;
+                write_u8(
+                    out,
+                    match layer.mode {
+                        MaskMode::MatchSource => 0,
+                        MaskMode::Alpha => 1,
+                        MaskMode::Luminance => 2,
+                    },
+                )?;
+                write_u8(
+                    out,
+                    match layer.composite {
+                        MaskComposite::Add => 0,
+                        MaskComposite::Subtract => 1,
+                        MaskComposite::Intersect => 2,
+                        MaskComposite::Exclude => 3,
+                        MaskComposite::DestinationOut => 4,
+                    },
+                )?;
+            }
+            Ok(())
         }
         Command::BeginArtifact { subtype } => {
             write_u8(out, 36)?;
@@ -595,6 +673,33 @@ fn read_command<R: Read>(input: &mut R) -> io::Result<Command> {
                 m11,
             }
         }
+        48 => {
+            let x = read_pt(input)?;
+            let y = read_pt(input)?;
+            let glyph_len = read_u32(input)? as usize;
+            let mut glyph_ids = Vec::with_capacity(glyph_len);
+            for _ in 0..glyph_len {
+                glyph_ids.push(read_u16(input)?);
+            }
+            let adv_len = read_u32(input)? as usize;
+            let mut advances = Vec::with_capacity(adv_len);
+            for _ in 0..adv_len {
+                advances.push((read_pt(input)?, read_pt(input)?));
+            }
+            let offset_len = read_u32(input)? as usize;
+            let mut offsets = Vec::with_capacity(offset_len);
+            for _ in 0..offset_len {
+                offsets.push((read_pt(input)?, read_pt(input)?));
+            }
+            Command::DrawSyntheticBoldGlyphRun {
+                x,
+                y,
+                glyph_ids,
+                advances,
+                offsets,
+                stroke_width: read_pt(input)?,
+            }
+        }
         30 => Command::DrawRect {
             x: read_pt(input)?,
             y: read_pt(input)?,
@@ -608,6 +713,22 @@ fn read_command<R: Read>(input: &mut R) -> io::Result<Command> {
             height: read_pt(input)?,
             resource_id: read_string(input)?,
             interpolate: read_bool(input)?,
+            source_clip: None,
+        },
+        50 => Command::DrawImage {
+            x: read_pt(input)?,
+            y: read_pt(input)?,
+            width: read_pt(input)?,
+            height: read_pt(input)?,
+            resource_id: read_string(input)?,
+            interpolate: read_bool(input)?,
+            source_clip: Some(ImageSourceClip {
+                left: read_pt(input)?,
+                top: read_pt(input)?,
+                right: read_pt(input)?,
+                bottom: read_pt(input)?,
+                snap_target_origin_to_css_pixel: read_bool(input)?,
+            }),
         },
         32 => Command::BeginTag {
             role: read_string(input)?,
@@ -667,6 +788,55 @@ fn read_command<R: Read>(input: &mut R) -> io::Result<Command> {
             filter: read_paint_filter(input)?,
             css_shadow: read_bool(input)?,
         },
+        49 => {
+            let x = read_pt(input)?;
+            let y = read_pt(input)?;
+            let width = read_pt(input)?;
+            let height = read_pt(input)?;
+            let resource_id = read_string(input)?;
+            let len = read_u32(input)? as usize;
+            let mut layers = Vec::with_capacity(len);
+            for _ in 0..len {
+                let layer_resource_id = read_string(input)?;
+                let mode = match read_u8(input)? {
+                    0 => MaskMode::MatchSource,
+                    1 => MaskMode::Alpha,
+                    2 => MaskMode::Luminance,
+                    value => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("unknown mask mode tag {value}"),
+                        ));
+                    }
+                };
+                let composite = match read_u8(input)? {
+                    0 => MaskComposite::Add,
+                    1 => MaskComposite::Subtract,
+                    2 => MaskComposite::Intersect,
+                    3 => MaskComposite::Exclude,
+                    4 => MaskComposite::DestinationOut,
+                    value => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("unknown mask composite tag {value}"),
+                        ));
+                    }
+                };
+                layers.push(CompiledMaskLayer {
+                    resource_id: layer_resource_id,
+                    mode,
+                    composite,
+                });
+            }
+            Command::DrawMaskedForm {
+                x,
+                y,
+                width,
+                height,
+                resource_id,
+                layers,
+            }
+        }
         36 => Command::BeginArtifact {
             subtype: read_option_string(input)?,
         },
@@ -719,6 +889,21 @@ fn write_shading<W: Write>(out: &mut W, shading: &Shading) -> io::Result<()> {
             write_f32(out, *r1)?;
             write_stops(out, stops)
         }
+        Shading::Conic {
+            center_x,
+            center_y,
+            radius,
+            start_angle_deg,
+            stops,
+            hard_stops,
+        } => {
+            write_u8(out, if *hard_stops { 5 } else { 4 })?;
+            write_f32(out, *center_x)?;
+            write_f32(out, *center_y)?;
+            write_f32(out, *radius)?;
+            write_f32(out, *start_angle_deg)?;
+            write_stops(out, stops)
+        }
     }
 }
 
@@ -756,6 +941,21 @@ fn read_shading<R: Read>(input: &mut R) -> io::Result<Shading> {
                 r1,
                 stops,
                 hard_stops: tag == 3,
+            }
+        }
+        4 | 5 => {
+            let center_x = read_f32(input)?;
+            let center_y = read_f32(input)?;
+            let radius = read_f32(input)?;
+            let start_angle_deg = read_f32(input)?;
+            let stops = read_stops(input)?;
+            Shading::Conic {
+                center_x,
+                center_y,
+                radius,
+                start_angle_deg,
+                stops,
+                hard_stops: tag == 5,
             }
         }
         _ => {
@@ -840,12 +1040,11 @@ fn write_paint_filter<W: Write>(out: &mut W, filter: &PaintFilterSpec) -> io::Re
     write_pt(out, filter.blur_radius)?;
     write_u32(out, filter.drop_shadows.len() as u32)?;
     for shadow in &filter.drop_shadows {
-        write_pt(out, shadow.offset_x)?;
-        write_pt(out, shadow.offset_y)?;
-        write_pt(out, shadow.blur_radius)?;
-        write_color(out, shadow.color)?;
-        write_f32(out, shadow.opacity)?;
-        write_bool(out, shadow.color_is_current_color)?;
+        write_filter_drop_shadow(out, shadow)?;
+    }
+    write_u32(out, filter.operations.len() as u32)?;
+    for operation in &filter.operations {
+        write_paint_filter_operation(out, operation)?;
     }
     Ok(())
 }
@@ -868,14 +1067,18 @@ fn read_paint_filter<R: Read>(input: &mut R) -> io::Result<PaintFilterSpec> {
     }
     let mut drop_shadows = Vec::with_capacity(drop_shadow_count as usize);
     for _ in 0..drop_shadow_count {
-        drop_shadows.push(FilterDropShadowSpec {
-            offset_x: read_pt(input)?,
-            offset_y: read_pt(input)?,
-            blur_radius: read_pt(input)?,
-            color: read_color(input)?,
-            opacity: read_f32(input)?,
-            color_is_current_color: read_bool(input)?,
-        });
+        drop_shadows.push(read_filter_drop_shadow(input)?);
+    }
+    let operation_count = read_u32(input)?;
+    if operation_count > 4096 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "too many filter operations",
+        ));
+    }
+    let mut operations = Vec::with_capacity(operation_count as usize);
+    for _ in 0..operation_count {
+        operations.push(read_paint_filter_operation(input)?);
     }
     Ok(PaintFilterSpec {
         saturate,
@@ -887,7 +1090,481 @@ fn read_paint_filter<R: Read>(input: &mut R) -> io::Result<PaintFilterSpec> {
         opacity,
         blur_radius,
         drop_shadows,
+        operations,
     })
+}
+
+fn write_filter_drop_shadow<W: Write>(
+    out: &mut W,
+    shadow: &FilterDropShadowSpec,
+) -> io::Result<()> {
+    write_pt(out, shadow.offset_x)?;
+    write_pt(out, shadow.offset_y)?;
+    write_pt(out, shadow.blur_radius)?;
+    write_color(out, shadow.color)?;
+    write_f32(out, shadow.opacity)?;
+    write_bool(out, shadow.color_is_current_color)
+}
+
+fn read_filter_drop_shadow<R: Read>(input: &mut R) -> io::Result<FilterDropShadowSpec> {
+    Ok(FilterDropShadowSpec {
+        offset_x: read_pt(input)?,
+        offset_y: read_pt(input)?,
+        blur_radius: read_pt(input)?,
+        color: read_color(input)?,
+        opacity: read_f32(input)?,
+        color_is_current_color: read_bool(input)?,
+    })
+}
+
+fn write_paint_filter_operation<W: Write>(
+    out: &mut W,
+    operation: &PaintFilterOperation,
+) -> io::Result<()> {
+    match operation {
+        PaintFilterOperation::Saturate(value) => {
+            write_u8(out, 0)?;
+            write_f32(out, *value)
+        }
+        PaintFilterOperation::Brightness(value) => {
+            write_u8(out, 1)?;
+            write_f32(out, *value)
+        }
+        PaintFilterOperation::Contrast(value) => {
+            write_u8(out, 2)?;
+            write_f32(out, *value)
+        }
+        PaintFilterOperation::Invert(value) => {
+            write_u8(out, 3)?;
+            write_f32(out, *value)
+        }
+        PaintFilterOperation::Sepia(value) => {
+            write_u8(out, 4)?;
+            write_f32(out, *value)
+        }
+        PaintFilterOperation::HueRotate(value) => {
+            write_u8(out, 5)?;
+            write_f32(out, *value)
+        }
+        PaintFilterOperation::Opacity(value) => {
+            write_u8(out, 6)?;
+            write_f32(out, *value)
+        }
+        PaintFilterOperation::Blur(value) => {
+            write_u8(out, 7)?;
+            write_pt(out, *value)
+        }
+        PaintFilterOperation::DropShadow(shadow) => {
+            write_u8(out, 8)?;
+            write_filter_drop_shadow(out, shadow)
+        }
+        PaintFilterOperation::Svg(program) => {
+            write_u8(out, 9)?;
+            write_svg_filter_program(out, program)
+        }
+        PaintFilterOperation::Url(source) => {
+            write_u8(out, 10)?;
+            write_string(out, source)
+        }
+    }
+}
+
+fn read_paint_filter_operation<R: Read>(input: &mut R) -> io::Result<PaintFilterOperation> {
+    Ok(match read_u8(input)? {
+        0 => PaintFilterOperation::Saturate(read_f32(input)?),
+        1 => PaintFilterOperation::Brightness(read_f32(input)?),
+        2 => PaintFilterOperation::Contrast(read_f32(input)?),
+        3 => PaintFilterOperation::Invert(read_f32(input)?),
+        4 => PaintFilterOperation::Sepia(read_f32(input)?),
+        5 => PaintFilterOperation::HueRotate(read_f32(input)?),
+        6 => PaintFilterOperation::Opacity(read_f32(input)?),
+        7 => PaintFilterOperation::Blur(read_pt(input)?),
+        8 => PaintFilterOperation::DropShadow(read_filter_drop_shadow(input)?),
+        9 => PaintFilterOperation::Svg(read_svg_filter_program(input)?),
+        10 => PaintFilterOperation::Url(read_string(input)?),
+        tag => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unknown filter operation tag {tag}"),
+            ));
+        }
+    })
+}
+
+fn write_svg_filter_program<W: Write>(out: &mut W, program: &SvgFilterProgram) -> io::Result<()> {
+    write_f32(out, program.region.x)?;
+    write_f32(out, program.region.y)?;
+    write_f32(out, program.region.width)?;
+    write_f32(out, program.region.height)?;
+    write_bool(out, program.linear_rgb)?;
+    write_u32(out, program.nodes.len() as u32)?;
+    for node in &program.nodes {
+        write_svg_filter_primitive(out, &node.primitive)?;
+        write_option_string(out, node.result.as_deref())?;
+    }
+    Ok(())
+}
+
+fn read_svg_filter_program<R: Read>(input: &mut R) -> io::Result<SvgFilterProgram> {
+    let region = SvgFilterRegion {
+        x: read_f32(input)?,
+        y: read_f32(input)?,
+        width: read_f32(input)?,
+        height: read_f32(input)?,
+    };
+    let linear_rgb = read_bool(input)?;
+    let node_count = read_u32(input)?;
+    if node_count > 4096 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "too many SVG filter nodes",
+        ));
+    }
+    let mut nodes = Vec::with_capacity(node_count as usize);
+    for _ in 0..node_count {
+        nodes.push(SvgFilterNode {
+            primitive: read_svg_filter_primitive(input)?,
+            result: read_option_string(input)?,
+        });
+    }
+    Ok(SvgFilterProgram {
+        nodes,
+        region,
+        linear_rgb,
+    })
+}
+
+fn write_svg_filter_input<W: Write>(out: &mut W, input: &SvgFilterInput) -> io::Result<()> {
+    match input {
+        SvgFilterInput::SourceGraphic => write_u8(out, 0),
+        SvgFilterInput::SourceAlpha => write_u8(out, 1),
+        SvgFilterInput::Previous => write_u8(out, 2),
+        SvgFilterInput::Named(name) => {
+            write_u8(out, 3)?;
+            write_string(out, name)
+        }
+    }
+}
+
+fn read_svg_filter_input<R: Read>(input: &mut R) -> io::Result<SvgFilterInput> {
+    Ok(match read_u8(input)? {
+        0 => SvgFilterInput::SourceGraphic,
+        1 => SvgFilterInput::SourceAlpha,
+        2 => SvgFilterInput::Previous,
+        3 => SvgFilterInput::Named(read_string(input)?),
+        tag => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unknown SVG filter input tag {tag}"),
+            ));
+        }
+    })
+}
+
+fn write_svg_component_transfer<W: Write>(
+    out: &mut W,
+    function: &SvgComponentTransferFunction,
+) -> io::Result<()> {
+    match function {
+        SvgComponentTransferFunction::Identity => write_u8(out, 0),
+        SvgComponentTransferFunction::Table(values) => {
+            write_u8(out, 1)?;
+            write_u32(out, values.len() as u32)?;
+            for value in values {
+                write_f32(out, *value)?;
+            }
+            Ok(())
+        }
+        SvgComponentTransferFunction::Discrete(values) => {
+            write_u8(out, 2)?;
+            write_u32(out, values.len() as u32)?;
+            for value in values {
+                write_f32(out, *value)?;
+            }
+            Ok(())
+        }
+        SvgComponentTransferFunction::Linear { slope, intercept } => {
+            write_u8(out, 3)?;
+            write_f32(out, *slope)?;
+            write_f32(out, *intercept)
+        }
+        SvgComponentTransferFunction::Gamma {
+            amplitude,
+            exponent,
+            offset,
+        } => {
+            write_u8(out, 4)?;
+            write_f32(out, *amplitude)?;
+            write_f32(out, *exponent)?;
+            write_f32(out, *offset)
+        }
+    }
+}
+
+fn read_svg_component_transfer<R: Read>(input: &mut R) -> io::Result<SvgComponentTransferFunction> {
+    let tag = read_u8(input)?;
+    Ok(match tag {
+        0 => SvgComponentTransferFunction::Identity,
+        1 | 2 => {
+            let count = read_u32(input)?;
+            if count > 4096 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "too many component-transfer values",
+                ));
+            }
+            let mut values = Vec::with_capacity(count as usize);
+            for _ in 0..count {
+                values.push(read_f32(input)?);
+            }
+            if tag == 1 {
+                SvgComponentTransferFunction::Table(values)
+            } else {
+                SvgComponentTransferFunction::Discrete(values)
+            }
+        }
+        3 => SvgComponentTransferFunction::Linear {
+            slope: read_f32(input)?,
+            intercept: read_f32(input)?,
+        },
+        4 => SvgComponentTransferFunction::Gamma {
+            amplitude: read_f32(input)?,
+            exponent: read_f32(input)?,
+            offset: read_f32(input)?,
+        },
+        tag => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unknown component-transfer tag {tag}"),
+            ));
+        }
+    })
+}
+
+fn write_svg_filter_primitive<W: Write>(
+    out: &mut W,
+    primitive: &SvgFilterPrimitive,
+) -> io::Result<()> {
+    match primitive {
+        SvgFilterPrimitive::GaussianBlur {
+            input,
+            std_deviation_x,
+            std_deviation_y,
+        } => {
+            write_u8(out, 0)?;
+            write_svg_filter_input(out, input)?;
+            write_pt(out, *std_deviation_x)?;
+            write_pt(out, *std_deviation_y)
+        }
+        SvgFilterPrimitive::Offset { input, dx, dy } => {
+            write_u8(out, 1)?;
+            write_svg_filter_input(out, input)?;
+            write_pt(out, *dx)?;
+            write_pt(out, *dy)
+        }
+        SvgFilterPrimitive::ColorMatrix { input, matrix } => {
+            write_u8(out, 2)?;
+            write_svg_filter_input(out, input)?;
+            for value in matrix {
+                write_f32(out, *value)?;
+            }
+            Ok(())
+        }
+        SvgFilterPrimitive::ComponentTransfer { input, functions } => {
+            write_u8(out, 3)?;
+            write_svg_filter_input(out, input)?;
+            for function in functions {
+                write_svg_component_transfer(out, function)?;
+            }
+            Ok(())
+        }
+        SvgFilterPrimitive::Flood { color, opacity } => {
+            write_u8(out, 4)?;
+            write_color(out, *color)?;
+            write_f32(out, *opacity)
+        }
+        SvgFilterPrimitive::CompositeIn { input, input2 } => {
+            write_u8(out, 5)?;
+            write_svg_filter_input(out, input)?;
+            write_svg_filter_input(out, input2)
+        }
+        SvgFilterPrimitive::Morphology {
+            input,
+            operator,
+            radius_x,
+            radius_y,
+        } => {
+            write_u8(out, 6)?;
+            write_svg_filter_input(out, input)?;
+            write_u8(
+                out,
+                match operator {
+                    SvgMorphologyOperator::Erode => 0,
+                    SvgMorphologyOperator::Dilate => 1,
+                },
+            )?;
+            write_pt(out, *radius_x)?;
+            write_pt(out, *radius_y)
+        }
+        SvgFilterPrimitive::DropShadow { input, shadow } => {
+            write_u8(out, 7)?;
+            write_svg_filter_input(out, input)?;
+            write_filter_drop_shadow(out, shadow)
+        }
+        SvgFilterPrimitive::Merge { inputs } => {
+            write_u8(out, 8)?;
+            write_u32(out, inputs.len() as u32)?;
+            for input in inputs {
+                write_svg_filter_input(out, input)?;
+            }
+            Ok(())
+        }
+        SvgFilterPrimitive::Blend {
+            input,
+            input2,
+            mode,
+        } => {
+            write_u8(out, 9)?;
+            write_svg_filter_input(out, input)?;
+            write_svg_filter_input(out, input2)?;
+            write_u8(out, mix_blend_mode_tag(*mode))
+        }
+    }
+}
+
+fn read_svg_filter_primitive<R: Read>(input: &mut R) -> io::Result<SvgFilterPrimitive> {
+    Ok(match read_u8(input)? {
+        0 => SvgFilterPrimitive::GaussianBlur {
+            input: read_svg_filter_input(input)?,
+            std_deviation_x: read_pt(input)?,
+            std_deviation_y: read_pt(input)?,
+        },
+        1 => SvgFilterPrimitive::Offset {
+            input: read_svg_filter_input(input)?,
+            dx: read_pt(input)?,
+            dy: read_pt(input)?,
+        },
+        2 => {
+            let filter_input = read_svg_filter_input(input)?;
+            let mut matrix = [0.0; 20];
+            for value in &mut matrix {
+                *value = read_f32(input)?;
+            }
+            SvgFilterPrimitive::ColorMatrix {
+                input: filter_input,
+                matrix,
+            }
+        }
+        3 => {
+            let filter_input = read_svg_filter_input(input)?;
+            let mut functions = Vec::with_capacity(4);
+            for _ in 0..4 {
+                functions.push(read_svg_component_transfer(input)?);
+            }
+            SvgFilterPrimitive::ComponentTransfer {
+                input: filter_input,
+                functions: functions.try_into().map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "invalid component-transfer channel count",
+                    )
+                })?,
+            }
+        }
+        4 => SvgFilterPrimitive::Flood {
+            color: read_color(input)?,
+            opacity: read_f32(input)?,
+        },
+        5 => SvgFilterPrimitive::CompositeIn {
+            input: read_svg_filter_input(input)?,
+            input2: read_svg_filter_input(input)?,
+        },
+        6 => SvgFilterPrimitive::Morphology {
+            input: read_svg_filter_input(input)?,
+            operator: if read_u8(input)? == 0 {
+                SvgMorphologyOperator::Erode
+            } else {
+                SvgMorphologyOperator::Dilate
+            },
+            radius_x: read_pt(input)?,
+            radius_y: read_pt(input)?,
+        },
+        7 => SvgFilterPrimitive::DropShadow {
+            input: read_svg_filter_input(input)?,
+            shadow: read_filter_drop_shadow(input)?,
+        },
+        8 => {
+            let count = read_u32(input)?;
+            if count > 4096 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "too many SVG merge inputs",
+                ));
+            }
+            let mut inputs = Vec::with_capacity(count as usize);
+            for _ in 0..count {
+                inputs.push(read_svg_filter_input(input)?);
+            }
+            SvgFilterPrimitive::Merge { inputs }
+        }
+        9 => SvgFilterPrimitive::Blend {
+            input: read_svg_filter_input(input)?,
+            input2: read_svg_filter_input(input)?,
+            mode: mix_blend_mode_from_tag(read_u8(input)?),
+        },
+        tag => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unknown SVG filter primitive tag {tag}"),
+            ));
+        }
+    })
+}
+
+fn mix_blend_mode_tag(mode: MixBlendMode) -> u8 {
+    match mode {
+        MixBlendMode::Normal => 0,
+        MixBlendMode::Multiply => 1,
+        MixBlendMode::Screen => 2,
+        MixBlendMode::Overlay => 3,
+        MixBlendMode::Darken => 4,
+        MixBlendMode::Lighten => 5,
+        MixBlendMode::ColorDodge => 6,
+        MixBlendMode::ColorBurn => 7,
+        MixBlendMode::HardLight => 8,
+        MixBlendMode::SoftLight => 9,
+        MixBlendMode::Difference => 10,
+        MixBlendMode::Exclusion => 11,
+        MixBlendMode::Hue => 12,
+        MixBlendMode::Saturation => 13,
+        MixBlendMode::Color => 14,
+        MixBlendMode::Luminosity => 15,
+        MixBlendMode::PlusLighter => 16,
+        MixBlendMode::PlusDarker => 17,
+    }
+}
+
+fn mix_blend_mode_from_tag(tag: u8) -> MixBlendMode {
+    match tag {
+        1 => MixBlendMode::Multiply,
+        2 => MixBlendMode::Screen,
+        3 => MixBlendMode::Overlay,
+        4 => MixBlendMode::Darken,
+        5 => MixBlendMode::Lighten,
+        6 => MixBlendMode::ColorDodge,
+        7 => MixBlendMode::ColorBurn,
+        8 => MixBlendMode::HardLight,
+        9 => MixBlendMode::SoftLight,
+        10 => MixBlendMode::Difference,
+        11 => MixBlendMode::Exclusion,
+        12 => MixBlendMode::Hue,
+        13 => MixBlendMode::Saturation,
+        14 => MixBlendMode::Color,
+        15 => MixBlendMode::Luminosity,
+        16 => MixBlendMode::PlusLighter,
+        17 => MixBlendMode::PlusDarker,
+        _ => MixBlendMode::Normal,
+    }
 }
 
 fn write_string<W: Write>(out: &mut W, value: &str) -> io::Result<()> {

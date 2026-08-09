@@ -362,6 +362,41 @@ impl<'a> Face<'a> {
         read_u16(hmtx, offset)
     }
 
+    pub(crate) fn glyph_ver_advance(&self, glyph: GlyphId) -> Option<u16> {
+        if glyph.0 >= self.number_of_glyphs() {
+            return None;
+        }
+        let vhea = self.table(*b"vhea")?;
+        let vmtx = self.table(*b"vmtx")?;
+        let metric_count = read_u16(vhea, 34)?;
+        if metric_count == 0 {
+            return None;
+        }
+        let metric_index = u32::from(glyph.0).min(u32::from(metric_count - 1));
+        let offset = usize::try_from(metric_index).ok()?.checked_mul(4)?;
+        read_u16(vmtx, offset)
+    }
+
+    pub(crate) fn glyph_ver_side_bearing(&self, glyph: GlyphId) -> Option<i16> {
+        if glyph.0 >= self.number_of_glyphs() {
+            return None;
+        }
+        let vhea = self.table(*b"vhea")?;
+        let vmtx = self.table(*b"vmtx")?;
+        let metric_count = read_u16(vhea, 34)?;
+        if metric_count == 0 {
+            return None;
+        }
+        let offset = if glyph.0 < metric_count {
+            usize::from(glyph.0).checked_mul(4)?.checked_add(2)?
+        } else {
+            usize::from(metric_count)
+                .checked_mul(4)?
+                .checked_add(usize::from(glyph.0 - metric_count).checked_mul(2)?)?
+        };
+        read_i16(vmtx, offset)
+    }
+
     pub(crate) fn names(&self) -> Vec<NameRecord<'a>> {
         let Some(name) = self.table(*b"name") else {
             return Vec::new();
