@@ -885,7 +885,11 @@ def validate_component_mount(
     asset_unresolved_count = int(asset_summary.get("unresolved_count") or 0)
     asset_unsupported_count = int(asset_summary.get("unsupported_count") or 0)
     asset_reference_count = int(asset_summary.get("image_reference_count") or 0)
-    if pagination_overflow_count > overflow_count:
+    # The native pagination trace describes layout overflow directly. Legacy
+    # JIT placement bounds are a fallback for older engines and can be wider
+    # than the painted glyph outlines because glyph runs use conservative
+    # diagnostic padding.
+    if pagination_trace_available:
         overflow_count = pagination_overflow_count
         overflow_samples = pagination_overflow_samples
     if pagination_trace_available:

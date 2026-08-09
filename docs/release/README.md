@@ -4,15 +4,20 @@ This directory is the release-operations layer for Fullbleed. It is separate
 from feature documentation so release decisions can be audited without reading
 engine internals.
 
-## 2.2.2 Documents
+## 2.2.3 Documents
 
-- `docs/release/2.2.2-runbook.md`: current Cargo, PyPI, wheel-matrix, and GitHub
+- `docs/release/2.2.3-runbook.md`: current Cargo, PyPI, wheel-matrix, and GitHub
   release procedure.
 - `docs/css-coverage.md`: current 1,642-pass, zero-failure IronPress parity evidence and
   remaining reference disputes.
 - `docs/performance-architecture.md`: compiled variable-data coordinate-state support and the
   remaining form-XObject/vector-compiler boundary.
-- `ReleaseNotes.MD`: current 2.2.2 release summary and gate list.
+- `ReleaseNotes.MD`: current 2.2.3 release summary and gate list.
+
+## 2.2.2 Documents
+
+- `docs/release/2.2.2-runbook.md`: historical parity, compiler, Cargo, PyPI, wheel-matrix, and
+  GitHub release procedure. `v2.2.3` supersedes it for component-validation reliability.
 
 ## 2.2.1 Documents
 

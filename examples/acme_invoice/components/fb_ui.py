@@ -340,6 +340,42 @@ def _collect_debug_signals(debug_entries: list[dict[str, Any]]) -> dict[str, Any
     }
 
 
+def _native_pagination_overflow(
+    engine: Any,
+    html: str,
+    css: str,
+) -> tuple[int, list[dict[str, Any]]] | None:
+    export_trace = getattr(engine, "export_render_time_pagination_trace", None)
+    if not callable(export_trace):
+        return None
+    try:
+        trace = export_trace(html, css)
+    except Exception:  # pragma: no cover - defensive native/runtime path
+        return None
+    if not isinstance(trace, dict):
+        return None
+
+    summary = dict(trace.get("summary") or {})
+    samples: list[dict[str, Any]] = []
+    for event in trace.get("events") or []:
+        if not isinstance(event, dict):
+            continue
+        if event.get("event_type") != "layout" or event.get("result") != "overflow":
+            continue
+        samples.append(
+            {
+                "page": event.get("page"),
+                "flowable_name": event.get("flowable_name"),
+                "frame_index": event.get("frame_index"),
+                "reason": event.get("reason"),
+                "overflow_severity": event.get("overflow_severity"),
+            }
+        )
+        if len(samples) >= 5:
+            break
+    return int(summary.get("overflow_event_count") or 0), samples
+
+
 def validate_component_mount(
     *,
     engine: Any,
@@ -369,6 +405,11 @@ def validate_component_mount(
     signals = _collect_debug_signals(debug_entries)
     overflow_count = int(signals["overflow_count"])
     overflow_samples = list(signals["overflow_samples"])
+    native_overflow = _native_pagination_overflow(engine, html, css)
+    if native_overflow is not None:
+        # Native pagination is authoritative when available. The older JIT
+        # bounds use conservative glyph padding and remain only as a fallback.
+        overflow_count, overflow_samples = native_overflow
     css_warning_count = int(signals["css_warning_count"])
     css_warning_samples = list(signals["css_warning_samples"])
     known_loss_count = int(signals["known_loss_count"])
@@ -434,6 +475,7 @@ def validate_component_mount(
         "bytes_written": len(pdf_bytes),
         "missing_glyph_count": len(glyph_list),
         "overflow_count": overflow_count,
+        "pagination_trace_available": native_overflow is not None,
         "css_warning_count": css_warning_count,
         "css_miss_count": css_warning_count,
         "known_loss_count": known_loss_count,

@@ -157,3 +157,8 @@ Each example emits:
 - PDF + preview PNG(s)
 - component mount validation JSON
 - `A11yContract` validation JSON
+
+Component mount validation uses the native render-time pagination trace as the authoritative
+overflow signal when the engine exposes it. Legacy JIT placement bounds remain a fallback for
+older engines; their conservative glyph-run padding is not treated as painted layout overflow
+when native pagination reports none.

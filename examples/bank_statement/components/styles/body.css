@@ -50,6 +50,7 @@
 [data-fb-role="document-root"] .bs-transaction-table {
   width: 100%;
   border-collapse: collapse;
+  break-inside: auto;
 }
 
 [data-fb-role="document-root"] .bs-transaction-table thead th {

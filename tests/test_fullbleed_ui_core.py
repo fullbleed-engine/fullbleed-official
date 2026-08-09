@@ -385,3 +385,59 @@ def test_validate_component_mount_uses_native_pagination_trace_for_overflow_and_
     assert any(f["code"] == "TEXT_OVERLAP" for f in report["failures"])
     assert any(f["code"] == "FLOWABLE_OVERPRINT" for f in report["failures"])
     assert report["debug"]["pagination_trace_error"] is None
+
+
+def test_validate_component_mount_prefers_native_pagination_over_conservative_jit_bounds(
+    tmp_path: Path,
+) -> None:
+    debug_log = tmp_path / "docplan.jsonl"
+    debug_log.write_text(
+        json.dumps(
+            {
+                "type": "jit.docplan",
+                "page_size": {"w": 612.0, "h": 792.0},
+                "pages": [
+                    {
+                        "n": 1,
+                        "placements": [
+                            {
+                                "layer": "content",
+                                "bbox": {"x": -6.633, "y": 0.0, "w": 618.633, "h": 792.0},
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeEngine:
+        def render_pdf_with_glyph_report(self, html: str, css: str) -> tuple[bytes, list[object]]:
+            return (b"%PDF-FAKE", [])
+
+        def export_render_time_pagination_trace(self, html: str, css: str) -> dict[str, object]:
+            return {
+                "schema": "fullbleed.pagination_trace.v1",
+                "summary": {
+                    "event_count": 1,
+                    "overflow_event_count": 0,
+                    "flowable_overlap_count": 0,
+                    "text_overlap_count": 0,
+                    "low_coverage_page_count": 0,
+                },
+                "events": [],
+                "pages": [],
+            }
+
+    report = validate_component_mount(
+        engine=FakeEngine(),
+        node_or_component=el("div", "x"),
+        debug_log=str(debug_log),
+        fail_on_overflow=True,
+    )
+
+    assert report["ok"] is True
+    assert report["overflow_count"] == 0
+    assert report["warnings"] == []
+    assert report["pagination_trace_available"] is True

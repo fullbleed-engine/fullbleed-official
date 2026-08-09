@@ -1,4 +1,4 @@
-# Fullbleed Release Notes - 2.2.2
+# Fullbleed Release Notes - 2.2.3
 
 Status: release
 
@@ -6,16 +6,23 @@ Release date: August 9, 2026
 
 ## Summary
 
-Fullbleed 2.2.2 closes the current IronPress parity pass and extends the compiled variable-data
-lane through immutable page-space transforms and clips. The official independent Wheel265 gate
-reports 1,642 comparator passes, zero implementation failures, and 20 reference-disputed cases.
-The disputed cases remain visible in the evidence set and are not relabeled as engine passes.
+Fullbleed 2.2.3 is a reliability follow-up to 2.2.2. It makes the native render-time pagination
+trace authoritative in component-mount validation, avoiding false overflow warnings from the
+legacy JIT's deliberately conservative glyph-run bounds. It also makes the bank-statement
+example's row-fragmentation intent explicit so its transaction table fills page 1 and continues
+on page 2 instead of moving as one avoided box.
+
+The Rust render engine and the independent Wheel265 parity result are unchanged from 2.2.2:
+1,642 comparator passes, zero implementation failures, and 20 reference-disputed cases. The
+disputed cases remain visible in the evidence set and are not relabeled as engine passes.
 
 The authoritative layout and geometry representation remains signed Q32.32 fixed point. Raster
 coverage and PDF serialization use bounded conversion only at their defined output boundaries.
 
 ## CSS, Layout, and Reflow
 
+- Explicit `break-inside: auto` on the bank-statement transaction table preserves its designed
+  row-level continuation while leaving authored `break-inside: avoid` behavior intact elsewhere.
 - Hardens fixed-height block, one-column grid, and column-flex continuation slicing without
   duplicating content across fragmentainers.
 - Preserves `display: contents` grid descendants and paint phase through continuations.
@@ -65,8 +72,8 @@ the identical-page copy benchmark and do not claim the same speed for arbitrary 
 
 ## Compatibility
 
-- Adds behavior without removing the 2.2.0 Rust, Python, CLI, batch, compiled-copy, or Stable ABI
-  surfaces.
+- Adds behavior without removing the 2.2.0-2.2.2 Rust, Python, CLI, batch, compiled-copy, or
+  Stable ABI surfaces.
 - Retains `cp310-abi3` wheels for standard CPython 3.10 through 3.14 across the 15-platform release
   matrix.
 - Retains Rust 1.85 as the minimum supported toolchain.
@@ -74,7 +81,7 @@ the identical-page copy benchmark and do not claim the same speed for arbitrary 
 
 ## Package Versions
 
-- `fullbleed 2.2.2` on crates.io and PyPI.
+- `fullbleed 2.2.3` on crates.io and PyPI.
 - `fullbleed_audit_contract 0.1.3` on crates.io.
 - `subsetter 0.2.6`, `rustc-hash 2.1.3`, and `unicode-bidi 0.3.18`, recorded in Cargo metadata and
   the generated CycloneDX SBOM.
@@ -82,7 +89,7 @@ the identical-page copy benchmark and do not claim the same speed for arbitrary 
 ## Verification Baseline
 
 - Rust library suite: 1,174 passed, zero failed.
-- Repository Python suite: 260 passed, zero failed.
+- Repository Python suite: 261 passed, zero failed.
 - Python Stable ABI compiled-document suite: eight passed.
 - Official independent Wheel265 parity gate: 1,642 passed, zero failed, 20 reference-disputed;
   the durable report records invocation `78173eed3cd2bf2c70127eef63092119` as complete.
@@ -92,6 +99,6 @@ the identical-page copy benchmark and do not claim the same speed for arbitrary 
 - The release workflow builds, installs, and smokes 15 `cp310-abi3` wheels plus one source
   distribution before publication.
 
-The exact `v2.2.2` source is validated before registry publication. GitHub, PyPI, and crates.io are
+The exact `v2.2.3` source is validated before registry publication. GitHub, PyPI, and crates.io are
 published from that immutable tagged source, with the complete Python distribution set and its
 SHA-256 manifest attached to the GitHub release.

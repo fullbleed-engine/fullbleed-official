@@ -110,7 +110,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-2.2.2-cp310-abi3-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-2.2.3-cp310-abi3-win_amd64.whl
 ```
 
 From a source checkout with Rust installed, no Python build package is needed:
@@ -161,7 +161,9 @@ vendors `inter` into `vendor/fonts/Inter-Variable.ttf`, writes license notices
 and seeds `assets.lock.json` with pinned hashes.
 The scaffolded `report.py` also runs a component mount smoke validation before
 main render and writes `output/component_mount_validation.json` (fails fast on
-missing glyphs, placement overflow, or CSS miss signals parsed from debug logs).
+missing glyphs, actual pagination overflow, or CSS miss signals). On current engines,
+render-time pagination is authoritative for overflow; conservative JIT placement bounds
+remain the compatibility fallback for older engines.
 Scaffolded components now include `components/primitives.py` with reusable
 layout/content helpers (`Stack`, `Row`, `Text`, table/list helpers, key/value rows, etc.).
 Each scaffolded project also includes `SCAFFOLDING.md`, which should be your

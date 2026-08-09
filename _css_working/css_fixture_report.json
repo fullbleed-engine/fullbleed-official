@@ -40,7 +40,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -162,16 +162,16 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_background_conic_gradient_supported_quadrants_220748_1785811234873500300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_background_conic_gradient_supported_quadrants_98640_1786259099751776100.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 13043,
-        "pdf_sha256": "927bd870b58723d60fb6c1495d388076b66da86828f53829fa4f29bb57687e37",
+        "pdf_bytes": 1114,
+        "pdf_sha256": "fcfb855274f84217cb67ccf356c7aac42e6c44876f1346df0d55c40084e2ef77",
         "image_count": 1,
         "image_sha256": [
-          "4e91b637f9b2a3d9335f822020b67463e7655ef4981541c91d8c7d41f30e2dd5"
+          "b51e38c1ed9950e09cf62a87166442cbd25893b6a00fdd4b608b11acc78071a9"
         ],
         "stability_hash_expected": "eb2531208b9f17f21945073966cfde4363e52bc7d913f3df0e55a97a2e3371a7",
         "stability_hash_actual": "eb2531208b9f17f21945073966cfde4363e52bc7d913f3df0e55a97a2e3371a7",
@@ -209,7 +209,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -408,13 +408,13 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_left_color_override_220748_1785811234874496300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_left_color_override_98640_1786259099752775900.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 766,
-        "pdf_sha256": "1b2bee554ad8644ecb6f1d1443bc4ca4967697eaba20195aa7a3268de5f75ff8",
+        "pdf_bytes": 751,
+        "pdf_sha256": "ee36a1c9d7ecf773c2107e0eaa1918f4fedcb302eafe56a13f3b2b42f4d2f787",
         "image_count": 1,
         "image_sha256": [
           "947b3a2a124ee4a4bb6a5c381ff1cba10cc5f328ef988ab14d69bc89ac6d12be"
@@ -455,7 +455,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -711,13 +711,13 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_uniform_frame_paint_matrix_220748_1785811234875502500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_borders_uniform_frame_paint_matrix_98640_1786259099752775900.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 731,
-        "pdf_sha256": "3c5efd68192ef8f668eff0955d686a7b38173d0b8385a5d1f442c313f4bce0ab",
+        "pdf_bytes": 730,
+        "pdf_sha256": "d5b08cf6b14f75ee05303b1e5ca4c3dc57734b6b7870f28fe28c00cd3310dad3",
         "image_count": 1,
         "image_sha256": [
           "96889497f1846ac4e8225e91e6180f2c52ee1e90a7960be962de879bc8bd80d3"
@@ -757,7 +757,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -879,13 +879,13 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_box_shadow_negative_spread_offset_paints_shrunk_shadow_220748_1785811234874496300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_box_shadow_negative_spread_offset_paints_shrunk_shadow_98640_1786259099753775200.jsonl"
           }
         }
       },
       "artifacts": {
         "pdf_bytes": 974,
-        "pdf_sha256": "f60d9199f593c8454dc5fb573a6fbf7696293f46ddf468732e741318b1959ae0",
+        "pdf_sha256": "f6360742ddfeffcf204d5393443f5648ca1b795571d34a04a1b931377a53b976",
         "image_count": 1,
         "image_sha256": [
           "9b44da2e66c21d2a2c6b5b5bba85a8d725c4ae7478d2d4f607176dca9a7dcbfa"
@@ -927,7 +927,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 27,
+            "computed_event_count": 28,
             "checks": [
               {
                 "index": 0,
@@ -1096,7 +1096,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_calc_var_additive_mixed_lengths_220748_1785811236004847800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_calc_var_additive_mixed_lengths_98640_1786259100821031000.jsonl"
           }
         }
       },
@@ -1143,7 +1143,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -1247,7 +1247,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_calc_var_percent_width_220748_1785811236114093000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_calc_var_percent_width_98640_1786259100824403100.jsonl"
           }
         }
       },
@@ -1294,7 +1294,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -1379,7 +1379,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_fallback_chain_220748_1785811236116102700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_fallback_chain_98640_1786259100831443600.jsonl"
           }
         }
       },
@@ -1426,7 +1426,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 27,
+            "computed_event_count": 28,
             "checks": [
               {
                 "index": 0,
@@ -1595,7 +1595,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_length_chain_fallback_220748_1785811236178751800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_length_chain_fallback_98640_1786259100833445000.jsonl"
           }
         }
       },
@@ -1644,7 +1644,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 3,
-            "computed_event_count": 30,
+            "computed_event_count": 31,
             "checks": [
               {
                 "index": 0,
@@ -1878,7 +1878,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_math_min_max_clamp_lengths_220748_1785811236700684000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_custom_property_math_min_max_clamp_lengths_98640_1786259101458386500.jsonl"
           }
         }
       },
@@ -1926,7 +1926,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -2021,16 +2021,16 @@
                 "kind": "summary_count_at_least",
                 "key": "jit.known_loss.conic_gradient_fallback",
                 "expected": 1,
-                "actual": 3,
+                "actual": 1,
                 "ok": true
               }
             ],
             "summary_counts_total": {
-              "jit.known_loss.conic_gradient_fallback": 3,
+              "jit.known_loss.conic_gradient_fallback": 1,
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_conic_gradient_fallback_no_color_220748_1785811236723737300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_conic_gradient_fallback_no_color_98640_1786259101459900900.jsonl"
           }
         }
       },
@@ -2078,7 +2078,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -2153,16 +2153,16 @@
                 "kind": "summary_count_at_least",
                 "key": "jit.known_loss.conic_gradient_fallback",
                 "expected": 1,
-                "actual": 3,
+                "actual": 1,
                 "ok": true
               }
             ],
             "summary_counts_total": {
-              "jit.known_loss.conic_gradient_fallback": 3,
+              "jit.known_loss.conic_gradient_fallback": 1,
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_conic_gradient_fallback_with_color_220748_1785811236758297700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_conic_gradient_fallback_with_color_98640_1786259101492485800.jsonl"
           }
         }
       },
@@ -2187,7 +2187,7 @@
         "full",
         "diagnostics"
       ],
-      "description": "Unsupported filter/effects declarations should keep deterministic paint and emit explicit known-loss diagnostics.",
+      "description": "Unsupported URL filters should emit explicit known-loss diagnostics while supported mask gradients retain deterministic paint.",
       "required_features": [
         "filters",
         "effects",
@@ -2211,7 +2211,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -2253,14 +2253,14 @@
               "y": 200,
               "expected_rgba": [
                 255,
-                0,
-                0,
+                107,
+                107,
                 255
               ],
               "actual_rgba": [
                 255,
-                0,
-                0,
+                107,
+                107,
                 255
               ],
               "tolerance": 8,
@@ -2286,28 +2286,28 @@
                 "kind": "summary_count_at_least",
                 "key": "jit.known_loss.filters_effects_fallback",
                 "expected": 1,
-                "actual": 6,
+                "actual": 2,
                 "ok": true
               }
             ],
             "summary_counts_total": {
-              "jit.known_loss.filters_effects_fallback": 6,
+              "jit.known_loss.filters_effects_fallback": 2,
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_filters_effects_fallback_220748_1785811236852719800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_filters_effects_fallback_98640_1786259101835486500.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1088,
-        "pdf_sha256": "96b2daa061ad38de24ecce682aa346e107bb9efa1a7a63c4725ebbcef2f066aa",
+        "pdf_bytes": 1795,
+        "pdf_sha256": "ab5ab11d085d9040c80715dae121526bbc9f839407d819ca57f4ec24fb36c743",
         "image_count": 1,
         "image_sha256": [
-          "5b1ad4b06df5d346f334cf9c68f7219ad70e6c34e42cd1e71ee6790378178f81"
+          "151a982d0becef0897b67f0ff0800062137c8bc49d70bd51ac8a0410111d6b9a"
         ],
-        "stability_hash_expected": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2",
-        "stability_hash_actual": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2",
+        "stability_hash_expected": "91a95fdc39d2af2d814c5743995a9bde977da1b9b632d056afe5e2248633e937",
+        "stability_hash_actual": "91a95fdc39d2af2d814c5743995a9bde977da1b9b632d056afe5e2248633e937",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -2320,7 +2320,7 @@
         "full",
         "diagnostics"
       ],
-      "description": "Supported column-count and column-rule should render while unsupported multicolumn properties emit explicit fallback diagnostics.",
+      "description": "Supported column-count, column-width, column-fill, column-span, and column-rule declarations should render without an obsolete single-column fallback diagnostic.",
       "required_features": [
         "multi-column",
         "fallback-policy",
@@ -2342,7 +2342,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 36,
+            "computed_event_count": 37,
             "checks": [
               {
                 "index": 0,
@@ -2403,39 +2403,20 @@
           "ok": true,
           "enabled": true,
           "details": {
-            "checks": [
-              {
-                "kind": "event_contains",
-                "condition": {
-                  "type": "jit.known_loss",
-                  "code": "MULTICOL_SINGLE_COLUMN_FALLBACK",
-                  "property": "column-width"
-                },
-                "ok": true
-              },
-              {
-                "kind": "summary_count_at_least",
-                "key": "jit.known_loss.multicol_single_column_fallback",
-                "expected": 1,
-                "actual": 12,
-                "ok": true
-              }
-            ],
             "summary_counts_total": {
-              "jit.known_loss.multicol_single_column_fallback": 12,
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_multicol_single_column_fallback_220748_1785811237237820200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_multicol_single_column_fallback_98640_1786259101837487900.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 873,
-        "pdf_sha256": "e801c5d744a1a55640dd7cdd677e1982e43c359397573e6e6cbfaee99632940f",
+        "pdf_bytes": 856,
+        "pdf_sha256": "a16fa456087fc283f200f0e526d54ca16ffac5f87f4cc1c939f6bbeebdd3f51a",
         "image_count": 1,
         "image_sha256": [
-          "a60175080169d92a85a432d48bb594c565a380926490b5ca585d4f0922a3930b"
+          "502274781eca4951dd35fbe67162f7a3c88a18845825c59d358d67f594c5a804"
         ],
         "stability_hash_expected": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2",
         "stability_hash_actual": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2",
@@ -2473,7 +2454,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -2567,28 +2548,28 @@
                 "kind": "summary_count_at_least",
                 "key": "css.media.unsupported",
                 "expected": 1,
-                "actual": 6,
+                "actual": 3,
                 "ok": true
               },
               {
                 "kind": "summary_count_at_least",
                 "key": "jit.known_loss.declaration_parsed_no_effect",
                 "expected": 1,
-                "actual": 3,
+                "actual": 1,
                 "ok": true
               }
             ],
             "summary_counts_total": {
               "css.media.matched": 0,
-              "css.media.rules": 3,
-              "css.media.rules_skipped": 3,
+              "css.media.rules": 1,
+              "css.media.rules_skipped": 1,
               "css.media.unmatched": 0,
-              "css.media.unsupported": 6,
-              "jit.known_loss.declaration_parsed_no_effect": 3,
+              "css.media.unsupported": 3,
+              "jit.known_loss.declaration_parsed_no_effect": 1,
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_unsupported_media_and_no_effect_220748_1785811237289569900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_diagnostics_unsupported_media_and_no_effect_98640_1786259101925065000.jsonl"
           }
         }
       },
@@ -2634,7 +2615,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 48,
+            "computed_event_count": 49,
             "checks": [
               {
                 "index": 0,
@@ -2871,7 +2852,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_align_content_flex_end_wrap_220748_1785811237357543700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_align_content_flex_end_wrap_98640_1786259102283676200.jsonl"
           }
         }
       },
@@ -2917,7 +2898,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 36,
+            "computed_event_count": 37,
             "checks": [
               {
                 "index": 0,
@@ -3143,7 +3124,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_align_self_item_override_220748_1785811237755587000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_align_self_item_override_98640_1786259102547065400.jsonl"
           }
         }
       },
@@ -3189,7 +3170,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 48,
+            "computed_event_count": 49,
             "checks": [
               {
                 "index": 0,
@@ -3396,7 +3377,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_flow_row_wrap_layout_220748_1785811237959791600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_flow_row_wrap_layout_98640_1786259102733051300.jsonl"
           }
         }
       },
@@ -3443,7 +3424,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 48,
+            "computed_event_count": 49,
             "checks": [
               {
                 "index": 0,
@@ -3718,7 +3699,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_content_flex_end_center_wrap_220748_1785811238052650500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_content_flex_end_center_wrap_98640_1786259103109796500.jsonl"
           }
         }
       },
@@ -3764,7 +3745,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 36,
+            "computed_event_count": 37,
             "checks": [
               {
                 "index": 0,
@@ -3944,7 +3925,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_items_container_alignment_220748_1785811239322425500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_items_container_alignment_98640_1786259103310276100.jsonl"
           }
         }
       },
@@ -3990,7 +3971,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 36,
+            "computed_event_count": 37,
             "checks": [
               {
                 "index": 0,
@@ -4216,7 +4197,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_self_item_override_220748_1785811239334794000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_place_self_item_override_98640_1786259103753192100.jsonl"
           }
         }
       },
@@ -4263,7 +4244,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 3,
-            "computed_event_count": 36,
+            "computed_event_count": 37,
             "checks": [
               {
                 "index": 0,
@@ -4402,7 +4383,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_two_column_distribution_220748_1785811239447472600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_flex_two_column_distribution_98640_1786259103896968900.jsonl"
           }
         }
       },
@@ -4448,7 +4429,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 27,
+            "computed_event_count": 28,
             "checks": [
               {
                 "index": 0,
@@ -4591,13 +4572,13 @@
               "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_fragmentation_break_inside_avoid_block_220748_1785811240248097800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_fragmentation_break_inside_avoid_block_98640_1786259104232471900.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1148,
-        "pdf_sha256": "31c8260d8906f413a9800521d197c8faa8c1f6843908952030bb3e3f67a61d00",
+        "pdf_bytes": 1161,
+        "pdf_sha256": "0d8f845f4d8e3c76fe852ff91841d2b0d064468c9c10383dcf8b9ef008ab6aa2",
         "image_count": 2,
         "image_sha256": [
           "c754fc4f0cdc92ad8953492fbc2ab9a0473da296ab62ef835996517bb6f49ed9",
@@ -4638,7 +4619,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 201,
+            "computed_event_count": 202,
             "checks": [
               {
                 "index": 0,
@@ -4704,13 +4685,13 @@
               "jit.page_break.trigger": 12
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_fragmentation_long_paragraph_220748_1785811240357857000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_fragmentation_long_paragraph_98640_1786259104626843200.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1800,
-        "pdf_sha256": "db1d70d4ddd2b3eaf0ab1f993f913b5101aa08e05e77ebd203d7bedd5ee13fd7",
+        "pdf_bytes": 1855,
+        "pdf_sha256": "9b753a212fc7a984313b189b2959ad85c4444ca493389b23243a808360f37ad4",
         "image_count": 3,
         "image_sha256": [
           "27b530b6452860836b260162879f24d171629a3a498a383c91eb28deeed471f7",
@@ -4754,7 +4735,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 36,
+            "computed_event_count": 37,
             "checks": [
               {
                 "index": 0,
@@ -4904,7 +4885,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_gap_row_column_var_resolution_220748_1785811240420895700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_gap_row_column_var_resolution_98640_1786259104629844900.jsonl"
           }
         }
       },
@@ -4951,7 +4932,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 36,
+            "computed_event_count": 49,
             "checks": [
               {
                 "index": 0,
@@ -5074,7 +5055,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_conflicting_explicit_slots_fall_forward_220748_1785811240454582300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_conflicting_explicit_slots_fall_forward_98640_1786259104675911500.jsonl"
           }
         }
       },
@@ -5121,7 +5102,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 36,
+            "computed_event_count": 49,
             "checks": [
               {
                 "index": 0,
@@ -5320,7 +5301,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_explicit_row_column_starts_220748_1785811241134951300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_explicit_row_column_starts_98640_1786259104917417400.jsonl"
           }
         }
       },
@@ -5366,7 +5347,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 48,
+            "computed_event_count": 73,
             "checks": [
               {
                 "index": 0,
@@ -5565,7 +5546,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_rows_only_column_derivation_220748_1785811241209445100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_rows_only_column_derivation_98640_1786259105203468700.jsonl"
           }
         }
       },
@@ -5612,7 +5593,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 48,
+            "computed_event_count": 73,
             "checks": [
               {
                 "index": 0,
@@ -5830,7 +5811,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_template_rows_columns_matrix_220748_1785811241212667900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_grid_template_rows_columns_matrix_98640_1786259105380340800.jsonl"
           }
         }
       },
@@ -5876,7 +5857,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 27,
+            "computed_event_count": 28,
             "checks": [
               {
                 "index": 0,
@@ -6026,7 +6007,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inheritance_unset_noninherited_resets_220748_1785811241564798700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inheritance_unset_noninherited_resets_98640_1786259105481925300.jsonl"
           }
         }
       },
@@ -6082,7 +6063,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 4,
-            "computed_event_count": 82,
+            "computed_event_count": 84,
             "checks": [
               {
                 "index": 0,
@@ -6154,8 +6135,8 @@
                 "kind": "color_run_length",
                 "page": 1,
                 "axis": "x",
-                "fixed": 30,
-                "start": 135,
+                "fixed": 35,
+                "start": 132,
                 "expected_rgba": [
                   0,
                   102,
@@ -6163,9 +6144,9 @@
                   255
                 ],
                 "tolerance": 8,
-                "actual_run_length": 27,
-                "min_length": 26,
-                "max_length": 34
+                "actual_run_length": 24,
+                "min_length": 23,
+                "max_length": 25
               },
               {
                 "index": 2,
@@ -6173,8 +6154,8 @@
                 "kind": "color_run_length",
                 "page": 1,
                 "axis": "x",
-                "fixed": 36,
-                "start": 165,
+                "fixed": 35,
+                "start": 156,
                 "expected_rgba": [
                   255,
                   0,
@@ -6182,9 +6163,9 @@
                   255
                 ],
                 "tolerance": 8,
-                "actual_run_length": 21,
-                "min_length": 20,
-                "max_length": 28
+                "actual_run_length": 24,
+                "min_length": 23,
+                "max_length": 25
               }
             ]
           }
@@ -6281,7 +6262,7 @@
             },
             {
               "page": 1,
-              "x": 185,
+              "x": 170,
               "y": 36,
               "expected_rgba": [
                 255,
@@ -6308,19 +6289,19 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inline_svg_image_mixed_run_torture_220748_1785811242740964900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inline_svg_image_mixed_run_torture_98640_1786259106296948500.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1316,
-        "pdf_sha256": "10a58c36c1b2936c25101bbfce6591cac109ecbd148d16f5a4ec073ba14d27ef",
+        "pdf_bytes": 1349,
+        "pdf_sha256": "452c28d04484ba014302090ff36362b5e4f98dc0711ab8d89a9c045a71404052",
         "image_count": 1,
         "image_sha256": [
-          "84e5b31c060167f8f1ea974156eadbad94c9dcd21193d43341169ecbe050f135"
+          "7a1ba329c1baa4c1a204012311a9c238a4607c251389b7a4d6faa3f20c9149b8"
         ],
-        "stability_hash_expected": "a3285a6873eac7956668da6c2be0e1a21782379f8eaf8698f53a4848ebe658ad",
-        "stability_hash_actual": "a3285a6873eac7956668da6c2be0e1a21782379f8eaf8698f53a4848ebe658ad",
+        "stability_hash_expected": "0f2a29a2e3e818c03835540c7f958e0673ec023f2ea0121e3bc70bea082a2507",
+        "stability_hash_actual": "0f2a29a2e3e818c03835540c7f958e0673ec023f2ea0121e3bc70bea082a2507",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -6355,7 +6336,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -6458,7 +6439,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inset_left_var_resolution_220748_1785811243040318500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_inset_left_var_resolution_98640_1786259106607463200.jsonl"
           }
         }
       },
@@ -6505,7 +6486,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 3,
-            "computed_event_count": 30,
+            "computed_event_count": 31,
             "checks": [
               {
                 "index": 0,
@@ -6739,7 +6720,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_inline_block_size_min_max_220748_1785811243167694800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_inline_block_size_min_max_98640_1786259106731260700.jsonl"
           }
         }
       },
@@ -6789,7 +6770,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 39,
+            "computed_event_count": 40,
             "checks": [
               {
                 "index": 0,
@@ -6919,7 +6900,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_inset_horizontal_tb_ltr_220748_1785811243247959500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_inset_horizontal_tb_ltr_98640_1786259106832696500.jsonl"
           }
         }
       },
@@ -6968,7 +6949,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 36,
+            "computed_event_count": 37,
             "checks": [
               {
                 "index": 0,
@@ -7098,13 +7079,13 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_margin_padding_horizontal_tb_ltr_220748_1785811243302514800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_logical_margin_padding_horizontal_tb_ltr_98640_1786259106902087600.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 699,
-        "pdf_sha256": "9de5fb68e00eea573984dca706acca3901e6b4946500698c5636a32ee14913b6",
+        "pdf_bytes": 696,
+        "pdf_sha256": "8598ac112032caf68d428a4331d9093febc6aa8d0fd68b2590b938284358aabf",
         "image_count": 1,
         "image_sha256": [
           "7d8ad8d041dd37c119011c3bbeb0845bde3a09a4345e4acd0645d3235abfda49"
@@ -7145,7 +7126,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 36,
+            "computed_event_count": 37,
             "checks": [
               {
                 "index": 0,
@@ -7333,13 +7314,13 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_overflow_hidden_clips_absolute_child_220748_1785811243374746900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_overflow_hidden_clips_absolute_child_98640_1786259106906600700.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 700,
-        "pdf_sha256": "ba696c08990d411bbf38e70f5dd51d66b77945dbf952286880d3a1ff6373d3ae",
+        "pdf_bytes": 698,
+        "pdf_sha256": "799b473859fe297737406e9788cf7390fb760ff4579a963be405acf7b60b6ab3",
         "image_count": 1,
         "image_sha256": [
           "59d208cedec0a042d24fb8096148bbb34e317e87999fc7f99dec96409e05913d"
@@ -7380,7 +7361,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 36,
+            "computed_event_count": 37,
             "checks": [
               {
                 "index": 0,
@@ -7568,13 +7549,13 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_overflow_visible_allows_absolute_bleed_220748_1785811244164564400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_overflow_visible_allows_absolute_bleed_98640_1786259107600140500.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 693,
-        "pdf_sha256": "d928cfa3acc5fdac641cd212454d3036943a928c45830af0abcae19095d4ef36",
+        "pdf_bytes": 691,
+        "pdf_sha256": "6aae5ca331c8d452849ea56d823bbc10f2b6d772775bf71c4827f6390bd1c309",
         "image_count": 1,
         "image_sha256": [
           "c54812362eea08576ce570b1227ff9da693f26cc1ac46b879594557d06909cd7"
@@ -7614,7 +7595,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 27,
+            "computed_event_count": 28,
             "checks": [
               {
                 "index": 0,
@@ -7738,13 +7719,13 @@
               "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_paged_break_before_forced_block_220748_1785811244673600000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_paged_break_before_forced_block_98640_1786259107854443900.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1158,
-        "pdf_sha256": "b6bdcf59702b4d6ac3687868c8e1335e1ccb9202f10177be40b541bfc41c5914",
+        "pdf_bytes": 1168,
+        "pdf_sha256": "e2a9510c0a33bd056f9f7af3a72a578ca506786dce96ef9c4410178245fc134d",
         "image_count": 2,
         "image_sha256": [
           "f7fb8a19b229799404dbfbf15c2705fa3bdfe2065fbbed7c1a20fbfdd91dfa1e",
@@ -7785,7 +7766,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 39,
+            "computed_event_count": 40,
             "checks": [
               {
                 "index": 0,
@@ -7965,7 +7946,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_auto_inset_static_position_fallback_220748_1785811244689653500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_auto_inset_static_position_fallback_98640_1786259107856443700.jsonl"
           }
         }
       },
@@ -8012,7 +7993,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 27,
+            "computed_event_count": 28,
             "checks": [
               {
                 "index": 0,
@@ -8173,7 +8154,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_empty_box_background_220748_1785811244820032800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_empty_box_background_98640_1786259107858955600.jsonl"
           }
         }
       },
@@ -8220,7 +8201,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 36,
+            "computed_event_count": 37,
             "checks": [
               {
                 "index": 0,
@@ -8438,7 +8419,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_explicit_width_overflow_no_clamp_220748_1785811245611240000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_explicit_width_overflow_no_clamp_98640_1786259108322766500.jsonl"
           }
         }
       },
@@ -8484,7 +8465,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 36,
+            "computed_event_count": 37,
             "checks": [
               {
                 "index": 0,
@@ -8664,7 +8645,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_initial_containing_block_from_static_parent_220748_1785811245626161500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_initial_containing_block_from_static_parent_98640_1786259108573024100.jsonl"
           }
         }
       },
@@ -8711,7 +8692,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 27,
+            "computed_event_count": 28,
             "checks": [
               {
                 "index": 0,
@@ -8872,7 +8853,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_left_right_width_precedence_220748_1785811245898629300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_left_right_width_precedence_98640_1786259108638500000.jsonl"
           }
         }
       },
@@ -8919,7 +8900,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 48,
+            "computed_event_count": 49,
             "checks": [
               {
                 "index": 0,
@@ -8940,7 +8921,7 @@
           "assertions_enabled": true,
           "assertions_ok": true,
           "assertions": {
-            "assertion_count": 5,
+            "assertion_count": 6,
             "checks": [
               {
                 "index": 0,
@@ -8948,7 +8929,7 @@
                 "kind": "color_run_length",
                 "page": 1,
                 "axis": "x",
-                "fixed": 30,
+                "fixed": 100,
                 "start": 0,
                 "expected_rgba": [
                   255,
@@ -8967,7 +8948,7 @@
                 "kind": "color_run_length",
                 "page": 1,
                 "axis": "x",
-                "fixed": 30,
+                "fixed": 100,
                 "start": 120,
                 "expected_rgba": [
                   255,
@@ -8986,7 +8967,7 @@
                 "kind": "color_run_length",
                 "page": 1,
                 "axis": "x",
-                "fixed": 30,
+                "fixed": 100,
                 "start": 150,
                 "expected_rgba": [
                   0,
@@ -9005,7 +8986,7 @@
                 "kind": "color_run_length",
                 "page": 1,
                 "axis": "x",
-                "fixed": 30,
+                "fixed": 100,
                 "start": 210,
                 "expected_rgba": [
                   255,
@@ -9014,8 +8995,8 @@
                   255
                 ],
                 "tolerance": 8,
-                "actual_run_length": 150,
-                "expected_length": 150,
+                "actual_run_length": 30,
+                "expected_length": 30,
                 "length_tolerance": 1
               },
               {
@@ -9024,7 +9005,26 @@
                 "kind": "color_run_length",
                 "page": 1,
                 "axis": "x",
-                "fixed": 30,
+                "fixed": 100,
+                "start": 240,
+                "expected_rgba": [
+                  0,
+                  255,
+                  0,
+                  255
+                ],
+                "tolerance": 8,
+                "actual_run_length": 120,
+                "expected_length": 120,
+                "length_tolerance": 1
+              },
+              {
+                "index": 5,
+                "ok": true,
+                "kind": "color_run_length",
+                "page": 1,
+                "axis": "x",
+                "fixed": 100,
                 "start": 360,
                 "expected_rgba": [
                   255,
@@ -9054,7 +9054,7 @@
             {
               "page": 1,
               "x": 170,
-              "y": 30,
+              "y": 100,
               "expected_rgba": [
                 0,
                 0,
@@ -9072,8 +9072,8 @@
             },
             {
               "page": 1,
-              "x": 290,
-              "y": 30,
+              "x": 220,
+              "y": 100,
               "expected_rgba": [
                 255,
                 0,
@@ -9099,19 +9099,19 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_nearest_positioned_ancestor_220748_1785811245901632300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_nearest_positioned_ancestor_98640_1786259108641487600.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 702,
-        "pdf_sha256": "72d4f50e0bac174b27e5c404842ab9b53f9753b2b9cf90d2c0de3b2b282a56bb",
+        "pdf_bytes": 707,
+        "pdf_sha256": "b6afb20b85f1e37cd27e11e87e7355d55cb40406e0dd843e95f8ac6c1dc748ca",
         "image_count": 1,
         "image_sha256": [
-          "c0665f885b72bc320ceef860f7640a068f2ef931680fe864ebd58c620072fd95"
+          "ae2144491925b84109dcc41dcc2991f8c4693e8476ec0fd03238463db758597c"
         ],
-        "stability_hash_expected": "e31a62462ac1ad4c31ff4b54330a76f79f40252c6c6b5a4a8048325d6051f19e",
-        "stability_hash_actual": "e31a62462ac1ad4c31ff4b54330a76f79f40252c6c6b5a4a8048325d6051f19e",
+        "stability_hash_expected": "bcc577b9bd8f26b83260a2d2711d56d9f672b2bbfd5778be92d0d604415d767d",
+        "stability_hash_actual": "bcc577b9bd8f26b83260a2d2711d56d9f672b2bbfd5778be92d0d604415d767d",
         "stability_hash_ok": true,
         "emitted": null
       },
@@ -9146,7 +9146,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 48,
+            "computed_event_count": 49,
             "checks": [
               {
                 "index": 0,
@@ -9326,7 +9326,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_percent_nearest_positioned_ancestor_220748_1785811246400758700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_percent_nearest_positioned_ancestor_98640_1786259108852162000.jsonl"
           }
         }
       },
@@ -9373,7 +9373,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 54,
+            "computed_event_count": 55,
             "checks": [
               {
                 "index": 0,
@@ -9516,13 +9516,13 @@
               "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_negative_page_one_only_220748_1785811246434841200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_negative_page_one_only_98640_1786259109144339800.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1122,
-        "pdf_sha256": "2e72637d1e15cb0f5f18a8cb8d4c7b06cf86e68546045669f70a2b566a9dd686",
+        "pdf_bytes": 1161,
+        "pdf_sha256": "841af145212233eca4c2ad98310848d28e2dd84a758b77f1fa6558f46f207c85",
         "image_count": 2,
         "image_sha256": [
           "af9be2770b19f45a1b8ad85f33440911ab9afa97998df68a8b30cb6c012cbb76",
@@ -9563,7 +9563,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 54,
+            "computed_event_count": 55,
             "checks": [
               {
                 "index": 0,
@@ -9725,13 +9725,13 @@
               "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_page_one_only_220748_1785811246481497200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_page_one_only_98640_1786259109192663700.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1173,
-        "pdf_sha256": "3c39088529e3a63fd9d58e93484948057b7a58e216915fa79bba22e6ae1ae7c2",
+        "pdf_bytes": 1186,
+        "pdf_sha256": "7028e1e96e224553151198c8564a88bb85dea2f787ae043bfc10d3c99f389e00",
         "image_count": 2,
         "image_sha256": [
           "39cee1d5be167ca226ad0b7de6b6822c98f73f7d95f719e53a809361d90a4ad9",
@@ -9774,7 +9774,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 42,
+            "computed_event_count": 43,
             "checks": [
               {
                 "index": 0,
@@ -9943,7 +9943,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_source_order_zindex_220748_1785811246528940400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_source_order_zindex_98640_1786259109195676700.jsonl"
           }
         }
       },
@@ -9994,7 +9994,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 42,
+            "computed_event_count": 43,
             "checks": [
               {
                 "index": 0,
@@ -10163,7 +10163,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_specificity_zindex_id_wins_220748_1785811247003344700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_specificity_zindex_id_wins_98640_1786259109282880200.jsonl"
           }
         }
       },
@@ -10209,7 +10209,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 42,
+            "computed_event_count": 43,
             "checks": [
               {
                 "index": 0,
@@ -10378,7 +10378,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_zindex_overlay_220748_1785811247768765800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_root_zindex_overlay_98640_1786259110463053500.jsonl"
           }
         }
       },
@@ -10425,7 +10425,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 27,
+            "computed_event_count": 28,
             "checks": [
               {
                 "index": 0,
@@ -10586,7 +10586,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_top_bottom_height_precedence_220748_1785811248044914200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_top_bottom_height_precedence_98640_1786259110466052800.jsonl"
           }
         }
       },
@@ -10633,7 +10633,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 36,
+            "computed_event_count": 37,
             "checks": [
               {
                 "index": 0,
@@ -10813,7 +10813,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_transform_establishes_containing_block_220748_1785811248197031700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_absolute_transform_establishes_containing_block_98640_1786259110534325600.jsonl"
           }
         }
       },
@@ -10860,7 +10860,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 54,
+            "computed_event_count": 55,
             "checks": [
               {
                 "index": 0,
@@ -10984,13 +10984,13 @@
               "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_negative_zindex_under_content_220748_1785811248739388500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_negative_zindex_under_content_98640_1786259110578893800.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1193,
-        "pdf_sha256": "05ac80b6c1d7544121ef5212206d3f613d86d6b8b50f060b12799ecc93d7d751",
+        "pdf_bytes": 1213,
+        "pdf_sha256": "6f80fd16c09fd74a359a614e373501cbf77995aba6c907e64ec83cc9c8b083ae",
         "image_count": 2,
         "image_sha256": [
           "bf37bbfb7c1fddc47880e120115df081466a670898007240910975c72c69bc80",
@@ -11031,7 +11031,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 54,
+            "computed_event_count": 55,
             "checks": [
               {
                 "index": 0,
@@ -11193,13 +11193,13 @@
               "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_repeats_each_page_220748_1785811248973057400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_repeats_each_page_98640_1786259111010101000.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1192,
-        "pdf_sha256": "dcdb836187794c1036ef0431f57c942364c1f33b2b0ecca5d2d78276b0b7b7ca",
+        "pdf_bytes": 1208,
+        "pdf_sha256": "77ff4676cade55349deb6a33b98d268d2a0b904c6bc3f166f1f56cf9f3cca3cd",
         "image_count": 2,
         "image_sha256": [
           "260a7a9dec59cd90ddc9f980ad994df21a1cad7f2061d405ce6138e5844283aa",
@@ -11240,7 +11240,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 42,
+            "computed_event_count": 43,
             "checks": [
               {
                 "index": 0,
@@ -11409,7 +11409,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_zindex_front_ordering_220748_1785811249073184700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_fixed_zindex_front_ordering_98640_1786259111205563800.jsonl"
           }
         }
       },
@@ -11457,7 +11457,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 36,
+            "computed_event_count": 37,
             "checks": [
               {
                 "index": 0,
@@ -11580,7 +11580,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_bottom_containing_height_220748_1785811249077290600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_bottom_containing_height_98640_1786259111617826700.jsonl"
           }
         }
       },
@@ -11628,7 +11628,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -11751,7 +11751,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_left_containing_width_220748_1785811250060220400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_left_containing_width_98640_1786259111620834800.jsonl"
           }
         }
       },
@@ -11799,7 +11799,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -11922,7 +11922,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_right_containing_width_220748_1785811250192520200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_calc_right_containing_width_98640_1786259111992615800.jsonl"
           }
         }
       },
@@ -11969,7 +11969,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -12111,7 +12111,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_inset_shorthand_uniform_220748_1785811250516882500.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_inset_shorthand_uniform_98640_1786259112246477200.jsonl"
           }
         }
       },
@@ -12158,7 +12158,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 27,
+            "computed_event_count": 28,
             "checks": [
               {
                 "index": 0,
@@ -12338,7 +12338,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_left_right_precedence_220748_1785811250558219700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_left_right_precedence_98640_1786259112249481100.jsonl"
           }
         }
       },
@@ -12385,7 +12385,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 27,
+            "computed_event_count": 28,
             "checks": [
               {
                 "index": 0,
@@ -12584,7 +12584,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_offset_preserves_flow_slot_220748_1785811250561218100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_offset_preserves_flow_slot_98640_1786259112263997800.jsonl"
           }
         }
       },
@@ -12631,7 +12631,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -12754,7 +12754,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_percent_left_containing_width_220748_1785811250570311400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_percent_left_containing_width_98640_1786259112275930300.jsonl"
           }
         }
       },
@@ -12801,7 +12801,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 36,
+            "computed_event_count": 37,
             "checks": [
               {
                 "index": 0,
@@ -12924,7 +12924,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_percent_top_containing_height_220748_1785811250874647300.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_percent_top_containing_height_98640_1786259112525352700.jsonl"
           }
         }
       },
@@ -12971,7 +12971,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 27,
+            "computed_event_count": 28,
             "checks": [
               {
                 "index": 0,
@@ -13151,7 +13151,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_right_bottom_offsets_220748_1785811250965516000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_right_bottom_offsets_98640_1786259112528347000.jsonl"
           }
         }
       },
@@ -13198,7 +13198,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 27,
+            "computed_event_count": 28,
             "checks": [
               {
                 "index": 0,
@@ -13359,7 +13359,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_top_bottom_precedence_220748_1785811251245480600.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_position_relative_top_bottom_precedence_98640_1786259112576569500.jsonl"
           }
         }
       },
@@ -13408,7 +13408,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 5,
-            "computed_event_count": 45,
+            "computed_event_count": 46,
             "checks": [
               {
                 "index": 0,
@@ -13639,7 +13639,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_attribute_variants_220748_1785811251249658200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_attribute_variants_98640_1786259112813090300.jsonl"
           }
         }
       },
@@ -13686,7 +13686,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 5,
-            "computed_event_count": 45,
+            "computed_event_count": 46,
             "checks": [
               {
                 "index": 0,
@@ -13917,7 +13917,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_sibling_combinators_220748_1785811251631026100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_sibling_combinators_98640_1786259113180915400.jsonl"
           }
         }
       },
@@ -13965,7 +13965,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -14050,7 +14050,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_specificity_id_wins_220748_1785811251678186800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_specificity_id_wins_98640_1786259113182919300.jsonl"
           }
         }
       },
@@ -14098,7 +14098,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 5,
-            "computed_event_count": 45,
+            "computed_event_count": 46,
             "checks": [
               {
                 "index": 0,
@@ -14329,7 +14329,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_structural_pseudos_220748_1785811252552862000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_selectors_structural_pseudos_98640_1786259113194986400.jsonl"
           }
         }
       },
@@ -14377,7 +14377,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 36,
+            "computed_event_count": 37,
             "checks": [
               {
                 "index": 0,
@@ -14462,7 +14462,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_solid_red_block_220748_1785811252731520100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_solid_red_block_98640_1786259114210920100.jsonl"
           }
         }
       },
@@ -14509,7 +14509,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 108,
+            "computed_event_count": 109,
             "checks": [
               {
                 "index": 0,
@@ -14652,13 +14652,13 @@
               "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_table_header_repeat_across_pages_220748_1785811252839855400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_table_header_repeat_across_pages_98640_1786259114236992800.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1365,
-        "pdf_sha256": "a4bb159b73ab1723e0066b442698a75395b400d20215cff7555d4c5f498d594f",
+        "pdf_bytes": 1399,
+        "pdf_sha256": "6fba2b8781b98443d6af3852393609765f5266963ae0a47d701b012c44096e0f",
         "image_count": 2,
         "image_sha256": [
           "2bb93bb49d2f702cec97741a2f45ca67ef4d4710225b3b59bb2953da6ce529e5",
@@ -14700,7 +14700,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -14842,7 +14842,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_individual_compose_with_transform_220748_1785811253645898900.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_individual_compose_with_transform_98640_1786259114478285200.jsonl"
           }
         }
       },
@@ -14889,7 +14889,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -15031,7 +15031,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_matrix_block_affine_220748_1785811253706695400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_matrix_block_affine_98640_1786259114591727800.jsonl"
           }
         }
       },
@@ -15078,7 +15078,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -15201,7 +15201,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_origin_left_scale_anchor_220748_1785811253949870000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_origin_left_scale_anchor_98640_1786259114667308500.jsonl"
           }
         }
       },
@@ -15248,7 +15248,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -15371,13 +15371,13 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_block_centered_220748_1785811254121426400.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_block_centered_98640_1786259114835930800.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 875,
-        "pdf_sha256": "cce45c21d551f85d4a593bab6e7c188df703cf3553cca96366fb6813fcebf4c2",
+        "pdf_bytes": 873,
+        "pdf_sha256": "7d71ac860afd69cae97f45dfdf1a8560498a3abfef7a279c16378db84ad5e6ce",
         "image_count": 1,
         "image_sha256": [
           "7e783d4d35afae7f4ae335d808c24c0d8b876c33a72d1dd6fe6211b8c99ba662"
@@ -15419,7 +15419,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -15542,13 +15542,13 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_var_fallback_missing_220748_1785811254175052800.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_var_fallback_missing_98640_1786259114908202500.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 875,
-        "pdf_sha256": "33b1e43d6db7fbe2db5567415dbc0ab9c75e92414578e25e41fa2ec51f0b0395",
+        "pdf_bytes": 873,
+        "pdf_sha256": "4e77f0e7174b9b12661cd262e9c7122a65e246d064cd9017df535e4d363a17c9",
         "image_count": 1,
         "image_sha256": [
           "dce2c4a1ca5a31efd75de788fd2297fde937519067dfc918c13782313145d1e4"
@@ -15590,7 +15590,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -15713,13 +15713,13 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_var_reference_custom_angle_220748_1785811254197942100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_rotate_var_reference_custom_angle_98640_1786259114961767900.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 875,
-        "pdf_sha256": "226ed44daab58a19f9230a967b8a4fde679ad13b67f4124d664cd5faa27ea3f6",
+        "pdf_bytes": 873,
+        "pdf_sha256": "7d9e62ace645fb40356519e42e3b880a7a2f8f5b5acad4534501e35f65d3cac2",
         "image_count": 1,
         "image_sha256": [
           "32111e1b6f23f31485be6ff918f4f683c79e9addf409bcda505750b92c73e0a0"
@@ -15760,7 +15760,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -15883,7 +15883,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_scale_block_centered_220748_1785811254257077700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_scale_block_centered_98640_1786259114963768400.jsonl"
           }
         }
       },
@@ -15930,7 +15930,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -16053,7 +16053,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_scale_var_reference_custom_pair_220748_1785811254505140100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_scale_var_reference_custom_pair_98640_1786259115050551800.jsonl"
           }
         }
       },
@@ -16100,7 +16100,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -16280,7 +16280,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_skewx_block_left_origin_220748_1785811254558060100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_skewx_block_left_origin_98640_1786259115178080200.jsonl"
           }
         }
       },
@@ -16327,7 +16327,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -16450,7 +16450,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_translate_block_offsets_220748_1785811254560664000.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_translate_block_offsets_98640_1786259115192593100.jsonl"
           }
         }
       },
@@ -16498,7 +16498,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -16621,7 +16621,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_translate_var_reference_custom_pair_220748_1785811254570709200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_translate_var_reference_custom_pair_98640_1786259115219245400.jsonl"
           }
         }
       },
@@ -16669,7 +16669,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -16792,7 +16792,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_var_cycle_fallback_translate_220748_1785811254725778100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_var_cycle_fallback_translate_98640_1786259115282322100.jsonl"
           }
         }
       },
@@ -16839,7 +16839,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -16981,7 +16981,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_var_reference_custom_list_220748_1785811254820308700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_transform_var_reference_custom_list_98640_1786259115335592600.jsonl"
           }
         }
       },
@@ -17028,7 +17028,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 2,
-            "computed_event_count": 51,
+            "computed_event_count": 52,
             "checks": [
               {
                 "index": 0,
@@ -17160,13 +17160,13 @@
               "jit.page_break.trigger": 6
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_two_page_break_colors_220748_1785811254821820200.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_two_page_break_colors_98640_1786259115374069200.jsonl"
           }
         }
       },
       "artifacts": {
-        "pdf_bytes": 1158,
-        "pdf_sha256": "531a86c485c13e1439d3db836420dcd616c50a1676bd02ca68257acc0b236cbc",
+        "pdf_bytes": 1164,
+        "pdf_sha256": "b65f32b87be835e284fb5380b2501ad6bf94f8cf05da949a74814b91e3d25465",
         "image_count": 2,
         "image_sha256": [
           "bc59d41bebaada5b93cec6b858749d73949ae442c578c1f525559c5526d5a6c2",
@@ -17207,7 +17207,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 1,
-            "computed_event_count": 24,
+            "computed_event_count": 25,
             "checks": [
               {
                 "index": 0,
@@ -17311,7 +17311,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_calc_width_resolution_220748_1785811254964410700.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_calc_width_resolution_98640_1786259115520547000.jsonl"
           }
         }
       },
@@ -17359,7 +17359,7 @@
           "assertions_ok": true,
           "assertions": {
             "assertion_count": 3,
-            "computed_event_count": 30,
+            "computed_event_count": 31,
             "checks": [
               {
                 "index": 0,
@@ -17593,7 +17593,7 @@
               "jit.layout.strategy": 3
             },
             "summary_context_count": 3,
-            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_min_max_clamp_widths_220748_1785811254994455100.jsonl"
+            "log_path": "C:\\Users\\keena\\AppData\\Local\\Temp\\fullbleed_css_fixture_units_min_max_clamp_widths_98640_1786259115608536400.jsonl"
           }
         }
       },
