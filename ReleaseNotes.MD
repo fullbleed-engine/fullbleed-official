@@ -1,4 +1,4 @@
-# Fullbleed Release Notes - 2.2.1
+# Fullbleed Release Notes - 2.2.2
 
 Status: release
 
@@ -6,7 +6,7 @@ Release date: August 9, 2026
 
 ## Summary
 
-Fullbleed 2.2.1 closes the current IronPress parity pass and extends the compiled variable-data
+Fullbleed 2.2.2 closes the current IronPress parity pass and extends the compiled variable-data
 lane through immutable page-space transforms and clips. The official independent Wheel265 gate
 reports 1,642 comparator passes, zero implementation failures, and 20 reference-disputed cases.
 The disputed cases remain visible in the evidence set and are not relabeled as engine passes.
@@ -59,6 +59,9 @@ the identical-page copy benchmark and do not claim the same speed for arbitrary 
   eliminating Windows-versus-Unix checkout differences.
 - Retains immutable, deterministic registry lookup behavior and adds a regression gate that rejects
   carriage returns in all public embedded payloads.
+- Sets a 4 MiB stack for Rust's debug test-harness threads in CI and release workflows. This keeps
+  the deep grid-fragmentation regression reproducible on both Linux and Windows without changing
+  optimized runtime stack behavior.
 
 ## Compatibility
 
@@ -71,7 +74,7 @@ the identical-page copy benchmark and do not claim the same speed for arbitrary 
 
 ## Package Versions
 
-- `fullbleed 2.2.1` on crates.io and PyPI.
+- `fullbleed 2.2.2` on crates.io and PyPI.
 - `fullbleed_audit_contract 0.1.3` on crates.io.
 - `subsetter 0.2.6`, `rustc-hash 2.1.3`, and `unicode-bidi 0.3.18`, recorded in Cargo metadata and
   the generated CycloneDX SBOM.
@@ -89,6 +92,6 @@ the identical-page copy benchmark and do not claim the same speed for arbitrary 
 - The release workflow builds, installs, and smokes 15 `cp310-abi3` wheels plus one source
   distribution before publication.
 
-The exact `v2.2.1` source is validated before registry publication. GitHub, PyPI, and crates.io are
+The exact `v2.2.2` source is validated before registry publication. GitHub, PyPI, and crates.io are
 published from that immutable tagged source, with the complete Python distribution set and its
 SHA-256 manifest attached to the GitHub release.

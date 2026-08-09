@@ -216,7 +216,7 @@ def test_cyclonedx_sbom_is_deterministic_and_covers_optional_build_graph(
     dependencies = {
         row["ref"]: set(row["dependsOn"]) for row in document["dependencies"]
     }
-    assert dependencies["pkg:cargo/fullbleed@2.2.1"] == {
+    assert dependencies["pkg:cargo/fullbleed@2.2.2"] == {
         "pkg:cargo/fullbleed_audit_contract@0.1.3",
         "pkg:cargo/subsetter@0.2.6",
         "pkg:cargo/unicode-bidi@0.3.18",
