@@ -35,7 +35,7 @@
         "kind": "color_run_length",
         "page": 1,
         "axis": "x",
-        "fixed": 30,
+        "fixed": 100,
         "start": 0,
         "rgba": [
           255,
@@ -51,7 +51,7 @@
         "kind": "color_run_length",
         "page": 1,
         "axis": "x",
-        "fixed": 30,
+        "fixed": 100,
         "start": 120,
         "rgba": [
           255,
@@ -67,7 +67,7 @@
         "kind": "color_run_length",
         "page": 1,
         "axis": "x",
-        "fixed": 30,
+        "fixed": 100,
         "start": 150,
         "rgba": [
           0,
@@ -83,7 +83,7 @@
         "kind": "color_run_length",
         "page": 1,
         "axis": "x",
-        "fixed": 30,
+        "fixed": 100,
         "start": 210,
         "rgba": [
           255,
@@ -92,14 +92,30 @@
           255
         ],
         "tolerance": 8,
-        "expected_length": 150,
+        "expected_length": 30,
         "length_tolerance": 1
       },
       {
         "kind": "color_run_length",
         "page": 1,
         "axis": "x",
-        "fixed": 30,
+        "fixed": 100,
+        "start": 240,
+        "rgba": [
+          0,
+          255,
+          0,
+          255
+        ],
+        "tolerance": 8,
+        "expected_length": 120,
+        "length_tolerance": 1
+      },
+      {
+        "kind": "color_run_length",
+        "page": 1,
+        "axis": "x",
+        "fixed": 100,
         "start": 360,
         "rgba": [
           255,
@@ -116,7 +132,7 @@
       {
         "page": 1,
         "x": 170,
-        "y": 30,
+        "y": 100,
         "rgba": [
           0,
           0,
@@ -127,8 +143,8 @@
       },
       {
         "page": 1,
-        "x": 290,
-        "y": 30,
+        "x": 220,
+        "y": 100,
         "rgba": [
           255,
           0,
@@ -139,5 +155,5 @@
       }
     ]
   },
-  "stability_hash": "e31a62462ac1ad4c31ff4b54330a76f79f40252c6c6b5a4a8048325d6051f19e"
+  "stability_hash": "bcc577b9bd8f26b83260a2d2711d56d9f672b2bbfd5778be92d0d604415d767d"
 }

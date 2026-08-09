@@ -1,6 +1,6 @@
 {
   "id": "diagnostics_multicol_single_column_fallback",
-  "description": "Supported column-count and column-rule should render while unsupported multicolumn properties emit explicit fallback diagnostics.",
+  "description": "Supported column-count, column-width, column-fill, column-span, and column-rule declarations should render without an obsolete single-column fallback diagnostic.",
   "labels": [
     "full",
     "diagnostics"
@@ -40,18 +40,6 @@
           255
         ],
         "tolerance": 8
-      }
-    ]
-  },
-  "expected_diagnostics": {
-    "summary_count_at_least": {
-      "jit.known_loss.multicol_single_column_fallback": 1
-    },
-    "event_contains": [
-      {
-        "type": "jit.known_loss",
-        "code": "MULTICOL_SINGLE_COLUMN_FALLBACK",
-        "property": "column-width"
       }
     ]
   },

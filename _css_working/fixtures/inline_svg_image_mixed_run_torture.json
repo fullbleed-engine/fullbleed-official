@@ -102,8 +102,8 @@
         "kind": "color_run_length",
         "page": 1,
         "axis": "x",
-        "fixed": 30,
-        "start": 135,
+        "fixed": 35,
+        "start": 132,
         "rgba": [
           0,
           102,
@@ -111,15 +111,15 @@
           255
         ],
         "tolerance": 8,
-        "min_length": 26,
-        "max_length": 34
+        "min_length": 23,
+        "max_length": 25
       },
       {
         "kind": "color_run_length",
         "page": 1,
         "axis": "x",
-        "fixed": 36,
-        "start": 165,
+        "fixed": 35,
+        "start": 156,
         "rgba": [
           255,
           0,
@@ -127,8 +127,8 @@
           255
         ],
         "tolerance": 8,
-        "min_length": 20,
-        "max_length": 28
+        "min_length": 23,
+        "max_length": 25
       }
     ],
     "paint_samples": [
@@ -158,7 +158,7 @@
       },
       {
         "page": 1,
-        "x": 185,
+        "x": 170,
         "y": 36,
         "rgba": [
           255,
@@ -170,5 +170,5 @@
       }
     ]
   },
-  "stability_hash": "a3285a6873eac7956668da6c2be0e1a21782379f8eaf8698f53a4848ebe658ad"
+  "stability_hash": "0f2a29a2e3e818c03835540c7f958e0673ec023f2ea0121e3bc70bea082a2507"
 }

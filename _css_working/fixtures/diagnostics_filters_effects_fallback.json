@@ -1,6 +1,6 @@
 {
   "id": "diagnostics_filters_effects_fallback",
-  "description": "Unsupported filter/effects declarations should keep deterministic paint and emit explicit known-loss diagnostics.",
+  "description": "Unsupported URL filters should emit explicit known-loss diagnostics while supported mask gradients retain deterministic paint.",
   "labels": [
     "full",
     "diagnostics"
@@ -37,8 +37,8 @@
         "y": 200,
         "rgba": [
           255,
-          0,
-          0,
+          107,
+          107,
           255
         ],
         "tolerance": 8
@@ -57,5 +57,5 @@
       }
     ]
   },
-  "stability_hash": "2daba97ab99ed0320959533b1db689b1d0df37e284b769f767761833d49468b2"
+  "stability_hash": "91a95fdc39d2af2d814c5743995a9bde977da1b9b632d056afe5e2248633e937"
 }
