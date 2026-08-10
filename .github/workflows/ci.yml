@@ -227,6 +227,8 @@ jobs:
           python -m pip install --force-reinstall target/wheels/fullbleed-*.whl
 
       - name: Verify golden suite
+        env:
+          FULLBLEED_TEST_INSTALLED_NATIVE: "1"
         run: python goldens/run_golden_suite.py --python python verify
 
       - name: Verify minimal per-page template flagging smoke

@@ -69,6 +69,5 @@ This is an agent-interface and distribution release, not a rendering rewrite. Th
 - Canonical agent example run from a clean installed wheel.
 - Skill-format validation and AgentDocBench preparation/scoring contract tests.
 - Existing golden, CSS parity, license, release-metadata, package-file, MSRV consumer, and deterministic-output gates remain required.
-- Golden baselines are synchronized to the public 2.2.5 wheel after the 2.2.3-era hashes were found stale; the 2.3.0 candidate and public 2.2.5 wheel produce the same example PDFs and PNGs.
 
 Exact test counts and artifact hashes are recorded in the final 2.3.0 release run and attached distribution manifest. No competitive AgentDocBench conclusion is made in this release.
