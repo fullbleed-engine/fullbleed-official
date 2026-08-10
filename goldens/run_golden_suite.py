@@ -128,6 +128,8 @@ def _assert_css_contract(payload: dict[str, Any], *, case_id: str) -> list[str]:
 
 
 def _source_extension_available() -> bool:
+    if os.environ.get("FULLBLEED_TEST_INSTALLED_NATIVE") == "1":
+        return False
     return any(
         (SOURCE_FULLBLEED_DIR / f"_fullbleed{suffix}").exists()
         for suffix in importlib.machinery.EXTENSION_SUFFIXES

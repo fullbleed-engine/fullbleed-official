@@ -883,6 +883,28 @@ fn dispatch_compiled(
                 "binding_program_command_count",
                 compiled.binding_program_command_count(),
             )?;
+            out.set_item("reflow_program_ready", compiled.reflow_program_ready())?;
+            out.set_item(
+                "reflow_binding_slot_count",
+                compiled.reflow_binding_slots().len(),
+            )?;
+            out.set_item(
+                "reflow_binding_slots",
+                PyList::new(py, compiled.reflow_binding_slots())?,
+            )?;
+            out.set_item(
+                "reflow_program_node_count",
+                compiled.reflow_program_node_count(),
+            )?;
+            out.set_item(
+                "reflow_program_binding_text_node_count",
+                compiled.reflow_program_binding_text_node_count(),
+            )?;
+            out.set_item(
+                "reflow_program_html_binding_node_count",
+                compiled.reflow_program_html_binding_node_count(),
+            )?;
+            out.set_item("reflow_program_error", compiled.reflow_program_error())?;
             Ok(out.unbind().into_any())
         }
         "CompiledDocument.render_pdf" => {
@@ -934,6 +956,29 @@ fn dispatch_compiled(
             let path: String = argument(payload, 1)?;
             let written = py
                 .allow_threads(|| compiled.render_bindings_to_file(&bindings, &path))
+                .map_err(to_py_err)?;
+            if let Some(hash_path) = optional_argument::<String>(payload, 2)? {
+                write_hash_file(&hash_path, &sha256_file_hex(&path)?)?;
+            }
+            written.into_py_value()
+        }
+        "CompiledDocument.render_pdf_reflow_bindings" => {
+            expect_arity(payload, 2)?;
+            let bindings: HashMap<String, Vec<String>> = argument(payload, 0)?;
+            let bytes = py
+                .allow_threads(|| compiled.render_reflow_bindings_to_buffer(&bindings))
+                .map_err(to_py_err)?;
+            if let Some(path) = optional_argument::<String>(payload, 1)? {
+                write_hash_file(&path, &sha256_hex(&bytes))?;
+            }
+            Ok(PyBytes::new(py, &bytes).unbind().into_any())
+        }
+        "CompiledDocument.render_pdf_reflow_bindings_to_file" => {
+            expect_arity(payload, 3)?;
+            let bindings: HashMap<String, Vec<String>> = argument(payload, 0)?;
+            let path: String = argument(payload, 1)?;
+            let written = py
+                .allow_threads(|| compiled.render_reflow_bindings_to_file(&bindings, &path))
                 .map_err(to_py_err)?;
             if let Some(hash_path) = optional_argument::<String>(payload, 2)? {
                 write_hash_file(&hash_path, &sha256_file_hex(&path)?)?;

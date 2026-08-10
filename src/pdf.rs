@@ -16,6 +16,7 @@ use crate::types::{
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{self, Write};
 use std::path::Path;
+use std::sync::{Arc, OnceLock, RwLock};
 
 fn effective_page_size(page: &Page, fallback: Size) -> Size {
     page.commands
@@ -318,9 +319,53 @@ const PDF_FILTER_RASTER_DPI: u32 = 300;
 const PDF_PAGE_NODE_MAX_KIDS: usize = 256;
 
 #[derive(Clone)]
-struct ShapedText {
-    tj: String,
-    glyph_map: BTreeMap<u16, String>,
+pub(crate) struct ShapedText {
+    tj: Arc<str>,
+    glyph_map: Arc<BTreeMap<u16, String>>,
+    glyph_map_is_direct_ascii: bool,
+    units_per_em: u16,
+    glyphs: Arc<[crate::text_shape::ShapedGlyph]>,
+    default_advances: Arc<[i32]>,
+}
+
+impl ShapedText {
+    pub(crate) fn for_each_glyph_source(&self, text: &str, mut visit: impl FnMut(u16, &str)) {
+        if self.glyph_map_is_direct_ascii {
+            debug_assert!(text.is_ascii());
+            for glyph in self.glyphs.iter() {
+                let start = glyph.cluster as usize;
+                if let Some(value) = text.get(start..start.saturating_add(1)) {
+                    visit(glyph.glyph_id, value);
+                }
+            }
+        } else {
+            for (glyph_id, value) in self.glyph_map.iter() {
+                visit(*glyph_id, value);
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct CompiledFlowShapeCache {
+    fonts: RwLock<HashMap<String, Arc<CompiledNumericFontShader>>>,
+    full_shapes: RwLock<HashMap<String, Arc<ShapedText>>>,
+}
+
+pub(crate) struct CompiledNumericFontShader {
+    data: Arc<[u8]>,
+    units_per_em: u16,
+    digit_glyphs: [u16; 10],
+    digit_advances: [i32; 10],
+    pair_shapes: Box<[OnceLock<Option<CompiledNumericPair>>]>,
+}
+
+#[derive(Clone, Copy)]
+struct CompiledNumericPair {
+    first_glyph: u16,
+    second_glyph: u16,
+    first_advance: i32,
+    first_default_advance: i32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -836,6 +881,20 @@ pub(crate) struct PdfStreamWriter<'a, W: Write> {
 
     // Text shaping cache (per document)
     shaped_cache: HashMap<String, ShapedText>,
+    compiled_flow_page_programs: Arc<CompiledFlowPdfProgramCache>,
+    compiled_flow_seen_glyphs: HashMap<String, Box<[u64; 1024]>>,
+    pending_compiled_flow_pages: Vec<PendingCompiledFlowPage>,
+    compiled_flow_shader_nanos: u64,
+    compiled_flow_compression_nanos: u64,
+    compiled_flow_pipeline_nanos: u64,
+    compiled_flow_write_nanos: u64,
+    compiled_flow_parallel_pages: usize,
+    compiled_flow_worker_encoded_pages: usize,
+    compiled_flow_fallback_pages: usize,
+    compiled_flow_reject_shape_pages: usize,
+    compiled_flow_reject_count_pages: usize,
+    compiled_flow_reject_command_pages: usize,
+    compiled_flow_reject_transform_pages: usize,
 
     // Tagged PDF state
     tag_records: Vec<TagRecord>,
@@ -854,6 +913,305 @@ pub(crate) struct PdfStreamWriter<'a, W: Write> {
     font_program_subset_glyphs: usize,
     pdfvt_dpart_root_id: Option<usize>,
     pdfvt_dpart_node_id: Option<usize>,
+}
+
+/// A command-local binding for a compiled flow program. The layout document remains immutable;
+/// the linker substitutes only the final painted text and x coordinate while walking it.
+pub(crate) struct CompiledFlowTextOverride {
+    pub(crate) command: usize,
+    pub(crate) transformed: bool,
+    pub(crate) x: Pt,
+    pub(crate) x_pdf: Arc<str>,
+    pub(crate) text: Arc<str>,
+    pub(crate) shaped: Option<ShapedText>,
+}
+
+#[derive(Clone, Copy)]
+enum CompiledFlowTextPlacement {
+    Normal {
+        y: Pt,
+    },
+    Transformed {
+        y: Pt,
+        m00: f32,
+        m01: f32,
+        m10: f32,
+        m11: f32,
+    },
+}
+
+struct CompiledFlowPaintSlot {
+    command: usize,
+    font_name: String,
+    font_size: Pt,
+    placement: CompiledFlowTextPlacement,
+}
+
+struct CompiledFlowPdfPaintSlot {
+    paint: CompiledFlowPaintSlot,
+    font_key: String,
+    encoding: FontEncoding,
+    prefix: Arc<str>,
+    after_x: Arc<str>,
+}
+
+struct CompiledFlowRenderedSlot {
+    start: usize,
+    end: usize,
+    paint: CompiledFlowPaintSlot,
+}
+
+struct CompiledFlowPageProgram {
+    static_segments: Vec<Arc<str>>,
+    slots: Vec<CompiledFlowPdfPaintSlot>,
+    resource_fonts: Option<Arc<[Arc<str>]>>,
+    capacity: usize,
+}
+
+fn compiled_flow_page_resource_fonts(commands: &[Command]) -> Option<Arc<[Arc<str>]>> {
+    let mut font_name = Arc::<str>::from("Helvetica");
+    let mut state_stack = Vec::<Arc<str>>::new();
+    let mut fonts = Vec::<Arc<str>>::new();
+    for command in commands {
+        match command {
+            Command::SaveState => state_stack.push(font_name.clone()),
+            Command::RestoreState => {
+                if let Some(saved) = state_stack.pop() {
+                    font_name = saved;
+                }
+            }
+            Command::SetFontName(name) => font_name = Arc::from(name.as_str()),
+            Command::DrawString { .. } | Command::DrawStringTransformed { .. } => {
+                if !fonts.iter().any(|current| current == &font_name) {
+                    fonts.push(font_name.clone());
+                }
+            }
+            Command::SetOpacity { .. }
+            | Command::SetBlendMode { .. }
+            | Command::ApplyBackdropFilter { .. }
+            | Command::ShadingFill(_)
+            | Command::DrawGlyphRun { .. }
+            | Command::DrawSyntheticBoldGlyphRun { .. }
+            | Command::DrawImage { .. }
+            | Command::DefineForm { .. }
+            | Command::DefineIsolatedForm { .. }
+            | Command::DrawForm { .. }
+            | Command::DrawFilteredForm { .. }
+            | Command::DrawMaskedForm { .. }
+            | Command::BeginOptionalContent { .. } => return None,
+            _ => {}
+        }
+    }
+    Some(fonts.into())
+}
+
+#[derive(Default)]
+pub(crate) struct CompiledFlowPdfProgramCache {
+    programs: RwLock<HashMap<(usize, usize), Arc<CompiledFlowPageProgram>>>,
+    font_seeds: Arc<[CompiledFlowFontSeed]>,
+}
+
+struct CompiledFlowFontSeed {
+    first_page_index: usize,
+    logical_name: Arc<str>,
+    glyph_map: Arc<BTreeMap<u16, String>>,
+}
+
+impl CompiledFlowPdfProgramCache {
+    fn replay_safe_clone_with_fonts(&self, font_seeds: Arc<[CompiledFlowFontSeed]>) -> Arc<Self> {
+        let programs = self
+            .programs
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .filter(|(_, program)| program.resource_fonts.is_some())
+            .map(|(key, program)| (*key, program.clone()))
+            .collect();
+        Arc::new(Self {
+            programs: RwLock::new(programs),
+            font_seeds,
+        })
+    }
+}
+
+impl CompiledFlowPageProgram {
+    fn parallel_instantiation_rejection(
+        &self,
+        overrides: &[CompiledFlowTextOverride],
+    ) -> Option<CompiledFlowParallelRejection> {
+        if self.slots.len() != overrides.len() || self.static_segments.len() != self.slots.len() + 1
+        {
+            return Some(CompiledFlowParallelRejection::Count);
+        }
+        for (slot, bound) in self.slots.iter().zip(overrides) {
+            let encoding_ready = match slot.encoding {
+                FontEncoding::IdentityH => bound.shaped.is_some() || bound.text.is_empty(),
+                FontEncoding::WinAnsi => true,
+            };
+            if !encoding_ready {
+                return Some(CompiledFlowParallelRejection::Shape);
+            }
+            if slot.paint.command != bound.command {
+                return Some(CompiledFlowParallelRejection::Command);
+            }
+            if matches!(
+                slot.paint.placement,
+                CompiledFlowTextPlacement::Transformed { .. }
+            ) != bound.transformed
+            {
+                return Some(CompiledFlowParallelRejection::Transform);
+            }
+        }
+        None
+    }
+
+    fn supports_parallel_instantiation(&self, overrides: &[CompiledFlowTextOverride]) -> bool {
+        self.parallel_instantiation_rejection(overrides).is_none()
+    }
+}
+
+#[derive(Clone, Copy)]
+enum CompiledFlowParallelRejection {
+    Shape,
+    Count,
+    Command,
+    Transform,
+}
+
+struct PendingCompiledFlowPage {
+    parent_id: usize,
+    content_id: usize,
+    page_id: usize,
+    page_index: usize,
+    geometry: PageGeometry,
+    content: PendingCompiledFlowContent,
+}
+
+enum PendingCompiledFlowContent {
+    Ready(String),
+    Program {
+        program: Arc<CompiledFlowPageProgram>,
+        overrides: Vec<CompiledFlowTextOverride>,
+    },
+    Encoded(EncodedCompiledFlowPage),
+}
+
+#[derive(Clone)]
+pub(crate) struct EncodedCompiledFlowPage {
+    raw_len: usize,
+    data: Arc<[u8]>,
+    compressed: bool,
+}
+
+fn instantiate_parallel_compiled_flow_page_program(
+    program: &CompiledFlowPageProgram,
+    overrides: &[CompiledFlowTextOverride],
+    geometry: PageGeometry,
+) -> io::Result<String> {
+    if !program.supports_parallel_instantiation(overrides) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "compiled flow page bindings do not match its parallel PDF paint program",
+        ));
+    }
+
+    let mut raw = String::with_capacity(program.capacity);
+    for ((static_segment, slot), bound) in program
+        .static_segments
+        .iter()
+        .zip(&program.slots)
+        .zip(overrides)
+    {
+        raw.push_str(static_segment);
+        raw.push_str(slot.prefix.as_ref());
+        raw.push_str(bound.x_pdf.as_ref());
+        raw.push_str(slot.after_x.as_ref());
+        match slot.encoding {
+            FontEncoding::IdentityH => {
+                if let Some(shaped) = bound.shaped.as_ref() {
+                    raw.push_str(shaped.tj.as_ref());
+                } else {
+                    debug_assert!(bound.text.is_empty());
+                    raw.push_str("<> Tj\n");
+                }
+            }
+            FontEncoding::WinAnsi => {
+                let encoded = encode_winansi_pdf_string(bound.text.as_ref());
+                debug_assert_eq!(encoded.replaced, 0);
+                debug_assert_eq!(encoded.fallbacks, 0);
+                raw.push('(');
+                raw.push_str(&encoded.text);
+                raw.push_str(") Tj\n");
+            }
+        }
+        raw.push_str("ET\n");
+    }
+    raw.push_str(
+        program
+            .static_segments
+            .last()
+            .expect("compiled flow page program always has a trailing segment"),
+    );
+    let content = wrap_page_content_for_presentation(raw, geometry);
+    Ok(wrap_page_content_for_print_device_phase(
+        content,
+        geometry.media_size.height,
+    ))
+}
+
+pub(crate) fn encode_compiled_flow_document(
+    cache: &CompiledFlowPdfProgramCache,
+    document: &Document,
+    page_overrides: &[Vec<CompiledFlowTextOverride>],
+    compress: bool,
+    minimum: usize,
+) -> Option<io::Result<Vec<EncodedCompiledFlowPage>>> {
+    if page_overrides.len() != document.pages.len() {
+        return Some(Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "compiled flow override page count does not match its display document",
+        )));
+    }
+    let document_key = document as *const Document as usize;
+    let programs = cache
+        .programs
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut inputs = Vec::with_capacity(document.pages.len());
+    for (source_page, (page, overrides)) in document.pages.iter().zip(page_overrides).enumerate() {
+        let program = programs.get(&(document_key, source_page))?.clone();
+        if !program.supports_parallel_instantiation(overrides) {
+            return None;
+        }
+        inputs.push((program, PageGeometry::for_page(page, document.page_size)));
+    }
+    drop(programs);
+
+    Some(
+        inputs
+            .into_iter()
+            .zip(page_overrides)
+            .map(|((program, geometry), overrides)| {
+                let content = instantiate_parallel_compiled_flow_page_program(
+                    program.as_ref(),
+                    overrides,
+                    geometry,
+                )?;
+                let raw_len = content.len();
+                let compressed = compress && raw_len >= minimum;
+                let data: Arc<[u8]> = if compressed {
+                    flate_compress_compiled_flow(content.as_bytes()).into()
+                } else {
+                    content.into_bytes().into()
+                };
+                Ok(EncodedCompiledFlowPage {
+                    raw_len,
+                    data,
+                    compressed,
+                })
+            })
+            .collect(),
+    )
 }
 
 impl<'a, W: Write> PdfStreamWriter<'a, W> {
@@ -928,6 +1286,20 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             page_nodes: Vec::new(),
             current_node: None,
             shaped_cache: HashMap::new(),
+            compiled_flow_page_programs: Arc::new(CompiledFlowPdfProgramCache::default()),
+            compiled_flow_seen_glyphs: HashMap::new(),
+            pending_compiled_flow_pages: Vec::new(),
+            compiled_flow_shader_nanos: 0,
+            compiled_flow_compression_nanos: 0,
+            compiled_flow_pipeline_nanos: 0,
+            compiled_flow_write_nanos: 0,
+            compiled_flow_parallel_pages: 0,
+            compiled_flow_worker_encoded_pages: 0,
+            compiled_flow_fallback_pages: 0,
+            compiled_flow_reject_shape_pages: 0,
+            compiled_flow_reject_count_pages: 0,
+            compiled_flow_reject_command_pages: 0,
+            compiled_flow_reject_transform_pages: 0,
             tag_records: Vec::new(),
             page_ids: Vec::new(),
             page_content_bytes: Vec::new(),
@@ -965,6 +1337,99 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         for page in &document.pages {
             self.add_page(page)?;
         }
+        Ok(())
+    }
+
+    pub(crate) fn compiled_flow_program_cache(&self) -> Arc<CompiledFlowPdfProgramCache> {
+        self.compiled_flow_page_programs.clone()
+    }
+
+    pub(crate) fn compiled_flow_replay_cache(&self) -> Arc<CompiledFlowPdfProgramCache> {
+        let mut fonts = self.fonts.values().collect::<Vec<_>>();
+        fonts.sort_unstable_by_key(|font| font.start_id);
+        let font_seeds = fonts
+            .into_iter()
+            .map(|font| {
+                let first_page_index = self
+                    .page_ids
+                    .partition_point(|page_id| *page_id < font.start_id)
+                    .saturating_sub(1);
+                CompiledFlowFontSeed {
+                    first_page_index,
+                    logical_name: Arc::from(font.logical_name.as_str()),
+                    glyph_map: Arc::new(font.glyph_map.clone()),
+                }
+            })
+            .collect::<Vec<_>>();
+        self.compiled_flow_page_programs
+            .replay_safe_clone_with_fonts(font_seeds.into())
+    }
+
+    pub(crate) fn use_compiled_flow_program_cache(
+        &mut self,
+        cache: Arc<CompiledFlowPdfProgramCache>,
+    ) {
+        self.compiled_flow_page_programs = cache;
+    }
+
+    /// Link one bound instance of an immutable compiled flow document without cloning its page
+    /// command trees. Overrides must be sorted by command index within each page.
+    pub(crate) fn add_compiled_flow_document(
+        &mut self,
+        doc_id: usize,
+        document: &Document,
+        page_overrides: Vec<Vec<CompiledFlowTextOverride>>,
+        font_glyphs: Vec<(Arc<str>, BTreeMap<u16, String>)>,
+        encoded_pages: Option<Vec<EncodedCompiledFlowPage>>,
+    ) -> io::Result<()> {
+        if page_overrides.len() != document.pages.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "compiled flow override page count does not match its display document",
+            ));
+        }
+        if encoded_pages
+            .as_ref()
+            .is_some_and(|pages| pages.len() != document.pages.len())
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "compiled flow encoded page count does not match its display document",
+            ));
+        }
+        if (document.page_size.width - self.page_size.width).abs() > Pt::from_f32(0.01)
+            || (document.page_size.height - self.page_size.height).abs() > Pt::from_f32(0.01)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "mixed page sizes are not supported in a single PDF stream",
+            ));
+        }
+        validate_profile_font_embedding(document, self.registry, &self.options)?;
+        self.current_doc_id = doc_id;
+        let document_key = document as *const Document as usize;
+        let mut encoded_pages = encoded_pages.map(Vec::into_iter);
+        for (source_page, (page, overrides)) in
+            document.pages.iter().zip(page_overrides).enumerate()
+        {
+            let encoded = encoded_pages.as_mut().and_then(Iterator::next);
+            self.add_page_with_compiled_flow_overrides(
+                (document_key, source_page),
+                page,
+                overrides,
+                encoded,
+            )?;
+        }
+        if encoded_pages
+            .as_mut()
+            .is_some_and(|pages| pages.next().is_some())
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "compiled flow encoded page count exceeds its display document",
+            ));
+        }
+        self.merge_compiled_flow_document_glyphs(font_glyphs)?;
         Ok(())
     }
 
@@ -1165,6 +1630,221 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         self.write_page_reference_sized(parent_id, content_id, page_id, page_index, geometry)
     }
 
+    fn add_page_with_compiled_flow_overrides(
+        &mut self,
+        program_key: (usize, usize),
+        page: &Page,
+        overrides: Vec<CompiledFlowTextOverride>,
+        encoded: Option<EncodedCompiledFlowPage>,
+    ) -> io::Result<()> {
+        const COMPILED_FLOW_COMPRESSION_BATCH: usize = 512;
+
+        let page_index = self
+            .page_ids
+            .len()
+            .saturating_add(self.pending_compiled_flow_pages.len());
+        let geometry = PageGeometry::for_page(page, self.page_size);
+        let parent_id = self.ensure_page_node();
+        let start = self.alloc_ids(2);
+        let content_id = start;
+        let page_id = start + 1;
+
+        if let Some(node) = self.current_node.as_mut() {
+            node.kids.push(page_id);
+        }
+
+        let shader_started = std::time::Instant::now();
+        let cached_program = if !self.options.pdf_profile.emits_tagged_structure() {
+            self.compiled_flow_page_programs
+                .programs
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(&program_key)
+                .cloned()
+        } else {
+            None
+        };
+        if encoded.is_some() {
+            let font_seeds = self
+                .compiled_flow_page_programs
+                .font_seeds
+                .iter()
+                .filter(|seed| seed.first_page_index == page_index)
+                .map(|seed| (seed.logical_name.clone(), seed.glyph_map.clone()))
+                .collect::<Vec<_>>();
+            for (font_name, glyph_map) in font_seeds {
+                self.ensure_font(font_name.as_ref())?;
+                let font_key = self.font_key(font_name.as_ref());
+                if let Some(font) = self.fonts.get_mut(&font_key) {
+                    for (glyph_id, value) in glyph_map.iter() {
+                        font.glyph_map
+                            .entry(*glyph_id)
+                            .or_insert_with(|| value.clone());
+                    }
+                }
+            }
+            if let Some(fonts) = cached_program
+                .as_ref()
+                .and_then(|program| program.resource_fonts.as_deref())
+            {
+                for font_name in fonts {
+                    self.ensure_font(font_name.as_ref())?;
+                }
+            }
+        }
+        let content = if let Some(encoded) = encoded {
+            self.compiled_flow_parallel_pages = self.compiled_flow_parallel_pages.saturating_add(1);
+            self.compiled_flow_worker_encoded_pages =
+                self.compiled_flow_worker_encoded_pages.saturating_add(1);
+            PendingCompiledFlowContent::Encoded(encoded)
+        } else if self.options.pdf_profile.emits_tagged_structure() {
+            PendingCompiledFlowContent::Ready(self.render_page_sized_with_compiled_flow_overrides(
+                page, page_index, geometry, &overrides,
+            )?)
+        } else if let Some(program) = cached_program {
+            if let Some(rejection) = program.parallel_instantiation_rejection(&overrides) {
+                match rejection {
+                    CompiledFlowParallelRejection::Shape => {
+                        self.compiled_flow_reject_shape_pages =
+                            self.compiled_flow_reject_shape_pages.saturating_add(1);
+                    }
+                    CompiledFlowParallelRejection::Count => {
+                        self.compiled_flow_reject_count_pages =
+                            self.compiled_flow_reject_count_pages.saturating_add(1);
+                    }
+                    CompiledFlowParallelRejection::Command => {
+                        self.compiled_flow_reject_command_pages =
+                            self.compiled_flow_reject_command_pages.saturating_add(1);
+                    }
+                    CompiledFlowParallelRejection::Transform => {
+                        self.compiled_flow_reject_transform_pages =
+                            self.compiled_flow_reject_transform_pages.saturating_add(1);
+                    }
+                }
+                self.compiled_flow_fallback_pages =
+                    self.compiled_flow_fallback_pages.saturating_add(1);
+                PendingCompiledFlowContent::Ready(self.instantiate_compiled_flow_page_program(
+                    program.as_ref(),
+                    &overrides,
+                    geometry,
+                )?)
+            } else {
+                self.compiled_flow_parallel_pages =
+                    self.compiled_flow_parallel_pages.saturating_add(1);
+                PendingCompiledFlowContent::Program { program, overrides }
+            }
+        } else {
+            let (content, program) =
+                self.compile_flow_page_program(page, page_index, geometry, &overrides)?;
+            self.compiled_flow_page_programs
+                .programs
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(program_key, Arc::new(program));
+            PendingCompiledFlowContent::Ready(content)
+        };
+        self.compiled_flow_shader_nanos = self
+            .compiled_flow_shader_nanos
+            .saturating_add(u64::try_from(shader_started.elapsed().as_nanos()).unwrap_or(u64::MAX));
+        self.pending_compiled_flow_pages
+            .push(PendingCompiledFlowPage {
+                parent_id,
+                content_id,
+                page_id,
+                page_index,
+                geometry,
+                content,
+            });
+        if self.pending_compiled_flow_pages.len() >= COMPILED_FLOW_COMPRESSION_BATCH {
+            self.flush_compiled_flow_pages()?;
+        }
+        Ok(())
+    }
+
+    fn flush_compiled_flow_pages(&mut self) -> io::Result<()> {
+        if self.pending_compiled_flow_pages.is_empty() {
+            return Ok(());
+        }
+        let pending = std::mem::take(&mut self.pending_compiled_flow_pages);
+        let compress = self.options.compress_content_streams;
+        let minimum = self.options.compress_content_stream_min_bytes;
+        let encode = |content: &str| {
+            let raw_len = content.len();
+            let compressed = compress && raw_len >= minimum;
+            let data: Arc<[u8]> = if compressed {
+                flate_compress_compiled_flow(content.as_bytes()).into()
+            } else {
+                Arc::from(content.as_bytes())
+            };
+            EncodedCompiledFlowPage {
+                raw_len,
+                data,
+                compressed,
+            }
+        };
+        let pipeline_started = std::time::Instant::now();
+        let encoded = if pending
+            .iter()
+            .all(|page| matches!(page.content, PendingCompiledFlowContent::Encoded(_)))
+        {
+            pending
+                .iter()
+                .map(|page| match &page.content {
+                    PendingCompiledFlowContent::Encoded(encoded) => Ok(encoded.clone()),
+                    _ => unreachable!("all compiled flow pages were encoded"),
+                })
+                .collect()
+        } else {
+            crate::parallel::map_ordered(&pending, |page| match &page.content {
+                PendingCompiledFlowContent::Encoded(encoded) => Ok(encoded.clone()),
+                PendingCompiledFlowContent::Ready(content) => Ok(encode(content)),
+                PendingCompiledFlowContent::Program { program, overrides } => {
+                    instantiate_parallel_compiled_flow_page_program(
+                        program.as_ref(),
+                        overrides,
+                        page.geometry,
+                    )
+                    .map(|content| encode(&content))
+                }
+            })
+        };
+        self.compiled_flow_pipeline_nanos = self.compiled_flow_pipeline_nanos.saturating_add(
+            u64::try_from(pipeline_started.elapsed().as_nanos()).unwrap_or(u64::MAX),
+        );
+        let encoded = encoded.into_iter().collect::<io::Result<Vec<_>>>()?;
+
+        let write_started = std::time::Instant::now();
+        for (page, encoded) in pending.into_iter().zip(encoded) {
+            self.content_stream_raw_bytes = self
+                .content_stream_raw_bytes
+                .saturating_add(encoded.raw_len);
+            self.content_stream_encoded_bytes = self
+                .content_stream_encoded_bytes
+                .saturating_add(encoded.data.len());
+            let dictionary = if encoded.compressed {
+                self.content_stream_compressed_count =
+                    self.content_stream_compressed_count.saturating_add(1);
+                "/Filter /FlateDecode"
+            } else {
+                ""
+            };
+            self.write_stream_object_bytes(page.content_id, dictionary, &encoded.data)?;
+            self.page_content_bytes.push(encoded.raw_len);
+            self.page_content_stream_count = self.page_content_stream_count.saturating_add(1);
+            self.write_page_reference_sized(
+                page.parent_id,
+                page.content_id,
+                page.page_id,
+                page.page_index,
+                page.geometry,
+            )?;
+        }
+        self.compiled_flow_write_nanos = self
+            .compiled_flow_write_nanos
+            .saturating_add(u64::try_from(write_started.elapsed().as_nanos()).unwrap_or(u64::MAX));
+        Ok(())
+    }
+
     fn add_page_reference_sized(
         &mut self,
         content_id: usize,
@@ -1260,6 +1940,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
 
     pub(crate) fn finish(&mut self) -> io::Result<usize> {
         let t_finish = std::time::Instant::now();
+        self.flush_compiled_flow_pages()?;
         if let Some(node) = self.current_node.take() {
             self.page_nodes.push(node);
         }
@@ -1931,6 +2612,26 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         }
         if let Some(perf_logger) = self.perf.as_deref() {
             perf_logger.log_span_ms("pdf.link", None, finish_ms);
+            perf_logger.log_span_ms(
+                "compile.flow.pdf_shader",
+                None,
+                self.compiled_flow_shader_nanos as f64 / 1_000_000.0,
+            );
+            perf_logger.log_span_ms(
+                "compile.flow.compress",
+                None,
+                self.compiled_flow_compression_nanos as f64 / 1_000_000.0,
+            );
+            perf_logger.log_span_ms(
+                "compile.flow.pipeline",
+                None,
+                self.compiled_flow_pipeline_nanos as f64 / 1_000_000.0,
+            );
+            perf_logger.log_span_ms(
+                "compile.flow.write",
+                None,
+                self.compiled_flow_write_nanos as f64 / 1_000_000.0,
+            );
             perf_logger.log_counts(
                 "pdf.link",
                 None,
@@ -1963,6 +2664,34 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     (
                         "page_content_reused_references",
                         self.page_content_reused_references as u64,
+                    ),
+                    (
+                        "compiled_flow_parallel_pages",
+                        self.compiled_flow_parallel_pages as u64,
+                    ),
+                    (
+                        "compiled_flow_worker_encoded_pages",
+                        self.compiled_flow_worker_encoded_pages as u64,
+                    ),
+                    (
+                        "compiled_flow_fallback_pages",
+                        self.compiled_flow_fallback_pages as u64,
+                    ),
+                    (
+                        "compiled_flow_reject_shape_pages",
+                        self.compiled_flow_reject_shape_pages as u64,
+                    ),
+                    (
+                        "compiled_flow_reject_count_pages",
+                        self.compiled_flow_reject_count_pages as u64,
+                    ),
+                    (
+                        "compiled_flow_reject_command_pages",
+                        self.compiled_flow_reject_command_pages as u64,
+                    ),
+                    (
+                        "compiled_flow_reject_transform_pages",
+                        self.compiled_flow_reject_transform_pages as u64,
                     ),
                     (
                         "font_program_source_bytes",
@@ -2018,6 +2747,125 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         Ok(bytes_written)
     }
 
+    fn append_text_paint(
+        &mut self,
+        out: &mut String,
+        font_name: &str,
+        font_size: Pt,
+        page_height: Pt,
+        placement: CompiledFlowTextPlacement,
+        x: Pt,
+        text: &str,
+        pre_shaped: Option<&ShapedText>,
+    ) -> io::Result<bool> {
+        let font_key = self.font_key(font_name);
+        if !self.fonts.contains_key(&font_key) {
+            self.ensure_font(font_name)?;
+        }
+        let Some((resource, encoding)) = self
+            .fonts
+            .get(&font_key)
+            .map(|font| (font.resource.clone(), font.encoding))
+        else {
+            return Ok(false);
+        };
+
+        out.push_str("BT\n");
+        out.push_str(&format!("/{} {} Tf\n", resource, fmt_pt(font_size)));
+        match placement {
+            CompiledFlowTextPlacement::Normal { y } => {
+                out.push_str(&format!(
+                    "{} {} Td\n",
+                    fmt_pt(x),
+                    fmt_pt(page_height - y - font_size)
+                ));
+            }
+            CompiledFlowTextPlacement::Transformed {
+                y,
+                m00,
+                m01,
+                m10,
+                m11,
+            } => {
+                out.push_str(&format!(
+                    "{} {} {} {} {} {} Tm\n",
+                    fmt(m00),
+                    fmt(m01),
+                    fmt(m10),
+                    fmt(m11),
+                    fmt_pt(x),
+                    fmt_pt(y)
+                ));
+            }
+        }
+
+        match encoding {
+            FontEncoding::WinAnsi => {
+                let encoded = encode_winansi_pdf_string(text);
+                if encoded.replaced > 0 {
+                    if let Some(logger) = self.debug.as_deref() {
+                        let json = format!(
+                            "{{\"type\":\"pdf.winansi.lossy\",\"font\":{},\"replaced\":{},\"sample\":{}}}",
+                            json_escape(font_name),
+                            encoded.replaced,
+                            json_escape(&truncate_preview(text, 80))
+                        );
+                        logger.log_json(&json);
+                        logger.increment("pdf.winansi.lossy", encoded.replaced as u64);
+                    }
+                }
+                if encoded.fallbacks > 0 {
+                    if let Some(logger) = self.debug.as_deref() {
+                        let json = format!(
+                            "{{\"type\":\"pdf.winansi.fallback\",\"font\":{},\"fallbacks\":{},\"sample\":{}}}",
+                            json_escape(font_name),
+                            encoded.fallbacks,
+                            json_escape(&truncate_preview(text, 80))
+                        );
+                        logger.log_json(&json);
+                        logger.increment("pdf.winansi.fallback", encoded.fallbacks as u64);
+                        if matches!(placement, CompiledFlowTextPlacement::Normal { .. }) {
+                            let known_loss = format!(
+                                "{{\"type\":\"jit.known_loss\",\"code\":\"FONT_FALLBACK_USED\",\"font\":{},\"fallbacks\":{},\"sample\":{}}}",
+                                json_escape(font_name),
+                                encoded.fallbacks,
+                                json_escape(&truncate_preview(text, 80))
+                            );
+                            logger.log_json(&known_loss);
+                            logger.increment(
+                                "jit.known_loss.font_fallback_used",
+                                encoded.fallbacks as u64,
+                            );
+                        }
+                    }
+                }
+                out.push_str(&format!("({}) Tj\n", encoded.text));
+            }
+            FontEncoding::IdentityH => {
+                if let Some(shaped) = pre_shaped {
+                    if let Some(font_state) = self.fonts.get_mut(&font_key) {
+                        for (gid, value) in shaped.glyph_map.iter() {
+                            font_state
+                                .glyph_map
+                                .entry(*gid)
+                                .or_insert_with(|| value.clone());
+                        }
+                    }
+                    out.push_str(shaped.tj.as_ref());
+                } else if let Some(tj) =
+                    self.shape_text_to_tj(&font_key, font_name, font_size, text)
+                {
+                    out.push_str(tj);
+                } else {
+                    let hex = self.encode_cid_hex_fallback(&font_key, font_name, text);
+                    out.push_str(&format!("{} Tj\n", hex));
+                }
+            }
+        }
+        out.push_str("ET\n");
+        Ok(true)
+    }
+
     fn render_page(&mut self, page: &Page, page_index: usize) -> io::Result<String> {
         let geometry = PageGeometry::for_page(page, self.page_size);
         self.render_page_sized(page, page_index, geometry)
@@ -2041,13 +2889,258 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         ))
     }
 
+    fn render_page_sized_with_compiled_flow_overrides(
+        &mut self,
+        page: &Page,
+        page_index: usize,
+        geometry: PageGeometry,
+        overrides: &[CompiledFlowTextOverride],
+    ) -> io::Result<String> {
+        let content = self.render_commands_with_filter_offset(
+            &page.commands,
+            geometry.logical_size.height,
+            Some(page_index),
+            None,
+            overrides,
+            None,
+        )?;
+        let content = wrap_page_content_for_presentation(content, geometry);
+        Ok(wrap_page_content_for_print_device_phase(
+            content,
+            geometry.media_size.height,
+        ))
+    }
+
+    fn compile_flow_page_program(
+        &mut self,
+        page: &Page,
+        page_index: usize,
+        geometry: PageGeometry,
+        overrides: &[CompiledFlowTextOverride],
+    ) -> io::Result<(String, CompiledFlowPageProgram)> {
+        let mut rendered_slots = Vec::with_capacity(overrides.len());
+        let raw = self.render_commands_with_filter_offset(
+            &page.commands,
+            geometry.logical_size.height,
+            Some(page_index),
+            None,
+            overrides,
+            Some(&mut rendered_slots),
+        )?;
+        if rendered_slots.len() != overrides.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "compiled flow page did not render every bound text slot",
+            ));
+        }
+
+        let mut static_segments = Vec::with_capacity(rendered_slots.len() + 1);
+        let mut slots = Vec::with_capacity(rendered_slots.len());
+        let mut cursor = 0usize;
+        for (rendered, bound) in rendered_slots.into_iter().zip(overrides) {
+            if rendered.start < cursor
+                || rendered.end < rendered.start
+                || rendered.end > raw.len()
+                || rendered.paint.command != bound.command
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "compiled flow page produced invalid text slot boundaries",
+                ));
+            }
+            static_segments.push(Arc::from(&raw[cursor..rendered.start]));
+            slots.push(
+                self.compile_flow_pdf_paint_slot(rendered.paint, geometry.logical_size.height)?,
+            );
+            cursor = rendered.end;
+        }
+        static_segments.push(Arc::from(&raw[cursor..]));
+        let program = CompiledFlowPageProgram {
+            static_segments,
+            slots,
+            resource_fonts: compiled_flow_page_resource_fonts(&page.commands),
+            capacity: raw.len().saturating_add(256),
+        };
+        let content = wrap_page_content_for_presentation(raw, geometry);
+        let content = wrap_page_content_for_print_device_phase(content, geometry.media_size.height);
+        Ok((content, program))
+    }
+
+    fn compile_flow_pdf_paint_slot(
+        &mut self,
+        paint: CompiledFlowPaintSlot,
+        page_height: Pt,
+    ) -> io::Result<CompiledFlowPdfPaintSlot> {
+        let font_key = self.font_key(&paint.font_name);
+        if !self.fonts.contains_key(&font_key) {
+            self.ensure_font(&paint.font_name)?;
+        }
+        let Some((resource, encoding)) = self
+            .fonts
+            .get(&font_key)
+            .map(|font| (font.resource.clone(), font.encoding))
+        else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "compiled flow text slot font could not be linked",
+            ));
+        };
+
+        let mut prefix = String::with_capacity(64);
+        prefix.push_str("BT\n/");
+        prefix.push_str(&resource);
+        prefix.push(' ');
+        prefix.push_str(&fmt_pt(paint.font_size));
+        prefix.push_str(" Tf\n");
+        let after_x = match paint.placement {
+            CompiledFlowTextPlacement::Normal { y } => {
+                format!(" {} Td\n", fmt_pt(page_height - y - paint.font_size))
+            }
+            CompiledFlowTextPlacement::Transformed {
+                y,
+                m00,
+                m01,
+                m10,
+                m11,
+            } => {
+                prefix.push_str(&fmt(m00));
+                prefix.push(' ');
+                prefix.push_str(&fmt(m01));
+                prefix.push(' ');
+                prefix.push_str(&fmt(m10));
+                prefix.push(' ');
+                prefix.push_str(&fmt(m11));
+                prefix.push(' ');
+                format!(" {} Tm\n", fmt_pt(y))
+            }
+        };
+        Ok(CompiledFlowPdfPaintSlot {
+            paint,
+            font_key,
+            encoding,
+            prefix: Arc::from(prefix),
+            after_x: Arc::from(after_x),
+        })
+    }
+
+    fn merge_compiled_flow_document_glyphs(
+        &mut self,
+        font_glyphs: Vec<(Arc<str>, BTreeMap<u16, String>)>,
+    ) -> io::Result<()> {
+        for (font_name, glyphs) in font_glyphs {
+            let font_key = self.font_key(font_name.as_ref());
+            let Some(font_state) = self.fonts.get_mut(&font_key) else {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "compiled flow text slot font could not be linked",
+                ));
+            };
+            let seen = self
+                .compiled_flow_seen_glyphs
+                .entry(font_key)
+                .or_insert_with(|| Box::new([0; 1024]));
+            for (gid, value) in glyphs {
+                let word = usize::from(gid) >> 6;
+                let mask = 1_u64 << (u32::from(gid) & 63);
+                if seen[word] & mask == 0 {
+                    font_state.glyph_map.entry(gid).or_insert(value);
+                    seen[word] |= mask;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn instantiate_compiled_flow_page_program(
+        &mut self,
+        program: &CompiledFlowPageProgram,
+        overrides: &[CompiledFlowTextOverride],
+        geometry: PageGeometry,
+    ) -> io::Result<String> {
+        if program.slots.len() != overrides.len()
+            || program.static_segments.len() != program.slots.len() + 1
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "compiled flow page bindings do not match its PDF paint program",
+            ));
+        }
+        let mut raw = String::with_capacity(program.capacity);
+        for ((static_segment, slot), bound) in program
+            .static_segments
+            .iter()
+            .zip(&program.slots)
+            .zip(overrides)
+        {
+            let transformed = matches!(
+                slot.paint.placement,
+                CompiledFlowTextPlacement::Transformed { .. }
+            );
+            if slot.paint.command != bound.command || transformed != bound.transformed {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "compiled flow text binding targets a different PDF paint slot",
+                ));
+            }
+            raw.push_str(static_segment);
+            if slot.encoding == FontEncoding::IdentityH {
+                if let Some(shaped) = bound.shaped.as_ref() {
+                    let Some(font_state) = self.fonts.get_mut(&slot.font_key) else {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "compiled flow text slot font could not be linked",
+                        ));
+                    };
+                    for (gid, value) in shaped.glyph_map.iter() {
+                        font_state
+                            .glyph_map
+                            .entry(*gid)
+                            .or_insert_with(|| value.clone());
+                    }
+                    raw.push_str(slot.prefix.as_ref());
+                    raw.push_str(bound.x_pdf.as_ref());
+                    raw.push_str(slot.after_x.as_ref());
+                    raw.push_str(shaped.tj.as_ref());
+                    raw.push_str("ET\n");
+                    continue;
+                }
+            }
+            if !self.append_text_paint(
+                &mut raw,
+                &slot.paint.font_name,
+                slot.paint.font_size,
+                geometry.logical_size.height,
+                slot.paint.placement,
+                bound.x,
+                bound.text.as_ref(),
+                bound.shaped.as_ref(),
+            )? {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "compiled flow text slot font could not be linked",
+                ));
+            }
+        }
+        raw.push_str(
+            program
+                .static_segments
+                .last()
+                .expect("compiled flow page program always has a trailing segment"),
+        );
+        let content = wrap_page_content_for_presentation(raw, geometry);
+        Ok(wrap_page_content_for_print_device_phase(
+            content,
+            geometry.media_size.height,
+        ))
+    }
+
     fn render_commands(
         &mut self,
         commands: &[Command],
         page_height: Pt,
         page_index: Option<usize>,
     ) -> io::Result<String> {
-        self.render_commands_with_filter_offset(commands, page_height, page_index, None)
+        self.render_commands_with_filter_offset(commands, page_height, page_index, None, &[], None)
     }
 
     fn render_commands_with_filter_offset(
@@ -2056,6 +3149,8 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         page_height: Pt,
         page_index: Option<usize>,
         filter_raster_offset: Option<(Pt, Pt)>,
+        compiled_flow_overrides: &[CompiledFlowTextOverride],
+        mut compiled_flow_capture: Option<&mut Vec<CompiledFlowRenderedSlot>>,
     ) -> io::Result<String> {
         let mut out = String::new();
         let mut current_font_size = Pt::from_f32(12.0);
@@ -2065,7 +3160,39 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         let mut tag_stack: Vec<usize> = Vec::new();
         let tag_enabled = self.options.pdf_profile.emits_tagged_structure() && page_index.is_some();
 
-        for cmd in commands {
+        if compiled_flow_overrides
+            .windows(2)
+            .any(|pair| pair[0].command >= pair[1].command)
+            || compiled_flow_overrides
+                .last()
+                .is_some_and(|value| value.command >= commands.len())
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "compiled flow text overrides are not strictly command-sorted",
+            ));
+        }
+        let mut next_override = 0usize;
+        for (command_index, cmd) in commands.iter().enumerate() {
+            let compiled_flow_override = compiled_flow_overrides
+                .get(next_override)
+                .filter(|value| value.command == command_index);
+            if compiled_flow_override.is_some() {
+                next_override += 1;
+            }
+            if let Some(value) = compiled_flow_override {
+                let valid_target = matches!(
+                    (value.transformed, cmd),
+                    (false, Command::DrawString { .. })
+                        | (true, Command::DrawStringTransformed { .. })
+                );
+                if !valid_target {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "compiled flow override does not target its expected text command",
+                    ));
+                }
+            }
             match cmd {
                 Command::SaveState => {
                     graphics_state_stack.push((
@@ -2306,87 +3433,37 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 Command::FillStroke => out.push_str("B\n"),
                 Command::FillStrokeEvenOdd => out.push_str("B*\n"),
                 Command::DrawString { x, y, text } => {
-                    let font_key = self.font_key(&current_font_name);
-                    if !self.fonts.contains_key(&font_key) {
-                        self.ensure_font(&current_font_name)?;
-                    }
-                    let Some((resource, encoding)) = self
-                        .fonts
-                        .get(&font_key)
-                        .map(|f| (f.resource.clone(), f.encoding))
-                    else {
+                    let (x, text) = compiled_flow_override
+                        .map(|value| (value.x, value.text.as_ref()))
+                        .unwrap_or((*x, text.as_str()));
+                    let placement = CompiledFlowTextPlacement::Normal { y: *y };
+                    let start = out.len();
+                    if !self.append_text_paint(
+                        &mut out,
+                        &current_font_name,
+                        current_font_size,
+                        page_height,
+                        placement,
+                        x,
+                        text,
+                        compiled_flow_override.and_then(|value| value.shaped.as_ref()),
+                    )? {
                         continue;
-                    };
-                    out.push_str("BT\n");
-                    out.push_str(&format!("/{} {} Tf\n", resource, fmt_pt(current_font_size)));
-                    out.push_str(&format!(
-                        "{} {} Td\n",
-                        fmt_pt(*x),
-                        fmt_pt(page_height - *y - current_font_size)
-                    ));
-
-                    match encoding {
-                        FontEncoding::WinAnsi => {
-                            let encoded = encode_winansi_pdf_string(text);
-                            if encoded.replaced > 0 {
-                                if let Some(logger) = self.debug.as_deref() {
-                                    let json = format!(
-                                        "{{\"type\":\"pdf.winansi.lossy\",\"font\":{},\"replaced\":{},\"sample\":{}}}",
-                                        json_escape(&current_font_name),
-                                        encoded.replaced,
-                                        json_escape(&truncate_preview(text, 80))
-                                    );
-                                    logger.log_json(&json);
-                                    logger.increment("pdf.winansi.lossy", encoded.replaced as u64);
-                                }
-                            }
-                            if encoded.fallbacks > 0 {
-                                if let Some(logger) = self.debug.as_deref() {
-                                    let json = format!(
-                                        "{{\"type\":\"pdf.winansi.fallback\",\"font\":{},\"fallbacks\":{},\"sample\":{}}}",
-                                        json_escape(&current_font_name),
-                                        encoded.fallbacks,
-                                        json_escape(&truncate_preview(text, 80))
-                                    );
-                                    logger.log_json(&json);
-                                    logger.increment(
-                                        "pdf.winansi.fallback",
-                                        encoded.fallbacks as u64,
-                                    );
-                                    let known_loss = format!(
-                                        "{{\"type\":\"jit.known_loss\",\"code\":\"FONT_FALLBACK_USED\",\"font\":{},\"fallbacks\":{},\"sample\":{}}}",
-                                        json_escape(&current_font_name),
-                                        encoded.fallbacks,
-                                        json_escape(&truncate_preview(text, 80))
-                                    );
-                                    logger.log_json(&known_loss);
-                                    logger.increment(
-                                        "jit.known_loss.font_fallback_used",
-                                        encoded.fallbacks as u64,
-                                    );
-                                }
-                            }
-                            out.push_str(&format!("({}) Tj\n", encoded.text));
-                        }
-                        FontEncoding::IdentityH => {
-                            if let Some(tj) = self.shape_text_to_tj(
-                                &font_key,
-                                &current_font_name,
-                                current_font_size,
-                                text,
-                            ) {
-                                out.push_str(tj);
-                            } else {
-                                let hex = self.encode_cid_hex_fallback(
-                                    &font_key,
-                                    &current_font_name,
-                                    text,
-                                );
-                                out.push_str(&format!("{} Tj\n", hex));
-                            }
+                    }
+                    if compiled_flow_override.is_some() {
+                        if let Some(capture) = compiled_flow_capture.as_deref_mut() {
+                            capture.push(CompiledFlowRenderedSlot {
+                                start,
+                                end: out.len(),
+                                paint: CompiledFlowPaintSlot {
+                                    command: command_index,
+                                    font_name: current_font_name.clone(),
+                                    font_size: current_font_size,
+                                    placement,
+                                },
+                            });
                         }
                     }
-                    out.push_str("ET\n");
                 }
                 Command::DrawStringTransformed {
                     x,
@@ -2397,79 +3474,43 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     m10,
                     m11,
                 } => {
-                    let font_key = self.font_key(&current_font_name);
-                    if !self.fonts.contains_key(&font_key) {
-                        self.ensure_font(&current_font_name)?;
-                    }
-                    let Some((resource, encoding)) = self
-                        .fonts
-                        .get(&font_key)
-                        .map(|font| (font.resource.clone(), font.encoding))
-                    else {
-                        continue;
+                    let (x, text) = compiled_flow_override
+                        .map(|value| (value.x, value.text.as_ref()))
+                        .unwrap_or((*x, text.as_str()));
+                    let placement = CompiledFlowTextPlacement::Transformed {
+                        y: *y,
+                        m00: *m00,
+                        m01: *m01,
+                        m10: *m10,
+                        m11: *m11,
                     };
-                    out.push_str("BT\n");
-                    out.push_str(&format!("/{} {} Tf\n", resource, fmt_pt(current_font_size)));
-                    out.push_str(&format!(
-                        "{} {} {} {} {} {} Tm\n",
-                        fmt(*m00),
-                        fmt(*m01),
-                        fmt(*m10),
-                        fmt(*m11),
-                        fmt_pt(*x),
-                        fmt_pt(*y)
-                    ));
-                    match encoding {
-                        FontEncoding::WinAnsi => {
-                            let encoded = encode_winansi_pdf_string(text);
-                            if encoded.replaced > 0 {
-                                if let Some(logger) = self.debug.as_deref() {
-                                    let json = format!(
-                                        "{{\"type\":\"pdf.winansi.lossy\",\"font\":{},\"replaced\":{},\"sample\":{}}}",
-                                        json_escape(&current_font_name),
-                                        encoded.replaced,
-                                        json_escape(&truncate_preview(text, 80))
-                                    );
-                                    logger.log_json(&json);
-                                    logger.increment("pdf.winansi.lossy", encoded.replaced as u64);
-                                }
-                            }
-                            if encoded.fallbacks > 0 {
-                                if let Some(logger) = self.debug.as_deref() {
-                                    let json = format!(
-                                        "{{\"type\":\"pdf.winansi.fallback\",\"font\":{},\"fallbacks\":{},\"sample\":{}}}",
-                                        json_escape(&current_font_name),
-                                        encoded.fallbacks,
-                                        json_escape(&truncate_preview(text, 80))
-                                    );
-                                    logger.log_json(&json);
-                                    logger.increment(
-                                        "pdf.winansi.fallback",
-                                        encoded.fallbacks as u64,
-                                    );
-                                }
-                            }
-                            out.push_str(&format!("({}) Tj\n", encoded.text));
-                        }
-                        FontEncoding::IdentityH => {
-                            if let Some(tj) = self.shape_text_to_tj(
-                                &font_key,
-                                &current_font_name,
-                                current_font_size,
-                                text,
-                            ) {
-                                out.push_str(tj);
-                            } else {
-                                let hex = self.encode_cid_hex_fallback(
-                                    &font_key,
-                                    &current_font_name,
-                                    text,
-                                );
-                                out.push_str(&format!("{} Tj\n", hex));
-                            }
+                    let start = out.len();
+                    if !self.append_text_paint(
+                        &mut out,
+                        &current_font_name,
+                        current_font_size,
+                        page_height,
+                        placement,
+                        x,
+                        text,
+                        compiled_flow_override.and_then(|value| value.shaped.as_ref()),
+                    )? {
+                        continue;
+                    }
+                    if compiled_flow_override.is_some() {
+                        if let Some(capture) = compiled_flow_capture.as_deref_mut() {
+                            capture.push(CompiledFlowRenderedSlot {
+                                start,
+                                end: out.len(),
+                                paint: CompiledFlowPaintSlot {
+                                    command: command_index,
+                                    font_name: current_font_name.clone(),
+                                    font_size: current_font_size,
+                                    placement,
+                                },
+                            });
                         }
                     }
-                    out.push_str("ET\n");
                 }
                 Command::DrawGlyphRun {
                     x,
@@ -3685,8 +4726,14 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             return Ok(Some(name.clone()));
         }
 
-        let content =
-            self.render_commands_with_filter_offset(commands, height, None, filter_raster_offset)?;
+        let content = self.render_commands_with_filter_offset(
+            commands,
+            height,
+            None,
+            filter_raster_offset,
+            &[],
+            None,
+        )?;
         let mut hash_input = Vec::with_capacity(content.len() + 1);
         hash_input.push(u8::from(isolated));
         hash_input.extend_from_slice(content.as_bytes());
@@ -4180,7 +5227,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 let font_state = self.fonts.get_mut(font_key)?;
                 let font_data = font_state.font_data?;
                 let shaped = shape_text_native(font_data, text)?;
-                for (gid, s) in &shaped.glyph_map {
+                for (gid, s) in shaped.glyph_map.iter() {
                     font_state
                         .glyph_map
                         .entry(*gid)
@@ -4190,7 +5237,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             };
             self.shaped_cache.insert(key.clone(), shaped);
         }
-        self.shaped_cache.get(&key).map(|s| s.tj.as_str())
+        self.shaped_cache.get(&key).map(|s| s.tj.as_ref())
     }
 
     fn encode_cid_hex_fallback(&mut self, font_key: &str, font_name: &str, text: &str) -> String {
@@ -4260,6 +5307,13 @@ fn shape_text_native(font_data: &[u8], text: &str) -> Option<ShapedText> {
     if shaped.glyphs.is_empty() {
         return None;
     }
+    let source_glyphs: Arc<[crate::text_shape::ShapedGlyph]> = shaped.glyphs.clone().into();
+    let default_advances: Arc<[i32]> = shaped
+        .glyphs
+        .iter()
+        .map(|glyph| i32::from(face.glyph_hor_advance(GlyphId(glyph.glyph_id)).unwrap_or(0)))
+        .collect::<Vec<_>>()
+        .into();
 
     // Build a map from glyph id -> source unicode string (cluster range).
     let mut boundaries: Vec<usize> = shaped
@@ -4317,9 +5371,336 @@ fn shape_text_native(font_data: &[u8], text: &str) -> Option<ShapedText> {
     }
 
     Some(ShapedText {
-        tj: format!("[{}] TJ\n", parts.join(" ")),
-        glyph_map,
+        tj: Arc::from(format!("[{}] TJ\n", parts.join(" "))),
+        glyph_map: Arc::new(glyph_map),
+        glyph_map_is_direct_ascii: false,
+        units_per_em,
+        glyphs: source_glyphs,
+        default_advances,
     })
+}
+
+impl CompiledNumericFontShader {
+    fn new(font_data: &[u8]) -> Option<Self> {
+        let mut digit_glyphs = [0u16; 10];
+        let mut digit_advances = [0i32; 10];
+        let mut units_per_em = None;
+        for (index, byte) in (b'0'..=b'9').enumerate() {
+            let text = char::from(byte).to_string();
+            let shaped = crate::text_shape::shape(font_data, &text)?;
+            let [glyph] = shaped.glyphs.as_slice() else {
+                return None;
+            };
+            if glyph.cluster != 0
+                || glyph.x_offset != 0
+                || glyph.y_offset != 0
+                || glyph.y_advance != 0
+            {
+                return None;
+            }
+            if units_per_em.is_some_and(|value| value != shaped.units_per_em) {
+                return None;
+            }
+            units_per_em = Some(shaped.units_per_em);
+            digit_glyphs[index] = glyph.glyph_id;
+            digit_advances[index] = glyph.x_advance;
+        }
+        Some(Self {
+            data: Arc::from(font_data),
+            units_per_em: units_per_em?.max(1),
+            digit_glyphs,
+            digit_advances,
+            pair_shapes: (0..128 * 128)
+                .map(|_| OnceLock::new())
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        })
+    }
+
+    fn numeric_neighbor(byte: u8) -> bool {
+        byte.is_ascii_digit()
+            || matches!(
+                byte,
+                b'-' | b'_' | b'.' | b',' | b'$' | b'/' | b':' | b'+' | b'#'
+            )
+    }
+
+    fn pair_shape(&self, left: u8, right: u8) -> Option<CompiledNumericPair> {
+        if !left.is_ascii() || !right.is_ascii() {
+            return None;
+        }
+        let key = usize::from(left) * 128 + usize::from(right);
+        *self.pair_shapes[key].get_or_init(|| {
+            let pair = [left, right];
+            let text = std::str::from_utf8(&pair).ok()?;
+            let shaped = crate::text_shape::shape(&self.data, text)?;
+            let [first, second] = shaped.glyphs.as_slice() else {
+                return None;
+            };
+            if shaped.units_per_em != self.units_per_em
+                || first.cluster != 0
+                || second.cluster != 1
+                || first.x_offset != 0
+                || first.y_offset != 0
+                || first.y_advance != 0
+                || second.x_offset != 0
+                || second.y_offset != 0
+                || second.y_advance != 0
+            {
+                return None;
+            }
+            let face = SfntFace::parse(&self.data, 0).ok()?;
+            let first_default_advance =
+                i32::from(face.glyph_hor_advance(GlyphId(first.glyph_id)).unwrap_or(0));
+            Some(CompiledNumericPair {
+                first_glyph: first.glyph_id,
+                second_glyph: second.glyph_id,
+                first_advance: first.x_advance,
+                first_default_advance,
+            })
+        })
+    }
+
+    fn shape_variant(
+        &self,
+        prototype_text: &str,
+        prototype: &ShapedText,
+        text: &str,
+    ) -> Option<ShapedText> {
+        let prototype_bytes = prototype_text.as_bytes();
+        let bytes = text.as_bytes();
+        if prototype_bytes.len() != bytes.len()
+            || !prototype_text.is_ascii()
+            || !text.is_ascii()
+            || prototype.units_per_em != self.units_per_em
+            || prototype.glyphs.len() != bytes.len()
+            || prototype.default_advances.len() != bytes.len()
+        {
+            return None;
+        }
+        let mut glyphs = prototype.glyphs.to_vec();
+        let mut changed = false;
+        for index in 0..bytes.len() {
+            let old = prototype_bytes[index];
+            let new = bytes[index];
+            let glyph = &prototype.glyphs[index];
+            if glyph.cluster as usize != index
+                || glyph.x_offset != 0
+                || glyph.y_offset != 0
+                || glyph.y_advance != 0
+            {
+                return None;
+            }
+            if old == new {
+                continue;
+            }
+            if !old.is_ascii_digit()
+                || !new.is_ascii_digit()
+                || index
+                    .checked_sub(1)
+                    .and_then(|previous| prototype_bytes.get(previous).copied())
+                    .is_some_and(|neighbor| !Self::numeric_neighbor(neighbor))
+                || prototype_bytes
+                    .get(index + 1)
+                    .copied()
+                    .is_some_and(|neighbor| !Self::numeric_neighbor(neighbor))
+            {
+                return None;
+            }
+            let digit = usize::from(new - b'0');
+            glyphs[index].glyph_id = self.digit_glyphs[digit];
+            glyphs[index].x_advance = self.digit_advances[digit];
+            changed = true;
+        }
+        if !changed {
+            return None;
+        }
+
+        for index in 0..bytes.len().saturating_sub(1) {
+            if prototype_bytes[index] == bytes[index]
+                && prototype_bytes[index + 1] == bytes[index + 1]
+            {
+                continue;
+            }
+            let pair = self.pair_shape(bytes[index], bytes[index + 1])?;
+            let first_matches = pair.first_glyph == glyphs[index].glyph_id;
+            let second_matches = pair.second_glyph == glyphs[index + 1].glyph_id;
+            let pair_has_no_adjustment = pair.first_advance == pair.first_default_advance;
+            let default_advance = if prototype_bytes[index] == bytes[index] {
+                prototype.default_advances[index]
+            } else {
+                self.digit_advances[usize::from(bytes[index] - b'0')]
+            };
+            if first_matches && (second_matches || pair_has_no_adjustment) {
+                glyphs[index].x_advance = pair.first_advance;
+            } else if !(pair_has_no_adjustment && glyphs[index].x_advance == default_advance) {
+                return None;
+            }
+        }
+
+        const HEX: &[u8; 16] = b"0123456789ABCDEF";
+        let mut tj = String::with_capacity(bytes.len().saturating_mul(8).saturating_add(8));
+        tj.push('[');
+        for (index, glyph) in glyphs.iter().enumerate() {
+            if index != 0 {
+                tj.push(' ');
+            }
+            tj.push('<');
+            for shift in [12u16, 8, 4, 0] {
+                tj.push(char::from(
+                    HEX[usize::from((glyph.glyph_id >> shift) & 0x0f)],
+                ));
+            }
+            tj.push('>');
+            let default_advance = if prototype_bytes[index] == bytes[index] {
+                prototype.default_advances[index]
+            } else {
+                self.digit_advances[usize::from(bytes[index] - b'0')]
+            };
+            let adjustment = i64::from(default_advance) - i64::from(glyph.x_advance);
+            if adjustment != 0 {
+                tj.push(' ');
+                tj.push_str(&format_font_units(adjustment, self.units_per_em));
+            }
+        }
+        tj.push_str("] TJ\n");
+        Some(ShapedText {
+            tj: Arc::from(tj),
+            glyph_map: Arc::new(BTreeMap::new()),
+            glyph_map_is_direct_ascii: true,
+            units_per_em: self.units_per_em,
+            glyphs: glyphs.into(),
+            default_advances: Arc::from([]),
+        })
+    }
+}
+
+impl CompiledFlowShapeCache {
+    pub(crate) fn font_shader(
+        &self,
+        registry: &FontRegistry,
+        font_name: &str,
+    ) -> Option<Arc<CompiledNumericFontShader>> {
+        let key = normalize_font_key(font_name);
+        if let Some(shader) = self
+            .fonts
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&key)
+        {
+            return Some(shader.clone());
+        }
+        let font = registry.resolve(font_name)?;
+        let shader = Arc::new(CompiledNumericFontShader::new(&font.data)?);
+        let mut fonts = self
+            .fonts
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Some(fonts.entry(key).or_insert(shader).clone())
+    }
+
+    fn shape(
+        &self,
+        registry: &FontRegistry,
+        font_name: &str,
+        prototype_text: &str,
+        prototype: Option<&ShapedText>,
+        numeric_shader: Option<&Arc<CompiledNumericFontShader>>,
+        text: &str,
+    ) -> Option<ShapedText> {
+        if text == prototype_text {
+            if let Some(prototype) = prototype {
+                return Some(prototype.clone());
+            }
+        }
+        let shader = numeric_shader
+            .cloned()
+            .or_else(|| self.font_shader(registry, font_name));
+        if let Some(prototype) = prototype {
+            if let Some(shaped) = shader
+                .as_ref()
+                .and_then(|shader| shader.shape_variant(prototype_text, prototype, text))
+            {
+                return Some(shaped);
+            }
+        }
+        let font = registry.resolve(font_name)?;
+        let key = format!("{}\0{text}", normalize_font_key(font_name));
+        if let Some(shaped) = self
+            .full_shapes
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&key)
+            .cloned()
+        {
+            return Some(shaped.as_ref().clone());
+        }
+        let shaped = shape_text_native(&font.data, text)?;
+        let mut cache = self
+            .full_shapes
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if cache.len() < 20_000 {
+            cache.entry(key).or_insert_with(|| Arc::new(shaped.clone()));
+        }
+        Some(shaped)
+    }
+}
+
+pub(crate) fn shape_compiled_flow_text(
+    cache: &CompiledFlowShapeCache,
+    registry: &FontRegistry,
+    font_name: &str,
+    prototype_text: &str,
+    prototype: Option<&ShapedText>,
+    numeric_shader: Option<&Arc<CompiledNumericFontShader>>,
+    text: &str,
+) -> Option<ShapedText> {
+    cache.shape(
+        registry,
+        font_name,
+        prototype_text,
+        prototype,
+        numeric_shader,
+        text,
+    )
+}
+
+pub(crate) fn shape_compiled_flow_cid_fallback(
+    registry: &FontRegistry,
+    font_name: &str,
+    text: &str,
+) -> ShapedText {
+    let (_, clean_text) = crate::text_shape::decode_shape_options(text);
+    let mut glyph_map = BTreeMap::new();
+    let mut tj = String::with_capacity(clean_text.chars().count().saturating_mul(4) + 8);
+    tj.push('<');
+    for ch in clean_text.chars() {
+        let gid = registry.map_glyph_id_for_char(font_name, ch);
+        if gid != 0 {
+            glyph_map.entry(gid).or_insert_with(|| ch.to_string());
+        }
+        use std::fmt::Write as _;
+        let _ = write!(tj, "{gid:04X}");
+    }
+    tj.push_str("> Tj\n");
+    ShapedText {
+        tj: Arc::from(tj),
+        glyph_map: Arc::new(glyph_map),
+        glyph_map_is_direct_ascii: false,
+        units_per_em: 1,
+        glyphs: Arc::from([]),
+        default_advances: Arc::from([]),
+    }
+}
+
+pub(crate) fn shape_compiled_flow_prototype(
+    cache: &CompiledFlowShapeCache,
+    registry: &FontRegistry,
+    font_name: &str,
+    text: &str,
+) -> Option<ShapedText> {
+    cache.shape(registry, font_name, text, None, None, text)
 }
 
 #[allow(dead_code)]
@@ -5129,6 +6510,10 @@ fn parse_data_uri(uri: &str) -> Option<(String, Vec<u8>)> {
 
 fn flate_compress(data: &[u8]) -> Vec<u8> {
     crate::flate_native::zlib_deflate_parallel(data)
+}
+
+fn flate_compress_compiled_flow(data: &[u8]) -> Vec<u8> {
+    crate::flate_native::zlib_deflate_compiled_flow(data)
 }
 
 fn hash_bytes(data: &[u8]) -> u64 {
@@ -7254,6 +8639,10 @@ fn fmt_pt(value: Pt) -> String {
     format_milli(value.to_milli_i64())
 }
 
+pub(crate) fn format_compiled_flow_pt(value: Pt) -> String {
+    fmt_pt(value)
+}
+
 fn fmt_pdf_f64(value: f64, decimal_places: usize) -> String {
     if !value.is_finite() {
         return "0".to_string();
@@ -7425,6 +8814,36 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn compiled_numeric_font_shader_matches_native_shape_for_identifier_patterns() {
+        let font = include_bytes!("../python/fullbleed_assets/fonts/Inter-Variable.ttf");
+        let shader = CompiledNumericFontShader::new(font).expect("compiled numeric font shader");
+        for (prototype_text, text) in [
+            ("REFLOW-00000001-P-000", "REFLOW-00000021-P-000"),
+            ("AC-00000001", "AC-00000021"),
+            ("2026-08-01", "2026-08-21"),
+            ("$1,211.36", "$1,833.72"),
+        ] {
+            let prototype = shape_text_native(font, prototype_text).expect("prototype shape");
+            let compiled = shader
+                .shape_variant(prototype_text, &prototype, text)
+                .unwrap_or_else(|| panic!("shader-compatible text: {prototype_text} -> {text}"));
+            let native = shape_text_native(font, text).expect("native shape");
+            assert_eq!(compiled.tj, native.tj, "TJ parity for {text}");
+            let mut compiled_glyph_map = BTreeMap::new();
+            compiled.for_each_glyph_source(text, |glyph_id, value| {
+                compiled_glyph_map
+                    .entry(glyph_id)
+                    .or_insert_with(|| value.to_string());
+            });
+            assert_eq!(
+                &compiled_glyph_map,
+                native.glyph_map.as_ref(),
+                "glyph map for {text}",
+            );
+        }
+    }
 
     #[test]
     fn binding_plan_compiles_coordinate_state_and_restores_its_checkpoint() {

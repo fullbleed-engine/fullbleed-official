@@ -99,6 +99,24 @@ size-changing records render 200x faster. See
 [`docs/performance-architecture.md`](docs/performance-architecture.md) for the packed vector IR,
 typed-binding, virtual-linker, and shader roadmap.
 
+Fullbleed 2.2.4 adds a third compiler lane for
+size-changing records: `CompiledDocument.render_pdf_reflow_bindings(...)`. It parses and recovers
+the template DOM once and compiles encountered structural flow variants into guarded fixed-point
+display programs. Matching records bind directly into those programs; workers execute pre-shaped
+text/TJ paint slots, cached static PDF page segments, page-local Deflate, and one ordered linker.
+Explicit trusted structural slots use `data-fb-bind-html="slot"`. A value that no compiled variant
+can safely place runs ordinary fixed-point layout once to add another variant.
+
+On the independent 1,000-distinct-record case study, the final ABI3 wheel's 29-sample hot
+direct-file run had a 168.839 ms median: **5,923 records/s and 10,365 pages/s**, with a 12,510
+pages/s best. It produced
+the exact 1,750-page 500/300/150/50 reflow distribution and verified all 24,900 markers. The
+throughput-tuned 6,870,320-byte PDF was deterministic across all samples. With the compact
+compression setting, compiled output was also byte-for-byte identical to ordinary rendering:
+5,298,961 bytes and SHA-256 `bb3c441313a08fb00d3bd15f23a567981f3bbbd550908e3a9fe7a07ca5d7f138`.
+This is a hot compiled-variant result, not a claim for previously unseen structure; the first
+compile-on-demand batch measured 407.521 ms (4,294 pages/s).
+
 ## Install
 
 New to Python or setting up on a fresh machine? Start with `docs/install-non-technical.md`.
@@ -110,7 +128,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-2.2.3-cp310-abi3-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-2.2.4-cp310-abi3-win_amd64.whl
 ```
 
 From a source checkout with Rust installed, no Python build package is needed:
@@ -970,12 +988,21 @@ Module exports:
 | `render_pdf_batch(copies, deterministic_hash=None)` | `bytes` |
 | `render_pdf_bindings(bindings, deterministic_hash=None)` | `bytes` |
 | `render_pdf_bindings_to_file(bindings, path, deterministic_hash=None)` | `int` |
+| `render_pdf_reflow_bindings(bindings, deterministic_hash=None)` | `bytes` |
+| `render_pdf_reflow_bindings_to_file(bindings, path, deterministic_hash=None)` | `int` |
 
 The compiled lane runs parsing/layout once. `render_pdf_batch` virtualizes identical untagged page
-content. The binding methods instead accept columnar `dict[str, list[str]]` data and emit distinct
+content. The fixed binding methods accept columnar `dict[str, list[str]]` data and emit distinct
 fixed-geometry text overlays per record while sharing static paint. They require exact slot keys,
 equal non-zero column lengths, page-local WinAnsi-compatible text, and an untagged profile; bound
 values do not trigger reflow.
+
+The reflow binding methods use the same exact-column contract but execute the compiled parsed-DOM
+program. `{{slot}}` values are literal text and may reshape, wrap, resize blocks, and change page
+counts. Empty elements can opt into trusted generated markup with
+`data-fb-bind-html="slot"`; those values replace the element's children. One DOM is reused per
+native worker and record output is linked in input order through a bounded queue. See
+[`docs/python-api.md`](docs/python-api.md) for the trust boundary and current limitations.
 
 When `deterministic_hash` is set, engine writes PDF SHA-256 to the provided file path.
 

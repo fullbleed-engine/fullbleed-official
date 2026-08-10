@@ -131,8 +131,63 @@ style resolution, layout, pagination, and static paint serialization. A reusable
 buffered file writer keep allocation and syscall counts bounded while the linker preserves page
 order. The Python GIL is released during native execution.
 
+## Fullbleed 2.2.4: compiled content reflow
+
+Fullbleed 2.2.4 adds
+`CompiledDocument.render_pdf_reflow_bindings` and its direct-file counterpart. This is a separate
+program from the fixed-geometry overlay linker. Initial compilation parses and recovers the static
+template DOM, lowers `{{slot}}` text nodes into immutable binding programs, and retains the CSS
+resolver, page templates, fonts, and engine configuration. Ordinary slots are literal text;
+explicit empty `data-fb-bind-html="slot"` targets accept trusted generated structure such as
+narrative blocks and table rows.
+
+Flow is now a real compiler target. On the first encounter with a structural/input shape, a worker
+runs the ordinary signed-Q32.32 layout, fragmentation, pagination, and paint planner and captures a
+guarded `CompiledFlowRecordProgram`. Later records try those programs before materializing a DOM.
+Every dynamic paint run retains its fixed-point origin, alignment box, parent fit guard, spacing,
+and browser text-paint phase. A record that fits binds directly; a guard miss executes layout once
+and adds a new variant. This preserves content-driven page counts while moving the hot path from
+full layout to bind/shape/execute/link.
+
+The PDF stage compiles each eligible page into static vector segments plus text paint slots.
+Workers lower bound slots to pre-shaped TJ operators, collect only newly encountered glyphs,
+instantiate the page program, and Deflate the content before sending ordered record results to the
+linker. The implementation uses native Rust scoped threads, not Python multiprocessing. On this
+20-logical-processor host it selected 20 workers, an 80-record bounded window, and 512-page linker
+flushes. The Python GIL is released during native execution.
+
+The optimized `cp310-abi3` wheel was measured against the independent 2.2.3 reflow case study on a
+Windows AMD64 Intel Core i7-12700H/Python 3.11 host. The adapter used nine literal slots and three
+trusted structural slots. The first sample compiled flow variants on demand; the next 29 rendered
+the same 1,000 distinct binding rows through the hot programs and wrote a new PDF each time:
+
+| Measurement | Ordinary 2.2.3 | Earlier parsed-DOM reflow | Compiled flow target |
+|---|---:|---:|---:|
+| Direct-file render | 9.067 s | 6.908 s | **168.839 ms hot median** |
+| Records/s | 110.3 | 144.8 | **5,923** |
+| Pages/s | 193.0 | 253.3 | **10,365** |
+| Best hot pages/s | n/a | n/a | **12,510** |
+| First compile-on-demand batch | n/a | 6.908 s | 407.521 ms; 4,294 pages/s |
+
+The hot median is 53.7x the ordinary renderer and 40.9x the earlier parsed-DOM reflow executor on
+this workload. It is explicitly a compiled-variant measurement: novel structure or values that
+violate every existing geometry guard pay a new variant compilation before joining the hot lane.
+
+The workload contract remains exact: 1,000 variable records, 1,750 naturally generated pages, the
+500/300/150/50 distribution of 1/2/3/4-page records, all 24,900 markers once and in order, and all
+1,750 local page counters. The throughput default uses a four-step deterministic Deflate search;
+all 29 hot repetitions produced 6,870,320 bytes with SHA-256
+`1dd02748af497ae2f477875ecf0ab87a6de5ceb55e097b4b775ddbf6d5038194`. Setting
+`FULLBLEED_COMPILED_FLOW_DEFLATE_CHAIN=64` prioritizes compactness and reproduced the ordinary PDF
+byte for byte: 5,298,961 bytes and SHA-256
+`bb3c441313a08fb00d3bd15f23a567981f3bbbd550908e3a9fe7a07ca5d7f138`. The independent checker
+verified all markers for that parity artifact as well.
+
 ## Validation
 
+- Current compiled-reflow branch: both locked Rust matrices report 1,181 passed; the complete
+  repository Python suite against the installed optimized ABI3 wheel reports 260 passed and four
+  skipped; the Stable ABI compiled-document file reports 10 passed.
 - `cargo test --lib`: 824 passed, zero failed.
 - Repository Python suite: 254 passed and four skipped.
 - Independent Python suite: 31 passed. One old assertion was deselected because it requires
@@ -151,7 +206,10 @@ bounded raw/compressed subset caches, immutable CSS/page-template reuse, linker 
 redundant compatibility-JIT scans/clones, an immutable compiled-document API, and shared-content page
 virtualization. The current `PlanAndReplay` JIT remains a compatibility planner, and the compiled
 document still holds the existing command enum rather than packed vector bytecode. Fullbleed 2.2.0
-adds fixed-geometry text slots; typed size policies, dependency-based partial reflow, and
-shader acceleration remain future phases. The 200.7x result applies only to fixed compiled copies;
-the 337,839 pages/s direct-file result applies to distinct paint-only text bindings. Neither result
-applies to arbitrary unseen HTML or records that require reflow.
+adds fixed-geometry text slots. Fullbleed 2.2.4 adds parsed-DOM full-record
+reflow plus guarded structural flow programs and compiled PDF page-paint shaders. General typed
+size policies, dependency-based partial reflow, and row virtualization remain future phases. The
+200.7x result applies only to fixed compiled copies; the 337,839 pages/s direct-file result applies
+to distinct paint-only text bindings; and the measured 10,365 pages/s result applies to the hot
+compiled variants of the exact variable-length reflow case study above. None applies to arbitrary
+previously unseen HTML without the corresponding compile contract.

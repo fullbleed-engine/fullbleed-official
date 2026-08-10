@@ -44,6 +44,13 @@ pub(crate) fn document_canvas_background(
     resolver: &StyleResolver,
 ) -> Option<(Color, f32)> {
     let document = parse_html(html);
+    document_canvas_background_for_document(&document, resolver)
+}
+
+pub(crate) fn document_canvas_background_for_document(
+    document: &NodeRef,
+    resolver: &StyleResolver,
+) -> Option<(Color, f32)> {
     let base_style = resolver.default_style();
     let html_el = document.select_first("html").ok()?;
     let html_node = html_el.as_node();
@@ -863,6 +870,17 @@ fn flex_item_basis(style: &ComputedStyle) -> Option<LengthSpec> {
     }
 }
 
+#[inline(never)]
+fn compute_boxed_style(
+    resolver: &StyleResolver,
+    info: &ElementInfo,
+    parent_style: &ComputedStyle,
+    inline_style: Option<&str>,
+    ancestors: &[ElementInfo],
+) -> Box<ComputedStyle> {
+    Box::new(resolver.compute_style(info, parent_style, inline_style, ancestors))
+}
+
 pub fn html_to_story_with_resolver_and_fonts_and_report(
     html: &str,
     resolver: &StyleResolver,
@@ -919,11 +937,42 @@ pub(crate) fn html_to_story_with_resolver_and_fonts_and_report_and_target_pages(
             &[("nodes", nodes), ("elements", elements)],
         );
     }
-    let base_style = resolver.default_style();
+    html_document_to_story_with_resolver_and_fonts_and_report_and_target_pages(
+        &document,
+        resolver,
+        font_registry,
+        asset_bundle,
+        report,
+        svg_form,
+        svg_raster_fallback,
+        perf,
+        doc_id,
+        target_pages,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn html_document_to_story_with_resolver_and_fonts_and_report_and_target_pages(
+    document: &NodeRef,
+    resolver: &StyleResolver,
+    font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<Arc<AssetBundle>>,
+    report: Option<&mut GlyphCoverageReport>,
+    svg_form: bool,
+    svg_raster_fallback: bool,
+    perf: Option<&crate::perf::PerfLogger>,
+    doc_id: Option<usize>,
+    target_pages: Option<Arc<HashMap<String, usize>>>,
+) -> Vec<Box<dyn Flowable>> {
+    // `ComputedStyle` intentionally carries the complete typed CSS state and is
+    // consequently a large value. Keep both document-level styles off the
+    // comparatively small Windows test/worker stacks before descending into
+    // the recursive DOM compiler.
+    let base_style = Box::new(resolver.default_style());
     let mut ancestors: Vec<ElementInfo> = Vec::new();
     let mut report = report;
     let mut counters = CounterState::with_target_context(
-        document_target_texts(&document),
+        document_target_texts(document),
         target_pages.unwrap_or_else(|| Arc::new(HashMap::new())),
     );
 
@@ -938,8 +987,13 @@ pub(crate) fn html_to_story_with_resolver_and_fonts_and_report_and_target_pages(
             .borrow()
             .get("style")
             .map(|s| s.to_string());
-        root_style =
-            resolver.compute_style(&html_info, &base_style, inline_style.as_deref(), &ancestors);
+        root_style = compute_boxed_style(
+            resolver,
+            &html_info,
+            &base_style,
+            inline_style.as_deref(),
+            &ancestors,
+        );
         html_info.apply_computed_container_style(&root_style);
         apply_style_counters_for_node(
             html_node,
@@ -990,7 +1044,7 @@ pub(crate) fn html_to_story_with_resolver_and_fonts_and_report_and_target_pages(
     } else {
         let t_collect = std::time::Instant::now();
         let items = collect_children(
-            &document,
+            document,
             resolver,
             &root_style,
             &mut ancestors,
@@ -2029,8 +2083,16 @@ fn node_to_flowables(
                 }
             }
             let t_style = std::time::Instant::now();
-            let mut style =
-                resolver.compute_style(&info, parent_style, inline_style.as_deref(), ancestors);
+            // DOM compilation is recursive and `ComputedStyle` is deliberately
+            // wide. Heap-own the per-element style so nesting depth does not
+            // multiply that value across the native thread stack.
+            let mut style = compute_boxed_style(
+                resolver,
+                &info,
+                parent_style,
+                inline_style.as_deref(),
+                ancestors,
+            );
             resolve_html_auto_direction(node, &mut style);
             resolve_inline_svg_mask_sources(node, &mut style);
             resolve_inline_svg_clip_source(node, &mut style);
@@ -2436,7 +2498,7 @@ fn node_to_flowables(
                 )
             } else {
                 match info.tag.as_str() {
-                    "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
+                    "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => (|| {
                         let role = match info.tag.as_str() {
                             "h1" => "H1",
                             "h2" => "H2",
@@ -2673,8 +2735,8 @@ fn node_to_flowables(
                             };
                             container_flowables_with_role(children, &style, Some(role))
                         }
-                    }
-                    "pre" => {
+                    })(),
+                    "pre" => (|| {
                         let t_extract = std::time::Instant::now();
                         let mut text = extract_text(node, WhiteSpaceMode::Pre);
                         if let Some(perf_logger) = perf {
@@ -2742,7 +2804,7 @@ fn node_to_flowables(
                             }];
                             container_flowables(items, &style)
                         }
-                    }
+                    })(),
                     "br" => {
                         let height = style.to_text_style().line_height.max(style.font_size);
                         vec![LayoutItem::Block {
@@ -2754,7 +2816,7 @@ fn node_to_flowables(
                             order: 0,
                         }]
                     }
-                    "img" => {
+                    "img" => (|| {
                         let attrs = element.attributes.borrow();
                         let src = attrs.get("src").unwrap_or("image");
                         let svg_xml = load_svg_xml_from_image_source(asset_bundle.as_deref(), src);
@@ -2857,8 +2919,8 @@ fn node_to_flowables(
                                 .with_alt(alt);
                             replaced_image_flowables(image, &style, replaced_sizing)
                         }
-                    }
-                    "svg" => {
+                    })(),
+                    "svg" => (|| {
                         // Inline SVG. We intentionally treat this as a leaf node and render it with a
                         // dedicated subset parser, rather than trying to interpret SVG children as HTML.
                         let xml = serialize_svg_node(node);
@@ -2938,7 +3000,7 @@ fn node_to_flowables(
                                 height,
                             )
                         }
-                    }
+                    })(),
                     "hr" => {
                         let spacer = Spacer::new_pt(style.to_text_style().line_height * 0.5);
                         vec![LayoutItem::Block {
@@ -2949,7 +3011,7 @@ fn node_to_flowables(
                             order: 0,
                         }]
                     }
-                    "table" => {
+                    "table" => (|| {
                         let include_prev_siblings = resolver.has_sibling_selectors();
                         let legacy_border_width = legacy_table_length_attribute(node, "border")
                             .filter(|width| *width > Pt::ZERO);
@@ -3364,8 +3426,8 @@ fn node_to_flowables(
                             width_spec: flex_item_basis(&style),
                             order: 0,
                         }]
-                    }
-                    "ul" | "ol" => {
+                    })(),
+                    "ul" | "ol" => (|| {
                         let items = list_flowables(
                             node,
                             resolver,
@@ -3421,8 +3483,8 @@ fn node_to_flowables(
                                 })
                                 .collect()
                         }
-                    }
-                    "li" => {
+                    })(),
+                    "li" => (|| {
                         let text = extract_text(node, style.white_space);
                         if text.is_empty() {
                             container_flowables_with_role(Vec::new(), &style, Some("LI"))
@@ -3459,10 +3521,10 @@ fn node_to_flowables(
                                 order: 0,
                             }]
                         }
-                    }
+                    })(),
                     "body" | "div" | "span" | "i" | "section" | "article" | "header" | "footer"
                     | "aside" | "nav" | "main" | "blockquote" | "figure" | "figcaption" | "dl"
-                    | "dt" | "dd" => {
+                    | "dt" | "dd" => (|| {
                         let dl_container_role = definition_list_container_role(info.tag.as_str());
                         let dl_inline_text_role =
                             definition_list_inline_text_role(info.tag.as_str());
@@ -3688,8 +3750,8 @@ fn node_to_flowables(
                                 )
                             }
                         }
-                    }
-                    _ => {
+                    })(),
+                    _ => (|| {
                         if is_table_container_display(style.display) {
                             table_container_flowables(
                                 node,
@@ -3724,7 +3786,7 @@ fn node_to_flowables(
                             );
                             inject_pseudo_items(children, &before_items, &after_items)
                         }
-                    }
+                    })(),
                 }
             };
 

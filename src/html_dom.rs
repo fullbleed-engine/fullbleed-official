@@ -7,10 +7,11 @@
 
 use crate::html_entities::NAMED_ENTITY_TABLES;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
-use std::fmt;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::fmt::{self, Write};
 use std::ops::Deref;
 use std::rc::{Rc, Weak};
+use std::sync::{Arc, Mutex, RwLock};
 
 const HTML_NS: &str = "http://www.w3.org/1999/xhtml";
 const SVG_NS: &str = "http://www.w3.org/2000/svg";
@@ -194,6 +195,16 @@ impl NodeRef {
         self.0.children.borrow_mut().push(child);
     }
 
+    fn replace_children(&self, children: Vec<NodeRef>) {
+        let previous = std::mem::take(&mut *self.0.children.borrow_mut());
+        for child in previous {
+            *child.0.parent.borrow_mut() = Weak::new();
+        }
+        for child in children {
+            self.append_child(child);
+        }
+    }
+
     fn insert_before_child(&self, reference: &NodeRef, child: NodeRef) {
         let mut children = self.0.children.borrow_mut();
         let index = children
@@ -285,6 +296,656 @@ impl NodeRef {
             .next()
             .ok_or_else(|| SelectorError::new("selector matched no elements"))
     }
+}
+
+#[derive(Clone, Debug)]
+enum CompiledTextPart {
+    Literal(Box<str>),
+    Slot(usize),
+}
+
+#[derive(Clone, Debug)]
+enum CompiledNode {
+    Document(Vec<CompiledNode>),
+    Doctype(String),
+    Text {
+        value: String,
+        program: Option<Arc<[CompiledTextPart]>>,
+    },
+    Comment(String),
+    Element {
+        name: QualName,
+        attributes: Attributes,
+        children: Vec<CompiledNode>,
+        html_binding: Option<usize>,
+    },
+}
+
+/// Parsed, recovered HTML tree with text bindings lowered to immutable slot programs.
+///
+/// The blueprint is `Send + Sync`; each reflow worker materializes one private `Rc` DOM and
+/// updates only its bound text cells between records. HTML tokenization and tree recovery are
+/// therefore compile-time work rather than per-record work.
+#[derive(Clone, Debug)]
+pub(crate) struct CompiledHtmlBindingTemplate {
+    root: CompiledNode,
+    slot_names: Vec<String>,
+    node_count: usize,
+    binding_text_node_count: usize,
+    html_binding_node_count: usize,
+}
+
+#[derive(Debug)]
+struct BoundTextNode {
+    node: NodeRef,
+    program: Arc<[CompiledTextPart]>,
+}
+
+#[derive(Debug)]
+struct BoundHtmlNode {
+    node: NodeRef,
+    slot: usize,
+    context_tag: String,
+}
+
+/// Worker-local DOM materialized from a [`CompiledHtmlBindingTemplate`].
+#[derive(Debug)]
+pub(crate) struct BoundHtmlDocument {
+    root: NodeRef,
+    bound_text_nodes: Vec<BoundTextNode>,
+    bound_html_nodes: Vec<BoundHtmlNode>,
+    flow_program_key: String,
+    flow_dynamic_text: Vec<Arc<str>>,
+}
+
+struct CompiledFlowHtmlInput {
+    structure_id: u64,
+    text: Arc<[Arc<str>]>,
+}
+
+#[derive(Default)]
+pub(crate) struct CompiledFlowHtmlInputCache {
+    entries: RwLock<HashMap<Arc<str>, Arc<CompiledFlowHtmlInput>>>,
+    structures: Mutex<HashMap<Arc<str>, u64>>,
+}
+
+impl CompiledFlowHtmlInputCache {
+    fn get_or_compile(&self, html: &str) -> Arc<CompiledFlowHtmlInput> {
+        if let Some(compiled) = self
+            .entries
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(html)
+            .cloned()
+        {
+            return compiled;
+        }
+
+        let mut structural_key = String::with_capacity(html.len());
+        push_flow_program_html_key(&mut structural_key, html);
+        let mut text = Vec::new();
+        collect_flow_program_html_text(&mut text, html);
+        let structure_id = {
+            let mut structures = self
+                .structures
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(id) = structures.get(structural_key.as_str()) {
+                *id
+            } else {
+                let id = structures.len() as u64 + 1;
+                structures.insert(Arc::from(structural_key), id);
+                id
+            }
+        };
+        let compiled = Arc::new(CompiledFlowHtmlInput {
+            structure_id,
+            text: text.into_iter().map(Arc::from).collect::<Vec<_>>().into(),
+        });
+        let mut entries = self
+            .entries
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(current) = entries.get(html) {
+            return current.clone();
+        }
+        if entries.len() < 20_000 {
+            entries.insert(Arc::from(html), compiled.clone());
+        }
+        compiled
+    }
+}
+
+impl CompiledHtmlBindingTemplate {
+    pub(crate) fn compile_document(root: &NodeRef) -> Result<Self, String> {
+        let mut slot_names = BTreeSet::new();
+        let mut node_count = 1usize;
+        let mut binding_text_node_count = 0usize;
+        let mut html_binding_node_count = 0usize;
+
+        for node in root.descendants() {
+            node_count = node_count.saturating_add(1);
+            match node.data() {
+                NodeData::Element(element) => {
+                    let attributes = element.attributes.borrow();
+                    if let Some(raw_slot) = attributes.get("data-fb-bind-html") {
+                        let slot = raw_slot.trim();
+                        if !crate::valid_binding_slot_name(slot) {
+                            return Err(format!(
+                                "invalid data-fb-bind-html slot name {raw_slot:?} on <{}>",
+                                element.name.local
+                            ));
+                        }
+                        let tag = element.name.local.as_ref();
+                        if tag.eq_ignore_ascii_case("script") || tag.eq_ignore_ascii_case("style") {
+                            return Err(format!("data-fb-bind-html is not supported on <{tag}>"));
+                        }
+                        let in_body = node.ancestors().any(|ancestor| {
+                            ancestor.as_element().is_some_and(|candidate| {
+                                candidate.name.local.as_ref().eq_ignore_ascii_case("body")
+                            })
+                        });
+                        if !in_body {
+                            return Err(format!(
+                                "data-fb-bind-html target <{tag}> must be inside the document body"
+                            ));
+                        }
+                        let has_static_content = node.children().any(|child| match child.data() {
+                            NodeData::Text(value) => !value.borrow().trim().is_empty(),
+                            NodeData::Comment(_) => false,
+                            NodeData::Document | NodeData::Doctype(_) | NodeData::Element(_) => {
+                                true
+                            }
+                        });
+                        if has_static_content {
+                            return Err(format!(
+                                "data-fb-bind-html target <{tag}> must be empty apart from whitespace/comments"
+                            ));
+                        }
+                        html_binding_node_count = html_binding_node_count.saturating_add(1);
+                        slot_names.insert(slot.to_string());
+                    }
+                    for (name, value) in &attributes.map {
+                        let slots = crate::binding_slot_names(&value.value);
+                        if !slots.is_empty() {
+                            return Err(format!(
+                                "compiled reflow bindings currently support text nodes only; attribute {} on <{}> contains {:?}",
+                                name.local, element.name.local, slots
+                            ));
+                        }
+                    }
+                }
+                NodeData::Comment(value) => {
+                    let value = value.borrow();
+                    let slots = crate::binding_slot_names(&value);
+                    if !slots.is_empty() {
+                        return Err(format!(
+                            "compiled reflow bindings do not execute inside HTML comments: {:?}",
+                            slots
+                        ));
+                    }
+                }
+                NodeData::Text(value) => {
+                    let value = value.borrow();
+                    let slots = crate::binding_slot_names(&value);
+                    if slots.is_empty() {
+                        continue;
+                    }
+                    let mut in_body = false;
+                    let mut raw_text_parent = None;
+                    for ancestor in node.ancestors().skip(1) {
+                        let Some(element) = ancestor.as_element() else {
+                            continue;
+                        };
+                        let local = element.name.local.as_ref();
+                        if local.eq_ignore_ascii_case("body") {
+                            in_body = true;
+                        }
+                        if local.eq_ignore_ascii_case("script")
+                            || local.eq_ignore_ascii_case("style")
+                        {
+                            raw_text_parent = Some(local.to_string());
+                            break;
+                        }
+                    }
+                    if let Some(parent) = raw_text_parent {
+                        return Err(format!(
+                            "compiled reflow bindings do not execute inside <{parent}> text: {:?}",
+                            slots
+                        ));
+                    }
+                    if !in_body {
+                        return Err(format!(
+                            "compiled reflow bindings must be inside the document body: {:?}",
+                            slots
+                        ));
+                    }
+                    binding_text_node_count = binding_text_node_count.saturating_add(1);
+                    slot_names.extend(slots.into_iter().map(str::to_string));
+                }
+                NodeData::Document | NodeData::Doctype(_) => {}
+            }
+        }
+
+        let slot_names = slot_names.into_iter().collect::<Vec<_>>();
+        let slot_indices = slot_names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| (name.as_str(), index))
+            .collect::<BTreeMap<_, _>>();
+        let root = compile_node(root, &slot_indices);
+        Ok(Self {
+            root,
+            slot_names,
+            node_count,
+            binding_text_node_count,
+            html_binding_node_count,
+        })
+    }
+
+    pub(crate) fn slot_names(&self) -> &[String] {
+        &self.slot_names
+    }
+
+    pub(crate) fn node_count(&self) -> usize {
+        self.node_count
+    }
+
+    pub(crate) fn binding_text_node_count(&self) -> usize {
+        self.binding_text_node_count
+    }
+
+    pub(crate) fn html_binding_node_count(&self) -> usize {
+        self.html_binding_node_count
+    }
+
+    pub(crate) fn instantiate(&self) -> BoundHtmlDocument {
+        let mut bound_text_nodes = Vec::with_capacity(self.binding_text_node_count);
+        let mut bound_html_nodes = Vec::with_capacity(self.html_binding_node_count);
+        let root = materialize_node(&self.root, &mut bound_text_nodes, &mut bound_html_nodes);
+        BoundHtmlDocument {
+            root,
+            bound_text_nodes,
+            bound_html_nodes,
+            flow_program_key: String::new(),
+            flow_dynamic_text: Vec::new(),
+        }
+    }
+}
+
+impl BoundHtmlDocument {
+    pub(crate) fn root(&self) -> &NodeRef {
+        &self.root
+    }
+
+    pub(crate) fn prepare_flow_program_input(
+        &mut self,
+        columns: &[&[String]],
+        row: usize,
+        cache: &CompiledFlowHtmlInputCache,
+    ) {
+        self.flow_dynamic_text.clear();
+        for binding in &self.bound_text_nodes {
+            let mut value = String::new();
+            for part in binding.program.iter() {
+                match part {
+                    CompiledTextPart::Literal(literal) => value.push_str(literal),
+                    CompiledTextPart::Slot(slot) => value.push_str(&columns[*slot][row]),
+                }
+            }
+            self.flow_dynamic_text.push(Arc::from(value));
+        }
+        self.flow_program_key.clear();
+        for binding in &self.bound_html_nodes {
+            write!(
+                self.flow_program_key,
+                "{}:{}:",
+                binding.slot,
+                binding.context_tag.len()
+            )
+            .expect("writing a compiled flow program key to a String cannot fail");
+            self.flow_program_key.push_str(&binding.context_tag);
+            let html = &columns[binding.slot][row];
+            let compiled = cache.get_or_compile(html);
+            write!(self.flow_program_key, "{}:", compiled.structure_id)
+                .expect("writing a compiled flow structure ID to a String cannot fail");
+            self.flow_dynamic_text.extend(compiled.text.iter().cloned());
+        }
+    }
+
+    pub(crate) fn materialize_flow_program_dom(
+        &mut self,
+        columns: &[&[String]],
+        row: usize,
+    ) -> Result<(), String> {
+        self.flow_dynamic_text.clear();
+        for binding in &self.bound_text_nodes {
+            let NodeData::Text(value) = binding.node.data() else {
+                unreachable!("compiled text binding must reference a text node");
+            };
+            let mut value = value.borrow_mut();
+            value.clear();
+            for part in binding.program.iter() {
+                match part {
+                    CompiledTextPart::Literal(literal) => value.push_str(literal),
+                    CompiledTextPart::Slot(slot) => value.push_str(&columns[*slot][row]),
+                }
+            }
+            self.flow_dynamic_text.push(Arc::from(value.as_str()));
+        }
+        let html_fragments = parse_bound_html_fragments(&self.bound_html_nodes, columns, row)?;
+        for (binding, children) in self.bound_html_nodes.iter().zip(html_fragments) {
+            for child in &children {
+                if let NodeData::Text(text) = child.data() {
+                    self.flow_dynamic_text
+                        .push(Arc::from(text.borrow().as_str()));
+                }
+                self.flow_dynamic_text
+                    .extend(child.descendants().filter_map(|node| match node.data() {
+                        NodeData::Text(text) => Some(Arc::from(text.borrow().as_str())),
+                        _ => None,
+                    }));
+            }
+            binding.node.replace_children(children);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn flow_program_key(&self) -> &str {
+        &self.flow_program_key
+    }
+
+    pub(crate) fn flow_dynamic_text(&self) -> &[Arc<str>] {
+        &self.flow_dynamic_text
+    }
+}
+
+fn push_flow_program_html_key(out: &mut String, html: &str) {
+    let mut in_tag = false;
+    let mut numeric_text = false;
+    for ch in html.chars() {
+        match ch {
+            '<' => {
+                if numeric_text {
+                    out.push('#');
+                    numeric_text = false;
+                }
+                in_tag = true;
+                out.push(ch);
+            }
+            '>' if in_tag => {
+                in_tag = false;
+                out.push(ch);
+            }
+            _ if in_tag => out.push(ch),
+            _ if ch.is_ascii_digit() || (numeric_text && matches!(ch, '$' | ',' | '.')) => {
+                numeric_text = true;
+            }
+            _ => {
+                if numeric_text {
+                    out.push('#');
+                    numeric_text = false;
+                }
+                out.push(ch);
+            }
+        }
+    }
+    if numeric_text {
+        out.push('#');
+    }
+    out.push('|');
+}
+
+fn collect_flow_program_html_text(out: &mut Vec<String>, html: &str) {
+    let mut cursor = 0usize;
+    while cursor < html.len() {
+        let remaining = &html[cursor..];
+        if remaining.starts_with("<!--") {
+            cursor += remaining.find("-->").map_or(remaining.len(), |end| end + 3);
+            continue;
+        }
+        if remaining.starts_with('<') {
+            cursor += remaining.find('>').map_or(remaining.len(), |end| end + 1);
+            continue;
+        }
+        let end = remaining.find('<').unwrap_or(remaining.len());
+        if end == 0 {
+            cursor += remaining.chars().next().map_or(1, char::len_utf8);
+            continue;
+        }
+        let value = decode_character_references(&remaining[..end]);
+        if !value.is_empty() {
+            out.push(value);
+        }
+        cursor += end;
+    }
+}
+
+fn compile_text_program(
+    value: &str,
+    slot_indices: &BTreeMap<&str, usize>,
+) -> Option<Arc<[CompiledTextPart]>> {
+    let spans = crate::binding_slot_spans(value);
+    if spans.is_empty() {
+        return None;
+    }
+    let mut parts = Vec::with_capacity(spans.len().saturating_mul(2).saturating_add(1));
+    let mut cursor = 0usize;
+    for (start, end, name) in spans {
+        if start > cursor {
+            parts.push(CompiledTextPart::Literal(value[cursor..start].into()));
+        }
+        let slot = *slot_indices
+            .get(name)
+            .expect("all compiled text slots were collected before lowering");
+        parts.push(CompiledTextPart::Slot(slot));
+        cursor = end;
+    }
+    if cursor < value.len() {
+        parts.push(CompiledTextPart::Literal(value[cursor..].into()));
+    }
+    Some(parts.into())
+}
+
+fn compile_node(node: &NodeRef, slot_indices: &BTreeMap<&str, usize>) -> CompiledNode {
+    let children = || {
+        node.children()
+            .map(|child| compile_node(&child, slot_indices))
+            .collect::<Vec<_>>()
+    };
+    match node.data() {
+        NodeData::Document => CompiledNode::Document(children()),
+        NodeData::Doctype(value) => CompiledNode::Doctype(value.clone()),
+        NodeData::Text(value) => {
+            let value = value.borrow();
+            CompiledNode::Text {
+                value: value.clone(),
+                program: compile_text_program(&value, slot_indices),
+            }
+        }
+        NodeData::Comment(value) => CompiledNode::Comment(value.borrow().clone()),
+        NodeData::Element(element) => CompiledNode::Element {
+            name: element.name.clone(),
+            attributes: element.attributes.borrow().clone(),
+            children: children(),
+            html_binding: element
+                .attributes
+                .borrow()
+                .get("data-fb-bind-html")
+                .map(str::trim)
+                .map(|name| {
+                    *slot_indices
+                        .get(name)
+                        .expect("all structural HTML slots were collected before lowering")
+                }),
+        },
+    }
+}
+
+fn materialize_node(
+    node: &CompiledNode,
+    text_bindings: &mut Vec<BoundTextNode>,
+    html_bindings: &mut Vec<BoundHtmlNode>,
+) -> NodeRef {
+    let (materialized, children) = match node {
+        CompiledNode::Document(children) => (NodeRef::new(NodeData::Document), children.as_slice()),
+        CompiledNode::Doctype(value) => (NodeRef::doctype(value.clone()), &[][..]),
+        CompiledNode::Text { value, program } => {
+            let initial = if program.is_some() {
+                String::with_capacity(value.len())
+            } else {
+                value.clone()
+            };
+            let materialized = NodeRef::text(initial);
+            if let Some(program) = program {
+                text_bindings.push(BoundTextNode {
+                    node: materialized.clone(),
+                    program: program.clone(),
+                });
+            }
+            (materialized, &[][..])
+        }
+        CompiledNode::Comment(value) => (NodeRef::comment(value.clone()), &[][..]),
+        CompiledNode::Element {
+            name,
+            attributes,
+            children,
+            html_binding,
+        } => {
+            let materialized = NodeRef::new(NodeData::Element(ElementData {
+                name: name.clone(),
+                attributes: RefCell::new(attributes.clone()),
+            }));
+            if let Some(slot) = html_binding {
+                html_bindings.push(BoundHtmlNode {
+                    node: materialized.clone(),
+                    slot: *slot,
+                    context_tag: name.local.to_string(),
+                });
+            }
+            let children = if html_binding.is_some() {
+                &[][..]
+            } else {
+                children.as_slice()
+            };
+            (materialized, children)
+        }
+    };
+    for child in children {
+        materialized.append_child(materialize_node(child, text_bindings, html_bindings));
+    }
+    materialized
+}
+
+const BOUND_HTML_ROOT_ATTRIBUTE: &str = "data-fullbleed-compiler-binding-root";
+
+fn push_bound_html_fragment_wrapper(
+    source: &mut String,
+    index: usize,
+    context_tag: &str,
+    html: &str,
+) {
+    let attribute = BOUND_HTML_ROOT_ATTRIBUTE;
+    match context_tag.to_ascii_lowercase().as_str() {
+        "table" => write!(
+            source,
+            "<table {attribute}=\"{index}\">{html}</table>"
+        ),
+        "thead" | "tbody" | "tfoot" => write!(
+            source,
+            "<table><{context_tag} {attribute}=\"{index}\">{html}</{context_tag}></table>"
+        ),
+        "colgroup" => write!(
+            source,
+            "<table><colgroup {attribute}=\"{index}\">{html}</colgroup></table>"
+        ),
+        "tr" => write!(
+            source,
+            "<table><tbody><tr {attribute}=\"{index}\">{html}</tr></tbody></table>"
+        ),
+        "td" | "th" => write!(
+            source,
+            "<table><tbody><tr><{context_tag} {attribute}=\"{index}\">{html}</{context_tag}></tr></tbody></table>"
+        ),
+        "select" => write!(
+            source,
+            "<select {attribute}=\"{index}\">{html}</select>"
+        ),
+        "optgroup" => write!(
+            source,
+            "<select><optgroup {attribute}=\"{index}\">{html}</optgroup></select>"
+        ),
+        _ => write!(
+            source,
+            "<div {attribute}=\"{index}\">{html}</div>"
+        ),
+    }
+    .expect("writing a compiled HTML fragment wrapper to a String cannot fail");
+}
+
+fn parse_bound_html_fragments(
+    bindings: &[BoundHtmlNode],
+    columns: &[&[String]],
+    row: usize,
+) -> Result<Vec<Vec<NodeRef>>, String> {
+    if bindings.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let estimated_html_bytes = bindings.iter().fold(0usize, |total, binding| {
+        total.saturating_add(columns[binding.slot][row].len())
+    });
+    let mut source = String::with_capacity(
+        estimated_html_bytes.saturating_add(bindings.len().saturating_mul(96)),
+    );
+    for (index, binding) in bindings.iter().enumerate() {
+        push_bound_html_fragment_wrapper(
+            &mut source,
+            index,
+            &binding.context_tag,
+            &columns[binding.slot][row],
+        );
+    }
+
+    let document = parse_html(&source);
+    let mut roots = vec![None; bindings.len()];
+    for node in document.descendants() {
+        let Some(element) = node.as_element() else {
+            continue;
+        };
+        let attributes = element.attributes.borrow();
+        let Some(raw_index) = attributes.get(BOUND_HTML_ROOT_ATTRIBUTE) else {
+            continue;
+        };
+        let index = raw_index.parse::<usize>().map_err(|_| {
+            format!(
+                "trusted HTML binding content must not use the reserved {BOUND_HTML_ROOT_ATTRIBUTE} attribute"
+            )
+        })?;
+        let Some(root) = roots.get_mut(index) else {
+            return Err(format!(
+                "trusted HTML binding content must not use the reserved {BOUND_HTML_ROOT_ATTRIBUTE} attribute"
+            ));
+        };
+        if root.replace(node.clone()).is_some() {
+            return Err(format!(
+                "trusted HTML binding content must not use the reserved {BOUND_HTML_ROOT_ATTRIBUTE} attribute"
+            ));
+        }
+    }
+
+    roots
+        .into_iter()
+        .enumerate()
+        .map(|(index, root)| {
+            root.map(|node| node.children().collect()).ok_or_else(|| {
+                format!(
+                    "failed to materialize <{}> HTML binding fragment",
+                    bindings[index].context_tag
+                )
+            })
+        })
+        .collect()
 }
 
 pub(crate) struct Children {
@@ -2229,7 +2890,7 @@ fn replace_nulls(source: &str) -> String {
     output
 }
 
-fn decode_character_references(source: &str) -> String {
+pub(crate) fn decode_character_references(source: &str) -> String {
     decode_character_references_with_context(source, false)
 }
 

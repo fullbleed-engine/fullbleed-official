@@ -1,11 +1,17 @@
+use std::cell::RefCell;
+use std::sync::OnceLock;
+
 const ADLER_BASE: u32 = 65_521;
 const DEFAULT_ADLER_CHUNK: usize = 1 << 20;
+const ADLER_NMAX: usize = 5_552;
 
 const LZ77_CHUNK_BYTES: usize = 128 * 1024;
 const MIN_MATCH: usize = 3;
 const MAX_MATCH: usize = 258;
 const MAX_DISTANCE: usize = 32 * 1024;
 const MAX_CHAIN_STEPS: usize = 64;
+const DEFAULT_COMPILED_FLOW_CHAIN_STEPS: usize = 4;
+const COMPILED_FLOW_THROUGHPUT_MIN_BYTES: usize = 4 * 1024;
 const HASH_BITS: usize = 15;
 const HASH_SIZE: usize = 1 << HASH_BITS;
 
@@ -41,19 +47,19 @@ impl AdlerPartial {
     }
 
     fn for_bytes(data: &[u8]) -> Self {
-        let mut a: u32 = 1;
-        let mut b: u32 = 0;
-        for &byte in data {
-            a += byte as u32;
-            if a >= ADLER_BASE {
-                a -= ADLER_BASE;
+        let mut a = 1_u64;
+        let mut b = 0_u64;
+        for chunk in data.chunks(ADLER_NMAX) {
+            for &byte in chunk {
+                a += u64::from(byte);
+                b += a;
             }
-            b += a;
-            b %= ADLER_BASE;
+            a %= u64::from(ADLER_BASE);
+            b %= u64::from(ADLER_BASE);
         }
         Self {
-            a,
-            b,
+            a: a as u32,
+            b: b as u32,
             len: data.len(),
         }
     }
@@ -166,87 +172,155 @@ fn hash3(data: &[u8], i: usize) -> usize {
 
 fn match_len(data: &[u8], a: usize, b: usize, max_len: usize) -> usize {
     let mut l = 0usize;
+    while l + 8 <= max_len {
+        let left = u64::from_le_bytes(
+            data[a + l..a + l + 8]
+                .try_into()
+                .expect("eight-byte match window"),
+        );
+        let right = u64::from_le_bytes(
+            data[b + l..b + l + 8]
+                .try_into()
+                .expect("eight-byte match window"),
+        );
+        let difference = left ^ right;
+        if difference != 0 {
+            return l + (difference.trailing_zeros() as usize >> 3);
+        }
+        l += 8;
+    }
     while l < max_len && data[a + l] == data[b + l] {
         l += 1;
     }
     l
 }
 
-fn plan_lz77_chunk(data: &[u8]) -> ChunkPlan {
-    let n = data.len();
-    if n == 0 {
-        return ChunkPlan { tokens: Vec::new() };
+struct Lz77Workspace {
+    head: Vec<i32>,
+    head_epoch: Vec<u32>,
+    prev: Vec<i32>,
+    epoch: u32,
+}
+
+impl Lz77Workspace {
+    fn new() -> Self {
+        Self {
+            head: vec![-1; HASH_SIZE],
+            head_epoch: vec![0; HASH_SIZE],
+            prev: Vec::new(),
+            epoch: 0,
+        }
     }
 
-    let mut head = vec![-1_i32; HASH_SIZE];
-    let mut prev = vec![-1_i32; n];
-    let mut tokens = Vec::with_capacity(n / 2);
-
-    let mut i = 0usize;
-    while i < n {
-        if i + MIN_MATCH > n {
-            tokens.push(Token::Literal(data[i]));
-            i += 1;
-            continue;
+    fn begin_page(&mut self, len: usize) -> u32 {
+        self.epoch = self.epoch.wrapping_add(1);
+        if self.epoch == 0 {
+            self.head_epoch.fill(0);
+            self.epoch = 1;
         }
+        if self.prev.len() < len {
+            self.prev.resize(len, -1);
+        }
+        self.epoch
+    }
 
-        let h = hash3(data, i);
-        let mut cand = head[h];
-        prev[i] = cand;
-        head[h] = i as i32;
+    fn plan(&mut self, data: &[u8], max_chain_steps: usize) -> ChunkPlan {
+        let n = data.len();
+        if n == 0 {
+            return ChunkPlan { tokens: Vec::new() };
+        }
+        let epoch = self.begin_page(n);
+        let mut tokens = Vec::with_capacity(n / 2);
 
-        let mut best_len = 0usize;
-        let mut best_dist = 0usize;
-        let mut steps = 0usize;
-
-        while cand >= 0 && steps < MAX_CHAIN_STEPS {
-            let c = cand as usize;
-            let dist = i - c;
-            if dist > MAX_DISTANCE {
-                break;
+        let mut i = 0usize;
+        while i < n {
+            if i + MIN_MATCH > n {
+                tokens.push(Token::Literal(data[i]));
+                i += 1;
+                continue;
             }
 
-            if data[c] == data[i] && data[c + 1] == data[i + 1] && data[c + 2] == data[i + 2] {
-                let max_len = MAX_MATCH.min(n - i);
-                let len = match_len(data, c, i, max_len);
-                if len >= MIN_MATCH && (len > best_len || (len == best_len && dist < best_dist)) {
-                    best_len = len;
-                    best_dist = dist;
-                    if best_len == MAX_MATCH {
-                        break;
+            let h = hash3(data, i);
+            let mut cand = if self.head_epoch[h] == epoch {
+                self.head[h]
+            } else {
+                -1
+            };
+            self.prev[i] = cand;
+            self.head[h] = i as i32;
+            self.head_epoch[h] = epoch;
+
+            let mut best_len = 0usize;
+            let mut best_dist = 0usize;
+            let mut steps = 0usize;
+
+            while cand >= 0 && steps < max_chain_steps {
+                let c = cand as usize;
+                let dist = i - c;
+                if dist > MAX_DISTANCE {
+                    break;
+                }
+
+                if data[c] == data[i] && data[c + 1] == data[i + 1] && data[c + 2] == data[i + 2] {
+                    let max_len = MAX_MATCH.min(n - i);
+                    let len = match_len(data, c, i, max_len);
+                    if len >= MIN_MATCH && (len > best_len || (len == best_len && dist < best_dist))
+                    {
+                        best_len = len;
+                        best_dist = dist;
+                        if best_len == MAX_MATCH {
+                            break;
+                        }
                     }
                 }
+
+                cand = self.prev[c];
+                steps += 1;
             }
 
-            cand = prev[c];
-            steps += 1;
-        }
+            if best_len >= MIN_MATCH {
+                tokens.push(Token::Match {
+                    len: best_len as u16,
+                    dist: best_dist as u16,
+                });
 
-        if best_len >= MIN_MATCH {
-            tokens.push(Token::Match {
-                len: best_len as u16,
-                dist: best_dist as u16,
-            });
-
-            let end = (i + best_len).min(n);
-            let mut j = i + 1;
-            while j < end {
-                if j + MIN_MATCH <= n {
-                    let hj = hash3(data, j);
-                    prev[j] = head[hj];
-                    head[hj] = j as i32;
+                let end = (i + best_len).min(n);
+                let mut j = i + 1;
+                while j < end {
+                    if j + MIN_MATCH <= n {
+                        let hj = hash3(data, j);
+                        self.prev[j] = if self.head_epoch[hj] == epoch {
+                            self.head[hj]
+                        } else {
+                            -1
+                        };
+                        self.head[hj] = j as i32;
+                        self.head_epoch[hj] = epoch;
+                    }
+                    j += 1;
                 }
-                j += 1;
+
+                i += best_len;
+            } else {
+                tokens.push(Token::Literal(data[i]));
+                i += 1;
             }
-
-            i += best_len;
-        } else {
-            tokens.push(Token::Literal(data[i]));
-            i += 1;
         }
-    }
 
-    ChunkPlan { tokens }
+        ChunkPlan { tokens }
+    }
+}
+
+thread_local! {
+    static LZ77_WORKSPACE: RefCell<Lz77Workspace> = RefCell::new(Lz77Workspace::new());
+}
+
+fn plan_lz77_chunk_with_chain(data: &[u8], max_chain_steps: usize) -> ChunkPlan {
+    LZ77_WORKSPACE.with(|workspace| {
+        workspace
+            .borrow_mut()
+            .plan(data, max_chain_steps.clamp(1, MAX_CHAIN_STEPS))
+    })
 }
 
 fn reverse_bits(mut value: u16, len: u8) -> u16 {
@@ -348,10 +422,32 @@ fn estimate_deflate_capacity(input_len: usize) -> usize {
 }
 
 pub(crate) fn zlib_deflate_parallel(data: &[u8]) -> Vec<u8> {
+    zlib_deflate_with_chain(data, MAX_CHAIN_STEPS)
+}
+
+pub(crate) fn zlib_deflate_compiled_flow(data: &[u8]) -> Vec<u8> {
+    static COMPILED_FLOW_CHAIN_STEPS: OnceLock<usize> = OnceLock::new();
+    let steps = *COMPILED_FLOW_CHAIN_STEPS.get_or_init(|| {
+        std::env::var("FULLBLEED_COMPILED_FLOW_DEFLATE_CHAIN")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(DEFAULT_COMPILED_FLOW_CHAIN_STEPS)
+            .clamp(1, MAX_CHAIN_STEPS)
+    });
+    let steps = if data.len() < COMPILED_FLOW_THROUGHPUT_MIN_BYTES {
+        MAX_CHAIN_STEPS
+    } else {
+        steps
+    };
+    zlib_deflate_with_chain(data, steps)
+}
+
+fn zlib_deflate_with_chain(data: &[u8], max_chain_steps: usize) -> Vec<u8> {
     let ranges = chunk_ranges(data.len(), LZ77_CHUNK_BYTES);
 
-    let plans =
-        crate::parallel::map_ordered(&ranges, |(start, end)| plan_lz77_chunk(&data[*start..*end]));
+    let plans = crate::parallel::map_ordered(&ranges, |(start, end)| {
+        plan_lz77_chunk_with_chain(&data[*start..*end], max_chain_steps)
+    });
 
     let adler = adler32_parallel(data, DEFAULT_ADLER_CHUNK);
 
@@ -810,6 +906,21 @@ mod tests {
             zlib_inflate(&encoded, src.len()).expect("native inflate"),
             src
         );
+    }
+
+    #[test]
+    fn zlib_compiled_flow_chain_levels_roundtrip_deterministically() {
+        let src = b"BT /F1 10 Tf 72 720 Td [(REFLOW-000001)] TJ ET\n".repeat(2_000);
+        for steps in [1, 4, 8, 16, 32, 64] {
+            let a = zlib_deflate_with_chain(&src, steps);
+            let b = zlib_deflate_with_chain(&src, steps);
+            assert_eq!(a, b, "deterministic at {steps} chain steps");
+            assert_eq!(
+                zlib_inflate(&a, src.len()).expect("native inflate"),
+                src,
+                "roundtrip at {steps} chain steps",
+            );
+        }
     }
 
     #[test]

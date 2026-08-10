@@ -144,6 +144,12 @@ def test_pdf_engine_constructor_and_method_signatures_remain_explicit() -> None:
     assert str(inspect.signature(fullbleed.CompiledDocument.render_pdf_bindings)) == (
         "(self, /, bindings, deterministic_hash=None)"
     )
+    assert str(
+        inspect.signature(fullbleed.CompiledDocument.render_pdf_reflow_bindings)
+    ) == "(self, /, bindings, deterministic_hash=None)"
+    assert str(
+        inspect.signature(fullbleed.CompiledDocument.render_pdf_reflow_bindings_to_file)
+    ) == "(self, /, bindings, path, deterministic_hash=None)"
     assert str(inspect.signature(fullbleed.PdfEngine.verify_accessibility_html)) == (
         "(self, /, html, css='', profile='strict', mode='error', "
         "render_preview_png_path=None, a11y_report=None, claim_evidence=None, "
@@ -225,6 +231,13 @@ def test_compiled_document_renders_distinct_columnar_bindings(tmp_path) -> None:
     assert stats["binding_slots"] == ["amount", "customer", "invoice_id"]
     assert stats["binding_program_page_count"] == 1
     assert stats["binding_program_command_count"] > 0
+    assert stats["reflow_program_ready"] is True
+    assert stats["reflow_binding_slots"] == ["amount", "customer", "invoice_id"]
+    assert stats["reflow_binding_slot_count"] == 3
+    assert stats["reflow_program_node_count"] > 0
+    assert stats["reflow_program_binding_text_node_count"] == 3
+    assert stats["reflow_program_html_binding_node_count"] == 0
+    assert stats["reflow_program_error"] is None
     bindings = {
         "invoice_id": ["INV-0001", "INV-0002", "INV-0003"],
         "customer": ["Ada Lovelace", "Grace Hopper", "Katherine Johnson"],
@@ -249,6 +262,111 @@ def test_compiled_document_renders_distinct_columnar_bindings(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="binding columns do not match compiled slots"):
         compiled.render_pdf_bindings({"invoice_id": ["INV-ONLY"]})
+
+
+def test_compiled_document_reflows_columnar_bindings_and_streams_to_file(tmp_path) -> None:
+    engine = fullbleed.PdfEngine()
+    template = (
+        "<!doctype html><html><body><main>"
+        "<h1>{{record_id}}</h1>"
+        '<div class="content">{{content}}</div>'
+        "<p>END {{record_id}}</p>"
+        "</main></body></html>"
+    )
+    css = """
+    @page { size: 240pt 180pt; margin: 18pt; }
+    body { margin: 0; font-family: Helvetica, sans-serif;
+           font-size: 10pt; line-height: 12pt; }
+    h1 { margin: 0 0 6pt; font-size: 14pt; line-height: 16pt; }
+    .content { white-space: pre-wrap; }
+    p { margin: 6pt 0 0; }
+    """
+    compiled = engine.compile_pdf(template, css)
+    bindings = {
+        "record_id": ["REC-A", "REC-B", "REC-C"],
+        "content": [
+            "\n".join(f"alpha {index:03}" for index in range(3)),
+            "\n".join(f"bravo {index:03}" for index in range(18)),
+            "\n".join(f"charlie {index:03}" for index in range(35)),
+        ],
+    }
+
+    first = compiled.render_pdf_reflow_bindings(bindings)
+    second = compiled.render_pdf_reflow_bindings(bindings)
+    assert first == second
+    assert first.count(b"/Type /Page ") >= 6
+
+    output = tmp_path / "reflow-bindings.pdf"
+    digest = tmp_path / "reflow-bindings.sha256"
+    written = compiled.render_pdf_reflow_bindings_to_file(
+        bindings, str(output), str(digest)
+    )
+    assert written == output.stat().st_size
+    assert output.read_bytes() == first
+    assert len(digest.read_text(encoding="utf-8").strip()) == 64
+    extracted = fullbleed.extract_pdf_page_texts(str(output))
+    assert extracted["ok"] is True
+    text = "\n".join(page["text"] or "" for page in extracted["pages"])
+    assert text.index("REC-A") < text.index("REC-B") < text.index("REC-C")
+    assert "charlie 034" in text
+
+    one = {
+        "record_id": ["REC-ONE"],
+        "content": ["\n".join(f"single {index:03}" for index in range(14))],
+    }
+    assert compiled.render_pdf_reflow_bindings(one) == engine.render_pdf(
+        template.replace("{{record_id}}", "REC-ONE").replace(
+            "{{content}}", one["content"][0]
+        ),
+        css,
+    )
+
+    with pytest.raises(ValueError, match="binding columns do not match compiled slots"):
+        compiled.render_pdf_reflow_bindings({"record_id": ["REC-ONLY"]})
+
+
+def test_compiled_reflow_supports_trusted_html_container_bindings(tmp_path) -> None:
+    engine = fullbleed.PdfEngine()
+    template = (
+        "<main><h1>{{record_id}}</h1>"
+        '<section data-fb-bind-html="sections"></section>'
+        "<table><thead><tr><th>Row</th></tr></thead>"
+        '<tbody data-fb-bind-html="rows"></tbody></table>'
+        "<p>END {{record_id}}</p></main>"
+    )
+    css = """
+    @page { size: 240pt 180pt; margin: 18pt; }
+    body { margin: 0; font: 9pt/11pt Helvetica, sans-serif; }
+    h1, p { margin: 0 0 5pt; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1pt solid #999; padding: 3pt; }
+    tr { break-inside: avoid; }
+    """
+    compiled = engine.compile_pdf(template, css)
+    stats = compiled.stats()
+    assert stats["reflow_program_ready"] is True
+    assert stats["reflow_program_html_binding_node_count"] == 2
+    assert stats["reflow_binding_slots"] == ["record_id", "rows", "sections"]
+    bindings = {
+        "record_id": ["HTML-A", "HTML-B"],
+        "sections": [
+            "<p>HTML-A-P-000</p>",
+            "".join(f"<p>HTML-B-P-{index:03}</p>" for index in range(14)),
+        ],
+        "rows": [
+            "<tr><td>HTML-A-R-000</td></tr>",
+            "".join(
+                f"<tr><td>HTML-B-R-{index:03}</td></tr>" for index in range(26)
+            ),
+        ],
+    }
+    output = tmp_path / "trusted-html-reflow.pdf"
+    compiled.render_pdf_reflow_bindings_to_file(bindings, str(output))
+    extracted = fullbleed.extract_pdf_page_texts(str(output))
+    text = "\n".join(page["text"] or "" for page in extracted["pages"])
+    assert text.index("HTML-A") < text.index("HTML-B")
+    assert "HTML-B-P-013" in text
+    assert "HTML-B-R-025" in text
 
 
 def test_capsule_reentry_raises_instead_of_aliasing_native_state(monkeypatch) -> None:

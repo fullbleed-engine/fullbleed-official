@@ -161,7 +161,7 @@ class WatermarkSpec(metaclass=_NativeFacadeType):
 
 
 class CompiledDocument(metaclass=_NativeFacadeType):
-    """Immutable fixed-point display document produced by ``PdfEngine.compile_pdf``."""
+    """Compiled fixed-paint and content-reflow programs from ``PdfEngine.compile_pdf``."""
 
     __slots__ = ("_handle",)
 
@@ -214,6 +214,27 @@ class CompiledDocument(metaclass=_NativeFacadeType):
         return _call(
             self._handle,
             "CompiledDocument.render_pdf_bindings_to_file",
+            bindings,
+            path,
+            deterministic_hash,
+        )
+
+    def render_pdf_reflow_bindings(self, /, bindings, deterministic_hash=None):
+        """Render columnar text bindings with content-driven layout and pagination."""
+        return _call(
+            self._handle,
+            "CompiledDocument.render_pdf_reflow_bindings",
+            bindings,
+            deterministic_hash,
+        )
+
+    def render_pdf_reflow_bindings_to_file(
+        self, /, bindings, path, deterministic_hash=None
+    ):
+        """Stream a compiled content-reflow batch directly to ``path``."""
+        return _call(
+            self._handle,
+            "CompiledDocument.render_pdf_reflow_bindings_to_file",
             bindings,
             path,
             deterministic_hash,

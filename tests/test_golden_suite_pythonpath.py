@@ -42,3 +42,9 @@ def test_case_pythonpath_clears_source_only_path_when_extension_missing():
     )
 
     assert value is None
+
+
+def test_installed_native_switch_ignores_source_extension(monkeypatch):
+    monkeypatch.setenv("FULLBLEED_TEST_INSTALLED_NATIVE", "1")
+
+    assert run_golden_suite._source_extension_available() is False

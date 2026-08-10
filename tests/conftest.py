@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import os
 import sys
 import types
 from pathlib import Path
@@ -9,6 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON_SRC = ROOT / "python"
+USE_INSTALLED_NATIVE = os.environ.get("FULLBLEED_TEST_INSTALLED_NATIVE") == "1"
 
 if str(PYTHON_SRC) not in sys.path:
     sys.path.insert(0, str(PYTHON_SRC))
@@ -86,15 +88,21 @@ def _load_installed_fullbleed_native() -> bool:
 
 def _ensure_fullbleed_native_stub() -> None:
     package = PYTHON_SRC / "fullbleed"
-    if any(
+    if not USE_INSTALLED_NATIVE and any(
         (package / f"_fullbleed{suffix}").is_file()
         for suffix in importlib.machinery.EXTENSION_SUFFIXES
     ):
         return
-    if "fullbleed._fullbleed" in sys.modules:
+    if not USE_INSTALLED_NATIVE and "fullbleed._fullbleed" in sys.modules:
         return
+    if USE_INSTALLED_NATIVE:
+        sys.modules.pop("fullbleed._fullbleed", None)
     if _load_installed_fullbleed_native():
         return
+    if USE_INSTALLED_NATIVE:
+        raise ImportError(
+            "FULLBLEED_TEST_INSTALLED_NATIVE=1 but no installed Fullbleed extension was found"
+        )
     stub = types.ModuleType("fullbleed._fullbleed")
     stub.__all__ = []
     stub.__doc__ = "Stubbed native module for pure-Python UI tests."

@@ -1,104 +1,103 @@
-# Fullbleed Release Notes - 2.2.3
+# Fullbleed Release Notes - 2.2.4
 
 Status: release
 
-Release date: August 9, 2026
+Release date: August 10, 2026
 
 ## Summary
 
-Fullbleed 2.2.3 is a reliability follow-up to 2.2.2. It makes the native render-time pagination
-trace authoritative in component-mount validation, avoiding false overflow warnings from the
-legacy JIT's deliberately conservative glyph-run bounds. It also makes the bank-statement
-example's row-fragmentation intent explicit so its transaction table fills page 1 and continues
-on page 2 instead of moving as one avoided box.
+Fullbleed 2.2.4 makes content-driven flow and pagination a first-class compiler target. A compiled
+document now retains the recovered template DOM, binding contract, guarded structural flow
+variants, fixed-point display programs, and reusable PDF page-paint programs. Once a structural
+variant has been encountered, matching variable records bypass HTML parsing, selector matching,
+layout, pagination, and static page serialization.
 
-The Rust render engine and the independent Wheel265 parity result are unchanged from 2.2.2:
-1,642 comparator passes, zero implementation failures, and 20 reference-disputed cases. The
-disputed cases remain visible in the evidence set and are not relabeled as engine passes.
+The authoritative layout and geometry representation remains signed Q32.32 fixed point. The
+compiled lane reuses those values and re-executes the browser text-paint phase where alignment or
+pixel snapping requires it; it does not replace layout geometry with floating-point estimates.
 
-The authoritative layout and geometry representation remains signed Q32.32 fixed point. Raster
-coverage and PDF serialization use bounded conversion only at their defined output boundaries.
+## Compiled Content Reflow
 
-## CSS, Layout, and Reflow
+- Adds `CompiledDocument.render_pdf_reflow_bindings(...)` and
+  `CompiledDocument.render_pdf_reflow_bindings_to_file(...)` to the stable Python ABI.
+- Compiles literal text slots and explicit trusted structural slots declared with
+  `data-fb-bind-html="slot"` from one recovered template DOM.
+- Captures encountered page-count and content structures as guarded `CompiledFlowRecordProgram`
+  variants. A guard miss performs ordinary fixed-point layout once and adds the new variant.
+- Compiles eligible PDF pages into static vector segments plus dynamic text-paint slots.
+- Lowers shaped glyph runs directly to PDF TJ operators, discovers glyphs in worker-local state,
+  compresses page streams in native workers, and feeds one ordered bounded linker.
+- Releases the Python GIL while native execution runs. The implementation uses Rust standard
+  threads rather than Python multiprocessing.
+- Keeps the fallback path explicit for unseen structures, unsupported resources, transformations,
+  or values that violate every compiled geometry guard.
 
-- Explicit `break-inside: auto` on the bank-statement transaction table preserves its designed
-  row-level continuation while leaving authored `break-inside: avoid` behavior intact elsewhere.
-- Hardens fixed-height block, one-column grid, and column-flex continuation slicing without
-  duplicating content across fragmentainers.
-- Preserves `display: contents` grid descendants and paint phase through continuations.
-- Retains empty styled captions in avoided figures and keeps positioned containing blocks atomic.
-- Expands generated-content, anonymous-table, positioning, counter, marker, footnote, text,
-  writing-mode, bidi, mask/filter, SVG, image, and fragmentation behavior exercised by the
-  independent suite.
-- Uses `unicode-bidi 0.3.18` for deterministic Unicode bidi classes, paragraph levels, and visual
-  run ordering instead of ad-hoc character-range direction checks.
-- Keeps coverage claims evidence-scoped: reference-disputed fixtures are reported separately, and
-  Fullbleed is not presented as a general browser replacement.
+## Measured Variable-Reflow Performance
 
-## Compiled Variable Data
+The final Windows AMD64 `cp310-abi3` wheel was measured on an Intel Core i7-12700H with 20 logical
+processors. The independent workload contains 1,000 distinct records and naturally produces
+1,750 pages: 500/300/150/50 records produce 1/2/3/4 pages respectively.
 
-- Compiles active page-space transform and rectangular/path clip commands into each dynamic
-  binding overlay while continuing to share immutable static page content.
-- Checkpoints coordinate state across PDF save/restore commands, so a slot replays only the state
-  active at its original paint position.
-- Preserves the compile-once contract: transformed and clipped records do not rerun HTML parsing,
-  selector matching, layout, pagination, or static paint serialization.
-- Keeps the current boundary explicit: slots inside form XObjects and values that change shaping,
-  wrapping, dimensions, pagination, or tagged structure still require another compiler layer or
-  the ordinary renderer.
+- Twenty-nine hot direct-file samples had a 168.839 ms median: **5,923 records/s and 10,365
+  pages/s**. The best sample reached **12,510 pages/s**.
+- The first compile-on-demand batch took 407.521 ms, or 4,294 pages/s.
+- Every sample produced deterministic bytes. The throughput-tuned PDF is 6,870,320 bytes with
+  SHA-256 `1dd02748af497ae2f477875ecf0ab87a6de5ceb55e097b4b775ddbf6d5038194`.
+- `FULLBLEED_COMPILED_FLOW_DEFLATE_CHAIN=64` selects compact mode. That output is byte-for-byte
+  identical to ordinary rendering: 5,298,961 bytes with SHA-256
+  `bb3c441313a08fb00d3bd15f23a567981f3bbbd550908e3a9fe7a07ca5d7f138`.
+- The independent verifier found all 24,900 markers once and in order, all 1,750 local page
+  counters, and the exact expected page distribution.
+- Final telemetry selected 20 workers and an 80-record bounded window. All 1,750 pages were
+  worker-encoded with zero fallback or rejection pages.
+- Exact TrueType subsetting remained active: 121 glyphs across two embedded subsets.
 
-On the Windows AMD64 benchmark host, a transformed and clipped one-page template rendered 100,000
-distinct records in a five-run median of 208.482 ms, or **479,657 pages/s**. The 47,762,773-byte
-output was deterministic with SHA-256
-`5d698871971f1df63a19b079e27b85c89569fcc0dbe9c653eacb9447e84fa98d`.
+These measurements describe hot execution of compiled structural variants, not arbitrary unseen
+HTML. Novel structure pays one fixed-point compile/layout pass before it joins the hot lane.
 
-The existing six-field invoice workload rendered 100,000 distinct records in a five-run median of
-290.003 ms, or **344,824 pages/s**. Its 88,139,022-byte output was deterministic with SHA-256
-`5e7c40cb1315292061ffd009fcc1dd360306bbe759a3d61f23a1b2e06e10dbe3`.
+## Compiler and PDF Pipeline
 
-These numbers describe fixed-geometry, paint-only bindings with distinct record data. They are not
-the identical-page copy benchmark and do not claim the same speed for arbitrary reflowing HTML.
-
-## Audit Contract and Reproducibility
-
-- Publishes `fullbleed_audit_contract 0.1.3` with canonical LF registry payloads on every host.
-- Computes registry hashes and the aggregate contract fingerprint from those canonical bytes,
-  eliminating Windows-versus-Unix checkout differences.
-- Retains immutable, deterministic registry lookup behavior and adds a regression gate that rejects
-  carriage returns in all public embedded payloads.
-- Sets a 4 MiB stack for Rust's debug test-harness threads in CI and release workflows. This keeps
-  the deep grid-fragmentation regression reproducible on both Linux and Windows without changing
-  optimized runtime stack behavior.
+- Stores resolved font identity in compiled paint patches and avoids repeated family
+  normalization and registry lookups.
+- Provides a direct ASCII numeric glyph shader while preserving the general shaping path.
+- Reuses page-local Deflate workspaces and fuses page-program instantiation with compression.
+- Uses a four-step deterministic Deflate search for throughput-sized compiled-flow streams.
+  Streams smaller than 4 KiB retain the compact 64-step search for ordinary-output parity.
+- Preserves exact fixed-point alignment constraints, parent fit guards, text spacing, and CSS pixel
+  snapping in each compiled patch.
+- Keeps large style and flow objects heap-owned so the complete test matrix passes on the standard
+  Windows thread stack.
 
 ## Compatibility
 
-- Adds behavior without removing the 2.2.0-2.2.2 Rust, Python, CLI, batch, compiled-copy, or
-  Stable ABI surfaces.
-- Retains `cp310-abi3` wheels for standard CPython 3.10 through 3.14 across the 15-platform release
-  matrix.
+- Adds behavior without removing the 2.2.x Rust, Python, CLI, batch, fixed-copy, fixed-geometry
+  binding, or Stable ABI surfaces.
+- Retains `cp310-abi3` wheels for CPython 3.10 through 3.14 across the 15-platform release matrix.
 - Retains Rust 1.85 as the minimum supported toolchain.
-- Keeps exact TrueType font subsetting and shared-resource PDF linking enabled.
+- Retains exact TrueType glyph closure, deterministic subset naming, and shared-resource PDF
+  linking.
 
 ## Package Versions
 
-- `fullbleed 2.2.3` on crates.io and PyPI.
+- `fullbleed 2.2.4` on crates.io and PyPI.
 - `fullbleed_audit_contract 0.1.3` on crates.io.
 - `subsetter 0.2.6`, `rustc-hash 2.1.3`, and `unicode-bidi 0.3.18`, recorded in Cargo metadata and
   the generated CycloneDX SBOM.
 
 ## Verification Baseline
 
-- Rust library suite: 1,174 passed, zero failed.
-- Repository Python suite: 261 passed, zero failed.
-- Python Stable ABI compiled-document suite: eight passed.
-- Official independent Wheel265 parity gate: 1,642 passed, zero failed, 20 reference-disputed;
-  the durable report records invocation `78173eed3cd2bf2c70127eef63092119` as complete.
-- External Poppler 300-DPI rasterization matches ordinary-render PNG hashes for transformed and
-  overflow-clipped bindings.
-- Both 100,000-record benchmark workloads verify deterministic bytes and page ordering.
+- Locked Rust default matrix: 1,181 passed, zero failed.
+- Locked Rust all-feature matrix: 1,181 passed, zero failed.
+- Repository Python suite against the installed optimized ABI3 wheel: 260 passed, four skipped.
+- Python Stable ABI compiled-document suite: 10 passed.
+- Independent reflow verification: 1,000 records, 1,750 pages, 24,900 markers, exact record order,
+  and exact local page counters.
+- Compact compiled output is byte-identical to ordinary rendering.
+- Poppler raster inspection passed for a one-page record and both pages of the final continued
+  record, with no clipping, overlap, missing header, or page-counter defect.
 - The release workflow builds, installs, and smokes 15 `cp310-abi3` wheels plus one source
   distribution before publication.
 
-The exact `v2.2.3` source is validated before registry publication. GitHub, PyPI, and crates.io are
+The exact `v2.2.4` source is validated before registry publication. GitHub, PyPI, and crates.io are
 published from that immutable tagged source, with the complete Python distribution set and its
 SHA-256 manifest attached to the GitHub release.

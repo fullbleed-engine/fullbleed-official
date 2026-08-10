@@ -76,7 +76,7 @@ use font::RegisteredFontTrace;
 pub use frame::{AddResult, Frame};
 use fullbleed_audit_contract as audit_contract;
 pub use glyph_report::{GlyphCoverageReport, MissingGlyph};
-use html_dom::NodeData;
+use html_dom::{NodeData, NodeRef};
 pub use jit::JitMode;
 pub use metrics::{DocumentMetrics, PageMetrics};
 pub use page_data::{PageDataContext, PageDataOp, PageDataValue, PaginatedContextSpec};
@@ -90,9 +90,9 @@ pub use pdfinspect::{
     require_pdf_composition_compatibility,
 };
 use perf::PerfLogger;
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::f32::consts::PI;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 pub use types::{Color, ColorSpace, I32F32, Margins, Pt, Rect, Size};
 
 const FILE_OUTPUT_BUFFER_BYTES: usize = 1024 * 1024;
@@ -135,12 +135,705 @@ pub struct FullBleed {
     render_context_cache: Mutex<RenderContextCache>,
 }
 
-/// Immutable output of the HTML/CSS frontend and layout pipeline.
+struct CompiledReflowPlan {
+    template: html_dom::CompiledHtmlBindingTemplate,
+    context: RenderContext,
+    runtime: Arc<FullBleed>,
+    flow_programs: Mutex<HashMap<Arc<str>, Arc<CompiledFlowProgramEntry>>>,
+    html_input_cache: html_dom::CompiledFlowHtmlInputCache,
+    shape_cache: pdf::CompiledFlowShapeCache,
+    pdf_program_cache: Mutex<Option<(usize, Arc<pdf::CompiledFlowPdfProgramCache>)>>,
+}
+
+#[derive(Default)]
+struct CompiledFlowProgramState {
+    programs: Vec<Arc<CompiledFlowRecordProgram>>,
+    compiling: bool,
+}
+
+#[derive(Default)]
+struct CompiledFlowProgramEntry {
+    state: Mutex<CompiledFlowProgramState>,
+    ready: Condvar,
+}
+
+#[derive(Clone, Copy)]
+struct CompiledTextConstraint {
+    origin_x: Pt,
+    position_max_width: Pt,
+    old_position_width: Pt,
+    guard_max_width: Pt,
+    old_width: Pt,
+    letter_spacing: Pt,
+    word_spacing: Pt,
+    css_pixel_snap_metrics: bool,
+    align: u8,
+}
+
+#[derive(Clone)]
+struct CompiledFlowTextEdit {
+    start: usize,
+    end: usize,
+    value_slots: Arc<[usize]>,
+}
+
+#[derive(Clone)]
+struct CompiledFlowTextPatch {
+    page: usize,
+    command: usize,
+    transformed: bool,
+    prototype_text: Arc<str>,
+    edits: Arc<[CompiledFlowTextEdit]>,
+    font_name: Arc<str>,
+    font_index: Option<usize>,
+    font_size: Pt,
+    prototype_x_pdf: Arc<str>,
+    old_measured: Pt,
+    prototype_shaped: Option<pdf::ShapedText>,
+    numeric_shader: Option<Arc<pdf::CompiledNumericFontShader>>,
+    constraint: Option<CompiledTextConstraint>,
+}
+
+struct CompiledFlowRecordProgram {
+    document: Arc<Document>,
+    prototype_values: Arc<[Arc<str>]>,
+    patches: Arc<[CompiledFlowTextPatch]>,
+    page_patch_counts: Arc<[usize]>,
+    patched_values: Arc<[bool]>,
+}
+
+struct CompiledFlowBoundRecord {
+    program: Arc<CompiledFlowRecordProgram>,
+    page_overrides: Vec<Vec<pdf::CompiledFlowTextOverride>>,
+    font_glyphs: Vec<(Arc<str>, BTreeMap<u16, String>)>,
+    encoded_pages: Option<Vec<pdf::EncodedCompiledFlowPage>>,
+}
+
+type CompiledFlowWorkerGlyphs = HashMap<Arc<str>, Box<[u64; 1024]>>;
+
+impl CompiledFlowBoundRecord {
+    fn page_count(&self) -> usize {
+        self.program.document.pages.len()
+    }
+}
+
+impl CompiledTextConstraint {
+    fn parse(value: &str) -> Option<Self> {
+        let mut fields = value.split(':');
+        let origin_x = Pt::from_milli_i64(fields.next()?.parse().ok()?);
+        let position_max_width = Pt::from_milli_i64(fields.next()?.parse().ok()?);
+        let old_position_width = Pt::from_milli_i64(fields.next()?.parse().ok()?);
+        let guard_max_width = Pt::from_milli_i64(fields.next()?.parse().ok()?);
+        let old_width = Pt::from_milli_i64(fields.next()?.parse().ok()?);
+        let letter_spacing = Pt::from_milli_i64(fields.next()?.parse().ok()?);
+        let word_spacing = Pt::from_milli_i64(fields.next()?.parse().ok()?);
+        let css_pixel_snap_metrics = match fields.next()? {
+            "0" => false,
+            "1" => true,
+            _ => return None,
+        };
+        let align = match fields.next()? {
+            "l" => b'l',
+            "c" => b'c',
+            "r" => b'r',
+            "j" => b'j',
+            _ => return None,
+        };
+        fields.next().is_none().then_some(Self {
+            origin_x,
+            position_max_width,
+            old_position_width,
+            guard_max_width,
+            old_width,
+            letter_spacing,
+            word_spacing,
+            css_pixel_snap_metrics,
+            align,
+        })
+    }
+
+    fn measured_width(self, base: Pt, text: &str) -> Pt {
+        let character_count = text.chars().count();
+        let letter_extra = if character_count > 1 {
+            self.letter_spacing * ((character_count - 1) as i32)
+        } else {
+            Pt::ZERO
+        };
+        let word_extra = self.word_spacing
+            * (text.as_bytes().iter().filter(|byte| **byte == b' ').count() as i32);
+        (base + letter_extra + word_extra).max(Pt::ZERO)
+    }
+
+    fn aligned_x(self, position_width: Pt) -> Pt {
+        let remaining = (self.position_max_width - position_width).max(Pt::ZERO);
+        let x = match self.align {
+            b'r' => self.origin_x + remaining,
+            b'c' => self.origin_x + remaining.mul_ratio(1, 2),
+            _ => self.origin_x,
+        };
+        if self.css_pixel_snap_metrics {
+            flowable::browser_registered_text_paint_x(x)
+        } else {
+            x
+        }
+    }
+}
+
+impl CompiledFlowRecordProgram {
+    fn text_edits(text: &str, lookup: &HashMap<&str, Vec<usize>>) -> Vec<CompiledFlowTextEdit> {
+        if let Some(slots) = lookup.get(text) {
+            return vec![CompiledFlowTextEdit {
+                start: 0,
+                end: text.len(),
+                value_slots: slots.clone().into(),
+            }];
+        }
+
+        // Inline formatting can fuse adjacent DOM text nodes into one painted
+        // glyph run. Compile only unique, non-overlapping source fragments;
+        // ambiguous or very short fragments stay guarded by the normal-layout
+        // fallback instead of risking a substitution into static prose.
+        let mut candidates = Vec::<(usize, usize, &[usize])>::new();
+        for (value, slots) in lookup {
+            if value.len() < 4 || value.len() > text.len() {
+                continue;
+            }
+            let mut occurrences = text.match_indices(*value);
+            let Some((start, _)) = occurrences.next() else {
+                continue;
+            };
+            if occurrences.next().is_some() {
+                continue;
+            }
+            candidates.push((start, start + value.len(), slots.as_slice()));
+        }
+        candidates.sort_by(|left, right| {
+            (right.1 - right.0)
+                .cmp(&(left.1 - left.0))
+                .then_with(|| left.0.cmp(&right.0))
+        });
+
+        let mut selected = Vec::<(usize, usize, &[usize])>::new();
+        for candidate in candidates {
+            if selected
+                .iter()
+                .any(|current| candidate.0 < current.1 && current.0 < candidate.1)
+            {
+                continue;
+            }
+            selected.push(candidate);
+        }
+        selected.sort_by_key(|candidate| candidate.0);
+        selected
+            .into_iter()
+            .map(|(start, end, slots)| CompiledFlowTextEdit {
+                start,
+                end,
+                value_slots: slots.to_vec().into(),
+            })
+            .collect()
+    }
+
+    fn compile(
+        document: Document,
+        values: &[Arc<str>],
+        registry: &FontRegistry,
+        shape_cache: &pdf::CompiledFlowShapeCache,
+    ) -> Self {
+        let mut lookup = HashMap::<&str, Vec<usize>>::new();
+        for (index, value) in values.iter().enumerate() {
+            if !value.is_empty() {
+                lookup.entry(value.as_ref()).or_default().push(index);
+            }
+        }
+
+        let mut patches = Vec::new();
+        let mut patched_values = vec![false; values.len()];
+        for (page_index, page) in document.pages.iter().enumerate() {
+            let mut font_name = Arc::<str>::from("Helvetica");
+            let mut font_size = Pt::from_f32(12.0);
+            let mut state_stack = Vec::<(Arc<str>, Pt)>::new();
+            let mut pending_constraint = None;
+            for (command_index, command) in page.commands.iter().enumerate() {
+                match command {
+                    Command::SaveState => state_stack.push((font_name.clone(), font_size)),
+                    Command::RestoreState => {
+                        if let Some((saved_name, saved_size)) = state_stack.pop() {
+                            font_name = saved_name;
+                            font_size = saved_size;
+                        }
+                    }
+                    Command::SetFontName(value) => font_name = Arc::from(value.as_str()),
+                    Command::SetFontSize(value) => font_size = *value,
+                    Command::Meta { key, value }
+                        if key == flowable::META_COMPILED_TEXT_CONSTRAINT_KEY =>
+                    {
+                        pending_constraint = CompiledTextConstraint::parse(value);
+                    }
+                    Command::DrawString { x, text, .. } => {
+                        let constraint = pending_constraint.take();
+                        let edits = Self::text_edits(text, &lookup);
+                        if edits.is_empty() {
+                            continue;
+                        }
+                        for edit in &edits {
+                            for slot in edit.value_slots.iter() {
+                                patched_values[*slot] = true;
+                            }
+                        }
+                        let font_index = registry.compiled_font_index(font_name.as_ref());
+                        patches.push(CompiledFlowTextPatch {
+                            page: page_index,
+                            command: command_index,
+                            transformed: false,
+                            prototype_text: Arc::from(text.as_str()),
+                            edits: edits.into(),
+                            font_name: font_name.clone(),
+                            font_index,
+                            font_size,
+                            prototype_x_pdf: Arc::from(pdf::format_compiled_flow_pt(*x)),
+                            old_measured: font_index
+                                .and_then(|index| {
+                                    registry.measure_compiled_basic_latin_width_at(
+                                        index, font_size, text,
+                                    )
+                                })
+                                .unwrap_or_else(|| {
+                                    registry.measure_compiled_basic_latin_width(
+                                        font_name.as_ref(),
+                                        font_size,
+                                        text,
+                                    )
+                                }),
+                            prototype_shaped: pdf::shape_compiled_flow_prototype(
+                                shape_cache,
+                                registry,
+                                font_name.as_ref(),
+                                text,
+                            ),
+                            numeric_shader: shape_cache.font_shader(registry, font_name.as_ref()),
+                            constraint,
+                        });
+                    }
+                    Command::DrawStringTransformed { x, text, .. } => {
+                        let constraint = pending_constraint.take();
+                        let edits = Self::text_edits(text, &lookup);
+                        if edits.is_empty() {
+                            continue;
+                        }
+                        for edit in &edits {
+                            for slot in edit.value_slots.iter() {
+                                patched_values[*slot] = true;
+                            }
+                        }
+                        let font_index = registry.compiled_font_index(font_name.as_ref());
+                        patches.push(CompiledFlowTextPatch {
+                            page: page_index,
+                            command: command_index,
+                            transformed: true,
+                            prototype_text: Arc::from(text.as_str()),
+                            edits: edits.into(),
+                            font_name: font_name.clone(),
+                            font_index,
+                            font_size,
+                            prototype_x_pdf: Arc::from(pdf::format_compiled_flow_pt(*x)),
+                            old_measured: font_index
+                                .and_then(|index| {
+                                    registry.measure_compiled_basic_latin_width_at(
+                                        index, font_size, text,
+                                    )
+                                })
+                                .unwrap_or_else(|| {
+                                    registry.measure_compiled_basic_latin_width(
+                                        font_name.as_ref(),
+                                        font_size,
+                                        text,
+                                    )
+                                }),
+                            prototype_shaped: pdf::shape_compiled_flow_prototype(
+                                shape_cache,
+                                registry,
+                                font_name.as_ref(),
+                                text,
+                            ),
+                            numeric_shader: shape_cache.font_shader(registry, font_name.as_ref()),
+                            constraint,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let mut page_patch_counts = vec![0usize; document.pages.len()];
+        for patch in &patches {
+            page_patch_counts[patch.page] = page_patch_counts[patch.page].saturating_add(1);
+        }
+        Self {
+            document: Arc::new(document),
+            prototype_values: values.to_vec().into(),
+            patches: patches.into(),
+            page_patch_counts: page_patch_counts.into(),
+            patched_values: patched_values.into(),
+        }
+    }
+
+    fn instantiate(
+        self: &Arc<Self>,
+        values: &[Arc<str>],
+        registry: &FontRegistry,
+        shape_cache: &pdf::CompiledFlowShapeCache,
+        worker_glyphs: &mut CompiledFlowWorkerGlyphs,
+    ) -> Option<CompiledFlowBoundRecord> {
+        if values.len() != self.prototype_values.len() {
+            return None;
+        }
+        for (index, patched) in self.patched_values.iter().enumerate() {
+            if !patched && values[index] != self.prototype_values[index] {
+                return None;
+            }
+        }
+
+        let mut updates = Vec::with_capacity(self.patches.len());
+        for patch in self.patches.iter() {
+            let direct = patch.edits.len() == 1
+                && patch.edits[0].start == 0
+                && patch.edits[0].end == patch.prototype_text.len();
+            let mut built_text =
+                (!direct).then(|| String::with_capacity(patch.prototype_text.len()));
+            let mut direct_text = None;
+            let mut cursor = 0usize;
+            for edit in patch.edits.iter() {
+                if edit.start < cursor
+                    || edit.end > patch.prototype_text.len()
+                    || !patch.prototype_text.is_char_boundary(edit.start)
+                    || !patch.prototype_text.is_char_boundary(edit.end)
+                {
+                    return None;
+                }
+                let first_slot = *edit.value_slots.first()?;
+                let new_value = &values[first_slot];
+                if edit
+                    .value_slots
+                    .iter()
+                    .any(|slot| values[*slot] != *new_value)
+                {
+                    return None;
+                }
+                let old_value = &self.prototype_values[first_slot];
+                if edit
+                    .value_slots
+                    .iter()
+                    .any(|slot| self.prototype_values[*slot] != *old_value)
+                    || &patch.prototype_text[edit.start..edit.end] != old_value.as_ref()
+                {
+                    return None;
+                }
+                if let Some(text) = built_text.as_mut() {
+                    text.push_str(&patch.prototype_text[cursor..edit.start]);
+                    text.push_str(new_value.as_ref());
+                } else {
+                    direct_text = Some(new_value.clone());
+                }
+                cursor = edit.end;
+            }
+            let new_text = if let Some(mut text) = built_text {
+                text.push_str(&patch.prototype_text[cursor..]);
+                Arc::from(text)
+            } else {
+                direct_text?
+            };
+
+            let old_measured = patch.old_measured;
+            let changed = new_text.as_ref() != patch.prototype_text.as_ref();
+            let new_measured = if changed {
+                patch
+                    .font_index
+                    .and_then(|index| {
+                        registry.measure_compiled_basic_latin_width_at(
+                            index,
+                            patch.font_size,
+                            new_text.as_ref(),
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        registry.measure_compiled_basic_latin_width(
+                            patch.font_name.as_ref(),
+                            patch.font_size,
+                            new_text.as_ref(),
+                        )
+                    })
+            } else {
+                old_measured
+            };
+            let constrained_width = patch.constraint.map(|constraint| {
+                if changed {
+                    // Calibrate the fast registry measurement against the exact width
+                    // captured by the layout target. This retains any font/style-specific
+                    // fixed-point bias (for example synthetic face metrics) while the
+                    // explicit spacing terms account for target-length changes.
+                    let prototype_measured =
+                        constraint.measured_width(old_measured, patch.prototype_text.as_ref());
+                    let measurement_bias = constraint.old_width - prototype_measured;
+                    (constraint.measured_width(new_measured, new_text.as_ref()) + measurement_bias)
+                        .max(Pt::ZERO)
+                } else {
+                    constraint.old_width
+                }
+            });
+            if changed {
+                match patch.constraint {
+                    Some(constraint) => {
+                        if new_text.contains(['\n', '\r', '\t'])
+                            || constrained_width? > constraint.guard_max_width + Pt::from_f32(0.01)
+                        {
+                            return None;
+                        }
+                        let slack =
+                            (constraint.guard_max_width - constraint.old_width).max(Pt::ZERO);
+                        if constrained_width? != constraint.old_width && slack < Pt::from_f32(0.5) {
+                            return None;
+                        }
+                    }
+                    None if new_measured != old_measured => return None,
+                    None => {}
+                }
+            }
+            updates.push((new_text, constrained_width));
+        }
+
+        let mut page_overrides = self
+            .page_patch_counts
+            .iter()
+            .map(|count| Vec::with_capacity(*count))
+            .collect::<Vec<_>>();
+        let mut font_glyphs = BTreeMap::<Arc<str>, BTreeMap<u16, String>>::new();
+        for (patch, (new_text, constrained_width)) in self.patches.iter().zip(updates) {
+            let command = self
+                .document
+                .pages
+                .get(patch.page)?
+                .commands
+                .get(patch.command)?;
+            let (x, prototype_text) = match command {
+                Command::DrawString { x, text, .. } if !patch.transformed => (*x, text),
+                Command::DrawStringTransformed { x, text, .. } if patch.transformed => (*x, text),
+                _ => return None,
+            };
+            let _ = prototype_text;
+            let bound_x = match (patch.constraint, constrained_width) {
+                (Some(constraint), Some(width)) => {
+                    let position_extra = constraint.old_position_width - constraint.old_width;
+                    let target_position_width = (width + position_extra).max(Pt::ZERO);
+                    constraint.aligned_x(target_position_width)
+                }
+                _ => x,
+            };
+            let shaped = pdf::shape_compiled_flow_text(
+                shape_cache,
+                registry,
+                patch.font_name.as_ref(),
+                patch.prototype_text.as_ref(),
+                patch.prototype_shaped.as_ref(),
+                patch.numeric_shader.as_ref(),
+                new_text.as_ref(),
+            )
+            .or_else(|| {
+                Some(pdf::shape_compiled_flow_cid_fallback(
+                    registry,
+                    patch.font_name.as_ref(),
+                    new_text.as_ref(),
+                ))
+            });
+            if let Some(shaped) = shaped.as_ref() {
+                let seen = worker_glyphs
+                    .entry(patch.font_name.clone())
+                    .or_insert_with(|| Box::new([0; 1024]));
+                shaped.for_each_glyph_source(new_text.as_ref(), |gid, value| {
+                    let word = usize::from(gid) >> 6;
+                    let mask = 1_u64 << (u32::from(gid) & 63);
+                    if seen[word] & mask == 0 {
+                        font_glyphs
+                            .entry(patch.font_name.clone())
+                            .or_default()
+                            .entry(gid)
+                            .or_insert_with(|| value.to_string());
+                        seen[word] |= mask;
+                    }
+                });
+            }
+            let x_pdf = if bound_x == x {
+                patch.prototype_x_pdf.clone()
+            } else {
+                Arc::from(pdf::format_compiled_flow_pt(bound_x))
+            };
+            page_overrides[patch.page].push(pdf::CompiledFlowTextOverride {
+                command: patch.command,
+                transformed: patch.transformed,
+                x: bound_x,
+                x_pdf,
+                text: new_text,
+                shaped,
+            });
+        }
+        Some(CompiledFlowBoundRecord {
+            program: self.clone(),
+            page_overrides,
+            font_glyphs: font_glyphs.into_iter().collect(),
+            encoded_pages: None,
+        })
+    }
+}
+
+impl CompiledReflowPlan {
+    fn flow_program_entry(&self, key: &str) -> Arc<CompiledFlowProgramEntry> {
+        let mut programs = self
+            .flow_programs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(entry) = programs.get(key) {
+            return entry.clone();
+        }
+        programs
+            .entry(Arc::from(key))
+            .or_insert_with(|| Arc::new(CompiledFlowProgramEntry::default()))
+            .clone()
+    }
+
+    fn render_compiled_flow_record(
+        &self,
+        row: usize,
+        document: &mut html_dom::BoundHtmlDocument,
+        worker_glyphs: &mut CompiledFlowWorkerGlyphs,
+        columns: &[&[String]],
+    ) -> Result<CompiledFlowBoundRecord, FullBleedError> {
+        document.prepare_flow_program_input(columns, row, &self.html_input_cache);
+        let entry = self.flow_program_entry(document.flow_program_key());
+        let mut values = document.flow_dynamic_text().to_vec();
+        loop {
+            let programs = entry
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .programs
+                .clone();
+            for program in &programs {
+                if let Some(document) = program.instantiate(
+                    &values,
+                    self.runtime.font_registry.as_ref(),
+                    &self.shape_cache,
+                    worker_glyphs,
+                ) {
+                    if let Some(perf) = self.runtime.perf.as_deref() {
+                        perf.log_counts("compile.flow", Some(row), &[("cache_hit", 1)]);
+                    }
+                    return Ok(document);
+                }
+            }
+            let mut state = entry
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if state.programs.len() != programs.len() {
+                drop(state);
+                continue;
+            }
+            if !state.compiling {
+                state.compiling = true;
+                drop(state);
+                break;
+            }
+            let state = entry
+                .ready
+                .wait(state)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            drop(state);
+        }
+
+        let started = std::time::Instant::now();
+        let rendered = match document.materialize_flow_program_dom(columns, row) {
+            Ok(()) => {
+                values = document.flow_dynamic_text().to_vec();
+                let _capture = flowable::set_compiled_flow_capture(true);
+                self.runtime
+                    .render_to_document_and_page_data_with_parsed_resolver_and_report_at(
+                        row,
+                        document.root(),
+                        &self.context.page_templates,
+                        &self.context.resolver,
+                        None,
+                    )
+                    .map(|(document, _page_data)| document)
+            }
+            Err(error) => Err(FullBleedError::InvalidConfiguration(error)),
+        };
+
+        let mut state = entry
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.compiling = false;
+        match rendered {
+            Ok(document) => {
+                let program = Arc::new(CompiledFlowRecordProgram::compile(
+                    document,
+                    &values,
+                    self.runtime.font_registry.as_ref(),
+                    &self.shape_cache,
+                ));
+                let output = program
+                    .instantiate(
+                        &values,
+                        self.runtime.font_registry.as_ref(),
+                        &self.shape_cache,
+                        worker_glyphs,
+                    )
+                    .expect("a freshly compiled flow program must instantiate its prototype");
+                let patch_count = program.patches.len();
+                let patched_value_count = program
+                    .patched_values
+                    .iter()
+                    .filter(|patched| **patched)
+                    .count();
+                state.programs.push(program);
+                let variant_count = state.programs.len();
+                entry.ready.notify_all();
+                if let Some(perf) = self.runtime.perf.as_deref() {
+                    perf.log_span_ms(
+                        "compile.flow.program",
+                        Some(row),
+                        started.elapsed().as_secs_f64() * 1000.0,
+                    );
+                    perf.log_counts(
+                        "compile.flow",
+                        Some(row),
+                        &[
+                            ("cache_miss", 1),
+                            ("values", values.len() as u64),
+                            ("patched_values", patched_value_count as u64),
+                            ("patches", patch_count as u64),
+                            ("variants", variant_count as u64),
+                        ],
+                    );
+                }
+                Ok(output)
+            }
+            Err(error) => {
+                entry.ready.notify_all();
+                Err(error)
+            }
+        }
+    }
+}
+
+/// Immutable output of the HTML/CSS frontend, binding compiler, and layout pipeline.
 ///
 /// A compiled document owns the fixed-point display commands and every linker resource required
 /// to render them. It can therefore be linked repeatedly, or from multiple threads, without
 /// reparsing HTML/CSS or rebuilding layout. Text markers written as ``{{slot_name}}`` can also
-/// be lowered to fixed-geometry, columnar bindings without rerunning the frontend or layout.
+/// be lowered either to fixed-geometry paint bindings or to a parsed-DOM reflow program. The
+/// reflow program reuses one worker-local DOM plus the compiled CSS context while rerunning the
+/// shaping, layout, and pagination stages required by size-changing values.
 pub struct CompiledDocument {
     document: Arc<Document>,
     font_registry: Arc<FontRegistry>,
@@ -151,9 +844,10 @@ pub struct CompiledDocument {
     command_count: usize,
     binding_slots: Vec<String>,
     binding_plan: Option<Result<Arc<pdf::CompiledBindingPlan>, Arc<str>>>,
+    reflow_plan: Option<Result<Arc<CompiledReflowPlan>, Arc<str>>>,
 }
 
-fn valid_binding_slot_name(name: &str) -> bool {
+pub(crate) fn valid_binding_slot_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
         && name
@@ -161,22 +855,31 @@ fn valid_binding_slot_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
 }
 
-pub(crate) fn binding_slot_names(text: &str) -> Vec<&str> {
-    let mut names = Vec::new();
+pub(crate) fn binding_slot_spans(text: &str) -> Vec<(usize, usize, &str)> {
+    let mut spans = Vec::new();
     let mut search = 0usize;
     while let Some(relative_start) = text[search..].find("{{") {
-        let start = search + relative_start + 2;
-        let Some(relative_end) = text[start..].find("}}") else {
+        let marker_start = search + relative_start;
+        let name_start = marker_start + 2;
+        let Some(relative_end) = text[name_start..].find("}}") else {
             break;
         };
-        let end = start + relative_end;
-        let name = text[start..end].trim();
+        let name_end = name_start + relative_end;
+        let marker_end = name_end + 2;
+        let name = text[name_start..name_end].trim();
         if valid_binding_slot_name(name) {
-            names.push(name);
+            spans.push((marker_start, marker_end, name));
         }
-        search = end + 2;
+        search = marker_end;
     }
-    names
+    spans
+}
+
+pub(crate) fn binding_slot_names(text: &str) -> Vec<&str> {
+    binding_slot_spans(text)
+        .into_iter()
+        .map(|(_, _, name)| name)
+        .collect()
 }
 
 fn collect_binding_slots(commands: &[Command], slots: &mut BTreeSet<String>) {
@@ -224,6 +927,38 @@ impl CompiledDocument {
             .as_ref()
             .and_then(|plan| plan.as_ref().ok())
             .map_or(0, |plan| plan.command_count())
+    }
+
+    pub fn reflow_binding_slots(&self) -> &[String] {
+        self.reflow_plan
+            .as_ref()
+            .and_then(|plan| plan.as_ref().ok())
+            .map_or(&[], |plan| plan.template.slot_names())
+    }
+
+    pub fn reflow_program_node_count(&self) -> usize {
+        self.reflow_plan
+            .as_ref()
+            .and_then(|plan| plan.as_ref().ok())
+            .map_or(0, |plan| plan.template.node_count())
+    }
+
+    pub fn reflow_program_binding_text_node_count(&self) -> usize {
+        self.reflow_plan
+            .as_ref()
+            .and_then(|plan| plan.as_ref().ok())
+            .map_or(0, |plan| plan.template.binding_text_node_count())
+    }
+
+    pub fn reflow_program_html_binding_node_count(&self) -> usize {
+        self.reflow_plan
+            .as_ref()
+            .and_then(|plan| plan.as_ref().ok())
+            .map_or(0, |plan| plan.template.html_binding_node_count())
+    }
+
+    pub fn reflow_program_ready(&self) -> bool {
+        self.reflow_plan.as_ref().is_some_and(|plan| plan.is_ok())
     }
 
     pub fn render_to_buffer(&self) -> Result<Vec<u8>, FullBleedError> {
@@ -293,19 +1028,30 @@ impl CompiledDocument {
         &self,
         bindings: &'a HashMap<String, Vec<String>>,
     ) -> Result<(usize, Vec<&'a [String]>), FullBleedError> {
-        if self.binding_slots.is_empty() {
+        Self::ordered_columns_for_slots(
+            &self.binding_slots,
+            bindings,
+            "compiled document has no page-local {{slot}} text bindings",
+        )
+    }
+
+    fn ordered_columns_for_slots<'a>(
+        slots: &[String],
+        bindings: &'a HashMap<String, Vec<String>>,
+        empty_message: &str,
+    ) -> Result<(usize, Vec<&'a [String]>), FullBleedError> {
+        if slots.is_empty() {
             return Err(FullBleedError::InvalidConfiguration(
-                "compiled document has no page-local {{slot}} text bindings".to_string(),
+                empty_message.to_string(),
             ));
         }
-        if bindings.len() != self.binding_slots.len() {
+        if bindings.len() != slots.len() {
             let unknown = bindings
                 .keys()
-                .filter(|name| !self.binding_slots.contains(name))
+                .filter(|name| !slots.contains(name))
                 .cloned()
                 .collect::<Vec<_>>();
-            let missing = self
-                .binding_slots
+            let missing = slots
                 .iter()
                 .filter(|name| !bindings.contains_key(*name))
                 .cloned()
@@ -316,8 +1062,8 @@ impl CompiledDocument {
         }
 
         let mut count = None;
-        let mut ordered = Vec::with_capacity(self.binding_slots.len());
-        for slot in &self.binding_slots {
+        let mut ordered = Vec::with_capacity(slots.len());
+        for slot in slots {
             let column = bindings.get(slot).ok_or_else(|| {
                 FullBleedError::InvalidConfiguration(format!(
                     "missing binding column for slot {slot:?}"
@@ -409,6 +1155,283 @@ impl CompiledDocument {
             self.render_bindings_to_writer(bindings, writer)
         })
     }
+
+    pub fn reflow_program_error(&self) -> Option<&str> {
+        self.reflow_plan
+            .as_ref()
+            .and_then(|plan| plan.as_ref().err())
+            .map(AsRef::as_ref)
+    }
+
+    fn compiled_reflow_plan(&self) -> Result<&CompiledReflowPlan, FullBleedError> {
+        self.reflow_plan
+            .as_ref()
+            .ok_or_else(|| {
+                FullBleedError::InvalidConfiguration(
+                    "compiled document has no reflow-capable {{slot}} text bindings".to_string(),
+                )
+            })?
+            .as_ref()
+            .map(AsRef::as_ref)
+            .map_err(|error| FullBleedError::InvalidConfiguration(error.to_string()))
+    }
+
+    /// Execute size-changing text slots through shaping, layout, and pagination.
+    ///
+    /// HTML tokenization, tree recovery, binding discovery, CSS parsing, and selector compilation
+    /// are compile-time work. Each worker materializes one private DOM, mutates its bound text
+    /// nodes per record, and emits completed documents to the ordered streaming PDF linker.
+    pub fn render_reflow_bindings_to_buffer(
+        &self,
+        bindings: &HashMap<String, Vec<String>>,
+    ) -> Result<Vec<u8>, FullBleedError> {
+        let plan = self.compiled_reflow_plan()?;
+        let (record_count, columns) = Self::ordered_columns_for_slots(
+            plan.template.slot_names(),
+            bindings,
+            "compiled document has no reflow-capable {{slot}} text bindings",
+        )?;
+        let estimated = record_count.saturating_mul(4096).saturating_add(64 * 1024);
+        let mut out = Vec::with_capacity(estimated);
+        self.render_reflow_bindings_to_writer_ordered(plan, record_count, &columns, &mut out)?;
+        Ok(out)
+    }
+
+    fn render_reflow_bindings_to_writer_ordered<W: std::io::Write>(
+        &self,
+        plan: &CompiledReflowPlan,
+        record_count: usize,
+        columns: &[&[String]],
+        writer: &mut W,
+    ) -> Result<usize, FullBleedError> {
+        use std::collections::BTreeMap;
+        use std::sync::Mutex;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::mpsc::{self, TrySendError};
+
+        let started = std::time::Instant::now();
+        let page_size = plan
+            .context
+            .page_templates
+            .first()
+            .ok_or(FullBleedError::MissingPageTemplate)?
+            .page_size;
+        let mut pdf_stream = pdf::PdfStreamWriter::new(
+            writer,
+            page_size,
+            Some(self.font_registry.as_ref()),
+            self.pdf_options.clone(),
+            self.debug.clone(),
+            self.perf.clone(),
+        )?;
+        if let Some(cache) = plan
+            .pdf_program_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .filter(|(cached_records, _)| *cached_records == record_count)
+            .map(|(_, cache)| cache.clone())
+        {
+            pdf_stream.use_compiled_flow_program_cache(cache);
+        }
+        let pdf_program_cache = pdf_stream.compiled_flow_program_cache();
+        let compress_content_streams = self.pdf_options.compress_content_streams;
+        let compress_content_stream_min_bytes = self.pdf_options.compress_content_stream_min_bytes;
+
+        let worker_count = crate::parallel::current_num_threads()
+            .max(1)
+            .min(record_count);
+        let buffer_cap = worker_count.saturating_mul(4).clamp(1, 256);
+        let (sender, receiver) = mpsc::sync_channel::<(
+            usize,
+            Result<CompiledFlowBoundRecord, FullBleedError>,
+        )>(buffer_cap);
+        let cancelled = AtomicBool::new(false);
+        // Seed only a bounded window of row indexes. The linker releases exactly one new job for
+        // every row it commits, so rendering, the result channel, and ordered reassembly together
+        // can never advance more than `buffer_cap` records beyond linked output. A shared job
+        // receiver retains dynamic load balancing without a scheduler lock on the linker path.
+        let (job_sender, job_receiver) = mpsc::channel::<usize>();
+        let initial_jobs = buffer_cap.min(record_count);
+        for row in 0..initial_jobs {
+            job_sender
+                .send(row)
+                .expect("compiled reflow job receiver exists before workers start");
+        }
+        let job_receiver = Mutex::new(job_receiver);
+        let mut next_row_to_schedule = initial_jobs;
+        let mut render_error = None;
+        let mut total_pages = 0usize;
+
+        std::thread::scope(|scope| {
+            for _worker in 0..worker_count {
+                let sender = sender.clone();
+                let cancelled = &cancelled;
+                let job_receiver = &job_receiver;
+                let pdf_program_cache = pdf_program_cache.clone();
+                scope.spawn(move || {
+                    let mut document = plan.template.instantiate();
+                    let mut worker_glyphs = CompiledFlowWorkerGlyphs::new();
+                    loop {
+                        let row = match job_receiver
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .recv()
+                        {
+                            Ok(row) => row,
+                            Err(_) => return,
+                        };
+                        if cancelled.load(Ordering::Acquire) {
+                            return;
+                        }
+                        let rendered = plan
+                            .render_compiled_flow_record(
+                                row,
+                                &mut document,
+                                &mut worker_glyphs,
+                                columns,
+                            )
+                            .and_then(|mut document| {
+                                if let Some(encoded) = pdf::encode_compiled_flow_document(
+                                    pdf_program_cache.as_ref(),
+                                    document.program.document.as_ref(),
+                                    &document.page_overrides,
+                                    compress_content_streams,
+                                    compress_content_stream_min_bytes,
+                                ) {
+                                    document.encoded_pages =
+                                        Some(encoded.map_err(FullBleedError::Io)?);
+                                }
+                                Ok(document)
+                            });
+                        let mut message = (row, rendered);
+                        loop {
+                            match sender.try_send(message) {
+                                Ok(()) => break,
+                                Err(TrySendError::Full(returned)) => {
+                                    if cancelled.load(Ordering::Acquire) {
+                                        return;
+                                    }
+                                    message = returned;
+                                    std::thread::yield_now();
+                                }
+                                Err(TrySendError::Disconnected(_)) => return,
+                            }
+                        }
+                    }
+                });
+            }
+            drop(sender);
+
+            let mut pending = BTreeMap::new();
+            let mut next_row = 0usize;
+            while next_row < record_count {
+                let message = match receiver.recv() {
+                    Ok(message) => message,
+                    Err(error) => {
+                        render_error = Some(FullBleedError::Io(std::io::Error::new(
+                            std::io::ErrorKind::BrokenPipe,
+                            format!("compiled reflow worker channel closed early: {error}"),
+                        )));
+                        break;
+                    }
+                };
+                let (row, result) = message;
+                match result {
+                    Ok(document) => {
+                        pending.insert(row, document);
+                    }
+                    Err(error) => {
+                        render_error = Some(error);
+                        break;
+                    }
+                }
+                while let Some(document) = pending.remove(&next_row) {
+                    total_pages = total_pages.saturating_add(document.page_count());
+                    if let Err(error) = pdf_stream.add_compiled_flow_document(
+                        next_row,
+                        document.program.document.as_ref(),
+                        document.page_overrides,
+                        document.font_glyphs,
+                        document.encoded_pages,
+                    ) {
+                        render_error = Some(FullBleedError::Io(error));
+                        break;
+                    }
+                    next_row = next_row.saturating_add(1);
+                    if next_row_to_schedule < record_count {
+                        if job_sender.send(next_row_to_schedule).is_err() {
+                            render_error = Some(FullBleedError::Io(std::io::Error::new(
+                                std::io::ErrorKind::BrokenPipe,
+                                "compiled reflow workers stopped accepting scheduled records",
+                            )));
+                            break;
+                        }
+                        next_row_to_schedule = next_row_to_schedule.saturating_add(1);
+                    }
+                }
+                if render_error.is_some() {
+                    break;
+                }
+            }
+            cancelled.store(true, Ordering::Release);
+            drop(job_sender);
+        });
+
+        if let Some(error) = render_error {
+            return Err(error);
+        }
+        let replay_cache = pdf_stream.compiled_flow_replay_cache();
+        let bytes_written = pdf_stream.finish()?;
+        *plan
+            .pdf_program_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some((record_count, replay_cache));
+        if let Some(perf) = self.perf.as_deref() {
+            perf.log_span_ms(
+                "compile.reflow.batch",
+                None,
+                started.elapsed().as_secs_f64() * 1000.0,
+            );
+            perf.log_counts(
+                "compile.reflow.batch",
+                None,
+                &[
+                    ("records", record_count as u64),
+                    ("pages", total_pages as u64),
+                    ("workers", worker_count as u64),
+                    ("buffer_cap", buffer_cap as u64),
+                    ("bytes", bytes_written as u64),
+                ],
+            );
+        }
+        Ok(bytes_written)
+    }
+
+    pub fn render_reflow_bindings_to_writer<W: std::io::Write>(
+        &self,
+        bindings: &HashMap<String, Vec<String>>,
+        writer: &mut W,
+    ) -> Result<usize, FullBleedError> {
+        let plan = self.compiled_reflow_plan()?;
+        let (record_count, columns) = Self::ordered_columns_for_slots(
+            plan.template.slot_names(),
+            bindings,
+            "compiled document has no reflow-capable {{slot}} text bindings",
+        )?;
+        self.render_reflow_bindings_to_writer_ordered(plan, record_count, &columns, writer)
+    }
+
+    pub fn render_reflow_bindings_to_file(
+        &self,
+        bindings: &HashMap<String, Vec<String>>,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<usize, FullBleedError> {
+        render_to_buffered_file(path, |writer| {
+            self.render_reflow_bindings_to_writer(bindings, writer)
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -498,6 +1521,12 @@ struct LayoutBuildResult {
     document: Document,
     story_ms: f64,
     layout_ms: f64,
+}
+
+#[derive(Clone, Copy)]
+enum HtmlLayoutInput<'a> {
+    Source(&'a str),
+    Parsed(&'a NodeRef),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2196,6 +3225,35 @@ fn escape_html_text(input: &str) -> String {
 impl FullBleed {
     pub fn builder() -> FullBleedBuilder {
         FullBleedBuilder::new()
+    }
+
+    fn clone_for_compiled_reflow(&self) -> Self {
+        Self {
+            default_page_size: self.default_page_size,
+            default_margins: self.default_margins,
+            page_margins: self.page_margins.clone(),
+            page_size_explicit: self.page_size_explicit,
+            margins_explicit: self.margins_explicit,
+            font_registry: self.font_registry.clone(),
+            pdf_options: self.pdf_options.clone(),
+            svg_form_xobjects: self.svg_form_xobjects,
+            svg_raster_fallback: self.svg_raster_fallback,
+            debug: self.debug.clone(),
+            perf: self.perf.clone(),
+            jit_mode: self.jit_mode,
+            layout_strategy: self.layout_strategy,
+            lazy_max_passes: self.lazy_max_passes,
+            lazy_budget_ms: self.lazy_budget_ms,
+            page_header: self.page_header.clone(),
+            page_header_html: self.page_header_html.clone(),
+            page_footer: self.page_footer.clone(),
+            paginated_context: self.paginated_context.clone(),
+            template_binding_spec: self.template_binding_spec.clone(),
+            watermark: self.watermark.clone(),
+            asset_css: self.asset_css.clone(),
+            asset_bundle: self.asset_bundle.clone(),
+            render_context_cache: Mutex::new(RenderContextCache::new()),
+        }
     }
 
     #[cfg(feature = "python")]
@@ -5175,6 +6233,40 @@ impl FullBleed {
         resolver: &style::StyleResolver,
         report: Option<&mut GlyphCoverageReport>,
     ) -> Result<LayoutBuildResult, FullBleedError> {
+        self.build_document_with_layout_strategy_input(
+            doc_id,
+            HtmlLayoutInput::Source(html),
+            page_templates,
+            resolver,
+            report,
+        )
+    }
+
+    fn build_document_with_layout_strategy_from_document(
+        &self,
+        doc_id: usize,
+        document: &NodeRef,
+        page_templates: &[PageTemplate],
+        resolver: &style::StyleResolver,
+        report: Option<&mut GlyphCoverageReport>,
+    ) -> Result<LayoutBuildResult, FullBleedError> {
+        self.build_document_with_layout_strategy_input(
+            doc_id,
+            HtmlLayoutInput::Parsed(document),
+            page_templates,
+            resolver,
+            report,
+        )
+    }
+
+    fn build_document_with_layout_strategy_input(
+        &self,
+        doc_id: usize,
+        input: HtmlLayoutInput<'_>,
+        page_templates: &[PageTemplate],
+        resolver: &style::StyleResolver,
+        report: Option<&mut GlyphCoverageReport>,
+    ) -> Result<LayoutBuildResult, FullBleedError> {
         let lazy = self.layout_strategy == LayoutStrategy::Lazy;
         let uses_target_counters = resolver.has_target_counter_content();
         let pass_limit = self
@@ -5192,49 +6284,54 @@ impl FullBleed {
         let mut report = report;
         let collect_report = report.is_some();
         let mut final_report: Option<GlyphCoverageReport> = None;
-        let page_templates =
-            if let Some((color, alpha)) = html::document_canvas_background(html, resolver) {
-                page_templates
-                    .iter()
-                    .cloned()
-                    .map(|template| {
-                        let Some(frame) = template.primary_frame_rect() else {
-                            return template;
-                        };
-                        template.append_on_page(move |canvas, _| {
-                            // A PDF rectangle grows from its block-end edge
-                            // toward block-start.  Poppler owns the exact far
-                            // edge for the fill, while Chromium leaves that
-                            // coincident row to the page background.  Retire
-                            // one serialized millipoint at a nonzero page-area
-                            // start without moving the block-end edge.
-                            let far_edge_guard = Pt::from_milli_i64(1);
-                            let block_start_guard =
-                                if frame.y > Pt::ZERO && frame.height > far_edge_guard {
-                                    far_edge_guard
-                                } else {
-                                    Pt::ZERO
-                                };
-                            canvas.meta(canvas::META_HTML_CANVAS_BACKGROUND_KEY, "begin");
-                            canvas.save_state();
-                            canvas.set_fill_color(color);
-                            if alpha < 1.0 {
-                                canvas.set_opacity(alpha, alpha);
-                            }
-                            canvas.draw_rect(
-                                frame.x,
-                                frame.y + block_start_guard,
-                                frame.width,
-                                frame.height - block_start_guard,
-                            );
-                            canvas.restore_state();
-                            canvas.meta(canvas::META_HTML_CANVAS_BACKGROUND_KEY, "end");
-                        })
+        let canvas_background = match input {
+            HtmlLayoutInput::Source(html) => html::document_canvas_background(html, resolver),
+            HtmlLayoutInput::Parsed(document) => {
+                html::document_canvas_background_for_document(document, resolver)
+            }
+        };
+        let page_templates = if let Some((color, alpha)) = canvas_background {
+            page_templates
+                .iter()
+                .cloned()
+                .map(|template| {
+                    let Some(frame) = template.primary_frame_rect() else {
+                        return template;
+                    };
+                    template.append_on_page(move |canvas, _| {
+                        // A PDF rectangle grows from its block-end edge
+                        // toward block-start.  Poppler owns the exact far
+                        // edge for the fill, while Chromium leaves that
+                        // coincident row to the page background.  Retire
+                        // one serialized millipoint at a nonzero page-area
+                        // start without moving the block-end edge.
+                        let far_edge_guard = Pt::from_milli_i64(1);
+                        let block_start_guard =
+                            if frame.y > Pt::ZERO && frame.height > far_edge_guard {
+                                far_edge_guard
+                            } else {
+                                Pt::ZERO
+                            };
+                        canvas.meta(canvas::META_HTML_CANVAS_BACKGROUND_KEY, "begin");
+                        canvas.save_state();
+                        canvas.set_fill_color(color);
+                        if alpha < 1.0 {
+                            canvas.set_opacity(alpha, alpha);
+                        }
+                        canvas.draw_rect(
+                            frame.x,
+                            frame.y + block_start_guard,
+                            frame.width,
+                            frame.height - block_start_guard,
+                        );
+                        canvas.restore_state();
+                        canvas.meta(canvas::META_HTML_CANVAS_BACKGROUND_KEY, "end");
                     })
-                    .collect::<Vec<_>>()
-            } else {
-                page_templates.to_vec()
-            };
+                })
+                .collect::<Vec<_>>()
+        } else {
+            page_templates.to_vec()
+        };
 
         for pass in 0..pass_limit {
             if lazy
@@ -5255,18 +6352,36 @@ impl FullBleed {
 
             passes += 1;
             let t_story = std::time::Instant::now();
-            let story = html::html_to_story_with_resolver_and_fonts_and_report_and_target_pages(
-                html,
-                resolver,
-                Some(self.font_registry.clone()),
-                Some(self.asset_bundle.clone()),
-                pass_report_ref.as_deref_mut(),
-                self.svg_form_xobjects,
-                self.svg_raster_fallback,
-                self.perf.as_deref(),
-                Some(doc_id),
-                uses_target_counters.then(|| target_pages.clone()),
-            );
+            let story = match input {
+                HtmlLayoutInput::Source(html) => {
+                    html::html_to_story_with_resolver_and_fonts_and_report_and_target_pages(
+                        html,
+                        resolver,
+                        Some(self.font_registry.clone()),
+                        Some(self.asset_bundle.clone()),
+                        pass_report_ref.as_deref_mut(),
+                        self.svg_form_xobjects,
+                        self.svg_raster_fallback,
+                        self.perf.as_deref(),
+                        Some(doc_id),
+                        uses_target_counters.then(|| target_pages.clone()),
+                    )
+                }
+                HtmlLayoutInput::Parsed(document) => {
+                    html::html_document_to_story_with_resolver_and_fonts_and_report_and_target_pages(
+                        document,
+                        resolver,
+                        Some(self.font_registry.clone()),
+                        Some(self.asset_bundle.clone()),
+                        pass_report_ref.as_deref_mut(),
+                        self.svg_form_xobjects,
+                        self.svg_raster_fallback,
+                        self.perf.as_deref(),
+                        Some(doc_id),
+                        uses_target_counters.then(|| target_pages.clone()),
+                    )
+                }
+            };
             story_ms += t_story.elapsed().as_secs_f64() * 1000.0;
 
             let mut doc = DocTemplate::new(page_templates.clone());
@@ -5740,16 +6855,62 @@ impl FullBleed {
         resolver: &style::StyleResolver,
         report: Option<&mut GlyphCoverageReport>,
     ) -> Result<(Document, Option<PageDataContext>), FullBleedError> {
-        let mut report = report;
-        let perf = self.perf.as_deref();
-        self.emit_html_asset_warnings(doc_id, html);
-        let layout = self.build_document_with_layout_strategy(
+        self.render_to_document_and_page_data_with_resolver_and_report_input_at(
             doc_id,
-            html,
+            HtmlLayoutInput::Source(html),
             page_templates,
             resolver,
-            report.as_deref_mut(),
-        )?;
+            report,
+        )
+    }
+
+    fn render_to_document_and_page_data_with_parsed_resolver_and_report_at(
+        &self,
+        doc_id: usize,
+        document: &NodeRef,
+        page_templates: &[PageTemplate],
+        resolver: &style::StyleResolver,
+        report: Option<&mut GlyphCoverageReport>,
+    ) -> Result<(Document, Option<PageDataContext>), FullBleedError> {
+        self.render_to_document_and_page_data_with_resolver_and_report_input_at(
+            doc_id,
+            HtmlLayoutInput::Parsed(document),
+            page_templates,
+            resolver,
+            report,
+        )
+    }
+
+    fn render_to_document_and_page_data_with_resolver_and_report_input_at(
+        &self,
+        doc_id: usize,
+        input: HtmlLayoutInput<'_>,
+        page_templates: &[PageTemplate],
+        resolver: &style::StyleResolver,
+        report: Option<&mut GlyphCoverageReport>,
+    ) -> Result<(Document, Option<PageDataContext>), FullBleedError> {
+        let mut report = report;
+        let perf = self.perf.as_deref();
+        if let HtmlLayoutInput::Source(html) = input {
+            self.emit_html_asset_warnings(doc_id, html);
+        }
+        let layout = match input {
+            HtmlLayoutInput::Source(html) => self.build_document_with_layout_strategy(
+                doc_id,
+                html,
+                page_templates,
+                resolver,
+                report.as_deref_mut(),
+            )?,
+            HtmlLayoutInput::Parsed(document) => self
+                .build_document_with_layout_strategy_from_document(
+                    doc_id,
+                    document,
+                    page_templates,
+                    resolver,
+                    report.as_deref_mut(),
+                )?,
+        };
         let built = layout.document;
         let story_ms = layout.story_ms;
         let layout_ms = layout.layout_ms;
@@ -5976,15 +7137,27 @@ impl FullBleed {
         self.render_to_document_with_resolver(html, &context.page_templates, &context.resolver)
     }
 
-    /// Compile HTML/CSS through layout and planning once, retaining an immutable fixed-point
-    /// display document that can be linked repeatedly without rerunning the frontend.
+    /// Compile HTML/CSS into both the immutable fixed-point display document and, when text slots
+    /// are present, a parsed-DOM reflow program with a reusable CSS context.
     pub fn compile_document(
         &self,
         html: &str,
         css: &str,
     ) -> Result<CompiledDocument, FullBleedError> {
         let started = std::time::Instant::now();
-        let document = Arc::new(self.render_to_document(html, css)?);
+        let context = self.build_render_context(css, Some(0));
+        let parsed_template = html_dom::parse_html(html);
+        self.emit_html_asset_warnings(0, html);
+        let document = Arc::new(
+            self.render_to_document_and_page_data_with_parsed_resolver_and_report_at(
+                0,
+                &parsed_template,
+                &context.page_templates,
+                &context.resolver,
+                None,
+            )?
+            .0,
+        );
         let command_count = document.pages.iter().map(|page| page.commands.len()).sum();
         let mut binding_slots = BTreeSet::new();
         for page in &document.pages {
@@ -5996,6 +7169,24 @@ impl FullBleed {
                 .map(Arc::new)
                 .map_err(|error| Arc::<str>::from(error.to_string()))
         });
+        let reflow_plan =
+            match html_dom::CompiledHtmlBindingTemplate::compile_document(&parsed_template) {
+                Ok(template) if template.slot_names().is_empty() => None,
+                Ok(template) => Some(Ok(Arc::new(CompiledReflowPlan {
+                    template,
+                    context,
+                    runtime: Arc::new(self.clone_for_compiled_reflow()),
+                    flow_programs: Mutex::new(HashMap::new()),
+                    html_input_cache: html_dom::CompiledFlowHtmlInputCache::default(),
+                    shape_cache: pdf::CompiledFlowShapeCache::default(),
+                    pdf_program_cache: Mutex::new(None),
+                }))),
+                Err(error) => Some(Err(Arc::<str>::from(error))),
+            };
+        let reflow_slot_count = reflow_plan
+            .as_ref()
+            .and_then(|plan| plan.as_ref().ok())
+            .map_or(0, |plan| plan.template.slot_names().len());
         let elapsed = started.elapsed();
         let compile_nanos = u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX);
         if let Some(logger) = self.perf.as_deref() {
@@ -6006,6 +7197,7 @@ impl FullBleed {
                 &[
                     ("pages", document.pages.len() as u64),
                     ("commands", command_count as u64),
+                    ("reflow_slots", reflow_slot_count as u64),
                 ],
             );
         }
@@ -6019,6 +7211,7 @@ impl FullBleed {
             command_count,
             binding_slots,
             binding_plan,
+            reflow_plan,
         })
     }
 
@@ -12934,6 +14127,307 @@ h1 { font-size: 20pt; }
         assert!(matches!(
             compiled.render_bindings_to_buffer(&uneven),
             Err(FullBleedError::InvalidConfiguration(_))
+        ));
+    }
+
+    #[test]
+    fn compiled_reflow_bindings_reuse_dom_and_generate_variable_page_counts() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let template = r#"<!doctype html><html><body>
+<main>
+  <h1>{{record_id}}</h1>
+  <div class="content">{{content}}</div>
+  <p class="tail">END {{record_id}}</p>
+</main>
+</body></html>"#;
+        let css = r#"
+@page { size: 240pt 180pt; margin: 18pt; }
+body { margin: 0; font-family: Helvetica, sans-serif; font-size: 10pt; line-height: 12pt; }
+h1 { margin: 0 0 6pt; font-size: 14pt; line-height: 16pt; }
+.content { white-space: pre-wrap; }
+.tail { margin: 6pt 0 0; }
+"#;
+        let compiled = engine
+            .compile_document(template, css)
+            .expect("compile reflow template");
+        assert!(compiled.reflow_program_ready());
+        assert_eq!(
+            compiled.reflow_binding_slots(),
+            &["content".to_string(), "record_id".to_string()]
+        );
+        assert!(compiled.reflow_program_node_count() > 5);
+        assert_eq!(compiled.reflow_program_binding_text_node_count(), 3);
+        assert_eq!(compiled.reflow_program_error(), None);
+
+        let lines = |prefix: &str, count: usize| {
+            (0..count)
+                .map(|index| format!("{prefix} marker {index:03}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let bindings = std::collections::HashMap::from([
+            (
+                "record_id".to_string(),
+                vec![
+                    "REC-A".to_string(),
+                    "REC-B".to_string(),
+                    "REC-C".to_string(),
+                ],
+            ),
+            (
+                "content".to_string(),
+                vec![lines("alpha", 3), lines("bravo", 18), lines("charlie", 35)],
+            ),
+        ]);
+
+        let first = compiled
+            .render_reflow_bindings_to_buffer(&bindings)
+            .expect("compiled reflow batch");
+        let second = compiled
+            .render_reflow_bindings_to_buffer(&bindings)
+            .expect("deterministic compiled reflow batch");
+        assert_eq!(first, second, "compiled reflow must be byte deterministic");
+        let inspection = inspect_pdf_bytes(&first).expect("inspect compiled reflow batch");
+        assert!(
+            inspection.page_count >= 6,
+            "three records should naturally expand beyond one page each: {:?}",
+            inspection.page_count
+        );
+
+        let parsed = crate::pdf_native::Document::load_mem(&first).expect("parse reflow PDF");
+        let page_numbers = parsed.get_pages().keys().copied().collect::<Vec<_>>();
+        let text = parsed
+            .extract_text_chunks(&page_numbers)
+            .into_iter()
+            .collect::<crate::pdf_native::Result<Vec<_>>>()
+            .expect("extract compiled reflow text")
+            .join("\n");
+        let a = text.find("REC-A").expect("record A marker");
+        let b = text.find("REC-B").expect("record B marker");
+        let c = text.find("REC-C").expect("record C marker");
+        assert!(a < b && b < c, "record order must survive parallel reflow");
+        assert!(text.contains("alpha marker 002"));
+        assert!(text.contains("bravo marker 017"));
+        assert!(text.contains("charlie marker 034"));
+
+        let one_record = std::collections::HashMap::from([
+            ("record_id".to_string(), vec!["REC <1> & final".to_string()]),
+            ("content".to_string(), vec![lines("single", 14)]),
+        ]);
+        let compiled_one = compiled
+            .render_reflow_bindings_to_buffer(&one_record)
+            .expect("single compiled reflow record");
+        let ordinary_html = template
+            .replace("{{record_id}}", &escape_html_text("REC <1> & final"))
+            .replace("{{content}}", &escape_html_text(&lines("single", 14)));
+        let ordinary = engine
+            .render_to_buffer(&ordinary_html, css)
+            .expect("ordinary equivalent reflow");
+        assert_eq!(
+            compiled_one, ordinary,
+            "compiled reflow must be byte-identical to the ordinary rendering path"
+        );
+    }
+
+    #[test]
+    fn compiled_reflow_constraint_reexecutes_the_browser_text_paint_phase() {
+        let constraint = CompiledTextConstraint::parse("563:100000:30000:100000:30000:0:0:1:r")
+            .expect("compiled text constraint");
+
+        assert_eq!(
+            constraint.aligned_x(Pt::from_milli_i64(100_000)),
+            Pt::from_milli_i64(538),
+            "the prototype phase must receive the browser's 0.025pt hint correction",
+        );
+        assert_eq!(
+            constraint.aligned_x(Pt::from_milli_i64(99_500)),
+            Pt::from_milli_i64(1_063),
+            "a width change must execute the shader at its new phase, not move the snapped prototype",
+        );
+
+        let unsnapped = CompiledTextConstraint::parse("563:100000:30000:100000:30000:0:0:0:r")
+            .expect("unsnapped compiled text constraint");
+        assert_eq!(
+            unsnapped.aligned_x(Pt::from_milli_i64(100_000)),
+            Pt::from_milli_i64(563),
+        );
+    }
+
+    #[test]
+    fn compiled_reflow_materializes_trusted_html_fragments_in_container_context() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let template = r#"<!doctype html><html><body>
+<main>
+  <h1>{{record_id}}</h1>
+  <section class="narrative" data-fb-bind-html="sections"></section>
+  <table><thead><tr><th>Item</th><th>Value</th></tr></thead>
+    <tbody data-fb-bind-html="rows"></tbody>
+  </table>
+  <p>END {{record_id}}</p>
+</main>
+</body></html>"#;
+        let css = r#"
+@page { size: 260pt 190pt; margin: 16pt; }
+body { margin: 0; font-family: Helvetica, sans-serif; font-size: 9pt; line-height: 11pt; }
+h1, p { margin: 0 0 5pt; }
+table { width: 100%; border-collapse: collapse; }
+th, td { border: 1pt solid #999; padding: 3pt; }
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+"#;
+        let compiled = engine
+            .compile_document(template, css)
+            .expect("compile structural reflow template");
+        assert_eq!(compiled.reflow_program_html_binding_node_count(), 2);
+        assert_eq!(
+            compiled.reflow_binding_slots(),
+            &[
+                "record_id".to_string(),
+                "rows".to_string(),
+                "sections".to_string()
+            ]
+        );
+
+        let sections = |record: &str, count: usize| {
+            (0..count)
+                .map(|index| format!("<p>{record}-P-{index:03} structural narrative</p>"))
+                .collect::<String>()
+        };
+        let rows = |record: &str, count: usize| {
+            (0..count)
+                .map(|index| {
+                    format!(
+                        "<tr><td>{record}-R-{index:03}</td><td>{}</td></tr>",
+                        index * 17
+                    )
+                })
+                .collect::<String>()
+        };
+        let bindings = std::collections::HashMap::from([
+            (
+                "record_id".to_string(),
+                vec!["STRUCT-A".to_string(), "STRUCT-B".to_string()],
+            ),
+            (
+                "sections".to_string(),
+                vec![sections("STRUCT-A", 2), sections("STRUCT-B", 14)],
+            ),
+            (
+                "rows".to_string(),
+                vec![rows("STRUCT-A", 3), rows("STRUCT-B", 28)],
+            ),
+        ]);
+        let batch = compiled
+            .render_reflow_bindings_to_buffer(&bindings)
+            .expect("render structural reflow batch");
+        let inspection = inspect_pdf_bytes(&batch).expect("inspect structural reflow batch");
+        assert!(inspection.page_count >= 4);
+        let parsed = crate::pdf_native::Document::load_mem(&batch).expect("parse structural PDF");
+        let page_numbers = parsed.get_pages().keys().copied().collect::<Vec<_>>();
+        let text = parsed
+            .extract_text_chunks(&page_numbers)
+            .into_iter()
+            .collect::<crate::pdf_native::Result<Vec<_>>>()
+            .expect("extract structural reflow text")
+            .join("\n");
+        assert!(text.find("STRUCT-A").unwrap() < text.find("STRUCT-B").unwrap());
+        assert!(text.contains("STRUCT-A-R-002"));
+        assert!(text.contains("STRUCT-B-P-013"));
+        assert!(text.contains("STRUCT-B-R-027"));
+
+        let record_id = "STRUCT-ONE";
+        let one_sections = sections(record_id, 7);
+        let one_rows = rows(record_id, 12);
+        let one = std::collections::HashMap::from([
+            ("record_id".to_string(), vec![record_id.to_string()]),
+            ("sections".to_string(), vec![one_sections.clone()]),
+            ("rows".to_string(), vec![one_rows.clone()]),
+        ]);
+        let compiled_one = compiled
+            .render_reflow_bindings_to_buffer(&one)
+            .expect("single structural reflow record");
+        let ordinary_html = template
+            .replace("{{record_id}}", record_id)
+            .replace(
+                "<section class=\"narrative\" data-fb-bind-html=\"sections\"></section>",
+                &format!(
+                    "<section class=\"narrative\" data-fb-bind-html=\"sections\">{one_sections}</section>"
+                ),
+            )
+            .replace(
+                "<tbody data-fb-bind-html=\"rows\"></tbody>",
+                &format!("<tbody data-fb-bind-html=\"rows\">{one_rows}</tbody>"),
+            );
+        let ordinary = engine
+            .render_to_buffer(&ordinary_html, css)
+            .expect("ordinary structural equivalent");
+        assert_eq!(compiled_one, ordinary);
+    }
+
+    #[test]
+    fn compiled_reflow_rejects_non_text_binding_contexts_without_breaking_fixed_compile() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let compiled = engine
+            .compile_document(
+                r#"<main data-account="{{account}}"><p>Static body</p></main>"#,
+                "",
+            )
+            .expect("fixed document still compiles");
+        assert!(!compiled.reflow_program_ready());
+        assert!(
+            compiled
+                .reflow_program_error()
+                .is_some_and(|error| error.contains("text nodes only"))
+        );
+        let bindings =
+            std::collections::HashMap::from([("account".to_string(), vec!["ACCT-1".to_string()])]);
+        assert!(matches!(
+            compiled.render_reflow_bindings_to_buffer(&bindings),
+            Err(FullBleedError::InvalidConfiguration(message))
+                if message.contains("text nodes only")
+        ));
+
+        let outside_body = engine
+            .compile_document(
+                r#"<html><head><title data-fb-bind-html="title"></title></head><body><p>Static</p></body></html>"#,
+                "",
+            )
+            .expect("fixed document with a head-only structural marker still compiles");
+        assert!(
+            outside_body
+                .reflow_program_error()
+                .is_some_and(|error| error.contains("inside the document body"))
+        );
+    }
+
+    #[test]
+    fn compiled_reflow_cancels_a_windowed_batch_without_worker_deadlock() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let compiled = engine
+            .compile_document(
+                r#"<main><h1>{{record_id}}</h1><section data-fb-bind-html="body"></section></main>"#,
+                "body { font: 9pt Helvetica, sans-serif; }",
+            )
+            .expect("compile windowed reflow template");
+        let record_count = 300usize;
+        let record_ids = (0..record_count)
+            .map(|index| format!("WINDOW-{index:03}"))
+            .collect::<Vec<_>>();
+        let mut bodies = record_ids
+            .iter()
+            .map(|record| format!("<p>{record} body</p>"))
+            .collect::<Vec<_>>();
+        bodies[200] =
+            r#"<p data-fullbleed-compiler-binding-root="999">reserved attribute</p>"#.to_string();
+        let bindings = std::collections::HashMap::from([
+            ("record_id".to_string(), record_ids),
+            ("body".to_string(), bodies),
+        ]);
+
+        assert!(matches!(
+            compiled.render_reflow_bindings_to_buffer(&bindings),
+            Err(FullBleedError::InvalidConfiguration(message))
+                if message.contains("reserved data-fullbleed-compiler-binding-root attribute")
         ));
     }
 

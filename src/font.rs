@@ -507,6 +507,11 @@ impl FontRegistry {
             .and_then(|index| self.fonts.get(*index))
     }
 
+    pub(crate) fn compiled_font_index(&self, name: &str) -> Option<usize> {
+        let key = normalize_name(name);
+        self.lookup.get(&key).copied()
+    }
+
     pub(crate) fn cached_truetype_subset(
         &self,
         name: &str,
@@ -766,6 +771,40 @@ impl FontRegistry {
 
     pub(crate) fn measure_text_width(&self, name: &str, font_size: Pt, text: &str) -> Pt {
         self.measure_text_width_encoded(name, font_size, text)
+    }
+
+    pub(crate) fn measure_compiled_basic_latin_width(
+        &self,
+        name: &str,
+        font_size: Pt,
+        text: &str,
+    ) -> Pt {
+        let (shape_options, clean_text) = text_shape::decode_shape_options(text);
+        if shape_options == text_shape::ShapeOptions::default() {
+            let key = normalize_name(name);
+            if let Some(font) = self
+                .lookup
+                .get(&key)
+                .and_then(|index| self.fonts.get(*index))
+                .filter(|font| font.metrics.is_within_basic_latin(clean_text))
+            {
+                return font.metrics.measure_text_width(font_size, clean_text);
+            }
+        }
+        self.measure_text_width_encoded(name, font_size, text)
+    }
+
+    pub(crate) fn measure_compiled_basic_latin_width_at(
+        &self,
+        font_index: usize,
+        font_size: Pt,
+        text: &str,
+    ) -> Option<Pt> {
+        let (shape_options, clean_text) = text_shape::decode_shape_options(text);
+        let font = self.fonts.get(font_index)?;
+        (shape_options == text_shape::ShapeOptions::default()
+            && font.metrics.is_within_basic_latin(clean_text))
+        .then(|| font.metrics.measure_text_width(font_size, clean_text))
     }
 
     pub(crate) fn measure_text_width_with_shape_options(

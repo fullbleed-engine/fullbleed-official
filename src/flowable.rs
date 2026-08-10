@@ -11,13 +11,15 @@ use crate::style::{
 };
 use crate::svg;
 use crate::types::{BoxSizingMode, Color, MixBlendMode, Pt, Rect, Shading, ShadingStop, Size};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::Path as FsPath;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 const SOFT_HYPHEN: char = '\u{00AD}';
+
+pub(crate) const META_COMPILED_TEXT_CONSTRAINT_KEY: &str = "fb.compile.text.constraint";
 
 fn huge_pt() -> Pt {
     // Large but safe sentinel for "unbounded" layout measurements.
@@ -141,6 +143,84 @@ pub(crate) struct PerfGuard {
 
 thread_local! {
     static PERF_CTX: RefCell<Option<PerfContext>> = RefCell::new(None);
+    static COMPILED_FLOW_CAPTURE: Cell<bool> = const { Cell::new(false) };
+    static COMPILED_FLOW_PARENT_WIDTH: Cell<Option<Pt>> = const { Cell::new(None) };
+}
+
+pub(crate) struct CompiledFlowCaptureGuard {
+    previous: bool,
+}
+
+pub(crate) fn set_compiled_flow_capture(enabled: bool) -> CompiledFlowCaptureGuard {
+    COMPILED_FLOW_CAPTURE.with(|capture| {
+        let previous = capture.replace(enabled);
+        CompiledFlowCaptureGuard { previous }
+    })
+}
+
+impl Drop for CompiledFlowCaptureGuard {
+    fn drop(&mut self) {
+        COMPILED_FLOW_CAPTURE.with(|capture| capture.set(self.previous));
+    }
+}
+
+struct CompiledFlowParentWidthGuard {
+    previous: Option<Pt>,
+}
+
+fn compiled_flow_capture_enabled() -> bool {
+    COMPILED_FLOW_CAPTURE.with(Cell::get)
+}
+
+fn set_compiled_flow_parent_width(width: Pt) -> CompiledFlowParentWidthGuard {
+    COMPILED_FLOW_PARENT_WIDTH.with(|slot| CompiledFlowParentWidthGuard {
+        previous: slot.replace(Some(width.max(Pt::ZERO))),
+    })
+}
+
+impl Drop for CompiledFlowParentWidthGuard {
+    fn drop(&mut self) {
+        COMPILED_FLOW_PARENT_WIDTH.with(|slot| slot.set(self.previous));
+    }
+}
+
+fn emit_compiled_text_constraint(
+    canvas: &mut Canvas,
+    origin_x: Pt,
+    position_max_width: Pt,
+    position_width: Pt,
+    text_width: Pt,
+    letter_spacing: Pt,
+    word_spacing: Pt,
+    css_pixel_snap_metrics: bool,
+    align: TextAlign,
+) {
+    if !compiled_flow_capture_enabled() {
+        return;
+    }
+    let guard_max_width = COMPILED_FLOW_PARENT_WIDTH
+        .with(Cell::get)
+        .unwrap_or(position_max_width);
+    let align = match align {
+        TextAlign::Left => 'l',
+        TextAlign::Center => 'c',
+        TextAlign::Right => 'r',
+        TextAlign::Justify => 'j',
+    };
+    canvas.meta(
+        META_COMPILED_TEXT_CONSTRAINT_KEY,
+        format!(
+            "{}:{}:{}:{}:{}:{}:{}:{}:{align}",
+            origin_x.to_milli_i64(),
+            position_max_width.max(Pt::ZERO).to_milli_i64(),
+            position_width.max(Pt::ZERO).to_milli_i64(),
+            guard_max_width.max(Pt::ZERO).to_milli_i64(),
+            text_width.max(Pt::ZERO).to_milli_i64(),
+            letter_spacing.to_milli_i64(),
+            word_spacing.to_milli_i64(),
+            u8::from(css_pixel_snap_metrics),
+        ),
+    );
 }
 
 pub(crate) fn set_perf_context(perf: Option<Arc<PerfLogger>>, doc_id: Option<usize>) -> PerfGuard {
@@ -5587,7 +5667,7 @@ fn draw_registered_text_run(
     }
 }
 
-fn browser_registered_text_paint_x(x: Pt) -> Pt {
+pub(crate) fn browser_registered_text_paint_x(x: Pt) -> Pt {
     // Poppler's hinted embedded-font raster lands 1/30 CSS px to the left only
     // near the two CSS-pixel phase boundaries where Chromium's print text
     // matrix crosses a hinting cell. Applying the correction throughout the
@@ -8596,6 +8676,17 @@ impl Flowable for Paragraph {
                 decoration_y,
                 decoration_width,
                 Some(&line.text),
+            );
+            emit_compiled_text_constraint(
+                canvas,
+                x + line.indent,
+                avail_width,
+                line_width,
+                line.text_width,
+                style.letter_spacing,
+                style.word_spacing,
+                style.css_pixel_snap_metrics,
+                align,
             );
             renderer.draw_text_with_fallbacks(canvas, text_x, draw_y, &line.text);
             renderer.draw_text_emphasis_for_line(canvas, text_x, draw_y, &line.text);
@@ -15039,6 +15130,17 @@ impl TableFlowable {
                             decoration_width,
                             Some(&line.text),
                         );
+                        emit_compiled_text_constraint(
+                            canvas,
+                            cell_x + pad_left,
+                            content_width,
+                            line_width,
+                            line.text_width,
+                            cell.style.letter_spacing,
+                            cell.style.word_spacing,
+                            cell.style.css_pixel_snap_metrics,
+                            cell.align,
+                        );
                         cell.draw_text_line(canvas, text_x, draw_y, &line.text);
                         draw_text_decorations_after_glyphs(
                             canvas,
@@ -17430,6 +17532,25 @@ impl InlineBlockLayoutFlowable {
     }
 }
 
+#[inline(never)]
+fn draw_inline_child_with_compiled_parent_width(
+    child: &dyn Flowable,
+    canvas: &mut Canvas,
+    item_x: Pt,
+    item_y: Pt,
+    item_width: Pt,
+    item_height: Pt,
+    parent_x: Pt,
+    parent_width: Pt,
+) {
+    let _parent_width = set_compiled_flow_parent_width(parent_width);
+    if child.expands_inline_fill() {
+        child.draw_expanding_inline_fill(canvas, item_x, item_y, item_width, item_height, parent_x);
+    } else {
+        child.draw(canvas, item_x, item_y, item_width, item_height);
+    }
+}
+
 impl Flowable for InlineBlockLayoutFlowable {
     fn inline_text_edge_letter_spacing(&self) -> Option<Pt> {
         self.children.first()?.0.inline_text_edge_letter_spacing()?;
@@ -17702,7 +17823,19 @@ impl Flowable for InlineBlockLayoutFlowable {
                 } else {
                     item.size.height.min(avail_height)
                 };
-                if child.expands_inline_fill() {
+                if compiled_flow_capture_enabled() && line.items.len() == 1 && !child.out_of_flow()
+                {
+                    draw_inline_child_with_compiled_parent_width(
+                        child,
+                        canvas,
+                        item_x,
+                        cursor_y + y_off,
+                        item_width,
+                        item_height,
+                        x,
+                        (avail_width - item.x_off).max(Pt::ZERO),
+                    );
+                } else if child.expands_inline_fill() {
                     child.draw_expanding_inline_fill(
                         canvas,
                         item_x,

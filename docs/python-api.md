@@ -102,9 +102,14 @@ Key methods:
 
 ## `CompiledDocument`
 
-`PdfEngine.compile_pdf(html, css)` runs HTML parsing, style resolution, layout, pagination, and JIT
-planning once. It returns an immutable document containing the fixed-point display commands and the
-linker resources captured from that engine.
+`PdfEngine.compile_pdf(html, css)` now lowers one template into two complementary programs:
+
+- a fixed-point paint/link program for immutable copies and fixed-geometry text overlays; and
+- a flow compiler that retains the recovered template tree, binding programs, CSS/page/font state,
+  guarded structural flow variants, and cached PDF page-paint programs.
+
+The reflow API described below ships in Fullbleed 2.2.4. The fixed paint/link methods remain
+unchanged.
 
 ```python
 compiled = engine.compile_pdf(html, css)
@@ -127,17 +132,53 @@ records = {
 }
 variable_pdf = invoice_template.render_pdf_bindings(records)
 invoice_template.render_pdf_bindings_to_file(records, "invoices.pdf")
+
+# Content-driven records. Ordinary {{slot}} values have literal-DOM semantics.
+# Encountered flow shapes compile on demand; matching later records bind and
+# execute guarded fixed-point programs without repeating layout.
+reflow_css = "body { font-family: Helvetica, sans-serif; }"
+reflow_template = engine.compile_pdf(
+    """
+    <article>
+      <h1>{{account_name}}</h1>
+      <div class="narrative">{{narrative}}</div>
+      <table>
+        <thead><tr><th>Item</th><th>Amount</th></tr></thead>
+        <tbody data-fb-bind-html="rows"></tbody>
+      </table>
+    </article>
+    """,
+    reflow_css,
+)
+reflow_records = {
+    "account_name": ["North", "South"],
+    "narrative": ["Short review.", "A much longer review that may wrap or paginate."],
+    # Explicit structural slots are trusted HTML. They may change child count
+    # and element structure; use only application-generated markup here.
+    "rows": [
+        "<tr><td>A</td><td>$10</td></tr>",
+        "<tr><td>B</td><td>$20</td></tr><tr><td>C</td><td>$30</td></tr>",
+    ],
+}
+reflow_template.render_pdf_reflow_bindings_to_file(
+    reflow_records, "reflow-records.pdf"
+)
 ```
 
 Methods:
 
-- `stats() -> dict` with `page_count`, `command_count`, `compile_ms`,
-  `binding_slot_count`, and sorted `binding_slots`
+- `stats() -> dict` with fixed-program `page_count`, `command_count`, `compile_ms`,
+  `binding_slot_count`, and sorted `binding_slots`, plus `reflow_program_ready`,
+  `reflow_program_error`, `reflow_binding_slot_count`, sorted `reflow_binding_slots`,
+  `reflow_program_node_count`, `reflow_program_binding_text_node_count`, and
+  `reflow_program_html_binding_node_count`
 - `render_pdf(deterministic_hash=None) -> bytes`
 - `render_pdf_to_file(path, deterministic_hash=None) -> int`
 - `render_pdf_batch(copies, deterministic_hash=None) -> bytes`
 - `render_pdf_bindings(bindings, deterministic_hash=None) -> bytes`
 - `render_pdf_bindings_to_file(bindings, path, deterministic_hash=None) -> int`
+- `render_pdf_reflow_bindings(bindings, deterministic_hash=None) -> bytes`
+- `render_pdf_reflow_bindings_to_file(bindings, path, deterministic_hash=None) -> int`
 
 `render_pdf_batch` is a fixed-copy virtualization API, not a dynamic template-binding API. Each
 page dictionary is distinct and ordered, while identical untagged page content/resources are
@@ -162,9 +203,49 @@ The current binding contract is deliberately narrow:
 - values replace paint text only. They do not trigger shaping or reflow, so templates must reserve
   sufficient geometry and should currently use WinAnsi-compatible values.
 
-Use the ordinary HTML/batch renderer when a value can change line wrapping, element dimensions,
-pagination, complex-script shaping, or accessibility structure. The direct-to-file method uses a
-buffered writer and flushes before returning.
+Use `render_pdf_reflow_bindings` when a value can change line wrapping, element dimensions,
+pagination, or complex-script shaping. It preserves the parsed/recovered template blueprint and
+compiles encountered structural/input shapes into guarded fixed-point flow programs. A matching
+record binds its text directly, validates width/spacing/alignment and parent-fit constraints,
+shapes dynamic glyph runs, executes a cached PDF page-paint program, and compresses its page stream
+on the worker. If no candidate is safe, one worker materializes its private DOM and runs full
+layout/fragmentation/pagination once to add a program variant.
+
+Execution uses native Rust scoped threads, not Python multiprocessing, and releases the GIL. The
+default worker count follows available parallelism (`FULLBLEED_THREADS` can override it), the
+in-flight record window is four times the worker count with a hard bound of 256, and the ordered
+linker flushes at most 512 pending flow pages at a time. Completion order therefore cannot change
+record/page order or deterministic bytes.
+
+The reflow binding contract is:
+
+- ordinary `{{name}}` markers are valid only in body text nodes. Values are literal text: `<`, `&`,
+  and other untrusted characters cannot create markup;
+- an empty element may opt into application-generated markup with
+  `data-fb-bind-html="name"`. This trusted structural value replaces the element's children and may
+  contain paragraphs, table rows, options, or other context-appropriate HTML;
+- structural targets must be inside the document body, empty apart from whitespace/comments, and
+  cannot be `script` or `style`; the reserved compiler-root attribute is rejected inside supplied
+  markup;
+- the mapping must contain exactly every reflow slot, and all columns must have equal non-zero
+  lengths;
+- a record executes full layout only when it cannot safely instantiate an existing flow variant.
+  The compiler does not yet use a dependency DAG to limit that miss to the smallest affected
+  subtree, and it does not virtualize repeated variable rows;
+- each record has the same semantics as rendering the fully substituted HTML through the ordinary
+  API. The compiler may therefore produce a different page count for every row.
+
+Use `render_pdf_bindings` for validated paint-only fields where hundreds of thousands of pages per
+second matter and geometry is fixed. Use `render_pdf_reflow_bindings` for compiled template reuse
+with genuine content-driven pagination. Use the ordinary HTML/batch renderer for dynamic
+attributes, selectors, document metadata, or other template changes outside these binding
+contracts. Direct-to-file methods use buffered writers and flush before returning.
+
+Compiled flow pages of at least 4 KiB default to the deterministic four-step Deflate search used by
+the throughput lane; smaller streams retain the compact 64-step encoder. Set
+`FULLBLEED_COMPILED_FLOW_DEFLATE_CHAIN=64` before process start when smaller large-page output is
+more important; on the independent 1,750-page workload that setting also produced exact ordinary
+renderer bytes. Values are clamped to 1-64 and are process-wide after first use.
 
 ## `AssetBundle`
 
