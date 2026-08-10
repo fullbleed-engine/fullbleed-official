@@ -91,6 +91,7 @@ jobs:
 
   publish-pypi:
     name: Publish fullbleed-mcp to PyPI
+    if: inputs.publish_pypi
     needs: validate
     runs-on: ubuntu-latest
     environment: "pypi-mcp"
@@ -105,12 +106,17 @@ jobs:
           path: dist
 
       - name: Publish with PyPI trusted publishing
-        if: inputs.publish_pypi
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
 
   publish-registry:
     name: Publish official MCP Registry metadata
-    if: inputs.publish_registry
+    if: >-
+      ${{
+        inputs.publish_registry &&
+        always() &&
+        needs.validate.result == 'success' &&
+        (needs.publish-pypi.result == 'success' || needs.publish-pypi.result == 'skipped')
+      }}
     needs:
       - validate
       - publish-pypi
@@ -161,6 +167,17 @@ jobs:
       - name: Confirm registry discovery
         shell: bash
         run: |
-          curl --fail --silent --show-error \
-            "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.fullbleed-engine/fullbleed-mcp" \
-            | python -m json.tool
+          registry_json="$(curl --fail --silent --show-error \
+            "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.fullbleed-engine/fullbleed-mcp")"
+          python -c '
+          import json, sys
+          payload = json.load(sys.stdin)
+          names = {
+              (item.get("server") or item).get("name")
+              for item in payload.get("servers", [])
+          }
+          expected = "io.github.fullbleed-engine/fullbleed-mcp"
+          if expected not in names:
+              raise SystemExit(f"registry did not return {expected}: {sorted(name for name in names if name)}")
+          print(json.dumps(payload, indent=2, sort_keys=True))
+          ' <<<"${registry_json}"
