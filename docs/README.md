@@ -8,7 +8,7 @@ This folder documents the Fullbleed stack at three layers:
 
 ## Version scope
 
-These docs target the `2.2.5` release line and the current repository source layout.
+These docs target the `2.3.0` release line and the current repository source layout. Agent-facing commands, schemas, capabilities, and profiles are generated from the installed runtime; use `fullbleed agent-contract --format json` as the source of truth.
 
 ## Documents
 
@@ -21,9 +21,18 @@ These docs target the `2.2.5` release line and the current repository source lay
 - `docs/python-api.md`: Python bindings, classes, methods, and usage patterns
 - `docs/ui-accessibility.md`: `fullbleed.ui` authoring, accessibility primitives, validation, signatures
 - `docs/cli.md`: command reference, JSON/machine mode, reproducibility and validation flows
+- `docs/agent-discovery.md`: maintained package, Skill, MCP Registry, and ecosystem distribution strategy
+- `fullbleed-agent-contract.json`: generated canonical agent manifest
+- `cli_schema.md`: generated human view of runtime commands, schemas, and capabilities
+- `llms.txt`: generated compact discovery entrypoint for LLM retrieval
+- `skills/fullbleed/SKILL.md`: first-party versionless Agent Skill
+- `packages/fullbleed-mcp/README.md`: separately distributed stdio MCP adapter
+- `agent_acceptance/README.md`: isolated cold-agent acceptance harness
+- `examples/agent_workflows/README.md`: compact end-to-end agent-oriented examples
+- `agentdocbench/README.md`: approach-neutral document-generation agent benchmark scaffold
 - `docs/pdf-templates.md`: Rust finalize PDF template/XObject composition policy and smoke gates
 - `docs/release/README.md`: release runbook, readiness ledger, and public claim contract
-- `docs/release/2.2.5-runbook.md`: current Cargo/PyPI/GitHub release and deployment procedure
+- `docs/release/2.3.0-runbook.md`: current Cargo/PyPI/GitHub/MCP release and deployment procedure
 - `examples/canonical_reference/README.md`: canonical static PDF scaffold reference and validation workflow
 - `examples/compiled_reflow/README.md`: compiled variable-content pagination, running strings,
   trusted structural slots, and per-call compression
@@ -35,12 +44,14 @@ These docs target the `2.2.5` release line and the current repository source lay
 3. `docs/python-api.md` if you are building reports/components in Python
 4. `docs/ui-accessibility.md` if you are building semantic/a11y-first document workflows
 5. `docs/cli.md` if you are automating builds/validation in CI
-6. `docs/pdf-templates.md` if your workflow overlays variable data onto source PDF templates
-7. `docs/performance-architecture.md` for the compiled rendering and performance contract
-8. `docs/release/README.md` if you are validating, tagging, or publishing a release
-9. `examples/canonical_reference/README.md` if you need a complete runnable static PDF reference project
-10. `examples/compiled_reflow/README.md` for the compiled content-reflow Python lane
-11. `docs/engine.md` if you need to reason about behavior, constraints, or performance
+6. `skills/fullbleed/SKILL.md` if you are configuring an unfamiliar coding agent
+7. `packages/fullbleed-mcp/README.md` if you need a semantic tool adapter
+8. `docs/pdf-templates.md` if your workflow overlays variable data onto source PDF templates
+9. `docs/performance-architecture.md` for the compiled rendering and performance contract
+10. `docs/release/README.md` if you are validating, tagging, or publishing a release
+11. `examples/canonical_reference/README.md` if you need a complete runnable static PDF reference project
+12. `examples/compiled_reflow/README.md` for the compiled content-reflow Python lane
+13. `docs/engine.md` if you need to reason about behavior, constraints, or performance
 
 ## Scaffold and component workflow
 

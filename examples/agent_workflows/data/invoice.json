@@ -1,0 +1,17 @@
+{
+  "invoice": "INV-2026-1042",
+  "customer": "Jordan Lee",
+  "items": [
+    {
+      "label": "Document design",
+      "quantity": 1,
+      "amount": "950.00"
+    },
+    {
+      "label": "Validation package",
+      "quantity": 1,
+      "amount": "334.50"
+    }
+  ],
+  "total": "USD 1,284.50"
+}

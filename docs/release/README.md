@@ -4,6 +4,12 @@ This directory is the release-operations layer for Fullbleed. It is separate
 from feature documentation so release decisions can be audited without reading
 engine internals.
 
+## 2.3.0 Documents
+
+- `docs/release/2.3.0-runbook.md`: current Cargo, PyPI, GitHub, Agent Skill, MCP package, and MCP Registry release procedure.
+- `docs/agent-discovery.md`: discovery targets, publication ordering, and claim boundaries.
+- `ReleaseNotes.MD`: current 2.3.0 agent-discovery release summary and gate list.
+
 ## 2.2.5 Documents
 
 - `docs/release/2.2.5-runbook.md`: current Cargo, PyPI, wheel-matrix, and GitHub
@@ -12,7 +18,7 @@ engine internals.
   evidence, and the independently measured 8,095.8-pages/s hot median (10,355.3-pages/s best).
 - `docs/performance-architecture.md`: guarded flow programs, native PDF page shaders, and the
   remaining partial-reflow/vector-IR boundary.
-- `ReleaseNotes.MD`: current 2.2.5 release summary and gate list.
+- The `v2.2.5` GitHub release preserves its historical release notes.
 
 ## 2.2.4 Documents
 

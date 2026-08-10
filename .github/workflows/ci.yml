@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.2.5"
+  FULLBLEED_CI_VERSION: "2.3.0"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -129,6 +129,26 @@ jobs:
 
       - name: Smoke-test installed wheel
         run: python tools/smoke_installed_package.py --expected-version "${{ env.FULLBLEED_CI_VERSION }}" --json
+
+      - name: Verify agent artifacts match the installed wheel
+        run: python tools/generate_agent_contract.py --python python --check --json
+
+      - name: Verify and build fullbleed-mcp integration package
+        run: |
+          python tools/generate_mcp_server_json.py --check --json
+          python -m pip wheel packages/fullbleed-mcp --no-deps --wheel-dir target/mcp-wheels
+
+      - name: Smoke-test installed MCP stdio package
+        shell: bash
+        run: |
+          python -m pip install --no-deps target/mcp-wheels/fullbleed_mcp-*.whl
+          python tools/smoke_mcp_stdio.py --json
+
+      - name: Run installed-wheel agent workflow examples
+        run: python examples/agent_workflows/run_examples.py --out target/agent-examples --json
+
+      - name: Prepare neutral AgentDocBench smoke task
+        run: python tools/agentdocbench.py prepare --workspace target/agentdocbench --task invoice --json
 
       - name: Verify installed-wheel SVG raster fallback
         run: python -m pytest tests/test_fullbleed_svg_raster_fallback.py -q

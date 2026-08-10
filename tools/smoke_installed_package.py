@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.metadata
+import importlib.resources
 import json
 import subprocess
 import sys
@@ -24,6 +25,32 @@ def run(expected_version: str) -> dict[str, Any]:
         raise AssertionError(
             f"expected MIT, found {fullbleed.SPDX_LICENSE_EXPRESSION!r}"
         )
+
+    contract_resource = importlib.resources.files("fullbleed").joinpath(
+        "agent_contract.json"
+    )
+    if not contract_resource.is_file():
+        raise AssertionError("installed wheel is missing fullbleed/agent_contract.json")
+    packaged_contract = json.loads(contract_resource.read_text(encoding="utf-8"))
+    if packaged_contract.get("schema") != "fullbleed.agent_contract.v1":
+        raise AssertionError("packaged agent contract has the wrong schema")
+    if packaged_contract.get("product", {}).get("version") != expected_version:
+        raise AssertionError("packaged agent contract version disagrees with the wheel")
+    required_engine_fields = {
+        "compiled_document",
+        "compiled_reflow_bindings",
+        "compiled_flow_compression_modes",
+    }
+    if not required_engine_fields.issubset(
+        packaged_contract.get("capabilities", {}).get("engine", {})
+    ):
+        raise AssertionError("packaged agent contract omits compiled engine capabilities")
+    llms_resource = importlib.resources.files("fullbleed").joinpath("llms.txt")
+    if not llms_resource.is_file():
+        raise AssertionError("installed wheel is missing fullbleed/llms.txt")
+    packaged_llms = llms_resource.read_text(encoding="utf-8")
+    if f"Fullbleed {expected_version}" not in packaged_llms:
+        raise AssertionError("packaged llms.txt version disagrees with the wheel")
 
     engine = fullbleed.PdfEngine(svg_raster_fallback=True)
     html = (
@@ -55,6 +82,34 @@ def run(expected_version: str) -> dict[str, Any]:
             capture_output=True,
             text=True,
         )
+        runtime_contract_process = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "fullbleed",
+                "agent-contract",
+                "--format",
+                "json",
+            ],
+            cwd=temp_dir,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        runtime_llms_process = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "fullbleed",
+                "agent-contract",
+                "--format",
+                "llms",
+            ],
+            cwd=temp_dir,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
     if compliance.returncode != 0:
         raise AssertionError(
             "installed-package compliance failed outside the source tree:\n"
@@ -64,6 +119,27 @@ def run(expected_version: str) -> dict[str, Any]:
     compliance_report = json.loads(compliance.stdout)
     if compliance_report.get("license", {}).get("spdx_expression") != "MIT":
         raise AssertionError("installed-package compliance did not report MIT")
+    if runtime_contract_process.returncode != 0:
+        raise AssertionError(
+            "installed runtime agent contract failed outside the source tree:\n"
+            + runtime_contract_process.stdout
+            + runtime_contract_process.stderr
+        )
+    runtime_contract = json.loads(runtime_contract_process.stdout)
+    if runtime_contract != packaged_contract:
+        raise AssertionError(
+            "packaged agent contract disagrees with the installed runtime"
+        )
+    if runtime_llms_process.returncode != 0:
+        raise AssertionError(
+            "installed runtime llms.txt failed outside the source tree:\n"
+            + runtime_llms_process.stdout
+            + runtime_llms_process.stderr
+        )
+    if runtime_llms_process.stdout.replace("\r\n", "\n") != packaged_llms.replace(
+        "\r\n", "\n"
+    ):
+        raise AssertionError("packaged llms.txt disagrees with the installed runtime")
 
     return {
         "ok": True,
@@ -73,6 +149,9 @@ def run(expected_version: str) -> dict[str, Any]:
         "pdf_bytes": len(pdf),
         "png_bytes": len(pages[0]),
         "compliance_files": compliance_report["files"],
+        "agent_contract_schema": packaged_contract["schema"],
+        "agent_contract_tools": len(packaged_contract["tool_adapter"]["tools"]),
+        "llms_txt": True,
     }
 
 

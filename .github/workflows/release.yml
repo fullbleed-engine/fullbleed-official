@@ -69,7 +69,15 @@ jobs:
           python build_backend/fullbleed_build_backend.py wheel --out target/validate-wheel
           python -m pip install --force-reinstall target/validate-wheel/*.whl
 
+      - name: Verify agent artifacts match the release wheel
+        run: python tools/generate_agent_contract.py --python python --check --json
+
+      - name: Validate first-party MCP package metadata
+        run: python tools/generate_mcp_server_json.py --check --json
+
       - name: Test Python package and CLI
+        env:
+          FULLBLEED_TEST_INSTALLED_NATIVE: "1"
         run: python -m pytest -q
 
       - name: Check Rust formatting

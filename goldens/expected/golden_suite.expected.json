@@ -1,14 +1,14 @@
 {
   "schema": "fullbleed.golden_suite.v1",
-  "generated_at_utc": "2026-08-09T06:56:46.141275+00:00",
+  "generated_at_utc": "2026-08-10T20:54:58.060021+00:00",
   "cases": {
     "acme_invoice": {
       "case_id": "acme_invoice",
       "report": "examples/acme_invoice/report.py",
       "pdf": {
         "path": "examples/acme_invoice/output/acme_sample_invoice.pdf",
-        "bytes": 142162,
-        "sha256": "e33c9470c6e74ea9bb923ca483a40a36f7f5acfeb78baf7caa784d64e8b4968b"
+        "bytes": 86399,
+        "sha256": "57545ba9b3d6c71b2f4655351d02808e75e7a1a9778cf11b7ff84324551e279f"
       },
       "png": {
         "count": 1,
@@ -16,15 +16,15 @@
           {
             "name": "acme_sample_invoice_page1.png",
             "path": "examples/acme_invoice/output/acme_sample_invoice_page1.png",
-            "bytes": 161652,
-            "sha256": "358e016c5ba9a3cb9ea6a7a12cb37ebbfb3288e40d2e00c54b516f7f7a13c3b8"
+            "bytes": 160996,
+            "sha256": "6a30c5beaf38d49a6404cb8f042f991bdc5bae36d3d430e84988a6bfb9698531"
           }
         ]
       },
       "validation": {
         "path": "examples/acme_invoice/output/acme_sample_invoice_component_mount_validation.json",
         "kind": "component_mount",
-        "sha256": "8add0fa1868168f691239ba1290e03872b44f3d69fef2d695ea1feded6a9a5b1"
+        "sha256": "c5ab5c62f589f4f8bf401e4df90c959d4d67da373e7c1cce961c41fc3dc5f61c"
       },
       "css_layers": {
         "path": "examples/acme_invoice/output/acme_sample_invoice_css_layers.json",
@@ -36,8 +36,8 @@
       "report": "examples/bank_statement/report.py",
       "pdf": {
         "path": "examples/bank_statement/output/bank_statement.pdf",
-        "bytes": 59745,
-        "sha256": "bf5d988f62c8961c63698788fe55a172f04ac56453e22cccb62ccaf70e8ef2b5"
+        "bytes": 59650,
+        "sha256": "df2c915e14b2243f1f54df3e6ef0d53c39333a3ee87a189d7dc55a78ca2b8b4b"
       },
       "png": {
         "count": 2,
@@ -45,21 +45,21 @@
           {
             "name": "bank_statement_page1.png",
             "path": "examples/bank_statement/output/bank_statement_page1.png",
-            "bytes": 198385,
-            "sha256": "66c8914ad43b5620faca0738c7eeb5bd362c9358daa4c064ce78cf4060289b5c"
+            "bytes": 198604,
+            "sha256": "c2ce366a45fe303871ff902dd8147daeeb5b3178ea10d6a58685de483781faaf"
           },
           {
             "name": "bank_statement_page2.png",
             "path": "examples/bank_statement/output/bank_statement_page2.png",
-            "bytes": 106598,
-            "sha256": "bdaeccaec9de51411564eb59adaf5e802d2464242eb5a3650b46646535f704b2"
+            "bytes": 106531,
+            "sha256": "605b1a7dee40bcd77b5e864e0b57659e2efca2004c07be806a9463fe4ee8283c"
           }
         ]
       },
       "validation": {
         "path": "examples/bank_statement/output/bank_statement_component_mount_validation.json",
         "kind": "component_mount",
-        "sha256": "15058b694d56a42191e87ffa98d5d746a13f245259d7bdf3c01d649cc444bf13"
+        "sha256": "d48c68fd82f77548daf1fc7410c49aae8ceafbf5b30cbf4298b05ba499b0d5d7"
       },
       "css_layers": {
         "path": "examples/bank_statement/output/bank_statement_css_layers.json",
@@ -71,8 +71,8 @@
       "report": "examples/coastal_menu/report.py",
       "pdf": {
         "path": "examples/coastal_menu/output/coastal_menu.pdf",
-        "bytes": 3736,
-        "sha256": "5b1feefb2c3178ce7c4121b138cd982318558a51b068bfc314828d728cd0187c"
+        "bytes": 3752,
+        "sha256": "82f1f340aab27e44099363fba43368e50377dde48d7d2685049706b4f45780a5"
       },
       "png": {
         "count": 1,
@@ -80,15 +80,15 @@
           {
             "name": "coastal_menu_page1.png",
             "path": "examples/coastal_menu/output/coastal_menu_page1.png",
-            "bytes": 247150,
-            "sha256": "06a564799a7d3239b625ab7e8f160bb0e22c6372731b6221fe722ab53d6eb072"
+            "bytes": 246747,
+            "sha256": "08a266c368e91e89d6a9964f0bd17b02f3d1f22607a8d73f65c1ff36dc6e1eaf"
           }
         ]
       },
       "validation": {
         "path": "examples/coastal_menu/output/coastal_menu_validation.json",
         "kind": "coastal_validation",
-        "sha256": "45ea2dae8bd82956c442e837f24555f934b687df111c89a37d5badf7ba24e77e"
+        "sha256": "c69ada12f7f1b8111f10d80149b92c8384458e5755a29b7a38b7da578f97c4ba"
       },
       "css_layers": null
     }

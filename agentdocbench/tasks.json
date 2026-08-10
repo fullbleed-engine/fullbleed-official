@@ -1,0 +1,118 @@
+{
+  "schema": "agentdocbench.tasks.v1",
+  "version": 1,
+  "tasks": [
+    {
+      "id": "quarterly-report",
+      "title": "Three-page quarterly report",
+      "prompt": "Create a polished three-page quarterly report from inputs/report.json. Include a title page/summary, segment analysis, and Appendix Alpha. Produce output/document.pdf.",
+      "inputs": {
+        "report.json": {
+          "report_id": "ADB-RPT-001",
+          "quarter": "Q2 2026",
+          "segments": ["North", "South", "Central", "International"],
+          "revenue_usd": [1820000, 1470000, 990000, 2110000]
+        }
+      },
+      "deliverable": "output/document.pdf",
+      "checks": {"min_pages": 3, "max_pages": 3, "text_markers": ["ADB-RPT-001", "Q2 2026", "Appendix Alpha"]}
+    },
+    {
+      "id": "invoice",
+      "title": "Invoice from structured data",
+      "prompt": "Create a clear professional invoice from inputs/invoice.json. Produce output/document.pdf.",
+      "inputs": {"invoice.json": {"invoice_id": "ADB-INV-1042", "customer": "Jordan Lee", "total": "USD 1,284.50"}},
+      "deliverable": "output/document.pdf",
+      "checks": {"min_pages": 1, "max_pages": 1, "text_markers": ["ADB-INV-1042", "Jordan Lee", "1,284.50"]}
+    },
+    {
+      "id": "business-letter",
+      "title": "Branded business letter",
+      "prompt": "Create a one-page formal business letter using inputs/letter.json. Produce output/document.pdf.",
+      "inputs": {"letter.json": {"reference": "ADB-LTR-7781", "recipient": "Morgan Rivera", "subject": "Service confirmation"}},
+      "deliverable": "output/document.pdf",
+      "checks": {"min_pages": 1, "max_pages": 1, "text_markers": ["ADB-LTR-7781", "Morgan Rivera", "Service confirmation"]}
+    },
+    {
+      "id": "certificate",
+      "title": "Completion certificate",
+      "prompt": "Create a landscape completion certificate from inputs/certificate.json. Produce output/document.pdf.",
+      "inputs": {"certificate.json": {"certificate_id": "ADB-CERT-9001", "recipient": "Avery Chen", "program": "Document Systems"}},
+      "deliverable": "output/document.pdf",
+      "checks": {"min_pages": 1, "max_pages": 1, "text_markers": ["ADB-CERT-9001", "Avery Chen", "Document Systems"]}
+    },
+    {
+      "id": "accessible-document",
+      "title": "Accessible PDF",
+      "prompt": "Create a semantically structured accessible English document from inputs/notice.json with title, language, headings, and a PDF/UA claim. Produce output/document.pdf.",
+      "inputs": {"notice.json": {"notice_id": "ADB-A11Y-3001", "title": "Accessible Service Notice"}},
+      "deliverable": "output/document.pdf",
+      "checks": {"min_pages": 1, "text_markers": ["ADB-A11Y-3001", "Accessible Service Notice"], "any_profile_claims": ["pdfua1", "pdfua2"]}
+    },
+    {
+      "id": "pdf-template-overlay",
+      "title": "Existing PDF-template overlay",
+      "prompt": "Inspect inputs/form-template.pdf and add the supplied record values without removing the template marker. Produce output/document.pdf.",
+      "inputs": {"record.json": {"record_id": "ADB-OVERLAY-4200", "account_holder": "Taylor Brooks"}},
+      "fixture": "pdf_template",
+      "deliverable": "output/document.pdf",
+      "checks": {"min_pages": 1, "max_pages": 1, "text_markers": ["ADB-TEMPLATE-BASE", "ADB-OVERLAY-4200", "Taylor Brooks"]}
+    },
+    {
+      "id": "personalized-statements-1000",
+      "title": "1,000 personalized statements",
+      "prompt": "Generate one ordered PDF containing 1,000 distinct one-page statements described by inputs/job.json. The first id is ADB-VDP-0001 and the last is ADB-VDP-1000. Produce output/document.pdf and report truthful execution metrics in submission.json.",
+      "inputs": {"job.json": {"record_count": 1000, "id_prefix": "ADB-VDP-", "first_balance": "USD 101.00", "balance_increment": "USD 17.00"}},
+      "deliverable": "output/document.pdf",
+      "checks": {"min_pages": 1000, "max_pages": 1000, "text_markers": ["ADB-VDP-0001", "ADB-VDP-1000"], "ordered_text_markers": ["ADB-VDP-0001", "ADB-VDP-1000"], "submission_required": true}
+    },
+    {
+      "id": "overflow-repair",
+      "title": "Repair overflowing content",
+      "prompt": "Create a one-page notice from inputs/overflow.json. The supplied long identifier must remain complete and visible without clipping. Produce output/document.pdf.",
+      "inputs": {"overflow.json": {"notice_id": "ADB-OVERFLOW-001", "long_identifier": "ACCOUNT-2026-VERY-LONG-IDENTIFIER-0000000000000000000000000000000001"}},
+      "deliverable": "output/document.pdf",
+      "checks": {"min_pages": 1, "max_pages": 1, "text_markers": ["ADB-OVERFLOW-001", "ACCOUNT-2026-VERY-LONG-IDENTIFIER-0000000000000000000000000000000001"]}
+    },
+    {
+      "id": "multilingual-document",
+      "title": "Multilingual glyph coverage",
+      "prompt": "Create a document containing every supplied translation with no missing glyphs. Produce output/document.pdf.",
+      "inputs": {"translations.json": {"document_id": "ADB-I18N-001", "lines": ["Hello", "Καλημέρα", "مرحبا", "日本語", "नमस्ते"]}},
+      "deliverable": "output/document.pdf",
+      "checks": {"min_pages": 1, "text_markers": ["ADB-I18N-001", "Καλημέρα", "مرحبا", "日本語", "नमस्ते"]}
+    },
+    {
+      "id": "archival-pdfa",
+      "title": "Archival PDF/A document",
+      "prompt": "Create an archival document from inputs/archive.json with an explicit PDF/A claim and required metadata. Produce output/document.pdf.",
+      "inputs": {"archive.json": {"document_id": "ADB-PDFA-001", "title": "Retention Record"}},
+      "deliverable": "output/document.pdf",
+      "checks": {"min_pages": 1, "text_markers": ["ADB-PDFA-001", "Retention Record"], "any_profile_prefixes": ["pdfa"]}
+    },
+    {
+      "id": "print-ready-pdfx",
+      "title": "Print-ready PDF/X document",
+      "prompt": "Create a print-ready promotional sheet from inputs/print.json with an explicit PDF/X claim and output intent. Produce output/document.pdf.",
+      "inputs": {"print.json": {"document_id": "ADB-PDFX-001", "headline": "Summer Product Sheet"}},
+      "deliverable": "output/document.pdf",
+      "checks": {"min_pages": 1, "max_pages": 1, "text_markers": ["ADB-PDFX-001", "Summer Product Sheet"], "any_profile_claims": ["pdfx4"]}
+    },
+    {
+      "id": "deterministic-reproduction",
+      "title": "Deterministic reproduction",
+      "prompt": "Create the requested artifact twice from identical inputs in independent runs. Produce byte-identical output/document.pdf and output/document-rerun.pdf.",
+      "inputs": {"record.json": {"document_id": "ADB-REPRO-001", "value": "Stable artifact"}},
+      "deliverable": "output/document.pdf",
+      "checks": {"min_pages": 1, "text_markers": ["ADB-REPRO-001", "Stable artifact"], "byte_identical_to": "output/document-rerun.pdf"}
+    },
+    {
+      "id": "variable-pagination",
+      "title": "Variable data that changes pagination",
+      "prompt": "Generate one ordered PDF for the 20 variable-length records described by inputs/job.json. Content length must naturally change pagination without truncation. Produce output/document.pdf.",
+      "inputs": {"job.json": {"record_count": 20, "id_prefix": "ADB-FLOW-", "line_count_formula": "record_index * 8"}},
+      "deliverable": "output/document.pdf",
+      "checks": {"min_pages": 20, "text_markers": ["ADB-FLOW-001", "ADB-FLOW-020"], "ordered_text_markers": ["ADB-FLOW-001", "ADB-FLOW-020"]}
+    }
+  ]
+}

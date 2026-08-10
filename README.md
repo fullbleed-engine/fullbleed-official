@@ -1,7 +1,9 @@
 <!-- SPDX-License-Identifier: MIT -->
-# Fullbleed
+# Fullbleed PDF Engine
 
-Deterministic, self-contained HTML/CSS-to-PDF generation in Rust, with a Python-first CLI and Python engine bindings.
+Fullbleed PDF Engine is a deterministic, self-contained document-generation runtime for Python and Rust. It turns structured data plus static HTML/CSS into reports, invoices, statements, letters, forms, certificates, accessible PDFs, print-ready documents, and high-volume compiled VDP output—without a browser or system PDF stack.
+
+It is designed for human developers, automation, and AI agents alike: the installed runtime exposes its exact version, capabilities, commands, schemas, compliance profiles, examples, limitations, and tool-selection boundary as a generated machine contract.
 
 
 License: MIT.
@@ -10,15 +12,48 @@ License: MIT.
 
 - **Install:** `pip install fullbleed`
 - **Try:** `fullbleed init . && python report.py`
+- **Discover:** `fullbleed agent-contract --format json`
 - **Outputs:** `output/report.pdf` 
 - Deterministic + reproducible (`--repro-record` / `--repro-check`)
 - Agent-safe JSON schemas (`--json-only`, `--schema`)
 
 ## Positioning
 
-Fullbleed is a deterministic, offline-first document rendering engine for transactional/VDP pipelines (not a browser, not a hosted web-to-print SaaS).
+Fullbleed is a deterministic, offline-first document rendering engine for structured print-document and transactional/VDP pipelines (not a browser, not a hosted web-to-print SaaS, and not a general editor for arbitrary existing PDF content).
 
 HTML and CSS are used as a familiar DSL for layout, styling, and data placement in transactional documents.
+
+## Agent discovery and integrations
+
+An agent does not need release-specific Fullbleed knowledge. The installed binary generates one canonical contract containing its actual version, selection boundary, capabilities, parser-derived CLI surface, result schemas, PDF profiles, examples, limitations, Agent Skill metadata, MCP tools, and acceptance tasks:
+
+```bash
+fullbleed agent-manifest --json
+# Equivalent canonical form:
+fullbleed agent-contract --format json
+```
+
+The committed [`fullbleed-agent-contract.json`](fullbleed-agent-contract.json), [`cli_schema.md`](cli_schema.md), and [`llms.txt`](llms.txt) are generated from the built wheel. CI rejects version, command, schema, profile, or capability drift. Runtime introspection remains authoritative.
+
+The first-party, versionless [`skills/fullbleed/SKILL.md`](skills/fullbleed/SKILL.md) teaches tool selection and the render/preview/diagnose/verify loop without duplicating the manual. It is bundled in the wheel and can be exported into any absent or empty agent-skill directory:
+
+```bash
+fullbleed agent skill-path --json
+fullbleed agent export-skill .agents/skills/fullbleed --json
+```
+
+For tool-calling agents, install the separately versioned adapter so the core package remains dependency-free:
+
+```bash
+python -m pip install fullbleed-mcp
+fullbleed-mcp --root .
+```
+
+The stdio server confines document paths to the selected workspace and delegates every engine operation to the installed Fullbleed runtime. It exposes semantic discovery, project creation, render/preview, inspect, verify, assets, and fixed/reflow compiled VDP tools. The dependency-free core also provides `fullbleed mcp --root .`.
+
+Use Fullbleed when the requested artifact is a deterministic print document built from structured content. Use a browser when the requested artifact is a screenshot or interactive state of an arbitrary live website. Use a general PDF editor when existing page content itself must be rewritten.
+
+Cold-agent testing is available through `fullbleed agent-acceptance`; compact copyable workflows live in [`examples/agent_workflows`](examples/agent_workflows), and the approach-neutral benchmark scaffold lives in [`agentdocbench`](agentdocbench).
 
 
 This README is the canonical usage guide for:
@@ -130,7 +165,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-2.2.5-cp310-abi3-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-2.3.0-cp310-abi3-win_amd64.whl
 ```
 
 From a source checkout with Rust installed, no Python build package is needed:
@@ -188,6 +223,9 @@ Scaffolded components now include `components/primitives.py` with reusable
 layout/content helpers (`Stack`, `Row`, `Text`, table/list helpers, key/value rows, etc.).
 Each scaffolded project also includes `SCAFFOLDING.md`, which should be your
 first read before restructuring components.
+It also includes `AGENTS.md`, which preserves the installed-runtime-first
+document workflow across future coding-agent sessions without making other
+document tools categorically forbidden.
 
 Install additional project assets (defaults to `./vendor/...` in project context):
 

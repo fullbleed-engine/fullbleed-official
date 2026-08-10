@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.fullbleed-engine/fullbleed-mcp",
+  "title": "Fullbleed PDF Engine",
+  "description": "Create, preview, inspect, verify, and compile deterministic PDF documents with Fullbleed.",
+  "version": "0.1.0",
+  "websiteUrl": "https://fullbleed.dev",
+  "repository": {
+    "url": "https://github.com/fullbleed-engine/fullbleed-official",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "fullbleed-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

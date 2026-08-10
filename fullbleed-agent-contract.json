@@ -1,0 +1,6094 @@
+{
+  "acceptance_suite": {
+    "isolation_contract": "Each unfamiliar agent receives a fresh scenario directory containing only this machine contract, TASK.json, and any fixture explicitly required by that scenario.",
+    "runner": [
+      "fullbleed",
+      "agent-acceptance"
+    ],
+    "scenarios": [
+      {
+        "checks": {
+          "max_pages": 1,
+          "min_pages": 1,
+          "text_markers": [
+            "FB-1042",
+            "Jordan Lee",
+            "1,284.50"
+          ]
+        },
+        "deliverable": "output/invoice.pdf",
+        "id": "invoice",
+        "task": "Using only the supplied Fullbleed agent contract, create a professional one-page invoice. Render it with Fullbleed to output/invoice.pdf. It must visibly contain invoice FB-1042, customer Jordan Lee, and total USD 1,284.50.",
+        "title": "Transactional invoice"
+      },
+      {
+        "checks": {
+          "min_pages": 2,
+          "text_markers": [
+            "RPT-2048",
+            "Executive Summary",
+            "Appendix Alpha"
+          ]
+        },
+        "deliverable": "output/report.pdf",
+        "id": "report",
+        "task": "Using only the supplied Fullbleed agent contract, create a naturally paginated report with no forced page breaks. Render it to output/report.pdf. It must span at least two pages and contain report id RPT-2048, Executive Summary, and Appendix Alpha.",
+        "title": "Naturally paginated report"
+      },
+      {
+        "checks": {
+          "any_profile_claims": [
+            "pdfua1",
+            "pdfua2"
+          ],
+          "min_pages": 1,
+          "profile_empty": [
+            "seed_blockers"
+          ],
+          "profile_truthy": [
+            "struct_tree_root_present",
+            "mark_info_present",
+            "lang_present"
+          ],
+          "text_markers": [
+            "ACCESS-3001"
+          ]
+        },
+        "deliverable": "output/accessible.pdf",
+        "id": "accessible_document",
+        "task": "Using only the supplied Fullbleed agent contract, create a semantically structured, English accessible document and render output/accessible.pdf with an explicit PDF/UA profile, title, language, headings, and the marker ACCESS-3001.",
+        "title": "Accessible PDF/UA document"
+      },
+      {
+        "checks": {
+          "composition_supported": true,
+          "min_pages": 1,
+          "text_markers": [
+            "FORM-TEMPLATE-001",
+            "OVERLAY-7781"
+          ]
+        },
+        "deliverable": "output/overlay.pdf",
+        "fixture": "pdf_template",
+        "id": "pdf_template_overlay",
+        "task": "Using only the supplied Fullbleed agent contract and inputs/form-template.pdf, inspect the template and create output/overlay.pdf by composing a Fullbleed overlay onto it. Preserve the template marker FORM-TEMPLATE-001 and add overlay marker OVERLAY-7781.",
+        "title": "PDF-template overlay"
+      },
+      {
+        "checks": {
+          "evidence": {
+            "allowed_apis": [
+              "CompiledDocument.render_pdf_bindings_to_file",
+              "CompiledDocument.render_pdf_reflow_bindings_to_file",
+              "fullbleed_render_compiled",
+              "fullbleed_compile_vdp"
+            ],
+            "path": "output/evidence.json",
+            "record_count": 25,
+            "schema": "fullbleed.agent_acceptance.evidence.v1"
+          },
+          "min_pages": 25,
+          "ordered_text_markers": [
+            "VDP-0001",
+            "VDP-0025"
+          ],
+          "text_markers": [
+            "VDP-0001",
+            "VDP-0025"
+          ]
+        },
+        "deliverable": "output/vdp.pdf",
+        "id": "compiled_vdp",
+        "task": "Using only the supplied Fullbleed agent contract, compile one invoice template and render 25 distinct records through a compiled binding API to output/vdp.pdf. The ordered records must run from VDP-0001 through VDP-0025. Also write output/evidence.json naming the compiled API used and the record count. Do not render 25 independent ordinary documents.",
+        "title": "Compiled variable-data job"
+      }
+    ],
+    "schema": "fullbleed.agent_acceptance.v1"
+  },
+  "agent_skill": {
+    "convention": "SKILL.md",
+    "export": [
+      "fullbleed",
+      "agent",
+      "export-skill",
+      ".agents/skills/fullbleed",
+      "--json"
+    ],
+    "inspect": [
+      "fullbleed",
+      "agent",
+      "skill-path",
+      "--json"
+    ],
+    "name": "fullbleed",
+    "packaged_resource": "fullbleed/skill/SKILL.md"
+  },
+  "authority": {
+    "command": [
+      "fullbleed",
+      "agent-contract",
+      "--format",
+      "json"
+    ],
+    "generated_artifacts": [
+      "fullbleed-agent-contract.json",
+      "cli_schema.md",
+      "llms.txt"
+    ],
+    "generator": [
+      "python",
+      "tools/generate_agent_contract.py"
+    ],
+    "rule": "Regenerate from the built wheel and fail release checks when committed artifacts differ.",
+    "source": "installed_runtime"
+  },
+  "capabilities": {
+    "acceptance_suite": {
+      "available": true,
+      "scenario_ids": [
+        "invoice",
+        "report",
+        "accessible_document",
+        "pdf_template_overlay",
+        "compiled_vdp"
+      ]
+    },
+    "agent_contract": {
+      "available": true,
+      "command": [
+        "fullbleed",
+        "agent-contract",
+        "--format",
+        "json"
+      ],
+      "generated_views": {
+        "llms": [
+          "fullbleed",
+          "agent-contract",
+          "--format",
+          "llms"
+        ],
+        "markdown": [
+          "fullbleed",
+          "agent-contract",
+          "--format",
+          "markdown"
+        ],
+        "packaged_llms_resource": "fullbleed/llms.txt"
+      },
+      "manifest_alias": [
+        "fullbleed",
+        "agent-manifest",
+        "--json"
+      ],
+      "packaged_resource": "fullbleed/agent_contract.json",
+      "schema": "fullbleed.agent_contract.v1"
+    },
+    "agent_flags": [
+      "--json",
+      "--json-only",
+      "--schema",
+      "--emit-manifest",
+      "--emit-compose-plan",
+      "--emit-image",
+      "--image-dpi",
+      "--no-prompts",
+      "--allow-fallbacks",
+      "--repro-record",
+      "--repro-check"
+    ],
+    "agent_skill": {
+      "available": true,
+      "export_command": [
+        "fullbleed",
+        "agent",
+        "export-skill",
+        ".agents/skills/fullbleed",
+        "--json"
+      ],
+      "format": "SKILL.md",
+      "path_command": [
+        "fullbleed",
+        "agent",
+        "skill-path",
+        "--json"
+      ]
+    },
+    "budget_flags": [
+      "--budget-max-pages",
+      "--budget-max-bytes",
+      "--budget-max-ms"
+    ],
+    "commands": [
+      "render",
+      "verify",
+      "plan",
+      "debug-perf",
+      "debug-jit",
+      "doctor",
+      "capabilities",
+      "agent-contract",
+      "agent-manifest",
+      "agent",
+      "mcp",
+      "agent-acceptance",
+      "compliance",
+      "assets",
+      "cache",
+      "finalize",
+      "inspect",
+      "init",
+      "new",
+      "run"
+    ],
+    "compliance": {
+      "copyright_file": "COPYRIGHT",
+      "copyright_required_markers": [
+        "MIT License",
+        "LICENSE"
+      ],
+      "copyright_required_spdx": "MIT",
+      "flag_codes": [
+        "LIC_MISSING_NOTICE",
+        "LIC_POLICY_MISMATCH",
+        "LIC_DISALLOWED",
+        "LIC_UNKNOWN",
+        "LIC_AUDIT_STALE",
+        "LIC_ASSET_UNMAPPED"
+      ],
+      "license_audit_artifacts": [
+        "FONT_LICENSE_AUDIT.md",
+        "FONT_LICENSE_AUDIT.json"
+      ],
+      "license_file": "LICENSE",
+      "license_forbidden_markers": [],
+      "license_options": [
+        "MIT"
+      ],
+      "license_required_header": "MIT License",
+      "licensing_guide_file": "LICENSING.md",
+      "package_license": "MIT",
+      "schema": "fullbleed.cli_compliance.v1",
+      "third_party_allowed_licenses": [
+        "OFL-1.1",
+        "Apache-2.0",
+        "MIT",
+        "UFL-1.0"
+      ],
+      "third_party_notice_file": "THIRD_PARTY_LICENSES.md"
+    },
+    "engine": {
+      "batch_render": true,
+      "batch_render_parallel": true,
+      "compiled_document": true,
+      "compiled_flow_compression_modes": [
+        "throughput",
+        "compact"
+      ],
+      "compiled_reflow_bindings": true,
+      "glyph_report": true,
+      "image_pages": true,
+      "page_data": true,
+      "pdf_inspect": true,
+      "template_catalog_inspect": true,
+      "template_compose_planner": true
+    },
+    "fail_on": [
+      "overflow",
+      "missing-glyphs",
+      "font-subst",
+      "budget"
+    ],
+    "fallback_policy_flags": [
+      "--allow-fallbacks"
+    ],
+    "pdf_profile_aliases": {
+      "a": "pdfa2b",
+      "none": "none",
+      "pdf/a": "pdfa2b",
+      "pdf/a-1a": "pdfa1a",
+      "pdf/a-1b": "pdfa1b",
+      "pdf/a-2a": "pdfa2a",
+      "pdf/a-2b": "pdfa2b",
+      "pdf/a-2u": "pdfa2u",
+      "pdf/a-3a": "pdfa3a",
+      "pdf/a-3b": "pdfa3b",
+      "pdf/a-3u": "pdfa3u",
+      "pdf/a-4": "pdfa4",
+      "pdf/a-4e": "pdfa4e",
+      "pdf/a-4f": "pdfa4f",
+      "pdf/a1a": "pdfa1a",
+      "pdf/a1b": "pdfa1b",
+      "pdf/a2a": "pdfa2a",
+      "pdf/a2b": "pdfa2b",
+      "pdf/a2u": "pdfa2u",
+      "pdf/a3a": "pdfa3a",
+      "pdf/a3b": "pdfa3b",
+      "pdf/a3u": "pdfa3u",
+      "pdf/a4": "pdfa4",
+      "pdf/a4e": "pdfa4e",
+      "pdf/a4f": "pdfa4f",
+      "pdf/ua": "pdfua1",
+      "pdf/ua-1": "pdfua1",
+      "pdf/ua-2": "pdfua2",
+      "pdf/vt": "pdfvt1",
+      "pdf/vt-1": "pdfvt1",
+      "pdf/x-4": "pdfx4",
+      "pdf/x4": "pdfx4",
+      "pdfa": "pdfa2b",
+      "pdfa-1a": "pdfa1a",
+      "pdfa-1b": "pdfa1b",
+      "pdfa-2a": "pdfa2a",
+      "pdfa-2b": "pdfa2b",
+      "pdfa-2u": "pdfa2u",
+      "pdfa-3a": "pdfa3a",
+      "pdfa-3b": "pdfa3b",
+      "pdfa-3u": "pdfa3u",
+      "pdfa-4": "pdfa4",
+      "pdfa-4e": "pdfa4e",
+      "pdfa-4f": "pdfa4f",
+      "pdfa1a": "pdfa1a",
+      "pdfa1b": "pdfa1b",
+      "pdfa2a": "pdfa2a",
+      "pdfa2b": "pdfa2b",
+      "pdfa2u": "pdfa2u",
+      "pdfa3a": "pdfa3a",
+      "pdfa3b": "pdfa3b",
+      "pdfa3u": "pdfa3u",
+      "pdfa4": "pdfa4",
+      "pdfa4e": "pdfa4e",
+      "pdfa4f": "pdfa4f",
+      "pdfa_1a": "pdfa1a",
+      "pdfa_1b": "pdfa1b",
+      "pdfa_2a": "pdfa2a",
+      "pdfa_2b": "pdfa2b",
+      "pdfa_2u": "pdfa2u",
+      "pdfa_3a": "pdfa3a",
+      "pdfa_3b": "pdfa3b",
+      "pdfa_3u": "pdfa3u",
+      "pdfa_4": "pdfa4",
+      "pdfa_4e": "pdfa4e",
+      "pdfa_4f": "pdfa4f",
+      "pdfua": "pdfua1",
+      "pdfua-1": "pdfua1",
+      "pdfua-2": "pdfua2",
+      "pdfua1": "pdfua1",
+      "pdfua2": "pdfua2",
+      "pdfvt": "pdfvt1",
+      "pdfvt-1": "pdfvt1",
+      "pdfvt1": "pdfvt1",
+      "pdfx-4": "pdfx4",
+      "pdfx4": "pdfx4",
+      "pdfx_4": "pdfx4",
+      "tagged": "tagged",
+      "ua": "pdfua1",
+      "vt": "pdfvt1",
+      "wt-1a": "wtpdf1a",
+      "wt-1r": "wtpdf1r",
+      "wt1a": "wtpdf1a",
+      "wt1r": "wtpdf1r",
+      "wtpdf-1a": "wtpdf1a",
+      "wtpdf-1r": "wtpdf1r",
+      "wtpdf1a": "wtpdf1a",
+      "wtpdf1r": "wtpdf1r",
+      "wtpdf_1a": "wtpdf1a",
+      "wtpdf_1r": "wtpdf1r"
+    },
+    "pdf_profiles": [
+      "none",
+      "pdfa1a",
+      "pdfa1b",
+      "pdfa2a",
+      "pdfa2b",
+      "pdfa2u",
+      "pdfa3a",
+      "pdfa3b",
+      "pdfa3u",
+      "pdfa4",
+      "pdfa4e",
+      "pdfa4f",
+      "pdfx4",
+      "pdfua1",
+      "pdfua2",
+      "pdfvt1",
+      "wtpdf1r",
+      "wtpdf1a",
+      "tagged"
+    ],
+    "pdf_profiles_requiring_output_intent": [
+      "pdfa1a",
+      "pdfa1b",
+      "pdfa2a",
+      "pdfa2b",
+      "pdfa2u",
+      "pdfa3a",
+      "pdfa3b",
+      "pdfa3u",
+      "pdfa4",
+      "pdfa4e",
+      "pdfa4f",
+      "pdfvt1",
+      "pdfx4"
+    ],
+    "profiles": [
+      "dev",
+      "preflight",
+      "prod"
+    ],
+    "schema": "fullbleed.capabilities.v1",
+    "svg": {
+      "asset_bundle": {
+        "auto_kind_from_extension": true,
+        "kind": "svg"
+      },
+      "build_features": {
+        "svg_raster": true
+      },
+      "document_input": {
+        "html_file_accepts_svg": true,
+        "html_str_accepts_svg_markup": true,
+        "inline_svg_in_html": true
+      },
+      "engine_flags": {
+        "svg_form_xobjects": true,
+        "svg_raster_fallback": true
+      },
+      "feature_matrix": {
+        "native_vector": [
+          "standalone SVG document input",
+          "inline SVG in HTML",
+          "SVG asset references",
+          "basic shapes and paths",
+          "stylesheets and style attributes",
+          "gradients",
+          "use references by ID",
+          "SVG text and tspan runs",
+          "symbols with use viewports",
+          "affine-transformed embedded images"
+        ],
+        "raster_fallback_required": [
+          "filters",
+          "masks",
+          "patterns",
+          "markers",
+          "mask/filter attributes"
+        ],
+        "unsupported_or_known_loss": [
+          "foreignObject content",
+          "PDF-native SVG filter effects",
+          "SVG url() clip sources",
+          "browser-complete SVG layout, scripting, and animation"
+        ]
+      }
+    },
+    "tool_adapter": {
+      "core_entrypoint": "fullbleed mcp",
+      "integration_distribution": "fullbleed-mcp",
+      "integration_entrypoint": "fullbleed-mcp",
+      "mcp_stdio": true,
+      "protocol_versions": [
+        "2025-11-25",
+        "2025-06-18",
+        "2025-03-26",
+        "2024-11-05"
+      ],
+      "workspace_confined": true
+    }
+  },
+  "commands": {
+    "schema_discovery": {
+      "envelope_schema": "fullbleed.schema.v1",
+      "pattern": "fullbleed --schema <command> [subcommand]"
+    },
+    "schema_registry": {
+      "agent-acceptance:prepare": "fullbleed.agent_acceptance_prepare.v1",
+      "agent-acceptance:run": "fullbleed.agent_acceptance_result.v1",
+      "agent-acceptance:verify": "fullbleed.agent_acceptance_result.v1",
+      "agent-contract": "fullbleed.agent_contract.v1",
+      "agent-manifest": "fullbleed.agent_contract.v1",
+      "agent:export-skill": "fullbleed.agent_skill.v1",
+      "agent:install-skill": "fullbleed.agent_skill.v1",
+      "agent:manifest": "fullbleed.agent_contract.v1",
+      "agent:skill-path": "fullbleed.agent_skill.v1",
+      "assets:info": "fullbleed.assets_info.v1",
+      "assets:install": "fullbleed.assets_install.v1",
+      "assets:list": "fullbleed.assets_list.v1",
+      "assets:lock": "fullbleed.assets_lock.v1",
+      "assets:verify": "fullbleed.assets_verify.v1",
+      "cache:dir": "fullbleed.cache_dir.v1",
+      "cache:prune": "fullbleed.cache_prune.v1",
+      "capabilities": "fullbleed.capabilities.v1",
+      "compliance": "fullbleed.compliance.v1",
+      "debug-jit": "fullbleed.debug_jit.v1",
+      "debug-perf": "fullbleed.debug_perf.v1",
+      "doctor": "fullbleed.doctor.v1",
+      "finalize:compose": "fullbleed.finalize_compose_result.v1",
+      "finalize:stamp": "fullbleed.finalize_stamp_result.v1",
+      "init": "fullbleed.init.v1",
+      "inspect:pdf": "fullbleed.inspect_pdf.v1",
+      "inspect:pdf-batch": "fullbleed.inspect_pdf_batch.v1",
+      "inspect:templates": "fullbleed.inspect_templates.v1",
+      "new": "fullbleed.new_template.v1",
+      "new:accessible": "fullbleed.new_template.v1",
+      "new:invoice": "fullbleed.new_template.v1",
+      "new:list": "fullbleed.new_list.v1",
+      "new:local": "fullbleed.new_template.v1",
+      "new:reference": "fullbleed.new_template.v1",
+      "new:remote": "fullbleed.new_remote.v1",
+      "new:search": "fullbleed.new_search.v1",
+      "new:statement": "fullbleed.new_template.v1",
+      "plan": "fullbleed.plan_result.v1",
+      "render": "fullbleed.render_result.v1",
+      "run": "fullbleed.run_result.v1",
+      "verify": "fullbleed.verify_result.v1"
+    },
+    "surface": {
+      "agent": {
+        "options": [],
+        "subcommands": {
+          "export-skill": {
+            "options": [
+              {
+                "dest": "target",
+                "positional": true,
+                "required": true
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          },
+          "install-skill": {
+            "options": [
+              {
+                "dest": "target",
+                "positional": true,
+                "required": true
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          },
+          "manifest": {
+            "options": [
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          },
+          "skill-path": {
+            "options": [
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          }
+        }
+      },
+      "agent-acceptance": {
+        "options": [],
+        "subcommands": {
+          "prepare": {
+            "options": [
+              {
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "required": true
+              },
+              {
+                "dest": "scenario",
+                "flags": [
+                  "--scenario"
+                ],
+                "required": false
+              },
+              {
+                "dest": "contract",
+                "flags": [
+                  "--contract"
+                ],
+                "required": false
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          },
+          "run": {
+            "options": [
+              {
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "required": true
+              },
+              {
+                "dest": "scenario",
+                "flags": [
+                  "--scenario"
+                ],
+                "required": false
+              },
+              {
+                "dest": "contract",
+                "flags": [
+                  "--contract"
+                ],
+                "required": false
+              },
+              {
+                "dest": "timeout",
+                "flags": [
+                  "--timeout"
+                ],
+                "required": false,
+                "value_type": "int"
+              },
+              {
+                "dest": "agent_command",
+                "flags": [
+                  "--agent-command"
+                ],
+                "help": "External command; supports {workspace}, {task}, {contract}, and {scenario}",
+                "nargs": "...",
+                "required": true
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          },
+          "verify": {
+            "options": [
+              {
+                "dest": "workspace",
+                "flags": [
+                  "--workspace"
+                ],
+                "required": true
+              },
+              {
+                "dest": "scenario",
+                "flags": [
+                  "--scenario"
+                ],
+                "required": false
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          }
+        }
+      },
+      "agent-contract": {
+        "options": [
+          {
+            "choices": [
+              "json",
+              "markdown",
+              "llms"
+            ],
+            "dest": "format",
+            "flags": [
+              "--format"
+            ],
+            "help": "Output format (default: json)",
+            "required": false
+          },
+          {
+            "dest": "pretty",
+            "flags": [
+              "--pretty"
+            ],
+            "help": "Indent JSON output",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "nargs": 0,
+            "required": false
+          }
+        ],
+        "subcommands": {}
+      },
+      "agent-manifest": {
+        "options": [
+          {
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "pretty",
+            "flags": [
+              "--pretty"
+            ],
+            "help": "Indent JSON output",
+            "nargs": 0,
+            "required": false
+          }
+        ],
+        "subcommands": {}
+      },
+      "assets": {
+        "options": [],
+        "subcommands": {
+          "info": {
+            "options": [
+              {
+                "dest": "package",
+                "help": "Package name (e.g., bootstrap, bootstrap-icons, noto-sans)",
+                "positional": true,
+                "required": true
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          },
+          "install": {
+            "options": [
+              {
+                "dest": "package",
+                "help": "Package reference (e.g., @bootstrap, @bootstrap-icons)",
+                "positional": true,
+                "required": true
+              },
+              {
+                "dest": "vendor",
+                "flags": [
+                  "--vendor"
+                ],
+                "help": "Install to custom vendor directory",
+                "required": false
+              },
+              {
+                "dest": "global_",
+                "flags": [
+                  "--global",
+                  "-g"
+                ],
+                "help": "Install to global cache instead of ./vendor/",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          },
+          "list": {
+            "options": [
+              {
+                "dest": "available",
+                "flags": [
+                  "--available",
+                  "-a"
+                ],
+                "help": "Show available remote packages",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          },
+          "lock": {
+            "options": [
+              {
+                "dest": "add",
+                "flags": [
+                  "--add"
+                ],
+                "help": "Add package to lock file",
+                "required": false
+              },
+              {
+                "dest": "output",
+                "flags": [
+                  "--output"
+                ],
+                "help": "Output path",
+                "required": false
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          },
+          "verify": {
+            "options": [
+              {
+                "dest": "package",
+                "help": "Package name",
+                "positional": true,
+                "required": true
+              },
+              {
+                "dest": "lock",
+                "flags": [
+                  "--lock"
+                ],
+                "help": "Validate package against lock file (default: assets.lock.json)",
+                "nargs": "?",
+                "required": false
+              },
+              {
+                "dest": "strict",
+                "flags": [
+                  "--strict"
+                ],
+                "help": "Exit non-zero on lock mismatch",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          }
+        }
+      },
+      "cache": {
+        "options": [],
+        "subcommands": {
+          "dir": {
+            "options": [
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          },
+          "prune": {
+            "options": [
+              {
+                "dest": "max_age_days",
+                "flags": [
+                  "--max-age-days"
+                ],
+                "help": "Max age in days",
+                "required": false,
+                "value_type": "int"
+              },
+              {
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "help": "Show what would be removed",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          }
+        }
+      },
+      "capabilities": {
+        "options": [
+          {
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "nargs": 0,
+            "required": false
+          }
+        ],
+        "subcommands": {}
+      },
+      "compliance": {
+        "options": [
+          {
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "strict",
+            "flags": [
+              "--strict"
+            ],
+            "help": "Exit non-zero when any compliance flag is present",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "max_audit_age_days",
+            "flags": [
+              "--max-audit-age-days"
+            ],
+            "help": "Maximum allowed age for license audit artifacts",
+            "required": false,
+            "value_type": "int"
+          }
+        ],
+        "subcommands": {}
+      },
+      "debug-jit": {
+        "options": [
+          {
+            "dest": "jit_log",
+            "flags": [
+              "--jit-log"
+            ],
+            "required": true
+          },
+          {
+            "dest": "errors_only",
+            "flags": [
+              "--errors-only"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "nargs": 0,
+            "required": false
+          }
+        ],
+        "subcommands": {}
+      },
+      "debug-perf": {
+        "options": [
+          {
+            "dest": "perf_log",
+            "flags": [
+              "--perf-log"
+            ],
+            "required": true
+          },
+          {
+            "dest": "top",
+            "flags": [
+              "--top"
+            ],
+            "required": false,
+            "value_type": "int"
+          },
+          {
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "nargs": 0,
+            "required": false
+          }
+        ],
+        "subcommands": {}
+      },
+      "doctor": {
+        "options": [
+          {
+            "dest": "strict",
+            "flags": [
+              "--strict"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "nargs": 0,
+            "required": false
+          }
+        ],
+        "subcommands": {}
+      },
+      "finalize": {
+        "options": [],
+        "subcommands": {
+          "compose": {
+            "options": [
+              {
+                "dest": "templates",
+                "flags": [
+                  "--templates"
+                ],
+                "help": "Template root directory or manifest location",
+                "required": true
+              },
+              {
+                "dest": "plan",
+                "flags": [
+                  "--plan"
+                ],
+                "help": "PagePlan JSON path",
+                "required": true
+              },
+              {
+                "dest": "overlay",
+                "flags": [
+                  "--overlay"
+                ],
+                "help": "Overlay PDF path",
+                "required": true
+              },
+              {
+                "dest": "out",
+                "flags": [
+                  "--out"
+                ],
+                "help": "Output PDF path",
+                "required": true
+              },
+              {
+                "choices": [
+                  "link_only",
+                  "none",
+                  "carry_widgets"
+                ],
+                "dest": "compose_annotation_mode",
+                "flags": [
+                  "--compose-annotation-mode"
+                ],
+                "help": "Template annotation carryover mode: link_only (default), none, or carry_widgets.",
+                "required": false
+              },
+              {
+                "dest": "experimental_xobject_reuse",
+                "flags": [
+                  "--experimental-xobject-reuse"
+                ],
+                "help": "Enable experimental XObject reuse implementation",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          },
+          "stamp": {
+            "options": [
+              {
+                "dest": "template",
+                "flags": [
+                  "--template"
+                ],
+                "help": "Template PDF path",
+                "required": true
+              },
+              {
+                "dest": "overlay",
+                "flags": [
+                  "--overlay"
+                ],
+                "help": "Overlay PDF path",
+                "required": true
+              },
+              {
+                "dest": "out",
+                "flags": [
+                  "--out"
+                ],
+                "help": "Output PDF path",
+                "required": true
+              },
+              {
+                "dest": "dx",
+                "flags": [
+                  "--dx"
+                ],
+                "help": "X translation in points for overlay placement",
+                "required": false,
+                "value_type": "float"
+              },
+              {
+                "dest": "dy",
+                "flags": [
+                  "--dy"
+                ],
+                "help": "Y translation in points for overlay placement",
+                "required": false,
+                "value_type": "float"
+              },
+              {
+                "dest": "page_map",
+                "flags": [
+                  "--page-map"
+                ],
+                "help": "Optional JSON path/string mapping template/overlay page indices",
+                "required": false
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          }
+        }
+      },
+      "init": {
+        "options": [
+          {
+            "dest": "path",
+            "help": "Directory to initialize (default: current)",
+            "nargs": "?",
+            "positional": true,
+            "required": false
+          },
+          {
+            "dest": "force",
+            "flags": [
+              "--force"
+            ],
+            "help": "Overwrite existing files",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "nargs": 0,
+            "required": false
+          }
+        ],
+        "subcommands": {}
+      },
+      "inspect": {
+        "options": [],
+        "subcommands": {
+          "pdf": {
+            "options": [
+              {
+                "dest": "path",
+                "help": "Path to PDF file",
+                "positional": true,
+                "required": true
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          },
+          "pdf-batch": {
+            "options": [
+              {
+                "dest": "paths",
+                "help": "PDF paths",
+                "nargs": "*",
+                "positional": true,
+                "required": true
+              },
+              {
+                "dest": "list",
+                "flags": [
+                  "--list"
+                ],
+                "help": "Newline-delimited file with PDF paths (ignores blank lines and # comments)",
+                "required": false
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          },
+          "templates": {
+            "options": [
+              {
+                "dest": "templates",
+                "flags": [
+                  "--templates"
+                ],
+                "help": "Template catalog (directory, JSON path, or inline JSON)",
+                "required": true
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          }
+        }
+      },
+      "mcp": {
+        "options": [
+          {
+            "dest": "root",
+            "flags": [
+              "--root"
+            ],
+            "help": "Workspace root that confines adapter file access (default: current directory)",
+            "required": false
+          }
+        ],
+        "subcommands": {}
+      },
+      "new": {
+        "options": [],
+        "subcommands": {
+          "accessible": {
+            "options": [
+              {
+                "dest": "path",
+                "help": "Target directory",
+                "nargs": "?",
+                "positional": true,
+                "required": false
+              },
+              {
+                "dest": "force",
+                "flags": [
+                  "--force"
+                ],
+                "help": "Overwrite existing files",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          },
+          "invoice": {
+            "options": [
+              {
+                "dest": "path",
+                "help": "Target directory",
+                "nargs": "?",
+                "positional": true,
+                "required": false
+              },
+              {
+                "dest": "force",
+                "flags": [
+                  "--force"
+                ],
+                "help": "Overwrite existing files",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          },
+          "list": {
+            "options": [
+              {
+                "dest": "registry",
+                "flags": [
+                  "--registry"
+                ],
+                "help": "Registry manifest URL (defaults to FULLBLEED_TEMPLATE_REGISTRY or builtin URL)",
+                "required": false
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          },
+          "local": {
+            "options": [
+              {
+                "dest": "template",
+                "help": "Template name (accessible, invoice, reference, statement)",
+                "positional": true,
+                "required": true
+              },
+              {
+                "dest": "path",
+                "help": "Target directory",
+                "nargs": "?",
+                "positional": true,
+                "required": false
+              },
+              {
+                "dest": "force",
+                "flags": [
+                  "--force"
+                ],
+                "help": "Overwrite existing files",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          },
+          "reference": {
+            "options": [
+              {
+                "dest": "path",
+                "help": "Target directory",
+                "nargs": "?",
+                "positional": true,
+                "required": false
+              },
+              {
+                "dest": "force",
+                "flags": [
+                  "--force"
+                ],
+                "help": "Overwrite existing files",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          },
+          "remote": {
+            "options": [
+              {
+                "dest": "template_id",
+                "help": "Remote template id (for example: i9-stamped-vdp)",
+                "positional": true,
+                "required": true
+              },
+              {
+                "dest": "path",
+                "help": "Target directory",
+                "nargs": "?",
+                "positional": true,
+                "required": false
+              },
+              {
+                "dest": "version",
+                "flags": [
+                  "--version"
+                ],
+                "help": "Release version (default: latest)",
+                "required": false
+              },
+              {
+                "dest": "registry",
+                "flags": [
+                  "--registry"
+                ],
+                "help": "Registry manifest URL (defaults to FULLBLEED_TEMPLATE_REGISTRY or builtin URL)",
+                "required": false
+              },
+              {
+                "dest": "dry_run",
+                "flags": [
+                  "--dry-run"
+                ],
+                "help": "Resolve remote release without downloading",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "dest": "force",
+                "flags": [
+                  "--force"
+                ],
+                "help": "Overwrite target directory contents",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          },
+          "search": {
+            "options": [
+              {
+                "dest": "query",
+                "help": "Search query text",
+                "positional": true,
+                "required": true
+              },
+              {
+                "dest": "tag",
+                "flags": [
+                  "--tag"
+                ],
+                "help": "Repeatable tag filter (all supplied tags must match)",
+                "required": false
+              },
+              {
+                "dest": "registry",
+                "flags": [
+                  "--registry"
+                ],
+                "help": "Registry manifest URL (defaults to FULLBLEED_TEMPLATE_REGISTRY or builtin URL)",
+                "required": false
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          },
+          "statement": {
+            "options": [
+              {
+                "dest": "path",
+                "help": "Target directory",
+                "nargs": "?",
+                "positional": true,
+                "required": false
+              },
+              {
+                "dest": "force",
+                "flags": [
+                  "--force"
+                ],
+                "help": "Overwrite existing files",
+                "nargs": 0,
+                "required": false
+              },
+              {
+                "dest": "json",
+                "flags": [
+                  "--json"
+                ],
+                "nargs": 0,
+                "required": false
+              }
+            ],
+            "subcommands": {}
+          }
+        }
+      },
+      "plan": {
+        "options": [
+          {
+            "dest": "html",
+            "flags": [
+              "--html"
+            ],
+            "help": "Path to HTML input. Use a .svg file to render a standalone SVG document.",
+            "required": false
+          },
+          {
+            "dest": "html_str",
+            "flags": [
+              "--html-str"
+            ],
+            "help": "Inline HTML or SVG markup string.",
+            "required": false
+          },
+          {
+            "dest": "css",
+            "flags": [
+              "--css"
+            ],
+            "required": false
+          },
+          {
+            "dest": "css_str",
+            "flags": [
+              "--css-str"
+            ],
+            "required": false
+          },
+          {
+            "dest": "page_size",
+            "flags": [
+              "--page-size"
+            ],
+            "required": false
+          },
+          {
+            "dest": "page_width",
+            "flags": [
+              "--page-width"
+            ],
+            "required": false
+          },
+          {
+            "dest": "page_height",
+            "flags": [
+              "--page-height"
+            ],
+            "required": false
+          },
+          {
+            "dest": "margin",
+            "flags": [
+              "--margin"
+            ],
+            "required": false
+          },
+          {
+            "dest": "page_margins",
+            "flags": [
+              "--page-margins"
+            ],
+            "required": false
+          },
+          {
+            "dest": "reuse_xobjects",
+            "flags": [
+              "--reuse-xobjects"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "reuse_xobjects",
+            "flags": [
+              "--no-reuse-xobjects"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "svg_form_xobjects",
+            "flags": [
+              "--svg-form-xobjects"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "svg_form_xobjects",
+            "flags": [
+              "--no-svg-form-xobjects"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "svg_raster_fallback",
+            "flags": [
+              "--svg-raster-fallback"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "svg_raster_fallback",
+            "flags": [
+              "--no-svg-raster-fallback"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "unicode_support",
+            "flags": [
+              "--unicode-support"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "unicode_support",
+            "flags": [
+              "--no-unicode-support"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "shape_text",
+            "flags": [
+              "--shape-text"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "shape_text",
+            "flags": [
+              "--no-shape-text"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "unicode_metrics",
+            "flags": [
+              "--unicode-metrics"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "unicode_metrics",
+            "flags": [
+              "--no-unicode-metrics"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "pdf_version",
+            "flags": [
+              "--pdf-version"
+            ],
+            "required": false
+          },
+          {
+            "dest": "pdf_profile",
+            "flags": [
+              "--pdf-profile"
+            ],
+            "help": "PDF export profile: none, pdfa1a, pdfa1b, pdfa2a, pdfa2b, pdfa2u, pdfa3a, pdfa3b, pdfa3u, pdfa4, pdfa4e, pdfa4f, pdfx4, pdfua1, pdfua2, pdfvt1, wtpdf1r, wtpdf1a, tagged (aliases: a, ua, vt, wt1r, wt1a, pdf/a, pdf/ua, pdf/vt)",
+            "required": false
+          },
+          {
+            "dest": "output_intent_icc",
+            "flags": [
+              "--output-intent-icc"
+            ],
+            "required": false
+          },
+          {
+            "dest": "output_intent_identifier",
+            "flags": [
+              "--output-intent-identifier"
+            ],
+            "required": false
+          },
+          {
+            "dest": "output_intent_info",
+            "flags": [
+              "--output-intent-info"
+            ],
+            "required": false
+          },
+          {
+            "dest": "output_intent_components",
+            "flags": [
+              "--output-intent-components"
+            ],
+            "required": false,
+            "value_type": "int"
+          },
+          {
+            "dest": "color_space",
+            "flags": [
+              "--color-space"
+            ],
+            "required": false
+          },
+          {
+            "dest": "document_lang",
+            "flags": [
+              "--document-lang"
+            ],
+            "required": false
+          },
+          {
+            "dest": "document_title",
+            "flags": [
+              "--document-title"
+            ],
+            "required": false
+          },
+          {
+            "dest": "header_each",
+            "flags": [
+              "--header-each"
+            ],
+            "required": false
+          },
+          {
+            "dest": "header_html_each",
+            "flags": [
+              "--header-html-each"
+            ],
+            "required": false
+          },
+          {
+            "dest": "footer_each",
+            "flags": [
+              "--footer-each"
+            ],
+            "required": false
+          },
+          {
+            "dest": "footer_html_each",
+            "flags": [
+              "--footer-html-each"
+            ],
+            "required": false
+          },
+          {
+            "dest": "watermark_text",
+            "flags": [
+              "--watermark-text"
+            ],
+            "required": false
+          },
+          {
+            "dest": "watermark_html",
+            "flags": [
+              "--watermark-html"
+            ],
+            "required": false
+          },
+          {
+            "dest": "watermark_image",
+            "flags": [
+              "--watermark-image"
+            ],
+            "required": false
+          },
+          {
+            "choices": [
+              "background",
+              "overlay",
+              "underlay"
+            ],
+            "dest": "watermark_layer",
+            "flags": [
+              "--watermark-layer"
+            ],
+            "help": "Watermark placement layer (legacy 'underlay' alias maps to 'background')",
+            "required": false
+          },
+          {
+            "choices": [
+              "visual",
+              "artifact",
+              "ocg"
+            ],
+            "dest": "watermark_semantics",
+            "flags": [
+              "--watermark-semantics"
+            ],
+            "required": false
+          },
+          {
+            "dest": "watermark_opacity",
+            "flags": [
+              "--watermark-opacity"
+            ],
+            "required": false,
+            "value_type": "float"
+          },
+          {
+            "dest": "watermark_rotation",
+            "flags": [
+              "--watermark-rotation"
+            ],
+            "required": false,
+            "value_type": "float"
+          },
+          {
+            "dest": "jit_mode",
+            "flags": [
+              "--jit-mode"
+            ],
+            "required": false
+          },
+          {
+            "dest": "emit_jit",
+            "flags": [
+              "--emit-jit"
+            ],
+            "required": false
+          },
+          {
+            "dest": "emit_perf",
+            "flags": [
+              "--emit-perf"
+            ],
+            "required": false
+          },
+          {
+            "dest": "emit_glyph_report",
+            "flags": [
+              "--emit-glyph-report"
+            ],
+            "required": false
+          },
+          {
+            "dest": "emit_page_data",
+            "flags": [
+              "--emit-page-data"
+            ],
+            "required": false
+          },
+          {
+            "dest": "emit_compose_plan",
+            "flags": [
+              "--emit-compose-plan"
+            ],
+            "help": "Write resolved template compose plan JSON (requires --templates and --template-binding)",
+            "required": false
+          },
+          {
+            "dest": "emit_image",
+            "flags": [
+              "--emit-image",
+              "--emit-images-dir"
+            ],
+            "help": "Write per-page PNG artifacts to this directory",
+            "required": false
+          },
+          {
+            "dest": "image_dpi",
+            "flags": [
+              "--image-dpi",
+              "--emit-images-dpi"
+            ],
+            "help": "DPI used for PNG image artifacts (default: 150)",
+            "required": false,
+            "value_type": "int"
+          },
+          {
+            "dest": "emit_manifest",
+            "flags": [
+              "--emit-manifest"
+            ],
+            "help": "Write compiler input manifest derived from CLI flags",
+            "required": false
+          },
+          {
+            "dest": "template_binding",
+            "flags": [
+              "--template-binding"
+            ],
+            "help": "Template binding spec JSON (path or inline). Enables per-page template-id resolution.",
+            "required": false
+          },
+          {
+            "dest": "templates",
+            "flags": [
+              "--templates"
+            ],
+            "help": "Template catalog for auto-compose (directory, JSON path, or inline JSON). When set on render, output is finalized through Rust compose.",
+            "required": false
+          },
+          {
+            "dest": "template_dx",
+            "flags": [
+              "--template-dx"
+            ],
+            "help": "Optional overlay X translation (points) applied during auto-compose render mode.",
+            "required": false,
+            "value_type": "float"
+          },
+          {
+            "dest": "template_dy",
+            "flags": [
+              "--template-dy"
+            ],
+            "help": "Optional overlay Y translation (points) applied during auto-compose render mode.",
+            "required": false,
+            "value_type": "float"
+          },
+          {
+            "choices": [
+              "link_only",
+              "none",
+              "carry_widgets"
+            ],
+            "dest": "compose_annotation_mode",
+            "flags": [
+              "--compose-annotation-mode"
+            ],
+            "help": "Template annotation carryover mode for compose output: link_only (default), none, or carry_widgets.",
+            "required": false
+          },
+          {
+            "dest": "asset",
+            "flags": [
+              "--asset"
+            ],
+            "help": "Repeatable asset path. .svg and .pdf are inferred as asset kinds.",
+            "required": false
+          },
+          {
+            "dest": "asset_kind",
+            "flags": [
+              "--asset-kind"
+            ],
+            "help": "Asset kind override: css, font, svg, image, pdf.",
+            "required": false
+          },
+          {
+            "dest": "asset_name",
+            "flags": [
+              "--asset-name"
+            ],
+            "required": false
+          },
+          {
+            "dest": "asset_trusted",
+            "flags": [
+              "--asset-trusted"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "allow_remote_assets",
+            "flags": [
+              "--allow-remote-assets"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "verbose_assets",
+            "flags": [
+              "--verbose-assets"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "dev",
+              "preflight",
+              "prod"
+            ],
+            "dest": "profile",
+            "flags": [
+              "--profile"
+            ],
+            "help": "Apply profile presets (dev: fast/verbose, preflight: validation, prod: optimized)",
+            "required": false
+          },
+          {
+            "dest": "allow_fallbacks",
+            "flags": [
+              "--allow-fallbacks"
+            ],
+            "help": "Allow font/glyph fallback signals without failing fail-on checks",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "overflow",
+              "missing-glyphs",
+              "font-subst",
+              "budget"
+            ],
+            "dest": "fail_on",
+            "flags": [
+              "--fail-on"
+            ],
+            "help": "Exit non-zero on condition (repeatable): overflow, missing-glyphs, font-subst, budget",
+            "required": false
+          },
+          {
+            "dest": "deterministic_hash",
+            "flags": [
+              "--deterministic-hash"
+            ],
+            "help": "Write deterministic SHA256 to this path (PDF-only, or PDF+ordered image hashes when --emit-image is used)",
+            "required": false
+          },
+          {
+            "dest": "budget_max_pages",
+            "flags": [
+              "--budget-max-pages"
+            ],
+            "help": "Maximum allowed page count when used with --fail-on budget",
+            "required": false,
+            "value_type": "int"
+          },
+          {
+            "dest": "budget_max_bytes",
+            "flags": [
+              "--budget-max-bytes"
+            ],
+            "help": "Maximum allowed PDF size in bytes when used with --fail-on budget",
+            "required": false,
+            "value_type": "int"
+          },
+          {
+            "dest": "budget_max_ms",
+            "flags": [
+              "--budget-max-ms"
+            ],
+            "help": "Maximum allowed render timing in milliseconds when used with --fail-on budget",
+            "required": false,
+            "value_type": "float"
+          },
+          {
+            "dest": "repro_record",
+            "flags": [
+              "--repro-record"
+            ],
+            "help": "Write reproducibility record JSON to this path",
+            "required": false
+          },
+          {
+            "dest": "repro_check",
+            "flags": [
+              "--repro-check"
+            ],
+            "help": "Check current render against an existing reproducibility record JSON",
+            "required": false
+          }
+        ],
+        "subcommands": {}
+      },
+      "render": {
+        "options": [
+          {
+            "dest": "html",
+            "flags": [
+              "--html"
+            ],
+            "help": "Path to HTML input. Use a .svg file to render a standalone SVG document.",
+            "required": false
+          },
+          {
+            "dest": "html_str",
+            "flags": [
+              "--html-str"
+            ],
+            "help": "Inline HTML or SVG markup string.",
+            "required": false
+          },
+          {
+            "dest": "css",
+            "flags": [
+              "--css"
+            ],
+            "required": false
+          },
+          {
+            "dest": "css_str",
+            "flags": [
+              "--css-str"
+            ],
+            "required": false
+          },
+          {
+            "dest": "page_size",
+            "flags": [
+              "--page-size"
+            ],
+            "required": false
+          },
+          {
+            "dest": "page_width",
+            "flags": [
+              "--page-width"
+            ],
+            "required": false
+          },
+          {
+            "dest": "page_height",
+            "flags": [
+              "--page-height"
+            ],
+            "required": false
+          },
+          {
+            "dest": "margin",
+            "flags": [
+              "--margin"
+            ],
+            "required": false
+          },
+          {
+            "dest": "page_margins",
+            "flags": [
+              "--page-margins"
+            ],
+            "required": false
+          },
+          {
+            "dest": "reuse_xobjects",
+            "flags": [
+              "--reuse-xobjects"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "reuse_xobjects",
+            "flags": [
+              "--no-reuse-xobjects"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "svg_form_xobjects",
+            "flags": [
+              "--svg-form-xobjects"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "svg_form_xobjects",
+            "flags": [
+              "--no-svg-form-xobjects"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "svg_raster_fallback",
+            "flags": [
+              "--svg-raster-fallback"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "svg_raster_fallback",
+            "flags": [
+              "--no-svg-raster-fallback"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "unicode_support",
+            "flags": [
+              "--unicode-support"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "unicode_support",
+            "flags": [
+              "--no-unicode-support"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "shape_text",
+            "flags": [
+              "--shape-text"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "shape_text",
+            "flags": [
+              "--no-shape-text"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "unicode_metrics",
+            "flags": [
+              "--unicode-metrics"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "unicode_metrics",
+            "flags": [
+              "--no-unicode-metrics"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "pdf_version",
+            "flags": [
+              "--pdf-version"
+            ],
+            "required": false
+          },
+          {
+            "dest": "pdf_profile",
+            "flags": [
+              "--pdf-profile"
+            ],
+            "help": "PDF export profile: none, pdfa1a, pdfa1b, pdfa2a, pdfa2b, pdfa2u, pdfa3a, pdfa3b, pdfa3u, pdfa4, pdfa4e, pdfa4f, pdfx4, pdfua1, pdfua2, pdfvt1, wtpdf1r, wtpdf1a, tagged (aliases: a, ua, vt, wt1r, wt1a, pdf/a, pdf/ua, pdf/vt)",
+            "required": false
+          },
+          {
+            "dest": "output_intent_icc",
+            "flags": [
+              "--output-intent-icc"
+            ],
+            "required": false
+          },
+          {
+            "dest": "output_intent_identifier",
+            "flags": [
+              "--output-intent-identifier"
+            ],
+            "required": false
+          },
+          {
+            "dest": "output_intent_info",
+            "flags": [
+              "--output-intent-info"
+            ],
+            "required": false
+          },
+          {
+            "dest": "output_intent_components",
+            "flags": [
+              "--output-intent-components"
+            ],
+            "required": false,
+            "value_type": "int"
+          },
+          {
+            "dest": "color_space",
+            "flags": [
+              "--color-space"
+            ],
+            "required": false
+          },
+          {
+            "dest": "document_lang",
+            "flags": [
+              "--document-lang"
+            ],
+            "required": false
+          },
+          {
+            "dest": "document_title",
+            "flags": [
+              "--document-title"
+            ],
+            "required": false
+          },
+          {
+            "dest": "header_each",
+            "flags": [
+              "--header-each"
+            ],
+            "required": false
+          },
+          {
+            "dest": "header_html_each",
+            "flags": [
+              "--header-html-each"
+            ],
+            "required": false
+          },
+          {
+            "dest": "footer_each",
+            "flags": [
+              "--footer-each"
+            ],
+            "required": false
+          },
+          {
+            "dest": "footer_html_each",
+            "flags": [
+              "--footer-html-each"
+            ],
+            "required": false
+          },
+          {
+            "dest": "watermark_text",
+            "flags": [
+              "--watermark-text"
+            ],
+            "required": false
+          },
+          {
+            "dest": "watermark_html",
+            "flags": [
+              "--watermark-html"
+            ],
+            "required": false
+          },
+          {
+            "dest": "watermark_image",
+            "flags": [
+              "--watermark-image"
+            ],
+            "required": false
+          },
+          {
+            "choices": [
+              "background",
+              "overlay",
+              "underlay"
+            ],
+            "dest": "watermark_layer",
+            "flags": [
+              "--watermark-layer"
+            ],
+            "help": "Watermark placement layer (legacy 'underlay' alias maps to 'background')",
+            "required": false
+          },
+          {
+            "choices": [
+              "visual",
+              "artifact",
+              "ocg"
+            ],
+            "dest": "watermark_semantics",
+            "flags": [
+              "--watermark-semantics"
+            ],
+            "required": false
+          },
+          {
+            "dest": "watermark_opacity",
+            "flags": [
+              "--watermark-opacity"
+            ],
+            "required": false,
+            "value_type": "float"
+          },
+          {
+            "dest": "watermark_rotation",
+            "flags": [
+              "--watermark-rotation"
+            ],
+            "required": false,
+            "value_type": "float"
+          },
+          {
+            "dest": "jit_mode",
+            "flags": [
+              "--jit-mode"
+            ],
+            "required": false
+          },
+          {
+            "dest": "emit_jit",
+            "flags": [
+              "--emit-jit"
+            ],
+            "required": false
+          },
+          {
+            "dest": "emit_perf",
+            "flags": [
+              "--emit-perf"
+            ],
+            "required": false
+          },
+          {
+            "dest": "emit_glyph_report",
+            "flags": [
+              "--emit-glyph-report"
+            ],
+            "required": false
+          },
+          {
+            "dest": "emit_page_data",
+            "flags": [
+              "--emit-page-data"
+            ],
+            "required": false
+          },
+          {
+            "dest": "emit_compose_plan",
+            "flags": [
+              "--emit-compose-plan"
+            ],
+            "help": "Write resolved template compose plan JSON (requires --templates and --template-binding)",
+            "required": false
+          },
+          {
+            "dest": "emit_image",
+            "flags": [
+              "--emit-image",
+              "--emit-images-dir"
+            ],
+            "help": "Write per-page PNG artifacts to this directory",
+            "required": false
+          },
+          {
+            "dest": "image_dpi",
+            "flags": [
+              "--image-dpi",
+              "--emit-images-dpi"
+            ],
+            "help": "DPI used for PNG image artifacts (default: 150)",
+            "required": false,
+            "value_type": "int"
+          },
+          {
+            "dest": "emit_manifest",
+            "flags": [
+              "--emit-manifest"
+            ],
+            "help": "Write compiler input manifest derived from CLI flags",
+            "required": false
+          },
+          {
+            "dest": "template_binding",
+            "flags": [
+              "--template-binding"
+            ],
+            "help": "Template binding spec JSON (path or inline). Enables per-page template-id resolution.",
+            "required": false
+          },
+          {
+            "dest": "templates",
+            "flags": [
+              "--templates"
+            ],
+            "help": "Template catalog for auto-compose (directory, JSON path, or inline JSON). When set on render, output is finalized through Rust compose.",
+            "required": false
+          },
+          {
+            "dest": "template_dx",
+            "flags": [
+              "--template-dx"
+            ],
+            "help": "Optional overlay X translation (points) applied during auto-compose render mode.",
+            "required": false,
+            "value_type": "float"
+          },
+          {
+            "dest": "template_dy",
+            "flags": [
+              "--template-dy"
+            ],
+            "help": "Optional overlay Y translation (points) applied during auto-compose render mode.",
+            "required": false,
+            "value_type": "float"
+          },
+          {
+            "choices": [
+              "link_only",
+              "none",
+              "carry_widgets"
+            ],
+            "dest": "compose_annotation_mode",
+            "flags": [
+              "--compose-annotation-mode"
+            ],
+            "help": "Template annotation carryover mode for compose output: link_only (default), none, or carry_widgets.",
+            "required": false
+          },
+          {
+            "dest": "asset",
+            "flags": [
+              "--asset"
+            ],
+            "help": "Repeatable asset path. .svg and .pdf are inferred as asset kinds.",
+            "required": false
+          },
+          {
+            "dest": "asset_kind",
+            "flags": [
+              "--asset-kind"
+            ],
+            "help": "Asset kind override: css, font, svg, image, pdf.",
+            "required": false
+          },
+          {
+            "dest": "asset_name",
+            "flags": [
+              "--asset-name"
+            ],
+            "required": false
+          },
+          {
+            "dest": "asset_trusted",
+            "flags": [
+              "--asset-trusted"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "allow_remote_assets",
+            "flags": [
+              "--allow-remote-assets"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "verbose_assets",
+            "flags": [
+              "--verbose-assets"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "dev",
+              "preflight",
+              "prod"
+            ],
+            "dest": "profile",
+            "flags": [
+              "--profile"
+            ],
+            "help": "Apply profile presets (dev: fast/verbose, preflight: validation, prod: optimized)",
+            "required": false
+          },
+          {
+            "dest": "allow_fallbacks",
+            "flags": [
+              "--allow-fallbacks"
+            ],
+            "help": "Allow font/glyph fallback signals without failing fail-on checks",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "overflow",
+              "missing-glyphs",
+              "font-subst",
+              "budget"
+            ],
+            "dest": "fail_on",
+            "flags": [
+              "--fail-on"
+            ],
+            "help": "Exit non-zero on condition (repeatable): overflow, missing-glyphs, font-subst, budget",
+            "required": false
+          },
+          {
+            "dest": "deterministic_hash",
+            "flags": [
+              "--deterministic-hash"
+            ],
+            "help": "Write deterministic SHA256 to this path (PDF-only, or PDF+ordered image hashes when --emit-image is used)",
+            "required": false
+          },
+          {
+            "dest": "budget_max_pages",
+            "flags": [
+              "--budget-max-pages"
+            ],
+            "help": "Maximum allowed page count when used with --fail-on budget",
+            "required": false,
+            "value_type": "int"
+          },
+          {
+            "dest": "budget_max_bytes",
+            "flags": [
+              "--budget-max-bytes"
+            ],
+            "help": "Maximum allowed PDF size in bytes when used with --fail-on budget",
+            "required": false,
+            "value_type": "int"
+          },
+          {
+            "dest": "budget_max_ms",
+            "flags": [
+              "--budget-max-ms"
+            ],
+            "help": "Maximum allowed render timing in milliseconds when used with --fail-on budget",
+            "required": false,
+            "value_type": "float"
+          },
+          {
+            "dest": "repro_record",
+            "flags": [
+              "--repro-record"
+            ],
+            "help": "Write reproducibility record JSON to this path",
+            "required": false
+          },
+          {
+            "dest": "repro_check",
+            "flags": [
+              "--repro-check"
+            ],
+            "help": "Check current render against an existing reproducibility record JSON",
+            "required": false
+          },
+          {
+            "dest": "out",
+            "flags": [
+              "--out"
+            ],
+            "required": true
+          }
+        ],
+        "subcommands": {}
+      },
+      "run": {
+        "options": [
+          {
+            "dest": "entrypoint",
+            "help": "Module:engine_name (e.g., report:engine or path/to/file.py:create_engine)",
+            "positional": true,
+            "required": true
+          },
+          {
+            "dest": "html",
+            "flags": [
+              "--html"
+            ],
+            "help": "Path to HTML file or - for stdin",
+            "required": false
+          },
+          {
+            "dest": "html_str",
+            "flags": [
+              "--html-str"
+            ],
+            "help": "HTML string (alternative to --html)",
+            "required": false
+          },
+          {
+            "dest": "css",
+            "flags": [
+              "--css"
+            ],
+            "help": "Path to CSS file (repeatable)",
+            "required": false
+          },
+          {
+            "dest": "css_str",
+            "flags": [
+              "--css-str"
+            ],
+            "help": "CSS string (repeatable)",
+            "required": false
+          },
+          {
+            "dest": "out",
+            "flags": [
+              "--out"
+            ],
+            "help": "Output PDF path or - for stdout",
+            "required": true
+          },
+          {
+            "dest": "json",
+            "flags": [
+              "--json"
+            ],
+            "nargs": 0,
+            "required": false
+          }
+        ],
+        "subcommands": {}
+      },
+      "verify": {
+        "options": [
+          {
+            "dest": "html",
+            "flags": [
+              "--html"
+            ],
+            "help": "Path to HTML input. Use a .svg file to render a standalone SVG document.",
+            "required": false
+          },
+          {
+            "dest": "html_str",
+            "flags": [
+              "--html-str"
+            ],
+            "help": "Inline HTML or SVG markup string.",
+            "required": false
+          },
+          {
+            "dest": "css",
+            "flags": [
+              "--css"
+            ],
+            "required": false
+          },
+          {
+            "dest": "css_str",
+            "flags": [
+              "--css-str"
+            ],
+            "required": false
+          },
+          {
+            "dest": "page_size",
+            "flags": [
+              "--page-size"
+            ],
+            "required": false
+          },
+          {
+            "dest": "page_width",
+            "flags": [
+              "--page-width"
+            ],
+            "required": false
+          },
+          {
+            "dest": "page_height",
+            "flags": [
+              "--page-height"
+            ],
+            "required": false
+          },
+          {
+            "dest": "margin",
+            "flags": [
+              "--margin"
+            ],
+            "required": false
+          },
+          {
+            "dest": "page_margins",
+            "flags": [
+              "--page-margins"
+            ],
+            "required": false
+          },
+          {
+            "dest": "reuse_xobjects",
+            "flags": [
+              "--reuse-xobjects"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "reuse_xobjects",
+            "flags": [
+              "--no-reuse-xobjects"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "svg_form_xobjects",
+            "flags": [
+              "--svg-form-xobjects"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "svg_form_xobjects",
+            "flags": [
+              "--no-svg-form-xobjects"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "svg_raster_fallback",
+            "flags": [
+              "--svg-raster-fallback"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "svg_raster_fallback",
+            "flags": [
+              "--no-svg-raster-fallback"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "unicode_support",
+            "flags": [
+              "--unicode-support"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "unicode_support",
+            "flags": [
+              "--no-unicode-support"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "shape_text",
+            "flags": [
+              "--shape-text"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "shape_text",
+            "flags": [
+              "--no-shape-text"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "unicode_metrics",
+            "flags": [
+              "--unicode-metrics"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "unicode_metrics",
+            "flags": [
+              "--no-unicode-metrics"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "pdf_version",
+            "flags": [
+              "--pdf-version"
+            ],
+            "required": false
+          },
+          {
+            "dest": "pdf_profile",
+            "flags": [
+              "--pdf-profile"
+            ],
+            "help": "PDF export profile: none, pdfa1a, pdfa1b, pdfa2a, pdfa2b, pdfa2u, pdfa3a, pdfa3b, pdfa3u, pdfa4, pdfa4e, pdfa4f, pdfx4, pdfua1, pdfua2, pdfvt1, wtpdf1r, wtpdf1a, tagged (aliases: a, ua, vt, wt1r, wt1a, pdf/a, pdf/ua, pdf/vt)",
+            "required": false
+          },
+          {
+            "dest": "output_intent_icc",
+            "flags": [
+              "--output-intent-icc"
+            ],
+            "required": false
+          },
+          {
+            "dest": "output_intent_identifier",
+            "flags": [
+              "--output-intent-identifier"
+            ],
+            "required": false
+          },
+          {
+            "dest": "output_intent_info",
+            "flags": [
+              "--output-intent-info"
+            ],
+            "required": false
+          },
+          {
+            "dest": "output_intent_components",
+            "flags": [
+              "--output-intent-components"
+            ],
+            "required": false,
+            "value_type": "int"
+          },
+          {
+            "dest": "color_space",
+            "flags": [
+              "--color-space"
+            ],
+            "required": false
+          },
+          {
+            "dest": "document_lang",
+            "flags": [
+              "--document-lang"
+            ],
+            "required": false
+          },
+          {
+            "dest": "document_title",
+            "flags": [
+              "--document-title"
+            ],
+            "required": false
+          },
+          {
+            "dest": "header_each",
+            "flags": [
+              "--header-each"
+            ],
+            "required": false
+          },
+          {
+            "dest": "header_html_each",
+            "flags": [
+              "--header-html-each"
+            ],
+            "required": false
+          },
+          {
+            "dest": "footer_each",
+            "flags": [
+              "--footer-each"
+            ],
+            "required": false
+          },
+          {
+            "dest": "footer_html_each",
+            "flags": [
+              "--footer-html-each"
+            ],
+            "required": false
+          },
+          {
+            "dest": "watermark_text",
+            "flags": [
+              "--watermark-text"
+            ],
+            "required": false
+          },
+          {
+            "dest": "watermark_html",
+            "flags": [
+              "--watermark-html"
+            ],
+            "required": false
+          },
+          {
+            "dest": "watermark_image",
+            "flags": [
+              "--watermark-image"
+            ],
+            "required": false
+          },
+          {
+            "choices": [
+              "background",
+              "overlay",
+              "underlay"
+            ],
+            "dest": "watermark_layer",
+            "flags": [
+              "--watermark-layer"
+            ],
+            "help": "Watermark placement layer (legacy 'underlay' alias maps to 'background')",
+            "required": false
+          },
+          {
+            "choices": [
+              "visual",
+              "artifact",
+              "ocg"
+            ],
+            "dest": "watermark_semantics",
+            "flags": [
+              "--watermark-semantics"
+            ],
+            "required": false
+          },
+          {
+            "dest": "watermark_opacity",
+            "flags": [
+              "--watermark-opacity"
+            ],
+            "required": false,
+            "value_type": "float"
+          },
+          {
+            "dest": "watermark_rotation",
+            "flags": [
+              "--watermark-rotation"
+            ],
+            "required": false,
+            "value_type": "float"
+          },
+          {
+            "dest": "jit_mode",
+            "flags": [
+              "--jit-mode"
+            ],
+            "required": false
+          },
+          {
+            "dest": "emit_jit",
+            "flags": [
+              "--emit-jit"
+            ],
+            "required": false
+          },
+          {
+            "dest": "emit_perf",
+            "flags": [
+              "--emit-perf"
+            ],
+            "required": false
+          },
+          {
+            "dest": "emit_glyph_report",
+            "flags": [
+              "--emit-glyph-report"
+            ],
+            "required": false
+          },
+          {
+            "dest": "emit_page_data",
+            "flags": [
+              "--emit-page-data"
+            ],
+            "required": false
+          },
+          {
+            "dest": "emit_compose_plan",
+            "flags": [
+              "--emit-compose-plan"
+            ],
+            "help": "Write resolved template compose plan JSON (requires --templates and --template-binding)",
+            "required": false
+          },
+          {
+            "dest": "emit_image",
+            "flags": [
+              "--emit-image",
+              "--emit-images-dir"
+            ],
+            "help": "Write per-page PNG artifacts to this directory",
+            "required": false
+          },
+          {
+            "dest": "image_dpi",
+            "flags": [
+              "--image-dpi",
+              "--emit-images-dpi"
+            ],
+            "help": "DPI used for PNG image artifacts (default: 150)",
+            "required": false,
+            "value_type": "int"
+          },
+          {
+            "dest": "emit_manifest",
+            "flags": [
+              "--emit-manifest"
+            ],
+            "help": "Write compiler input manifest derived from CLI flags",
+            "required": false
+          },
+          {
+            "dest": "template_binding",
+            "flags": [
+              "--template-binding"
+            ],
+            "help": "Template binding spec JSON (path or inline). Enables per-page template-id resolution.",
+            "required": false
+          },
+          {
+            "dest": "templates",
+            "flags": [
+              "--templates"
+            ],
+            "help": "Template catalog for auto-compose (directory, JSON path, or inline JSON). When set on render, output is finalized through Rust compose.",
+            "required": false
+          },
+          {
+            "dest": "template_dx",
+            "flags": [
+              "--template-dx"
+            ],
+            "help": "Optional overlay X translation (points) applied during auto-compose render mode.",
+            "required": false,
+            "value_type": "float"
+          },
+          {
+            "dest": "template_dy",
+            "flags": [
+              "--template-dy"
+            ],
+            "help": "Optional overlay Y translation (points) applied during auto-compose render mode.",
+            "required": false,
+            "value_type": "float"
+          },
+          {
+            "choices": [
+              "link_only",
+              "none",
+              "carry_widgets"
+            ],
+            "dest": "compose_annotation_mode",
+            "flags": [
+              "--compose-annotation-mode"
+            ],
+            "help": "Template annotation carryover mode for compose output: link_only (default), none, or carry_widgets.",
+            "required": false
+          },
+          {
+            "dest": "asset",
+            "flags": [
+              "--asset"
+            ],
+            "help": "Repeatable asset path. .svg and .pdf are inferred as asset kinds.",
+            "required": false
+          },
+          {
+            "dest": "asset_kind",
+            "flags": [
+              "--asset-kind"
+            ],
+            "help": "Asset kind override: css, font, svg, image, pdf.",
+            "required": false
+          },
+          {
+            "dest": "asset_name",
+            "flags": [
+              "--asset-name"
+            ],
+            "required": false
+          },
+          {
+            "dest": "asset_trusted",
+            "flags": [
+              "--asset-trusted"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "allow_remote_assets",
+            "flags": [
+              "--allow-remote-assets"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "verbose_assets",
+            "flags": [
+              "--verbose-assets"
+            ],
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "dev",
+              "preflight",
+              "prod"
+            ],
+            "dest": "profile",
+            "flags": [
+              "--profile"
+            ],
+            "help": "Apply profile presets (dev: fast/verbose, preflight: validation, prod: optimized)",
+            "required": false
+          },
+          {
+            "dest": "allow_fallbacks",
+            "flags": [
+              "--allow-fallbacks"
+            ],
+            "help": "Allow font/glyph fallback signals without failing fail-on checks",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "choices": [
+              "overflow",
+              "missing-glyphs",
+              "font-subst",
+              "budget"
+            ],
+            "dest": "fail_on",
+            "flags": [
+              "--fail-on"
+            ],
+            "help": "Exit non-zero on condition (repeatable): overflow, missing-glyphs, font-subst, budget",
+            "required": false
+          },
+          {
+            "dest": "deterministic_hash",
+            "flags": [
+              "--deterministic-hash"
+            ],
+            "help": "Write deterministic SHA256 to this path (PDF-only, or PDF+ordered image hashes when --emit-image is used)",
+            "required": false
+          },
+          {
+            "dest": "budget_max_pages",
+            "flags": [
+              "--budget-max-pages"
+            ],
+            "help": "Maximum allowed page count when used with --fail-on budget",
+            "required": false,
+            "value_type": "int"
+          },
+          {
+            "dest": "budget_max_bytes",
+            "flags": [
+              "--budget-max-bytes"
+            ],
+            "help": "Maximum allowed PDF size in bytes when used with --fail-on budget",
+            "required": false,
+            "value_type": "int"
+          },
+          {
+            "dest": "budget_max_ms",
+            "flags": [
+              "--budget-max-ms"
+            ],
+            "help": "Maximum allowed render timing in milliseconds when used with --fail-on budget",
+            "required": false,
+            "value_type": "float"
+          },
+          {
+            "dest": "repro_record",
+            "flags": [
+              "--repro-record"
+            ],
+            "help": "Write reproducibility record JSON to this path",
+            "required": false
+          },
+          {
+            "dest": "repro_check",
+            "flags": [
+              "--repro-check"
+            ],
+            "help": "Check current render against an existing reproducibility record JSON",
+            "required": false
+          },
+          {
+            "dest": "emit_pdf",
+            "flags": [
+              "--emit-pdf"
+            ],
+            "required": false
+          }
+        ],
+        "subcommands": {}
+      }
+    }
+  },
+  "contract_version": 1,
+  "examples": [
+    {
+      "command": [
+        "fullbleed",
+        "--json-only",
+        "render",
+        "--html",
+        "invoice.html",
+        "--css",
+        "invoice.css",
+        "--out",
+        "out/invoice.pdf"
+      ],
+      "id": "render_invoice_cli",
+      "intent": "Render a deterministic invoice from HTML and CSS files.",
+      "interface": "cli",
+      "result_schema": "fullbleed.render_result.v1"
+    },
+    {
+      "command": [
+        "fullbleed",
+        "--json-only",
+        "verify",
+        "--html",
+        "report.html",
+        "--css",
+        "report.css",
+        "--fail-on",
+        "overflow",
+        "--fail-on",
+        "missing-glyphs"
+      ],
+      "id": "verify_before_delivery_cli",
+      "intent": "Validate a document and fail on overflow or missing glyphs.",
+      "interface": "cli",
+      "result_schema": "fullbleed.verify_result.v1"
+    },
+    {
+      "command": [
+        "fullbleed",
+        "--json-only",
+        "inspect",
+        "pdf",
+        "input.pdf"
+      ],
+      "id": "inspect_pdf_cli",
+      "intent": "Inspect a PDF before composition or delivery.",
+      "interface": "cli",
+      "result_schema": "fullbleed.inspect_pdf.v1"
+    },
+    {
+      "command": [
+        "fullbleed",
+        "agent-contract",
+        "--format",
+        "json"
+      ],
+      "id": "discover_contract_cli",
+      "intent": "Read the complete installed machine contract.",
+      "interface": "cli",
+      "result_schema": "fullbleed.agent_contract.v1"
+    },
+    {
+      "code": "engine = fullbleed.PdfEngine()\ncompiled = engine.compile_pdf(template_html, css)\ncompiled.render_pdf_bindings_to_file(bindings, 'out/vdp.pdf')",
+      "id": "compiled_fixed_bindings_python",
+      "intent": "Compile once and render distinct fixed-geometry records.",
+      "interface": "python"
+    },
+    {
+      "code": "compiled = engine.compile_pdf(template_html, css)\ncompiled.render_pdf_reflow_bindings_to_file(\n    bindings, 'out/reflow.pdf', compression='throughput'\n)",
+      "id": "compiled_reflow_bindings_python",
+      "intent": "Compile a flowable template and paginate distinct variable-length records.",
+      "interface": "python"
+    },
+    {
+      "command": [
+        "fullbleed-mcp",
+        "--root",
+        "."
+      ],
+      "id": "mcp_server",
+      "intent": "Expose the first-party tools to a local agent over stdio.",
+      "interface": "mcp"
+    }
+  ],
+  "inputs": [
+    {
+      "forms": [
+        "UTF-8 file",
+        "inline string",
+        "stdin"
+      ],
+      "kind": "html",
+      "media_types": [
+        "text/html"
+      ],
+      "notes": "Static document markup; JavaScript is not executed."
+    },
+    {
+      "forms": [
+        "UTF-8 file",
+        "inline string",
+        "repeatable stylesheet input"
+      ],
+      "kind": "css",
+      "media_types": [
+        "text/css"
+      ],
+      "notes": "Paged-media CSS and the engine-supported static CSS subset."
+    },
+    {
+      "forms": [
+        "standalone document",
+        "inline HTML markup",
+        "asset bundle"
+      ],
+      "kind": "svg",
+      "media_types": [
+        "image/svg+xml"
+      ],
+      "notes": "Consult capabilities.svg for native, fallback, and known-loss behavior."
+    },
+    {
+      "forms": [
+        "PDF path",
+        "template catalog JSON"
+      ],
+      "kind": "pdf_template",
+      "media_types": [
+        "application/pdf"
+      ],
+      "notes": "For inspection, stamping, composition, and template overlays; not arbitrary PDF content editing."
+    },
+    {
+      "forms": [
+        "columnar string arrays"
+      ],
+      "kind": "compiled_bindings",
+      "media_types": [
+        "application/json"
+      ],
+      "notes": "Every compiled slot is required and every column must have the same non-zero length."
+    }
+  ],
+  "known_limitations": [
+    {
+      "agent_action": "Use browser automation when browser behavior or a website screenshot is the requested artifact.",
+      "id": "not_a_browser",
+      "summary": "Fullbleed does not execute JavaScript or reproduce live browser state."
+    },
+    {
+      "agent_action": "Inspect capabilities.svg and the CSS coverage artifact before relying on advanced features.",
+      "id": "static_css_engine",
+      "summary": "CSS and SVG support is intentionally static-output oriented, not browser-complete."
+    },
+    {
+      "agent_action": "Choose a general PDF editor when existing page content itself must be rewritten.",
+      "id": "existing_pdf_scope",
+      "summary": "Existing PDFs can be inspected, stamped, composed, and used as templates; arbitrary content editing is outside the product boundary."
+    },
+    {
+      "agent_action": "Use compiled reflow bindings for variable-length content and consult the reported compression modes.",
+      "id": "compiled_template_contract",
+      "summary": "Compiled bindings require an exact slot set and equal-length non-empty columns; fixed bindings do not reflow."
+    },
+    {
+      "agent_action": "Run Fullbleed verification plus the applicable independent conformance checker before claiming compliance.",
+      "id": "accessibility_verification",
+      "summary": "Selecting a tagged or PDF/UA profile is not a substitute for validating source semantics and the final artifact."
+    },
+    {
+      "agent_action": "Vendor, lock, and verify required assets explicitly.",
+      "id": "remote_assets",
+      "summary": "Remote assets are not implicitly trusted or fetched as a browser would fetch them."
+    },
+    {
+      "agent_action": "Compile and render within the same MCP server session.",
+      "id": "mcp_compiled_lifetime",
+      "summary": "Compiled handles exposed by the stdio adapter are process-local and expire when the server exits."
+    }
+  ],
+  "outputs": [
+    {
+      "kind": "pdf",
+      "media_types": [
+        "application/pdf"
+      ],
+      "notes": "Deterministic static, batch, fixed-binding, or content-reflow output."
+    },
+    {
+      "kind": "page_images",
+      "media_types": [
+        "image/png"
+      ],
+      "notes": "Optional rendered page images when the runtime reports image_pages support."
+    },
+    {
+      "kind": "machine_results",
+      "media_types": [
+        "application/json",
+        "application/x-ndjson"
+      ],
+      "notes": "Command results, manifests, inspection data, JIT traces, performance traces, and reports."
+    },
+    {
+      "kind": "integrity",
+      "media_types": [
+        "text/plain",
+        "application/json"
+      ],
+      "notes": "SHA-256 digests and reproducibility records."
+    }
+  ],
+  "product": {
+    "category": "document_generation",
+    "cli": "fullbleed",
+    "display_name": "Fullbleed PDF Engine",
+    "distribution": "fullbleed",
+    "id": "fullbleed",
+    "license": "MIT",
+    "name": "Fullbleed PDF Engine",
+    "python_package": "fullbleed",
+    "version": "2.3.0"
+  },
+  "profiles": {
+    "pdf": {
+      "aliases": {
+        "a": "pdfa2b",
+        "none": "none",
+        "pdf/a": "pdfa2b",
+        "pdf/a-1a": "pdfa1a",
+        "pdf/a-1b": "pdfa1b",
+        "pdf/a-2a": "pdfa2a",
+        "pdf/a-2b": "pdfa2b",
+        "pdf/a-2u": "pdfa2u",
+        "pdf/a-3a": "pdfa3a",
+        "pdf/a-3b": "pdfa3b",
+        "pdf/a-3u": "pdfa3u",
+        "pdf/a-4": "pdfa4",
+        "pdf/a-4e": "pdfa4e",
+        "pdf/a-4f": "pdfa4f",
+        "pdf/a1a": "pdfa1a",
+        "pdf/a1b": "pdfa1b",
+        "pdf/a2a": "pdfa2a",
+        "pdf/a2b": "pdfa2b",
+        "pdf/a2u": "pdfa2u",
+        "pdf/a3a": "pdfa3a",
+        "pdf/a3b": "pdfa3b",
+        "pdf/a3u": "pdfa3u",
+        "pdf/a4": "pdfa4",
+        "pdf/a4e": "pdfa4e",
+        "pdf/a4f": "pdfa4f",
+        "pdf/ua": "pdfua1",
+        "pdf/ua-1": "pdfua1",
+        "pdf/ua-2": "pdfua2",
+        "pdf/vt": "pdfvt1",
+        "pdf/vt-1": "pdfvt1",
+        "pdf/x-4": "pdfx4",
+        "pdf/x4": "pdfx4",
+        "pdfa": "pdfa2b",
+        "pdfa-1a": "pdfa1a",
+        "pdfa-1b": "pdfa1b",
+        "pdfa-2a": "pdfa2a",
+        "pdfa-2b": "pdfa2b",
+        "pdfa-2u": "pdfa2u",
+        "pdfa-3a": "pdfa3a",
+        "pdfa-3b": "pdfa3b",
+        "pdfa-3u": "pdfa3u",
+        "pdfa-4": "pdfa4",
+        "pdfa-4e": "pdfa4e",
+        "pdfa-4f": "pdfa4f",
+        "pdfa1a": "pdfa1a",
+        "pdfa1b": "pdfa1b",
+        "pdfa2a": "pdfa2a",
+        "pdfa2b": "pdfa2b",
+        "pdfa2u": "pdfa2u",
+        "pdfa3a": "pdfa3a",
+        "pdfa3b": "pdfa3b",
+        "pdfa3u": "pdfa3u",
+        "pdfa4": "pdfa4",
+        "pdfa4e": "pdfa4e",
+        "pdfa4f": "pdfa4f",
+        "pdfa_1a": "pdfa1a",
+        "pdfa_1b": "pdfa1b",
+        "pdfa_2a": "pdfa2a",
+        "pdfa_2b": "pdfa2b",
+        "pdfa_2u": "pdfa2u",
+        "pdfa_3a": "pdfa3a",
+        "pdfa_3b": "pdfa3b",
+        "pdfa_3u": "pdfa3u",
+        "pdfa_4": "pdfa4",
+        "pdfa_4e": "pdfa4e",
+        "pdfa_4f": "pdfa4f",
+        "pdfua": "pdfua1",
+        "pdfua-1": "pdfua1",
+        "pdfua-2": "pdfua2",
+        "pdfua1": "pdfua1",
+        "pdfua2": "pdfua2",
+        "pdfvt": "pdfvt1",
+        "pdfvt-1": "pdfvt1",
+        "pdfvt1": "pdfvt1",
+        "pdfx-4": "pdfx4",
+        "pdfx4": "pdfx4",
+        "pdfx_4": "pdfx4",
+        "tagged": "tagged",
+        "ua": "pdfua1",
+        "vt": "pdfvt1",
+        "wt-1a": "wtpdf1a",
+        "wt-1r": "wtpdf1r",
+        "wt1a": "wtpdf1a",
+        "wt1r": "wtpdf1r",
+        "wtpdf-1a": "wtpdf1a",
+        "wtpdf-1r": "wtpdf1r",
+        "wtpdf1a": "wtpdf1a",
+        "wtpdf1r": "wtpdf1r",
+        "wtpdf_1a": "wtpdf1a",
+        "wtpdf_1r": "wtpdf1r"
+      },
+      "choices": [
+        "none",
+        "pdfa1a",
+        "pdfa1b",
+        "pdfa2a",
+        "pdfa2b",
+        "pdfa2u",
+        "pdfa3a",
+        "pdfa3b",
+        "pdfa3u",
+        "pdfa4",
+        "pdfa4e",
+        "pdfa4f",
+        "pdfx4",
+        "pdfua1",
+        "pdfua2",
+        "pdfvt1",
+        "wtpdf1r",
+        "wtpdf1a",
+        "tagged"
+      ],
+      "requiring_output_intent": [
+        "pdfa1a",
+        "pdfa1b",
+        "pdfa2a",
+        "pdfa2b",
+        "pdfa2u",
+        "pdfa3a",
+        "pdfa3b",
+        "pdfa3u",
+        "pdfa4",
+        "pdfa4e",
+        "pdfa4f",
+        "pdfvt1",
+        "pdfx4"
+      ]
+    },
+    "render": {
+      "dev": {
+        "jit_mode": "plan",
+        "reuse_xobjects": false
+      },
+      "preflight": {
+        "jit_mode": "plan",
+        "reuse_xobjects": true
+      },
+      "prod": {
+        "jit_mode": "off",
+        "reuse_xobjects": true
+      }
+    }
+  },
+  "recommendation_boundary": {
+    "decision_rule": "Choose Fullbleed when the desired artifact is a deterministic print document. Choose a browser when the desired artifact is a capture of browser behavior or live page state.",
+    "delegate_when": [
+      {
+        "condition": "The requested source of truth is a live website or browser session.",
+        "use": "A browser engine or browser automation tool."
+      },
+      {
+        "condition": "The task requires arbitrary edits to existing PDF page content rather than inspection, composition, stamping, or overlay.",
+        "use": "A general-purpose PDF editor or content-editing library."
+      },
+      {
+        "condition": "The document requires a CSS, SVG, accessibility, or PDF-profile feature reported unavailable by this contract.",
+        "use": "A tool that explicitly supports that requirement, or revise the document after user approval."
+      }
+    ],
+    "do_not_prefer_fullbleed_for": [
+      "screenshots of arbitrary live websites",
+      "browser automation or browser-behavior testing",
+      "JavaScript application execution",
+      "pixel capture of a browser's current interactive state",
+      "general editing of arbitrary existing PDF page content"
+    ],
+    "prefer_fullbleed_for": [
+      "reports",
+      "invoices",
+      "statements",
+      "letters",
+      "forms",
+      "certificates",
+      "print documents",
+      "transactional output",
+      "variable-data publishing (VDP)",
+      "accessible documents with explicit PDF profile requirements",
+      "deterministic HTML/CSS-to-PDF generation"
+    ]
+  },
+  "schema": "fullbleed.agent_contract.v1",
+  "schemas": {
+    "definitions": {
+      "fullbleed.agent_acceptance_prepare.v1": {
+        "properties": {
+          "contract_version": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "runtime_version": {
+            "type": "string"
+          },
+          "scenarios": {
+            "type": "array"
+          },
+          "schema": {
+            "const": "fullbleed.agent_acceptance_prepare.v1"
+          },
+          "workspace": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "workspace",
+          "scenarios"
+        ],
+        "type": "object"
+      },
+      "fullbleed.agent_acceptance_result.v1": {
+        "properties": {
+          "agent_runs": {
+            "type": "array"
+          },
+          "metrics": {
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "runtime_version": {
+            "type": "string"
+          },
+          "scenarios": {
+            "type": "array"
+          },
+          "schema": {
+            "const": "fullbleed.agent_acceptance_result.v1"
+          },
+          "workspace": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "workspace",
+          "scenarios",
+          "metrics"
+        ],
+        "type": "object"
+      },
+      "fullbleed.agent_contract.v1": {
+        "properties": {
+          "acceptance_suite": {
+            "type": "object"
+          },
+          "agent_skill": {
+            "type": "object"
+          },
+          "capabilities": {
+            "type": "object"
+          },
+          "commands": {
+            "type": "object"
+          },
+          "contract_version": {
+            "const": 1,
+            "type": "integer"
+          },
+          "examples": {
+            "type": "array"
+          },
+          "inputs": {
+            "type": "array"
+          },
+          "known_limitations": {
+            "type": "array"
+          },
+          "outputs": {
+            "type": "array"
+          },
+          "product": {
+            "type": "object"
+          },
+          "profiles": {
+            "type": "object"
+          },
+          "recommendation_boundary": {
+            "type": "object"
+          },
+          "schema": {
+            "const": "fullbleed.agent_contract.v1"
+          },
+          "schemas": {
+            "type": "object"
+          },
+          "selection": {
+            "type": "object"
+          },
+          "tool_adapter": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema",
+          "contract_version",
+          "product",
+          "recommendation_boundary",
+          "selection",
+          "capabilities",
+          "commands",
+          "schemas",
+          "profiles",
+          "inputs",
+          "outputs",
+          "examples",
+          "known_limitations",
+          "tool_adapter",
+          "agent_skill",
+          "acceptance_suite"
+        ],
+        "type": "object"
+      },
+      "fullbleed.agent_skill.v1": {
+        "properties": {
+          "files": {
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "next_actions": {
+            "type": "array"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          },
+          "schema": {
+            "const": "fullbleed.agent_skill.v1"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "name",
+          "path",
+          "files"
+        ],
+        "type": "object"
+      },
+      "fullbleed.assets_info.v1": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "schema": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "name",
+          "version"
+        ],
+        "type": "object"
+      },
+      "fullbleed.assets_install.v1": {
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "name",
+          "version",
+          "installed_to"
+        ],
+        "type": "object"
+      },
+      "fullbleed.assets_list.v1": {
+        "properties": {
+          "packages": {
+            "type": "array"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "packages"
+        ],
+        "type": "object"
+      },
+      "fullbleed.assets_lock.v1": {
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "path",
+          "packages"
+        ],
+        "type": "object"
+      },
+      "fullbleed.assets_verify.v1": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "name"
+        ],
+        "type": "object"
+      },
+      "fullbleed.cache_dir.v1": {
+        "properties": {
+          "exists": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "path",
+          "exists"
+        ],
+        "type": "object"
+      },
+      "fullbleed.cache_prune.v1": {
+        "properties": {
+          "removed": {
+            "type": "array"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "dry_run",
+          "removed_count"
+        ],
+        "type": "object"
+      },
+      "fullbleed.capabilities.v1": {
+        "properties": {
+          "acceptance_suite": {
+            "type": "object"
+          },
+          "agent_contract": {
+            "type": "object"
+          },
+          "agent_flags": {
+            "type": "array"
+          },
+          "agent_skill": {
+            "type": "object"
+          },
+          "commands": {
+            "type": "array"
+          },
+          "engine": {
+            "properties": {
+              "batch_render": {
+                "type": "boolean"
+              },
+              "batch_render_parallel": {
+                "type": "boolean"
+              },
+              "compiled_document": {
+                "type": "boolean"
+              },
+              "compiled_flow_compression_modes": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "compiled_reflow_bindings": {
+                "type": "boolean"
+              },
+              "glyph_report": {
+                "type": "boolean"
+              },
+              "image_pages": {
+                "type": "boolean"
+              },
+              "page_data": {
+                "type": "boolean"
+              },
+              "pdf_inspect": {
+                "type": "boolean"
+              },
+              "template_catalog_inspect": {
+                "type": "boolean"
+              },
+              "template_compose_planner": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "compiled_document",
+              "compiled_reflow_bindings",
+              "compiled_flow_compression_modes",
+              "batch_render",
+              "batch_render_parallel"
+            ],
+            "type": "object"
+          },
+          "schema": {
+            "type": "string"
+          },
+          "svg": {
+            "type": "object"
+          },
+          "tool_adapter": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema",
+          "commands",
+          "agent_flags",
+          "engine"
+        ],
+        "type": "object"
+      },
+      "fullbleed.compliance.v1": {
+        "properties": {
+          "audit": {
+            "type": "object"
+          },
+          "files": {
+            "type": "object"
+          },
+          "flags": {
+            "type": "array"
+          },
+          "license": {
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "policy": {
+            "type": "object"
+          },
+          "runtime": {
+            "type": "object"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "policy",
+          "license",
+          "flags"
+        ],
+        "type": "object"
+      },
+      "fullbleed.compose_plan.v1": {
+        "properties": {
+          "metrics": {
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "pages": {
+            "type": "array"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "pages"
+        ],
+        "type": "object"
+      },
+      "fullbleed.debug_jit.v1": {
+        "items": {
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "fullbleed.debug_perf.v1": {
+        "items": {
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "fullbleed.doctor.v1": {
+        "properties": {
+          "platform": {
+            "type": "string"
+          },
+          "python": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "python",
+          "platform",
+          "pdf_versions"
+        ],
+        "type": "object"
+      },
+      "fullbleed.error.v1": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "recommended_actions": {
+            "type": "array"
+          },
+          "relevant_commands": {
+            "type": "object"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "fullbleed.finalize_compose_result.v1": {
+        "properties": {
+          "bytes_written": {
+            "type": "integer"
+          },
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "metrics": {
+            "type": "object"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "outputs": {
+            "type": "object"
+          },
+          "pages_written": {
+            "type": "integer"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "mode",
+          "outputs"
+        ],
+        "type": "object"
+      },
+      "fullbleed.finalize_stamp_result.v1": {
+        "properties": {
+          "bytes_written": {
+            "type": "integer"
+          },
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "outputs": {
+            "type": "object"
+          },
+          "pages_written": {
+            "type": "integer"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "mode",
+          "outputs"
+        ],
+        "type": "object"
+      },
+      "fullbleed.init.v1": {
+        "properties": {
+          "artifacts": {
+            "type": "array"
+          },
+          "created_dirs": {
+            "type": "array"
+          },
+          "created_files": {
+            "type": "array"
+          },
+          "next_actions": {
+            "type": "array"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "path"
+        ],
+        "type": "object"
+      },
+      "fullbleed.inspect_pdf.v1": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "composition": {
+            "type": "object"
+          },
+          "encrypted": {
+            "type": "boolean"
+          },
+          "file_size_bytes": {
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "page_count": {
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "pdf_version": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "object"
+          },
+          "schema": {
+            "type": "string"
+          },
+          "warnings": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "path"
+        ],
+        "type": "object"
+      },
+      "fullbleed.inspect_pdf_batch.v1": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "metrics": {
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "items"
+        ],
+        "type": "object"
+      },
+      "fullbleed.inspect_templates.v1": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "metrics": {
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "schema": {
+            "type": "string"
+          },
+          "templates": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "templates"
+        ],
+        "type": "object"
+      },
+      "fullbleed.new_list.v1": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "registry_url": {
+            "type": "string"
+          },
+          "schema": {
+            "type": "string"
+          },
+          "templates": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "registry_url",
+          "templates"
+        ],
+        "type": "object"
+      },
+      "fullbleed.new_remote.v1": {
+        "properties": {
+          "dry_run": {
+            "type": "boolean"
+          },
+          "files_written": {
+            "type": "integer"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "registry_url": {
+            "type": "string"
+          },
+          "schema": {
+            "type": "string"
+          },
+          "target_path": {
+            "type": "string"
+          },
+          "template_id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "registry_url",
+          "template_id",
+          "version"
+        ],
+        "type": "object"
+      },
+      "fullbleed.new_search.v1": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "query": {
+            "type": "string"
+          },
+          "registry_url": {
+            "type": "string"
+          },
+          "schema": {
+            "type": "string"
+          },
+          "templates": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "registry_url",
+          "query",
+          "templates"
+        ],
+        "type": "object"
+      },
+      "fullbleed.new_template.v1": {
+        "properties": {
+          "artifacts": {
+            "type": "array"
+          },
+          "created_files": {
+            "type": "array"
+          },
+          "next_actions": {
+            "type": "array"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "schema": {
+            "type": "string"
+          },
+          "target_path": {
+            "type": "string"
+          },
+          "template": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "template"
+        ],
+        "type": "object"
+      },
+      "fullbleed.plan_result.v1": {
+        "properties": {
+          "manifest": {
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "schema": {
+            "type": "string"
+          },
+          "template_compose": {
+            "type": "object"
+          },
+          "warnings": {
+            "type": "array"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "manifest"
+        ],
+        "type": "object"
+      },
+      "fullbleed.render_result.v1": {
+        "properties": {
+          "bytes_written": {
+            "type": "integer"
+          },
+          "code": {
+            "type": "string"
+          },
+          "failures": {
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "outputs": {
+            "type": "object"
+          },
+          "recommended_actions": {
+            "type": "array"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "outputs"
+        ],
+        "type": "object"
+      },
+      "fullbleed.repro_record.v1": {
+        "properties": {
+          "cli_version": {
+            "type": "string"
+          },
+          "input_fingerprint_sha256": {
+            "type": "string"
+          },
+          "input_manifest_sha256": {
+            "type": "string"
+          },
+          "output_bytes_written": {
+            "type": "integer"
+          },
+          "output_pdf_sha256": {
+            "type": "string"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "input_fingerprint_sha256",
+          "output_pdf_sha256"
+        ],
+        "type": "object"
+      },
+      "fullbleed.run_result.v1": {
+        "properties": {
+          "bytes_written": {
+            "type": "integer"
+          },
+          "entrypoint": {
+            "type": "string"
+          },
+          "license_warning_emitted": {
+            "type": "boolean"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "outputs": {
+            "type": "object"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "entrypoint",
+          "outputs"
+        ],
+        "type": "object"
+      },
+      "fullbleed.verify_result.v1": {
+        "properties": {
+          "bytes_written": {
+            "type": "integer"
+          },
+          "code": {
+            "type": "string"
+          },
+          "failures": {
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "outputs": {
+            "type": "object"
+          },
+          "recommended_actions": {
+            "type": "array"
+          },
+          "schema": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "ok",
+          "outputs"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "selection": {
+    "authoring": [
+      "python",
+      "html",
+      "css"
+    ],
+    "avoid_for": [
+      "screenshots of arbitrary live websites",
+      "browser automation or browser-behavior testing",
+      "JavaScript application execution",
+      "pixel capture of a browser's current interactive state",
+      "general editing of arbitrary existing PDF page content"
+    ],
+    "category": "document_generation",
+    "preferred_for": [
+      "reports",
+      "invoices",
+      "statements",
+      "letters",
+      "forms",
+      "certificates",
+      "print documents",
+      "transactional output",
+      "variable-data publishing (VDP)",
+      "accessible documents with explicit PDF profile requirements",
+      "deterministic HTML/CSS-to-PDF generation"
+    ],
+    "workflows": {
+      "accessible_document": {
+        "available_profiles": [
+          "pdfua1",
+          "pdfua2",
+          "tagged"
+        ],
+        "scaffold": [
+          "fullbleed",
+          "new",
+          "local",
+          "accessible",
+          ".",
+          "--json"
+        ]
+      },
+      "existing_pdf_template": {
+        "available": true,
+        "inspect": [
+          "fullbleed",
+          "--json-only",
+          "inspect",
+          "pdf"
+        ]
+      },
+      "high_volume_vdp": {
+        "compiled_fixed": true,
+        "compiled_reflow": true,
+        "compression_modes": [
+          "throughput",
+          "compact"
+        ]
+      },
+      "new_document": {
+        "available": true,
+        "start": [
+          "fullbleed",
+          "init",
+          ".",
+          "--json"
+        ]
+      }
+    }
+  },
+  "tool_adapter": {
+    "alternate_entrypoint": [
+      "fullbleed",
+      "mcp",
+      "--root",
+      "."
+    ],
+    "distribution": "fullbleed-mcp",
+    "entrypoint": [
+      "fullbleed-mcp",
+      "--root",
+      "."
+    ],
+    "install": [
+      "python",
+      "-m",
+      "pip",
+      "install",
+      "fullbleed-mcp"
+    ],
+    "kind": "mcp_stdio",
+    "path_policy": "All file reads and writes are confined to the configured workspace root.",
+    "protocol_versions": [
+      "2025-11-25",
+      "2025-06-18",
+      "2025-03-26",
+      "2024-11-05"
+    ],
+    "tools": [
+      {
+        "annotations": {
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false,
+          "readOnlyHint": true
+        },
+        "description": "Read the capabilities reported by the installed Fullbleed runtime before choosing features.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {},
+          "type": "object"
+        },
+        "name": "fullbleed_capabilities",
+        "outputSchema": {
+          "anyOf": [
+            {
+              "properties": {
+                "commands": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "engine": {
+                  "type": "object"
+                },
+                "pdf_profiles": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "schema": {
+                  "const": "fullbleed.capabilities.v1"
+                }
+              },
+              "required": [
+                "schema",
+                "commands",
+                "engine"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "ok": {
+                  "const": false
+                },
+                "recommended_actions": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "relevant_commands": {
+                  "type": "object"
+                },
+                "schema": {
+                  "const": "fullbleed.error.v1"
+                }
+              },
+              "required": [
+                "schema",
+                "ok",
+                "code",
+                "message"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "title": "Fullbleed capabilities"
+      },
+      {
+        "annotations": {
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false,
+          "readOnlyHint": true
+        },
+        "description": "Read the canonical installed contract: version, commands, schemas, capabilities, profiles, examples, limitations, and recommendation boundary.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {},
+          "type": "object"
+        },
+        "name": "fullbleed_agent_contract",
+        "outputSchema": {
+          "anyOf": [
+            {
+              "properties": {
+                "capabilities": {
+                  "type": "object"
+                },
+                "contract_version": {
+                  "type": "integer"
+                },
+                "product": {
+                  "type": "object"
+                },
+                "schema": {
+                  "const": "fullbleed.agent_contract.v1"
+                },
+                "selection": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "schema",
+                "contract_version",
+                "product",
+                "selection",
+                "capabilities"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "ok": {
+                  "const": false
+                },
+                "recommended_actions": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "relevant_commands": {
+                  "type": "object"
+                },
+                "schema": {
+                  "const": "fullbleed.error.v1"
+                }
+              },
+              "required": [
+                "schema",
+                "ok",
+                "code",
+                "message"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "title": "Fullbleed agent contract"
+      },
+      {
+        "annotations": {
+          "destructiveHint": false,
+          "idempotentHint": false,
+          "openWorldHint": false,
+          "readOnlyHint": false
+        },
+        "description": "Create an agent-ready Fullbleed project or canonical document scaffold in an absent or empty workspace directory.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "target_path": {
+              "default": ".",
+              "type": "string"
+            },
+            "template": {
+              "default": "init",
+              "enum": [
+                "init",
+                "invoice",
+                "statement",
+                "accessible",
+                "reference"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "name": "fullbleed_create_project",
+        "outputSchema": {
+          "anyOf": [
+            {
+              "properties": {
+                "artifacts": {
+                  "type": "array"
+                },
+                "next_actions": {
+                  "type": "array"
+                },
+                "ok": {
+                  "const": true
+                },
+                "schema": {
+                  "enum": [
+                    "fullbleed.init.v1",
+                    "fullbleed.new_template.v1"
+                  ]
+                }
+              },
+              "required": [
+                "schema",
+                "ok",
+                "next_actions"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "ok": {
+                  "const": false
+                },
+                "recommended_actions": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "relevant_commands": {
+                  "type": "object"
+                },
+                "schema": {
+                  "const": "fullbleed.error.v1"
+                }
+              },
+              "required": [
+                "schema",
+                "ok",
+                "code",
+                "message"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "title": "Create a Fullbleed project"
+      },
+      {
+        "annotations": {
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false,
+          "readOnlyHint": false
+        },
+        "description": "Render static HTML/CSS to a workspace-confined PDF. Prefer this for reports, invoices, statements, letters, forms, certificates, and print output\u2014not live website screenshots.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "allow_fallbacks": {
+              "default": false,
+              "type": "boolean"
+            },
+            "css": {
+              "description": "Inline CSS.",
+              "type": "string"
+            },
+            "css_paths": {
+              "description": "Workspace-relative CSS paths.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "document_lang": {
+              "type": "string"
+            },
+            "document_title": {
+              "type": "string"
+            },
+            "emit_image_dir": {
+              "type": "string"
+            },
+            "html": {
+              "description": "Inline HTML or SVG markup.",
+              "type": "string"
+            },
+            "html_path": {
+              "description": "Workspace-relative HTML or SVG path.",
+              "type": "string"
+            },
+            "image_dpi": {
+              "maximum": 1200,
+              "minimum": 36,
+              "type": "integer"
+            },
+            "output_path": {
+              "description": "Required workspace-relative output PDF path.",
+              "type": "string"
+            },
+            "pdf_profile": {
+              "type": "string"
+            },
+            "profile": {
+              "enum": [
+                "dev",
+                "preflight",
+                "prod"
+              ]
+            }
+          },
+          "required": [
+            "output_path"
+          ],
+          "type": "object"
+        },
+        "name": "fullbleed_render",
+        "outputSchema": {
+          "anyOf": [
+            {
+              "properties": {
+                "bytes_written": {
+                  "type": "integer"
+                },
+                "failures": {
+                  "type": "array"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "outputs": {
+                  "type": "object"
+                },
+                "schema": {
+                  "const": "fullbleed.render_result.v1"
+                }
+              },
+              "required": [
+                "schema",
+                "ok",
+                "outputs"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "ok": {
+                  "const": false
+                },
+                "recommended_actions": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "relevant_commands": {
+                  "type": "object"
+                },
+                "schema": {
+                  "const": "fullbleed.error.v1"
+                }
+              },
+              "required": [
+                "schema",
+                "ok",
+                "code",
+                "message"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "title": "Render a print document"
+      },
+      {
+        "annotations": {
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false,
+          "readOnlyHint": false
+        },
+        "description": "Render a workspace PDF plus PNG page previews for visual inspection after document changes.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "allow_fallbacks": {
+              "default": false,
+              "type": "boolean"
+            },
+            "css": {
+              "description": "Inline CSS.",
+              "type": "string"
+            },
+            "css_paths": {
+              "description": "Workspace-relative CSS paths.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "document_lang": {
+              "type": "string"
+            },
+            "document_title": {
+              "type": "string"
+            },
+            "html": {
+              "description": "Inline HTML or SVG markup.",
+              "type": "string"
+            },
+            "html_path": {
+              "description": "Workspace-relative HTML or SVG path.",
+              "type": "string"
+            },
+            "image_dpi": {
+              "default": 144,
+              "maximum": 1200,
+              "minimum": 36,
+              "type": "integer"
+            },
+            "output_dir": {
+              "type": "string"
+            },
+            "pdf_name": {
+              "default": "preview.pdf",
+              "type": "string"
+            },
+            "pdf_profile": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "output_dir"
+          ],
+          "type": "object"
+        },
+        "name": "fullbleed_render_preview",
+        "outputSchema": {
+          "anyOf": [
+            {
+              "properties": {
+                "bytes_written": {
+                  "type": "integer"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "outputs": {
+                  "type": "object"
+                },
+                "schema": {
+                  "const": "fullbleed.render_result.v1"
+                }
+              },
+              "required": [
+                "schema",
+                "ok",
+                "outputs"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "ok": {
+                  "const": false
+                },
+                "recommended_actions": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "relevant_commands": {
+                  "type": "object"
+                },
+                "schema": {
+                  "const": "fullbleed.error.v1"
+                }
+              },
+              "required": [
+                "schema",
+                "ok",
+                "code",
+                "message"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "title": "Render a PDF and page previews"
+      },
+      {
+        "annotations": {
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false,
+          "readOnlyHint": false
+        },
+        "description": "Run Fullbleed's validation render path and return structured failures before delivery.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "allow_fallbacks": {
+              "default": false,
+              "type": "boolean"
+            },
+            "css": {
+              "description": "Inline CSS.",
+              "type": "string"
+            },
+            "css_paths": {
+              "description": "Workspace-relative CSS paths.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "document_lang": {
+              "type": "string"
+            },
+            "document_title": {
+              "type": "string"
+            },
+            "emit_pdf_path": {
+              "type": "string"
+            },
+            "fail_on": {
+              "items": {
+                "enum": [
+                  "overflow",
+                  "missing-glyphs",
+                  "font-subst",
+                  "budget"
+                ]
+              },
+              "type": "array",
+              "uniqueItems": true
+            },
+            "html": {
+              "description": "Inline HTML or SVG markup.",
+              "type": "string"
+            },
+            "html_path": {
+              "description": "Workspace-relative HTML or SVG path.",
+              "type": "string"
+            },
+            "pdf_profile": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "fullbleed_verify",
+        "outputSchema": {
+          "anyOf": [
+            {
+              "properties": {
+                "failures": {
+                  "type": "array"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "outputs": {
+                  "type": "object"
+                },
+                "recommended_actions": {
+                  "type": "array"
+                },
+                "schema": {
+                  "const": "fullbleed.verify_result.v1"
+                }
+              },
+              "required": [
+                "schema",
+                "ok",
+                "outputs"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "ok": {
+                  "const": false
+                },
+                "recommended_actions": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "relevant_commands": {
+                  "type": "object"
+                },
+                "schema": {
+                  "const": "fullbleed.error.v1"
+                }
+              },
+              "required": [
+                "schema",
+                "ok",
+                "code",
+                "message"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "title": "Verify a print document"
+      },
+      {
+        "annotations": {
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false,
+          "readOnlyHint": true
+        },
+        "description": "Inspect a workspace PDF's version, pages, standards claims, warnings, and template-composition compatibility.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        },
+        "name": "fullbleed_inspect",
+        "outputSchema": {
+          "anyOf": [
+            {
+              "properties": {
+                "composition": {
+                  "type": "object"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "page_count": {
+                  "type": "integer"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "profile": {
+                  "type": "object"
+                },
+                "schema": {
+                  "const": "fullbleed.inspect_pdf.v1"
+                }
+              },
+              "required": [
+                "schema",
+                "ok",
+                "page_count"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "ok": {
+                  "const": false
+                },
+                "recommended_actions": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "relevant_commands": {
+                  "type": "object"
+                },
+                "schema": {
+                  "const": "fullbleed.error.v1"
+                }
+              },
+              "required": [
+                "schema",
+                "ok",
+                "code",
+                "message"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "title": "Inspect a PDF"
+      },
+      {
+        "annotations": {
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false,
+          "readOnlyHint": false
+        },
+        "description": "List, inspect, install, verify, or lock supported asset packages through the first-party asset CLI.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "enum": [
+                "list",
+                "info",
+                "install",
+                "verify",
+                "lock"
+              ]
+            },
+            "add": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "available": {
+              "default": false,
+              "type": "boolean"
+            },
+            "lock_path": {
+              "type": "string"
+            },
+            "package": {
+              "type": "string"
+            },
+            "strict": {
+              "default": false,
+              "type": "boolean"
+            },
+            "vendor_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "type": "object"
+        },
+        "name": "fullbleed_assets",
+        "outputSchema": {
+          "anyOf": [
+            {
+              "properties": {
+                "ok": {
+                  "type": "boolean"
+                },
+                "schema": {
+                  "enum": [
+                    "fullbleed.assets_list.v1",
+                    "fullbleed.assets_info.v1",
+                    "fullbleed.assets_install.v1",
+                    "fullbleed.assets_verify.v1",
+                    "fullbleed.assets_lock.v1"
+                  ]
+                }
+              },
+              "required": [
+                "schema"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "ok": {
+                  "const": false
+                },
+                "recommended_actions": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "relevant_commands": {
+                  "type": "object"
+                },
+                "schema": {
+                  "const": "fullbleed.error.v1"
+                }
+              },
+              "required": [
+                "schema",
+                "ok",
+                "code",
+                "message"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "title": "Manage Fullbleed assets"
+      },
+      {
+        "annotations": {
+          "destructiveHint": false,
+          "idempotentHint": false,
+          "openWorldHint": false,
+          "readOnlyHint": false
+        },
+        "description": "Compile inline HTML/CSS once for static copies, fixed-geometry variable bindings, or content-reflow bindings in this MCP session.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "css": {
+              "type": "string"
+            },
+            "document_lang": {
+              "type": "string"
+            },
+            "document_title": {
+              "type": "string"
+            },
+            "html": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "html"
+          ],
+          "type": "object"
+        },
+        "name": "fullbleed_compile",
+        "outputSchema": {
+          "anyOf": [
+            {
+              "properties": {
+                "compile_id": {
+                  "type": "string"
+                },
+                "lifetime": {
+                  "type": "string"
+                },
+                "ok": {
+                  "const": true
+                },
+                "schema": {
+                  "const": "fullbleed.mcp.compile_result.v1"
+                },
+                "stats": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "schema",
+                "ok",
+                "compile_id",
+                "stats",
+                "lifetime"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "ok": {
+                  "const": false
+                },
+                "recommended_actions": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "relevant_commands": {
+                  "type": "object"
+                },
+                "schema": {
+                  "const": "fullbleed.error.v1"
+                }
+              },
+              "required": [
+                "schema",
+                "ok",
+                "code",
+                "message"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "title": "Compile a document family"
+      },
+      {
+        "annotations": {
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false,
+          "readOnlyHint": false
+        },
+        "description": "Render a process-local compiled handle to a workspace PDF using static copies, fixed bindings, or content-reflow bindings.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "bindings": {
+              "additionalProperties": {
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "type": "object"
+            },
+            "compile_id": {
+              "type": "string"
+            },
+            "compression": {
+              "enum": [
+                "throughput",
+                "compact"
+              ]
+            },
+            "copies": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "mode": {
+              "enum": [
+                "static",
+                "fixed_bindings",
+                "reflow_bindings"
+              ]
+            },
+            "output_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "compile_id",
+            "output_path",
+            "mode"
+          ],
+          "type": "object"
+        },
+        "name": "fullbleed_render_compiled",
+        "outputSchema": {
+          "anyOf": [
+            {
+              "properties": {
+                "bytes_written": {
+                  "type": "integer"
+                },
+                "compile_id": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "ok": {
+                  "const": true
+                },
+                "output_path": {
+                  "type": "string"
+                },
+                "page_count": {
+                  "type": "integer"
+                },
+                "record_count": {
+                  "type": "integer"
+                },
+                "schema": {
+                  "const": "fullbleed.mcp.compiled_render_result.v1"
+                },
+                "sha256": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "schema",
+                "ok",
+                "compile_id",
+                "record_count",
+                "output_path",
+                "page_count"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "ok": {
+                  "const": false
+                },
+                "recommended_actions": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "relevant_commands": {
+                  "type": "object"
+                },
+                "schema": {
+                  "const": "fullbleed.error.v1"
+                }
+              },
+              "required": [
+                "schema",
+                "ok",
+                "code",
+                "message"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "title": "Render a compiled document"
+      },
+      {
+        "annotations": {
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false,
+          "readOnlyHint": false
+        },
+        "description": "Compile one inline document family and render distinct columnar records through the fixed or content-reflow VDP lane in one call.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "bindings": {
+              "additionalProperties": {
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "type": "object"
+            },
+            "compression": {
+              "enum": [
+                "throughput",
+                "compact"
+              ]
+            },
+            "css": {
+              "type": "string"
+            },
+            "document_lang": {
+              "type": "string"
+            },
+            "document_title": {
+              "type": "string"
+            },
+            "html": {
+              "type": "string"
+            },
+            "mode": {
+              "enum": [
+                "fixed_bindings",
+                "reflow_bindings"
+              ]
+            },
+            "output_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "html",
+            "bindings",
+            "mode",
+            "output_path"
+          ],
+          "type": "object"
+        },
+        "name": "fullbleed_compile_vdp",
+        "outputSchema": {
+          "anyOf": [
+            {
+              "properties": {
+                "bytes_written": {
+                  "type": "integer"
+                },
+                "compiled_stats": {
+                  "type": "object"
+                },
+                "metrics": {
+                  "type": "object"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "ok": {
+                  "const": true
+                },
+                "output_path": {
+                  "type": "string"
+                },
+                "page_count": {
+                  "type": "integer"
+                },
+                "record_count": {
+                  "type": "integer"
+                },
+                "schema": {
+                  "const": "fullbleed.mcp.vdp_result.v1"
+                },
+                "sha256": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "schema",
+                "ok",
+                "record_count",
+                "output_path",
+                "page_count",
+                "metrics"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "ok": {
+                  "const": false
+                },
+                "recommended_actions": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "relevant_commands": {
+                  "type": "object"
+                },
+                "schema": {
+                  "const": "fullbleed.error.v1"
+                }
+              },
+              "required": [
+                "schema",
+                "ok",
+                "code",
+                "message"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "title": "Compile and render a VDP job"
+      }
+    ],
+    "transport": "newline-delimited JSON-RPC 2.0 over stdio"
+  }
+}

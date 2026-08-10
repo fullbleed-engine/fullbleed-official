@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fullbleed PDF Engine"
+  short_description: "Create deterministic, validated PDF documents"
+  default_prompt: "Use $fullbleed to create and validate a deterministic PDF document from my structured content."

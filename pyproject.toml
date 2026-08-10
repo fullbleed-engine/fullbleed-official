@@ -5,8 +5,8 @@ backend-path = ["build_backend"]
 
 [project]
 name = "fullbleed"
-version = "2.2.5"
-description = "Deterministic static HTML/CSS-to-PDF renderer built in Rust"
+version = "2.3.0"
+description = "Deterministic Python PDF engine for reports, invoices, accessible documents, print-ready output, and compiled VDP"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -18,7 +18,27 @@ license-files = [
     "FONT_LICENSE_AUDIT.md",
     "FONT_LICENSE_AUDIT.json",
 ]
-keywords = ["pdf", "html", "css", "rust", "static-pdf", "document-generation"]
+keywords = [
+    "pdf-generation",
+    "document-generation",
+    "html-to-pdf",
+    "python-pdf-engine",
+    "deterministic-pdf",
+    "reports",
+    "invoices",
+    "statements",
+    "forms",
+    "transactional-documents",
+    "vdp",
+    "variable-data-printing",
+    "accessible-pdf",
+    "pdf-ua",
+    "pdf-a",
+    "pdf-x",
+    "ai-agents",
+    "agentic-document-generation",
+    "mcp",
+]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "License :: OSI Approved :: MIT License",
@@ -34,7 +54,10 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Office/Business",
+    "Topic :: Office/Business :: Financial",
     "Topic :: Printing",
+    "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Text Processing :: Markup :: HTML",
 ]
 
@@ -47,6 +70,9 @@ Homepage = "https://fullbleed.dev"
 Repository = "https://github.com/fullbleed-engine/fullbleed-official"
 Documentation = "https://github.com/fullbleed-engine/fullbleed-official#readme"
 Issues = "https://github.com/fullbleed-engine/fullbleed-official/issues"
+Agent-Contract = "https://github.com/fullbleed-engine/fullbleed-official/blob/master/fullbleed-agent-contract.json"
+Agent-Skill = "https://github.com/fullbleed-engine/fullbleed-official/tree/master/skills/fullbleed"
+MCP = "https://github.com/fullbleed-engine/fullbleed-official/tree/master/packages/fullbleed-mcp"
 
 [project.optional-dependencies]
 # Compatibility name retained for existing `fullbleed[api]` consumers. The
@@ -62,6 +88,13 @@ abi-tag = "cp310-abi3"
 strip = true
 
 [tool.fullbleed-build.wheel-resources]
+"fullbleed/agent_contract.json" = "fullbleed-agent-contract.json"
+"fullbleed/llms.txt" = "llms.txt"
+"fullbleed/skill/SKILL.md" = "skills/fullbleed/SKILL.md"
+"fullbleed/skill/agents/openai.yaml" = "skills/fullbleed/agents/openai.yaml"
+"fullbleed/skill/references/compliance.md" = "skills/fullbleed/references/compliance.md"
+"fullbleed/skill/references/selection.md" = "skills/fullbleed/references/selection.md"
+"fullbleed/skill/references/workflows.md" = "skills/fullbleed/references/workflows.md"
 "fullbleed/specs/fullbleed.audit_registry.v1.yaml" = "docs/specs/fullbleed.audit_registry.v1.yaml"
 "fullbleed/specs/fullbleed.a11y.verify.v1.schema.json" = "docs/specs/fullbleed.a11y.verify.v1.schema.json"
 "fullbleed/specs/fullbleed.pmr.v1.schema.json" = "docs/specs/fullbleed.pmr.v1.schema.json"

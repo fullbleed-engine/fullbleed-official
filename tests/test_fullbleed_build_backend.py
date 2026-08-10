@@ -77,6 +77,16 @@ def test_python_310_toml_fallback_reads_complete_project_configuration(backend) 
         ]
         == "docs/specs/fullbleed.audit_registry.v1.yaml"
     )
+    assert (
+        parsed["tool"]["fullbleed-build"]["wheel-resources"][
+            "fullbleed/agent_contract.json"
+        ]
+        == "fullbleed-agent-contract.json"
+    )
+    assert (
+        parsed["tool"]["fullbleed-build"]["wheel-resources"]["fullbleed/llms.txt"]
+        == "llms.txt"
+    )
 
 
 @pytest.mark.parametrize(
@@ -248,6 +258,12 @@ def test_python_and_sdist_file_sets_preserve_assets_without_build_caches(
         "fullbleed_cli/scaffold_templates/new/accessible/output/.gitkeep" in wheel_files
     )
     for name in (
+        "fullbleed/agent_contract.json",
+        "fullbleed/skill/SKILL.md",
+        "fullbleed/skill/agents/openai.yaml",
+        "fullbleed/skill/references/compliance.md",
+        "fullbleed/skill/references/selection.md",
+        "fullbleed/skill/references/workflows.md",
         "fullbleed/specs/fullbleed.audit_registry.v1.yaml",
         "fullbleed/specs/fullbleed.a11y.verify.v1.schema.json",
         "fullbleed/specs/fullbleed.pmr.v1.schema.json",

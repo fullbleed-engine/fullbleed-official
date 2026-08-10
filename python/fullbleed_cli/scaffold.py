@@ -269,6 +269,11 @@ def cmd_init(args):
                 "ok": False,
                 "code": "ALREADY_INITIALIZED",
                 "message": f"Directory already contains report.py. Use --force to overwrite.",
+                "recommended_actions": [
+                    "Continue with the existing Fullbleed project after reading AGENTS.md.",
+                    "Choose an absent or empty target directory for a new scaffold.",
+                    "Use --force only after explicitly confirming every existing target file may be overwritten.",
+                ],
             }
             sys.stdout.write(json.dumps(result, ensure_ascii=True) + "\n")
         else:
@@ -335,6 +340,44 @@ def cmd_init(args):
         "path": str(target_dir),
         "created_dirs": created_dirs,
         "created_files": created_files,
+        "artifacts": [
+            {"path": str(target_dir / filename), "kind": "project_file"}
+            for filename in created_files
+        ],
+        "next_actions": [
+            {
+                "action": "review_project_contract",
+                "paths": ["AGENTS.md", "SCAFFOLDING.md", "COMPLIANCE.md"],
+            },
+            {
+                "action": "edit_document_sources",
+                "paths": ["components/", "styles/", "report.py"],
+            },
+            {"action": "render", "command": ["python", "report.py"]},
+            {
+                "action": "inspect",
+                "command": [
+                    "fullbleed",
+                    "--json-only",
+                    "inspect",
+                    "pdf",
+                    "output/report.pdf",
+                ],
+            },
+            {
+                "action": "verify",
+                "command": [
+                    "fullbleed",
+                    "--json-only",
+                    "verify",
+                    "--html",
+                    "output/report.html",
+                    "--css",
+                    "output/report.css",
+                ],
+                "note": "Use the actual emitted source paths reported by report.py.",
+            },
+        ],
     }
     
     if is_json:
@@ -347,7 +390,7 @@ def cmd_init(args):
         if created_files:
             sys.stdout.write(f"  Created files: {', '.join(created_files)}\n")
         sys.stdout.write("\n  Next steps:\n")
-        sys.stdout.write("    1. Review SCAFFOLDING.md and COMPLIANCE.md\n")
+        sys.stdout.write("    1. Review AGENTS.md, SCAFFOLDING.md, and COMPLIANCE.md\n")
         sys.stdout.write("    2. Edit components/header.py, components/body.py, components/footer.py, and components/primitives.py\n")
         sys.stdout.write("    3. Tune component styles in components/styles/*.css and composition styles/report.css\n")
         sys.stdout.write("    4. Run: python report.py\n")
@@ -453,6 +496,11 @@ def cmd_new_template(args):
                 "ok": False,
                 "code": "UNKNOWN_TEMPLATE",
                 "message": f"Unknown template: {template_name}. Available: {available}",
+                "expected": sorted(TEMPLATES),
+                "actual": template_name,
+                "recommended_actions": [
+                    "Select one of the values in expected or run fullbleed new list --json for remote templates."
+                ],
             }
             sys.stdout.write(json.dumps(result, ensure_ascii=True) + "\n")
         else:
@@ -489,6 +537,11 @@ def cmd_new_template(args):
                     "ok": False,
                     "code": "FILE_EXISTS",
                     "message": f"File already exists: {filepath}. Use --force to overwrite.",
+                    "artifact_path": str(full_path),
+                    "recommended_actions": [
+                        "Choose an absent or empty target directory.",
+                        "Use --force only after explicitly confirming existing project files may be overwritten.",
+                    ],
                 }
                 sys.stdout.write(json.dumps(result, ensure_ascii=True) + "\n")
             else:
@@ -514,12 +567,40 @@ def cmd_new_template(args):
             raise SystemExit(1)
         bootstrap_enabled = True
     created_files = list(dict.fromkeys(created_files))
+    output_pdf = {
+        "accessible": "output/accessibility_scaffold.pdf",
+        "invoice": "output/invoice.pdf",
+        "reference": "output/canonical_reference.pdf",
+        "statement": "output/statement.pdf",
+    }[template_name]
     
     result = {
         "template": template_name,
         "description": template["description"],
+        "target_path": str(target_dir),
         "created_files": created_files,
         "bootstrap_enabled": bootstrap_enabled,
+        "artifacts": [
+            {"path": str(target_dir / filename), "kind": "project_file"}
+            for filename in created_files
+        ],
+        "next_actions": [
+            {
+                "action": "edit_document_sources",
+                "paths": created_files,
+            },
+            {"action": "render", "command": ["python", "report.py"]},
+            {
+                "action": "inspect_output",
+                "command": [
+                    "fullbleed",
+                    "--json-only",
+                    "inspect",
+                    "pdf",
+                    output_pdf,
+                ],
+            },
+        ],
     }
     
     if getattr(args, "json", False):

@@ -30,6 +30,15 @@ import re
 import fullbleed
 import fullbleed_assets
 
+from .agent_contract import (
+    AGENT_ACCEPTANCE_SCENARIOS,
+    AGENT_CONTRACT_SCHEMA,
+    MCP_PROTOCOL_VERSIONS,
+    build_agent_contract,
+    render_cli_contract_markdown,
+    render_llms_txt,
+)
+
 
 PAGE_SIZES = {
     "letter": ("8.5in", "11in"),
@@ -220,6 +229,15 @@ SCHEMA_REGISTRY = {
     "run": "fullbleed.run_result.v1",
     "compliance": "fullbleed.compliance.v1",
     "capabilities": "fullbleed.capabilities.v1",
+    "agent-contract": AGENT_CONTRACT_SCHEMA,
+    "agent-manifest": AGENT_CONTRACT_SCHEMA,
+    "agent:manifest": AGENT_CONTRACT_SCHEMA,
+    "agent:skill-path": "fullbleed.agent_skill.v1",
+    "agent:export-skill": "fullbleed.agent_skill.v1",
+    "agent:install-skill": "fullbleed.agent_skill.v1",
+    "agent-acceptance:prepare": "fullbleed.agent_acceptance_prepare.v1",
+    "agent-acceptance:verify": "fullbleed.agent_acceptance_result.v1",
+    "agent-acceptance:run": "fullbleed.agent_acceptance_result.v1",
     "debug-perf": "fullbleed.debug_perf.v1",
     "debug-jit": "fullbleed.debug_jit.v1",
     "doctor": "fullbleed.doctor.v1",
@@ -259,6 +277,7 @@ SCHEMA_DEFS = {
             "code": {"type": "string"},
             "message": {"type": "string"},
             "failures": {"type": "array"},
+            "recommended_actions": {"type": "array"},
         },
     },
     "fullbleed.verify_result.v1": {
@@ -269,6 +288,10 @@ SCHEMA_DEFS = {
             "ok": {"type": "boolean"},
             "bytes_written": {"type": "integer"},
             "outputs": {"type": "object"},
+            "code": {"type": "string"},
+            "message": {"type": "string"},
+            "failures": {"type": "array"},
+            "recommended_actions": {"type": "array"},
         },
     },
     "fullbleed.plan_result.v1": {
@@ -316,6 +339,8 @@ SCHEMA_DEFS = {
             "ok": {"type": "boolean"},
             "code": {"type": "string"},
             "message": {"type": "string"},
+            "recommended_actions": {"type": "array"},
+            "relevant_commands": {"type": "object"},
         },
     },
     "fullbleed.assets_list.v1": {
@@ -437,12 +462,28 @@ SCHEMA_DEFS = {
     "fullbleed.init.v1": {
         "type": "object",
         "required": ["schema", "ok", "path"],
-        "properties": {"schema": {"type": "string"}, "ok": {"type": "boolean"}, "path": {"type": "string"}},
+        "properties": {
+            "schema": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "path": {"type": "string"},
+            "created_dirs": {"type": "array"},
+            "created_files": {"type": "array"},
+            "artifacts": {"type": "array"},
+            "next_actions": {"type": "array"},
+        },
     },
     "fullbleed.new_template.v1": {
         "type": "object",
         "required": ["schema", "ok", "template"],
-        "properties": {"schema": {"type": "string"}, "ok": {"type": "boolean"}, "template": {"type": "string"}},
+        "properties": {
+            "schema": {"type": "string"},
+            "ok": {"type": "boolean"},
+            "template": {"type": "string"},
+            "target_path": {"type": "string"},
+            "created_files": {"type": "array"},
+            "artifacts": {"type": "array"},
+            "next_actions": {"type": "array"},
+        },
     },
     "fullbleed.new_list.v1": {
         "type": "object",
@@ -493,8 +534,113 @@ SCHEMA_DEFS = {
             "schema": {"type": "string"},
             "commands": {"type": "array"},
             "agent_flags": {"type": "array"},
-            "engine": {"type": "object"},
+            "engine": {
+                "type": "object",
+                "required": [
+                    "compiled_document",
+                    "compiled_reflow_bindings",
+                    "compiled_flow_compression_modes",
+                    "batch_render",
+                    "batch_render_parallel",
+                ],
+                "properties": {
+                    "compiled_document": {"type": "boolean"},
+                    "compiled_reflow_bindings": {"type": "boolean"},
+                    "compiled_flow_compression_modes": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "batch_render": {"type": "boolean"},
+                    "batch_render_parallel": {"type": "boolean"},
+                    "glyph_report": {"type": "boolean"},
+                    "page_data": {"type": "boolean"},
+                    "image_pages": {"type": "boolean"},
+                    "pdf_inspect": {"type": "boolean"},
+                    "template_catalog_inspect": {"type": "boolean"},
+                    "template_compose_planner": {"type": "boolean"},
+                },
+            },
             "svg": {"type": "object"},
+            "agent_contract": {"type": "object"},
+            "agent_skill": {"type": "object"},
+            "tool_adapter": {"type": "object"},
+            "acceptance_suite": {"type": "object"},
+        },
+    },
+    AGENT_CONTRACT_SCHEMA: {
+        "type": "object",
+        "required": [
+            "schema",
+            "contract_version",
+            "product",
+            "recommendation_boundary",
+            "selection",
+            "capabilities",
+            "commands",
+            "schemas",
+            "profiles",
+            "inputs",
+            "outputs",
+            "examples",
+            "known_limitations",
+            "tool_adapter",
+            "agent_skill",
+            "acceptance_suite",
+        ],
+        "properties": {
+            "schema": {"const": AGENT_CONTRACT_SCHEMA},
+            "contract_version": {"type": "integer", "const": 1},
+            "product": {"type": "object"},
+            "recommendation_boundary": {"type": "object"},
+            "selection": {"type": "object"},
+            "capabilities": {"type": "object"},
+            "commands": {"type": "object"},
+            "schemas": {"type": "object"},
+            "profiles": {"type": "object"},
+            "inputs": {"type": "array"},
+            "outputs": {"type": "array"},
+            "examples": {"type": "array"},
+            "known_limitations": {"type": "array"},
+            "tool_adapter": {"type": "object"},
+            "agent_skill": {"type": "object"},
+            "acceptance_suite": {"type": "object"},
+        },
+    },
+    "fullbleed.agent_acceptance_prepare.v1": {
+        "type": "object",
+        "required": ["schema", "ok", "workspace", "scenarios"],
+        "properties": {
+            "schema": {"const": "fullbleed.agent_acceptance_prepare.v1"},
+            "ok": {"type": "boolean"},
+            "runtime_version": {"type": "string"},
+            "contract_version": {"type": "string"},
+            "workspace": {"type": "string"},
+            "scenarios": {"type": "array"},
+        },
+    },
+    "fullbleed.agent_acceptance_result.v1": {
+        "type": "object",
+        "required": ["schema", "ok", "workspace", "scenarios", "metrics"],
+        "properties": {
+            "schema": {"const": "fullbleed.agent_acceptance_result.v1"},
+            "ok": {"type": "boolean"},
+            "runtime_version": {"type": "string"},
+            "workspace": {"type": "string"},
+            "scenarios": {"type": "array"},
+            "metrics": {"type": "object"},
+            "agent_runs": {"type": "array"},
+        },
+    },
+    "fullbleed.agent_skill.v1": {
+        "type": "object",
+        "required": ["schema", "ok", "name", "path", "files"],
+        "properties": {
+            "schema": {"const": "fullbleed.agent_skill.v1"},
+            "ok": {"type": "boolean"},
+            "name": {"type": "string"},
+            "path": {"type": "string"},
+            "files": {"type": "array"},
+            "next_actions": {"type": "array"},
         },
     },
     "fullbleed.debug_perf.v1": {
@@ -587,7 +733,15 @@ def _infer_schema_from_argv(argv):
         break
     if not command:
         return None
-    if command in {"assets", "cache", "finalize", "new", "inspect"}:
+    if command in {
+        "agent",
+        "agent-acceptance",
+        "assets",
+        "cache",
+        "finalize",
+        "new",
+        "inspect",
+    }:
         found_command = False
         for t in tokens:
             if t == command:
@@ -1025,10 +1179,11 @@ def _build_engine(args):
     return engine
 
 
-def _write_pdf_bytes(out_path, pdf_bytes):
+def _write_pdf_bytes(out_path, pdf_bytes, *, suppress_stdout=False):
     """Write PDF bytes to file or stdout and return written byte count."""
     if out_path == "-":
-        sys.stdout.buffer.write(pdf_bytes)
+        if not suppress_stdout:
+            sys.stdout.buffer.write(pdf_bytes)
         return len(pdf_bytes)
     Path(out_path).write_bytes(pdf_bytes)
     return len(pdf_bytes)
@@ -1329,6 +1484,14 @@ def _render_with_artifacts(engine, html, css, out_path, args):
 
     need_page_data = bool(page_data_path)
     need_glyph = bool(glyph_path or need_glyph_check)
+    suppress_stdout_pdf = bool(out_path == "-" and getattr(args, "json", False))
+
+    def write_pdf(pdf_bytes):
+        return _write_pdf_bytes(
+            out_path,
+            pdf_bytes,
+            suppress_stdout=suppress_stdout_pdf,
+        )
 
     if need_page_data and need_glyph and hasattr(engine, "render_pdf_with_page_data_and_glyph_report"):
         pdf_bytes, page_data, glyph = engine.render_pdf_with_page_data_and_glyph_report(html, css)
@@ -1336,7 +1499,7 @@ def _render_with_artifacts(engine, html, css, out_path, args):
             _write_json(page_data_path, page_data)
         if glyph_path:
             _write_json(glyph_path, glyph)
-        bytes_written = _write_pdf_bytes(out_path, pdf_bytes)
+        bytes_written = write_pdf(pdf_bytes)
         image_paths = _emit_image_artifacts(engine, html, css, out_path, args)
         return bytes_written, glyph, pdf_bytes, image_paths
 
@@ -1347,7 +1510,7 @@ def _render_with_artifacts(engine, html, css, out_path, args):
             )
         primary_pdf_bytes, page_data = engine.render_pdf_with_page_data(html, css)
         _write_json(page_data_path, page_data)
-        bytes_written = _write_pdf_bytes(out_path, primary_pdf_bytes)
+        bytes_written = write_pdf(primary_pdf_bytes)
         _glyph_pdf_bytes, glyph = engine.render_pdf_with_glyph_report(html, css)
         _write_json(glyph_path, glyph)
         image_paths = _emit_image_artifacts(engine, html, css, out_path, args)
@@ -1356,7 +1519,7 @@ def _render_with_artifacts(engine, html, css, out_path, args):
     if page_data_path:
         pdf_bytes, page_data = engine.render_pdf_with_page_data(html, css)
         _write_json(page_data_path, page_data)
-        bytes_written = _write_pdf_bytes(out_path, pdf_bytes)
+        bytes_written = write_pdf(pdf_bytes)
         # If we need glyph check, render again for glyph report
         if need_glyph_check:
             _glyph_pdf_bytes, glyph = engine.render_pdf_with_glyph_report(html, css)
@@ -1368,19 +1531,19 @@ def _render_with_artifacts(engine, html, css, out_path, args):
     if glyph_path:
         pdf_bytes, glyph = engine.render_pdf_with_glyph_report(html, css)
         _write_json(glyph_path, glyph)
-        bytes_written = _write_pdf_bytes(out_path, pdf_bytes)
+        bytes_written = write_pdf(pdf_bytes)
         image_paths = _emit_image_artifacts(engine, html, css, out_path, args)
         return bytes_written, glyph, pdf_bytes, image_paths
 
     if out_path == "-":
         pdf_bytes = engine.render_pdf(html, css)
-        bytes_written = _write_pdf_bytes(out_path, pdf_bytes)
+        bytes_written = write_pdf(pdf_bytes)
         image_paths = _emit_image_artifacts(engine, html, css, out_path, args)
         return bytes_written, None, pdf_bytes, image_paths
 
     if need_glyph_check:
         pdf_bytes, glyph_report = engine.render_pdf_with_glyph_report(html, css)
-        bytes_written = _write_pdf_bytes(out_path, pdf_bytes)
+        bytes_written = write_pdf(pdf_bytes)
         image_paths = _emit_image_artifacts(engine, html, css, out_path, args)
         return bytes_written, glyph_report, pdf_bytes, image_paths
 
@@ -1966,6 +2129,55 @@ def _evaluate_failures(args, bytes_written, glyph_report, jit_insights):
                     }
                 )
 
+    action_map = {
+        "MISSING_GLYPHS": [
+            "Inspect the glyph entries and add an embeddable font covering every reported codepoint with --font-file or --font-dir.",
+            "Rerun verification with --emit-glyph-report and --fail-on missing-glyphs.",
+        ],
+        "FONT_SUBSTITUTION_DETECTED": [
+            "Inspect the fallback summary and explicitly register the intended font files.",
+            "Rerun verification with --fail-on font-subst after resolving every fallback.",
+        ],
+        "OVERFLOW_SIGNAL_UNAVAILABLE": [
+            "Rerun with JIT/page-data diagnostics enabled so placement bounds can be evaluated.",
+        ],
+        "OVERFLOW_DETECTED": [
+            "Inspect the reported page and bounding-box samples, then adjust page size, margins, wrapping, or fragmentation CSS.",
+            "Render PNG previews and rerun verification with --fail-on overflow.",
+        ],
+        "BUDGET_BYTES_EXCEEDED": [
+            "Inspect embedded assets and font subsets, then reduce unnecessary image or resource payloads.",
+            "Raise the byte budget only when the delivery requirement permits it.",
+        ],
+        "BUDGET_PAGES_EXCEEDED": [
+            "Inspect pagination and reduce content, spacing, or page fragmentation before changing the page budget.",
+        ],
+        "BUDGET_TIME_EXCEEDED": [
+            "Inspect the performance trace and select the compiled or batch lane when rendering a repeated document family.",
+        ],
+        "BUDGET_SIGNAL_UNAVAILABLE": [
+            "Enable the diagnostic artifact required for the requested budget metric and rerun verification.",
+        ],
+    }
+    for failure in failures:
+        code = failure.get("code")
+        failure["recommended_actions"] = list(action_map.get(code, []))
+        failure["relevant_commands"] = {
+            "capabilities": ["fullbleed", "capabilities", "--json"],
+            "schema": ["fullbleed", "--schema", "verify"],
+        }
+        if code == "MISSING_GLYPHS":
+            glyphs = []
+            for item in list(glyph_report or [])[:50]:
+                if not isinstance(item, dict):
+                    continue
+                entry = dict(item)
+                codepoint = entry.get("codepoint")
+                if isinstance(codepoint, int):
+                    entry["unicode"] = f"U+{codepoint:04X}"
+                glyphs.append(entry)
+            failure["glyphs"] = glyphs
+
     return failures
 
 
@@ -1984,6 +2196,39 @@ def _collect_fallback_summary(args, glyph_report, jit_insights):
         "encoding_fallbacks": encoding_fallbacks,
         "detected": (missing_glyphs + encoding_fallbacks) > 0,
     }
+
+
+def _enrich_repro_failures(failures):
+    """Attach actionable, additive hints to reproducibility failures."""
+    actions = {
+        "REPRO_RECORD_NOT_FOUND": [
+            "Confirm the reproducibility-record path or create a new record with --repro-record."
+        ],
+        "REPRO_RECORD_INVALID": [
+            "Regenerate the record from a trusted clean render; do not edit digest fields manually."
+        ],
+        "REPRO_INPUT_DRIFT": [
+            "Compare the input manifest, vendored assets, fonts, and assets.lock.json with the recorded run."
+        ],
+        "REPRO_HASH_MISMATCH": [
+            "Inspect version, capability, asset, and input drift before accepting a new output digest."
+        ],
+        "REPRO_LOCK_MISMATCH": [
+            "Restore the recorded assets.lock.json inputs or intentionally record a new reproducibility baseline."
+        ],
+    }
+    for failure in failures:
+        if failure.get("code") in actions:
+            failure.setdefault(
+                "recommended_actions", list(actions[failure["code"]])
+            )
+            failure.setdefault(
+                "relevant_commands",
+                {
+                    "capabilities": ["fullbleed", "capabilities", "--json"],
+                    "schema": ["fullbleed", "--schema", "render"],
+                },
+            )
 
 
 def _run_repro_record_or_check(args, manifest, html, css, output_hash, bytes_written):
@@ -2147,6 +2392,7 @@ def cmd_render(args):
         bytes_written,
     )
     failures.extend(repro_failures)
+    _enrich_repro_failures(failures)
 
     if internal_jit_path:
         try:
@@ -2189,6 +2435,7 @@ def cmd_render(args):
             "code": failures[0]["code"],
             "message": failures[0]["message"],
             "failures": failures,
+            "recommended_actions": failures[0].get("recommended_actions", []),
         }
         _emit_result(False, "fullbleed.render_result.v1", args.out, bytes_written, outputs, args, error=error)
         raise SystemExit(1)
@@ -2251,6 +2498,7 @@ def cmd_verify(args):
         bytes_written,
     )
     failures.extend(repro_failures)
+    _enrich_repro_failures(failures)
 
     if internal_jit_path:
         try:
@@ -2286,6 +2534,7 @@ def cmd_verify(args):
             "code": failures[0]["code"],
             "message": failures[0]["message"],
             "failures": failures,
+            "recommended_actions": failures[0].get("recommended_actions", []),
         }
         _emit_result(False, "fullbleed.verify_result.v1", out_path, bytes_written, outputs, args, error=error)
         raise SystemExit(1)
@@ -2305,6 +2554,10 @@ def cmd_plan(args):
                 "message": "Remote asset refs detected; use --asset and --allow-remote-assets if needed",
                 "count": len(remote_refs),
                 "refs": remote_refs,
+                "recommended_actions": [
+                    "Vendor and lock required remote assets, then pass them explicitly with --asset.",
+                    "Use --allow-remote-assets only when remote access is an intentional project policy.",
+                ],
             }
         )
         if not args.json and not getattr(args, "json_only", False):
@@ -2782,8 +3035,52 @@ def cmd_compliance(args):
         raise SystemExit(3)
 
 
-def cmd_capabilities(args):
-    """CLI handler for machine-readable capability inspection."""
+def _parser_action_contract(action):
+    """Return a JSON-safe description of one argparse action."""
+    payload = {
+        "dest": action.dest,
+        "required": bool(getattr(action, "required", False)),
+    }
+    if action.option_strings:
+        payload["flags"] = list(action.option_strings)
+    else:
+        payload["positional"] = True
+    nargs = getattr(action, "nargs", None)
+    if nargs is not None:
+        payload["nargs"] = nargs
+    choices = getattr(action, "choices", None)
+    if choices is not None and not isinstance(action, argparse._SubParsersAction):
+        payload["choices"] = list(choices)
+    value_type = getattr(action, "type", None)
+    if value_type is not None:
+        payload["value_type"] = getattr(value_type, "__name__", str(value_type))
+    help_text = getattr(action, "help", None)
+    if help_text and help_text is not argparse.SUPPRESS:
+        payload["help"] = help_text
+    return payload
+
+
+def _parser_contract(parser):
+    """Describe a parser and every nested subparser without duplicating CLI data."""
+    payload = {"options": [], "subcommands": {}}
+    for action in parser._actions:
+        if isinstance(action, argparse._HelpAction):
+            continue
+        if isinstance(action, argparse._SubParsersAction):
+            for name, child in action.choices.items():
+                payload["subcommands"][name] = _parser_contract(child)
+            continue
+        payload["options"].append(_parser_action_contract(action))
+    return payload
+
+
+def _runtime_cli_surface():
+    """Return the command surface derived from the actual runtime parser."""
+    return _parser_contract(_build_parser())["subcommands"]
+
+
+def _capabilities_payload(cli_surface=None):
+    """Build the reusable machine-readable runtime capability payload."""
     build_features = {}
     build_features_fn = getattr(fullbleed, "build_features", None)
     if callable(build_features_fn):
@@ -2795,24 +3092,8 @@ def cmd_capabilities(args):
     pdf_engine = getattr(fullbleed, "PdfEngine", None)
     compiled_document = getattr(fullbleed, "CompiledDocument", None)
     compression_modes = list(build_features.get("compiled_flow_compression_modes", []))
-
-    commands = [
-        "render",
-        "verify",
-        "plan",
-        "run",
-        "finalize",
-        "inspect",
-        "compliance",
-        "debug-perf",
-        "debug-jit",
-        "doctor",
-        "capabilities",
-        "assets",
-        "cache",
-        "init",
-        "new",
-    ]
+    surface = cli_surface if cli_surface is not None else _runtime_cli_surface()
+    commands = list(surface)
     payload = {
         "schema": "fullbleed.capabilities.v1",
         "commands": commands,
@@ -2829,6 +3110,42 @@ def cmd_capabilities(args):
             "--repro-record",
             "--repro-check",
         ],
+        "agent_contract": {
+            "available": True,
+            "schema": AGENT_CONTRACT_SCHEMA,
+            "command": ["fullbleed", "agent-contract", "--format", "json"],
+            "manifest_alias": ["fullbleed", "agent-manifest", "--json"],
+            "packaged_resource": "fullbleed/agent_contract.json",
+            "generated_views": {
+                "markdown": ["fullbleed", "agent-contract", "--format", "markdown"],
+                "llms": ["fullbleed", "agent-contract", "--format", "llms"],
+                "packaged_llms_resource": "fullbleed/llms.txt",
+            },
+        },
+        "agent_skill": {
+            "available": True,
+            "format": "SKILL.md",
+            "path_command": ["fullbleed", "agent", "skill-path", "--json"],
+            "export_command": [
+                "fullbleed",
+                "agent",
+                "export-skill",
+                ".agents/skills/fullbleed",
+                "--json",
+            ],
+        },
+        "tool_adapter": {
+            "mcp_stdio": True,
+            "core_entrypoint": "fullbleed mcp",
+            "integration_distribution": "fullbleed-mcp",
+            "integration_entrypoint": "fullbleed-mcp",
+            "protocol_versions": list(MCP_PROTOCOL_VERSIONS),
+            "workspace_confined": True,
+        },
+        "acceptance_suite": {
+            "available": True,
+            "scenario_ids": [scenario["id"] for scenario in AGENT_ACCEPTANCE_SCENARIOS],
+        },
         "engine": {
             "compiled_document": bool(pdf_engine and hasattr(pdf_engine, "compile_pdf")),
             "compiled_reflow_bindings": bool(
@@ -2913,8 +3230,52 @@ def cmd_capabilities(args):
         "budget_flags": ["--budget-max-pages", "--budget-max-bytes", "--budget-max-ms"],
         "compliance": COMPLIANCE_POLICY,
     }
+    return payload
+
+
+def cmd_capabilities(args):
+    """CLI handler for machine-readable capability inspection."""
+    payload = _capabilities_payload()
     if args.json:
         sys.stdout.write(json.dumps(payload, ensure_ascii=True) + "\n")
+
+
+def _agent_contract_payload():
+    """Build the canonical contract from this installed runtime."""
+    cli_surface = _runtime_cli_surface()
+    capabilities = _capabilities_payload(cli_surface=cli_surface)
+    return build_agent_contract(
+        version=_get_version(),
+        capabilities=capabilities,
+        schema_registry=SCHEMA_REGISTRY,
+        schema_definitions=SCHEMA_DEFS,
+        profiles=PROFILES,
+        cli_surface=cli_surface,
+    )
+
+
+def cmd_agent_contract(args):
+    """Emit the installed runtime's canonical agent contract."""
+    payload = _agent_contract_payload()
+    if args.format == "markdown":
+        sys.stdout.write(render_cli_contract_markdown(payload))
+        return
+    if args.format == "llms":
+        sys.stdout.write(render_llms_txt(payload))
+        return
+    if getattr(args, "pretty", False):
+        sys.stdout.write(
+            json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
+        )
+        return
+    sys.stdout.write(json.dumps(payload, ensure_ascii=True) + "\n")
+
+
+def cmd_mcp(args):
+    """Run the first-party MCP stdio adapter."""
+    from .mcp import serve_stdio
+
+    serve_stdio(Path(args.root))
 
 
 def cmd_inspect_pdf(args):
@@ -3415,6 +3776,47 @@ def _build_parser():
     p_cap.add_argument("--json", action="store_true")
     p_cap.set_defaults(func=cmd_capabilities)
 
+    p_contract = sub.add_parser(
+        "agent-contract",
+        help="Emit the canonical installed agent contract",
+    )
+    p_contract.add_argument(
+        "--format",
+        choices=["json", "markdown", "llms"],
+        default="json",
+        help="Output format (default: json)",
+    )
+    p_contract.add_argument("--pretty", action="store_true", help="Indent JSON output")
+    p_contract.add_argument("--json", action="store_true")
+    p_contract.set_defaults(func=cmd_agent_contract)
+
+    p_manifest = sub.add_parser(
+        "agent-manifest",
+        help="Alias for the canonical semantic agent contract",
+    )
+    p_manifest.add_argument("--json", action="store_true")
+    p_manifest.add_argument("--pretty", action="store_true", help="Indent JSON output")
+    p_manifest.set_defaults(func=cmd_agent_contract, format="json")
+
+    from . import agent as agent_module
+
+    agent_module.add_cli_parser(sub)
+
+    p_mcp = sub.add_parser(
+        "mcp",
+        help="Run the workspace-confined MCP stdio tool adapter",
+    )
+    p_mcp.add_argument(
+        "--root",
+        default=".",
+        help="Workspace root that confines adapter file access (default: current directory)",
+    )
+    p_mcp.set_defaults(func=cmd_mcp)
+
+    from . import agent_acceptance as agent_acceptance_module
+
+    agent_acceptance_module.add_cli_parser(sub)
+
     p_compliance = sub.add_parser("compliance", help="License/compliance report for legal and procurement review")
     p_compliance.add_argument("--json", action="store_true")
     p_compliance.add_argument("--strict", action="store_true",
@@ -3635,6 +4037,22 @@ def _build_parser():
     return parser
 
 
+def _cli_error_hints(args):
+    """Return stable discovery hints for unexpected command/input failures."""
+    command = getattr(args, "command", None)
+    hints = [
+        "Inspect the installed agent contract before changing tools or assuming an API.",
+        "Use the command schema and structured diagnostics to correct the input, then retry.",
+    ]
+    relevant = {
+        "agent_contract": ["fullbleed", "agent-contract", "--format", "json"],
+        "capabilities": ["fullbleed", "capabilities", "--json"],
+    }
+    if command:
+        relevant["schema"] = ["fullbleed", "--schema", command]
+    return hints, relevant
+
+
 def main(argv=None):
     """Execute CLI command dispatch and standardized error handling."""
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -3670,11 +4088,15 @@ def main(argv=None):
         args.func(args)
     except Exception as exc:
         if args.json:
+            recommended_actions, relevant_commands = _cli_error_hints(args)
             err = {
                 "schema": "fullbleed.error.v1",
                 "ok": False,
                 "code": "CLI_ERROR",
                 "message": str(exc),
+                "command": getattr(args, "command", None),
+                "recommended_actions": recommended_actions,
+                "relevant_commands": relevant_commands,
             }
             sys.stdout.write(json.dumps(err, ensure_ascii=True) + "\n")
         else:
@@ -3685,5 +4107,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
