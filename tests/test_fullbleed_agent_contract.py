@@ -35,6 +35,12 @@ def test_runtime_agent_contract_is_complete_and_parser_derived(
     assert "agent-contract" in contract["commands"]["surface"]
     assert "agent-acceptance" in contract["commands"]["surface"]
     assert "mcp" in contract["commands"]["surface"]
+    batch_paths = contract["commands"]["surface"]["inspect"]["subcommands"][
+        "pdf-batch"
+    ]["options"][0]
+    assert batch_paths["dest"] == "paths"
+    assert batch_paths["nargs"] == "*"
+    assert batch_paths["required"] is False
     engine = contract["capabilities"]["engine"]
     assert engine["compiled_document"] is True
     assert engine["compiled_reflow_bindings"] is True

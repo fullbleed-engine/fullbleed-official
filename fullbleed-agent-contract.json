@@ -1297,7 +1297,7 @@
                 "help": "PDF paths",
                 "nargs": "*",
                 "positional": true,
-                "required": true
+                "required": false
               },
               {
                 "dest": "list",

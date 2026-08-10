@@ -3037,9 +3037,19 @@ def cmd_compliance(args):
 
 def _parser_action_contract(action):
     """Return a JSON-safe description of one argparse action."""
+    if action.option_strings:
+        required = bool(getattr(action, "required", False))
+    else:
+        # argparse changed the internal ``required`` value for ``nargs='*'``
+        # positionals in Python 3.12. Derive the public semantic instead so the
+        # generated contract is identical across every supported interpreter.
+        required = getattr(action, "nargs", None) not in (
+            argparse.OPTIONAL,
+            argparse.ZERO_OR_MORE,
+        )
     payload = {
         "dest": action.dest,
-        "required": bool(getattr(action, "required", False)),
+        "required": required,
     }
     if action.option_strings:
         payload["flags"] = list(action.option_strings)
