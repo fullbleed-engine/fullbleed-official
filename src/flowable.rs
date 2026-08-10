@@ -33108,8 +33108,20 @@ impl Flowable for ContainerFlowable {
                 && sibling_boundary_context
                 && combined_occupied_height - remaining_height <= Pt::from_milli_i64(1_500)
                 && child.has_paint_only_fixed_height_tail(content_width, child_available_height);
+            // Relax `break-inside: avoid` before deferring an oversized box.
+            // The UA stylesheet gives tables this value too, so suppressing a
+            // split merely because earlier siblings were placed orphaned a
+            // kept heading and moved a long, splittable table to the next
+            // page. The same behavior wasted the remainder before an
+            // oversized authored keep-together block. Avoidance is only
+            // actionable when the complete box can fit a fresh fragmentainer.
+            let fresh_size =
+                avoids_page_break.then(|| child.wrap(content_width, available_content_height));
+            let fits_fresh_fragmentainer =
+                fresh_size.is_some_and(|fresh| fresh.height <= available_content_height);
             let child_split = if paint_only_edge_overhang
                 || (avoids_page_break
+                    && fits_fresh_fragmentainer
                     && ((!placed.is_empty() && !follows_only_table_captions)
                         || size.height <= available_content_height))
             {

@@ -448,6 +448,11 @@ fn build_features(py: Python<'_>) -> PyResult<PyObject> {
     out.set_item("schema", "fullbleed.build_features.v1")?;
     out.set_item("python", cfg!(feature = "python"))?;
     out.set_item("svg_raster", cfg!(feature = "svg_raster"))?;
+    out.set_item("compiled_reflow", true)?;
+    out.set_item(
+        "compiled_flow_compression_modes",
+        PyList::new(py, ["throughput", "compact"])?,
+    )?;
     Ok(out.unbind().into_any())
 }
 

@@ -7,6 +7,9 @@ import fullbleed
 ```
 
 `fullbleed` re-exports the Rust extension API plus license helpers in `python/fullbleed/__init__.py`.
+`build_features()` reports `compiled_reflow=True` and the supported
+`compiled_flow_compression_modes` so long-lived services can inspect this surface without compiling
+a probe document.
 
 ## `fullbleed.ui` (component-first authoring)
 
@@ -108,7 +111,8 @@ Key methods:
 - a flow compiler that retains the recovered template tree, binding programs, CSS/page/font state,
   guarded structural flow variants, and cached PDF page-paint programs.
 
-The reflow API described below ships in Fullbleed 2.2.4. The fixed paint/link methods remain
+The reflow API described below was introduced in Fullbleed 2.2.4 and hardened in 2.2.5 with
+per-call compression, named-string, and fragmentation fixes. The fixed paint/link methods remain
 unchanged.
 
 ```python
@@ -154,14 +158,24 @@ reflow_records = {
     "account_name": ["North", "South"],
     "narrative": ["Short review.", "A much longer review that may wrap or paginate."],
     # Explicit structural slots are trusted HTML. They may change child count
-    # and element structure; use only application-generated markup here.
+    # and element structure. Generate them from escaped fields or sanitize them
+    # with an allowlist; never pass untrusted HTML directly.
     "rows": [
         "<tr><td>A</td><td>$10</td></tr>",
         "<tr><td>B</td><td>$20</td></tr><tr><td>C</td><td>$30</td></tr>",
     ],
 }
 reflow_template.render_pdf_reflow_bindings_to_file(
-    reflow_records, "reflow-records.pdf"
+    reflow_records,
+    "reflow-records.pdf",
+    compression=fullbleed.CompiledFlowCompression.Throughput,
+)
+
+# Choose smaller streams for an archival/file-size-sensitive job. This is a
+# per-call policy and may be mixed safely with throughput jobs in one process.
+compact_pdf = reflow_template.render_pdf_reflow_bindings(
+    reflow_records,
+    compression=fullbleed.CompiledFlowCompression.Compact,
 )
 ```
 
@@ -171,14 +185,19 @@ Methods:
   `binding_slot_count`, and sorted `binding_slots`, plus `reflow_program_ready`,
   `reflow_program_error`, `reflow_binding_slot_count`, sorted `reflow_binding_slots`,
   `reflow_program_node_count`, `reflow_program_binding_text_node_count`, and
-  `reflow_program_html_binding_node_count`
+  `reflow_program_html_binding_node_count`, plus `reflow_compression_modes` and
+  `reflow_default_compression`
 - `render_pdf(deterministic_hash=None) -> bytes`
 - `render_pdf_to_file(path, deterministic_hash=None) -> int`
 - `render_pdf_batch(copies, deterministic_hash=None) -> bytes`
 - `render_pdf_bindings(bindings, deterministic_hash=None) -> bytes`
 - `render_pdf_bindings_to_file(bindings, path, deterministic_hash=None) -> int`
-- `render_pdf_reflow_bindings(bindings, deterministic_hash=None) -> bytes`
-- `render_pdf_reflow_bindings_to_file(bindings, path, deterministic_hash=None) -> int`
+- `render_pdf_reflow_bindings(bindings, deterministic_hash=None, *, compression="throughput") -> bytes`
+- `render_pdf_reflow_bindings_to_file(bindings, path, deterministic_hash=None, *, compression="throughput") -> int`
+
+`CompiledFlowCompression.Throughput` uses a bounded four-step match search for large compiled-flow
+page streams. `CompiledFlowCompression.Compact` uses the deterministic 64-step search. The choice
+is job-local, is included in native performance counters, and does not mutate the engine or process.
 
 `render_pdf_batch` is a fixed-copy virtualization API, not a dynamic template-binding API. Each
 page dictionary is distinct and ordered, while identical untagged page content/resources are
@@ -224,6 +243,10 @@ The reflow binding contract is:
 - an empty element may opt into application-generated markup with
   `data-fb-bind-html="name"`. This trusted structural value replaces the element's children and may
   contain paragraphs, table rows, options, or other context-appropriate HTML;
+- `data-fb-bind-html` is a security boundary, not an escaping helper. Build structural fragments
+  from escaped scalar fields or pass them through an application-approved HTML allowlist sanitizer.
+  Prefer ordinary `{{name}}` slots for user-controlled values because those bindings remain literal
+  text and cannot introduce elements, scripts, remote resources, or CSS;
 - structural targets must be inside the document body, empty apart from whitespace/comments, and
   cannot be `script` or `style`; the reserved compiler-root attribute is rejected inside supplied
   markup;
@@ -242,10 +265,17 @@ attributes, selectors, document metadata, or other template changes outside thes
 contracts. Direct-to-file methods use buffered writers and flush before returning.
 
 Compiled flow pages of at least 4 KiB default to the deterministic four-step Deflate search used by
-the throughput lane; smaller streams retain the compact 64-step encoder. Set
-`FULLBLEED_COMPILED_FLOW_DEFLATE_CHAIN=64` before process start when smaller large-page output is
-more important; on the independent 1,750-page workload that setting also produced exact ordinary
-renderer bytes. Values are clamped to 1-64 and are process-wide after first use.
+the throughput lane; smaller streams retain the compact 64-step encoder. Select
+`CompiledFlowCompression.Compact` per call when smaller large-page output is more important. On the
+independent 1,750-page workload compact mode produced exact ordinary-renderer bytes while throughput
+mode was faster. The former `FULLBLEED_COMPILED_FLOW_DEFLATE_CHAIN` process-global switch is no
+longer needed by the current source API.
+
+Paged-media named strings accept both `string-set: title content()` and the commonly authored
+`string-set: title content(text)` form. `content: string(title)` in an `@page` margin box carries the
+most recent value onto continuation pages. Oversized `break-inside: avoid` boxes relax avoidance in
+the current fragmentainer, and long splittable tables can start in the remainder after a kept
+heading instead of being retried wholesale on a fresh page.
 
 ## `AssetBundle`
 

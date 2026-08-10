@@ -83,7 +83,7 @@ pub use page_data::{PageDataContext, PageDataOp, PageDataValue, PaginatedContext
 use page_template::PageSelector;
 pub use page_template::{FrameSpec, PageTemplate};
 use pdf::PdfOptions;
-pub use pdf::{OutputIntent, PdfProfile, PdfVersion};
+pub use pdf::{CompiledFlowCompression, OutputIntent, PdfProfile, PdfVersion};
 pub use pdfinspect::{
     PdfInspectError, PdfInspectErrorCode, PdfInspectReport, PdfInspectWarning,
     composition_compatibility_issues, inspect_pdf_bytes, inspect_pdf_path,
@@ -96,6 +96,12 @@ use std::sync::{Arc, Condvar, Mutex};
 pub use types::{Color, ColorSpace, I32F32, Margins, Pt, Rect, Size};
 
 const FILE_OUTPUT_BUFFER_BYTES: usize = 1024 * 1024;
+
+/// Per-job execution options for compiled content-reflow bindings.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CompiledReflowOptions {
+    pub compression: CompiledFlowCompression,
+}
 
 fn render_to_buffered_file<T>(
     path: impl AsRef<std::path::Path>,
@@ -1185,6 +1191,18 @@ impl CompiledDocument {
         &self,
         bindings: &HashMap<String, Vec<String>>,
     ) -> Result<Vec<u8>, FullBleedError> {
+        self.render_reflow_bindings_to_buffer_with_options(
+            bindings,
+            CompiledReflowOptions::default(),
+        )
+    }
+
+    /// Execute compiled content reflow with explicit per-job options.
+    pub fn render_reflow_bindings_to_buffer_with_options(
+        &self,
+        bindings: &HashMap<String, Vec<String>>,
+        options: CompiledReflowOptions,
+    ) -> Result<Vec<u8>, FullBleedError> {
         let plan = self.compiled_reflow_plan()?;
         let (record_count, columns) = Self::ordered_columns_for_slots(
             plan.template.slot_names(),
@@ -1193,7 +1211,13 @@ impl CompiledDocument {
         )?;
         let estimated = record_count.saturating_mul(4096).saturating_add(64 * 1024);
         let mut out = Vec::with_capacity(estimated);
-        self.render_reflow_bindings_to_writer_ordered(plan, record_count, &columns, &mut out)?;
+        self.render_reflow_bindings_to_writer_ordered(
+            plan,
+            record_count,
+            &columns,
+            &mut out,
+            options,
+        )?;
         Ok(out)
     }
 
@@ -1203,6 +1227,7 @@ impl CompiledDocument {
         record_count: usize,
         columns: &[&[String]],
         writer: &mut W,
+        options: CompiledReflowOptions,
     ) -> Result<usize, FullBleedError> {
         use std::collections::BTreeMap;
         use std::sync::Mutex;
@@ -1216,11 +1241,13 @@ impl CompiledDocument {
             .first()
             .ok_or(FullBleedError::MissingPageTemplate)?
             .page_size;
+        let mut pdf_options = self.pdf_options.clone();
+        pdf_options.compiled_flow_compression = options.compression;
         let mut pdf_stream = pdf::PdfStreamWriter::new(
             writer,
             page_size,
             Some(self.font_registry.as_ref()),
-            self.pdf_options.clone(),
+            pdf_options,
             self.debug.clone(),
             self.perf.clone(),
         )?;
@@ -1298,6 +1325,7 @@ impl CompiledDocument {
                                     &document.page_overrides,
                                     compress_content_streams,
                                     compress_content_stream_min_bytes,
+                                    options.compression,
                                 ) {
                                     document.encoded_pages =
                                         Some(encoded.map_err(FullBleedError::Io)?);
@@ -1403,6 +1431,10 @@ impl CompiledDocument {
                     ("workers", worker_count as u64),
                     ("buffer_cap", buffer_cap as u64),
                     ("bytes", bytes_written as u64),
+                    (
+                        "compression_compact",
+                        u64::from(options.compression == CompiledFlowCompression::Compact),
+                    ),
                 ],
             );
         }
@@ -1414,13 +1446,26 @@ impl CompiledDocument {
         bindings: &HashMap<String, Vec<String>>,
         writer: &mut W,
     ) -> Result<usize, FullBleedError> {
+        self.render_reflow_bindings_to_writer_with_options(
+            bindings,
+            writer,
+            CompiledReflowOptions::default(),
+        )
+    }
+
+    pub fn render_reflow_bindings_to_writer_with_options<W: std::io::Write>(
+        &self,
+        bindings: &HashMap<String, Vec<String>>,
+        writer: &mut W,
+        options: CompiledReflowOptions,
+    ) -> Result<usize, FullBleedError> {
         let plan = self.compiled_reflow_plan()?;
         let (record_count, columns) = Self::ordered_columns_for_slots(
             plan.template.slot_names(),
             bindings,
             "compiled document has no reflow-capable {{slot}} text bindings",
         )?;
-        self.render_reflow_bindings_to_writer_ordered(plan, record_count, &columns, writer)
+        self.render_reflow_bindings_to_writer_ordered(plan, record_count, &columns, writer, options)
     }
 
     pub fn render_reflow_bindings_to_file(
@@ -1428,8 +1473,21 @@ impl CompiledDocument {
         bindings: &HashMap<String, Vec<String>>,
         path: impl AsRef<std::path::Path>,
     ) -> Result<usize, FullBleedError> {
+        self.render_reflow_bindings_to_file_with_options(
+            bindings,
+            path,
+            CompiledReflowOptions::default(),
+        )
+    }
+
+    pub fn render_reflow_bindings_to_file_with_options(
+        &self,
+        bindings: &HashMap<String, Vec<String>>,
+        path: impl AsRef<std::path::Path>,
+        options: CompiledReflowOptions,
+    ) -> Result<usize, FullBleedError> {
         render_to_buffered_file(path, |writer| {
-            self.render_reflow_bindings_to_writer(bindings, writer)
+            self.render_reflow_bindings_to_writer_with_options(bindings, writer, options)
         })
     }
 }
@@ -11423,6 +11481,82 @@ mod tests {
     }
 
     #[test]
+    fn named_string_content_text_populates_continuation_margin_boxes() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let body = (0..48)
+            .map(|index| format!("<p>RUNNING-LINE-{index:03} words words words words</p>"))
+            .collect::<String>();
+        let document = engine
+            .render_to_document(
+                &format!("<h1>RUNNING-DOC-741</h1>{body}"),
+                "@page { size: letter; margin: 36pt; \
+                         @top-right { content: string(document-title); } } \
+                 * { box-sizing: border-box; } \
+                 body { margin: 0; font: 9pt/11pt Helvetica, sans-serif; } \
+                 h1 { margin: 0 0 6pt; font-size: 12pt; line-height: 14pt; \
+                      string-set: document-title content(text); } \
+                 p { margin: 0 0 5pt; }",
+            )
+            .expect("render content(text) named string");
+        assert!(document.pages.len() > 1);
+        for (index, page) in document.pages.iter().enumerate() {
+            assert!(
+                page_contains_text(page, "RUNNING-DOC-741"),
+                "the named string must be carried into every continuation header; missing on page {} of {}",
+                index + 1,
+                document.pages.len(),
+            );
+        }
+    }
+
+    #[test]
+    fn oversized_avoid_and_long_table_fragment_in_the_current_page_remainder() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let oversized_lines = (0..80)
+            .map(|index| format!("<p>OVERSIZE-LINE-{index:03} detail detail detail</p>"))
+            .collect::<String>();
+        let oversized = engine
+            .render_to_document(
+                &format!(
+                    "<h1>Oversized keep</h1><section><strong>OVERSIZE-START</strong>{oversized_lines}<strong>OVERSIZE-END</strong></section>"
+                ),
+                "@page { size: 240pt 180pt; margin: 18pt; } \
+                 body { margin: 0; font: 9pt/11pt Helvetica, sans-serif; } \
+                 h1 { margin: 0 0 6pt; } section { break-inside: avoid; } \
+                 p { margin: 0 0 3pt; }",
+            )
+            .expect("render oversized avoid block");
+        assert!(oversized.pages.len() > 1);
+        assert!(
+            page_contains_text(&oversized.pages[0], "OVERSIZE-START"),
+            "an avoid box taller than a fresh frame must relax avoidance immediately"
+        );
+
+        let rows = (0..80)
+            .map(|index| format!("<tr><td>ROW-{index:03}</td><td>variable table content</td></tr>"))
+            .collect::<String>();
+        let table = engine
+            .render_to_document(
+                &format!(
+                    "<h1>Long table</h1><table><thead><tr><th>ROW-ID</th><th>DESCRIPTION-HEADER</th></tr></thead><tbody>{rows}</tbody></table>"
+                ),
+                "@page { size: 240pt 180pt; margin: 18pt; } \
+                 body { margin: 0; font: 8pt/10pt Helvetica, sans-serif; } \
+                 h1 { margin: 0 0 6pt; font-size: 12pt; line-height: 14pt; } \
+                 table { width: 100%; border-collapse: collapse; } \
+                 th, td { border: 0.5pt solid #999; padding: 2pt; }",
+            )
+            .expect("render long table");
+        assert!(table.pages.len() > 1);
+        assert!(page_contains_text(&table.pages[0], "Long table"));
+        assert!(
+            page_contains_text(&table.pages[0], "DESCRIPTION-HEADER"),
+            "a splittable table must use the remainder after its heading"
+        );
+        assert!(page_contains_text(&table.pages[0], "ROW-000"));
+    }
+
+    #[test]
     fn page_margin_boxes_inherit_root_typography_and_corner_alignment() {
         let engine = FullBleed::builder().build().expect("engine");
         let document = engine
@@ -14187,6 +14321,44 @@ h1 { margin: 0 0 6pt; font-size: 14pt; line-height: 16pt; }
             .render_reflow_bindings_to_buffer(&bindings)
             .expect("deterministic compiled reflow batch");
         assert_eq!(first, second, "compiled reflow must be byte deterministic");
+        let explicit_throughput = compiled
+            .render_reflow_bindings_to_buffer_with_options(
+                &bindings,
+                CompiledReflowOptions {
+                    compression: CompiledFlowCompression::Throughput,
+                },
+            )
+            .expect("explicit throughput reflow batch");
+        assert_eq!(first, explicit_throughput);
+        let compact = compiled
+            .render_reflow_bindings_to_buffer_with_options(
+                &bindings,
+                CompiledReflowOptions {
+                    compression: CompiledFlowCompression::Compact,
+                },
+            )
+            .expect("compact reflow batch");
+        assert_eq!(
+            inspect_pdf_bytes(&compact)
+                .expect("inspect compact batch")
+                .page_count,
+            inspect_pdf_bytes(&first)
+                .expect("inspect throughput batch")
+                .page_count,
+        );
+        assert!(compact.len() <= first.len());
+        assert_eq!(
+            compiled
+                .render_reflow_bindings_to_buffer_with_options(
+                    &bindings,
+                    CompiledReflowOptions {
+                        compression: CompiledFlowCompression::Throughput,
+                    },
+                )
+                .expect("throughput batch after compact batch"),
+            first,
+            "compression policy must be isolated to one render call",
+        );
         let inspection = inspect_pdf_bytes(&first).expect("inspect compiled reflow batch");
         assert!(
             inspection.page_count >= 6,

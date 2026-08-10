@@ -156,38 +156,43 @@ linker. The implementation uses native Rust scoped threads, not Python multiproc
 20-logical-processor host it selected 20 workers, an 80-record bounded window, and 512-page linker
 flushes. The Python GIL is released during native execution.
 
-The optimized `cp310-abi3` wheel was measured against the independent 2.2.3 reflow case study on a
-Windows AMD64 Intel Core i7-12700H/Python 3.11 host. The adapter used nine literal slots and three
-trusted structural slots. The first sample compiled flow variants on demand; the next 29 rendered
-the same 1,000 distinct binding rows through the hot programs and wrote a new PDF each time:
+The final `cp310-abi3` wheel was independently measured on a Windows AMD64 Intel Core
+i7-12700H/Python 3.11 host. The adapter used nine literal slots and three trusted structural slots.
+The first sample compiled flow variants on demand; the next 29 rendered the same 1,000 distinct
+binding rows through the hot programs and wrote a new PDF each time:
 
-| Measurement | Ordinary 2.2.3 | Earlier parsed-DOM reflow | Compiled flow target |
+| Measurement | Ordinary render | Compiled first discovery | Compiled hot median |
 |---|---:|---:|---:|
-| Direct-file render | 9.067 s | 6.908 s | **168.839 ms hot median** |
-| Records/s | 110.3 | 144.8 | **5,923** |
-| Pages/s | 193.0 | 253.3 | **10,365** |
-| Best hot pages/s | n/a | n/a | **12,510** |
-| First compile-on-demand batch | n/a | 6.908 s | 407.521 ms; 4,294 pages/s |
+| Direct-file render | 9.470 s | 0.509 s | **216.160 ms** |
+| Records/s | 105.6 | 1,963.9 | **4,626.2** |
+| Pages/s | 184.8 | 3,436.8 | **8,095.8** |
+| Output bytes | 5,298,961 | 6,870,320 | 6,870,320 |
 
-The hot median is 53.7x the ordinary renderer and 40.9x the earlier parsed-DOM reflow executor on
-this workload. It is explicitly a compiled-variant measurement: novel structure or values that
-violate every existing geometry guard pay a new variant compilation before joining the hot lane.
+The 29 hot samples ranged from 168.995 to 269.975 ms. The best sample reached 5,917.3 records/s
+and 10,355.3 pages/s; the earlier 168.839 ms release-note number was therefore reproduced as a
+best-case result, not as the independent median. The defensible hot-median speedup is 43.8x over
+ordinary rendering. A complete cold job including engine/font setup, binding-column construction,
+document compilation, first variant discovery, and output took 0.588 s: about 1,700 records/s,
+2,975 pages/s, and 16.2x the ordinary cold path. Novel structure or values that violate every
+existing geometry guard still pay a new variant compilation before joining the hot lane.
 
 The workload contract remains exact: 1,000 variable records, 1,750 naturally generated pages, the
 500/300/150/50 distribution of 1/2/3/4-page records, all 24,900 markers once and in order, and all
 1,750 local page counters. The throughput default uses a four-step deterministic Deflate search;
 all 29 hot repetitions produced 6,870,320 bytes with SHA-256
-`1dd02748af497ae2f477875ecf0ab87a6de5ceb55e097b4b775ddbf6d5038194`. Setting
-`FULLBLEED_COMPILED_FLOW_DEFLATE_CHAIN=64` prioritizes compactness and reproduced the ordinary PDF
-byte for byte: 5,298,961 bytes and SHA-256
+`1dd02748af497ae2f477875ecf0ab87a6de5ceb55e097b4b775ddbf6d5038194`. The independently measured
+compact hot median was 0.260 s, 3,850.5 records/s, and 6,738.4 pages/s. In current source,
+`CompiledFlowCompression.Compact` selects that deterministic 64-step search per render and can be
+mixed safely with throughput calls in one process. Compact mode reproduced the ordinary PDF byte
+for byte: 5,298,961 bytes and SHA-256
 `bb3c441313a08fb00d3bd15f23a567981f3bbbd550908e3a9fe7a07ca5d7f138`. The independent checker
 verified all markers for that parity artifact as well.
 
 ## Validation
 
-- Current compiled-reflow branch: both locked Rust matrices report 1,181 passed; the complete
-  repository Python suite against the installed optimized ABI3 wheel reports 260 passed and four
-  skipped; the Stable ABI compiled-document file reports 10 passed.
+- Independent 2.2.4 case study: 54 tests passed, `pip check` reported no broken requirements, all
+  24,900 markers were verified, extracted text matched on all 1,750 pages, and sampled raster
+  hashes matched across ordinary, throughput, and compact output.
 - `cargo test --lib`: 824 passed, zero failed.
 - Repository Python suite: 254 passed and four skipped.
 - Independent Python suite: 31 passed. One old assertion was deselected because it requires
@@ -207,9 +212,12 @@ redundant compatibility-JIT scans/clones, an immutable compiled-document API, an
 virtualization. The current `PlanAndReplay` JIT remains a compatibility planner, and the compiled
 document still holds the existing command enum rather than packed vector bytecode. Fullbleed 2.2.0
 adds fixed-geometry text slots. Fullbleed 2.2.4 adds parsed-DOM full-record
-reflow plus guarded structural flow programs and compiled PDF page-paint shaders. General typed
+reflow plus guarded structural flow programs and compiled PDF page-paint shaders. Current source
+also makes compiled-flow compression a per-call enum, accepts `content(text)` named-string capture,
+and relaxes oversized keeps before deferring splittable content. General typed
 size policies, dependency-based partial reflow, and row virtualization remain future phases. The
 200.7x result applies only to fixed compiled copies; the 337,839 pages/s direct-file result applies
-to distinct paint-only text bindings; and the measured 10,365 pages/s result applies to the hot
-compiled variants of the exact variable-length reflow case study above. None applies to arbitrary
+to distinct paint-only text bindings; and the independently measured 8,095.8 pages/s hot median
+(10,355.3 pages/s best) applies to compiled variants of the exact variable-length reflow case study
+above. None applies to arbitrary
 previously unseen HTML without the corresponding compile contract.

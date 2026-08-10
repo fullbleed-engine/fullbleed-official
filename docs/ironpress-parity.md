@@ -19,7 +19,7 @@ substrate probes:
 ```powershell
 python tools/run_ironpress_parity.py `
   --only probes `
-  --wheel target/ironpress-wheel/fullbleed-2.2.4-cp310-abi3-linux_x86_64.whl `
+  --wheel target/ironpress-wheel/fullbleed-2.2.5-cp310-abi3-linux_x86_64.whl `
   --keep-pdfs `
   --evidence-dir target/ironpress-evidence/probes
 ```
@@ -33,7 +33,7 @@ Run the complete corpus by omitting `--only`:
 
 ```powershell
 python tools/run_ironpress_parity.py `
-  --wheel target/ironpress-wheel/fullbleed-2.2.4-cp310-abi3-linux_x86_64.whl `
+  --wheel target/ironpress-wheel/fullbleed-2.2.5-cp310-abi3-linux_x86_64.whl `
   --evidence-dir target/ironpress-evidence/full
 ```
 

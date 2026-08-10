@@ -2793,6 +2793,8 @@ def cmd_capabilities(args):
             build_features = {}
     svg_raster_available = bool(build_features.get("svg_raster", False))
     pdf_engine = getattr(fullbleed, "PdfEngine", None)
+    compiled_document = getattr(fullbleed, "CompiledDocument", None)
+    compression_modes = list(build_features.get("compiled_flow_compression_modes", []))
 
     commands = [
         "render",
@@ -2828,6 +2830,14 @@ def cmd_capabilities(args):
             "--repro-check",
         ],
         "engine": {
+            "compiled_document": bool(pdf_engine and hasattr(pdf_engine, "compile_pdf")),
+            "compiled_reflow_bindings": bool(
+                build_features.get("compiled_reflow", False)
+                and pdf_engine
+                and compiled_document
+                and hasattr(compiled_document, "render_pdf_reflow_bindings")
+            ),
+            "compiled_flow_compression_modes": compression_modes,
             "batch_render": bool(pdf_engine and hasattr(pdf_engine, "render_pdf_batch")),
             "batch_render_parallel": bool(
                 pdf_engine and hasattr(pdf_engine, "render_pdf_batch_parallel")
@@ -3675,7 +3685,5 @@ def main(argv=None):
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
 
 

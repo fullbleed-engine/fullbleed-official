@@ -12,6 +12,7 @@ import fullbleed._fullbleed as native
 PUBLIC_NATIVE_NAMES = {
     "PdfEngine",
     "CompiledDocument",
+    "CompiledFlowCompression",
     "AssetKind",
     "Asset",
     "AssetBundle",
@@ -46,6 +47,7 @@ def test_stable_abi_facade_preserves_native_import_surface() -> None:
     classes = {
         "PdfEngine",
         "CompiledDocument",
+        "CompiledFlowCompression",
         "AssetKind",
         "Asset",
         "AssetBundle",
@@ -146,10 +148,13 @@ def test_pdf_engine_constructor_and_method_signatures_remain_explicit() -> None:
     )
     assert str(
         inspect.signature(fullbleed.CompiledDocument.render_pdf_reflow_bindings)
-    ) == "(self, /, bindings, deterministic_hash=None)"
+    ) == ("(self, /, bindings, deterministic_hash=None, *, compression='throughput')")
     assert str(
         inspect.signature(fullbleed.CompiledDocument.render_pdf_reflow_bindings_to_file)
-    ) == "(self, /, bindings, path, deterministic_hash=None)"
+    ) == (
+        "(self, /, bindings, path, deterministic_hash=None, *, "
+        "compression='throughput')"
+    )
     assert str(inspect.signature(fullbleed.PdfEngine.verify_accessibility_html)) == (
         "(self, /, html, css='', profile='strict', mode='error', "
         "render_preview_png_path=None, a11y_report=None, claim_evidence=None, "
@@ -164,19 +169,31 @@ def test_value_wrappers_preserve_construction_and_validation_contracts() -> None
     assert fullbleed.AssetKind.Pdf == "pdf"
     assert fullbleed.AssetKind.Svg == "svg"
     assert fullbleed.AssetKind.Other == "other"
+    assert fullbleed.CompiledFlowCompression.Throughput == "throughput"
+    assert fullbleed.CompiledFlowCompression.Compact == "compact"
     with pytest.raises(TypeError, match="No constructor defined"):
         fullbleed.AssetKind()
     with pytest.raises(TypeError, match="No constructor defined"):
         fullbleed.Asset()
     with pytest.raises(TypeError, match="No constructor defined"):
         fullbleed.CompiledDocument()
+    with pytest.raises(TypeError, match="No constructor defined"):
+        fullbleed.CompiledFlowCompression()
     with pytest.raises(TypeError, match="not an acceptable base type"):
+
         class AssetSubclass(fullbleed.Asset):
             pass
+
     with pytest.raises(TypeError, match="kind must be a string"):
         fullbleed.WatermarkSpec(1, "DRAFT")
     with pytest.raises(TypeError, match="opacity must be a real number"):
         fullbleed.WatermarkSpec("text", "DRAFT", opacity="0.5")
+
+
+def test_build_features_reports_compiled_reflow_capabilities() -> None:
+    features = fullbleed.build_features()
+    assert features["compiled_reflow"] is True
+    assert features["compiled_flow_compression_modes"] == ["throughput", "compact"]
 
 
 def test_facade_routes_assets_and_pdf_rendering_through_capsules(tmp_path) -> None:
@@ -238,6 +255,8 @@ def test_compiled_document_renders_distinct_columnar_bindings(tmp_path) -> None:
     assert stats["reflow_program_binding_text_node_count"] == 3
     assert stats["reflow_program_html_binding_node_count"] == 0
     assert stats["reflow_program_error"] is None
+    assert stats["reflow_compression_modes"] == ["throughput", "compact"]
+    assert stats["reflow_default_compression"] == "throughput"
     bindings = {
         "invoice_id": ["INV-0001", "INV-0002", "INV-0003"],
         "customer": ["Ada Lovelace", "Grace Hopper", "Katherine Johnson"],
@@ -264,7 +283,9 @@ def test_compiled_document_renders_distinct_columnar_bindings(tmp_path) -> None:
         compiled.render_pdf_bindings({"invoice_id": ["INV-ONLY"]})
 
 
-def test_compiled_document_reflows_columnar_bindings_and_streams_to_file(tmp_path) -> None:
+def test_compiled_document_reflows_columnar_bindings_and_streams_to_file(
+    tmp_path,
+) -> None:
     engine = fullbleed.PdfEngine()
     template = (
         "<!doctype html><html><body><main>"
@@ -295,6 +316,17 @@ def test_compiled_document_reflows_columnar_bindings_and_streams_to_file(tmp_pat
     second = compiled.render_pdf_reflow_bindings(bindings)
     assert first == second
     assert first.count(b"/Type /Page ") >= 6
+    compact = compiled.render_pdf_reflow_bindings(
+        bindings,
+        compression=fullbleed.CompiledFlowCompression.Compact,
+    )
+    assert compact.count(b"/Type /Page ") == first.count(b"/Type /Page ")
+    assert len(compact) <= len(first)
+    assert compiled.render_pdf_reflow_bindings(bindings) == first
+    with pytest.raises(ValueError, match="compression must be"):
+        compiled.render_pdf_reflow_bindings(bindings, compression="maximum")
+    with pytest.raises(TypeError, match="compression must be a string"):
+        compiled.render_pdf_reflow_bindings(bindings, compression=64)
 
     output = tmp_path / "reflow-bindings.pdf"
     digest = tmp_path / "reflow-bindings.sha256"
@@ -355,9 +387,7 @@ def test_compiled_reflow_supports_trusted_html_container_bindings(tmp_path) -> N
         ],
         "rows": [
             "<tr><td>HTML-A-R-000</td></tr>",
-            "".join(
-                f"<tr><td>HTML-B-R-{index:03}</td></tr>" for index in range(26)
-            ),
+            "".join(f"<tr><td>HTML-B-R-{index:03}</td></tr>" for index in range(26)),
         ],
     }
     output = tmp_path / "trusted-html-reflow.pdf"

@@ -65,6 +65,13 @@ def test_cli_capabilities_expose_asserted_pdf_standards(capsys: pytest.CaptureFi
     assert set(payload["pdf_profiles_requiring_output_intent"]) == cli.PDF_PROFILES_REQUIRING_OUTPUT_INTENT
     assert payload["svg"]["engine_flags"]["svg_raster_fallback"] is svg_raster_available
     assert payload["svg"]["build_features"]["svg_raster"] is svg_raster_available
+    assert payload["engine"]["compiled_document"] is True
+    assert payload["engine"]["compiled_reflow_bindings"] is bool(
+        build_features.get("compiled_reflow", False)
+    )
+    assert payload["engine"]["compiled_flow_compression_modes"] == list(
+        build_features.get("compiled_flow_compression_modes", [])
+    )
     assert "SVG text and tspan runs" in payload["svg"]["feature_matrix"]["native_vector"]
     assert "symbols with use viewports" in payload["svg"]["feature_matrix"]["native_vector"]
     assert "foreignObject content" in payload["svg"]["feature_matrix"]["unsupported_or_known_loss"]
@@ -82,6 +89,9 @@ def test_cli_capabilities_without_native_extension_do_not_crash(
     payload = json.loads(capsys.readouterr().out)
 
     assert payload["engine"]["batch_render"] is False
+    assert payload["engine"]["compiled_document"] is False
+    assert payload["engine"]["compiled_reflow_bindings"] is False
+    assert payload["engine"]["compiled_flow_compression_modes"] == []
     assert payload["engine"]["template_compose_planner"] is False
     assert payload["svg"]["build_features"]["svg_raster"] is False
 

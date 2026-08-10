@@ -19,7 +19,8 @@ page-paint shader; its measured boundary is recorded in that document.
    primary 50-200x lane. Reflow slots compile encountered structural/input variants into guarded
    fixed-point display programs. A matching record binds, shapes, and executes the program without
    layout; a guard miss runs full layout once and adds a variant. Explicit trusted structural slots
-   can vary paragraphs, table rows, and similar child content.
+   can vary paragraphs, table rows, and similar child content. Their values are parsed as markup,
+   so applications must sanitize untrusted HTML or keep user data in literal scalar slots.
 4. **Compiled batch** accepts exact columnar bindings and links ordered output once. Fixed-geometry
    overlays use the virtual linker and exceed the 100,000 pages/s gate. Reflow workers bind guarded
    programs, lower cached PDF page segments and text slots, precompress page streams, and feed an
@@ -36,6 +37,11 @@ records instantiate fixed-point text constraints directly. Eligible PDF pages ar
 compiled into static vector segments and text-paint slots. General typed size policies,
 dependency-bounded partial reflow, row virtualization, batch-wide resource closure, and a packed
 layout IR remain later phases.
+
+Compiled reflow compression is an explicit per-job policy. Throughput mode uses a bounded search
+for large page streams; compact mode uses the deterministic full search. The option is threaded
+through worker encoding and linker fallback, so calls with different policies can run sequentially
+or concurrently without process-global state.
 
 Every benchmark must name its lane. Repeated-input memoization is not a compiled-template result.
 

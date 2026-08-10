@@ -1,5 +1,6 @@
 use super::*;
 use crate::python_abi::{self, FromPyObject, IntoPyValue, ffi};
+use crate::{CompiledFlowCompression, CompiledReflowOptions};
 use std::ffi::{CStr, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
@@ -52,6 +53,20 @@ fn optional_bound<'py>(
         Ok(None)
     } else {
         Ok(Some(value))
+    }
+}
+
+fn compiled_flow_compression_argument(
+    payload: &Bound<'_, PyAny>,
+    index: isize,
+) -> PyResult<CompiledFlowCompression> {
+    let value: String = argument(payload, index)?;
+    match value.trim().to_ascii_lowercase().as_str() {
+        "throughput" => Ok(CompiledFlowCompression::Throughput),
+        "compact" => Ok(CompiledFlowCompression::Compact),
+        _ => Err(PyValueError::new_err(
+            "compression must be CompiledFlowCompression.Throughput ('throughput') or CompiledFlowCompression.Compact ('compact')",
+        )),
     }
 }
 
@@ -905,6 +920,11 @@ fn dispatch_compiled(
                 compiled.reflow_program_html_binding_node_count(),
             )?;
             out.set_item("reflow_program_error", compiled.reflow_program_error())?;
+            out.set_item(
+                "reflow_compression_modes",
+                PyList::new(py, ["throughput", "compact"])?,
+            )?;
+            out.set_item("reflow_default_compression", "throughput")?;
             Ok(out.unbind().into_any())
         }
         "CompiledDocument.render_pdf" => {
@@ -963,10 +983,15 @@ fn dispatch_compiled(
             written.into_py_value()
         }
         "CompiledDocument.render_pdf_reflow_bindings" => {
-            expect_arity(payload, 2)?;
+            expect_arity(payload, 3)?;
             let bindings: HashMap<String, Vec<String>> = argument(payload, 0)?;
+            let options = CompiledReflowOptions {
+                compression: compiled_flow_compression_argument(payload, 2)?,
+            };
             let bytes = py
-                .allow_threads(|| compiled.render_reflow_bindings_to_buffer(&bindings))
+                .allow_threads(|| {
+                    compiled.render_reflow_bindings_to_buffer_with_options(&bindings, options)
+                })
                 .map_err(to_py_err)?;
             if let Some(path) = optional_argument::<String>(payload, 1)? {
                 write_hash_file(&path, &sha256_hex(&bytes))?;
@@ -974,11 +999,16 @@ fn dispatch_compiled(
             Ok(PyBytes::new(py, &bytes).unbind().into_any())
         }
         "CompiledDocument.render_pdf_reflow_bindings_to_file" => {
-            expect_arity(payload, 3)?;
+            expect_arity(payload, 4)?;
             let bindings: HashMap<String, Vec<String>> = argument(payload, 0)?;
             let path: String = argument(payload, 1)?;
+            let options = CompiledReflowOptions {
+                compression: compiled_flow_compression_argument(payload, 3)?,
+            };
             let written = py
-                .allow_threads(|| compiled.render_reflow_bindings_to_file(&bindings, &path))
+                .allow_threads(|| {
+                    compiled.render_reflow_bindings_to_file_with_options(&bindings, &path, options)
+                })
                 .map_err(to_py_err)?;
             if let Some(hash_path) = optional_argument::<String>(payload, 2)? {
                 write_hash_file(&hash_path, &sha256_file_hex(&path)?)?;

@@ -4,15 +4,21 @@ This directory is the release-operations layer for Fullbleed. It is separate
 from feature documentation so release decisions can be audited without reading
 engine internals.
 
-## 2.2.4 Documents
+## 2.2.5 Documents
 
-- `docs/release/2.2.4-runbook.md`: current Cargo, PyPI, wheel-matrix, and GitHub
+- `docs/release/2.2.5-runbook.md`: current Cargo, PyPI, wheel-matrix, and GitHub
   release procedure.
 - `docs/performance-pass-2026-08-04.md`: compiled content-reflow architecture, exact-parity
-  evidence, and the 10,365-pages/s independent benchmark result.
+  evidence, and the independently measured 8,095.8-pages/s hot median (10,355.3-pages/s best).
 - `docs/performance-architecture.md`: guarded flow programs, native PDF page shaders, and the
   remaining partial-reflow/vector-IR boundary.
-- `ReleaseNotes.MD`: current 2.2.4 release summary and gate list.
+- `ReleaseNotes.MD`: current 2.2.5 release summary and gate list.
+
+## 2.2.4 Documents
+
+- `docs/release/2.2.4-runbook.md`: historical Cargo, PyPI, wheel-matrix, and GitHub
+  release procedure. `v2.2.5` supersedes it with fragmentation, named-string, compression API,
+  and Python discovery hardening.
 
 ## 2.2.3 Documents
 

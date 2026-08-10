@@ -54,6 +54,16 @@ class AssetKind(metaclass=_NativeFacadeType):
         raise TypeError("No constructor defined for AssetKind")
 
 
+class CompiledFlowCompression(metaclass=_NativeFacadeType):
+    """Per-call size/speed policy for compiled content-reflow PDF streams."""
+
+    Throughput = "throughput"
+    Compact = "compact"
+
+    def __new__(cls, /, *args, **kwargs):
+        raise TypeError("No constructor defined for CompiledFlowCompression")
+
+
 class Asset(metaclass=_NativeFacadeType):
     __slots__ = ("_handle",)
 
@@ -219,25 +229,42 @@ class CompiledDocument(metaclass=_NativeFacadeType):
             deterministic_hash,
         )
 
-    def render_pdf_reflow_bindings(self, /, bindings, deterministic_hash=None):
+    def render_pdf_reflow_bindings(
+        self,
+        /,
+        bindings,
+        deterministic_hash=None,
+        *,
+        compression=CompiledFlowCompression.Throughput,
+    ):
         """Render columnar text bindings with content-driven layout and pagination."""
+        _require_string(compression, "compression")
         return _call(
             self._handle,
             "CompiledDocument.render_pdf_reflow_bindings",
             bindings,
             deterministic_hash,
+            compression,
         )
 
     def render_pdf_reflow_bindings_to_file(
-        self, /, bindings, path, deterministic_hash=None
+        self,
+        /,
+        bindings,
+        path,
+        deterministic_hash=None,
+        *,
+        compression=CompiledFlowCompression.Throughput,
     ):
         """Stream a compiled content-reflow batch directly to ``path``."""
+        _require_string(compression, "compression")
         return _call(
             self._handle,
             "CompiledDocument.render_pdf_reflow_bindings_to_file",
             bindings,
             path,
             deterministic_hash,
+            compression,
         )
 
 
@@ -579,7 +606,9 @@ class PdfEngine(metaclass=_NativeFacadeType):
         )
 
     def render_pdf(self, /, html, css, deterministic_hash=None):
-        return _call(self._handle, "PdfEngine.render_pdf", html, css, deterministic_hash)
+        return _call(
+            self._handle, "PdfEngine.render_pdf", html, css, deterministic_hash
+        )
 
     def compile_pdf(self, /, html, css):
         handle = _call(self._handle, "PdfEngine.compile_pdf", html, css)
@@ -747,7 +776,9 @@ class PdfEngine(metaclass=_NativeFacadeType):
             deterministic_hash,
         )
 
-    def render_pdf_batch_to_file(self, /, html_list, css, path, deterministic_hash=None):
+    def render_pdf_batch_to_file(
+        self, /, html_list, css, path, deterministic_hash=None
+    ):
         return _call(
             self._handle,
             "PdfEngine.render_pdf_batch_to_file",
@@ -897,6 +928,7 @@ def audit_sparse_page_visual_pair(source_png_path, render_png_path):
 __all__ = [
     "PdfEngine",
     "CompiledDocument",
+    "CompiledFlowCompression",
     "AssetKind",
     "Asset",
     "AssetBundle",
@@ -925,6 +957,7 @@ __all__ = [
 _CLASS_NAMES = {
     "PdfEngine",
     "CompiledDocument",
+    "CompiledFlowCompression",
     "AssetKind",
     "Asset",
     "AssetBundle",

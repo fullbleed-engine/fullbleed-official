@@ -75,6 +75,22 @@ continues to use signed Q32.32 fixed-point arithmetic.
 This targeted result does not replace the complete external-corpus report or
 claim 100% parity for every CSS fixture.
 
+### Independent compiled-reflow QA hardening (August 10, 2026)
+
+Fullbleed 2.2.5 addresses the three pagination/generated-content issues
+reported by the independent 1,750-page compiled-reflow review:
+
+- a table taller than a fresh frame now fragments in the current remainder, so
+  a `break-after: avoid` heading stays with the initial table fragment;
+- an oversized `break-inside: avoid` box relaxes avoidance before a fresh-page
+  retry, preventing an avoidable underfilled heading page; and
+- `string-set` accepts both `content()` and `content(text)`, including rules
+  whose only declaration is `string-set`, and carries the value through
+  `string(name)` continuation-page margin boxes.
+
+Focused Rust regressions cover all three paths. The ordinary layout and compiled
+reflow lanes share this pagination and named-string implementation.
+
 ## Current Coverage Summary
 
 Tracked CSS modules: `22`

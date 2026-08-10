@@ -30310,7 +30310,9 @@ fn parse_named_string_set_spec(raw: &str) -> Option<NamedStringSetSpec> {
         cursor += 1;
         let source = match tokens.get(cursor)? {
             ComponentValue::Function { name, arguments }
-                if name.eq_ignore_ascii_case("content") && arguments.trim().is_empty() =>
+                if name.eq_ignore_ascii_case("content")
+                    && (arguments.trim().is_empty()
+                        || arguments.trim().eq_ignore_ascii_case("text")) =>
             {
                 NamedStringSource::Content
             }
@@ -33830,6 +33832,8 @@ impl StyleDelta {
             && self.white_space_var.is_none()
             && self.display.is_none()
             && self.position.is_none()
+            && self.running_name.is_none()
+            && self.string_set.is_none()
             && self.float_mode.is_none()
             && self.clear_mode.is_none()
             && self.z_index.is_none()
@@ -43260,6 +43264,20 @@ mod tests {
         let reset = resolver.compute_style(&element("h2", None, &["reset"]), &root, None, &[]);
         assert!(reset.running_name.is_none());
         assert!(reset.string_set.is_empty());
+    }
+
+    #[test]
+    fn string_set_accepts_content_text_alias_used_by_paged_templates() {
+        let resolver = StyleResolver::new(".running { string-set: document-title content(text); }");
+        let root = resolver.default_style();
+        let running = resolver.compute_style(&element("h1", None, &["running"]), &root, None, &[]);
+        assert_eq!(
+            running.string_set,
+            vec![NamedStringAssignment {
+                name: "document-title".to_string(),
+                source: NamedStringSource::Content,
+            }]
+        );
     }
 
     #[test]

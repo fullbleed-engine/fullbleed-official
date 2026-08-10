@@ -101,6 +101,10 @@ pub(crate) struct PdfOptions {
     pub compress_content_streams: bool,
     // Keep tiny streams uncompressed to avoid compression overhead.
     pub compress_content_stream_min_bytes: usize,
+    // Search depth used by compiled-flow page stream compression. This is a
+    // per-render option so throughput and compact jobs can coexist safely in
+    // one long-lived process.
+    pub compiled_flow_compression: CompiledFlowCompression,
 }
 
 impl Default for PdfOptions {
@@ -117,6 +121,23 @@ impl Default for PdfOptions {
             color_space: ColorSpace::Rgb,
             compress_content_streams: true,
             compress_content_stream_min_bytes: 128,
+            compiled_flow_compression: CompiledFlowCompression::Throughput,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CompiledFlowCompression {
+    #[default]
+    Throughput,
+    Compact,
+}
+
+impl CompiledFlowCompression {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Throughput => "throughput",
+            Self::Compact => "compact",
         }
     }
 }
@@ -1165,6 +1186,7 @@ pub(crate) fn encode_compiled_flow_document(
     page_overrides: &[Vec<CompiledFlowTextOverride>],
     compress: bool,
     minimum: usize,
+    compression: CompiledFlowCompression,
 ) -> Option<io::Result<Vec<EncodedCompiledFlowPage>>> {
     if page_overrides.len() != document.pages.len() {
         return Some(Err(io::Error::new(
@@ -1200,7 +1222,7 @@ pub(crate) fn encode_compiled_flow_document(
                 let raw_len = content.len();
                 let compressed = compress && raw_len >= minimum;
                 let data: Arc<[u8]> = if compressed {
-                    flate_compress_compiled_flow(content.as_bytes()).into()
+                    flate_compress_compiled_flow(content.as_bytes(), compression).into()
                 } else {
                     content.into_bytes().into()
                 };
@@ -1768,11 +1790,12 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         let pending = std::mem::take(&mut self.pending_compiled_flow_pages);
         let compress = self.options.compress_content_streams;
         let minimum = self.options.compress_content_stream_min_bytes;
+        let compression = self.options.compiled_flow_compression;
         let encode = |content: &str| {
             let raw_len = content.len();
             let compressed = compress && raw_len >= minimum;
             let data: Arc<[u8]> = if compressed {
-                flate_compress_compiled_flow(content.as_bytes()).into()
+                flate_compress_compiled_flow(content.as_bytes(), compression).into()
             } else {
                 Arc::from(content.as_bytes())
             };
@@ -6512,8 +6535,8 @@ fn flate_compress(data: &[u8]) -> Vec<u8> {
     crate::flate_native::zlib_deflate_parallel(data)
 }
 
-fn flate_compress_compiled_flow(data: &[u8]) -> Vec<u8> {
-    crate::flate_native::zlib_deflate_compiled_flow(data)
+fn flate_compress_compiled_flow(data: &[u8], compression: CompiledFlowCompression) -> Vec<u8> {
+    crate::flate_native::zlib_deflate_compiled_flow(data, compression)
 }
 
 fn hash_bytes(data: &[u8]) -> u64 {

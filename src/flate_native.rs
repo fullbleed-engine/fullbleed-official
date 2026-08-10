@@ -1,6 +1,4 @@
 use std::cell::RefCell;
-use std::sync::OnceLock;
-
 const ADLER_BASE: u32 = 65_521;
 const DEFAULT_ADLER_CHUNK: usize = 1 << 20;
 const ADLER_NMAX: usize = 5_552;
@@ -425,15 +423,14 @@ pub(crate) fn zlib_deflate_parallel(data: &[u8]) -> Vec<u8> {
     zlib_deflate_with_chain(data, MAX_CHAIN_STEPS)
 }
 
-pub(crate) fn zlib_deflate_compiled_flow(data: &[u8]) -> Vec<u8> {
-    static COMPILED_FLOW_CHAIN_STEPS: OnceLock<usize> = OnceLock::new();
-    let steps = *COMPILED_FLOW_CHAIN_STEPS.get_or_init(|| {
-        std::env::var("FULLBLEED_COMPILED_FLOW_DEFLATE_CHAIN")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(DEFAULT_COMPILED_FLOW_CHAIN_STEPS)
-            .clamp(1, MAX_CHAIN_STEPS)
-    });
+pub(crate) fn zlib_deflate_compiled_flow(
+    data: &[u8],
+    compression: crate::pdf::CompiledFlowCompression,
+) -> Vec<u8> {
+    let steps = match compression {
+        crate::pdf::CompiledFlowCompression::Throughput => DEFAULT_COMPILED_FLOW_CHAIN_STEPS,
+        crate::pdf::CompiledFlowCompression::Compact => MAX_CHAIN_STEPS,
+    };
     let steps = if data.len() < COMPILED_FLOW_THROUGHPUT_MIN_BYTES {
         MAX_CHAIN_STEPS
     } else {
@@ -921,6 +918,32 @@ mod tests {
                 "roundtrip at {steps} chain steps",
             );
         }
+    }
+
+    #[test]
+    fn compiled_flow_compression_modes_are_per_call_and_deterministic() {
+        use crate::pdf::CompiledFlowCompression::{Compact, Throughput};
+
+        let src = (0..8_000)
+            .map(|index| format!("BT /F1 10 Tf 72 720 Td [(RECORD-{index:05})] TJ ET\n"))
+            .collect::<String>()
+            .into_bytes();
+        let throughput = zlib_deflate_compiled_flow(&src, Throughput);
+        let compact = zlib_deflate_compiled_flow(&src, Compact);
+        assert_eq!(throughput, zlib_deflate_compiled_flow(&src, Throughput));
+        assert_eq!(compact, zlib_deflate_compiled_flow(&src, Compact));
+        assert_eq!(
+            zlib_inflate(&throughput, src.len()).expect("throughput roundtrip"),
+            src
+        );
+        assert_eq!(
+            zlib_inflate(&compact, src.len()).expect("compact roundtrip"),
+            src
+        );
+        assert!(
+            compact.len() <= throughput.len(),
+            "compact search should not produce a larger representative stream"
+        );
     }
 
     #[test]
