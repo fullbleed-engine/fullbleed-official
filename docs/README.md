@@ -8,7 +8,7 @@ This folder documents the Fullbleed stack at three layers:
 
 ## Version scope
 
-These docs target the `2.3.0` release line and the current repository source layout. Agent-facing commands, schemas, capabilities, and profiles are generated from the installed runtime; use `fullbleed agent-contract --format json` as the source of truth.
+These docs target the `2.3.1` release line and the current repository source layout. Agent-facing commands, schemas, capabilities, and profiles are generated from the installed runtime; use `fullbleed agent-contract --format json` as the source of truth.
 
 ## Documents
 
@@ -32,7 +32,7 @@ These docs target the `2.3.0` release line and the current repository source lay
 - `agentdocbench/README.md`: approach-neutral document-generation agent benchmark scaffold
 - `docs/pdf-templates.md`: Rust finalize PDF template/XObject composition policy and smoke gates
 - `docs/release/README.md`: release runbook, readiness ledger, and public claim contract
-- `docs/release/2.3.0-runbook.md`: current Cargo/PyPI/GitHub/MCP release and deployment procedure
+- `docs/release/2.3.1-runbook.md`: current Cargo/PyPI/GitHub release procedure
 - `examples/canonical_reference/README.md`: canonical static PDF scaffold reference and validation workflow
 - `examples/compiled_reflow/README.md`: compiled variable-content pagination, running strings,
   trusted structural slots, and per-call compression

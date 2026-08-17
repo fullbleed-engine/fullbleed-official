@@ -5,7 +5,7 @@ backend-path = ["build_backend"]
 
 [project]
 name = "fullbleed"
-version = "2.3.0"
+version = "2.3.1"
 description = "Deterministic Python PDF engine for reports, invoices, accessible documents, print-ready output, and compiled VDP"
 readme = "README.md"
 requires-python = ">=3.10"

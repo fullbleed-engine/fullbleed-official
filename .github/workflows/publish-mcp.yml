@@ -7,7 +7,7 @@ on:
         description: "Git ref containing the MCP package metadata"
         required: true
         type: string
-        default: "v2.3.0"
+        default: "v2.3.1"
       publish_pypi:
         description: "Publish fullbleed-mcp to PyPI after validation"
         required: true

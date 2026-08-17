@@ -1,6 +1,6 @@
 # Fullbleed PDF Engine
 
-> Fullbleed 2.3.0 is a deterministic, self-contained document-generation runtime for Python and Rust. It turns structured data plus static HTML/CSS into validated PDF documents without a browser.
+> Fullbleed 2.3.1 is a deterministic, self-contained document-generation runtime for Python and Rust. It turns structured data plus static HTML/CSS into validated PDF documents without a browser.
 
 The installed runtime is authoritative. Do not infer its API from this file or from remembered release knowledge. Start with:
 

@@ -1,73 +1,39 @@
-# Fullbleed Release Notes - 2.3.0
+# Fullbleed Release Notes - 2.3.1
 
 Status: release
 
-Release date: August 10, 2026
+Release date: August 17, 2026
 
 ## Summary
 
-Fullbleed 2.3.0 makes the installed Fullbleed PDF Engine directly discoverable and usable by unfamiliar AI agents without coupling the renderer to an AI vendor. The release adds a runtime-generated semantic contract, a first-party open Agent Skill, a workspace-confined MCP adapter, project-level agent retention, actionable machine diagnostics, complete agent-oriented examples, a cold-agent acceptance harness, and the initial approach-neutral AgentDocBench infrastructure.
+Fullbleed 2.3.1 fixes two custom-font failures in finalized PDF previews and compiled fixed-geometry variable-data output. It preserves the dependency-free engine, deterministic fixed-point layout, existing public APIs, Base-14 binding fast path, and the 2.3.0 agent-discovery surface.
 
-This is an agent-interface and distribution release, not a rendering rewrite. The deterministic engine, signed Q32.32 fixed-point geometry, exact TrueType subsetting, ordinary render path, template composition, and fixed/reflow compiled VDP behavior remain intact.
+## Font and preview fixes
 
-## Runtime-owned agent contract
+- Finalized-PDF previews now recover Fullbleed-generated Type 3 glyph IDs from their `gXXXX` encoding names and reconnect those synthetic-bold resources to the sibling embedded source font.
+- Synthetic-bold preview lowering preserves the generated stroke strength instead of decoding Type 3 byte codes through StandardEncoding.
+- The fix is internal to Fullbleed's native PDF raster path and adds no browser, system PDF stack, or system-font dependency.
 
-- `fullbleed agent-contract --format json` emits `fullbleed.agent_contract.v1` from the installed binary.
-- `fullbleed agent-manifest --json` and `fullbleed agent manifest --json` provide discovery aliases.
-- The contract includes product identity, semantic selection boundaries, workflows, capabilities, parser-derived commands/options, result schemas, profiles, inputs/outputs, examples, limitations, MCP tools, Skill metadata, and acceptance tasks.
-- `fullbleed agent-contract --format markdown|llms` generates human and retrieval-oriented views from the same payload.
-- `fullbleed-agent-contract.json`, `cli_schema.md`, and `llms.txt` are regenerated from the built wheel. CI fails if their version, commands, schemas, profiles, or engine capabilities drift from the installed runtime.
-- The wheel embeds the exact generated JSON contract and `llms.txt`; installed-package smoke tests compare them byte-for-byte with live runtime output.
+## Compiled fixed-layout bindings
 
-## Agent Skill and project retention
+- Fixed-layout VDP now binds registered Identity-H fonts instead of silently leaving `{{slot}}` placeholders encoded as the original glyph IDs.
+- Base-14/WinAnsi text retains the measured byte-patch linker. Registered fonts use a command-level overlay that shapes each bound value and extends the embedded subset without rerunning HTML/CSS layout or pagination.
+- Binding-bearing synthetic-bold registered-font runs stay substitutable until record values are known, while immutable page paint remains shared.
+- Bound values still do not reflow; templates must reserve sufficient geometry. Use compiled reflow bindings when values can wrap, resize content, or repaginate.
 
-- Ships a concise, versionless open Agent Skill at `skills/fullbleed/SKILL.md`, with focused selection, workflow, and compliance references.
-- The Skill instructs agents to trust runtime introspection instead of remembered release knowledge and makes the Fullbleed/browser/general-PDF-editor boundary explicit.
-- `fullbleed agent skill-path --json` locates the bundled Skill.
-- `fullbleed agent export-skill|install-skill <target> --json` safely copies it only to an absent or empty target.
-- `fullbleed init` now includes `AGENTS.md`; scaffold results expose artifact paths and structured next actions.
-- The repository also includes contributor `AGENTS.md` guidance for preserving the dependency-free core and generated contracts.
+## Compatibility and packages
 
-## MCP adapter
-
-- Adds the separately versioned `fullbleed-mcp 0.1.0` distribution so MCP discovery does not add dependencies to `pip install fullbleed`.
-- Provides newline-delimited JSON-RPC 2.0 over stdio and negotiates current MCP protocol versions.
-- Exposes 11 semantic, typed tools for capabilities, agent contract, project creation, rendering, previews, verification, inspection, assets, compilation, compiled rendering, and one-call fixed/reflow VDP.
-- Confines user document paths to `--root`, preserves structured Fullbleed errors, reports artifacts and compiled throughput metrics, and delegates to the installed runtime rather than duplicating renderer behavior.
-- The dependency-free core exposes the same implementation through `fullbleed mcp --root .`.
-- Includes generated, schema-validated official MCP Registry metadata and PyPI ownership proof under `io.github.fullbleed-engine/fullbleed-mcp`.
-
-## Agent feedback and evaluation
-
-- High-value glyph, overflow, fallback, budget, reproducibility, scaffold, and generic CLI failures now include additive `recommended_actions`, relevant schema/capability commands, and affected values where available.
-- Project scaffolds return machine-readable artifacts and next actions.
-- `examples/agent_workflows` provides complete invoice, report, accessible PDF/UA, fixed VDP, and compiled-reflow workflows with preview/inspection/marker validation.
-- `fullbleed agent-acceptance prepare|verify|run` supplies five isolated cold-agent tasks and an objective PDF judge without bundling a model vendor.
-- AgentDocBench begins with 13 approach-neutral tasks and machine checks for artifact validity, pagination, text/order, requested profile claims, deterministic reproduction, and reported agent/setup metrics. Visual scoring remains explicitly pending rather than inferred from structural checks.
-
-## Discoverability metadata
-
-- PyPI and Cargo summaries now identify Fullbleed PDF Engine as a deterministic document-generation engine for reports, invoices, statements, accessibility, print output, and compiled VDP.
-- PyPI keywords, classifiers, and project URLs cover PDF/document generation, HTML-to-PDF, transactional output, PDF/UA, PDF/A, PDF/X, AI agents, Agent Skills, and MCP.
-- The README opening and recommendation boundary distinguish document generation from arbitrary live-website screenshots.
-- Release automation prepares the independent MCP PyPI package and official preview Registry publication after the core release is public.
-
-## Compatibility and package versions
-
-- Adds interfaces and metadata without removing the Fullbleed 2.2 Rust, Python, CLI, template, batch, fixed-copy, fixed-binding, reflow-binding, or Stable ABI surfaces.
-- Core `fullbleed` still has no third-party Python runtime dependency and adds no browser, system PDF, system font, Cairo/Pango, or AI-vendor dependency.
+- No Rust, Python, CLI, Stable ABI, agent-contract, MCP, template, batch, fixed-copy, or reflow-binding interface is removed.
+- Core `fullbleed` retains no third-party Python runtime dependency and adds no browser, system PDF, system font, Cairo/Pango, or AI-vendor dependency.
 - Wheels retain `cp310-abi3` compatibility for CPython 3.10 through 3.14 across the 15-platform release matrix.
 - Rust 1.85 remains the minimum supported toolchain.
-- Packages: `fullbleed 2.3.0` on crates.io/PyPI, `fullbleed-mcp 0.1.0` on PyPI, and unchanged `fullbleed_audit_contract 0.1.3` on crates.io.
+- Packages: `fullbleed 2.3.1` on crates.io/PyPI; unchanged `fullbleed_audit_contract 0.1.3` on crates.io and `fullbleed-mcp 0.1.0` on PyPI.
 
 ## Release gates
 
-- Locked default and `python,svg_raster` Rust suites.
-- Complete Python suite against the installed 2.3.0 ABI3 wheel.
-- Installed-wheel contract/Skill/resource smoke, generated-artifact drift check, and clean MCP stdio handshake.
-- MCP `server.json` validation against the current official schema and PyPI ownership-marker check.
-- Canonical agent example run from a clean installed wheel.
-- Skill-format validation and AgentDocBench preparation/scoring contract tests.
-- Existing golden, CSS parity, license, release-metadata, package-file, MSRV consumer, and deterministic-output gates remain required.
+- Locked default and `python,svg_raster` Rust suites, including regressions for Type 3 preview metadata and registered-font fixed bindings.
+- Complete Python suite against the installed 2.3.1 ABI3 wheel.
+- Installed-wheel smoke, generated agent-contract drift, license, release-metadata, package-file, MSRV consumer, Skill-format, and deterministic-output gates.
+- The retained diagnostic scenarios verify readable synthetic weights and resolved custom-font VDP values in finalized previews; package claims remain limited to checks actually run.
 
-Exact test counts and artifact hashes are recorded in the final 2.3.0 release run and attached distribution manifest. No competitive AgentDocBench conclusion is made in this release.
+Exact cross-platform artifact hashes and installed-wheel results are retained by the final release workflow.

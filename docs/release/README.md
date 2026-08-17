@@ -4,11 +4,15 @@ This directory is the release-operations layer for Fullbleed. It is separate
 from feature documentation so release decisions can be audited without reading
 engine internals.
 
+## 2.3.1 Documents
+
+- `docs/release/2.3.1-runbook.md`: current Cargo, PyPI, wheel-matrix, and GitHub release procedure.
+- `ReleaseNotes.MD`: current 2.3.1 custom-font binding and finalized-preview patch summary.
+
 ## 2.3.0 Documents
 
-- `docs/release/2.3.0-runbook.md`: current Cargo, PyPI, GitHub, Agent Skill, MCP package, and MCP Registry release procedure.
+- `docs/release/2.3.0-runbook.md`: historical Cargo, PyPI, GitHub, Agent Skill, MCP package, and MCP Registry release procedure.
 - `docs/agent-discovery.md`: discovery targets, publication ordering, and claim boundaries.
-- `ReleaseNotes.MD`: current 2.3.0 agent-discovery release summary and gate list.
 
 ## 2.2.5 Documents
 
