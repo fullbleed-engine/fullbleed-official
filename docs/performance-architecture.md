@@ -30,7 +30,9 @@ page-paint shader; its measured boundary is recorded in that document.
 The implementation exposes `compile_pdf`, a virtualized fixed-copy batch, a distinct-record
 fixed-geometry binding batch, and a distinct-record compiled reflow batch. The fixed lane freezes
 the existing fixed-point command display list, shares static page content/resources, and lowers
-`{{slot}}` text runs into compact per-record overlay streams. The reflow lane lowers the recovered
+`{{slot}}` text runs into per-record overlay streams. Base-14 text uses a compact byte-patch program;
+registered fonts use a command-level overlay that shapes dynamic values while preserving the frozen
+geometry. The reflow lane lowers the recovered
 DOM into an immutable node/text-binding blueprint, updates worker-local text cells without
 reparsing the template, caches trusted structural inputs, and compiles guarded flow variants. Hot
 records instantiate fixed-point text constraints directly. Eligible PDF pages are separately

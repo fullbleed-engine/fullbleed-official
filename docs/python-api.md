@@ -207,8 +207,10 @@ rendered concurrently from multiple Python threads.
 
 `render_pdf_bindings` is a compiled fixed-geometry variable-data API. Parsing, selector matching,
 layout, pagination, and static page paint run once. The linker shares the static page stream and
-writes one compact text overlay stream for every record page. It does not copy one immutable page:
-each binding row produces distinct PDF text content.
+writes one text overlay stream for every record page. Base-14/WinAnsi text uses a compact byte-patch
+program; registered fonts use the preserved command overlay so bound values are shaped and included
+in the embedded subset. It does not copy one immutable page: each binding row produces distinct PDF
+text content.
 
 The current binding contract is deliberately narrow:
 
@@ -216,11 +218,11 @@ The current binding contract is deliberately narrow:
 - a marker may be embedded in an ordinary text run such as `Invoice: {{invoice_id}}`;
 - the mapping must contain exactly every compiled slot, and all columns must have equal non-zero
   lengths;
-- slots must lower to page-local WinAnsi text outside form XObjects; immutable page-space
-  transforms and rectangular/path clips are compiled into the dynamic overlay program, while
-  tagged PDF profiles are not accepted by this fast path;
-- values replace paint text only. They do not trigger shaping or reflow, so templates must reserve
-  sufficient geometry and should currently use WinAnsi-compatible values.
+- slots must lower to page-local text outside form XObjects; immutable page-space transforms and
+  rectangular/path clips are compiled into the dynamic overlay program, while tagged PDF profiles
+  are not accepted by this path;
+- values replace paint text only. Registered-font values are shaped, but no value triggers layout
+  or reflow, so templates must reserve sufficient geometry.
 
 Use `render_pdf_reflow_bindings` when a value can change line wrapping, element dimensions,
 pagination, or complex-script shaping. It preserves the parsed/recovered template blueprint and

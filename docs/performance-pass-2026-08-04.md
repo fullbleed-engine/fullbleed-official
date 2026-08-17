@@ -131,6 +131,11 @@ style resolution, layout, pagination, and static paint serialization. A reusable
 buffered file writer keep allocation and syscall counts bounded while the linker preserves page
 order. The Python GIL is released during native execution.
 
+The recorded 2.2.0 measurements cover the Base-14 byte-patch program. The current fixed lane also
+supports registered embedded fonts through a command-level overlay fallback that shapes each bound
+value and updates the font subset without rerunning HTML/CSS layout; those jobs are outside this
+historical throughput result.
+
 ## Fullbleed 2.2.4: compiled content reflow
 
 Fullbleed 2.2.4 adds

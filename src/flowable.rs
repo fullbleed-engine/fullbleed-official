@@ -5600,6 +5600,7 @@ fn draw_registered_text_run(
     y: Pt,
     text: String,
 ) {
+    let contains_binding_slot = !crate::binding_slot_names(&text).is_empty();
     let text = crate::text_shape::encode_shape_options(&text, text_shape_options(style));
     let synthetic_bold = style.font_synthesis_weight
         && !style.font_face_satisfies_weight
@@ -5614,6 +5615,17 @@ fn draw_registered_text_run(
         && registry.requires_synthetic_italic(font_name);
     let strength = (style.font_size * (1.0 / 32.0)).max(Pt::from_f32(0.25));
     let italic_shear = synthetic_italic_shear(style.font_style);
+    // Fixed VDP substitutes slot values after layout. Keep binding-bearing
+    // text as a patchable text command instead of compiling the placeholder's
+    // glyph IDs into the reusable Type 3 synthetic-bold shader.
+    if contains_binding_slot && synthetic_bold {
+        if synthetic_italic {
+            canvas.draw_string_synthetic_bold_italic(x, y, text, strength, italic_shear);
+        } else {
+            canvas.draw_string_synthetic_bold(x, y, text, strength);
+        }
+        return;
+    }
     match (synthetic_bold, synthetic_italic) {
         (true, true) if style.css_pixel_snap_metrics => {
             if draw_registered_synthetic_bold_outline_run(

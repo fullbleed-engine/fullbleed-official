@@ -127,6 +127,11 @@ Fixed-geometry slots may remain inside immutable page-space transforms and clips
 captures that active coordinate-state program once and replays it in each compact record overlay;
 it does not rerun layout or clone the complete page display list.
 
+Base-14/WinAnsi slot paint keeps the measured byte-patch linker. Registered embedded fonts use a
+command-level overlay program so each bound value is shaped and included in the font subset while
+the compiled layout, pagination, and static page stream remain shared. The throughput figures above
+describe the Base-14 fast lane; they are not claims for registered-font shaping.
+
 The fixed-copy result remains scoped to identical content; the variable-data result is scoped to
 paint-only text whose geometry does not reflow. Neither is a claim that arbitrary new HTML or
 size-changing records render 200x faster. See
@@ -1036,8 +1041,9 @@ Module exports:
 The compiled lane runs parsing/layout once. `render_pdf_batch` virtualizes identical untagged page
 content. The fixed binding methods accept columnar `dict[str, list[str]]` data and emit distinct
 fixed-geometry text overlays per record while sharing static paint. They require exact slot keys,
-equal non-zero column lengths, page-local WinAnsi-compatible text, and an untagged profile; bound
-values do not trigger reflow.
+equal non-zero column lengths, page-local text, and an untagged profile. Base-14 text uses the
+direct byte-patch lane; registered fonts are shaped into a command-level overlay. Bound values do
+not trigger layout or reflow.
 
 The reflow binding methods use the same exact-column contract but execute the compiled parsed-DOM
 program. `{{slot}}` values are literal text and may reshape, wrap, resize blocks, and change page

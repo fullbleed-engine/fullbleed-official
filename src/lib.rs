@@ -14265,6 +14265,63 @@ h1 { font-size: 20pt; }
     }
 
     #[test]
+    fn compiled_document_binds_registered_identity_h_fonts_without_literal_slots() {
+        let mut bundle = AssetBundle::default();
+        bundle.add(Asset::new(
+            "VdpCustom".to_string(),
+            AssetKind::Font,
+            std::fs::read(repo_font_path("NotoSans-Regular.ttf")).expect("read custom font"),
+            None,
+            true,
+        ));
+        let engine = FullBleed::builder()
+            .register_bundle(bundle)
+            .build()
+            .expect("engine");
+        let compiled = engine
+            .compile_document(
+                "<main><h1>{{attendee}}</h1><p>{{role}}</p><strong>{{seat}}</strong></main>",
+                "@page { size: 260pt 140pt; margin: 12pt; } body { margin: 0; font-family: VdpCustom; font-weight: 400; } h1 { font-size: 20pt; font-weight: 700; }",
+            )
+            .expect("compile registered-font template");
+        let bindings = std::collections::HashMap::from([
+            (
+                "attendee".to_string(),
+                vec!["ADA RIVERA".to_string(), "GRACE HOPPER".to_string()],
+            ),
+            (
+                "role".to_string(),
+                vec!["RESEARCHER".to_string(), "ENGINEER".to_string()],
+            ),
+            (
+                "seat".to_string(),
+                vec!["A12".to_string(), "B07".to_string()],
+            ),
+        ]);
+        let pdf = compiled
+            .render_bindings_to_buffer(&bindings)
+            .expect("registered-font fixed bindings");
+        let inspection = inspect_pdf_bytes(&pdf).expect("inspect binding output");
+        assert_eq!(inspection.page_count, 2);
+
+        let parsed = crate::pdf_native::Document::load_mem(&pdf).expect("parse binding PDF");
+        let page_numbers = parsed.get_pages().keys().copied().collect::<Vec<_>>();
+        let text = parsed
+            .extract_text_chunks(&page_numbers)
+            .into_iter()
+            .collect::<crate::pdf_native::Result<Vec<_>>>()
+            .expect("extract registered-font bindings")
+            .join("\n");
+        assert!(text.contains("ADA RIVERA"));
+        assert!(text.contains("GRACE HOPPER"));
+        assert!(text.contains("RESEARCHER"));
+        assert!(text.contains("ENGINEER"));
+        assert!(text.contains("A12"));
+        assert!(text.contains("B07"));
+        assert!(!text.contains("{{"));
+    }
+
+    #[test]
     fn compiled_reflow_bindings_reuse_dom_and_generate_variable_page_counts() {
         let engine = FullBleed::builder().build().expect("engine");
         let template = r#"<!doctype html><html><body>

@@ -438,14 +438,21 @@ struct BindingPageProgram {
     static_content_id: usize,
     static_content_len: usize,
     geometry: PageGeometry,
-    dynamic_segments: Vec<BindingContentSegment>,
-    dynamic_capacity: usize,
-    dynamic_slot_occurrences: usize,
+    dynamic: BindingDynamicProgram,
+}
+
+enum BindingDynamicProgram {
+    Patched {
+        segments: Vec<BindingContentSegment>,
+        capacity: usize,
+    },
+    Commands(Page),
 }
 
 struct CompiledBindingPage {
     static_page: Page,
     overlay_page: Page,
+    dynamic_slot_occurrences: usize,
 }
 
 /// Immutable command partition produced once for a compiled template.
@@ -558,10 +565,102 @@ fn instantiate_binding_content(
     }
 }
 
+fn instantiate_binding_text(
+    template: &str,
+    slot_lookup: &HashMap<String, usize>,
+    columns: &[&[String]],
+    row: usize,
+) -> String {
+    let spans = crate::binding_slot_spans(template);
+    if spans.is_empty() {
+        return template.to_string();
+    }
+
+    let mut output = String::with_capacity(template.len().saturating_add(32));
+    let mut cursor = 0usize;
+    for (start, end, name) in spans {
+        output.push_str(&template[cursor..start]);
+        if let Some(slot_index) = slot_lookup.get(name) {
+            output.push_str(&columns[*slot_index][row]);
+        } else {
+            output.push_str(&template[start..end]);
+        }
+        cursor = end;
+    }
+    output.push_str(&template[cursor..]);
+    output
+}
+
+fn instantiate_binding_overlay_page(
+    template: &Page,
+    slot_lookup: &HashMap<String, usize>,
+    columns: &[&[String]],
+    row: usize,
+) -> Page {
+    let commands = template
+        .commands
+        .iter()
+        .map(|command| match command {
+            Command::DrawString { x, y, text } => Command::DrawString {
+                x: *x,
+                y: *y,
+                text: instantiate_binding_text(text, slot_lookup, columns, row),
+            },
+            Command::DrawStringTransformed {
+                x,
+                y,
+                text,
+                m00,
+                m01,
+                m10,
+                m11,
+            } => Command::DrawStringTransformed {
+                x: *x,
+                y: *y,
+                text: instantiate_binding_text(text, slot_lookup, columns, row),
+                m00: *m00,
+                m01: *m01,
+                m10: *m10,
+                m11: *m11,
+            },
+            _ => command.clone(),
+        })
+        .collect();
+    Page { commands }
+}
+
+fn binding_overlay_uses_registered_font(page: &Page, registry: Option<&FontRegistry>) -> bool {
+    let Some(registry) = registry else {
+        return false;
+    };
+    let mut font_name = "Helvetica".to_string();
+    let mut stack = Vec::new();
+    for command in &page.commands {
+        match command {
+            Command::SaveState => stack.push(font_name.clone()),
+            Command::RestoreState => {
+                if let Some(saved) = stack.pop() {
+                    font_name = saved;
+                }
+            }
+            Command::SetFontName(value) => font_name.clone_from(value),
+            Command::DrawString { text, .. } | Command::DrawStringTransformed { text, .. }
+                if !crate::binding_slot_names(text).is_empty()
+                    && registry.resolve(&font_name).is_some() =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 #[derive(Clone)]
 struct BindingPaintState {
     font_name: String,
     font_size: Pt,
+    line_width: Pt,
     fill: Color,
     stroke: Color,
     opacity_fill: f32,
@@ -575,6 +674,7 @@ impl Default for BindingPaintState {
         Self {
             font_name: "Helvetica".to_string(),
             font_size: Pt::from_f32(12.0),
+            line_width: Pt::from_f32(1.0),
             fill: Color::BLACK,
             stroke: Color::BLACK,
             opacity_fill: 1.0,
@@ -683,6 +783,7 @@ fn binding_overlay_commands(
             Command::SetBlendMode { mode } => state.blend_mode = *mode,
             Command::SetFontName(value) => state.font_name.clone_from(value),
             Command::SetFontSize(value) => state.font_size = *value,
+            Command::SetLineWidth(value) => state.line_width = *value,
             Command::SetTextRenderingMode(value) => state.text_rendering_mode = *value,
             Command::DefineForm { commands, .. } | Command::DefineIsolatedForm { commands, .. }
                 if commands_contain_binding_marker(commands) =>
@@ -724,6 +825,7 @@ fn binding_overlay_commands(
                 }
                 overlay.push(Command::SetFontName(state.font_name.clone()));
                 overlay.push(Command::SetFontSize(state.font_size));
+                overlay.push(Command::SetLineWidth(state.line_width));
                 if state.text_rendering_mode != 0 {
                     overlay.push(Command::SetTextRenderingMode(state.text_rendering_mode));
                 }
@@ -774,6 +876,7 @@ fn binding_overlay_commands(
                 }
                 overlay.push(Command::SetFontName(state.font_name.clone()));
                 overlay.push(Command::SetFontSize(state.font_size));
+                overlay.push(Command::SetLineWidth(state.line_width));
                 if state.text_rendering_mode != 0 {
                     overlay.push(Command::SetTextRenderingMode(state.text_rendering_mode));
                 }
@@ -812,7 +915,11 @@ pub(crate) fn compile_binding_plan(
         let (overlay_commands, page_slot_counts) =
             binding_overlay_commands(&page.commands, &slot_lookup)?;
         let static_commands = binding_static_commands(&page.commands, &slot_lookup);
-        for (total, count) in total_slot_counts.iter_mut().zip(page_slot_counts) {
+        let dynamic_slot_occurrences = page_slot_counts.iter().copied().sum();
+        for (total, count) in total_slot_counts
+            .iter_mut()
+            .zip(page_slot_counts.iter().copied())
+        {
             *total = total.saturating_add(count);
         }
         static_command_count = static_command_count.saturating_add(static_commands.len());
@@ -824,6 +931,7 @@ pub(crate) fn compile_binding_plan(
             overlay_page: Page {
                 commands: overlay_commands,
             },
+            dynamic_slot_occurrences,
         });
     }
 
@@ -1587,47 +1695,64 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             self.write_content_stream_object(static_content_id, "", static_content.as_bytes())?;
             self.page_content_stream_count = self.page_content_stream_count.saturating_add(1);
 
-            let overlay_template =
-                self.render_page_sized(&page.overlay_page, page_index, geometry)?;
-            let (dynamic_segments, dynamic_slot_occurrences, dynamic_static_bytes) =
-                compile_binding_content_segments(&overlay_template, &binding_plan.slot_lookup);
-            if dynamic_slot_occurrences == 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "compiled slot overlay could not be lowered to patchable WinAnsi text",
-                ));
-            }
+            let dynamic = if binding_overlay_uses_registered_font(&page.overlay_page, self.registry)
+            {
+                BindingDynamicProgram::Commands(page.overlay_page.clone())
+            } else {
+                let overlay_template =
+                    self.render_page_sized(&page.overlay_page, page_index, geometry)?;
+                let (segments, occurrences, static_bytes) =
+                    compile_binding_content_segments(&overlay_template, &binding_plan.slot_lookup);
+                if occurrences == page.dynamic_slot_occurrences {
+                    BindingDynamicProgram::Patched {
+                        segments,
+                        capacity: static_bytes.saturating_add(128),
+                    }
+                } else {
+                    BindingDynamicProgram::Commands(page.overlay_page.clone())
+                }
+            };
             programs.push(BindingPageProgram {
                 static_content_id,
                 static_content_len: static_content.len(),
                 geometry,
-                dynamic_segments,
-                dynamic_capacity: dynamic_static_bytes.saturating_add(128),
-                dynamic_slot_occurrences,
+                dynamic,
             });
         }
 
         let max_dynamic_capacity = programs
             .iter()
-            .map(|program| program.dynamic_capacity)
+            .filter_map(|program| match &program.dynamic {
+                BindingDynamicProgram::Patched { capacity, .. } => Some(*capacity),
+                BindingDynamicProgram::Commands(_) => None,
+            })
             .max()
             .unwrap_or(0);
         let mut dynamic_content = Vec::with_capacity(max_dynamic_capacity);
         for row in 0..record_count {
             for program in &programs {
-                instantiate_binding_content(
-                    &program.dynamic_segments,
-                    columns,
-                    row,
-                    &mut dynamic_content,
-                );
+                match &program.dynamic {
+                    BindingDynamicProgram::Patched { segments, .. } => {
+                        instantiate_binding_content(segments, columns, row, &mut dynamic_content);
+                    }
+                    BindingDynamicProgram::Commands(template) => {
+                        let overlay = instantiate_binding_overlay_page(
+                            template,
+                            &binding_plan.slot_lookup,
+                            columns,
+                            row,
+                        );
+                        dynamic_content = self
+                            .render_page_sized(&overlay, self.page_ids.len(), program.geometry)?
+                            .into_bytes();
+                    }
+                }
                 self.add_bound_page(
                     program.static_content_id,
                     program.static_content_len,
                     &dynamic_content,
                     program.geometry,
                 )?;
-                debug_assert!(program.dynamic_slot_occurrences > 0);
             }
         }
         Ok(())

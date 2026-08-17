@@ -84,6 +84,8 @@ struct PdfFontResource {
     embedded_font: Option<Arc<Vec<u8>>>,
     metrics: PdfFontMetrics,
     code_to_gid: PdfCodeToGlyphMap,
+    generated_type3: bool,
+    synthetic_bold_millionths: u32,
 }
 
 #[derive(Clone, Default)]
@@ -701,6 +703,8 @@ fn parse_operations(
                                 embedded_font: None,
                                 metrics: PdfFontMetrics::default(),
                                 code_to_gid: PdfCodeToGlyphMap::default(),
+                                generated_type3: false,
+                                synthetic_bold_millionths: 0,
                             });
                     let size = op_f32(op, 1).unwrap_or(12.0).abs();
                     state.font_resource = Some(font_res_name);
@@ -1039,17 +1043,36 @@ fn emit_glyph_run(
 
     let (x_pdf, y_pdf) = combined.transform_point(0.0, state.text_rise);
     let y_top = page_height - y_pdf;
-    commands.push(Command::DrawGlyphRun {
-        x: Pt::from_f32(x_pdf),
-        y: Pt::from_f32(y_top),
-        glyph_ids,
-        advances,
-        // Keep PDF linear terms as-is; raster base transform handles page y-axis conversion.
-        m00: combined.a,
-        m01: combined.b,
-        m10: combined.c,
-        m11: combined.d,
-    });
+    let generated_upright_type3 = font.synthetic_bold_millionths > 0
+        && (combined.a - 1.0).abs() < 0.001
+        && combined.b.abs() < 0.001
+        && combined.c.abs() < 0.001
+        && (combined.d - 1.0).abs() < 0.001;
+    if generated_upright_type3 {
+        let stroke_width = Pt::from_f32(
+            state.font_size.to_f32() * font.synthetic_bold_millionths as f32 / 1_000_000.0,
+        );
+        commands.push(Command::DrawSyntheticBoldGlyphRun {
+            x: Pt::from_f32(x_pdf),
+            y: Pt::from_f32(y_top),
+            offsets: vec![(Pt::ZERO, Pt::ZERO); glyph_ids.len()],
+            glyph_ids,
+            advances,
+            stroke_width,
+        });
+    } else {
+        commands.push(Command::DrawGlyphRun {
+            x: Pt::from_f32(x_pdf),
+            y: Pt::from_f32(y_top),
+            glyph_ids,
+            advances,
+            // Keep PDF linear terms as-is; raster base transform handles page y-axis conversion.
+            m00: combined.a,
+            m01: combined.b,
+            m10: combined.c,
+            m11: combined.d,
+        });
+    }
     true
 }
 
@@ -1515,6 +1538,17 @@ fn resources_from_object(
             }
             out.fonts.insert(resource_name, font);
         }
+        // Fullbleed's reusable synthetic-bold Type 3 fonts contain glyph
+        // programs rather than a second embedded font stream. Associate them
+        // with the sibling embedded source face after every resource has been
+        // discovered so dictionary iteration order cannot affect previews.
+        for font in out.fonts.values_mut() {
+            if font.embedded_font.is_none() && font.generated_type3 {
+                if let Some(data) = embedded_fonts.get(&font.font_name) {
+                    font.embedded_font = Some(data.clone());
+                }
+            }
+        }
     }
 
     if let Ok(xobj_obj) = dict.get(b"XObject") {
@@ -1577,16 +1611,23 @@ fn resolve_font_resource(
                 embedded_font: None,
                 metrics: PdfFontMetrics::default(),
                 code_to_gid: PdfCodeToGlyphMap::default(),
+                generated_type3: false,
+                synthetic_bold_millionths: 0,
             });
         }
     };
-    let font_name = dict
+    let raw_font_name = dict
         .get(b"BaseFont")
         .ok()
         .and_then(|obj| obj.as_name().ok())
         .map(name_bytes_to_string)
         .map(|name| normalize_pdf_font_name(&name))
         .unwrap_or_else(|| "Helvetica".to_string());
+    let generated_type3 = parse_fullbleed_type3_font_name(&raw_font_name);
+    let font_name = generated_type3
+        .as_ref()
+        .map(|(logical_name, _)| logical_name.clone())
+        .unwrap_or(raw_font_name);
     let to_unicode = parse_to_unicode_cmap(doc, dict);
     let embedded_font = resolve_embedded_font_bytes(doc, dict).map(Arc::new);
     let metrics = parse_font_metrics(doc, dict, &to_unicode);
@@ -1597,6 +1638,8 @@ fn resolve_font_resource(
         embedded_font,
         metrics,
         code_to_gid,
+        generated_type3: generated_type3.is_some(),
+        synthetic_bold_millionths: generated_type3.map_or(0, |(_, strength)| strength),
     })
 }
 
@@ -1680,6 +1723,9 @@ fn parse_code_to_gid_map(
         .and_then(|o| o.as_name().ok())
         .map(name_bytes_to_string)
         .unwrap_or_default();
+    if subtype == "Type3" {
+        return parse_type3_code_to_gid_map(doc, font_dict);
+    }
     if subtype != "Type0" {
         return PdfCodeToGlyphMap::None;
     }
@@ -1718,6 +1764,48 @@ fn parse_code_to_gid_map(
 
     let _ = code_encoding;
     PdfCodeToGlyphMap::None
+}
+
+fn parse_type3_code_to_gid_map(doc: &LoDocument, font_dict: &LoDictionary) -> PdfCodeToGlyphMap {
+    let Some(items) = font_dict
+        .get(b"Encoding")
+        .ok()
+        .and_then(|object| resolve_object(doc, object).ok())
+        .and_then(|object| object.as_dict().ok())
+        .and_then(|dict| dict.get(b"Differences").ok())
+        .and_then(|object| resolve_object(doc, object).ok())
+        .and_then(|object| object.as_array().ok())
+    else {
+        return PdfCodeToGlyphMap::None;
+    };
+
+    let mut table = vec![0u16; 256];
+    let mut code = 0u16;
+    let mut mapped = false;
+    for item in items {
+        if let Some(value) = resolved_obj_to_u16(doc, item) {
+            code = value;
+            continue;
+        }
+        let glyph_id = resolve_object(doc, item)
+            .ok()
+            .and_then(|object| object.as_name().ok())
+            .and_then(|name| std::str::from_utf8(name).ok())
+            .and_then(|name| name.strip_prefix('g'))
+            .filter(|hex| hex.len() == 4 && hex.chars().all(|ch| ch.is_ascii_hexdigit()))
+            .and_then(|hex| u16::from_str_radix(hex, 16).ok());
+        if let (Some(glyph_id), Some(slot)) = (glyph_id, table.get_mut(code as usize)) {
+            *slot = glyph_id;
+            mapped = true;
+        }
+        code = code.saturating_add(1);
+    }
+
+    if mapped {
+        PdfCodeToGlyphMap::Table(table)
+    } else {
+        PdfCodeToGlyphMap::None
+    }
 }
 
 fn parse_simple_font_metrics(doc: &LoDocument, font_dict: &LoDictionary) -> PdfFontMetrics {
@@ -3133,6 +3221,19 @@ fn normalize_pdf_font_name(name: &str) -> String {
     trimmed.to_string()
 }
 
+fn parse_fullbleed_type3_font_name(name: &str) -> Option<(String, u32)> {
+    let (prefix, strength) = name.rsplit_once("-B")?;
+    let strength = strength.parse::<u32>().ok()?;
+    let (logical_name, glyph_page) = prefix.rsplit_once("-T3-")?;
+    if logical_name.is_empty()
+        || glyph_page.len() != 2
+        || !glyph_page.chars().all(|ch| ch.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    Some((logical_name.to_string(), strength))
+}
+
 fn parse_to_unicode_cmap(doc: &LoDocument, font_dict: &LoDictionary) -> PdfToUnicodeMap {
     let mut map = PdfToUnicodeMap::default();
     let to_unicode_obj = match font_dict.get(b"ToUnicode") {
@@ -4264,6 +4365,92 @@ endbfrange
             !has_non_white_pixel(&img),
             "expected no visible text for Tr=3 mode"
         );
+    }
+
+    #[test]
+    fn fullbleed_type3_metadata_recovers_source_font_and_glyph_ids() {
+        assert_eq!(
+            parse_fullbleed_type3_font_name("Lato-Regular-T3-09-B31259"),
+            Some(("Lato-Regular".to_string(), 31_259))
+        );
+        assert_eq!(parse_fullbleed_type3_font_name("Ordinary-Type3-Font"), None);
+
+        let doc = LoDocument::with_version("1.7");
+        let font_dict = dictionary! {
+            "Subtype" => "Type3",
+            "Encoding" => dictionary! {
+                "Differences" => vec![
+                    LoObject::Integer(34),
+                    LoObject::Name(b"g0022".to_vec()),
+                    LoObject::Integer(158),
+                    LoObject::Name(b"g099E".to_vec()),
+                ],
+            },
+        };
+        let map = parse_code_to_gid_map(&doc, &font_dict, PdfCharCodeWidthEncoding::SingleByte);
+        match map {
+            PdfCodeToGlyphMap::Table(values) => {
+                assert_eq!(values[34], 0x0022);
+                assert_eq!(values[158], 0x099E);
+            }
+            _ => panic!("expected generated Type 3 glyph table"),
+        }
+    }
+
+    #[test]
+    fn finalized_preview_recovers_generated_synthetic_bold_type3_glyphs() {
+        let mut bundle = crate::AssetBundle::default();
+        bundle.add(crate::Asset::new(
+            "PreviewRegular".to_string(),
+            crate::AssetKind::Font,
+            include_bytes!("../python/fullbleed_assets/fonts/NotoSans-Regular.ttf").to_vec(),
+            None,
+            true,
+        ));
+        let engine = crate::FullBleed::builder()
+            .register_bundle(bundle)
+            .build()
+            .expect("engine");
+        let pdf = engine
+            .render_to_buffer(
+                "<p>Synthetic Bold 2048</p>",
+                "@page { size: 240pt 100pt; margin: 12pt; } body { margin: 0; font-family: PreviewRegular; font-size: 24pt; font-weight: 700; }",
+            )
+            .expect("synthetic-bold PDF");
+        assert!(
+            pdf.windows(b"/Subtype /Type3".len())
+                .any(|window| window == b"/Subtype /Type3"),
+            "fixture must exercise the generated Type 3 path"
+        );
+
+        let doc = LoDocument::load_mem(&pdf).expect("parse PDF");
+        let (pages, embedded_fonts) = parse_pdf_pages(&doc).expect("lower PDF for preview");
+        assert!(!embedded_fonts.is_empty());
+        let synthetic_runs = pages[0]
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::DrawSyntheticBoldGlyphRun {
+                    glyph_ids,
+                    stroke_width,
+                    ..
+                } => Some((glyph_ids, stroke_width)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!synthetic_runs.is_empty());
+        assert!(
+            synthetic_runs
+                .iter()
+                .all(|(glyph_ids, stroke_width)| !glyph_ids.is_empty() && **stroke_width > Pt::ZERO)
+        );
+
+        let previews = pdf_bytes_to_png_pages(&pdf, 120, None, true).expect("finalized preview");
+        assert_eq!(previews.len(), 1);
+        let image = crate::image_native::load_from_memory(&previews[0])
+            .expect("preview PNG")
+            .into_rgba8();
+        assert!(has_non_white_pixel(&image));
     }
 
     #[test]
