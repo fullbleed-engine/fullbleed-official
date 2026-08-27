@@ -1673,6 +1673,20 @@ fn extract_collection_face_at(data: &[u8], index: usize) -> Option<Vec<u8>> {
     extract_collection_face(data, face_offset)
 }
 
+/// Returns one standalone OpenType/TrueType face from font bytes.
+///
+/// A non-collection font is returned unchanged only for face index zero. A TTC/OTC
+/// collection is rewritten into a self-contained sfnt program using the exact
+/// requested face and its referenced tables. This is useful when a caller needs
+/// to vendor one deterministic system-font face rather than the entire collection.
+#[must_use]
+pub fn extract_font_face_bytes(data: &[u8], face_index: u32) -> Option<Vec<u8>> {
+    if data.get(0..4) == Some(b"ttcf") {
+        return extract_collection_face_at(data, usize::try_from(face_index).ok()?);
+    }
+    (face_index == 0).then(|| data.to_vec())
+}
+
 fn extract_collection_face(data: &[u8], face_offset: usize) -> Option<Vec<u8>> {
     let header = data.get(face_offset..face_offset.checked_add(12)?)?;
     let signature = header.get(0..4)?;
@@ -1870,8 +1884,9 @@ pub(crate) fn font_primary_name_from_bytes(
 #[cfg(test)]
 mod tests {
     use super::{
-        FontRegistry, compact_font_name, decode_font_name, extract_collection_faces, font_be_u16,
-        font_be_u32, font_checksum, font_write_u32, preferred_collection_face_index,
+        FontRegistry, compact_font_name, decode_font_name, extract_collection_faces,
+        extract_font_face_bytes, font_be_u16, font_be_u32, font_checksum, font_write_u32,
+        preferred_collection_face_index,
     };
     use crate::sfnt::{Face, GlyphId, NameRecord, PlatformId};
     use crate::types::Pt;
@@ -2081,6 +2096,13 @@ mod tests {
             preferred_collection_face_index(&collection, "NotoSansCJK-Regular.ttc"),
             0,
             "an unqualified collection keeps its fontconfig-compatible default face"
+        );
+        let selected = extract_font_face_bytes(&collection, 1).expect("extract selected face");
+        assert_ne!(selected.get(0..4), Some(&b"ttcf"[..]));
+        assert!(crate::sfnt::Face::parse(&selected, 0).is_ok());
+        assert_ne!(
+            selected,
+            extract_font_face_bytes(&collection, 0).expect("extract first face")
         );
     }
 

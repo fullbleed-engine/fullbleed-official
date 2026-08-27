@@ -1,6 +1,5 @@
 use crate::canvas::{
-    Command, Document, ImageSourceClip, META_PAGE_PRESENTATION_KEY, META_PAGE_SIZE_KEY, Page,
-    ResolvedImageSourceCrop,
+    Command, Document, ImageSourceClip, Page, PageGeometry, ResolvedImageSourceCrop,
 };
 use crate::debug::json_escape;
 use crate::font::{
@@ -10,77 +9,12 @@ use crate::metrics::{DocumentMetrics, PageMetrics};
 use crate::perf::PerfLogger;
 use crate::sfnt::{Face as SfntFace, GlyphId};
 use crate::types::{
-    Color, ColorSpace, MixBlendMode, PageOrientation, PagePresentation, Pt, Shading, ShadingStop,
-    Size,
+    Color, ColorSpace, MixBlendMode, PageOrientation, Pt, Shading, ShadingStop, Size,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{self, Write};
 use std::path::Path;
 use std::sync::{Arc, OnceLock, RwLock};
-
-fn effective_page_size(page: &Page, fallback: Size) -> Size {
-    page.commands
-        .iter()
-        .rev()
-        .find_map(|command| match command {
-            Command::Meta { key, value } if key == META_PAGE_SIZE_KEY => {
-                let (width, height) = value.split_once(',')?;
-                Some(Size {
-                    width: Pt::from_milli_i64(width.parse().ok()?),
-                    height: Pt::from_milli_i64(height.parse().ok()?),
-                })
-            }
-            _ => None,
-        })
-        .unwrap_or(fallback)
-        .quantized()
-}
-
-fn effective_page_presentation(page: &Page) -> PagePresentation {
-    page.commands
-        .iter()
-        .rev()
-        .find_map(|command| match command {
-            Command::Meta { key, value } if key == META_PAGE_PRESENTATION_KEY => {
-                PagePresentation::decode(value)
-            }
-            _ => None,
-        })
-        .unwrap_or_default()
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct PageGeometry {
-    logical_size: Size,
-    media_size: Size,
-    presentation: PagePresentation,
-}
-
-impl PageGeometry {
-    fn for_page(page: &Page, fallback: Size) -> Self {
-        let logical_size = effective_page_size(page, fallback);
-        let presentation = effective_page_presentation(page);
-        let extent = presentation.media_extent();
-        let unrotated = Size {
-            width: logical_size.width + extent + extent,
-            height: logical_size.height + extent + extent,
-        }
-        .quantized();
-        let media_size = match presentation.orientation {
-            PageOrientation::Upright => unrotated,
-            PageOrientation::RotateLeft | PageOrientation::RotateRight => Size {
-                width: unrotated.height,
-                height: unrotated.width,
-            },
-        }
-        .quantized();
-        Self {
-            logical_size,
-            media_size,
-            presentation,
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub(crate) struct PdfOptions {
@@ -301,10 +235,167 @@ struct TagRecord {
     mcid: Option<u32>,
     role: String,
     alt: Option<String>,
+    actual_text: Option<String>,
     scope: Option<String>,
     parent: Option<usize>,
     table_id: Option<u32>,
     col_index: Option<u16>,
+}
+
+fn normalize_definition_list_structure(records: Vec<TagRecord>) -> Vec<TagRecord> {
+    if records.is_empty() {
+        return records;
+    }
+
+    let mut children = vec![Vec::new(); records.len()];
+    let mut roots = Vec::new();
+    for (index, record) in records.iter().enumerate() {
+        if let Some(parent) = record.parent.filter(|parent| *parent < records.len()) {
+            children[parent].push(index);
+        } else {
+            roots.push(index);
+        }
+    }
+
+    fn synthetic_record(role: &str, parent: Option<usize>, page_index: usize) -> TagRecord {
+        TagRecord {
+            page_index,
+            mcid: None,
+            role: role.to_string(),
+            alt: None,
+            actual_text: None,
+            scope: None,
+            parent,
+            table_id: None,
+            col_index: None,
+        }
+    }
+
+    fn append_existing(
+        old_index: usize,
+        parent: Option<usize>,
+        records: &[TagRecord],
+        children: &[Vec<usize>],
+        normalized: &mut Vec<TagRecord>,
+    ) {
+        let role = records[old_index].role.clone();
+        let new_index = normalized.len();
+        let mut record = records[old_index].clone();
+        record.parent = parent;
+        normalized.push(record);
+        append_children(
+            &children[old_index],
+            Some(new_index),
+            Some(role.as_str()),
+            records,
+            children,
+            normalized,
+        );
+    }
+
+    fn append_definition_items(
+        items: &[usize],
+        list_parent: usize,
+        records: &[TagRecord],
+        children: &[Vec<usize>],
+        normalized: &mut Vec<TagRecord>,
+    ) {
+        let mut start = 0usize;
+        while start < items.len() {
+            let mut end = start;
+            let mut has_body = false;
+            while end < items.len() {
+                let role = records[items[end]].role.as_str();
+                if end > start && role == "Lbl" && has_body {
+                    break;
+                }
+                has_body |= role == "LBody";
+                end += 1;
+            }
+
+            let page_index = records[items[start]].page_index;
+            let item_parent = normalized.len();
+            normalized.push(synthetic_record("LI", Some(list_parent), page_index));
+            for old_index in &items[start..end] {
+                append_existing(*old_index, Some(item_parent), records, children, normalized);
+            }
+            start = end;
+        }
+    }
+
+    fn append_children(
+        siblings: &[usize],
+        parent: Option<usize>,
+        parent_role: Option<&str>,
+        records: &[TagRecord],
+        children: &[Vec<usize>],
+        normalized: &mut Vec<TagRecord>,
+    ) {
+        let mut index = 0usize;
+        while index < siblings.len() {
+            let old_index = siblings[index];
+            let role = records[old_index].role.as_str();
+            let is_definition_part = matches!(role, "Lbl" | "LBody");
+            if is_definition_part && parent_role != Some("LI") {
+                let mut end = index + 1;
+                while end < siblings.len()
+                    && matches!(records[siblings[end]].role.as_str(), "Lbl" | "LBody")
+                {
+                    end += 1;
+                }
+                let run = &siblings[index..end];
+                let list_parent = if parent_role == Some("L") {
+                    parent.expect("an L structure element has a normalized parent index")
+                } else {
+                    let list_index = normalized.len();
+                    normalized.push(synthetic_record("L", parent, records[run[0]].page_index));
+                    list_index
+                };
+                append_definition_items(run, list_parent, records, children, normalized);
+                index = end;
+                continue;
+            }
+
+            append_existing(old_index, parent, records, children, normalized);
+            index += 1;
+        }
+    }
+
+    let mut normalized = Vec::with_capacity(records.len());
+    append_children(&roots, None, None, &records, &children, &mut normalized);
+    normalized
+}
+
+fn command_paints_nontext_content(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::ApplyBackdropFilter { .. }
+            | Command::ShadingFill(_)
+            | Command::MoveTo { .. }
+            | Command::LineTo { .. }
+            | Command::CurveTo { .. }
+            | Command::ClosePath
+            | Command::Fill
+            | Command::FillEvenOdd
+            | Command::Stroke
+            | Command::FillStroke
+            | Command::FillStrokeEvenOdd
+            | Command::DrawRect { .. }
+            | Command::DrawImage { .. }
+            | Command::DrawForm { .. }
+            | Command::DrawFilteredForm { .. }
+            | Command::DrawMaskedForm { .. }
+    )
+}
+
+fn command_paints_text_content(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::DrawString { .. }
+            | Command::DrawStringTransformed { .. }
+            | Command::DrawGlyphRun { .. }
+            | Command::DrawSyntheticBoldGlyphRun { .. }
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -1644,7 +1735,14 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         binding_plan: &CompiledBindingPlan,
         columns: &[&[String]],
         record_count: usize,
+        cancelled: impl Fn() -> bool,
     ) -> io::Result<()> {
+        if cancelled() {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "compiled binding batch cancelled",
+            ));
+        }
         if record_count == 0
             || binding_plan.slot_lookup.is_empty()
             || columns.len() != binding_plan.slot_lookup.len()
@@ -1688,6 +1786,12 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         let mut programs = Vec::with_capacity(binding_plan.pages.len());
 
         for page in &binding_plan.pages {
+            if cancelled() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "compiled binding batch cancelled",
+                ));
+            }
             let page_index = self.page_ids.len();
             let geometry = PageGeometry::for_page(&page.static_page, self.page_size);
             let static_content = self.render_page(&page.static_page, page_index)?;
@@ -1730,6 +1834,12 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             .unwrap_or(0);
         let mut dynamic_content = Vec::with_capacity(max_dynamic_capacity);
         for row in 0..record_count {
+            if cancelled() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "compiled binding batch cancelled",
+                ));
+            }
             for program in &programs {
                 match &program.dynamic {
                     BindingDynamicProgram::Patched { segments, .. } => {
@@ -2334,7 +2444,10 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
 
         if let Some(registry) = self.registry {
             for type3_font in type3_fonts.values() {
-                self.write_type3_font(type3_font, registry)?;
+                let glyph_map = fonts
+                    .get(&normalize_font_key(&type3_font.logical_name))
+                    .map(|font| &font.glyph_map);
+                self.write_type3_font(type3_font, registry, glyph_map)?;
             }
         }
 
@@ -2415,7 +2528,8 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         if self.options.pdf_profile.emits_tagged_structure() {
             let uses_pdf20_structure_namespace =
                 self.options.pdf_profile.uses_pdf20_structure_namespace();
-            let tag_records = std::mem::take(&mut self.tag_records);
+            let tag_records =
+                normalize_definition_list_structure(std::mem::take(&mut self.tag_records));
             let tag_count = tag_records.len();
             let extra_pdf20_structure_objects = if uses_pdf20_structure_namespace { 2 } else { 0 };
             let start_id = self.alloc_ids(tag_count + 2 + extra_pdf20_structure_objects);
@@ -2475,6 +2589,9 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     );
                     if let Some(alt) = tag.alt.as_deref() {
                         obj.push_str(&format!(" /Alt ({})", escape_pdf_string(alt)));
+                    }
+                    if let Some(actual_text) = tag.actual_text.as_deref() {
+                        obj.push_str(&format!(" /ActualText {}", pdf_text_string(actual_text)));
                     }
                     if let Some(scope) = tag.scope.as_deref() {
                         obj.push_str(&format!(" /Scope /{}", escape_pdf_name(scope)));
@@ -3306,6 +3423,9 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         let mut current_fill = Color::BLACK;
         let mut graphics_state_stack: Vec<(Pt, String, Color)> = Vec::new();
         let mut tag_stack: Vec<usize> = Vec::new();
+        let mut marked_content_stack: Vec<bool> = Vec::new();
+        let mut explicit_artifact_depth = 0usize;
+        let mut automatic_artifact_open = false;
         let tag_enabled = self.options.pdf_profile.emits_tagged_structure() && page_index.is_some();
 
         if compiled_flow_overrides
@@ -3340,6 +3460,29 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                         "compiled flow override does not target its expected text command",
                     ));
                 }
+            }
+            let marked_content_boundary = matches!(
+                cmd,
+                Command::BeginTag { .. }
+                    | Command::EndTag
+                    | Command::BeginArtifact { .. }
+                    | Command::BeginOptionalContent { .. }
+                    | Command::EndMarkedContent
+            );
+            if automatic_artifact_open
+                && (marked_content_boundary || command_paints_text_content(cmd))
+            {
+                out.push_str("EMC\n");
+                automatic_artifact_open = false;
+            }
+            if tag_enabled
+                && !automatic_artifact_open
+                && tag_stack.is_empty()
+                && explicit_artifact_depth == 0
+                && command_paints_nontext_content(cmd)
+            {
+                out.push_str("/Artifact BMC\n");
+                automatic_artifact_open = true;
             }
             match cmd {
                 Command::SaveState => {
@@ -3421,10 +3564,39 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             mcid: *mcid,
                             role: role_raw,
                             alt: alt.clone(),
+                            actual_text: None,
                             scope: scope.clone(),
                             parent,
                             table_id: *table_id,
                             col_index: *col_index,
+                        });
+                        tag_stack.push(idx);
+                    }
+                }
+                Command::BeginTagActualText {
+                    role,
+                    mcid,
+                    actual_text,
+                } => {
+                    if tag_enabled {
+                        let role_raw = role.clone();
+                        let role = escape_pdf_name(role);
+                        out.push_str(&format!(
+                            "/{role} <</MCID {mcid} /ActualText {}>> BDC\n",
+                            pdf_text_string(actual_text)
+                        ));
+                        let parent = tag_stack.last().copied();
+                        let idx = self.tag_records.len();
+                        self.tag_records.push(TagRecord {
+                            page_index: page_index.unwrap_or(0),
+                            mcid: Some(*mcid),
+                            role: role_raw,
+                            alt: None,
+                            actual_text: Some(actual_text.clone()),
+                            scope: None,
+                            parent,
+                            table_id: None,
+                            col_index: None,
                         });
                         tag_stack.push(idx);
                     }
@@ -3444,13 +3616,19 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     } else {
                         out.push_str("/Artifact BMC\n");
                     }
+                    marked_content_stack.push(true);
+                    explicit_artifact_depth = explicit_artifact_depth.saturating_add(1);
                 }
                 Command::BeginOptionalContent { name } => {
                     self.optional_content_names.insert(name.clone());
                     out.push_str(&format!("/OC /{} BDC\n", escape_pdf_name(name)));
+                    marked_content_stack.push(false);
                 }
                 Command::EndMarkedContent => {
                     out.push_str("EMC\n");
+                    if marked_content_stack.pop() == Some(true) {
+                        explicit_artifact_depth = explicit_artifact_depth.saturating_sub(1);
+                    }
                 }
                 Command::SetFillColor(color) => {
                     current_fill = *color;
@@ -4233,6 +4411,9 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 }
             }
         }
+        if automatic_artifact_open {
+            out.push_str("EMC\n");
+        }
         Ok(out)
     }
 
@@ -4573,6 +4754,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         &mut self,
         font_state: &Type3StreamFont,
         registry: &FontRegistry,
+        glyph_map: Option<&BTreeMap<u16, String>>,
     ) -> io::Result<()> {
         let mut glyphs = Vec::with_capacity(font_state.glyph_ids.len());
         for glyph_id in &font_state.glyph_ids {
@@ -4631,8 +4813,29 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             font_state.glyph_ids.iter().next().copied().unwrap_or(0) >> 8,
             font_state.synthetic_bold_millionths,
         );
+        let unicode_map = glyph_map
+            .map(|glyph_map| {
+                glyphs
+                    .iter()
+                    .filter_map(|(glyph_id, _, _, _)| {
+                        glyph_map
+                            .get(glyph_id)
+                            .cloned()
+                            .map(|value| ((glyph_id & 0x00ff) as u8, value))
+                    })
+                    .collect::<BTreeMap<_, _>>()
+            })
+            .unwrap_or_default();
+        let to_unicode = if unicode_map.is_empty() {
+            String::new()
+        } else {
+            let to_unicode_id = self.alloc_ids(1);
+            let cmap = type3_to_unicode_cmap(&unicode_map);
+            self.write_stream_object_bytes(to_unicode_id, "", cmap.as_bytes())?;
+            format!(" /ToUnicode {} 0 R", to_unicode_id)
+        };
         let object = format!(
-            "<< /Type /Font /Subtype /Type3 /BaseFont /{} /FontBBox [{} {} {} {}] /FontMatrix [0.001 0 0 -0.001 0 0] /CharProcs << {} >> /Encoding << /Type /Encoding /Differences [{}] >> /FirstChar {} /LastChar {} /Widths [{}] /Resources << >> >>",
+            "<< /Type /Font /Subtype /Type3 /BaseFont /{} /FontBBox [{} {} {} {}] /FontMatrix [0.001 0 0 -0.001 0 0] /CharProcs << {} >> /Encoding << /Type /Encoding /Differences [{}] >> /FirstChar {} /LastChar {} /Widths [{}] /Resources << >>{} >>",
             base,
             fmt(font_bbox[0]),
             fmt(font_bbox[1]),
@@ -4643,6 +4846,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             first_char,
             last_char,
             widths,
+            to_unicode,
         );
         self.write_object(font_state.font_id, &object)
     }
@@ -6125,10 +6329,31 @@ fn collect_tag_records(document: &Document) -> Vec<TagRecord> {
                         mcid: *mcid,
                         role: role.clone(),
                         alt: alt.clone(),
+                        actual_text: None,
                         scope: scope.clone(),
                         parent,
                         table_id: *table_id,
                         col_index: *col_index,
+                    });
+                    stack.push(idx);
+                }
+                Command::BeginTagActualText {
+                    role,
+                    mcid,
+                    actual_text,
+                } => {
+                    let parent = stack.last().copied();
+                    let idx = records.len();
+                    records.push(TagRecord {
+                        page_index,
+                        mcid: Some(*mcid),
+                        role: role.clone(),
+                        alt: None,
+                        actual_text: Some(actual_text.clone()),
+                        scope: None,
+                        parent,
+                        table_id: None,
+                        col_index: None,
                     });
                     stack.push(idx);
                 }
@@ -6949,10 +7174,41 @@ fn render_page(
                             mcid: *mcid,
                             role: role_raw,
                             alt: alt.clone(),
+                            actual_text: None,
                             scope: scope.clone(),
                             parent,
                             table_id: *table_id,
                             col_index: *col_index,
+                        });
+                        tag_stack.push(idx);
+                    }
+                }
+            }
+            Command::BeginTagActualText {
+                role,
+                mcid,
+                actual_text,
+            } => {
+                if options.pdf_profile.emits_tagged_structure() {
+                    let role_raw = role.clone();
+                    let role = escape_pdf_name(role);
+                    out.push_str(&format!(
+                        "/{role} <</MCID {mcid} /ActualText {}>> BDC\n",
+                        pdf_text_string(actual_text)
+                    ));
+                    if let Some(records) = tag_records.as_deref_mut() {
+                        let parent = tag_stack.last().copied();
+                        let idx = records.len();
+                        records.push(TagRecord {
+                            page_index,
+                            mcid: Some(*mcid),
+                            role: role_raw,
+                            alt: None,
+                            actual_text: Some(actual_text.clone()),
+                            scope: None,
+                            parent,
+                            table_id: None,
+                            col_index: None,
                         });
                         tag_stack.push(idx);
                     }
@@ -8143,6 +8399,18 @@ fn escape_pdf_string(input: &str) -> String {
     out
 }
 
+fn pdf_text_string(input: &str) -> String {
+    if input.is_ascii() {
+        return format!("({})", escape_pdf_string(input));
+    }
+    let mut out = String::from("<FEFF");
+    for code_unit in input.encode_utf16() {
+        out.push_str(&format!("{code_unit:04X}"));
+    }
+    out.push('>');
+    out
+}
+
 struct WinAnsiEncoded {
     text: String,
     replaced: usize,
@@ -8480,6 +8748,42 @@ fn to_unicode_cmap(glyph_map: &BTreeMap<u16, String>) -> String {
         }
         out.push_str("endbfchar\n");
         idx = end;
+    }
+
+    out.push_str("endcmap\n");
+    out.push_str("CMapName currentdict /CMap defineresource pop\n");
+    out.push_str("end\nend\n");
+    out
+}
+
+fn type3_to_unicode_cmap(glyph_map: &BTreeMap<u8, String>) -> String {
+    let entries: Vec<(u8, String)> = glyph_map
+        .iter()
+        .map(|(code, value)| (*code, value.clone()))
+        .collect();
+
+    let mut out = String::new();
+    out.push_str("/CIDInit /ProcSet findresource begin\n");
+    out.push_str("12 dict begin\n");
+    out.push_str("begincmap\n");
+    out.push_str("/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n");
+    out.push_str("/CMapName /FullBleed-Type3-UCS def\n");
+    out.push_str("/CMapType 2 def\n");
+    out.push_str("1 begincodespacerange\n<00> <FF>\nendcodespacerange\n");
+
+    let mut index = 0usize;
+    while index < entries.len() {
+        let end = (index + 100).min(entries.len());
+        out.push_str(&format!("{} beginbfchar\n", end - index));
+        for (code, value) in &entries[index..end] {
+            let mut unicode = String::new();
+            for character in value.encode_utf16() {
+                unicode.push_str(&format!("{:04X}", character));
+            }
+            out.push_str(&format!("<{:02X}> <{}>\n", code, unicode));
+        }
+        out.push_str("endbfchar\n");
+        index = end;
     }
 
     out.push_str("endcmap\n");
@@ -8957,8 +9261,9 @@ fn color_to_pdf_stroke(color: Color, space: ColorSpace) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::canvas::Page;
+    use crate::canvas::{META_PAGE_PRESENTATION_KEY, Page};
     use crate::pdf_native::{Document as LoDocument, Object as LoObject};
+    use crate::types::PagePresentation;
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -9094,6 +9399,54 @@ mod tests {
         let cmap = to_unicode_cmap(&map);
         assert!(cmap.contains("<0003> <0041>"));
         assert!(cmap.contains("<0004> <D83DDE00>"));
+    }
+
+    #[test]
+    fn type3_to_unicode_cmap_uses_single_byte_source_codes() {
+        let map = BTreeMap::from([(0x2cu8, "A".to_string()), (0xfbu8, "\u{1F600}".to_string())]);
+        let cmap = type3_to_unicode_cmap(&map);
+        assert!(cmap.contains("<00> <FF>"));
+        assert!(cmap.contains("<2C> <0041>"));
+        assert!(cmap.contains("<FB> <D83DDE00>"));
+    }
+
+    #[test]
+    fn orphan_definition_parts_are_normalized_into_list_items_in_source_order() {
+        let record = |role: &str| TagRecord {
+            page_index: 0,
+            mcid: Some(0),
+            role: role.to_string(),
+            alt: None,
+            actual_text: None,
+            scope: None,
+            parent: None,
+            table_id: None,
+            col_index: None,
+        };
+        let normalized = normalize_definition_list_structure(vec![
+            record("P"),
+            record("Lbl"),
+            record("LBody"),
+            record("Lbl"),
+            record("LBody"),
+            record("P"),
+        ]);
+
+        assert_eq!(
+            normalized
+                .iter()
+                .map(|record| record.role.as_str())
+                .collect::<Vec<_>>(),
+            vec!["P", "L", "LI", "Lbl", "LBody", "LI", "Lbl", "LBody", "P"]
+        );
+        assert_eq!(normalized[1].parent, None);
+        assert_eq!(normalized[2].parent, Some(1));
+        assert_eq!(normalized[3].parent, Some(2));
+        assert_eq!(normalized[4].parent, Some(2));
+        assert_eq!(normalized[5].parent, Some(1));
+        assert_eq!(normalized[6].parent, Some(5));
+        assert_eq!(normalized[7].parent, Some(5));
+        assert_eq!(normalized[8].parent, None);
     }
 
     #[test]
@@ -9899,6 +10252,140 @@ mod tests {
         assert!(pdf.contains("/CharProcs << /.notdef"));
         assert!(pdf.contains(&format!("/g{:04X}", glyph_id)));
         assert!(pdf.contains("/T3F1 "));
+    }
+
+    #[test]
+    fn pdfua1_type3_synthetic_bold_font_maps_visible_glyphs_to_unicode() {
+        let inter_path = repo_font_path("Inter-Variable.ttf");
+        let inter_bytes = std::fs::read(&inter_path).expect("read inter");
+        let mut registry = FontRegistry::new();
+        let inter_name = registry
+            .register_bytes(inter_bytes, Some(inter_path.to_string_lossy().as_ref()))
+            .expect("register inter");
+        let glyph_id = registry.map_glyph_id_for_char(&inter_name, 'A');
+        let advance = Pt::from_f32(21.0).mul_ratio(
+            i32::from(registry.glyph_advance(&inter_name, glyph_id)),
+            1000,
+        );
+        let doc = one_page_document(vec![
+            Command::BeginTag {
+                role: "P".to_string(),
+                mcid: Some(0),
+                alt: None,
+                scope: None,
+                table_id: None,
+                col_index: None,
+                group_only: false,
+            },
+            Command::SetFontName(inter_name),
+            Command::SetFontSize(Pt::from_f32(21.0)),
+            Command::DrawSyntheticBoldGlyphRun {
+                x: Pt::from_f32(13.5),
+                y: Pt::from_f32(45.0),
+                glyph_ids: vec![glyph_id],
+                advances: vec![(advance, Pt::ZERO)],
+                offsets: vec![(Pt::ZERO, Pt::ZERO)],
+                stroke_width: Pt::from_milli_i64(656),
+            },
+            Command::SetTextRenderingMode(3),
+            Command::DrawString {
+                x: Pt::from_f32(13.5),
+                y: Pt::from_f32(45.0),
+                text: "A".to_string(),
+            },
+            Command::EndTag,
+        ]);
+        let mut options = PdfOptions::default();
+        options.pdf_profile = PdfProfile::PdfUa1;
+        options.document_lang = Some("en-US".to_string());
+        options.document_title = Some("Synthetic bold Unicode".to_string());
+
+        let bytes =
+            document_to_pdf_with_metrics_and_registry(&doc, None, Some(&registry), &options)
+                .expect("render PDF/UA synthetic bold text");
+        let pdf = String::from_utf8_lossy(&bytes);
+        assert!(pdf.contains("/Subtype /Type3"));
+        assert!(pdf.contains("/CMapName /FullBleed-Type3-UCS"));
+        assert!(pdf.contains(&format!("<{:02X}> <0041>", glyph_id & 0x00ff)));
+    }
+
+    #[test]
+    fn tagged_pdf_marks_only_orphan_nontext_paint_as_artifact() {
+        let doc = one_page_document(vec![
+            Command::DrawRect {
+                x: Pt::from_f32(1.0),
+                y: Pt::from_f32(2.0),
+                width: Pt::from_f32(3.0),
+                height: Pt::from_f32(4.0),
+            },
+            Command::BeginTag {
+                role: "Figure".to_string(),
+                mcid: Some(0),
+                alt: Some("Meaningful rectangle".to_string()),
+                scope: None,
+                table_id: None,
+                col_index: None,
+                group_only: false,
+            },
+            Command::DrawRect {
+                x: Pt::from_f32(5.0),
+                y: Pt::from_f32(6.0),
+                width: Pt::from_f32(7.0),
+                height: Pt::from_f32(8.0),
+            },
+            Command::EndTag,
+        ]);
+        let mut options = PdfOptions::default();
+        options.pdf_profile = PdfProfile::Tagged;
+
+        let bytes = document_to_pdf_with_metrics_and_registry(&doc, None, None, &options)
+            .expect("render tagged paint");
+        let content = page_content_bytes(&bytes);
+        assert_eq!(count_token(&content, b"/Artifact BMC"), 1);
+        assert_eq!(count_token(&content, b"/Figure <</MCID 0>> BDC"), 1);
+        let content = String::from_utf8_lossy(&content);
+        assert!(content.find("/Artifact BMC").unwrap() < content.find(" re\nf\n").unwrap());
+        assert!(content.find("EMC\n/Figure").is_some());
+    }
+
+    #[test]
+    fn tagged_pdf_emits_screen_reader_only_actual_text_without_glyph_paint() {
+        let doc = one_page_document(vec![
+            Command::BeginTagActualText {
+                role: "Span".to_string(),
+                mcid: 0,
+                actual_text: "Additional account context".to_string(),
+            },
+            Command::EndTag,
+        ]);
+        let mut options = PdfOptions::default();
+        options.pdf_profile = PdfProfile::Tagged;
+
+        let bytes = document_to_pdf_with_metrics_and_registry(&doc, None, None, &options)
+            .expect("render tagged screen-reader-only text");
+        let content = page_content_bytes(&bytes);
+        let content = String::from_utf8_lossy(&content);
+        assert!(content.contains("/Span <</MCID 0 /ActualText (Additional account context)>> BDC"));
+        assert!(!content.contains(" Tj"));
+        let pdf = String::from_utf8_lossy(&bytes);
+        assert!(pdf.contains("/S /Span"));
+        assert!(pdf.contains("/ActualText (Additional account context)"));
+
+        let unicode_doc = one_page_document(vec![
+            Command::BeginTagActualText {
+                role: "Span".to_string(),
+                mcid: 0,
+                actual_text: "Résumé – 東京".to_string(),
+            },
+            Command::EndTag,
+        ]);
+        let unicode_bytes =
+            document_to_pdf_with_metrics_and_registry(&unicode_doc, None, None, &options)
+                .expect("render Unicode screen-reader-only text");
+        let unicode_pdf = String::from_utf8_lossy(&unicode_bytes);
+        assert!(
+            unicode_pdf.contains("/ActualText <FEFF005200E900730075006D00E900202013002067714EAC>")
+        );
     }
 
     #[test]

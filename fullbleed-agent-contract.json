@@ -219,6 +219,29 @@
       "--budget-max-bytes",
       "--budget-max-ms"
     ],
+    "charts": {
+      "browser_runtime_required": false,
+      "engine_owned": true,
+      "generated_svg_persisted": false,
+      "input_contract": "resolved_chart_spec",
+      "kinds": [
+        "bar",
+        "line",
+        "sparkline"
+      ],
+      "native_svg_primitives": [
+        "path",
+        "rect",
+        "line",
+        "circle",
+        "text"
+      ],
+      "outputs": [
+        "native_inline_svg",
+        "semantic_html_table"
+      ],
+      "rust_api": "fullbleed::compile_chart"
+    },
     "commands": [
       "render",
       "verify",
@@ -4132,6 +4155,9 @@
           "agent_skill": {
             "type": "object"
           },
+          "charts": {
+            "type": "object"
+          },
           "commands": {
             "type": "array"
           },
@@ -4839,6 +4865,19 @@
           ".",
           "--json"
         ]
+      },
+      "data_bound_charts": {
+        "engine_owned": true,
+        "kinds": [
+          "bar",
+          "line",
+          "sparkline"
+        ],
+        "outputs": [
+          "native_inline_svg",
+          "semantic_html_table"
+        ],
+        "rust_api": "fullbleed::compile_chart"
       },
       "existing_pdf_template": {
         "available": true,

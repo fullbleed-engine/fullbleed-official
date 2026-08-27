@@ -14,10 +14,11 @@ use crate::flowable::{
     LeaderFlowable, LengthSpec, ListBulletFlowable, ListBulletKind, ListItemFlowable, MaskMode,
     MetaFlowable, MultiColumnFlowable, OutlineLineStyle, OverlayFlowable, PageFootnoteAreaStyle,
     PageFootnoteEntry, PaintFilterOperation, PaintFilterSpec, Paragraph,
-    RelativePositionedFlowable, RunningElementFlowable, Spacer, SvgComponentTransferFunction,
-    SvgFilterInput, SvgFilterNode, SvgFilterPrimitive, SvgFilterProgram, SvgFilterRegion,
-    SvgFlowable, SvgMorphologyOperator, TableCell, TableColumnBorder, TableColumnGroupBorder,
-    TableColumnWidthHint, TableFlowable, TableLayoutMode, TextAlign, TextStyle, VerticalAlign,
+    RelativePositionedFlowable, RunningElementFlowable, ScreenReaderTextFlowable, Spacer,
+    SvgComponentTransferFunction, SvgFilterInput, SvgFilterNode, SvgFilterPrimitive,
+    SvgFilterProgram, SvgFilterRegion, SvgFlowable, SvgMorphologyOperator, TableCell,
+    TableColumnBorder, TableColumnGroupBorder, TableColumnWidthHint, TableFlowable,
+    TableLayoutMode, TextAlign, TextStyle, VerticalAlign,
     css_direct_text_prefers_nearest_baseline_snap, css_print_line_prefers_nearest_baseline_snap,
 };
 use crate::font::FontRegistry;
@@ -1157,6 +1158,7 @@ fn authored_owner_metadata(
     let should_attach = !explicit_meta.is_empty()
         || info.id.is_some()
         || !info.classes.is_empty()
+        || info.attrs.contains_key("data-fb-id")
         || info.attrs.contains_key("data-fb-role")
         || info.attrs.contains_key("data-fb-component")
         || !style.transform.is_empty()
@@ -1208,6 +1210,11 @@ fn authored_owner_metadata(
         Some(dom_path_for_node(ancestors, info)),
     );
     upsert(&mut out, "fb.owner.id", info.id.clone());
+    upsert(
+        &mut out,
+        "fb.owner.source_id",
+        info.attrs.get("data-fb-id").cloned(),
+    );
     if !info.classes.is_empty() {
         upsert(&mut out, "fb.owner.classes", Some(info.classes.join(" ")));
     }
@@ -2156,7 +2163,29 @@ fn node_to_flowables(
             }
             let node_meta = authored_owner_metadata(&info, ancestors, &explicit_node_meta, &style);
 
-            if matches!(style.display, DisplayMode::None) {
+            // `data-fb-a11y-only` is an explicit document-compiler primitive,
+            // not a browser clipping trick. Preserve resolved source text in
+            // tagged reading order without creating visual flow geometry. The
+            // authored inline hiding style remains useful when the
+            // same source is opened or exported as ordinary HTML. Compile the
+            // zero-size carrier in flow so its tag remains at the exact source
+            // reading-order position; the semantic primitive ignores visual
+            // positioning/float declarations rather than entering a deferred
+            // paint phase.
+            let screen_reader_text = info
+                .attrs
+                .get("data-fb-a11y-only")
+                .filter(|value| data_attribute_value_is_truthy(value))
+                .map(|_| extract_text(node, style.white_space))
+                .map(|text| text.split_whitespace().collect::<Vec<_>>().join(" "))
+                .filter(|text| !text.is_empty());
+            if screen_reader_text.is_some() {
+                style.position = PositionMode::Static;
+                style.float_mode = FloatMode::None;
+                style.clear_mode = ClearMode::None;
+            }
+
+            if matches!(style.display, DisplayMode::None) && screen_reader_text.is_none() {
                 return Vec::new();
             }
             let counter_reset_scopes = if style_can_mutate_counters(&style) {
@@ -2262,7 +2291,8 @@ fn node_to_flowables(
 
             // Inline elements are transparent containers in our layout model,
             // except replaced/special inline elements that render atomically.
-            let transparent_inline = matches!(style.display, DisplayMode::Inline)
+            let transparent_inline = screen_reader_text.is_none()
+                    && matches!(style.display, DisplayMode::Inline)
                     && !matches!(info.tag.as_str(), "img" | "svg" | "br")
                     // Grid items are blockified even when their specified
                     // outer display type is inline.
@@ -2478,8 +2508,18 @@ fn node_to_flowables(
                 return out;
             }
 
-            let mut flowables = if let Some(marker_ancestors) = list_item_marker_ancestors.as_ref()
-            {
+            let mut flowables = if let Some(text) = screen_reader_text.as_ref() {
+                vec![LayoutItem::Block {
+                    flowable: Box::new(
+                        ScreenReaderTextFlowable::new(text.clone())
+                            .with_pagination(style.pagination),
+                    ) as Box<dyn Flowable>,
+                    flex_grow: 0.0,
+                    flex_shrink: 0.0,
+                    width_spec: None,
+                    order: 0,
+                }]
+            } else if let Some(marker_ancestors) = list_item_marker_ancestors.as_ref() {
                 css_display_list_item_flowables(
                     node,
                     resolver,
@@ -3526,8 +3566,7 @@ fn node_to_flowables(
                     | "aside" | "nav" | "main" | "blockquote" | "figure" | "figcaption" | "dl"
                     | "dt" | "dd" => (|| {
                         let dl_container_role = definition_list_container_role(info.tag.as_str());
-                        let dl_inline_text_role =
-                            definition_list_inline_text_role(info.tag.as_str());
+                        let direct_text_role = direct_text_structure_role(info.tag.as_str());
                         if is_table_container_display(style.display) {
                             table_container_flowables(
                                 node,
@@ -3644,12 +3683,8 @@ fn node_to_flowables(
                                         WhiteSpaceMode::BreakSpaces
                                     ))
                                     .with_pagination(style.pagination)
-                                    .with_font_registry(font_registry.clone());
-                                let paragraph = if let Some(role) = dl_inline_text_role {
-                                    paragraph.with_tag_role(role)
-                                } else {
-                                    paragraph
-                                };
+                                    .with_font_registry(font_registry.clone())
+                                    .with_tag_role(direct_text_role);
                                 let items = vec![LayoutItem::Block {
                                     flowable: Box::new(
                                         CssLineBoxFlowable::new(Box::new(paragraph))
@@ -5714,6 +5749,16 @@ fn inline_children_only(
             .map(|s| s.to_string());
         let child_style =
             resolver.compute_style(&info, parent_style, inline_style.as_deref(), ancestors);
+        // This semantic child must be compiled as its own zero-size tag at the
+        // exact DOM position. Flattening the parent into one text run would
+        // paint the alternative text and discard its `/ActualText` carrier.
+        if info
+            .attrs
+            .get("data-fb-a11y-only")
+            .is_some_and(|value| data_attribute_value_is_truthy(value))
+        {
+            return false;
+        }
         // display:none generates no box and contributes no text, so it cannot
         // invalidate an otherwise flattenable inline formatting context.
         if matches!(child_style.display, DisplayMode::None) {
@@ -5771,6 +5816,13 @@ fn inline_children_only(
         }
     }
     true
+}
+
+fn data_attribute_value_is_truthy(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "" | "1" | "true" | "yes" | "on"
+    )
 }
 
 /// Return whether an inline wrapper is semantically transparent to the single-style
@@ -8079,6 +8131,138 @@ mod tests {
             Pt::from_f32(-6.0),
             "the shadow form keeps the inline-union phase shared by its source glyph run"
         );
+    }
+
+    #[test]
+    fn semantic_container_direct_text_is_emitted_as_real_paragraph_content() {
+        let resolver = StyleResolver::new(
+            "* { margin: 0; padding: 0; } html, body, footer { display: block; }",
+        );
+        let story = html_to_story_with_resolver_and_fonts_and_report(
+            "<html><body><footer>Questions? Call support.</footer></body></html>",
+            &resolver,
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        );
+        let page = Size {
+            width: Pt::from_f32(300.0),
+            height: Pt::from_f32(120.0),
+        };
+        let mut canvas = Canvas::new(page);
+        let mut y = Pt::ZERO;
+        for flowable in story {
+            let size = flowable.wrap(page.width, page.height);
+            flowable.draw(&mut canvas, Pt::ZERO, y, page.width, size.height);
+            y += size.height;
+        }
+        let commands = &canvas.finish().pages[0].commands;
+        let text_index = commands
+            .iter()
+            .position(|command| {
+                matches!(command, Command::DrawString { text, .. } if text == "Questions? Call support.")
+            })
+            .expect("footer text command");
+        assert!(
+            commands[..text_index].iter().any(|command| {
+                matches!(command, Command::BeginTag { role, .. } if role == "P")
+            })
+        );
+        assert!(
+            commands[text_index + 1..]
+                .iter()
+                .any(|command| matches!(command, Command::EndTag))
+        );
+    }
+
+    #[test]
+    fn screen_reader_only_text_emits_actual_text_without_paint_or_flow_height() {
+        let resolver =
+            StyleResolver::new("* { margin: 0; padding: 0; } html, body, p { display: block; }");
+        let compile = |html: &str| {
+            let story = html_to_story_with_resolver_and_fonts_and_report(
+                html, &resolver, None, None, None, false, false, None, None,
+            );
+            let page = Size {
+                width: Pt::from_f32(300.0),
+                height: Pt::from_f32(120.0),
+            };
+            let mut canvas = Canvas::new(page);
+            let mut y = Pt::ZERO;
+            for flowable in &story {
+                let size = flowable.wrap(page.width, page.height);
+                flowable.draw(&mut canvas, Pt::ZERO, y, page.width, size.height);
+                y += size.height;
+            }
+            (y, canvas.finish().pages[0].commands.clone())
+        };
+
+        let (baseline_height, _) =
+            compile("<html><body><p>Visible before</p><p>Visible after</p></body></html>");
+        let (authored_height, commands) = compile(
+            "<html><body><p>Visible before</p><span data-fb-a11y-only='true' style='display:none'>Account values are shown in the following table.</span><p>Visible after</p></body></html>",
+        );
+
+        assert_eq!(authored_height, baseline_height);
+        assert!(commands.iter().any(|command| matches!(
+            command,
+            Command::BeginTagActualText { role, actual_text, .. }
+                if role == "Span" && actual_text == "Account values are shown in the following table."
+        )));
+        assert!(!commands.iter().any(|command| matches!(
+            command,
+            Command::DrawString { text, .. }
+                if text.contains("Account values are shown")
+        )));
+        let before = commands
+            .iter()
+            .position(|command| matches!(command, Command::DrawString { text, .. } if text.contains("Visible before")))
+            .expect("visible predecessor paint");
+        let semantic = commands
+            .iter()
+            .position(|command| matches!(command, Command::BeginTagActualText { .. }))
+            .expect("screen-reader-only semantic carrier");
+        let after = commands
+            .iter()
+            .position(|command| matches!(command, Command::DrawString { text, .. } if text.contains("Visible after")))
+            .expect("visible successor paint");
+        assert!(before < semantic && semantic < after);
+
+        let (inline_baseline_height, _) =
+            compile("<html><body><p>Visible before visible after</p></body></html>");
+        let (inline_height, inline_commands) = compile(
+            "<html><body><p>Visible before <span data-fb-a11y-only='true'>Inline semantic context</span> visible after</p></body></html>",
+        );
+        assert_eq!(inline_height, inline_baseline_height);
+        assert!(
+            inline_commands.iter().any(|command| matches!(
+                command,
+                Command::BeginTagActualText { actual_text, .. }
+                    if actual_text == "Inline semantic context"
+            )),
+            "inline commands: {inline_commands:#?}"
+        );
+        assert!(!inline_commands.iter().any(|command| matches!(
+            command,
+            Command::DrawString { text, .. } if text.contains("Inline semantic context")
+        )));
+        let inline_before = inline_commands
+            .iter()
+            .position(|command| matches!(command, Command::DrawString { text, .. } if text.contains("Visible before")))
+            .expect("inline visible predecessor paint");
+        let inline_semantic = inline_commands
+            .iter()
+            .position(|command| matches!(command, Command::BeginTagActualText { .. }))
+            .expect("inline semantic carrier");
+        let inline_after = inline_commands
+            .iter()
+            .position(|command| matches!(command, Command::DrawString { text, .. } if text.contains("visible after")))
+            .expect("inline visible successor paint");
+        assert!(inline_before < inline_semantic && inline_semantic < inline_after);
     }
 
     #[test]
@@ -10939,11 +11123,14 @@ fn definition_list_container_role(tag: &str) -> Option<&'static str> {
     }
 }
 
-fn definition_list_inline_text_role(tag: &str) -> Option<&'static str> {
+fn direct_text_structure_role(tag: &str) -> &'static str {
     match tag {
-        "dt" => Some("Lbl"),
-        "dd" => Some("LBody"),
-        _ => None,
+        "dl" | "dd" => "LBody",
+        "dt" => "Lbl",
+        "blockquote" => "BlockQuote",
+        "figcaption" => "Caption",
+        "span" | "i" => "Span",
+        _ => "P",
     }
 }
 

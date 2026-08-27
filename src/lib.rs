@@ -1,6 +1,8 @@
 mod assets;
+mod authoring;
 mod base64;
 mod canvas;
+mod chart;
 mod css_native;
 mod css_queries;
 mod debug;
@@ -51,7 +53,21 @@ mod unicode_data;
 mod xml;
 
 pub use assets::{Asset, AssetBundle, AssetKind};
+pub use authoring::{
+    AUTHORING_LANGUAGE_REPORT_SCHEMA, AUTHORING_READING_PREVIEW_SCHEMA, AuthoringCancellationToken,
+    AuthoringDiagnostic, AuthoringDiagnosticSeverity, AuthoringLanguageDiagnostic,
+    AuthoringLanguageFacts, AuthoringLanguageFeature, AuthoringLanguageFeatureContext,
+    AuthoringLanguageReportV1, AuthoringLanguageRequest, AuthoringLayoutFragment,
+    AuthoringLayoutNode, AuthoringLayoutPage, AuthoringLayoutSnapshotV1,
+    AuthoringPreviewArtifactV1, AuthoringPreviewPhase, AuthoringPreviewProgress,
+    AuthoringPreviewRequest, AuthoringReadingNode, AuthoringReadingPage, AuthoringReadingPreviewV1,
+    AuthoringSourceLanguage, authoring_language_features, inspect_authoring_source,
+};
 pub use canvas::{Canvas, Command, Document, Page};
+pub use chart::{
+    CHART_COMPILER_SCHEMA, ChartArtifact, ChartDiagnostic, ChartError, ChartKind, ChartSeries,
+    ChartSpec, ChartTable, ChartTrace, compile_chart,
+};
 use debug::DebugLogger;
 pub use doc_context::DocContext;
 pub use doc_template::DocTemplate;
@@ -73,6 +89,7 @@ pub use flowable::{
 use font::FontRegistry;
 #[cfg(feature = "python")]
 use font::RegisteredFontTrace;
+pub use font::extract_font_face_bytes;
 pub use frame::{AddResult, Frame};
 use fullbleed_audit_contract as audit_contract;
 pub use glyph_report::{GlyphCoverageReport, MissingGlyph};
@@ -1105,7 +1122,25 @@ impl CompiledDocument {
         let (record_count, columns) = self.ordered_binding_columns(bindings)?;
         let estimated = record_count.saturating_mul(512).saturating_add(64 * 1024);
         let mut out = Vec::with_capacity(estimated);
-        self.render_bindings_to_writer_ordered(record_count, &columns, &mut out)?;
+        self.render_bindings_to_writer_ordered(record_count, &columns, &mut out, None)?;
+        Ok(out)
+    }
+
+    /// Execute fixed-geometry bindings with cooperative row-boundary cancellation.
+    pub fn render_bindings_to_buffer_cancellable(
+        &self,
+        bindings: &HashMap<String, Vec<String>>,
+        cancellation: &AuthoringCancellationToken,
+    ) -> Result<Vec<u8>, FullBleedError> {
+        let (record_count, columns) = self.ordered_binding_columns(bindings)?;
+        let estimated = record_count.saturating_mul(512).saturating_add(64 * 1024);
+        let mut out = Vec::with_capacity(estimated);
+        self.render_bindings_to_writer_ordered(
+            record_count,
+            &columns,
+            &mut out,
+            Some(cancellation),
+        )?;
         Ok(out)
     }
 
@@ -1114,6 +1149,7 @@ impl CompiledDocument {
         record_count: usize,
         columns: &[&[String]],
         writer: &mut W,
+        cancellation: Option<&AuthoringCancellationToken>,
     ) -> Result<usize, FullBleedError> {
         let binding_plan = self
             .binding_plan
@@ -1133,13 +1169,21 @@ impl CompiledDocument {
             self.debug.clone(),
             self.perf.clone(),
         )?;
-        pdf_stream.add_compiled_document_bindings(
+        let result = pdf_stream.add_compiled_document_bindings(
             0,
             &self.document,
             binding_plan,
             columns,
             record_count,
-        )?;
+            || cancellation.is_some_and(AuthoringCancellationToken::is_cancelled),
+        );
+        if result
+            .as_ref()
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::Interrupted)
+        {
+            return Err(FullBleedError::Cancelled);
+        }
+        result?;
         Ok(pdf_stream.finish()?)
     }
 
@@ -1149,7 +1193,7 @@ impl CompiledDocument {
         writer: &mut W,
     ) -> Result<usize, FullBleedError> {
         let (record_count, columns) = self.ordered_binding_columns(bindings)?;
-        self.render_bindings_to_writer_ordered(record_count, &columns, writer)
+        self.render_bindings_to_writer_ordered(record_count, &columns, writer, None)
     }
 
     pub fn render_bindings_to_file(
@@ -1217,6 +1261,33 @@ impl CompiledDocument {
             &columns,
             &mut out,
             options,
+            None,
+        )?;
+        Ok(out)
+    }
+
+    /// Execute compiled reflow with explicit options and cooperative cancellation.
+    pub fn render_reflow_bindings_to_buffer_with_options_cancellable(
+        &self,
+        bindings: &HashMap<String, Vec<String>>,
+        options: CompiledReflowOptions,
+        cancellation: &AuthoringCancellationToken,
+    ) -> Result<Vec<u8>, FullBleedError> {
+        let plan = self.compiled_reflow_plan()?;
+        let (record_count, columns) = Self::ordered_columns_for_slots(
+            plan.template.slot_names(),
+            bindings,
+            "compiled document has no reflow-capable {{slot}} text bindings",
+        )?;
+        let estimated = record_count.saturating_mul(4096).saturating_add(64 * 1024);
+        let mut out = Vec::with_capacity(estimated);
+        self.render_reflow_bindings_to_writer_ordered(
+            plan,
+            record_count,
+            &columns,
+            &mut out,
+            options,
+            Some(cancellation),
         )?;
         Ok(out)
     }
@@ -1228,12 +1299,16 @@ impl CompiledDocument {
         columns: &[&[String]],
         writer: &mut W,
         options: CompiledReflowOptions,
+        cancellation: Option<&AuthoringCancellationToken>,
     ) -> Result<usize, FullBleedError> {
         use std::collections::BTreeMap;
         use std::sync::Mutex;
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::mpsc::{self, TrySendError};
 
+        if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
+            return Err(FullBleedError::Cancelled);
+        }
         let started = std::time::Instant::now();
         let page_size = plan
             .context
@@ -1294,12 +1369,19 @@ impl CompiledDocument {
             for _worker in 0..worker_count {
                 let sender = sender.clone();
                 let cancelled = &cancelled;
+                let external_cancellation = cancellation;
                 let job_receiver = &job_receiver;
                 let pdf_program_cache = pdf_program_cache.clone();
                 scope.spawn(move || {
                     let mut document = plan.template.instantiate();
                     let mut worker_glyphs = CompiledFlowWorkerGlyphs::new();
                     loop {
+                        if external_cancellation
+                            .is_some_and(AuthoringCancellationToken::is_cancelled)
+                        {
+                            cancelled.store(true, Ordering::Release);
+                            return;
+                        }
                         let row = match job_receiver
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1332,12 +1414,22 @@ impl CompiledDocument {
                                 }
                                 Ok(document)
                             });
+                        if external_cancellation
+                            .is_some_and(AuthoringCancellationToken::is_cancelled)
+                        {
+                            cancelled.store(true, Ordering::Release);
+                            return;
+                        }
                         let mut message = (row, rendered);
                         loop {
                             match sender.try_send(message) {
                                 Ok(()) => break,
                                 Err(TrySendError::Full(returned)) => {
-                                    if cancelled.load(Ordering::Acquire) {
+                                    if cancelled.load(Ordering::Acquire)
+                                        || external_cancellation
+                                            .is_some_and(AuthoringCancellationToken::is_cancelled)
+                                    {
+                                        cancelled.store(true, Ordering::Release);
                                         return;
                                     }
                                     message = returned;
@@ -1354,16 +1446,29 @@ impl CompiledDocument {
             let mut pending = BTreeMap::new();
             let mut next_row = 0usize;
             while next_row < record_count {
-                let message = match receiver.recv() {
+                if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
+                    render_error = Some(FullBleedError::Cancelled);
+                    break;
+                }
+                let message = match receiver.recv_timeout(std::time::Duration::from_millis(25)) {
                     Ok(message) => message,
-                    Err(error) => {
+                    Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
+                            render_error = Some(FullBleedError::Cancelled);
+                            break;
+                        }
                         render_error = Some(FullBleedError::Io(std::io::Error::new(
                             std::io::ErrorKind::BrokenPipe,
-                            format!("compiled reflow worker channel closed early: {error}"),
+                            "compiled reflow worker channel closed early",
                         )));
                         break;
                     }
                 };
+                if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
+                    render_error = Some(FullBleedError::Cancelled);
+                    break;
+                }
                 let (row, result) = message;
                 match result {
                     Ok(document) => {
@@ -1375,6 +1480,10 @@ impl CompiledDocument {
                     }
                 }
                 while let Some(document) = pending.remove(&next_row) {
+                    if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
+                        render_error = Some(FullBleedError::Cancelled);
+                        break;
+                    }
                     total_pages = total_pages.saturating_add(document.page_count());
                     if let Err(error) = pdf_stream.add_compiled_flow_document(
                         next_row,
@@ -1406,6 +1515,9 @@ impl CompiledDocument {
             drop(job_sender);
         });
 
+        if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
+            return Err(FullBleedError::Cancelled);
+        }
         if let Some(error) = render_error {
             return Err(error);
         }
@@ -1465,7 +1577,14 @@ impl CompiledDocument {
             bindings,
             "compiled document has no reflow-capable {{slot}} text bindings",
         )?;
-        self.render_reflow_bindings_to_writer_ordered(plan, record_count, &columns, writer, options)
+        self.render_reflow_bindings_to_writer_ordered(
+            plan,
+            record_count,
+            &columns,
+            writer,
+            options,
+            None,
+        )
     }
 
     pub fn render_reflow_bindings_to_file(
@@ -2177,7 +2296,10 @@ fn apply_html_page_shrink_to_fit(doc: &mut Document) {
             .filter_map(|command| match command {
                 // A cross-fragment paint replay is an artifact of the owning
                 // element, not a second semantic occurrence.
-                Command::Meta { .. } | Command::BeginTag { .. } | Command::EndTag => None,
+                Command::Meta { .. }
+                | Command::BeginTag { .. }
+                | Command::BeginTagActualText { .. }
+                | Command::EndTag => None,
                 Command::DefineForm {
                     resource_id,
                     width,
@@ -7823,9 +7945,37 @@ impl FullBleed {
         html_list: &[String],
         css: &str,
     ) -> Result<Vec<u8>, FullBleedError> {
+        self.render_many_to_buffer_parallel_ordered(html_list, css, None)
+    }
+
+    /// Render independent source documents in input order with cooperative cancellation.
+    ///
+    /// Cancellation is observed before and after each record layout and before the final PDF link.
+    /// A record already inside layout is allowed to reach its next safe boundary.
+    pub fn render_many_to_buffer_parallel_cancellable(
+        &self,
+        html_list: &[String],
+        css: &str,
+        cancellation: &AuthoringCancellationToken,
+    ) -> Result<Vec<u8>, FullBleedError> {
+        self.render_many_to_buffer_parallel_ordered(html_list, css, Some(cancellation))
+    }
+
+    fn render_many_to_buffer_parallel_ordered(
+        &self,
+        html_list: &[String],
+        css: &str,
+        cancellation: Option<&AuthoringCancellationToken>,
+    ) -> Result<Vec<u8>, FullBleedError> {
+        if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
+            return Err(FullBleedError::Cancelled);
+        }
         let context = self.build_render_context(css, None);
         let mut results: Vec<(usize, Result<Document, FullBleedError>)> =
             crate::parallel::map_indexed_ordered(html_list, |idx, html| {
+                if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
+                    return (idx, Err(FullBleedError::Cancelled));
+                }
                 let res = self
                     .render_to_document_and_page_data_with_resolver_and_report_at(
                         idx,
@@ -7834,7 +7984,14 @@ impl FullBleed {
                         &context.resolver,
                         None,
                     )
-                    .map(|(doc, _page_data)| doc);
+                    .map(|(doc, _page_data)| doc)
+                    .and_then(|document| {
+                        if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
+                            Err(FullBleedError::Cancelled)
+                        } else {
+                            Ok(document)
+                        }
+                    });
                 (idx, res)
             });
         results.sort_by_key(|(idx, _)| *idx);
@@ -7844,15 +8001,22 @@ impl FullBleed {
             documents.push(res?);
         }
 
+        if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
+            return Err(FullBleedError::Cancelled);
+        }
         let merged = merge_documents(documents)?;
-        Ok(pdf::document_to_pdf_with_metrics_and_registry_with_logs(
+        let bytes = pdf::document_to_pdf_with_metrics_and_registry_with_logs(
             &merged,
             None,
             Some(self.font_registry.as_ref()),
             &self.pdf_options,
             self.debug.clone(),
             self.perf.clone(),
-        )?)
+        )?;
+        if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
+            return Err(FullBleedError::Cancelled);
+        }
+        Ok(bytes)
     }
 
     pub fn render_many_to_buffer_parallel_with_page_data(
@@ -9877,7 +10041,10 @@ mod tests {
         );
         assert!(!replay.iter().any(|command| matches!(
             command,
-            Command::Meta { .. } | Command::BeginTag { .. } | Command::EndTag
+            Command::Meta { .. }
+                | Command::BeginTag { .. }
+                | Command::BeginTagActualText { .. }
+                | Command::EndTag
         )));
         let expected_x = first_area.x - second_area.x;
         let expected_y = first_area.y + first_area.height - second_area.y + Pt::from_f32(0.25);
@@ -10051,7 +10218,10 @@ mod tests {
         )));
         assert!(!replay.iter().any(|command| matches!(
             command,
-            Command::Meta { .. } | Command::BeginTag { .. } | Command::EndTag
+            Command::Meta { .. }
+                | Command::BeginTag { .. }
+                | Command::BeginTagActualText { .. }
+                | Command::EndTag
         )));
     }
 
@@ -11327,6 +11497,39 @@ mod tests {
         assert!(surface.iter().any(
             |command| matches!(command, Command::DrawString { text, .. } if text == "RUN HEAD")
         ));
+    }
+
+    #[test]
+    fn running_elements_nested_in_main_repeat_on_overflow_pages() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine
+            .render_to_document(
+                "<!doctype html><html><body><main><header>RUN HEAD</header><footer>RUN FOOT</footer><div class='p'></div><div class='q'></div></main></body></html>",
+                "@page { size: 180px 120px; margin: 22px 0; \
+                         @top-center { content: element(head); } \
+                         @bottom-center { content: element(foot); } } \
+                 * { margin: 0; box-sizing: border-box; } \
+                 header { position: running(head); height: 18px; font-size: 12px; } \
+                 footer { position: running(foot); height: 18px; font-size: 12px; } \
+                 .p, .q { height: 50px; } \
+                 .p { background: #dbeafe; } \
+                 .q { background: #bbf7d0; }",
+            )
+            .expect("render nested running elements");
+        assert_eq!(document.pages.len(), 2);
+        let running_form_counts = document
+            .pages
+            .iter()
+            .map(|page| {
+                page.commands
+                    .iter()
+                    .filter(|command| {
+                        matches!(command, Command::DrawForm { resource_id, .. } if resource_id.starts_with("css-running-"))
+                    })
+                    .count()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(running_form_counts, vec![2; document.pages.len()]);
     }
 
     #[test]
@@ -14261,6 +14464,44 @@ h1 { font-size: 20pt; }
         assert!(matches!(
             compiled.render_bindings_to_buffer(&uneven),
             Err(FullBleedError::InvalidConfiguration(_))
+        ));
+    }
+
+    #[test]
+    fn batch_rendering_apis_honor_pre_cancelled_tokens() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let compiled = engine
+            .compile_document(
+                "<main><h1>{{name}}</h1><p>Cancellation contract</p></main>",
+                "@page { size: 180pt 120pt; margin: 12pt; }",
+            )
+            .expect("compile cancellable template");
+        let bindings = std::collections::HashMap::from([(
+            "name".to_string(),
+            vec!["Ada".to_string(), "Grace".to_string()],
+        )]);
+        let cancellation = AuthoringCancellationToken::new();
+        cancellation.cancel();
+
+        assert!(matches!(
+            compiled.render_bindings_to_buffer_cancellable(&bindings, &cancellation),
+            Err(FullBleedError::Cancelled)
+        ));
+        assert!(matches!(
+            compiled.render_reflow_bindings_to_buffer_with_options_cancellable(
+                &bindings,
+                CompiledReflowOptions::default(),
+                &cancellation,
+            ),
+            Err(FullBleedError::Cancelled)
+        ));
+        assert!(matches!(
+            engine.render_many_to_buffer_parallel_cancellable(
+                &["<main>One</main>".to_string()],
+                "",
+                &cancellation,
+            ),
+            Err(FullBleedError::Cancelled)
         ));
     }
 

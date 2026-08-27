@@ -2158,6 +2158,27 @@ pub trait Flowable: FlowableClone + Send + Sync {
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)>;
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt);
 
+    /// Page-space bounds for authoring observability after paint-only positioning is applied.
+    ///
+    /// Normal-flow boxes paint in their layout slot. Wrappers such as `position: relative`
+    /// preserve that slot while translating the painted box, so they override this hook rather
+    /// than forcing editor integrations to reconstruct CSS positioning from source declarations.
+    fn authoring_paint_bounds(
+        &self,
+        x: Pt,
+        y: Pt,
+        _avail_width: Pt,
+        _avail_height: Pt,
+        laid_out_size: Size,
+    ) -> Rect {
+        Rect {
+            x,
+            y,
+            width: laid_out_size.width,
+            height: laid_out_size.height,
+        }
+    }
+
     /// Page-local compiled footnote bodies reachable from this fragment. The
     /// frame reserves their bottom area separately from normal-flow advance,
     /// so repeated draws reuse immutable call/body flowables without DOM
@@ -10114,6 +10135,70 @@ impl Flowable for Spacer {
     }
 }
 
+/// Semantic replacement text that participates in tagged-PDF reading order
+/// without painting glyphs or consuming normal-flow geometry.
+///
+/// HTML compilation keeps this zero-size carrier in the authored source
+/// sequence. Its marked-content span is intentionally empty: the PDF writer
+/// emits the authored value as `/ActualText`, which is distinct from a
+/// figure's `/Alt` description.
+#[derive(Debug, Clone)]
+pub struct ScreenReaderTextFlowable {
+    text: Arc<str>,
+    pagination: Pagination,
+}
+
+impl ScreenReaderTextFlowable {
+    pub fn new(text: impl Into<Arc<str>>) -> Self {
+        Self {
+            text: text.into(),
+            pagination: Pagination::default(),
+        }
+    }
+
+    pub fn with_pagination(mut self, pagination: Pagination) -> Self {
+        self.pagination = pagination;
+        self
+    }
+}
+
+impl Flowable for ScreenReaderTextFlowable {
+    fn wrap(&self, _avail_width: Pt, _avail_height: Pt) -> Size {
+        Size {
+            width: Pt::ZERO,
+            height: Pt::ZERO,
+        }
+    }
+
+    fn intrinsic_width(&self) -> Option<Pt> {
+        Some(Pt::ZERO)
+    }
+
+    fn split(
+        &self,
+        _avail_width: Pt,
+        _avail_height: Pt,
+    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        None
+    }
+
+    fn draw(&self, canvas: &mut Canvas, _x: Pt, _y: Pt, _avail_width: Pt, _avail_height: Pt) {
+        if self.text.trim().is_empty() {
+            return;
+        }
+        canvas.begin_tag_actual_text("Span", self.text.to_string());
+        canvas.end_tag();
+    }
+
+    fn pagination(&self) -> Pagination {
+        self.pagination
+    }
+
+    fn debug_name(&self) -> &'static str {
+        "screen-reader-text"
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct CollapsibleSpaceFlowable {
     width: Pt,
@@ -11180,6 +11265,7 @@ pub struct SvgFlowable {
     compiled_size: Size,
     svg_xml: String,
     compiled: std::sync::Arc<Vec<svg::CompiledItem>>,
+    authoring_fragments: std::sync::Arc<Vec<svg::SvgAuthoringFragment>>,
     use_available_size: bool,
     object_fit: ObjectFitMode,
     object_position: BackgroundPositionSpec,
@@ -11210,12 +11296,14 @@ impl SvgFlowable {
         let height = height.max(Pt::ZERO);
         let svg_xml = svg_xml.into();
         let compiled = std::sync::Arc::new(svg::compile_svg(&svg_xml, width, height));
+        let authoring_fragments = std::sync::Arc::new(svg::authoring_fragments(&compiled));
         Self {
             width,
             height,
             compiled_size: Size { width, height },
             svg_xml,
             compiled,
+            authoring_fragments,
             use_available_size: false,
             object_fit: ObjectFitMode::Fill,
             object_position: BackgroundPositionSpec::center(),
@@ -11354,6 +11442,49 @@ impl SvgFlowable {
             .map(|page| page.commands.clone())
             .unwrap_or_default()
     }
+
+    fn record_authoring_fragments(
+        &self,
+        canvas: &mut Canvas,
+        paint_x: Pt,
+        paint_y: Pt,
+        paint_width: Pt,
+        paint_height: Pt,
+        clip: Rect,
+    ) {
+        if self.compiled_size.width <= Pt::ZERO
+            || self.compiled_size.height <= Pt::ZERO
+            || paint_width <= Pt::ZERO
+            || paint_height <= Pt::ZERO
+        {
+            return;
+        }
+        let scale_x = paint_width.to_f32() / self.compiled_size.width.to_f32();
+        let scale_y = paint_height.to_f32() / self.compiled_size.height.to_f32();
+        let clip_right = clip.x + clip.width;
+        let clip_bottom = clip.y + clip.height;
+        for fragment in self.authoring_fragments.iter() {
+            let left = (paint_x + Pt::from_f32(fragment.x.to_f32() * scale_x)).max(clip.x);
+            let top = (paint_y + Pt::from_f32(fragment.y.to_f32() * scale_y)).max(clip.y);
+            let right = (paint_x + Pt::from_f32((fragment.x + fragment.width).to_f32() * scale_x))
+                .min(clip_right);
+            let bottom = (paint_y
+                + Pt::from_f32((fragment.y + fragment.height).to_f32() * scale_y))
+            .min(clip_bottom);
+            if right < left || bottom < top {
+                continue;
+            }
+            canvas.meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "svg-authoring-fragment");
+            canvas.meta("fb.owner.source_id", fragment.source_id.clone());
+            canvas.record_flowable_bounds(Rect {
+                x: left,
+                y: top,
+                width: right - left,
+                height: bottom - top,
+            });
+            canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "svg-authoring-fragment");
+        }
+    }
 }
 
 impl Flowable for SvgFlowable {
@@ -11465,6 +11596,19 @@ impl Flowable for SvgFlowable {
             svg::render_compiled_items(&self.compiled, canvas, paint_x, paint_y);
         }
         canvas.restore_state();
+        self.record_authoring_fragments(
+            canvas,
+            paint_x,
+            paint_y,
+            width,
+            height,
+            Rect {
+                x,
+                y,
+                width: area.width,
+                height: area.height,
+            },
+        );
         if tagged.is_some() {
             canvas.end_tag();
         }
@@ -11479,7 +11623,7 @@ impl Flowable for SvgFlowable {
 mod svg_flowable_tests {
     use super::{Flowable, SvgFlowable};
     use crate::Canvas;
-    use crate::canvas::Command;
+    use crate::canvas::{Command, META_FLOWABLE_BBOX_KEY};
     use crate::types::{MixBlendMode, Pt, Size};
 
     #[test]
@@ -11587,6 +11731,64 @@ mod svg_flowable_tests {
                 .height,
             Pt::from_f32(132.0)
         );
+    }
+
+    #[test]
+    fn transformed_svg_ids_emit_page_space_geometry_outside_compiled_forms() {
+        let svg = SvgFlowable::new_pt(
+            Pt::from_f32(100.0),
+            Pt::from_f32(80.0),
+            r#"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 80' data-fb-id='root'>
+                <g data-fb-id='group' transform='matrix(0 1 -1 0 60 10)'>
+                    <rect data-fb-id='shape' x='10' y='20' width='30' height='10' fill='#123456'/>
+                </g>
+            </svg>"#,
+        )
+        .with_form_enabled(true);
+        let mut canvas = Canvas::new(Size {
+            width: Pt::from_f32(140.0),
+            height: Pt::from_f32(120.0),
+        });
+
+        svg.draw(
+            &mut canvas,
+            Pt::from_f32(5.0),
+            Pt::from_f32(7.0),
+            Pt::from_f32(100.0),
+            Pt::from_f32(80.0),
+        );
+        let document = canvas.finish();
+        let commands = &document.pages[0].commands;
+        assert!(
+            commands
+                .iter()
+                .any(|command| matches!(command, Command::DefineForm { .. }))
+        );
+
+        let mut current_source = None::<String>;
+        let mut bounds = std::collections::BTreeMap::new();
+        for command in commands {
+            match command {
+                Command::Meta { key, value } if key == "fb.owner.source_id" => {
+                    current_source = Some(value.clone());
+                }
+                Command::Meta { key, value } if key == META_FLOWABLE_BBOX_KEY => {
+                    if let Some(source_id) = current_source.take() {
+                        bounds.insert(source_id, value.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(
+            bounds.get("group").map(String::as_str),
+            Some("35000,27000,10000,30000")
+        );
+        assert_eq!(
+            bounds.get("shape").map(String::as_str),
+            Some("35000,27000,10000,30000")
+        );
+        assert!(!bounds.contains_key("root"));
     }
 }
 
@@ -35949,6 +36151,18 @@ impl Flowable for ClearFlowable {
         )
     }
 
+    fn authoring_paint_bounds(
+        &self,
+        x: Pt,
+        y: Pt,
+        avail_width: Pt,
+        avail_height: Pt,
+        laid_out_size: Size,
+    ) -> Rect {
+        self.child
+            .authoring_paint_bounds(x, y, avail_width, avail_height, laid_out_size)
+    }
+
     fn split(
         &self,
         avail_width: Pt,
@@ -36640,6 +36854,32 @@ impl MetaFlowable {
             metadata: Arc::new(metadata),
         }
     }
+
+    fn records_authored_bounds(&self) -> bool {
+        self.metadata
+            .iter()
+            .any(|(key, value)| key == "fb.owner.source_id" && !value.is_empty())
+    }
+
+    fn record_authored_bounds(
+        &self,
+        canvas: &mut Canvas,
+        x: Pt,
+        y: Pt,
+        avail_width: Pt,
+        avail_height: Pt,
+        size: Size,
+    ) {
+        if self.records_authored_bounds() && size.width >= Pt::ZERO && size.height >= Pt::ZERO {
+            canvas.record_flowable_bounds(self.child.authoring_paint_bounds(
+                x,
+                y,
+                avail_width,
+                avail_height,
+                size,
+            ));
+        }
+    }
 }
 
 impl Flowable for MetaFlowable {
@@ -36653,6 +36893,18 @@ impl Flowable for MetaFlowable {
 
     fn inline_text_edge_letter_spacing(&self) -> Option<Pt> {
         self.child.inline_text_edge_letter_spacing()
+    }
+
+    fn authoring_paint_bounds(
+        &self,
+        x: Pt,
+        y: Pt,
+        avail_width: Pt,
+        avail_height: Pt,
+        laid_out_size: Size,
+    ) -> Rect {
+        self.child
+            .authoring_paint_bounds(x, y, avail_width, avail_height, laid_out_size)
     }
 
     fn page_footnotes(&self) -> Vec<PageFootnoteEntry> {
@@ -36774,6 +37026,14 @@ impl Flowable for MetaFlowable {
             canvas.meta(k.clone(), v.clone());
         }
         self.child.draw(canvas, x, y, avail_width, avail_height);
+        self.record_authored_bounds(
+            canvas,
+            x,
+            y,
+            avail_width,
+            avail_height,
+            self.child.wrap(avail_width, avail_height),
+        );
         canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "flowable");
     }
 
@@ -36784,6 +37044,14 @@ impl Flowable for MetaFlowable {
         }
         self.child
             .draw_stretched(canvas, x, y, avail_width, avail_height);
+        self.record_authored_bounds(
+            canvas,
+            x,
+            y,
+            avail_width,
+            avail_height,
+            self.child.wrap(avail_width, avail_height),
+        );
         canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "flowable");
     }
 
@@ -36802,6 +37070,14 @@ impl Flowable for MetaFlowable {
         }
         self.child
             .draw_flexed_width(canvas, x, y, avail_width, avail_height, stretch_cross_axis);
+        self.record_authored_bounds(
+            canvas,
+            x,
+            y,
+            avail_width,
+            avail_height,
+            self.child.wrap_flexed_width(avail_width, avail_height),
+        );
         canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "flowable");
     }
 
@@ -36828,6 +37104,18 @@ impl Flowable for MetaFlowable {
             avail_height,
             stretch_cross_axis,
         );
+        self.record_authored_bounds(
+            canvas,
+            x,
+            y,
+            avail_width,
+            avail_height,
+            self.child.wrap_flexed_width_with_containing_block(
+                avail_width,
+                containing_block_width,
+                avail_height,
+            ),
+        );
         canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "flowable");
     }
 
@@ -36845,6 +37133,9 @@ impl Flowable for MetaFlowable {
         }
         self.child
             .draw_flexed_height(canvas, x, y, avail_width, avail_height);
+        let mut size = self.child.wrap(avail_width, avail_height);
+        size.height = avail_height;
+        self.record_authored_bounds(canvas, x, y, avail_width, avail_height, size);
         canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "flowable");
     }
 
@@ -37557,6 +37848,23 @@ impl Flowable for RelativePositionedFlowable {
             containing_block_width,
             avail_height,
         )
+    }
+
+    fn authoring_paint_bounds(
+        &self,
+        x: Pt,
+        y: Pt,
+        avail_width: Pt,
+        avail_height: Pt,
+        laid_out_size: Size,
+    ) -> Rect {
+        let (dx, dy) = self.paint_offset(avail_width, avail_height);
+        Rect {
+            x: x + dx,
+            y: y + dy,
+            width: laid_out_size.width,
+            height: laid_out_size.height,
+        }
     }
 
     fn split(

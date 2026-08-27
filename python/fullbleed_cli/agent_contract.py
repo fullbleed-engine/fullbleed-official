@@ -833,6 +833,16 @@ def build_agent_contract(
                         )
                     ),
                 },
+                "data_bound_charts": {
+                    "engine_owned": bool(
+                        capabilities.get("charts", {}).get("engine_owned", False)
+                    ),
+                    "rust_api": capabilities.get("charts", {}).get("rust_api"),
+                    "kinds": list(capabilities.get("charts", {}).get("kinds", [])),
+                    "outputs": list(
+                        capabilities.get("charts", {}).get("outputs", [])
+                    ),
+                },
                 "accessible_document": {
                     "available_profiles": [
                         profile
@@ -1068,6 +1078,9 @@ def render_llms_txt(contract: Mapping[str, Any]) -> str:
             f"- Compiled reflow bindings: {str(bool(engine.get('compiled_reflow_bindings'))).lower()}.",
             "- Compiled reflow compression modes: "
             + ", ".join(engine.get("compiled_flow_compression_modes", []))
+            + ".",
+            "- Engine-owned chart kinds: "
+            + ", ".join(contract.get("capabilities", {}).get("charts", {}).get("kinds", []))
             + ".",
             "- PDF profiles reported by this runtime: " + ", ".join(profiles) + ".",
             "",

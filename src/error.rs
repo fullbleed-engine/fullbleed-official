@@ -8,6 +8,7 @@ pub enum FullBleedError {
     InconsistentPageSize,
     InvalidConfiguration(String),
     Asset(String),
+    Cancelled,
     Io(std::io::Error),
 }
 
@@ -26,6 +27,7 @@ impl fmt::Display for FullBleedError {
                 write!(f, "invalid configuration: {}", message)
             }
             FullBleedError::Asset(message) => write!(f, "asset error: {}", message),
+            FullBleedError::Cancelled => write!(f, "operation cancelled"),
             FullBleedError::Io(err) => write!(f, "io error: {}", err),
         }
     }

@@ -1,5 +1,7 @@
 use crate::flowable::{MaskComposite, MaskMode, PaintFilterSpec};
-use crate::types::{Color, MixBlendMode, PagePresentation, Pt, Rect, Shading, Size};
+use crate::types::{
+    Color, MixBlendMode, PageOrientation, PagePresentation, Pt, Rect, Shading, Size,
+};
 
 pub const META_FLOWABLE_BBOX_KEY: &str = "__fb_bbox";
 pub const META_HTML_CANVAS_BACKGROUND_KEY: &str = "__fb_html_canvas_background";
@@ -486,6 +488,15 @@ pub enum Command {
         col_index: Option<u16>,
         group_only: bool,
     },
+    /// A tagged marked-content span whose accessible replacement is present
+    /// only in the semantic tree. This is deliberately distinct from `alt`:
+    /// `/ActualText` is the PDF contract for replacement text, while `/Alt`
+    /// remains the alternate-description contract used by figures.
+    BeginTagActualText {
+        role: String,
+        mcid: u32,
+        actual_text: String,
+    },
     EndTag,
     BeginArtifact {
         subtype: Option<String>,
@@ -513,6 +524,67 @@ impl Page {
 pub struct Document {
     pub page_size: Size,
     pub pages: Vec<Page>,
+}
+
+/// Physical and logical geometry derived from the immutable per-page display
+/// list. Layout remains in trim coordinates while PDF and raster consumers
+/// apply the same presentation transform for bleed, marks, and orientation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PageGeometry {
+    pub(crate) logical_size: Size,
+    pub(crate) media_size: Size,
+    pub(crate) presentation: PagePresentation,
+}
+
+impl PageGeometry {
+    pub(crate) fn for_page(page: &Page, fallback: Size) -> Self {
+        let logical_size = page
+            .commands
+            .iter()
+            .rev()
+            .find_map(|command| match command {
+                Command::Meta { key, value } if key == META_PAGE_SIZE_KEY => {
+                    let (width, height) = value.split_once(',')?;
+                    Some(Size {
+                        width: Pt::from_milli_i64(width.parse().ok()?),
+                        height: Pt::from_milli_i64(height.parse().ok()?),
+                    })
+                }
+                _ => None,
+            })
+            .unwrap_or(fallback)
+            .quantized();
+        let presentation = page
+            .commands
+            .iter()
+            .rev()
+            .find_map(|command| match command {
+                Command::Meta { key, value } if key == META_PAGE_PRESENTATION_KEY => {
+                    PagePresentation::decode(value)
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
+        let extent = presentation.media_extent();
+        let unrotated = Size {
+            width: logical_size.width + extent + extent,
+            height: logical_size.height + extent + extent,
+        }
+        .quantized();
+        let media_size = match presentation.orientation {
+            PageOrientation::Upright => unrotated,
+            PageOrientation::RotateLeft | PageOrientation::RotateRight => Size {
+                width: unrotated.height,
+                height: unrotated.width,
+            },
+        }
+        .quantized();
+        Self {
+            logical_size,
+            media_size,
+            presentation,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1475,6 +1547,21 @@ impl Canvas {
             table_id,
             col_index,
             group_only,
+        });
+        mcid
+    }
+
+    pub fn begin_tag_actual_text(
+        &mut self,
+        role: impl Into<String>,
+        actual_text: impl Into<String>,
+    ) -> u32 {
+        let mcid = self.current_mcid;
+        self.current_mcid = self.current_mcid.saturating_add(1);
+        self.current.commands.push(Command::BeginTagActualText {
+            role: role.into(),
+            mcid,
+            actual_text: actual_text.into(),
         });
         mcid
     }

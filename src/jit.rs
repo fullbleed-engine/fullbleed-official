@@ -840,6 +840,7 @@ fn commands_bbox(commands: &[Command], font_registry: Option<&FontRegistry>) -> 
             | Command::DefineForm { .. }
             | Command::DefineIsolatedForm { .. }
             | Command::BeginTag { .. }
+            | Command::BeginTagActualText { .. }
             | Command::EndTag
             | Command::BeginArtifact { .. }
             | Command::BeginOptionalContent { .. }

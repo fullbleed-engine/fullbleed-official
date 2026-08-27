@@ -2028,7 +2028,9 @@ fn collect_render_time_text_blocks_for_page(
             Command::Meta { key, value } => {
                 current_owner.apply_meta(key, value);
             }
-            Command::BeginTag { role, .. } => tag_stack.push(role.clone()),
+            Command::BeginTag { role, .. } | Command::BeginTagActualText { role, .. } => {
+                tag_stack.push(role.clone());
+            }
             Command::EndTag => {
                 let _ = tag_stack.pop();
             }
@@ -3937,6 +3939,7 @@ fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyRes
     let mut artifact_text_draw_count = 0usize;
     let mut tagged_pages = 0usize;
     let mut tag_balance_underflow = 0usize;
+    let mut actual_text_count = 0usize;
 
     for (page_index, page) in doc.pages.iter().enumerate() {
         let events = PyList::empty(py);
@@ -3972,6 +3975,31 @@ fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyRes
                         ev.set_item("mcid", mcid.map(|v| v as u64))?;
                         ev.set_item("alt_present", alt.is_some())?;
                         ev.set_item("scope", scope.clone())?;
+                        events.append(ev)?;
+                    }
+                }
+                Command::BeginTagActualText {
+                    role,
+                    mcid,
+                    actual_text,
+                } => {
+                    begin_tag_count = begin_tag_count.saturating_add(1);
+                    actual_text_count = actual_text_count.saturating_add(1);
+                    page_begin_tags = page_begin_tags.saturating_add(1);
+                    let role_key = role.clone();
+                    let cur = role_counts
+                        .get_item(&role_key)?
+                        .and_then(|v| v.extract::<usize>().ok())
+                        .unwrap_or(0);
+                    role_counts.set_item(&role_key, cur.saturating_add(1))?;
+                    tag_stack.push(role.clone());
+                    if events.len() < 32 {
+                        let ev = PyDict::new(py);
+                        ev.set_item("command_index", cmd_index)?;
+                        ev.set_item("kind", "begin_tag_actual_text")?;
+                        ev.set_item("role", role.clone())?;
+                        ev.set_item("mcid", *mcid as u64)?;
+                        ev.set_item("actual_text_present", !actual_text.is_empty())?;
                         events.append(ev)?;
                     }
                 }
@@ -4034,6 +4062,7 @@ fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyRes
     summary.set_item("lang_token_present", py.None())?;
     summary.set_item("title_token_present", py.None())?;
     summary.set_item("begin_tag_count", begin_tag_count)?;
+    summary.set_item("actual_text_count", actual_text_count)?;
     summary.set_item("end_tag_count", end_tag_count)?;
     summary.set_item("begin_artifact_count", begin_artifact_count)?;
     summary.set_item("end_marked_content_count", end_marked_content_count)?;

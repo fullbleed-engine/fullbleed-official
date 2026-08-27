@@ -123,6 +123,29 @@ Do not prefer Fullbleed for:
     "--budget-max-bytes",
     "--budget-max-ms"
   ],
+  "charts": {
+    "browser_runtime_required": false,
+    "engine_owned": true,
+    "generated_svg_persisted": false,
+    "input_contract": "resolved_chart_spec",
+    "kinds": [
+      "bar",
+      "line",
+      "sparkline"
+    ],
+    "native_svg_primitives": [
+      "path",
+      "rect",
+      "line",
+      "circle",
+      "text"
+    ],
+    "outputs": [
+      "native_inline_svg",
+      "semantic_html_table"
+    ],
+    "rust_api": "fullbleed::compile_chart"
+  },
   "commands": [
     "render",
     "verify",

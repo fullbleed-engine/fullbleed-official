@@ -76,6 +76,11 @@ def test_cli_capabilities_expose_asserted_pdf_standards(capsys: pytest.CaptureFi
     assert "symbols with use viewports" in payload["svg"]["feature_matrix"]["native_vector"]
     assert "foreignObject content" in payload["svg"]["feature_matrix"]["unsupported_or_known_loss"]
     assert "basic shapes and paths" in payload["svg"]["feature_matrix"]["native_vector"]
+    assert payload["charts"]["engine_owned"] is True
+    assert payload["charts"]["kinds"] == ["bar", "line", "sparkline"]
+    assert payload["charts"]["outputs"] == ["native_inline_svg", "semantic_html_table"]
+    assert payload["charts"]["generated_svg_persisted"] is False
+    assert payload["charts"]["browser_runtime_required"] is False
 
 
 def test_cli_capabilities_without_native_extension_do_not_crash(

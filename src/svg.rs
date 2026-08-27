@@ -316,6 +316,7 @@ pub(crate) struct CompiledGroup {
     items: Vec<CompiledItem>,
     filter: Option<PaintFilterSpec>,
     mask: Option<CompiledMask>,
+    source_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -324,6 +325,15 @@ pub(crate) enum CompiledItem {
     Image(CompiledImage),
     Text(CompiledText),
     Group(CompiledGroup),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SvgAuthoringFragment {
+    pub source_id: String,
+    pub x: Pt,
+    pub y: Pt,
+    pub width: Pt,
+    pub height: Pt,
 }
 
 pub(crate) fn compile_svg(svg_xml: &str, width: Pt, height: Pt) -> Vec<CompiledItem> {
@@ -374,7 +384,7 @@ pub(crate) fn compile_svg(svg_xml: &str, width: Pt, height: Pt) -> Vec<CompiledI
     let style = SvgStyle::default();
     let mut out = Vec::new();
     let mut resolving_ids = Vec::new();
-    compile_element(
+    compile_element_with_source_capture(
         &mut out,
         root,
         base,
@@ -383,6 +393,7 @@ pub(crate) fn compile_svg(svg_xml: &str, width: Pt, height: Pt) -> Vec<CompiledI
         &id_map,
         &stylesheet,
         &mut resolving_ids,
+        false,
     );
     out
 }
@@ -553,13 +564,44 @@ fn compile_element(
     stylesheet: &SvgStylesheet,
     resolving_ids: &mut Vec<String>,
 ) {
+    compile_element_with_source_capture(
+        out,
+        node,
+        ctm,
+        style,
+        gradients,
+        id_map,
+        stylesheet,
+        resolving_ids,
+        true,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compile_element_with_source_capture(
+    out: &mut Vec<CompiledItem>,
+    node: XmlNode<'_>,
+    ctm: Matrix,
+    style: &SvgStyle,
+    gradients: &std::collections::HashMap<String, GradientDef>,
+    id_map: &std::collections::HashMap<String, XmlNode<'_>>,
+    stylesheet: &SvgStylesheet,
+    resolving_ids: &mut Vec<String>,
+    capture_source_id: bool,
+) {
     let mut effect_ctm = ctm;
     if let Some(transform) = node.attribute("transform") {
         effect_ctm = effect_ctm.mul(parse_transform(transform));
     }
     let filter = compile_filter_for_node(node, effect_ctm, id_map);
     let mask = compile_mask_for_node(node, effect_ctm, id_map, stylesheet);
-    if filter.is_none() && mask.is_none() {
+    let source_id = capture_source_id
+        .then(|| node.attribute("data-fb-id"))
+        .flatten()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    if filter.is_none() && mask.is_none() && source_id.is_none() {
         compile_element_inner(
             out,
             node,
@@ -589,6 +631,7 @@ fn compile_element(
             items,
             filter,
             mask,
+            source_id,
         }));
     }
 }
@@ -1541,6 +1584,7 @@ fn compile_pattern_fill(
             evenodd: target_style.fill_rule_evenodd,
             paints_anything: true,
         }),
+        source_id: None,
     }));
 }
 
@@ -1951,6 +1995,208 @@ fn bbox_of_segs(segs: &[PathSeg]) -> Option<(f32, f32, f32, f32)> {
     let w = (max_x - min_x).max(0.0);
     let h = (max_y - min_y).max(0.0);
     Some((min_x, min_y, w, h))
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SvgBounds {
+    min_x: f32,
+    min_y: f32,
+    max_x: f32,
+    max_y: f32,
+}
+
+impl SvgBounds {
+    fn from_xywh(x: f32, y: f32, width: f32, height: f32) -> Option<Self> {
+        let (min_x, max_x) = if width >= 0.0 {
+            (x, x + width)
+        } else {
+            (x + width, x)
+        };
+        let (min_y, max_y) = if height >= 0.0 {
+            (y, y + height)
+        } else {
+            (y + height, y)
+        };
+        [min_x, min_y, max_x, max_y]
+            .into_iter()
+            .all(f32::is_finite)
+            .then_some(Self {
+                min_x,
+                min_y,
+                max_x,
+                max_y,
+            })
+    }
+
+    fn from_points(points: &[(f32, f32)]) -> Option<Self> {
+        let mut min_x = f32::INFINITY;
+        let mut min_y = f32::INFINITY;
+        let mut max_x = f32::NEG_INFINITY;
+        let mut max_y = f32::NEG_INFINITY;
+        for &(x, y) in points {
+            if !x.is_finite() || !y.is_finite() {
+                return None;
+            }
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x);
+            max_y = max_y.max(y);
+        }
+        (!points.is_empty()).then_some(Self {
+            min_x,
+            min_y,
+            max_x,
+            max_y,
+        })
+    }
+
+    fn union(self, other: Self) -> Self {
+        Self {
+            min_x: self.min_x.min(other.min_x),
+            min_y: self.min_y.min(other.min_y),
+            max_x: self.max_x.max(other.max_x),
+            max_y: self.max_y.max(other.max_y),
+        }
+    }
+
+    fn intersect(self, other: Self) -> Option<Self> {
+        let result = Self {
+            min_x: self.min_x.max(other.min_x),
+            min_y: self.min_y.max(other.min_y),
+            max_x: self.max_x.min(other.max_x),
+            max_y: self.max_y.min(other.max_y),
+        };
+        (result.max_x >= result.min_x && result.max_y >= result.min_y).then_some(result)
+    }
+
+    fn expand(self, amount: f32) -> Self {
+        let amount = amount.max(0.0);
+        Self {
+            min_x: self.min_x - amount,
+            min_y: self.min_y - amount,
+            max_x: self.max_x + amount,
+            max_y: self.max_y + amount,
+        }
+    }
+
+    fn translated(self, x: f32, y: f32) -> Self {
+        Self {
+            min_x: self.min_x + x,
+            min_y: self.min_y + y,
+            max_x: self.max_x + x,
+            max_y: self.max_y + y,
+        }
+    }
+
+    fn width(self) -> f32 {
+        (self.max_x - self.min_x).max(0.0)
+    }
+
+    fn height(self) -> f32 {
+        (self.max_y - self.min_y).max(0.0)
+    }
+}
+
+fn compiled_item_bounds(item: &CompiledItem) -> Option<SvgBounds> {
+    match item {
+        CompiledItem::Path(path) => {
+            let (x, y, width, height) = bbox_of_segs(&path.segs)?;
+            let mut bounds = SvgBounds::from_xywh(x, y, width, height)?;
+            if path.style.stroke_width > 0.0
+                && (path.style.stroke.color.is_some() || path.style.stroke.gradient_id.is_some())
+            {
+                bounds = bounds.expand(path.style.stroke_width * 0.5);
+            }
+            if let Some((clip, _)) = &path.clip {
+                let (x, y, width, height) = bbox_of_segs(clip)?;
+                bounds = bounds.intersect(SvgBounds::from_xywh(x, y, width, height)?)?;
+            }
+            Some(bounds)
+        }
+        CompiledItem::Image(image) => {
+            if let Some(transform) = image.transform {
+                let x = image.x;
+                let y = image.y;
+                let right = x + image.width;
+                let bottom = y + image.height;
+                SvgBounds::from_points(&[
+                    transform.apply(x, y),
+                    transform.apply(right, y),
+                    transform.apply(right, bottom),
+                    transform.apply(x, bottom),
+                ])
+            } else {
+                SvgBounds::from_xywh(image.x, image.y, image.width, image.height)
+            }
+        }
+        CompiledItem::Text(text) => {
+            let width = text.font_size * 0.6 * text.text.chars().count() as f32;
+            let anchor_offset = match text.anchor {
+                TextAnchor::Start => 0.0,
+                TextAnchor::Middle => width * 0.5,
+                TextAnchor::End => width,
+            };
+            let left = text.x - anchor_offset;
+            let top = text.y - text.font_size;
+            SvgBounds::from_points(&[
+                text.transform.apply(left, top),
+                text.transform.apply(left + width, top),
+                text.transform.apply(left + width, top + text.font_size),
+                text.transform.apply(left, top + text.font_size),
+            ])
+        }
+        CompiledItem::Group(group) => {
+            let mut bounds = group
+                .items
+                .iter()
+                .filter_map(compiled_item_bounds)
+                .reduce(SvgBounds::union)?;
+            if let Some(mask) = &group.mask {
+                if !mask.paints_anything {
+                    return None;
+                }
+                if let Some((x, y, width, height)) = bbox_of_segs(&mask.segs) {
+                    bounds = bounds.intersect(SvgBounds::from_xywh(x, y, width, height)?)?;
+                }
+            }
+            if let Some(filter) = &group.filter {
+                bounds = bounds.expand(filter.blur_radius.to_f32() * 3.0);
+                for shadow in &filter.drop_shadows {
+                    let shadow_bounds = bounds
+                        .translated(shadow.offset_x.to_f32(), shadow.offset_y.to_f32())
+                        .expand(shadow.blur_radius.to_f32() * 3.0);
+                    bounds = bounds.union(shadow_bounds);
+                }
+            }
+            Some(bounds)
+        }
+    }
+}
+
+fn collect_authoring_fragments(items: &[CompiledItem], out: &mut Vec<SvgAuthoringFragment>) {
+    for item in items {
+        let CompiledItem::Group(group) = item else {
+            continue;
+        };
+        if let (Some(source_id), Some(bounds)) =
+            (group.source_id.as_ref(), compiled_item_bounds(item))
+        {
+            out.push(SvgAuthoringFragment {
+                source_id: source_id.clone(),
+                x: Pt::from_f32(bounds.min_x),
+                y: Pt::from_f32(bounds.min_y),
+                width: Pt::from_f32(bounds.width()),
+                height: Pt::from_f32(bounds.height()),
+            });
+        }
+        collect_authoring_fragments(&group.items, out);
+    }
+}
+
+pub(crate) fn authoring_fragments(items: &[CompiledItem]) -> Vec<SvgAuthoringFragment> {
+    let mut fragments = Vec::new();
+    collect_authoring_fragments(items, &mut fragments);
+    fragments
 }
 
 fn resolve_gradient_fill(

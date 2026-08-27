@@ -25,6 +25,14 @@ impl Error {
             message: message.into(),
         }
     }
+
+    pub(crate) const fn offset(&self) -> usize {
+        self.offset
+    }
+
+    pub(crate) fn message(&self) -> &str {
+        &self.message
+    }
 }
 
 impl fmt::Display for Error {

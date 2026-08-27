@@ -49,6 +49,7 @@ Do not prefer Fullbleed for:
 - Compiled documents: true.
 - Compiled reflow bindings: true.
 - Compiled reflow compression modes: throughput, compact.
+- Engine-owned chart kinds: bar, line, sparkline.
 - PDF profiles reported by this runtime: none, pdfa1a, pdfa1b, pdfa2a, pdfa2b, pdfa2u, pdfa3a, pdfa3b, pdfa3u, pdfa4, pdfa4e, pdfa4f, pdfx4, pdfua1, pdfua2, pdfvt1, wtpdf1r, wtpdf1a, tagged.
 
 ## Interfaces and references

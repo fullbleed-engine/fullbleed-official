@@ -406,6 +406,16 @@ fn write_command<W: Write>(out: &mut W, command: &Command) -> io::Result<()> {
             write_option_u16(out, *col_index)?;
             write_bool(out, *group_only)
         }
+        Command::BeginTagActualText {
+            role,
+            mcid,
+            actual_text,
+        } => {
+            write_u8(out, 51)?;
+            write_string(out, role)?;
+            write_u32(out, *mcid)?;
+            write_string(out, actual_text)
+        }
         Command::EndTag => write_u8(out, 33),
         Command::DefineForm {
             resource_id,
@@ -738,6 +748,11 @@ fn read_command<R: Read>(input: &mut R) -> io::Result<Command> {
             table_id: read_option_u32(input)?,
             col_index: read_option_u16(input)?,
             group_only: read_bool(input)?,
+        },
+        51 => Command::BeginTagActualText {
+            role: read_string(input)?,
+            mcid: read_u32(input)?,
+            actual_text: read_string(input)?,
         },
         33 => Command::EndTag,
         34 => {

@@ -1,4 +1,4 @@
-use crate::canvas::{Command, CompiledMaskLayer, Document};
+use crate::canvas::{Command, CompiledMaskLayer, Document, PageGeometry};
 use crate::error::FullBleedError;
 use crate::flowable::{
     FilterDropShadowSpec, MaskComposite, MaskMode, PaintFilterOperation, PaintFilterSpec,
@@ -16,7 +16,7 @@ use crate::sfnt::{Face as SfntFace, GlyphId as SfntGlyphId};
 use crate::sfnt_cff::{Cff2Outlines, CffOutlines};
 use crate::sfnt_outline::OutlineBuilder as NativeOutlineBuilder;
 use crate::text_shape;
-use crate::types::{Color, MixBlendMode, Pt, Shading, ShadingStop};
+use crate::types::{Color, MixBlendMode, PageOrientation, Pt, Shading, ShadingStop};
 use std::collections::{HashMap, VecDeque};
 use std::path::Path as FsPath;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -603,18 +603,40 @@ fn document_to_png_pages_with_background(
     transparent: bool,
 ) -> Result<Vec<Vec<u8>>, FullBleedError> {
     let dpi = if dpi == 0 { 150 } else { dpi };
-    let width_px = pt_milli_to_px_u32(document.page_size.width.to_milli_i64(), dpi)?;
-    let height_px = pt_milli_to_px_u32(document.page_size.height.to_milli_i64(), dpi)?;
-    let page_height_pt = document.page_size.height.to_f32();
-    let page_width_pt = document.page_size.width.to_f32();
     let scale = dpi as f32 / 72.0;
-    let base_transform = Transform::from_row(scale, 0.0, 0.0, -scale, 0.0, page_height_pt * scale);
 
     let mut png_pages = Vec::with_capacity(document.pages.len());
     let mut image_cache: HashMap<String, Option<Pixmap>> = HashMap::new();
     let mut forms: HashMap<String, FormDefinition> = HashMap::new();
 
     for page in &document.pages {
+        let geometry = PageGeometry::for_page(page, document.page_size);
+        let width_px = pt_milli_to_px_u32(geometry.media_size.width.to_milli_i64(), dpi)?;
+        let height_px = pt_milli_to_px_u32(geometry.media_size.height.to_milli_i64(), dpi)?;
+        let page_height_pt = geometry.logical_size.height.to_f32();
+        let page_width_pt = geometry.logical_size.width.to_f32();
+        let extent = geometry.presentation.media_extent().to_f32();
+        let base_transform = match geometry.presentation.orientation {
+            PageOrientation::Upright => Transform::from_row(
+                scale,
+                0.0,
+                0.0,
+                -scale,
+                extent * scale,
+                (page_height_pt + extent) * scale,
+            ),
+            PageOrientation::RotateLeft => Transform::from_row(
+                0.0,
+                -scale,
+                -scale,
+                0.0,
+                (page_height_pt + extent) * scale,
+                (page_width_pt + extent) * scale,
+            ),
+            PageOrientation::RotateRight => {
+                Transform::from_row(0.0, scale, scale, 0.0, extent * scale, extent * scale)
+            }
+        };
         let mut pixmap = Pixmap::new(width_px, height_px).ok_or_else(|| {
             FullBleedError::InvalidConfiguration(format!(
                 "invalid raster size {}x{} at {} DPI",
@@ -854,7 +876,7 @@ fn render_commands(
                 ));
             }
             Command::Meta { .. } => {}
-            Command::BeginTag { .. } => {}
+            Command::BeginTag { .. } | Command::BeginTagActualText { .. } => {}
             Command::EndTag => {}
             Command::BeginArtifact { .. } => {}
             Command::BeginOptionalContent { .. } => {}
