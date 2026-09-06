@@ -196,6 +196,8 @@ pub struct AuthoringReadingPreviewV1 {
     pub alternate_text_count: usize,
     pub untagged_text_run_count: usize,
     pub artifact_marked_content_count: usize,
+    /// Drawn forms can contain text that is not present in the page-level text index.
+    pub unindexed_form_count: usize,
     pub pages: Vec<AuthoringReadingPage>,
 }
 
@@ -203,10 +205,25 @@ pub struct AuthoringReadingPreviewV1 {
 pub struct AuthoringReadingPage {
     pub page_number: usize,
     pub nodes: Vec<AuthoringReadingNode>,
+    /// Compiled command order, including untagged and artifact text. Never source DOM text.
+    pub text_runs: Vec<AuthoringTextRun>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AuthoringTextRun {
+    pub command_index: usize,
+    pub reading_command_index: Option<usize>,
+    pub source_id: Option<String>,
+    /// `painted`, `actual_text`, or `alternate_text`.
+    pub kind: String,
+    pub artifact: bool,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AuthoringReadingNode {
+    /// Page-local compiled command destination, also valid for ID-free HTML.
+    pub command_index: usize,
     pub role: String,
     pub source_id: Option<String>,
     pub text: String,
@@ -475,16 +492,18 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
     let mut pages = Vec::with_capacity(document.pages.len());
     let mut untagged_text_run_count = 0usize;
     let mut artifact_marked_content_count = 0usize;
+    let mut unindexed_form_count = 0usize;
 
     for (page_index, page) in document.pages.iter().enumerate() {
         let mut roots = Vec::new();
+        let mut text_runs = Vec::new();
         let mut stack = Vec::<ReadingStackEntry>::new();
         let mut current_source = None::<String>;
         let mut source_stack = Vec::<Option<String>>::new();
         let mut marked_content_stack = Vec::<bool>::new();
         let mut artifact_depth = 0usize;
 
-        for command in &page.commands {
+        for (command_index, command) in page.commands.iter().enumerate() {
             match command {
                 Command::Meta { key, .. } if key == META_DIAGNOSTIC_SCOPE_BEGIN_KEY => {
                     source_stack.push(current_source.clone());
@@ -518,7 +537,18 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
                     if artifact_depth > 0 || role.eq_ignore_ascii_case("artifact") {
                         stack.push(ReadingStackEntry::Suppressed);
                     } else {
+                        if let Some(text) = alt.as_deref().filter(|text| !text.trim().is_empty()) {
+                            text_runs.push(AuthoringTextRun {
+                                command_index,
+                                reading_command_index: Some(command_index),
+                                source_id: current_source.clone(),
+                                kind: "alternate_text".into(),
+                                artifact: false,
+                                text: normalize_reading_text(text),
+                            });
+                        }
                         stack.push(ReadingStackEntry::Node(AuthoringReadingNode {
+                            command_index,
                             role: role.clone(),
                             source_id: current_source.clone(),
                             text: String::new(),
@@ -538,7 +568,18 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
                     if artifact_depth > 0 || role.eq_ignore_ascii_case("artifact") {
                         stack.push(ReadingStackEntry::Suppressed);
                     } else {
+                        if !actual_text.trim().is_empty() {
+                            text_runs.push(AuthoringTextRun {
+                                command_index,
+                                reading_command_index: Some(command_index),
+                                source_id: current_source.clone(),
+                                kind: "actual_text".into(),
+                                artifact: false,
+                                text: normalize_reading_text(actual_text),
+                            });
+                        }
                         stack.push(ReadingStackEntry::Node(AuthoringReadingNode {
+                            command_index,
                             role: role.clone(),
                             source_id: current_source.clone(),
                             text: String::new(),
@@ -558,6 +599,27 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
                     }
                 }
                 Command::DrawString { text, .. } | Command::DrawStringTransformed { text, .. } => {
+                    let artifact = artifact_depth > 0
+                        || stack
+                            .iter()
+                            .any(|entry| matches!(entry, ReadingStackEntry::Suppressed));
+                    if !text.trim().is_empty() {
+                        text_runs.push(AuthoringTextRun {
+                            command_index,
+                            reading_command_index: if artifact {
+                                None
+                            } else {
+                                stack.iter().rev().find_map(|entry| match entry {
+                                    ReadingStackEntry::Node(node) => Some(node.command_index),
+                                    ReadingStackEntry::Suppressed => None,
+                                })
+                            },
+                            source_id: current_source.clone(),
+                            kind: "painted".into(),
+                            artifact,
+                            text: normalize_reading_text(text),
+                        });
+                    }
                     if artifact_depth > 0 {
                         continue;
                     }
@@ -566,6 +628,9 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
                     } else if !text.trim().is_empty() {
                         untagged_text_run_count = untagged_text_run_count.saturating_add(1);
                     }
+                }
+                Command::DrawForm { .. } => {
+                    unindexed_form_count = unindexed_form_count.saturating_add(1);
                 }
                 _ => {}
             }
@@ -579,6 +644,7 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
         pages.push(AuthoringReadingPage {
             page_number: page_index + 1,
             nodes: roots,
+            text_runs,
         });
     }
 
@@ -616,6 +682,7 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
         alternate_text_count,
         untagged_text_run_count,
         artifact_marked_content_count,
+        unindexed_form_count,
         pages,
     }
 }
@@ -1149,6 +1216,118 @@ mod tests {
             collected.push(node);
             collect_reading_nodes(&node.children, collected);
         }
+    }
+
+    #[test]
+    fn text_index_includes_untagged_artifact_and_transformed_runs_in_page_command_order() {
+        use crate::canvas::Page;
+        use crate::types::{Pt, Size};
+        let document = Document {
+            page_size: Size {
+                width: Pt::from_f32(200.0),
+                height: Pt::from_f32(200.0),
+            },
+            pages: vec![
+                Page {
+                    commands: vec![
+                        Command::DrawString {
+                            x: Pt::ZERO,
+                            y: Pt::ZERO,
+                            text: "Untagged first".into(),
+                        },
+                        Command::BeginArtifact { subtype: None },
+                        Command::DrawString {
+                            x: Pt::ZERO,
+                            y: Pt::ZERO,
+                            text: "Running footer".into(),
+                        },
+                        Command::EndMarkedContent,
+                        Command::DrawStringTransformed {
+                            x: Pt::ZERO,
+                            y: Pt::ZERO,
+                            text: "Rotated text".into(),
+                            m00: 0.0,
+                            m01: 1.0,
+                            m10: -1.0,
+                            m11: 0.0,
+                        },
+                        Command::DrawForm {
+                            x: Pt::ZERO,
+                            y: Pt::ZERO,
+                            width: Pt::from_f32(10.0),
+                            height: Pt::from_f32(10.0),
+                            resource_id: "opaque-form".into(),
+                        },
+                    ],
+                },
+                Page {
+                    commands: vec![Command::DrawString {
+                        x: Pt::ZERO,
+                        y: Pt::ZERO,
+                        text: "Second page".into(),
+                    }],
+                },
+            ],
+        };
+        let reading = reading_preview(&document);
+        assert_eq!(reading.coverage, "unavailable");
+        assert_eq!(reading.unindexed_form_count, 1);
+        assert_eq!(
+            reading.pages[0]
+                .text_runs
+                .iter()
+                .map(|run| (run.command_index, run.text.as_str(), run.artifact))
+                .collect::<Vec<_>>(),
+            [
+                (0, "Untagged first", false),
+                (2, "Running footer", true),
+                (4, "Rotated text", false)
+            ]
+        );
+        assert!(
+            reading.pages[0]
+                .text_runs
+                .iter()
+                .all(|run| run.reading_command_index.is_none())
+        );
+        assert_eq!(reading.pages[1].page_number, 2);
+        assert_eq!(reading.pages[1].text_runs[0].text, "Second page");
+        assert_eq!(reading_preview(&document), reading);
+    }
+
+    #[test]
+    fn id_free_text_index_links_to_compiled_semantics_and_excludes_hidden_source() {
+        let engine = FullBleed::builder().build().unwrap();
+        let artifact = engine.render_authoring_preview(AuthoringPreviewRequest {
+            html: "<main><h1>First heading</h1><p>Before <strong>middle</strong> after</p><p hidden style='display:none'>Hidden secret</p><span data-fb-a11y-only='true'>Nonvisual explanation</span><h2 style='break-before:page'>Second heading</h2></main>",
+            css: "@page { size: 240pt 240pt; margin: 12pt; }", dpi: 72,
+        }, &AuthoringCancellationToken::new(), |_| {}).unwrap();
+        assert_eq!(artifact.reading.pages.len(), 2);
+        for page in &artifact.reading.pages {
+            let mut nodes = Vec::new();
+            collect_reading_nodes(&page.nodes, &mut nodes);
+            for run in &page.text_runs {
+                assert!(run.source_id.is_none());
+                assert!(!run.text.contains("Hidden secret"));
+                if let Some(command_index) = run.reading_command_index {
+                    assert!(nodes.iter().any(|node| node.command_index == command_index));
+                }
+            }
+        }
+        let text = artifact.reading.pages[0]
+            .text_runs
+            .iter()
+            .filter(|run| run.kind == "painted")
+            .map(|run| run.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(text.contains("Before middle after"), "{text}");
+        assert!(
+            artifact.reading.pages[0]
+                .text_runs
+                .iter()
+                .any(|run| run.kind == "actual_text" && run.text == "Nonvisual explanation")
+        );
     }
 
     #[test]
