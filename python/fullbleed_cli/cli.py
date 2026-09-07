@@ -19,6 +19,7 @@ import argparse
 import importlib.metadata as metadata
 import hashlib
 import json
+import math
 import os
 import sys
 import tempfile
@@ -1931,6 +1932,7 @@ def _collect_jit_insights(jit_log_path):
         "pages": None,
         "total_ms": None,
     }
+    overflow_complete = True
 
     if not jit_log_path:
         return insights
@@ -1975,14 +1977,27 @@ def _collect_jit_insights(jit_log_path):
         elif entry_type == "jit.docplan":
             page_size = entry.get("page_size", {})
             if not isinstance(page_size, dict):
+                overflow_complete = False
                 continue
             page_w = _as_float(page_size.get("w"))
             page_h = _as_float(page_size.get("h"))
-            if page_w is None or page_h is None:
+            if any(value is None or not math.isfinite(value) or value <= 0 for value in (page_w, page_h)):
+                overflow_complete = False
                 continue
             insights["overflow_signal"] = True
             for page in entry.get("pages", []) or []:
                 if not isinstance(page, dict):
+                    continue
+                # New engines emit the actual logical size for each named page.
+                # Older diagnostic streams retain the document-size fallback.
+                current_size = page.get("page_size", page_size)
+                if not isinstance(current_size, dict):
+                    overflow_complete = False
+                    continue
+                current_w = _as_float(current_size.get("w"))
+                current_h = _as_float(current_size.get("h"))
+                if any(value is None or not math.isfinite(value) or value <= 0 for value in (current_w, current_h)):
+                    overflow_complete = False
                     continue
                 page_number = page.get("n")
                 for placement in page.get("placements", []) or []:
@@ -1995,18 +2010,20 @@ def _collect_jit_insights(jit_log_path):
                     y = _as_float(bbox.get("y"))
                     w = _as_float(bbox.get("w"))
                     h = _as_float(bbox.get("h"))
-                    if x is None or y is None or w is None or h is None:
+                    if any(value is None or not math.isfinite(value) for value in (x, y, w, h)) or w < 0 or h < 0:
+                        overflow_complete = False
                         continue
-                    if x < -0.01 or y < -0.01 or (x + w) > (page_w + 0.01) or (y + h) > (page_h + 0.01):
+                    if x < -0.01 or y < -0.01 or (x + w) > (current_w + 0.01) or (y + h) > (current_h + 0.01):
                         insights["overflow_count"] += 1
                         if len(insights["overflow_samples"]) < 5:
                             insights["overflow_samples"].append(
                                 {
                                     "page": page_number,
                                     "bbox": {"x": x, "y": y, "w": w, "h": h},
-                                    "page_size": {"w": page_w, "h": page_h},
+                                    "page_size": {"w": current_w, "h": current_h},
                                 }
                             )
+    insights["overflow_signal"] = insights["overflow_signal"] and overflow_complete
     return insights
 
 

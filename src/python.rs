@@ -1969,6 +1969,7 @@ fn accumulate_owner_hint(
 
 fn collect_render_time_text_blocks_for_page(
     page: &crate::canvas::Page,
+    page_height: Pt,
     engine: Option<&FullBleed>,
 ) -> TracePageTextCollection {
     let mut out = TracePageTextCollection::default();
@@ -1987,28 +1988,14 @@ fn collect_render_time_text_blocks_for_page(
             Command::RestoreState => {
                 state = state_stack.pop().unwrap_or_else(TraceTextState::new);
             }
-            Command::Translate(dx, dy) => {
+            Command::Translate(..)
+            | Command::CssTransformOrigin { .. }
+            | Command::Scale(..)
+            | Command::Rotate(..)
+            | Command::ConcatMatrix { .. } => {
                 state.transform = state
                     .transform
-                    .mul(Transform::translate(dx.to_f32(), dy.to_f32()));
-            }
-            Command::CssTransformOrigin { x, y, inverse } => {
-                let sign = if *inverse { -1.0 } else { 1.0 };
-                state.transform = state
-                    .transform
-                    .mul(Transform::translate(x.to_f32() * sign, y.to_f32() * sign));
-            }
-            Command::Scale(sx, sy) => {
-                state.transform = state.transform.mul(Transform::scale(*sx, *sy));
-            }
-            Command::Rotate(angle) => {
-                state.transform = state.transform.mul(Transform::rotate(*angle));
-            }
-            Command::ConcatMatrix { a, b, c, d, e, f } => {
-                state.transform =
-                    state
-                        .transform
-                        .mul(Transform::matrix(*a, *b, *c, *d, e.to_f32(), f.to_f32()));
+                    .mul(Transform::for_command(cmd, page_height).unwrap());
             }
             Command::SetFontName(name) => state.font_name = name.clone(),
             Command::SetFontSize(size) => state.font_size = *size,
@@ -2071,13 +2058,27 @@ fn collect_render_time_text_blocks_for_page(
                     owner: current_owner.clone(),
                 });
             }
-            Command::DrawStringTransformed { x, y, text, .. } => {
+            Command::DrawStringTransformed {
+                x,
+                y,
+                text,
+                m00,
+                m01,
+                m10,
+                m11,
+            } => {
                 if artifact_depth > 0 {
                     out.artifact_text_blocks_excluded =
                         out.artifact_text_blocks_excluded.saturating_add(1);
                     continue;
                 }
-                let bbox = estimate_trace_text_bbox(engine, &state, *x, *y, text);
+                let text_state = TraceTextState {
+                    transform: state.transform.mul(Transform::page_basis(page_height)).mul(
+                        Transform::matrix(*m00, *m01, *m10, *m11, x.to_f32(), y.to_f32()),
+                    ),
+                    ..state.clone()
+                };
+                let bbox = estimate_trace_text_bbox(engine, &text_state, Pt::ZERO, Pt::ZERO, text);
                 if tag_stack.last().is_none() {
                     out.untagged_text_blocks = out.untagged_text_blocks.saturating_add(1);
                 }
@@ -2226,7 +2227,13 @@ fn build_render_time_typography_drift_trace_py(
     let mut suspicious_char_width_block_count = 0usize;
 
     for (page_index, page) in doc.pages.iter().enumerate() {
-        let text_collection = collect_render_time_text_blocks_for_page(page, Some(engine));
+        let text_collection = collect_render_time_text_blocks_for_page(
+            page,
+            crate::canvas::PageGeometry::for_page(page, doc.page_size)
+                .logical_size
+                .height,
+            Some(engine),
+        );
         let flagged_blocks = PyList::empty(py);
         let mut page_flagged_count = 0usize;
 
@@ -2429,7 +2436,13 @@ fn build_render_time_region_text_alignment_trace_py(
     let mut dense_region_candidate_page_count = 0usize;
 
     for (page_index, page) in doc.pages.iter().enumerate() {
-        let text_collection = collect_render_time_text_blocks_for_page(page, Some(engine));
+        let text_collection = collect_render_time_text_blocks_for_page(
+            page,
+            crate::canvas::PageGeometry::for_page(page, doc.page_size)
+                .logical_size
+                .height,
+            Some(engine),
+        );
         let mut table_blocks: Vec<&TraceTextBlockRow> = text_collection
             .blocks
             .iter()
@@ -3299,7 +3312,13 @@ fn build_render_time_pagination_trace_py(
             std::collections::BTreeMap::new();
         let mut page_issue_flowables: std::collections::BTreeMap<String, usize> =
             std::collections::BTreeMap::new();
-        let text_collection = collect_render_time_text_blocks_for_page(page, Some(engine));
+        let text_collection = collect_render_time_text_blocks_for_page(
+            page,
+            crate::canvas::PageGeometry::for_page(page, doc.page_size)
+                .logical_size
+                .height,
+            Some(engine),
+        );
 
         for cmd in &page.commands {
             if is_visible_command(cmd) {
@@ -3829,7 +3848,13 @@ fn build_render_time_reading_order_trace_py(
 
     for (page_index, page) in doc.pages.iter().enumerate() {
         let blocks = PyList::empty(py);
-        let text_collection = collect_render_time_text_blocks_for_page(page, engine);
+        let text_collection = collect_render_time_text_blocks_for_page(
+            page,
+            crate::canvas::PageGeometry::for_page(page, doc.page_size)
+                .logical_size
+                .height,
+            engine,
+        );
         let block_count = text_collection.blocks.len();
         let page_draw_form_count = text_collection.draw_form_count;
         let page_define_form_count = text_collection.define_form_count;
@@ -3875,8 +3900,9 @@ fn build_render_time_reading_order_trace_py(
         let page_row = PyDict::new(py);
         page_row.set_item("page_index", page_index)?;
         page_row.set_item("page", page_index + 1)?;
-        page_row.set_item("width", doc.page_size.width.to_f32())?;
-        page_row.set_item("height", doc.page_size.height.to_f32())?;
+        let page_size = crate::canvas::PageGeometry::for_page(page, doc.page_size).logical_size;
+        page_row.set_item("width", page_size.width.to_f32())?;
+        page_row.set_item("height", page_size.height.to_f32())?;
         page_row.set_item("block_count", block_count)?;
         page_row.set_item("blocks", blocks)?;
         page_row.set_item("draw_form_count", page_draw_form_count)?;

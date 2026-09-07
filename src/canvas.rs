@@ -308,8 +308,9 @@ pub enum Command {
     RestoreState,
     Translate(Pt, Pt),
     /// Translate around a point expressed in FullBleed's top-down page space.
-    /// PDF emission converts the y coordinate to bottom-up space; raster/JIT
-    /// consumers keep it top-down. `inverse` emits the return translation.
+    /// PDF and raster emission convert the y coordinate to bottom-up space;
+    /// diagnostic consumers must conjugate that transform back to page space.
+    /// `inverse` emits the return translation.
     CssTransformOrigin {
         x: Pt,
         y: Pt,

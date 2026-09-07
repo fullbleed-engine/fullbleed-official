@@ -1,4 +1,4 @@
-use crate::canvas::{Command, Document, Page};
+use crate::canvas::{Command, Document, Page, PageGeometry};
 use crate::debug::{DebugLogger, json_escape};
 use crate::font::FontRegistry;
 use crate::page_data::{PageDataContext, PageDataValue};
@@ -101,6 +101,30 @@ impl Transform {
             self.b * x + self.d * y + self.f,
         )
     }
+
+    /// The same involution used by PDF/raster consumers to cross between
+    /// top-down page coordinates and PDF's bottom-up user space.
+    pub(crate) fn page_basis(page_height: Pt) -> Self {
+        Self::matrix(1.0, 0.0, 0.0, -1.0, 0.0, page_height.to_f32())
+    }
+
+    pub(crate) fn for_command(command: &Command, page_height: Pt) -> Option<Self> {
+        let pdf = match command {
+            Command::Translate(x, y) => Self::translate(x.to_f32(), -y.to_f32()),
+            Command::CssTransformOrigin { x, y, inverse } => {
+                let sign = if *inverse { -1.0 } else { 1.0 };
+                Self::translate(x.to_f32() * sign, (page_height - *y).to_f32() * sign)
+            }
+            Command::Scale(x, y) => Self::scale(*x, *y),
+            Command::Rotate(angle) => Self::rotate(-*angle),
+            Command::ConcatMatrix { a, b, c, d, e, f } => {
+                Self::matrix(*a, -*b, -*c, *d, e.to_f32(), -f.to_f32())
+            }
+            _ => return None,
+        };
+        let basis = Self::page_basis(page_height);
+        Some(basis.mul(pdf).mul(basis))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -115,6 +139,7 @@ pub struct PlacedItem {
 pub struct PagePlan {
     pub page_number: usize,
     pub page_count: usize,
+    pub page_size: Size,
     pub page_data: Option<HashMap<String, PageDataValue>>,
     pub placements: Vec<PlacedItem>,
 }
@@ -155,15 +180,16 @@ pub fn plan_document_with_overlay(
     let mut paintables = Vec::with_capacity(document.pages.len() * 2);
     let mut pages = Vec::with_capacity(document.pages.len());
     let page_count = document.pages.len();
-    let page_bbox = Rect {
-        x: Pt::ZERO,
-        y: Pt::ZERO,
-        width: document.page_size.width,
-        height: document.page_size.height,
-    };
     let capture_precise_bounds = debug.is_some();
 
     for (page_index, page) in document.pages.iter().enumerate() {
+        let page_size = PageGeometry::for_page(page, document.page_size).logical_size;
+        let page_bbox = Rect {
+            x: Pt::ZERO,
+            y: Pt::ZERO,
+            width: page_size.width,
+            height: page_size.height,
+        };
         let mut placements = Vec::new();
         let page_data_snapshot = page_data
             .as_ref()
@@ -172,7 +198,7 @@ pub fn plan_document_with_overlay(
         if !page.commands.is_empty() {
             let paintable_id = paintables.len();
             let bbox = capture_precise_bounds
-                .then(|| commands_bbox(&page.commands, font_registry))
+                .then(|| commands_bbox(&page.commands, page_size.height, font_registry))
                 .flatten();
             paintables.push(Paintable::PageCommands {
                 commands: page.commands.clone(),
@@ -190,7 +216,7 @@ pub fn plan_document_with_overlay(
                 if !bg_page.commands.is_empty() {
                     let paintable_id = paintables.len();
                     let bbox = capture_precise_bounds
-                        .then(|| commands_bbox(&bg_page.commands, font_registry))
+                        .then(|| commands_bbox(&bg_page.commands, page_size.height, font_registry))
                         .flatten();
                     paintables.push(Paintable::PageCommands {
                         commands: bg_page.commands.clone(),
@@ -210,7 +236,9 @@ pub fn plan_document_with_overlay(
                 if !overlay_page.commands.is_empty() {
                     let paintable_id = paintables.len();
                     let bbox = capture_precise_bounds
-                        .then(|| commands_bbox(&overlay_page.commands, font_registry))
+                        .then(|| {
+                            commands_bbox(&overlay_page.commands, page_size.height, font_registry)
+                        })
                         .flatten();
                     paintables.push(Paintable::PageCommands {
                         commands: overlay_page.commands.clone(),
@@ -229,6 +257,7 @@ pub fn plan_document_with_overlay(
         pages.push(PagePlan {
             page_number: page_index + 1,
             page_count,
+            page_size,
             page_data: page_data_snapshot,
             placements,
         });
@@ -382,8 +411,8 @@ fn plan_to_json(plan: &DocPlan) -> String {
             out.push(',');
         }
         out.push_str(&format!(
-            "{{\"n\":{},\"page_count\":{},\"placements\":[",
-            page.page_number, page.page_count
+            "{{\"n\":{},\"page_count\":{},\"page_size\":{{\"w\":{:.3},\"h\":{:.3}}},\"placements\":[",
+            page.page_number, page.page_count, page.page_size.width.to_f32(), page.page_size.height.to_f32()
         ));
 
         for (pidx, placement) in page.placements.iter().enumerate() {
@@ -498,53 +527,32 @@ fn rect_from_bounds(bounds: Option<(f32, f32, f32, f32)>) -> Option<Rect> {
     })
 }
 
-fn commands_bbox(commands: &[Command], font_registry: Option<&FontRegistry>) -> Option<Rect> {
+fn commands_bbox(
+    commands: &[Command],
+    page_height: Pt,
+    font_registry: Option<&FontRegistry>,
+) -> Option<Rect> {
     let mut bounds: Option<(f32, f32, f32, f32)> = None;
     let mut path_points: Vec<(f32, f32)> = Vec::new();
     let mut transform = Transform::identity();
-    let mut stack: Vec<Transform> = Vec::new();
+    let mut stack = Vec::new();
     let mut font_name = "Helvetica".to_string();
     let mut font_size = Pt::from_f32(12.0);
-    let mut has_meta_bounds = false;
 
     for cmd in commands {
-        if has_meta_bounds {
-            if let Command::Meta { key, value } = cmd {
-                if key == "__fb_bbox" {
-                    if let Some(rect) = parse_bbox_meta(value) {
-                        let min_x = rect.x.to_f32();
-                        let min_y = rect.y.to_f32();
-                        let max_x = min_x + rect.width.to_f32();
-                        let max_y = min_y + rect.height.to_f32();
-                        union_bounds(&mut bounds, (min_x, min_y, max_x, max_y));
-                    }
+        match cmd {
+            Command::SaveState => stack.push((transform, font_name.clone(), font_size)),
+            Command::RestoreState => {
+                if let Some(saved) = stack.pop() {
+                    (transform, font_name, font_size) = saved;
                 }
             }
-            continue;
-        }
-
-        match cmd {
-            Command::SaveState => stack.push(transform),
-            Command::RestoreState => {
-                transform = stack.pop().unwrap_or_else(Transform::identity);
-            }
-            Command::Translate(x, y) => {
-                transform = transform.mul(Transform::translate(x.to_f32(), y.to_f32()));
-            }
-            Command::CssTransformOrigin { x, y, inverse } => {
-                let sign = if *inverse { -1.0 } else { 1.0 };
-                transform =
-                    transform.mul(Transform::translate(x.to_f32() * sign, y.to_f32() * sign));
-            }
-            Command::Scale(x, y) => {
-                transform = transform.mul(Transform::scale(*x, *y));
-            }
-            Command::Rotate(angle) => {
-                transform = transform.mul(Transform::rotate(*angle));
-            }
-            Command::ConcatMatrix { a, b, c, d, e, f } => {
-                transform =
-                    transform.mul(Transform::matrix(*a, *b, *c, *d, e.to_f32(), f.to_f32()));
+            Command::Translate(..)
+            | Command::CssTransformOrigin { .. }
+            | Command::Scale(..)
+            | Command::Rotate(..)
+            | Command::ConcatMatrix { .. } => {
+                transform = transform.mul(Transform::for_command(cmd, page_height).unwrap());
             }
             Command::SetFontName(name) => font_name = name.clone(),
             Command::SetFontSize(size) => font_size = *size,
@@ -700,7 +708,15 @@ fn commands_bbox(commands: &[Command], font_registry: Option<&FontRegistry>) -> 
                 }
                 union_bounds(&mut bounds, (min_x, min_y, max_x, max_y));
             }
-            Command::DrawStringTransformed { x, y, text, .. } => {
+            Command::DrawStringTransformed {
+                x,
+                y,
+                text,
+                m00,
+                m01,
+                m10,
+                m11,
+            } => {
                 let width = if let Some(registry) = font_registry {
                     registry.measure_text_width(&font_name, font_size, text)
                 } else {
@@ -708,15 +724,24 @@ fn commands_bbox(commands: &[Command], font_registry: Option<&FontRegistry>) -> 
                     Pt::from_f32(font_size.to_f32() * approx)
                 };
                 let height = font_size;
-                let x0 = x.to_f32();
-                let y0 = y.to_f32();
-                let x1 = x0 + width.to_f32();
-                let y1 = y0 + height.to_f32();
+                // Unlike DrawString, this command carries a PDF-space
+                // baseline and an explicit linear text matrix.
+                let text_transform =
+                    transform
+                        .mul(Transform::page_basis(page_height))
+                        .mul(Transform::matrix(
+                            *m00,
+                            *m01,
+                            *m10,
+                            *m11,
+                            x.to_f32(),
+                            y.to_f32(),
+                        ));
                 let corners = [
-                    transform.apply(x0, y0),
-                    transform.apply(x1, y0),
-                    transform.apply(x1, y1),
-                    transform.apply(x0, y1),
+                    text_transform.apply(0.0, 0.0),
+                    text_transform.apply(width.to_f32(), 0.0),
+                    text_transform.apply(width.to_f32(), height.to_f32()),
+                    text_transform.apply(0.0, height.to_f32()),
                 ];
                 let mut min_x = corners[0].0;
                 let mut min_y = corners[0].1;
@@ -821,12 +846,13 @@ fn commands_bbox(commands: &[Command], font_registry: Option<&FontRegistry>) -> 
                         let max_x = min_x + rect.width.to_f32();
                         let max_y = min_y + rect.height.to_f32();
                         union_bounds(&mut bounds, (min_x, min_y, max_x, max_y));
-                        has_meta_bounds = true;
+                        // Layout metadata supplements the display commands;
+                        // it must never suppress later off-page paint.
                     }
                 }
             }
+            Command::ClipPath { .. } => path_points.clear(),
             Command::ClipRect { .. }
-            | Command::ClipPath { .. }
             | Command::SetFillColor(_)
             | Command::SetStrokeColor(_)
             | Command::SetLineWidth(_)
@@ -873,4 +899,309 @@ pub fn ops_to_document(page_size: Size, ops: Vec<PageOps>) -> Document {
         });
     }
     Document { page_size, pages }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ChartKind, ChartSeries, ChartSpec, ChartTable, FullBleed, PreparedChart};
+
+    fn rect(x: f32, y: f32, width: f32, height: f32) -> Command {
+        Command::DrawRect {
+            x: Pt::from_f32(x),
+            y: Pt::from_f32(y),
+            width: Pt::from_f32(width),
+            height: Pt::from_f32(height),
+        }
+    }
+
+    fn assert_bounds(actual: Rect, expected: (f32, f32, f32, f32)) {
+        let observed = (
+            actual.x.to_f32(),
+            actual.y.to_f32(),
+            actual.width.to_f32(),
+            actual.height.to_f32(),
+        );
+        for (a, b) in [
+            (observed.0, expected.0),
+            (observed.1, expected.1),
+            (observed.2, expected.2),
+            (observed.3, expected.3),
+        ] {
+            assert!((a - b).abs() < 0.005, "{observed:?} != {expected:?}");
+        }
+    }
+
+    #[test]
+    fn scaled_commands_use_the_same_page_basis_as_pdf_and_raster() {
+        let commands = [Command::Scale(0.75, 0.75), rect(10.0, 20.0, 40.0, 60.0)];
+        // A PDF-space scale acts around the page bottom, not its top.
+        assert_bounds(
+            commands_bbox(&commands, Pt::from_f32(792.0), None).unwrap(),
+            (7.5, 213.0, 30.0, 45.0),
+        );
+    }
+
+    #[test]
+    fn graphics_restore_restores_font_metrics_as_well_as_transform() {
+        let commands = [
+            Command::SetFontSize(Pt::from_f32(10.0)),
+            Command::SaveState,
+            Command::SetFontSize(Pt::from_f32(100.0)),
+            Command::RestoreState,
+            Command::DrawString {
+                x: Pt::from_f32(20.0),
+                y: Pt::from_f32(20.0),
+                text: "AB".into(),
+            },
+        ];
+        assert_bounds(
+            commands_bbox(&commands, Pt::from_f32(792.0), None).unwrap(),
+            (20.0, 20.0, 12.0, 10.0),
+        );
+    }
+
+    #[test]
+    fn transformed_strings_use_pdf_baseline_and_the_explicit_text_matrix() {
+        let commands = [
+            Command::SetFontSize(Pt::from_f32(10.0)),
+            Command::DrawStringTransformed {
+                x: Pt::from_f32(20.0),
+                y: Pt::from_f32(752.0),
+                text: "AB".into(),
+                m00: 2.0,
+                m01: 0.0,
+                m10: 0.5,
+                m11: 1.0,
+            },
+        ];
+        assert_bounds(
+            commands_bbox(&commands, Pt::from_f32(792.0), None).unwrap(),
+            (20.0, 30.0, 29.0, 10.0),
+        );
+    }
+
+    #[test]
+    fn layout_metadata_does_not_hide_later_off_page_paint() {
+        let commands = [
+            Command::Meta {
+                key: "__fb_bbox".into(),
+                value: "36000,36000,100000,100000".into(),
+            },
+            rect(-20.0, 10.0, 10.0, 10.0),
+        ];
+        assert!(
+            commands_bbox(&commands, Pt::from_f32(792.0), None)
+                .unwrap()
+                .x
+                < Pt::ZERO
+        );
+    }
+
+    #[test]
+    fn affine_reported_bounds_match_actual_native_raster_pixels() {
+        let origin = |inverse| Command::CssTransformOrigin {
+            x: Pt::from_f32(100.0),
+            y: Pt::from_f32(70.0),
+            inverse,
+        };
+        let cases = [
+            vec![Command::Scale(0.5, 0.75)],
+            vec![
+                origin(false),
+                Command::Rotate(core::f32::consts::FRAC_PI_2),
+                origin(true),
+            ],
+            vec![origin(false), Command::Scale(0.5, 1.25), origin(true)],
+            vec![Command::ConcatMatrix {
+                a: 0.75,
+                b: 0.125,
+                c: -0.125,
+                d: 0.75,
+                e: Pt::from_f32(80.0),
+                f: Pt::from_f32(15.0),
+            }],
+            vec![
+                Command::SaveState,
+                Command::Scale(2.0, 3.0),
+                Command::RestoreState,
+                Command::Translate(Pt::from_f32(12.0), Pt::from_f32(9.0)),
+            ],
+        ];
+        for mut commands in cases {
+            commands.push(rect(80.0, 60.0, 40.0, 20.0));
+            let document = Document {
+                page_size: Size {
+                    width: Pt::from_f32(612.0),
+                    height: Pt::from_f32(792.0),
+                },
+                pages: vec![Page { commands }],
+            };
+            let bbox = commands_bbox(&document.pages[0].commands, document.page_size.height, None)
+                .unwrap();
+            let png = crate::raster::document_to_png_pages(&document, 72, None, false).unwrap();
+            let pixels = crate::image_native::load_from_memory(&png[0])
+                .unwrap()
+                .into_rgba8();
+            let mut actual = (612.0_f32, 792.0_f32, 0.0_f32, 0.0_f32);
+            for y in 0..792 {
+                for x in 0..612 {
+                    if pixels.get_pixel(x, y).0[..3]
+                        .iter()
+                        .any(|value| *value < 250)
+                    {
+                        actual.0 = actual.0.min(x as f32);
+                        actual.1 = actual.1.min(y as f32);
+                        actual.2 = actual.2.max(x as f32 + 1.0);
+                        actual.3 = actual.3.max(y as f32 + 1.0);
+                    }
+                }
+            }
+            for (observed, reported) in [
+                (actual.0, bbox.x.to_f32()),
+                (actual.1, bbox.y.to_f32()),
+                (actual.2, (bbox.x + bbox.width).to_f32()),
+                (actual.3, (bbox.y + bbox.height).to_f32()),
+            ] {
+                assert!(
+                    (observed - reported).abs() <= 1.01,
+                    "pixels {actual:?}, bounds {bbox:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn real_overflow_remains_visible_on_each_page_edge_and_after_metadata() {
+        for paint in [
+            rect(-2.0, 40.0, 10.0, 10.0),
+            rect(40.0, -2.0, 10.0, 10.0),
+            rect(608.0, 40.0, 10.0, 10.0),
+            rect(40.0, 788.0, 10.0, 10.0),
+        ] {
+            let commands = [
+                Command::Meta {
+                    key: "__fb_bbox".into(),
+                    value: "36000,36000,100000,100000".into(),
+                },
+                Command::SaveState,
+                Command::Translate(Pt::from_f32(4.0), Pt::from_f32(8.0)),
+                Command::Translate(Pt::from_f32(-4.0), Pt::from_f32(-8.0)),
+                paint,
+                Command::RestoreState,
+            ];
+            let bbox = commands_bbox(&commands, Pt::from_f32(792.0), None).unwrap();
+            assert!(
+                bbox.x < Pt::ZERO
+                    || bbox.y < Pt::ZERO
+                    || bbox.x + bbox.width > Pt::from_f32(612.0)
+                    || bbox.y + bbox.height > Pt::from_f32(792.0)
+            );
+        }
+    }
+
+    #[test]
+    fn clip_path_is_consumed_without_painting_it() {
+        let commands = [
+            Command::MoveTo {
+                x: Pt::from_f32(-100.0),
+                y: Pt::from_f32(-100.0),
+            },
+            Command::LineTo {
+                x: Pt::from_f32(200.0),
+                y: Pt::from_f32(200.0),
+            },
+            Command::ClipPath { evenodd: false },
+            Command::MoveTo {
+                x: Pt::from_f32(20.0),
+                y: Pt::from_f32(30.0),
+            },
+            Command::LineTo {
+                x: Pt::from_f32(40.0),
+                y: Pt::from_f32(50.0),
+            },
+            Command::Stroke,
+        ];
+        assert_bounds(
+            commands_bbox(&commands, Pt::from_f32(792.0), None).unwrap(),
+            (20.0, 30.0, 20.0, 20.0),
+        );
+    }
+
+    #[test]
+    fn named_page_size_is_carried_in_each_serialized_page_plan() {
+        let document = Document {
+            page_size: Size {
+                width: Pt::from_f32(612.0),
+                height: Pt::from_f32(792.0),
+            },
+            pages: vec![Page {
+                commands: vec![
+                    Command::Meta {
+                        key: crate::canvas::META_PAGE_SIZE_KEY.into(),
+                        value: "100000,200000".into(),
+                    },
+                    Command::Scale(0.5, 0.5),
+                    rect(20.0, 20.0, 40.0, 40.0),
+                ],
+            }],
+        };
+        let plan = plan_document_with_overlay(0, &document, None, None, None, None, None);
+        assert_eq!(plan.pages[0].page_size.height, Pt::from_f32(200.0));
+        assert!(plan_to_json(&plan).contains("\"page_size\":{\"w\":100.000,\"h\":200.000}"));
+        assert_bounds(
+            commands_bbox(
+                &document.pages[0].commands,
+                plan.pages[0].page_size.height,
+                None,
+            )
+            .unwrap(),
+            (10.0, 110.0, 20.0, 20.0),
+        );
+    }
+
+    #[test]
+    fn chart_labels_and_table_have_contained_reported_paint_bounds() {
+        let mut spec = ChartSpec::new(
+            "bounds-proof",
+            ChartKind::Bar,
+            "Monthly comparison",
+            vec!["January".into(), "February".into()],
+            vec![
+                ChartSeries::new("revenue", "Revenue", vec![Some(10.0), Some(20.0)]),
+                ChartSeries::new("forecast", "Planned amount", vec![Some(9.0), Some(19.0)]),
+            ],
+        );
+        spec.width = 640;
+        spec.height = 320;
+        spec.table = ChartTable::Visible;
+        let pending = PreparedChart::new("bounds-proof", spec).unwrap();
+        let engine = FullBleed::builder()
+            .register_font_file(crate::tests::repo_font_path("Inter-Variable.ttf"))
+            .svg_form_xobjects(false)
+            .build()
+            .unwrap();
+        let css = "@page { size: Letter; margin: 36pt; } figure { margin:0; font-family:Inter; font-size:18pt; }";
+        let compiled = engine
+            .compile_chart_document(
+                &format!("<figure>{}</figure>", pending.placeholder_html()),
+                css,
+                &[pending],
+            )
+            .unwrap();
+        let document = engine.render_to_document(&compiled.html, css).unwrap();
+        assert_eq!(document.pages.len(), 1);
+        let bbox = commands_bbox(
+            &document.pages[0].commands,
+            document.page_size.height,
+            Some(&engine.font_registry),
+        )
+        .unwrap();
+        assert!(bbox.x >= Pt::ZERO && bbox.y >= Pt::ZERO, "{bbox:?}");
+        assert!(bbox.x + bbox.width <= document.page_size.width, "{bbox:?}");
+        assert!(
+            bbox.y + bbox.height <= document.page_size.height,
+            "{bbox:?}"
+        );
+    }
 }
