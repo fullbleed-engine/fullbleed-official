@@ -2,6 +2,7 @@ use crate::assets::{
     AssetBundle, load_svg_xml_from_image_source, raster_image_intrinsic_dimensions,
     renderable_image_source,
 };
+use crate::canvas::META_READING_LAYOUT_KEY;
 use crate::flowable::{
     AbsolutePositionedFlowable, AlignContent, AlignItems, BackgroundPaint, BackgroundPaintFlowable,
     BorderRadiiSpec, BorderSpacingSpec, BorderSpec, CalcLength, CjkDecimalMarkerFlowable,
@@ -1579,8 +1580,8 @@ fn collect_children(
                 out.extend(text_node_to_flowables(
                     &text.borrow(),
                     parent_style,
-                    !has_before,
-                    !has_after,
+                    !has_before && !matches!(parent_style.display, DisplayMode::Inline),
+                    !has_after && !matches!(parent_style.display, DisplayMode::Inline),
                     font_registry.clone(),
                     report.as_deref_mut(),
                     perf,
@@ -1713,7 +1714,7 @@ fn text_node_to_flowables(
             ))
             .with_pagination(parent_style.pagination)
             .with_font_registry(font_registry.clone())
-            .with_tag_role("P");
+            .with_tag_role(if inline_context { "Span" } else { "P" });
         items.push(inline_item(Box::new(paragraph)));
     }
     if trailing_space && has_text {
@@ -1722,7 +1723,51 @@ fn text_node_to_flowables(
             font_registry,
         ))));
     }
+    annotate_reading_layout(items)
+}
+
+/// Retain the actual lowered formatting context, including ID-free source and
+/// anonymous text. This evidence never participates in painting or geometry.
+fn annotate_reading_layout(items: Vec<LayoutItem>) -> Vec<LayoutItem> {
     items
+        .into_iter()
+        .map(|item| match item {
+            LayoutItem::Block {
+                flowable,
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            } => LayoutItem::Block {
+                flowable: Box::new(MetaFlowable::new(
+                    flowable,
+                    vec![(META_READING_LAYOUT_KEY.into(), "block".into())],
+                )),
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            },
+            LayoutItem::Inline {
+                flowable,
+                valign,
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            } => LayoutItem::Inline {
+                flowable: Box::new(MetaFlowable::new(
+                    flowable,
+                    vec![(META_READING_LAYOUT_KEY.into(), "inline".into())],
+                )),
+                valign,
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            },
+        })
+        .collect()
 }
 
 fn inherited_subgrid_line_names(
@@ -4021,7 +4066,7 @@ fn node_to_flowables(
 
             ancestors.pop();
             counters.pop_reset_scopes(&counter_reset_scopes);
-            items
+            annotate_reading_layout(items)
         }
         _ => Vec::new(),
     }

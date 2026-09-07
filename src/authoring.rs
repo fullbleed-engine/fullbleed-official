@@ -10,7 +10,8 @@ use fullbleed_audit_contract::sha256::Sha256;
 
 use crate::canvas::{
     Command, META_DIAGNOSTIC_SCOPE_BEGIN_KEY, META_DIAGNOSTIC_SCOPE_END_KEY,
-    META_FLOWABLE_BBOX_KEY, PageGeometry,
+    META_FLOWABLE_BBOX_KEY, META_READING_LAYOUT_KEY, META_READING_TEXT_BEGIN_KEY,
+    META_READING_TEXT_END_KEY, META_READING_TEXT_KEY, PageGeometry,
 };
 use crate::css_native::{AtRuleBlock, Rule};
 use crate::html_dom::{NodeData, parse_html};
@@ -207,6 +208,8 @@ pub struct AuthoringReadingPage {
     pub nodes: Vec<AuthoringReadingNode>,
     /// Compiled command order, including untagged and artifact text. Never source DOM text.
     pub text_runs: Vec<AuthoringTextRun>,
+    /// Ordered text/child references from the compiled command stream.
+    pub content: Vec<AuthoringReadingContent>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -218,6 +221,12 @@ pub struct AuthoringTextRun {
     pub kind: String,
     pub artifact: bool,
     pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthoringReadingContent {
+    Text(String),
+    Child(usize),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -234,6 +243,9 @@ pub struct AuthoringReadingNode {
     pub column_index: Option<u16>,
     pub group_only: bool,
     pub children: Vec<AuthoringReadingNode>,
+    /// `inline`/`block` only when the lowered engine flow supplied evidence.
+    pub layout: Option<String>,
+    pub content: Vec<AuthoringReadingContent>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -422,26 +434,50 @@ fn normalize_reading_text(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn append_reading_text(target: &mut String, value: &str) {
-    let value = normalize_reading_text(value);
-    if value.is_empty() {
+fn append_reading_content(content: &mut Vec<AuthoringReadingContent>, text: &str) {
+    if text.is_empty() {
         return;
     }
-    if !target.is_empty() {
-        target.push(' ');
+    if let Some(AuthoringReadingContent::Text(previous)) = content.last_mut() {
+        previous.push_str(text);
+    } else {
+        content.push(AuthoringReadingContent::Text(text.into()));
     }
-    target.push_str(&value);
+}
+
+fn append_reading_text(
+    stack: &mut [ReadingStackEntry],
+    roots: &mut Vec<AuthoringReadingContent>,
+    text: &str,
+) {
+    match stack.last_mut() {
+        Some(ReadingStackEntry::Node(node)) => {
+            node.text.push_str(text);
+            append_reading_content(&mut node.content, text);
+        }
+        Some(ReadingStackEntry::Suppressed) => {}
+        None => append_reading_content(roots, text),
+    }
 }
 
 fn attach_reading_node(
     node: AuthoringReadingNode,
     stack: &mut [ReadingStackEntry],
     roots: &mut Vec<AuthoringReadingNode>,
+    root_content: &mut Vec<AuthoringReadingContent>,
 ) {
     match stack.last_mut() {
-        Some(ReadingStackEntry::Node(parent)) => parent.children.push(node),
+        Some(ReadingStackEntry::Node(parent)) => {
+            parent
+                .content
+                .push(AuthoringReadingContent::Child(parent.children.len()));
+            parent.children.push(node);
+        }
         Some(ReadingStackEntry::Suppressed) => {}
-        None => roots.push(node),
+        None => {
+            root_content.push(AuthoringReadingContent::Child(roots.len()));
+            roots.push(node);
+        }
     }
 }
 
@@ -496,23 +532,51 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
 
     for (page_index, page) in document.pages.iter().enumerate() {
         let mut roots = Vec::new();
+        let mut root_content = Vec::new();
         let mut text_runs = Vec::new();
         let mut stack = Vec::<ReadingStackEntry>::new();
         let mut current_source = None::<String>;
         let mut source_stack = Vec::<Option<String>>::new();
         let mut marked_content_stack = Vec::<bool>::new();
         let mut artifact_depth = 0usize;
+        let mut logical_text_depth = 0usize;
+        let mut current_layout = None::<String>;
+        let mut layout_stack = Vec::<Option<String>>::new();
 
         for (command_index, command) in page.commands.iter().enumerate() {
             match command {
                 Command::Meta { key, .. } if key == META_DIAGNOSTIC_SCOPE_BEGIN_KEY => {
                     source_stack.push(current_source.clone());
+                    layout_stack.push(current_layout.clone());
                 }
                 Command::Meta { key, .. } if key == META_DIAGNOSTIC_SCOPE_END_KEY => {
                     current_source = source_stack.pop().unwrap_or_default();
+                    current_layout = layout_stack.pop().unwrap_or_default();
                 }
                 Command::Meta { key, value } if key == "fb.owner.source_id" => {
                     current_source = Some(value.clone());
+                }
+                Command::Meta { key, value } if key == META_READING_LAYOUT_KEY => {
+                    current_layout =
+                        matches!(value.as_str(), "inline" | "block").then(|| value.clone());
+                }
+                Command::Meta { key, value }
+                    if key == META_READING_TEXT_KEY || key == META_READING_TEXT_BEGIN_KEY =>
+                {
+                    if logical_text_depth == 0
+                        && artifact_depth == 0
+                        && !stack
+                            .iter()
+                            .any(|entry| matches!(entry, ReadingStackEntry::Suppressed))
+                    {
+                        append_reading_text(&mut stack, &mut root_content, value);
+                    }
+                    if key == META_READING_TEXT_BEGIN_KEY {
+                        logical_text_depth += 1;
+                    }
+                }
+                Command::Meta { key, .. } if key == META_READING_TEXT_END_KEY => {
+                    logical_text_depth = logical_text_depth.saturating_sub(1);
                 }
                 Command::BeginArtifact { .. } => {
                     marked_content_stack.push(true);
@@ -559,6 +623,8 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
                             column_index: *col_index,
                             group_only: *group_only,
                             children: Vec::new(),
+                            layout: current_layout.take(),
+                            content: Vec::new(),
                         }));
                     }
                 }
@@ -590,12 +656,19 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
                             column_index: None,
                             group_only: false,
                             children: Vec::new(),
+                            layout: current_layout.take(),
+                            content: Vec::new(),
                         }));
                     }
                 }
                 Command::EndTag => {
                     if let Some(ReadingStackEntry::Node(node)) = stack.pop() {
-                        attach_reading_node(finish_reading_node(node), &mut stack, &mut roots);
+                        attach_reading_node(
+                            finish_reading_node(node),
+                            &mut stack,
+                            &mut roots,
+                            &mut root_content,
+                        );
                     }
                 }
                 Command::DrawString { text, .. } | Command::DrawStringTransformed { text, .. } => {
@@ -623,9 +696,17 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
                     if artifact_depth > 0 {
                         continue;
                     }
-                    if let Some(ReadingStackEntry::Node(node)) = stack.last_mut() {
-                        append_reading_text(&mut node.text, text);
-                    } else if !text.trim().is_empty() {
+                    if let Some(ReadingStackEntry::Node(node)) = stack.last() {
+                        if logical_text_depth == 0 {
+                            // Opaque/table/SVG paint paths without logical-text
+                            // provenance retain the legacy normalized-run fallback.
+                            let mut fallback = normalize_reading_text(text);
+                            if !fallback.is_empty() && !node.text.is_empty() {
+                                fallback.insert(0, ' ');
+                            }
+                            append_reading_text(&mut stack, &mut root_content, &fallback);
+                        }
+                    } else if !text.trim().is_empty() && !artifact {
                         untagged_text_run_count = untagged_text_run_count.saturating_add(1);
                     }
                 }
@@ -638,13 +719,19 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
 
         while let Some(entry) = stack.pop() {
             if let ReadingStackEntry::Node(node) = entry {
-                attach_reading_node(finish_reading_node(node), &mut stack, &mut roots);
+                attach_reading_node(
+                    finish_reading_node(node),
+                    &mut stack,
+                    &mut roots,
+                    &mut root_content,
+                );
             }
         }
         pages.push(AuthoringReadingPage {
             page_number: page_index + 1,
             nodes: roots,
             text_runs,
+            content: root_content,
         });
     }
 
@@ -1216,6 +1303,168 @@ mod tests {
             collected.push(node);
             collect_reading_nodes(&node.children, collected);
         }
+    }
+
+    fn ordered_text(
+        content: &[AuthoringReadingContent],
+        children: &[AuthoringReadingNode],
+    ) -> String {
+        content
+            .iter()
+            .map(|part| match part {
+                AuthoringReadingContent::Text(text) => text.clone(),
+                AuthoringReadingContent::Child(index) => {
+                    let child = &children[*index];
+                    child
+                        .actual_text
+                        .clone()
+                        .unwrap_or_else(|| ordered_text(&child.content, &child.children))
+                }
+            })
+            .collect()
+    }
+
+    fn reading_fixture(html: &str, css: &str) -> AuthoringPreviewArtifactV1 {
+        FullBleed::builder()
+            .build()
+            .unwrap()
+            .render_authoring_preview(
+                AuthoringPreviewRequest { html, css, dpi: 72 },
+                &AuthoringCancellationToken::new(),
+                |_| {},
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn ordered_reading_preserves_id_free_inline_text_and_lowered_block_boundaries() {
+        let artifact = reading_fixture(
+            "<main><span class='row'>BILL TO</span><span class='row'>Aster Corporation</span><span class='row postal'>123 Business Park Drive\nAustin, TX 78701</span><p>Before <strong>middle</strong> after.</p><p><span>micro</span><strong>scope</strong></p><p><span>Hello </span><strong>world</strong><span>!</span></p></main>",
+            "@page { size: 500pt 680pt; margin: 24pt; } .row { display:block; } .postal { white-space: pre-line; } strong { color: red; font-weight:700; }",
+        );
+        let page = &artifact.reading.pages[0];
+        let text = ordered_text(&page.content, &page.nodes);
+        assert_eq!(
+            text,
+            "BILL TOAster Corporation123 Business Park Drive\nAustin, TX 78701Before middle after.microscopeHello world!"
+        );
+        let mut nodes = Vec::new();
+        collect_reading_nodes(&page.nodes, &mut nodes);
+        for label in ["BILL TO", "Aster Corporation"] {
+            assert!(
+                nodes.iter().any(|node| node.role == "Span"
+                    && node.layout.as_deref() == Some("block")
+                    && ordered_text(&node.content, &node.children) == label),
+                "{nodes:#?}"
+            );
+        }
+        assert!(nodes.iter().all(|node| node.source_id.is_none()));
+    }
+
+    #[test]
+    fn ordered_reading_retains_hard_breaks_code_spacing_and_words_across_paint_runs() {
+        let artifact = reading_fixture(
+            "<main><p>First line<br>Second line</p><p>One <strong>bold</strong><br>Two <em>italic</em><br><br>Four</p><pre>const first = 1;\n  const second = 2;</pre><p class='tracked'>ABCDEFGHIJKL</p><p class='wrapped'>uninterruptedidentifieruninterruptedidentifier</p></main>",
+            "@page { size:500pt 680pt; margin:24pt; } .tracked { letter-spacing:1pt; text-shadow:1pt 1pt #888; } .wrapped { width:110pt; overflow-wrap:anywhere; } strong {color:red;} em {color:blue;}",
+        );
+        let page = &artifact.reading.pages[0];
+        let text = ordered_text(&page.content, &page.nodes);
+        assert_eq!(
+            text,
+            "First line\nSecond lineOne bold\nTwo italic\n\nFourconst first = 1;\n  const second = 2;ABCDEFGHIJKLuninterruptedidentifieruninterruptedidentifier"
+        );
+    }
+
+    #[test]
+    fn ordered_reading_preserves_soft_wrap_provenance_across_page_fragments() {
+        let identifier = "uninterruptedidentifier".repeat(12);
+        let prose = "one two three four five six seven eight nine ten ".repeat(8);
+        let artifact = reading_fixture(
+            &format!("<p>{identifier}</p><p>{prose}</p>"),
+            "@page { size:120pt 110pt; margin:10pt; } body { margin:0; font-size:12pt; } p { margin:0; overflow-wrap:anywhere; }",
+        );
+        assert!(artifact.reading.pages.len() > 2);
+        let text: String = artifact
+            .reading
+            .pages
+            .iter()
+            .map(|page| ordered_text(&page.content, &page.nodes))
+            .collect();
+        assert_eq!(text, format!("{identifier}{}", prose.trim_end()));
+    }
+
+    #[test]
+    fn ordered_reading_retains_legacy_spacing_for_table_paint_without_logical_provenance() {
+        let artifact = reading_fixture(
+            "<table><tr><td>one two three four five six seven eight nine ten</td></tr></table>",
+            "@page {size:120pt 400pt;margin:12pt;} table {width:65pt;} td {font-size:12pt;}",
+        );
+        let text: String = artifact
+            .reading
+            .pages
+            .iter()
+            .map(|page| ordered_text(&page.content, &page.nodes))
+            .collect();
+        assert_eq!(text, "one two three four five six seven eight nine ten");
+    }
+
+    #[test]
+    fn reading_metadata_is_nonpainting_and_excludes_clamped_hidden_and_artifact_text() {
+        let engine = FullBleed::builder().build().unwrap();
+        let mut document = engine.render_to_document(
+            "<main><p class='clamp'>Visible words that wrap across many lines HIDDEN_TAIL</p><p class='hidden'>HIDDEN_SOURCE</p><p data-fb-a11y-role='Artifact'>RUNNING_ARTIFACT</p><span data-fb-a11y-only='true'>Nonvisual instruction</span></main>",
+            "@page {size:300pt 300pt;margin:12pt;} .clamp {width:60pt;line-clamp:1;} .hidden {display:none;}",
+        ).unwrap();
+        let reading = reading_preview(&document);
+        let text: String = reading
+            .pages
+            .iter()
+            .map(|page| ordered_text(&page.content, &page.nodes))
+            .collect();
+        assert!(!text.contains("HIDDEN_SOURCE"));
+        assert!(!text.contains("HIDDEN_TAIL"), "{text}");
+        assert!(text.contains("Nonvisual instruction"));
+        let pdf = pdf::document_to_pdf_with_metrics_and_registry_with_logs(
+            &document,
+            None,
+            Some(engine.font_registry.as_ref()),
+            &engine.pdf_options,
+            None,
+            None,
+        )
+        .unwrap();
+        let png = raster::document_to_png_pages(
+            &document,
+            72,
+            Some(engine.font_registry.as_ref()),
+            engine.pdf_options.shape_text,
+        )
+        .unwrap();
+        for page in &mut document.pages {
+            page.commands.retain(|command| !matches!(command, Command::Meta { key, .. } if key.starts_with("fb.reading.")));
+        }
+        assert_eq!(
+            pdf,
+            pdf::document_to_pdf_with_metrics_and_registry_with_logs(
+                &document,
+                None,
+                Some(engine.font_registry.as_ref()),
+                &engine.pdf_options,
+                None,
+                None
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            png,
+            raster::document_to_png_pages(
+                &document,
+                72,
+                Some(engine.font_registry.as_ref()),
+                engine.pdf_options.shape_text
+            )
+            .unwrap()
+        );
     }
 
     #[test]

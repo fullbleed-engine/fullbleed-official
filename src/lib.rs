@@ -60,9 +60,9 @@ pub use authoring::{
     AuthoringLanguageReportV1, AuthoringLanguageRequest, AuthoringLayoutFragment,
     AuthoringLayoutNode, AuthoringLayoutPage, AuthoringLayoutSnapshotV1,
     AuthoringPreviewArtifactV1, AuthoringPreviewPhase, AuthoringPreviewProgress,
-    AuthoringPreviewRequest, AuthoringReadingNode, AuthoringReadingPage, AuthoringReadingPreviewV1,
-    AuthoringSourceLanguage, AuthoringTextRun, authoring_language_features,
-    inspect_authoring_source,
+    AuthoringPreviewRequest, AuthoringReadingContent, AuthoringReadingNode, AuthoringReadingPage,
+    AuthoringReadingPreviewV1, AuthoringSourceLanguage, AuthoringTextRun,
+    authoring_language_features, inspect_authoring_source,
 };
 pub use canvas::{Canvas, Command, Document, Page};
 pub use chart::{

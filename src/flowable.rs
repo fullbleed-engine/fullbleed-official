@@ -1,7 +1,8 @@
 use crate::canvas::{
     Canvas, Command, CompiledMaskLayer, ImageSourceClip, META_DIAGNOSTIC_SCOPE_BEGIN_KEY,
-    META_DIAGNOSTIC_SCOPE_END_KEY, META_NAMED_STRING_PREFIX, META_RUNNING_ELEMENT_PREFIX,
-    PerspectiveContext, ProjectiveTransform,
+    META_DIAGNOSTIC_SCOPE_END_KEY, META_NAMED_STRING_PREFIX, META_READING_LAYOUT_KEY,
+    META_READING_TEXT_BEGIN_KEY, META_READING_TEXT_END_KEY, META_READING_TEXT_KEY,
+    META_RUNNING_ELEMENT_PREFIX, PerspectiveContext, ProjectiveTransform,
 };
 use crate::font::{FontRegistry, GlyphOutlineCommand, RegisteredPositionedGlyphOutline};
 use crate::perf::PerfLogger;
@@ -277,6 +278,24 @@ fn perf_end(name: &str, start: Option<Instant>) {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum ReadingSeparator {
+    #[default]
+    None,
+    Space,
+    Line,
+}
+
+impl ReadingSeparator {
+    fn text(self) -> &'static str {
+        match self {
+            Self::None => "",
+            Self::Space => " ",
+            Self::Line => "\n",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct LineLayout {
     text: String,
@@ -284,6 +303,7 @@ struct LineLayout {
     text_width: Pt,
     indent: Pt,
     forced_start: bool,
+    reading_separator: ReadingSeparator,
 }
 
 #[derive(Debug, Clone)]
@@ -6085,6 +6105,9 @@ fn apply_first_line_text_transform(text: &str, mode: TextTransformMode) -> Strin
 #[derive(Debug, Clone)]
 pub struct Paragraph {
     text: String,
+    // Pagination retains line boxes using newlines in `text`. Keep their real
+    // logical separators separately so those paint breaks do not alter words.
+    reading_line_separators: Option<Vec<ReadingSeparator>>,
     style: TextStyle,
     align: TextAlign,
     align_last: Option<TextAlign>,
@@ -6111,6 +6134,7 @@ impl Paragraph {
     pub fn new(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
+            reading_line_separators: None,
             style: TextStyle::default(),
             align: TextAlign::Left,
             align_last: None,
@@ -6539,6 +6563,7 @@ impl Paragraph {
     ) -> Self {
         let mut variant = self.clone();
         variant.text = text;
+        variant.reading_line_separators = None;
         variant.style = style;
         variant.suppress_first_line_indent = suppress_first_line_indent;
         variant.initial_letter = None;
@@ -6558,7 +6583,8 @@ impl Paragraph {
             self.suppress_first_line_indent,
         );
         let probe_lines = probe.layout_lines(max_width);
-        let first_line = probe_lines.first()?.clone();
+        let mut first_line = probe_lines.first()?.clone();
+        first_line.reading_separator = self.reading_separator_for_segment(0);
 
         // Normal white-space layout collapses every separator between words.
         // Counting formatted words therefore maps the dynamically selected
@@ -6580,7 +6606,8 @@ impl Paragraph {
 
         let mut lines = vec![first_line];
         if !remainder.is_empty() {
-            let base = self.style_variant_for_text(remainder, self.style.clone(), true);
+            let mut base = self.style_variant_for_text(remainder, self.style.clone(), true);
+            base.reading_line_separators = Some(vec![ReadingSeparator::Space]);
             lines.extend(base.layout_lines(max_width).iter().cloned());
         }
         Some(lines)
@@ -7341,6 +7368,18 @@ impl Paragraph {
         }
     }
 
+    fn reading_separator_for_segment(&self, index: usize) -> ReadingSeparator {
+        self.reading_line_separators
+            .as_ref()
+            .and_then(|separators| separators.get(index))
+            .copied()
+            .unwrap_or(if index == 0 {
+                ReadingSeparator::None
+            } else {
+                ReadingSeparator::Line
+            })
+    }
+
     fn layout_lines(&self, avail_width: Pt) -> Arc<Vec<LineLayout>> {
         let perf = perf_start();
         let max_width = avail_width.max(Pt::from_f32(1.0));
@@ -7409,6 +7448,7 @@ impl Paragraph {
                     text_width,
                     indent: line_indent,
                     forced_start,
+                    reading_separator: self.reading_separator_for_segment(idx),
                 });
             }
             let lines = Arc::new(line_layouts);
@@ -7442,9 +7482,12 @@ impl Paragraph {
             ) || matches!(self.style.line_break, crate::style::LineBreakMode::Anywhere);
 
         let mut lines: Vec<PendingLineLayout> = Vec::new();
+        let mut reading_prefixes = HashMap::<usize, ReadingSeparator>::new();
         let mut word_widths: HashMap<&str, Pt> = HashMap::new();
         if self.preserve_whitespace {
             for (segment_idx, segment) in self.text.split('\n').enumerate() {
+                reading_prefixes
+                    .insert(lines.len(), self.reading_separator_for_segment(segment_idx));
                 push_preserved_wrapped_segment(
                     self,
                     segment,
@@ -7458,6 +7501,8 @@ impl Paragraph {
         } else {
             let space_width = self.measure_text_width(" ");
             for (segment_idx, segment) in self.text.split('\n').enumerate() {
+                reading_prefixes
+                    .insert(lines.len(), self.reading_separator_for_segment(segment_idx));
                 let mut current_forced_start = segment_idx > 0;
                 if segment.is_empty() {
                     lines.push(PendingLineLayout {
@@ -7481,7 +7526,10 @@ impl Paragraph {
                         (word, width)
                     })
                     .collect();
-                for (word, word_width) in words {
+                for (word_index, (word, word_width)) in words.into_iter().enumerate() {
+                    if word_index > 0 && current.is_empty() {
+                        reading_prefixes.insert(lines.len(), ReadingSeparator::Space);
+                    }
                     let current_indent =
                         self.line_text_indent(lines.len(), current_forced_start, indent_value);
                     let current_limit = self.line_limit(max_width, current_indent);
@@ -7602,6 +7650,7 @@ impl Paragraph {
                                 text: current,
                                 forced_start: current_forced_start,
                             });
+                            reading_prefixes.insert(lines.len(), ReadingSeparator::Space);
                             current = String::new();
                             current_forced_start = false;
                             let follow_indent =
@@ -7710,6 +7759,7 @@ impl Paragraph {
                 text_width,
                 indent,
                 forced_start: line.forced_start,
+                reading_separator: reading_prefixes.get(&idx).copied().unwrap_or_default(),
             });
         }
         let lines = Arc::new(line_layouts);
@@ -8518,6 +8568,12 @@ impl Flowable for Paragraph {
             .join("\n");
         let first = Paragraph {
             text: first_text,
+            reading_line_separators: Some(
+                lines[..split_at]
+                    .iter()
+                    .map(|line| line.reading_separator)
+                    .collect(),
+            ),
             style: self.style.clone(),
             align: self.align,
             align_last: self.align_last,
@@ -8545,6 +8601,12 @@ impl Flowable for Paragraph {
         };
         let second = Paragraph {
             text: second_text,
+            reading_line_separators: Some(
+                lines[split_at..]
+                    .iter()
+                    .map(|line| line.reading_separator)
+                    .collect(),
+            ),
             style: self.style.clone(),
             align: self.align,
             align_last: self.align_last,
@@ -8582,10 +8644,26 @@ impl Flowable for Paragraph {
         let tagged = self.tag_role.as_ref().map(|role| {
             canvas.begin_tag(role.as_ref(), None, None, None, None, false);
         });
+        let reading_lines = self.layout_lines(if self.is_vertical_text() {
+            avail_height
+        } else {
+            avail_width
+        });
+        let mut reading_text = self
+            .initial_letter
+            .as_ref()
+            .map(|initial| initial.text.clone())
+            .unwrap_or_default();
+        for line in reading_lines.iter() {
+            reading_text.push_str(line.reading_separator.text());
+            reading_text.push_str(&line.text);
+        }
+        canvas.meta(META_READING_TEXT_BEGIN_KEY, reading_text);
         canvas.set_fill_color(self.style.color);
         canvas.set_font_size(self.style.font_size);
         if self.is_vertical_text() {
             self.draw_vertical_text(canvas, x, y, avail_width, avail_height);
+            canvas.meta(META_READING_TEXT_END_KEY, "");
             if tagged.is_some() {
                 canvas.end_tag();
             }
@@ -8629,7 +8707,7 @@ impl Flowable for Paragraph {
             canvas.set_font_size(self.style.font_size);
         }
 
-        let lines = self.layout_lines(avail_width);
+        let lines = reading_lines;
         let round_each_css_line_baseline =
             self.round_each_css_line_baseline && self.first_line_style.is_none() && lines.len() > 1;
         let mut cursor_y = y;
@@ -8734,6 +8812,7 @@ impl Flowable for Paragraph {
             );
             cursor_y = cursor_y + annotated_line_height;
         }
+        canvas.meta(META_READING_TEXT_END_KEY, "");
         if tagged.is_some() {
             canvas.end_tag();
         }
@@ -10273,7 +10352,9 @@ impl Flowable for CollapsibleSpaceFlowable {
         None
     }
 
-    fn draw(&self, _canvas: &mut Canvas, _x: Pt, _y: Pt, _avail_width: Pt, _avail_height: Pt) {}
+    fn draw(&self, canvas: &mut Canvas, _x: Pt, _y: Pt, _avail_width: Pt, _avail_height: Pt) {
+        canvas.meta(META_READING_TEXT_KEY, " ");
+    }
 }
 
 #[derive(Clone)]
@@ -12391,6 +12472,7 @@ impl TableCell {
                     text_width: width,
                     indent: Pt::ZERO,
                     forced_start: false,
+                    reading_separator: ReadingSeparator::None,
                 });
             }
             let lines = Arc::new(line_layouts);
@@ -12527,6 +12609,7 @@ impl TableCell {
                 text_width: width,
                 indent: Pt::ZERO,
                 forced_start: false,
+                reading_separator: ReadingSeparator::None,
             });
         }
         let lines = Arc::new(line_layouts);
@@ -17118,6 +17201,7 @@ struct InlineLineLayout {
     parent_font_ascent: Pt,
     parent_font_descent: Pt,
     items: Vec<InlineItemLayout>,
+    reading_break_after: bool,
 }
 
 #[derive(Clone)]
@@ -17558,6 +17642,7 @@ impl InlineBlockLayoutFlowable {
                 parent_font_ascent,
                 parent_font_descent,
                 items,
+                reading_break_after: false,
             });
         };
 
@@ -17576,6 +17661,7 @@ impl InlineBlockLayoutFlowable {
                         parent_font_ascent: Pt::ZERO,
                         parent_font_descent: Pt::ZERO,
                         items: Vec::new(),
+                        reading_break_after: false,
                     });
                 } else {
                     line_height = line_height.max(break_height);
@@ -17587,6 +17673,9 @@ impl InlineBlockLayoutFlowable {
                         &mut max_width,
                         &mut total_height,
                     );
+                }
+                if let Some(line) = lines.last_mut() {
+                    line.reading_break_after = true;
                 }
                 line_width = Pt::ZERO;
                 raw_line_width = Pt::ZERO;
@@ -18076,6 +18165,9 @@ impl Flowable for InlineBlockLayoutFlowable {
                 } else {
                     child.draw(canvas, item_x, cursor_y + y_off, item_width, item_height);
                 }
+            }
+            if line.reading_break_after {
+                canvas.meta(META_READING_TEXT_KEY, "\n");
             }
             cursor_y = cursor_y + line.line_height;
         }
@@ -36876,6 +36968,12 @@ impl MetaFlowable {
             .any(|(key, value)| key == "fb.owner.source_id" && !value.is_empty())
     }
 
+    fn requires_metadata_carrier(&self) -> bool {
+        self.metadata
+            .iter()
+            .any(|(key, _)| key != META_READING_LAYOUT_KEY)
+    }
+
     fn record_authored_bounds(
         &self,
         canvas: &mut Canvas,
@@ -36898,6 +36996,64 @@ impl MetaFlowable {
 }
 
 impl Flowable for MetaFlowable {
+    fn freeze_replaced_fragmentation_size(
+        &self,
+        width: Pt,
+        height: Pt,
+    ) -> Option<Box<dyn Flowable>> {
+        self.child
+            .freeze_replaced_fragmentation_size(width, height)
+            .map(|child| {
+                Box::new(Self::new(child, self.metadata.as_ref().clone())) as Box<dyn Flowable>
+            })
+    }
+
+    fn expands_inline_fill(&self) -> bool {
+        self.child.expands_inline_fill()
+    }
+    fn is_collapsible_inline_space(&self) -> bool {
+        self.child.is_collapsible_inline_space()
+    }
+    fn forced_line_break_height(&self) -> Option<Pt> {
+        self.child.forced_line_break_height()
+    }
+    fn css_line_baselines_are_self_snapped(&self, width: Pt) -> bool {
+        self.child.css_line_baselines_are_self_snapped(width)
+    }
+    fn inline_box_ascent(&self, width: Pt) -> Option<Pt> {
+        self.child.inline_box_ascent(width)
+    }
+    fn inline_x_height(&self, width: Pt) -> Option<Pt> {
+        self.child.inline_x_height(width)
+    }
+    fn inline_font_extents(&self, width: Pt) -> Option<(Pt, Pt)> {
+        self.child.inline_font_extents(width)
+    }
+    fn uses_parent_content_height(&self) -> bool {
+        self.child.uses_parent_content_height()
+    }
+    fn repeats_parent_fragment_block_start_padding(&self) -> bool {
+        self.child.repeats_parent_fragment_block_start_padding()
+    }
+
+    fn draw_expanding_inline_fill(
+        &self,
+        canvas: &mut Canvas,
+        x: Pt,
+        y: Pt,
+        width: Pt,
+        height: Pt,
+        line_origin_x: Pt,
+    ) {
+        canvas.meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "flowable");
+        for (key, value) in self.metadata.iter() {
+            canvas.meta(key.clone(), value.clone());
+        }
+        self.child
+            .draw_expanding_inline_fill(canvas, x, y, width, height, line_origin_x);
+        self.record_authored_bounds(canvas, x, y, width, height, Size { width, height });
+        canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "flowable");
+    }
     fn with_sliced_decoration_block_extension(&self, extra: Pt) -> Box<dyn Flowable> {
         let mut extended = self.clone();
         extended.child = self
@@ -36991,7 +37147,8 @@ impl Flowable for MetaFlowable {
 
     fn wrap(&self, avail_width: Pt, avail_height: Pt) -> Size {
         let mut size = self.child.wrap(avail_width, avail_height);
-        if !self.metadata.is_empty() && size.height <= Pt::ZERO && !self.child.out_of_flow() {
+        if self.requires_metadata_carrier() && size.height <= Pt::ZERO && !self.child.out_of_flow()
+        {
             size.height = Pt::from_f32(0.01);
         }
         size
@@ -36999,7 +37156,8 @@ impl Flowable for MetaFlowable {
 
     fn wrap_flexed_width(&self, avail_width: Pt, avail_height: Pt) -> Size {
         let mut size = self.child.wrap_flexed_width(avail_width, avail_height);
-        if !self.metadata.is_empty() && size.height <= Pt::ZERO && !self.child.out_of_flow() {
+        if self.requires_metadata_carrier() && size.height <= Pt::ZERO && !self.child.out_of_flow()
+        {
             size.height = Pt::from_f32(0.01);
         }
         size
@@ -37016,7 +37174,8 @@ impl Flowable for MetaFlowable {
             containing_block_width,
             avail_height,
         );
-        if !self.metadata.is_empty() && size.height <= Pt::ZERO && !self.child.out_of_flow() {
+        if self.requires_metadata_carrier() && size.height <= Pt::ZERO && !self.child.out_of_flow()
+        {
             size.height = Pt::from_f32(0.01);
         }
         size

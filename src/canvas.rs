@@ -16,6 +16,11 @@ pub const META_RUNNING_ELEMENT_PREFIX: &str = "__fb_running_element:";
 pub const META_NAMED_STRING_PREFIX: &str = "__fb_named_string:";
 pub const META_DIAGNOSTIC_SCOPE_BEGIN_KEY: &str = "__fb_diag_scope_begin";
 pub const META_DIAGNOSTIC_SCOPE_END_KEY: &str = "__fb_diag_scope_end";
+/// Non-painting compiler evidence for logical text and its formatting context.
+pub const META_READING_LAYOUT_KEY: &str = "fb.reading.layout";
+pub const META_READING_TEXT_KEY: &str = "fb.reading.text";
+pub const META_READING_TEXT_BEGIN_KEY: &str = "fb.reading.text.begin";
+pub const META_READING_TEXT_END_KEY: &str = "fb.reading.text.end";
 
 /// A compact projective vector transform retained only while the display list
 /// is being compiled. Geometry is lowered to ordinary PDF path commands at
