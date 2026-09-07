@@ -221,6 +221,8 @@
     ],
     "charts": {
       "browser_runtime_required": false,
+      "document_context_input": "fullbleed::PreparedChart placeholders in resolved HTML plus CSS",
+      "document_context_rust_api": "fullbleed::FullBleed::compile_chart_document",
       "engine_owned": true,
       "generated_svg_persisted": false,
       "input_contract": "resolved_chart_spec",
@@ -240,7 +242,19 @@
         "native_inline_svg",
         "semantic_html_table"
       ],
-      "rust_api": "fullbleed::compile_chart"
+      "rust_api": "fullbleed::compile_chart",
+      "typography": {
+        "category_labels": "measured sparse labels with exact unsampled marks and table",
+        "css_properties": [
+          "font-family",
+          "font-size",
+          "font-weight",
+          "font-style"
+        ],
+        "font_metrics": "registered project fonts; explicit estimated-fallback diagnostic otherwise",
+        "insufficient_space": "diagnostic placeholder and retained semantic table",
+        "legend_layout": "measured word wrapping"
+      }
     },
     "commands": [
       "render",

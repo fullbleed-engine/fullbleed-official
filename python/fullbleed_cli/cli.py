@@ -3231,6 +3231,15 @@ def _capabilities_payload(cli_surface=None):
         "charts": {
             "engine_owned": True,
             "rust_api": "fullbleed::compile_chart",
+            "document_context_rust_api": "fullbleed::FullBleed::compile_chart_document",
+            "document_context_input": "fullbleed::PreparedChart placeholders in resolved HTML plus CSS",
+            "typography": {
+                "css_properties": ["font-family", "font-size", "font-weight", "font-style"],
+                "font_metrics": "registered project fonts; explicit estimated-fallback diagnostic otherwise",
+                "legend_layout": "measured word wrapping",
+                "category_labels": "measured sparse labels with exact unsampled marks and table",
+                "insufficient_space": "diagnostic placeholder and retained semantic table",
+            },
             "input_contract": "resolved_chart_spec",
             "kinds": ["bar", "line", "sparkline"],
             "outputs": ["native_inline_svg", "semantic_html_table"],

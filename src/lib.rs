@@ -3,6 +3,7 @@ mod authoring;
 mod base64;
 mod canvas;
 mod chart;
+mod chart_document;
 mod css_native;
 mod css_queries;
 mod debug;
@@ -69,6 +70,7 @@ pub use chart::{
     CHART_COMPILER_SCHEMA, ChartArtifact, ChartDiagnostic, ChartError, ChartKind, ChartSeries,
     ChartSpec, ChartTable, ChartTrace, compile_chart,
 };
+pub use chart_document::{ChartDocumentArtifact, ChartDocumentEntry, PreparedChart};
 use debug::DebugLogger;
 pub use doc_context::DocContext;
 pub use doc_template::DocTemplate;
@@ -10272,7 +10274,7 @@ mod tests {
         ))
     }
 
-    fn repo_font_path(file_name: &str) -> PathBuf {
+    pub(super) fn repo_font_path(file_name: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("python")
             .join("fullbleed_assets")

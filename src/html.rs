@@ -883,6 +883,53 @@ fn compute_boxed_style(
     Box::new(resolver.compute_style(info, parent_style, inline_style, ancestors))
 }
 
+/// Resolve only chart ancestors, not every cell of potentially very large
+/// semantic tables. This shares the final HTML compiler's cascade and selector
+/// context. Heap-owned styles avoid recursive native stack growth.
+pub(crate) fn chart_marker_text_styles(
+    html: &str,
+    resolver: &StyleResolver,
+) -> Vec<(String, TextStyle)> {
+    let document = parse_html(html);
+    let mut output = Vec::new();
+    for selected in document
+        .select("svg[data-fb-chart-pending]")
+        .expect("static chart selector")
+    {
+        let node = selected.as_node();
+        let key = node
+            .as_element()
+            .expect("selected SVG")
+            .attributes
+            .borrow()
+            .get("data-fb-chart-pending")
+            .expect("selected marker")
+            .to_string();
+        let mut chain = node
+            .ancestors()
+            .filter(|ancestor| ancestor.as_element().is_some())
+            .collect::<Vec<_>>();
+        chain.reverse();
+        let mut style = Box::new(resolver.default_style());
+        let mut ancestors = Vec::new();
+        for ancestor in chain {
+            let mut info = element_info(&ancestor, resolver.has_sibling_selectors());
+            let inline = ancestor
+                .as_element()
+                .expect("element ancestor")
+                .attributes
+                .borrow()
+                .get("style")
+                .map(str::to_owned);
+            style = compute_boxed_style(resolver, &info, &style, inline.as_deref(), &ancestors);
+            info.apply_computed_container_style(&style);
+            ancestors.push(info);
+        }
+        output.push((key, style.to_text_style()));
+    }
+    output
+}
+
 pub fn html_to_story_with_resolver_and_fonts_and_report(
     html: &str,
     resolver: &StyleResolver,

@@ -875,6 +875,14 @@ Entrypoint formats:
 - `module_name:factory_or_engine`
 - `path/to/file.py:factory_or_engine`
 
+## Rust chart compilation
+
+For Rust-based visual/source frontends, the engine also provides
+[document-context chart compilation](docs/chart-typography.md): normal CSS font
+selection and size, project-font legend measurement/wrapping, semantic tables,
+and observable layout failures. Generated SVG is derived output, not authoring
+source.
+
 ## Python API Quick Start
 
 ```python
