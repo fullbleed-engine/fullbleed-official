@@ -11810,6 +11810,153 @@ mod tests {
     }
 
     #[test]
+    fn inline_svg_and_chart_labels_inherit_the_registered_document_font() {
+        let mut chart = ChartSpec::new(
+            "font-chart",
+            ChartKind::Bar,
+            "Chart font test",
+            vec!["QuarterOne".into(), "QuarterTwo".into()],
+            vec![ChartSeries::new(
+                "amount",
+                "Revenue",
+                vec![Some(4.0), Some(9.0)],
+            )],
+        );
+        chart.table = ChartTable::Hidden;
+        let artifact = compile_chart(&chart).expect("compile chart");
+        let html = format!(
+            r#"<html><body><main><p>REFERENCE</p>{}<svg width="160" height="40"><text x="4" y="24">INLINE</text><text x="80" y="24" font-family="Courier">EXPLICIT</text></svg></main></body></html>"#,
+            artifact.svg,
+        );
+        let engine = FullBleed::builder()
+            .register_font_file(repo_font_path("NotoSans-Regular.ttf"))
+            .svg_form_xobjects(false)
+            .build()
+            .expect("engine with vendored font");
+        let document = engine.render_to_document(
+            &html,
+            "@page { size: 800pt 700pt; margin: 10pt; } main { font-family: 'Noto Sans'; } p { margin: 0; }",
+        ).expect("render inherited chart font");
+        let mut font = String::new();
+        let mut labels = std::collections::BTreeMap::new();
+        for command in document.pages.iter().flat_map(|page| &page.commands) {
+            match command {
+                Command::SetFontName(name) => font = name.clone(),
+                Command::DrawString { text, .. } => {
+                    labels.insert(text.clone(), font.clone());
+                }
+                _ => {}
+            }
+        }
+        let reference = labels.get("REFERENCE").expect("reference label");
+        assert!(
+            reference.to_ascii_lowercase().contains("noto"),
+            "vendored font must actually be selected: {reference}"
+        );
+        for label in ["Revenue", "QuarterOne", "QuarterTwo", "INLINE"] {
+            assert_eq!(
+                labels.get(label),
+                Some(reference),
+                "{label} must use the same resolved vendored face as HTML"
+            );
+        }
+        assert_eq!(
+            labels.get("EXPLICIT").map(String::as_str),
+            Some("Courier"),
+            "explicit SVG fonts still override inheritance"
+        );
+    }
+
+    #[test]
+    fn inline_svg_inherits_the_resolved_bold_italic_face_without_double_suffixing() {
+        let engine = FullBleed::builder()
+            .svg_form_xobjects(false)
+            .build()
+            .expect("engine");
+        let document = engine.render_to_document(
+            r#"<html><body><section><p>REFERENCE</p><svg width="160" height="40"><text x="4" y="24">INHERITED</text></svg></section></body></html>"#,
+            "section { font-family: Helvetica; font-weight: 700; font-style: italic; }",
+        ).expect("render inherited face");
+        let mut font = String::new();
+        let mut labels = std::collections::BTreeMap::new();
+        for command in document.pages.iter().flat_map(|page| &page.commands) {
+            match command {
+                Command::SetFontName(name) => font = name.clone(),
+                Command::DrawString { text, .. } => {
+                    labels.insert(text.clone(), font.clone());
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(
+            labels.get("REFERENCE").map(String::as_str),
+            Some("Helvetica-BoldOblique")
+        );
+        assert_eq!(labels.get("INHERITED"), labels.get("REFERENCE"));
+    }
+
+    #[test]
+    fn inline_svg_forms_separate_inherited_fonts_and_reuse_identical_typography() {
+        let svg = r#"<svg width="200" height="40"><text x="100" y="24" text-anchor="middle">SAME</text></svg>"#;
+        let html = format!(
+            "<main><div class='noto'>{svg}</div><div class='base'>{svg}</div><div class='noto'>{svg}</div></main>"
+        );
+        let css = ".noto { font-family: 'Noto Sans'; } .base { font-family: Helvetica; }";
+        let engine = FullBleed::builder()
+            .register_font_file(repo_font_path("NotoSans-Regular.ttf"))
+            .svg_form_xobjects(true)
+            .build()
+            .unwrap();
+        let document = engine.render_to_document(&html, css).unwrap();
+        let mut fonts_by_id = std::collections::BTreeMap::new();
+        for command in document.pages.iter().flat_map(|page| &page.commands) {
+            if let Command::DefineForm {
+                resource_id,
+                commands,
+                ..
+            } = command
+            {
+                if commands.iter().any(
+                    |command| matches!(command, Command::DrawString { text, .. } if text == "SAME"),
+                ) {
+                    let font = commands
+                        .iter()
+                        .find_map(|command| match command {
+                            Command::SetFontName(name) => Some(name.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| "Helvetica".to_string());
+                    if let Some(previous) = fonts_by_id.insert(resource_id.clone(), font.clone()) {
+                        assert_eq!(
+                            previous, font,
+                            "different fonts must not alias one SVG form"
+                        );
+                    }
+                }
+            }
+        }
+        assert_eq!(fonts_by_id.len(), 2);
+        assert!(
+            fonts_by_id
+                .values()
+                .any(|name| name.to_lowercase().contains("noto"))
+        );
+        assert!(fonts_by_id.values().any(|name| name == "Helvetica"));
+        let first = engine.render_to_buffer(&html, css).unwrap();
+        let repeated = engine.render_to_buffer(&html, css).unwrap();
+        assert_eq!(
+            first, repeated,
+            "warm font caches must not change PDF bytes"
+        );
+        assert!(
+            first
+                .windows(b"/FontFile2".len())
+                .any(|bytes| bytes == b"/FontFile2"),
+            "vendored font must be embedded"
+        );
+    }
+
+    #[test]
     fn paragraph_reflows_intact_when_page_remainder_cannot_satisfy_orphans() {
         let engine = FullBleed::builder().build().expect("engine");
         let document = engine

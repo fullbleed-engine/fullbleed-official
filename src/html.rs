@@ -2964,6 +2964,10 @@ fn node_to_flowables(
                         // Inline SVG. We intentionally treat this as a leaf node and render it with a
                         // dedicated subset parser, rather than trying to interpret SVG children as HTML.
                         let xml = serialize_svg_node(node);
+                        let font_context = crate::svg::SvgFontContext {
+                            style: style.to_text_style(),
+                            registry: font_registry.clone(),
+                        };
                         let attrs = element.attributes.borrow();
                         let (inline_w, inline_h) = inline_dimensions(inline_style.as_deref());
                         let (width, height) = resolve_svg_dimensions(
@@ -2980,7 +2984,12 @@ fn node_to_flowables(
                             .map(|s| s.to_string());
                         if svg_raster_fallback && crate::svg::svg_needs_raster_fallback(&xml) {
                             if let Some(data_uri) =
-                                crate::svg::rasterize_svg_to_data_uri(&xml, width, height)
+                                crate::svg::rasterize_svg_to_data_uri_with_font_context(
+                                    &xml,
+                                    width,
+                                    height,
+                                    Some(&font_context),
+                                )
                             {
                                 let image = ImageFlowable::new_pt(width, height, data_uri)
                                     .with_object_fit(style.object_fit)
@@ -2999,11 +3008,16 @@ fn node_to_flowables(
                             } else {
                                 let xml_len = xml.len() as u64;
                                 let t_svg = std::time::Instant::now();
-                                let svg = SvgFlowable::new_pt(width, height, xml)
-                                    .with_form_enabled(svg_form)
-                                    .with_visible(style.visibility.paints())
-                                    .with_tag_role("Figure")
-                                    .with_alt(alt);
+                                let svg = SvgFlowable::new_pt_with_font_context(
+                                    width,
+                                    height,
+                                    xml,
+                                    Some(&font_context),
+                                )
+                                .with_form_enabled(svg_form)
+                                .with_visible(style.visibility.paints())
+                                .with_tag_role("Figure")
+                                .with_alt(alt);
                                 if let Some(perf_logger) = perf {
                                     let ms = t_svg.elapsed().as_secs_f64() * 1000.0;
                                     perf_logger.log_span_ms("svg.compile", None, ms);
@@ -3023,11 +3037,16 @@ fn node_to_flowables(
                         } else {
                             let xml_len = xml.len() as u64;
                             let t_svg = std::time::Instant::now();
-                            let svg = SvgFlowable::new_pt(width, height, xml)
-                                .with_form_enabled(svg_form)
-                                .with_visible(style.visibility.paints())
-                                .with_tag_role("Figure")
-                                .with_alt(alt);
+                            let svg = SvgFlowable::new_pt_with_font_context(
+                                width,
+                                height,
+                                xml,
+                                Some(&font_context),
+                            )
+                            .with_form_enabled(svg_form)
+                            .with_visible(style.visibility.paints())
+                            .with_tag_role("Figure")
+                            .with_alt(alt);
                             if let Some(perf_logger) = perf {
                                 let ms = t_svg.elapsed().as_secs_f64() * 1000.0;
                                 perf_logger.log_span_ms("svg.compile", None, ms);

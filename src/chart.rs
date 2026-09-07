@@ -333,7 +333,7 @@ fn render_svg(spec: &ChartSpec, safe_id: &str) -> (String, usize) {
     if spec.categories.is_empty() {
         write!(
             svg,
-            "<rect x=\"1\" y=\"1\" width=\"{}\" height=\"{}\" fill=\"#f7f9fb\" stroke=\"#a8b3bf\"/><text x=\"{}\" y=\"{}\" text-anchor=\"middle\" font-family=\"Helvetica, sans-serif\" font-size=\"14\" fill=\"#52606d\">No chart data for this record</text></svg>",
+            "<rect x=\"1\" y=\"1\" width=\"{}\" height=\"{}\" fill=\"#f7f9fb\" stroke=\"#a8b3bf\"/><text x=\"{}\" y=\"{}\" text-anchor=\"middle\" font-size=\"14\" fill=\"#52606d\">No chart data for this record</text></svg>",
             spec.width.saturating_sub(2),
             spec.height.saturating_sub(2),
             fmt_num(width / 2.0),
@@ -367,7 +367,7 @@ fn render_svg(spec: &ChartSpec, safe_id: &str) -> (String, usize) {
         let series = &spec.series[series_index];
         write!(
             svg,
-            "<rect x=\"{}\" y=\"{}\" width=\"10\" height=\"10\" rx=\"1.5\" fill=\"{}\"/><text x=\"{}\" y=\"{}\" font-family=\"Helvetica, sans-serif\" font-size=\"10\" fill=\"#364452\">{}</text>",
+            "<rect x=\"{}\" y=\"{}\" width=\"10\" height=\"10\" rx=\"1.5\" fill=\"{}\"/><text x=\"{}\" y=\"{}\" font-size=\"10\" fill=\"#364452\">{}</text>",
             fmt_num(*x),
             fmt_num(*y),
             xml_attribute(series_color(series, series_index)),
@@ -386,7 +386,7 @@ fn render_svg(spec: &ChartSpec, safe_id: &str) -> (String, usize) {
             let value = domain_max - (domain_max - domain_min) * fraction;
             write!(
                 svg,
-                "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"#d9e0e7\" stroke-width=\"1\"/><text x=\"{}\" y=\"{}\" text-anchor=\"end\" font-family=\"Helvetica, sans-serif\" font-size=\"10\" fill=\"#52606d\">{}</text>",
+            "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"#d9e0e7\" stroke-width=\"1\"/><text x=\"{}\" y=\"{}\" text-anchor=\"end\" font-size=\"10\" fill=\"#52606d\">{}</text>",
                 fmt_num(left),
                 fmt_num(y),
                 fmt_num(left + plot_width),
@@ -625,7 +625,7 @@ fn write_category_label(
     if category_label_visible(index, count) {
         write!(
             svg,
-            "<text x=\"{}\" y=\"{}\" text-anchor=\"middle\" font-family=\"Helvetica, sans-serif\" font-size=\"10\" fill=\"#364452\">{}</text>",
+            "<text x=\"{}\" y=\"{}\" text-anchor=\"middle\" font-size=\"10\" fill=\"#364452\">{}</text>",
             fmt_num(x),
             fmt_num(y),
             xml_text(category)

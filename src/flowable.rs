@@ -4688,7 +4688,7 @@ fn resolve_font_variant_name(
     base.clone()
 }
 
-fn synthetic_italic_shear(style: crate::style::FontStyleMode) -> f32 {
+pub(crate) fn synthetic_italic_shear(style: crate::style::FontStyleMode) -> f32 {
     match style {
         crate::style::FontStyleMode::Oblique(centideg) => {
             let degrees = (centideg as f32 / 100.0).clamp(-89.0, 89.0);
@@ -5564,7 +5564,7 @@ fn explicit_text_underline_offset(style: &TextStyle) -> Option<Pt> {
     }
 }
 
-fn resolve_font_stack(
+pub(crate) fn resolve_font_stack(
     registry: Option<&FontRegistry>,
     style: &TextStyle,
 ) -> (Arc<str>, Vec<Arc<str>>) {
@@ -11265,6 +11265,7 @@ pub struct SvgFlowable {
     compiled_size: Size,
     svg_xml: String,
     compiled: std::sync::Arc<Vec<svg::CompiledItem>>,
+    compiled_text_identity: u64,
     authoring_fragments: std::sync::Arc<Vec<svg::SvgAuthoringFragment>>,
     use_available_size: bool,
     object_fit: ObjectFitMode,
@@ -11292,10 +11293,22 @@ impl SvgFlowable {
     }
 
     pub fn new_pt(width: Pt, height: Pt, svg_xml: impl Into<String>) -> Self {
+        Self::new_pt_with_font_context(width, height, svg_xml, None)
+    }
+
+    pub(crate) fn new_pt_with_font_context(
+        width: Pt,
+        height: Pt,
+        svg_xml: impl Into<String>,
+        font: Option<&svg::SvgFontContext>,
+    ) -> Self {
         let width = width.max(Pt::ZERO);
         let height = height.max(Pt::ZERO);
         let svg_xml = svg_xml.into();
-        let compiled = std::sync::Arc::new(svg::compile_svg(&svg_xml, width, height));
+        let compiled = std::sync::Arc::new(svg::compile_svg_with_font_context(
+            &svg_xml, width, height, font,
+        ));
+        let compiled_text_identity = svg::compiled_text_identity(&compiled);
         let authoring_fragments = std::sync::Arc::new(svg::authoring_fragments(&compiled));
         Self {
             width,
@@ -11303,6 +11316,7 @@ impl SvgFlowable {
             compiled_size: Size { width, height },
             svg_xml,
             compiled,
+            compiled_text_identity,
             authoring_fragments,
             use_available_size: false,
             object_fit: ObjectFitMode::Fill,
@@ -11421,6 +11435,7 @@ impl SvgFlowable {
         self.svg_xml.hash(&mut hasher);
         self.compiled_size.width.to_milli_i64().hash(&mut hasher);
         self.compiled_size.height.to_milli_i64().hash(&mut hasher);
+        self.compiled_text_identity.hash(&mut hasher);
         let prefix = if isolated { "svg-blend" } else { "svg" };
         format!("{prefix}:{:x}", hasher.finish())
     }
