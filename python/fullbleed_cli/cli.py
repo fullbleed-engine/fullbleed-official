@@ -678,34 +678,34 @@ def _get_version():
 
 
 def _compliance_roots():
-    """Candidate directories where compliance docs might exist."""
-    roots = []
-    for candidate in [Path.cwd(), *Path(__file__).resolve().parents[:4]]:
-        try:
-            resolved = candidate.resolve()
-        except Exception:
-            continue
-        if resolved not in roots:
-            roots.append(resolved)
-    return roots
+    """Actual source checkout only; ambient cwd/site-packages are not ours."""
+    module = Path(__file__).resolve()
+    for root in module.parents[:4]:
+        if (root / "python" / "fullbleed_cli" / "cli.py").resolve() == module:
+            return [root]
+    return []
 
 
 def _find_compliance_file(rel_name):
-    """Locate a compliance file in a source tree or installed distribution."""
-    for root in _compliance_roots():
-        path = root / rel_name
-        if path.exists():
-            return path
-
+    """Prefer Fullbleed's own distribution notices, never another package's."""
     try:
         distribution = metadata.distribution("fullbleed")
     except metadata.PackageNotFoundError:
-        return None
+        distribution = None
     expected_name = Path(rel_name).name
-    for entry in distribution.files or ():
-        if Path(str(entry)).name != expected_name:
+    for entry in (distribution.files or ()) if distribution is not None else ():
+        parts = Path(str(entry)).parts
+        # PEP 639 licenses/ and legacy direct dist-info notices. An asset's
+        # basename LICENSE is not the primary package license either.
+        if not (len(parts) in (2, 3) and parts[0].endswith(".dist-info")
+                and (len(parts) == 2 or parts[1] == "licenses")
+                and parts[-1] == expected_name):
             continue
         path = Path(distribution.locate_file(entry))
+        if path.is_file():
+            return path
+    for root in _compliance_roots():
+        path = root / rel_name
         if path.is_file():
             return path
     return None
