@@ -12037,6 +12037,7 @@ pub struct TableCell {
     pub box_shadow: Option<BoxShadowSpec>,
     pub tag_role: Option<Arc<str>>,
     pub scope: Option<String>,
+    authoring_source_id: Option<Arc<str>>,
     col_span: usize,
     row_span: usize,
     rowspan_placeholder: bool,
@@ -12114,6 +12115,7 @@ impl TableCell {
             box_shadow,
             tag_role,
             scope,
+            authoring_source_id: None,
             col_span: col_span.max(1),
             row_span: 1,
             rowspan_placeholder: false,
@@ -12159,6 +12161,21 @@ impl TableCell {
         self
     }
 
+    pub(crate) fn with_authoring_source_id(mut self, source_id: Option<Arc<str>>) -> Self {
+        self.authoring_source_id = source_id;
+        self
+    }
+
+    fn begin_authoring_scope(&self, canvas: &mut Canvas, bounds: Rect) -> bool {
+        let Some(source_id) = &self.authoring_source_id else {
+            return false;
+        };
+        canvas.meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "table-cell");
+        canvas.meta("fb.owner.source_id", source_id.to_string());
+        canvas.record_flowable_bounds(bounds);
+        true
+    }
+
     pub(crate) fn as_rowspan_placeholder(&self) -> Self {
         let mut placeholder = self.clone();
         placeholder.text.clear();
@@ -12166,6 +12183,7 @@ impl TableCell {
         placeholder.box_shadow = None;
         placeholder.tag_role = None;
         placeholder.scope = None;
+        placeholder.authoring_source_id = None;
         placeholder.col_span = 1;
         placeholder.row_span = 1;
         placeholder.rowspan_placeholder = true;
@@ -14926,6 +14944,18 @@ impl TableFlowable {
             let pad_top = padding.top + layout_border.top;
             let pad_bottom = padding.bottom + layout_border.bottom;
 
+            // These are the engine's final cell coordinates, including spans,
+            // RTL placement and fragment row heights. Never synthesize them in
+            // an authoring frontend from text or neighboring browser boxes.
+            let authoring_scope = cell.begin_authoring_scope(
+                canvas,
+                Rect {
+                    x: cell_x,
+                    y: cell_y,
+                    width: col_width,
+                    height: cell_height,
+                },
+            );
             let tagged = cell.tag_role.as_ref().map(|role| {
                 let col = u16::try_from(cursor_col).ok();
                 canvas.begin_tag(
@@ -14944,6 +14974,9 @@ impl TableFlowable {
             if hide_empty_paint {
                 if tagged.is_some() {
                     canvas.end_tag();
+                }
+                if authoring_scope {
+                    canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "table-cell");
                 }
                 cursor_x = if rtl {
                     cursor_x - col_width
@@ -15473,6 +15506,9 @@ impl TableFlowable {
 
             if tagged.is_some() {
                 canvas.end_tag();
+            }
+            if authoring_scope {
+                canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "table-cell");
             }
             cursor_x = if rtl {
                 cursor_x - col_width

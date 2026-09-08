@@ -15668,6 +15668,14 @@ fn table_flowable(
                 )
                 .with_row_min_height(row_min_height.max(cell_min_height))
                 .with_row_span(row_span)
+                .with_authoring_source_id(
+                    cell_el
+                        .attributes
+                        .borrow()
+                        .get("data-fb-id")
+                        .filter(|value| !value.is_empty())
+                        .map(Arc::<str>::from),
+                )
                 .with_hide_empty_cells(cell_style.empty_cells_hide)
                 .with_establishes_abs_containing_block(establishes_abs_containing_block(cell_style))
                 .with_overflow_hidden(matches!(

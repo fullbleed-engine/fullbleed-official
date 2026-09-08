@@ -1711,6 +1711,161 @@ mod tests {
     }
 
     #[test]
+    fn table_cells_expose_engine_span_bounds_without_changing_pdf_or_pixels() {
+        let engine = FullBleed::builder().build().unwrap();
+        let html = "<table><tbody><tr><td data-fb-id='anchor' colspan='2' rowspan='2'>Anchor</td><td data-fb-id='top'>Top</td></tr><tr><td data-fb-id='bottom'>Bottom</td></tr></tbody></table>";
+        let plain = html
+            .replace(" data-fb-id='anchor'", "")
+            .replace(" data-fb-id='top'", "")
+            .replace(" data-fb-id='bottom'", "");
+        for mode in ["auto", "fixed"] {
+            for direction in ["ltr", "rtl"] {
+                let css = format!(
+                    "@page {{size:240pt 160pt; margin:10pt;}} body {{margin:0; font:10pt Helvetica;}} table {{width:210pt; table-layout:{mode}; direction:{direction}; border-collapse:collapse;}} td {{padding:5pt; border:1pt solid #aaa;}}"
+                );
+                let render = |html: &str| {
+                    engine
+                        .render_authoring_preview(
+                            AuthoringPreviewRequest {
+                                html,
+                                css: &css,
+                                dpi: 72,
+                            },
+                            &AuthoringCancellationToken::new(),
+                            |_| {},
+                        )
+                        .unwrap()
+                };
+                let artifact = render(html);
+                let fragment = |id: &str| {
+                    let node = artifact
+                        .layout
+                        .nodes
+                        .iter()
+                        .find(|node| node.source_id == id)
+                        .unwrap();
+                    assert!(node.geometry_available, "{mode}/{direction}: missing {id}");
+                    assert_eq!(
+                        node.fragments.len(),
+                        1,
+                        "rowspan placeholders must not duplicate an authored cell"
+                    );
+                    &node.fragments[0]
+                };
+                let anchor = fragment("anchor");
+                let top = fragment("top");
+                let bottom = fragment("bottom");
+                // Auto layout distributes intrinsic widths, not equal logical
+                // columns. Only fixed layout promises this width relationship.
+                assert!(anchor.width_milli_pt > 0 && top.width_milli_pt > 0);
+                if mode == "fixed" {
+                    assert!(anchor.width_milli_pt > top.width_milli_pt);
+                }
+                assert!(anchor.height_milli_pt > top.height_milli_pt);
+                assert!(bottom.y_milli_pt > top.y_milli_pt);
+                assert_eq!(anchor.x_milli_pt < top.x_milli_pt, direction == "ltr");
+                let without_ids = render(&plain);
+                assert_eq!(
+                    artifact.pdf, without_ids.pdf,
+                    "source ownership metadata does not alter PDF emission"
+                );
+                assert_eq!(
+                    artifact.png_pages, without_ids.png_pages,
+                    "source ownership metadata does not alter paint"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn empty_and_translated_table_cells_have_balanced_authored_geometry() {
+        let engine = FullBleed::builder().build().unwrap();
+        let html = "<table data-fb-id='table'><tbody><tr><td data-fb-id='empty'></td><td data-fb-id='rich'><p data-fb-id='child'>Rich text</p></td></tr></tbody></table><p data-fb-id='after'>After table</p>";
+        let render = |offset: &str| {
+            engine.render_authoring_preview(AuthoringPreviewRequest { html, css: &format!("@page {{size:240pt 200pt; margin:10pt;}} body {{margin:0; font:10pt Helvetica;}} table {{width:210pt; empty-cells:hide; border-collapse:separate; {offset}}} td {{padding:5pt; border:1pt solid black;}} p {{margin:0;}}"), dpi:72 }, &AuthoringCancellationToken::new(), |_| {}).unwrap()
+        };
+        let before = render("");
+        let shifted = render("position:relative; left:9pt; top:13pt;");
+        let fragment = |artifact: &AuthoringPreviewArtifactV1, id: &str| {
+            let node = artifact
+                .layout
+                .nodes
+                .iter()
+                .find(|node| node.source_id == id)
+                .unwrap();
+            assert!(node.geometry_available, "missing {id}");
+            assert_eq!(
+                node.fragments.len(),
+                1,
+                "cell/child metadata ownership must not leak"
+            );
+            node.fragments[0].clone()
+        };
+        for id in ["empty", "rich", "child"] {
+            let original = fragment(&before, id);
+            let moved = fragment(&shifted, id);
+            assert_eq!(moved.x_milli_pt - original.x_milli_pt, 9_000);
+            assert_eq!(moved.y_milli_pt - original.y_milli_pt, 13_000);
+        }
+        let after_before = fragment(&before, "after");
+        let after_shifted = fragment(&shifted, "after");
+        // Relative positioning changes paint-command order, not subsequent flow.
+        assert_eq!(
+            (
+                after_before.page_number,
+                after_before.x_milli_pt,
+                after_before.y_milli_pt,
+                after_before.width_milli_pt,
+                after_before.height_milli_pt
+            ),
+            (
+                after_shifted.page_number,
+                after_shifted.x_milli_pt,
+                after_shifted.y_milli_pt,
+                after_shifted.width_milli_pt,
+                after_shifted.height_milli_pt
+            )
+        );
+        assert!(
+            fragment(&before, "rich").width_milli_pt > fragment(&before, "child").width_milli_pt
+        );
+    }
+
+    #[test]
+    fn repeated_header_cell_geometry_tracks_each_real_page_fragment() {
+        let engine = FullBleed::builder().build().unwrap();
+        let rows = (0..18)
+            .map(|index| format!("<tr><td data-fb-id='row-{index}'>Row {index}</td></tr>"))
+            .collect::<String>();
+        let html = format!(
+            "<table><thead><tr><th data-fb-id='heading'>Repeated heading</th></tr></thead><tbody>{rows}</tbody></table>"
+        );
+        let artifact = engine.render_authoring_preview(AuthoringPreviewRequest { html: &html, css: "@page {size:200pt 120pt; margin:10pt;} body {margin:0; font:10pt Helvetica;} table {width:180pt;} th,td {padding:5pt; border:1pt solid black;}", dpi:72 }, &AuthoringCancellationToken::new(), |_| {}).unwrap();
+        assert!(artifact.layout.pages.len() > 2);
+        let heading = artifact
+            .layout
+            .nodes
+            .iter()
+            .find(|node| node.source_id == "heading")
+            .unwrap();
+        assert_eq!(heading.fragments.len(), artifact.layout.pages.len());
+        for (index, fragment) in heading.fragments.iter().enumerate() {
+            assert_eq!(fragment.page_number, index + 1);
+            assert!(fragment.width_milli_pt > 0 && fragment.height_milli_pt > 0);
+        }
+        for index in 0..18 {
+            let node = artifact
+                .layout
+                .nodes
+                .iter()
+                .find(|node| node.source_id == format!("row-{index}"))
+                .unwrap();
+            assert!(node.geometry_available);
+            assert_eq!(node.fragments.len(), 1);
+        }
+    }
+
+    #[test]
     fn transformed_inline_svg_descendants_have_engine_authored_geometry() {
         let engine = FullBleed::builder().build().unwrap();
         let artifact = engine
