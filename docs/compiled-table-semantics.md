@@ -40,5 +40,8 @@ and [HTML table attributes/model](https://html.spec.whatwg.org/multipage/tables.
 
 Regression coverage exercises ID-free source, row groups, collapsed rows/columns,
 repeated page headers, old/new spill serialization, unchanged painting, and
-installed direct/compiled/repeated/fixed/reflow PDF emission. Manual assistive
-technology testing and external conformance validation are separate acceptance.
+installed direct/compiled/repeated/reflow tagged PDF emission. The existing
+fixed-geometry variable-binding API explicitly refuses tagged structure; this
+refusal is tested, not silently converted to untagged output. Compiled reflow is
+the available tagged variable-binding path. Manual assistive technology testing
+and external conformance validation are separate acceptance.

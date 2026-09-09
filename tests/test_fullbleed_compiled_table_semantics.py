@@ -16,8 +16,8 @@ CSS = """@page {size:300pt 300pt;margin:12pt;}
 table {width:100%;} th,td {padding:4pt;font:10pt Helvetica;}"""
 
 
-@pytest.mark.parametrize("mode", ["direct", "compiled", "repeat", "fixed", "reflow", "compact"])
-def test_compiled_table_spans_use_standard_attributes_in_every_pdf_path(mode):
+@pytest.mark.parametrize("mode", ["direct", "compiled", "repeat", "reflow", "compact"])
+def test_compiled_table_spans_use_standard_attributes_in_supported_tagged_pdf_paths(mode):
     engine = fullbleed.PdfEngine(pdf_profile="tagged", document_lang="en-US")
     if mode == "direct":
         pdf = engine.render_pdf(HTML.replace("{{label}}", "Ada"), CSS)
@@ -27,12 +27,9 @@ def test_compiled_table_spans_use_standard_attributes_in_every_pdf_path(mode):
     else:
         compiled = engine.compile_pdf(HTML, CSS)
         bindings = {"label": ["Ada", "Bea"]}
-        if mode == "fixed":
-            pdf = compiled.render_pdf_bindings(bindings)
-        else:
-            pdf = compiled.render_pdf_reflow_bindings(
-                bindings, compression="compact" if mode == "compact" else "throughput"
-            )
+        pdf = compiled.render_pdf_reflow_bindings(
+            bindings, compression="compact" if mode == "compact" else "throughput"
+        )
     records = 1 if mode in {"direct", "compiled"} else 2
     headers = [line for line in pdf.splitlines() if b"/Type /StructElem /S /TH " in line]
     assert len(headers) == records * 3
@@ -47,3 +44,17 @@ def test_compiled_table_spans_use_standard_attributes_in_every_pdf_path(mode):
         assert b"/ColSpan" not in prefix
         assert b"/RowSpan" not in prefix
     assert b"/Headers [" not in pdf, "No unsupported automatic header-reference guesses"
+
+
+def test_tagged_fixed_geometry_binding_refusal_remains_explicit():
+    bindings = {"label": ["Ada", "Bea"]}
+    tagged = fullbleed.PdfEngine(pdf_profile="tagged").compile_pdf(HTML, CSS)
+    assert tagged.stats()["binding_slots"] == ["label"]
+    with pytest.raises(ValueError, match="compiled fixed-geometry bindings do not yet support tagged page structure"):
+        tagged.render_pdf_bindings(bindings)
+    # The refusal concerns tagging, not a new span/record limit or broken data
+    # binding. Do not silently replace the requested profile with untagged PDF.
+    plain = fullbleed.PdfEngine().compile_pdf(HTML, CSS).render_pdf_bindings(bindings)
+    assert plain.count(b"/Type /Page ") == 2
+    assert b"Ada" in plain and b"Bea" in plain
+    assert b"/StructTreeRoot" not in plain
