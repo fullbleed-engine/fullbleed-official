@@ -3982,6 +3982,8 @@ fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyRes
                     mcid,
                     alt,
                     scope,
+                    column_span,
+                    row_span,
                     ..
                 } => {
                     begin_tag_count = begin_tag_count.saturating_add(1);
@@ -4001,6 +4003,8 @@ fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyRes
                         ev.set_item("mcid", mcid.map(|v| v as u64))?;
                         ev.set_item("alt_present", alt.is_some())?;
                         ev.set_item("scope", scope.clone())?;
+                        ev.set_item("column_span", *column_span)?;
+                        ev.set_item("row_span", *row_span)?;
                         events.append(ev)?;
                     }
                 }

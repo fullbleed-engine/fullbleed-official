@@ -493,6 +493,9 @@ pub enum Command {
         table_id: Option<u32>,
         col_index: Option<u16>,
         group_only: bool,
+        /// Positive spans in this emitted table fragment; None means unknown.
+        column_span: Option<u32>,
+        row_span: Option<u32>,
     },
     /// A tagged marked-content span whose accessible replacement is present
     /// only in the semantic tree. This is deliberately distinct from `alt`:
@@ -1553,7 +1556,32 @@ impl Canvas {
             table_id,
             col_index,
             group_only,
+            column_span: None,
+            row_span: None,
         });
+        mcid
+    }
+
+    /// Begin a table cell with compiler-resolved (column, row) spans. The
+    /// existing begin_tag API continues to represent unknown span metadata.
+    pub fn begin_table_cell_tag(
+        &mut self,
+        role: impl Into<String>,
+        scope: Option<String>,
+        table_id: u32,
+        col_index: Option<u16>,
+        spans: (usize, usize),
+    ) -> Option<u32> {
+        let mcid = self.begin_tag(role, None, scope, Some(table_id), col_index, false);
+        if let Some(Command::BeginTag {
+            column_span,
+            row_span,
+            ..
+        }) = self.current.commands.last_mut()
+        {
+            *column_span = u32::try_from(spans.0).ok().filter(|span| *span > 0);
+            *row_span = u32::try_from(spans.1).ok().filter(|span| *span > 0);
+        }
         mcid
     }
 

@@ -396,15 +396,24 @@ fn write_command<W: Write>(out: &mut W, command: &Command) -> io::Result<()> {
             table_id,
             col_index,
             group_only,
+            column_span,
+            row_span,
         } => {
-            write_u8(out, 32)?;
+            // Keep opcode 32 byte-for-byte for legacy tags; 52 appends spans.
+            let spans_present = column_span.is_some() || row_span.is_some();
+            write_u8(out, if spans_present { 52 } else { 32 })?;
             write_string(out, role)?;
             write_option_u32(out, *mcid)?;
             write_option_string(out, alt.as_deref())?;
             write_option_string(out, scope.as_deref())?;
             write_option_u32(out, table_id.map(|v| v as u32))?;
             write_option_u16(out, *col_index)?;
-            write_bool(out, *group_only)
+            write_bool(out, *group_only)?;
+            if spans_present {
+                write_option_u32(out, *column_span)?;
+                write_option_u32(out, *row_span)?;
+            }
+            Ok(())
         }
         Command::BeginTagActualText {
             role,
@@ -748,6 +757,19 @@ fn read_command<R: Read>(input: &mut R) -> io::Result<Command> {
             table_id: read_option_u32(input)?,
             col_index: read_option_u16(input)?,
             group_only: read_bool(input)?,
+            column_span: None,
+            row_span: None,
+        },
+        52 => Command::BeginTag {
+            role: read_string(input)?,
+            mcid: read_option_u32(input)?,
+            alt: read_option_string(input)?,
+            scope: read_option_string(input)?,
+            table_id: read_option_u32(input)?,
+            col_index: read_option_u16(input)?,
+            group_only: read_bool(input)?,
+            column_span: read_option_u32(input)?,
+            row_span: read_option_u32(input)?,
         },
         51 => Command::BeginTagActualText {
             role: read_string(input)?,
@@ -1706,4 +1728,62 @@ fn write_f32<W: Write>(out: &mut W, value: f32) -> io::Result<()> {
 
 fn read_f32<R: Read>(input: &mut R) -> io::Result<f32> {
     Ok(f32::from_bits(read_u32(input)?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_table_tag_spill_bytes_remain_readable_and_unchanged() {
+        let bytes = [32, 2, 0, 0, 0, b'T', b'D', 0, 0, 0, 0, 0, 0];
+        let tag = read_command(&mut bytes.as_slice()).unwrap();
+        assert!(
+            matches!(&tag, Command::BeginTag { role, column_span: None, row_span: None, .. } if role == "TD")
+        );
+        let mut encoded = Vec::new();
+        write_command(&mut encoded, &tag).unwrap();
+        assert_eq!(encoded, bytes);
+    }
+
+    #[test]
+    fn resolved_table_spans_round_trip_without_shifting_following_commands() {
+        for column_span in [None, Some(1), Some(3)] {
+            for row_span in [None, Some(1), Some(2)] {
+                let tag = Command::BeginTag {
+                    role: "TH".into(),
+                    mcid: Some(4),
+                    alt: Some("café".into()),
+                    scope: Some("Column".into()),
+                    table_id: Some(9),
+                    col_index: Some(2),
+                    group_only: false,
+                    column_span,
+                    row_span,
+                };
+                let mut encoded = Vec::new();
+                write_command(&mut encoded, &tag).unwrap();
+                assert_eq!(
+                    encoded[0],
+                    if column_span.is_some() || row_span.is_some() {
+                        52
+                    } else {
+                        32
+                    }
+                );
+                write_command(&mut encoded, &Command::EndTag).unwrap();
+                let mut input = encoded.as_slice();
+                let decoded = read_command(&mut input).unwrap();
+                assert!(
+                    matches!(&decoded, Command::BeginTag { column_span: columns, row_span: rows, .. } if *columns == column_span && *rows == row_span)
+                );
+                assert!(matches!(read_command(&mut input).unwrap(), Command::EndTag));
+                assert!(input.is_empty());
+                let mut repeated = Vec::new();
+                write_command(&mut repeated, &decoded).unwrap();
+                write_command(&mut repeated, &Command::EndTag).unwrap();
+                assert_eq!(repeated, encoded);
+            }
+        }
+    }
 }

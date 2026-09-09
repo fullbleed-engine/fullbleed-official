@@ -241,6 +241,10 @@ pub struct AuthoringReadingNode {
     pub scope: Option<String>,
     pub table_id: Option<u32>,
     pub column_index: Option<u16>,
+    /// Positive spans of the emitted cell in this compiled page fragment.
+    /// Missing values are unavailable evidence, not implicit unit spans.
+    pub column_span: Option<u32>,
+    pub row_span: Option<u32>,
     pub group_only: bool,
     pub children: Vec<AuthoringReadingNode>,
     /// `inline`/`block` only when the lowered engine flow supplied evidence.
@@ -596,6 +600,8 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
                     table_id,
                     col_index,
                     group_only,
+                    column_span,
+                    row_span,
                     ..
                 } => {
                     if artifact_depth > 0 || role.eq_ignore_ascii_case("artifact") {
@@ -621,6 +627,8 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
                             scope: scope.clone(),
                             table_id: *table_id,
                             column_index: *col_index,
+                            column_span: *column_span,
+                            row_span: *row_span,
                             group_only: *group_only,
                             children: Vec::new(),
                             layout: current_layout.take(),
@@ -654,6 +662,8 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
                             scope: None,
                             table_id: None,
                             column_index: None,
+                            column_span: None,
+                            row_span: None,
                             group_only: false,
                             children: Vec::new(),
                             layout: current_layout.take(),
@@ -1334,6 +1344,199 @@ mod tests {
                 |_| {},
             )
             .unwrap()
+    }
+
+    #[test]
+    fn compiled_table_spans_reach_standard_pdf_table_attributes() {
+        let engine = FullBleed::builder().build().unwrap();
+        let document = engine.render_to_document(
+            "<table><thead><tr><th colspan='2' scope='col'>Items</th><th scope='col'>Price</th></tr></thead><tbody><tr><th rowspan='2' scope='row'>Group</th><td>A</td><td>10</td></tr><tr><td>B</td><td>20</td></tr></tbody></table>",
+            "@page {size:300pt 300pt;margin:12pt;} table {width:100%;} th,td {padding:4pt;}",
+        ).unwrap();
+        let options = crate::pdf::PdfOptions {
+            pdf_profile: crate::pdf::PdfProfile::Tagged,
+            ..Default::default()
+        };
+        let bytes = pdf::document_to_pdf_with_metrics_and_registry_with_logs(
+            &document,
+            None,
+            Some(engine.font_registry.as_ref()),
+            &options,
+            None,
+            None,
+        )
+        .unwrap();
+        let pdf = String::from_utf8_lossy(&bytes);
+        let headers: Vec<_> = pdf
+            .lines()
+            .filter(|line| line.contains("/S /TH "))
+            .collect();
+        assert_eq!(headers.len(), 3);
+        assert!(headers[0].contains("/A << /O /Table"), "{headers:#?}");
+        assert!(headers[0].contains("/ColSpan 2"), "{headers:#?}");
+        assert!(headers[0].contains("/Scope /Column"), "{headers:#?}");
+        assert!(headers[2].contains("/RowSpan 2"), "{headers:#?}");
+        assert!(headers[2].contains("/Scope /Row"), "{headers:#?}");
+        assert!(
+            !pdf.contains("/Headers ["),
+            "Do not invent header associations from column positions"
+        );
+    }
+
+    #[test]
+    fn compiled_table_spans_resolve_id_free_zero_clamping_and_row_groups() {
+        let artifact = reading_fixture(
+            "<table><thead><tr><th colspan='2' scope='col'>Items</th><th>Price</th></tr></thead><tbody><tr><td rowspan='0'>Anchor</td><td>A</td><td>10</td></tr><tr><td>B</td><td>20</td></tr></tbody><tbody><tr style='visibility:collapse'><td colspan='3'>Hidden group start</td></tr><tr><td rowspan='99' colspan='3'>Last group</td></tr></tbody></table>",
+            "@page {size:300pt 300pt;margin:12pt;} table {width:100%;} th,td {padding:4pt;}",
+        );
+        assert_eq!(artifact.reading.pages.len(), 1);
+        let mut nodes = Vec::new();
+        collect_reading_nodes(&artifact.reading.pages[0].nodes, &mut nodes);
+        assert!(nodes.iter().all(|node| node.source_id.is_none()));
+        let groups: Vec<_> = nodes.iter().filter(|node| node.role == "TBody").collect();
+        assert_eq!(
+            groups.len(),
+            2,
+            "Authored tbody boundaries survive collapsed first rows"
+        );
+        assert_eq!(groups[0].children.len(), 2);
+        assert_eq!(groups[1].children.len(), 1);
+        let cells: Vec<_> = nodes
+            .iter()
+            .filter(|node| matches!(node.role.as_str(), "TH" | "TD"))
+            .collect();
+        assert_eq!(
+            cells.len(),
+            8,
+            "Do not emit rowspan placeholders as extra cells"
+        );
+        let spans: Vec<_> = cells
+            .iter()
+            .map(|node| {
+                (
+                    ordered_text(&node.content, &node.children),
+                    node.column_span,
+                    node.row_span,
+                )
+            })
+            .collect();
+        assert_eq!(spans[0], ("Items".into(), Some(2), Some(1)));
+        assert_eq!(spans[2], ("Anchor".into(), Some(1), Some(2)));
+        assert_eq!(spans[7], ("Last group".into(), Some(3), Some(1)));
+        assert!(
+            cells
+                .iter()
+                .all(|node| node.column_span.is_some_and(|span| span > 0)
+                    && node.row_span.is_some_and(|span| span > 0))
+        );
+        assert!(
+            nodes
+                .iter()
+                .filter(|node| !matches!(node.role.as_str(), "TH" | "TD"))
+                .all(|node| node.column_span.is_none() && node.row_span.is_none())
+        );
+    }
+
+    #[test]
+    fn compiled_table_spans_count_only_emitted_rows_and_columns() {
+        let artifact = reading_fixture(
+            "<table><colgroup><col><col style='visibility:collapse'><col><col></colgroup><tbody><tr><td colspan='3' rowspan='3'>Anchor</td><td>A</td></tr><tr style='visibility:collapse'><td>Hidden</td></tr><tr><td>B</td></tr></tbody></table>",
+            "@page {size:400pt 300pt;margin:12pt;} table {width:100%;table-layout:fixed;} tr {height:24pt;} td {padding:4pt;}",
+        );
+        let mut nodes = Vec::new();
+        collect_reading_nodes(&artifact.reading.pages[0].nodes, &mut nodes);
+        let cells: Vec<_> = nodes.iter().filter(|node| node.role == "TD").collect();
+        assert_eq!(cells.len(), 3, "{cells:#?}");
+        assert_eq!(cells[0].column_span, Some(2));
+        assert_eq!(cells[0].row_span, Some(2));
+        assert_eq!(
+            cells[2].column_index,
+            Some(3),
+            "Source-grid column positions remain unchanged"
+        );
+    }
+
+    #[test]
+    fn compiled_table_spans_survive_repeated_headers_on_each_page() {
+        let rows = (0..12)
+            .map(|index| format!("<tr><td>Row {index}</td><td>A</td><td>B</td></tr>"))
+            .collect::<String>();
+        let artifact = reading_fixture(
+            &format!(
+                "<table><thead><tr><th rowspan='2' scope='col'>Item</th><th colspan='2' scope='col'>Amounts</th></tr><tr><th scope='col'>Net</th><th scope='col'>Gross</th></tr></thead><tbody>{rows}</tbody></table>"
+            ),
+            "@page {size:300pt 150pt;margin:10pt;} body {margin:0;} table {width:100%;} tr {height:24pt;} th,td {font-size:10pt;padding:2pt;}",
+        );
+        assert!(artifact.reading.pages.len() >= 3);
+        for page in &artifact.reading.pages {
+            let mut nodes = Vec::new();
+            collect_reading_nodes(&page.nodes, &mut nodes);
+            let headers: Vec<_> = nodes.iter().filter(|node| node.role == "TH").collect();
+            assert_eq!(headers.len(), 4, "Page {}", page.page_number);
+            assert_eq!(headers[0].row_span, Some(2));
+            assert_eq!(headers[1].column_span, Some(2));
+            assert!(
+                nodes
+                    .iter()
+                    .filter(|node| node.role == "TD")
+                    .all(|node| node.row_span == Some(1) && node.column_span == Some(1))
+            );
+        }
+    }
+
+    #[test]
+    fn compiled_table_spans_are_nonpainting_and_untagged_pdf_neutral() {
+        let engine = FullBleed::builder().build().unwrap();
+        let mut document = engine.render_to_document(
+            "<table><tr><th colspan='2' scope='col'>Items</th></tr><tr><td rowspan='2'>Anchor</td><td>A</td></tr><tr><td>B</td></tr></table>",
+            "@page {size:240pt 240pt;margin:12pt;} table {width:100%;border-collapse:collapse;} th,td {border:1pt solid black;padding:4pt;}",
+        ).unwrap();
+        let pdf = |document: &Document, profile| {
+            pdf::document_to_pdf_with_metrics_and_registry_with_logs(
+                document,
+                None,
+                Some(engine.font_registry.as_ref()),
+                &crate::pdf::PdfOptions {
+                    pdf_profile: profile,
+                    ..Default::default()
+                },
+                None,
+                None,
+            )
+            .unwrap()
+        };
+        let raster = |document: &Document| {
+            raster::document_to_png_pages(
+                document,
+                72,
+                Some(engine.font_registry.as_ref()),
+                engine.pdf_options.shape_text,
+            )
+            .unwrap()
+        };
+        let untagged = pdf(&document, crate::pdf::PdfProfile::None);
+        let tagged = pdf(&document, crate::pdf::PdfProfile::Tagged);
+        let png = raster(&document);
+        for page in &mut document.pages {
+            for command in &mut page.commands {
+                if let Command::BeginTag {
+                    column_span,
+                    row_span,
+                    ..
+                } = command
+                {
+                    *column_span = None;
+                    *row_span = None;
+                }
+            }
+        }
+        assert_eq!(untagged, pdf(&document, crate::pdf::PdfProfile::None));
+        assert_eq!(png, raster(&document));
+        assert_ne!(
+            tagged,
+            pdf(&document, crate::pdf::PdfProfile::Tagged),
+            "Tagged structure intentionally gains table attributes"
+        );
     }
 
     #[test]

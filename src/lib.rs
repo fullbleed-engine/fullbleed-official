@@ -10005,6 +10005,8 @@ mod tests {
                             table_id: None,
                             col_index: None,
                             group_only: false,
+                            column_span: None,
+                            row_span: None,
                         },
                         Command::DrawRect {
                             x: second_area.x,
@@ -10137,6 +10139,8 @@ mod tests {
                             table_id: None,
                             col_index: None,
                             group_only: false,
+                            column_span: None,
+                            row_span: None,
                         },
                         Command::DrawRect {
                             x: source_rect.x,

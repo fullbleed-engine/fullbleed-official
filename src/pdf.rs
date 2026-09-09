@@ -238,8 +238,31 @@ struct TagRecord {
     actual_text: Option<String>,
     scope: Option<String>,
     parent: Option<usize>,
-    table_id: Option<u32>,
-    col_index: Option<u16>,
+    column_span: Option<u32>,
+    row_span: Option<u32>,
+}
+
+fn table_attributes(tag: &TagRecord) -> Option<String> {
+    if !matches!(tag.role.as_str(), "TH" | "TD") {
+        return None;
+    }
+    let mut attributes = String::new();
+    if tag.role == "TH" {
+        if let Some(scope @ ("Row" | "Column" | "Both")) = tag.scope.as_deref() {
+            attributes.push_str(&format!(" /Scope /{scope}"));
+        }
+    }
+    if let Some(span) = tag.column_span.filter(|span| *span > 1) {
+        attributes.push_str(&format!(" /ColSpan {span}"));
+    }
+    if let Some(span) = tag.row_span.filter(|span| *span > 1) {
+        attributes.push_str(&format!(" /RowSpan {span}"));
+    }
+    // ISO 32000 Table-owner attributes live under StructElem /A. Scope is
+    // limited to Row/Column/Both; HTML rowgroup/colgroup are not PDF names.
+    // Headers requires structure-element ID byte strings and an IDTree, not
+    // indirect object references guessed from the first header in a column.
+    (!attributes.is_empty()).then(|| format!(" /A << /O /Table{attributes} >>"))
 }
 
 fn normalize_definition_list_structure(records: Vec<TagRecord>) -> Vec<TagRecord> {
@@ -266,8 +289,8 @@ fn normalize_definition_list_structure(records: Vec<TagRecord>) -> Vec<TagRecord
             actual_text: None,
             scope: None,
             parent,
-            table_id: None,
-            col_index: None,
+            column_span: None,
+            row_span: None,
         }
     }
 
@@ -2549,14 +2572,6 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             }
             let mut page_parent_tree: Vec<Vec<Option<usize>>> =
                 vec![Vec::new(); self.page_ids.len()];
-            let mut header_map: HashMap<(u32, u16), usize> = HashMap::new();
-            for (idx, tag) in tag_records.iter().enumerate() {
-                if tag.role == "TH" {
-                    if let (Some(table_id), Some(col)) = (tag.table_id, tag.col_index) {
-                        header_map.entry((table_id, col)).or_insert(start_id + idx);
-                    }
-                }
-            }
             let mut root_kids: Vec<usize> = Vec::new();
             for (i, tag) in tag_records.iter().enumerate() {
                 if let Some(page_id) = self.page_ids.get(tag.page_index).copied() {
@@ -2593,15 +2608,8 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     if let Some(actual_text) = tag.actual_text.as_deref() {
                         obj.push_str(&format!(" /ActualText {}", pdf_text_string(actual_text)));
                     }
-                    if let Some(scope) = tag.scope.as_deref() {
-                        obj.push_str(&format!(" /Scope /{}", escape_pdf_name(scope)));
-                    }
-                    if tag.role == "TD" {
-                        if let (Some(table_id), Some(col)) = (tag.table_id, tag.col_index) {
-                            if let Some(th_id) = header_map.get(&(table_id, col)) {
-                                obj.push_str(&format!(" /Headers [{} 0 R]", th_id));
-                            }
-                        }
+                    if let Some(attributes) = table_attributes(tag) {
+                        obj.push_str(&attributes);
                     }
                     obj.push_str(" >>");
                     self.write_object(id, &obj)?;
@@ -3545,9 +3553,10 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     mcid,
                     alt,
                     scope,
-                    table_id,
-                    col_index,
+                    column_span,
+                    row_span,
                     group_only,
+                    ..
                 } => {
                     if tag_enabled {
                         let role_raw = role.clone();
@@ -3567,8 +3576,8 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             actual_text: None,
                             scope: scope.clone(),
                             parent,
-                            table_id: *table_id,
-                            col_index: *col_index,
+                            column_span: *column_span,
+                            row_span: *row_span,
                         });
                         tag_stack.push(idx);
                     }
@@ -3595,8 +3604,8 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             actual_text: Some(actual_text.clone()),
                             scope: None,
                             parent,
-                            table_id: None,
-                            col_index: None,
+                            column_span: None,
+                            row_span: None,
                         });
                         tag_stack.push(idx);
                     }
@@ -6318,9 +6327,10 @@ fn collect_tag_records(document: &Document) -> Vec<TagRecord> {
                     mcid,
                     alt,
                     scope,
-                    table_id,
-                    col_index,
+                    column_span,
+                    row_span,
                     group_only: _,
+                    ..
                 } => {
                     let parent = stack.last().copied();
                     let idx = records.len();
@@ -6332,8 +6342,8 @@ fn collect_tag_records(document: &Document) -> Vec<TagRecord> {
                         actual_text: None,
                         scope: scope.clone(),
                         parent,
-                        table_id: *table_id,
-                        col_index: *col_index,
+                        column_span: *column_span,
+                        row_span: *row_span,
                     });
                     stack.push(idx);
                 }
@@ -6352,8 +6362,8 @@ fn collect_tag_records(document: &Document) -> Vec<TagRecord> {
                         actual_text: Some(actual_text.clone()),
                         scope: None,
                         parent,
-                        table_id: None,
-                        col_index: None,
+                        column_span: None,
+                        row_span: None,
                     });
                     stack.push(idx);
                 }
@@ -7154,9 +7164,10 @@ fn render_page(
                 mcid,
                 alt,
                 scope,
-                table_id,
-                col_index,
+                column_span,
+                row_span,
                 group_only,
+                ..
             } => {
                 if options.pdf_profile.emits_tagged_structure() {
                     let role_raw = role.clone();
@@ -7177,8 +7188,8 @@ fn render_page(
                             actual_text: None,
                             scope: scope.clone(),
                             parent,
-                            table_id: *table_id,
-                            col_index: *col_index,
+                            column_span: *column_span,
+                            row_span: *row_span,
                         });
                         tag_stack.push(idx);
                     }
@@ -7207,8 +7218,8 @@ fn render_page(
                             actual_text: Some(actual_text.clone()),
                             scope: None,
                             parent,
-                            table_id: None,
-                            col_index: None,
+                            column_span: None,
+                            row_span: None,
                         });
                         tag_stack.push(idx);
                     }
@@ -9420,8 +9431,8 @@ mod tests {
             actual_text: None,
             scope: None,
             parent: None,
-            table_id: None,
-            col_index: None,
+            column_span: None,
+            row_span: None,
         };
         let normalized = normalize_definition_list_structure(vec![
             record("P"),
@@ -10276,6 +10287,8 @@ mod tests {
                 table_id: None,
                 col_index: None,
                 group_only: false,
+                column_span: None,
+                row_span: None,
             },
             Command::SetFontName(inter_name),
             Command::SetFontSize(Pt::from_f32(21.0)),
@@ -10326,6 +10339,8 @@ mod tests {
                 table_id: None,
                 col_index: None,
                 group_only: false,
+                column_span: None,
+                row_span: None,
             },
             Command::DrawRect {
                 x: Pt::from_f32(5.0),
@@ -10453,6 +10468,8 @@ mod tests {
                 table_id: None,
                 col_index: None,
                 group_only: false,
+                column_span: None,
+                row_span: None,
             },
             Command::SetFontName(inter_name),
             Command::SetFontSize(Pt::from_f32(12.0)),

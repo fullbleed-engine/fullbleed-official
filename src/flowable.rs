@@ -13962,6 +13962,45 @@ impl TableFlowable {
         rows + row_gap * (span.saturating_sub(1) as i32)
     }
 
+    fn semantic_row_span_for_draw_index(
+        &self,
+        draw_row_index: usize,
+        row_span: usize,
+        row_heights: &[Pt],
+    ) -> usize {
+        // Count emitted rows, not collapsed/source-only rows or the repeated
+        // header/footer on another page. Span tables bypass the height cache;
+        // these are the exact heights used by draw(). HTML lowering has already
+        // resolved rowspan=0 and bounded spans to authored row groups.
+        if row_span <= 1 {
+            return 1;
+        }
+        let header_end = if self.include_header {
+            self.data.header_rows.len()
+        } else {
+            0
+        };
+        let body_end = header_end + self.body_range.len();
+        let section_end = if draw_row_index < header_end {
+            header_end
+        } else if draw_row_index < body_end {
+            body_end
+        } else {
+            row_heights.len()
+        };
+        let end = draw_row_index
+            .saturating_add(row_span)
+            .min(section_end)
+            .min(row_heights.len());
+        row_heights
+            .get(draw_row_index..end)
+            .unwrap_or_default()
+            .iter()
+            .filter(|height| **height > Pt::ZERO)
+            .count()
+            .max(1)
+    }
+
     fn row_by_draw_index(&self, draw_row_index: usize) -> Option<&[TableCell]> {
         let header_len = if self.include_header {
             self.data.header_rows.len()
@@ -14958,13 +14997,14 @@ impl TableFlowable {
             );
             let tagged = cell.tag_role.as_ref().map(|role| {
                 let col = u16::try_from(cursor_col).ok();
-                canvas.begin_tag(
+                let row_span =
+                    self.semantic_row_span_for_draw_index(row_index, cell.row_span(), row_heights);
+                canvas.begin_table_cell_tag(
                     role.as_ref(),
-                    None,
                     cell.scope.clone(),
-                    Some(self.table_id),
+                    self.table_id,
                     col,
-                    false,
+                    (visible_span_columns, row_span),
                 );
             });
 
@@ -16122,14 +16162,16 @@ impl Flowable for TableFlowable {
             }
         }
 
-        let body_tagged = self.tag_role.as_ref().map(|_| {
-            canvas.begin_tag("TBody", None, None, Some(self.table_id), None, true);
-        });
+        let mut body_tagged = false;
+        let mut body_group_pending = true;
         for (i, row) in self.data.body_rows[self.body_range.clone()]
             .iter()
             .enumerate()
         {
             let meta_index = self.body_range.start + i;
+            if row.first().is_some_and(|cell| cell.row_group_starts) {
+                body_group_pending = true;
+            }
             let cached_row_lines = cache.and_then(|c| c.body_row_lines.get(meta_index));
             let mut owned_row_lines: Option<Vec<Arc<Vec<LineLayout>>>> = None;
             let row_height = if let Some(value) =
@@ -16154,6 +16196,17 @@ impl Flowable for TableFlowable {
             } else {
                 owned_row_lines.as_ref().map(|lines| lines.as_slice())
             };
+            // Preserve authored row-group boundaries in the compiled tag tree.
+            // A collapsed first row still starts a group for its next emitted
+            // row; a fully collapsed group emits no empty semantic container.
+            if body_group_pending && self.tag_role.is_some() {
+                if body_tagged {
+                    canvas.end_tag();
+                }
+                canvas.begin_tag("TBody", None, None, Some(self.table_id), None, true);
+                body_tagged = true;
+                body_group_pending = false;
+            }
             if let Some(meta) = self.data.body_row_meta.get(meta_index) {
                 for (k, v) in meta {
                     canvas.meta(k.clone(), v.clone());
@@ -16186,7 +16239,7 @@ impl Flowable for TableFlowable {
                 cursor_y = cursor_y + row_gap;
             }
         }
-        if body_tagged.is_some() {
+        if body_tagged {
             canvas.end_tag();
         }
 
