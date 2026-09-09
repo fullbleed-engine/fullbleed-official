@@ -12037,6 +12037,7 @@ pub struct TableCell {
     pub box_shadow: Option<BoxShadowSpec>,
     pub tag_role: Option<Arc<str>>,
     pub scope: Option<String>,
+    table_semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
     authoring_source_id: Option<Arc<str>>,
     col_span: usize,
     row_span: usize,
@@ -12115,6 +12116,7 @@ impl TableCell {
             box_shadow,
             tag_role,
             scope,
+            table_semantics: None,
             authoring_source_id: None,
             col_span: col_span.max(1),
             row_span: 1,
@@ -12164,6 +12166,29 @@ impl TableCell {
     pub(crate) fn with_authoring_source_id(mut self, source_id: Option<Arc<str>>) -> Self {
         self.authoring_source_id = source_id;
         self
+    }
+
+    pub(crate) fn with_table_semantics(
+        mut self,
+        semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
+    ) -> Self {
+        self.table_semantics = semantics;
+        self
+    }
+
+    fn table_container_semantics(
+        &self,
+        row: bool,
+    ) -> Option<Arc<crate::table_semantics::TableSemanticNode>> {
+        let mut value = self.table_semantics.as_deref()?.clone();
+        value.cell_key = None;
+        if !row {
+            value.row_key = None;
+        }
+        value.header_cells = None;
+        value.row_span_end = None;
+        value.header_issues.clear();
+        Some(Arc::new(value))
     }
 
     fn begin_authoring_scope(&self, canvas: &mut Canvas, bounds: Rect) -> bool {
@@ -13058,6 +13083,9 @@ pub struct TableFlowable {
     draw_background: bool,
     tag_role: Option<Arc<str>>,
     table_id: u32,
+    table_semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
+    first_fragment: bool,
+    last_fragment: bool,
     border_collapse: BorderCollapseMode,
     border_spacing: BorderSpacingSpec,
     table_layout: TableLayoutMode,
@@ -13099,6 +13127,9 @@ impl TableFlowable {
             draw_background: false,
             tag_role: None,
             table_id,
+            table_semantics: None,
+            first_fragment: true,
+            last_fragment: true,
             border_collapse: BorderCollapseMode::Separate,
             border_spacing: BorderSpacingSpec::zero(),
             table_layout: TableLayoutMode::Auto,
@@ -13112,6 +13143,14 @@ impl TableFlowable {
             minimum_height: Pt::ZERO,
             pagination: Pagination::default(),
         }
+    }
+
+    pub(crate) fn with_table_semantics(
+        mut self,
+        semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
+    ) -> Self {
+        self.table_semantics = semantics;
+        self
     }
 
     pub fn with_header(mut self, header_rows: Vec<Vec<TableCell>>) -> Self {
@@ -13996,9 +14035,53 @@ impl TableFlowable {
             .get(draw_row_index..end)
             .unwrap_or_default()
             .iter()
-            .filter(|height| **height > Pt::ZERO)
+            .enumerate()
+            .filter(|(offset, height)| {
+                **height > Pt::ZERO
+                    && !self
+                        .row_by_draw_index(draw_row_index + offset)
+                        .is_some_and(Self::row_is_collapsed)
+            })
             .count()
             .max(1)
+    }
+
+    fn cell_semantics_for_draw_index(
+        &self,
+        cell: &TableCell,
+        draw_row_index: usize,
+    ) -> Option<Arc<crate::TableSemanticNode>> {
+        let mut semantics = cell.table_semantics.clone()?;
+        if cell.row_span() > 1 {
+            let header_len = if self.include_header {
+                self.data.header_rows.len()
+            } else {
+                0
+            };
+            let (rows, start) = if draw_row_index < header_len {
+                (&self.data.header_rows, draw_row_index)
+            } else if draw_row_index < header_len + self.body_range.len() {
+                (
+                    &self.data.body_rows,
+                    self.body_range.start + draw_row_index - header_len,
+                )
+            } else {
+                (
+                    &self.data.body_rows,
+                    self.footer_range.start + draw_row_index - header_len - self.body_range.len(),
+                )
+            };
+            Arc::make_mut(&mut semantics).row_span_end = rows
+                .get(start.saturating_add(cell.row_span() - 1))
+                .and_then(|row| {
+                    row.iter().find_map(|cell| {
+                        cell.table_semantics
+                            .as_ref()
+                            .and_then(|value| value.row_key)
+                    })
+                });
+        }
+        Some(semantics)
     }
 
     fn row_by_draw_index(&self, draw_row_index: usize) -> Option<&[TableCell]> {
@@ -14895,9 +14978,19 @@ impl TableFlowable {
         row_heights: &[Pt],
         row_gap: Pt,
     ) -> Pt {
-        let row_tagged = self.tag_role.as_ref().map(|_| {
-            canvas.begin_tag("TR", None, None, Some(self.table_id), None, true);
-        });
+        // Collapsed rows can retain a fractional border strut. Keep its layout
+        // and paint behavior, but never emit an empty logical row or its cells.
+        let row_tagged = self
+            .tag_role
+            .as_ref()
+            .filter(|_| !Self::row_is_collapsed(row))
+            .map(|_| {
+                canvas.begin_tag("TR", None, None, Some(self.table_id), None, true);
+                canvas.set_table_semantics(
+                    row.iter()
+                        .find_map(|cell| cell.table_container_semantics(true)),
+                );
+            });
         let total_columns = col_widths.len().max(1);
         let visible_columns = self.visible_column_count(total_columns);
         let rtl = matches!(self.direction, DirectionMode::Rtl);
@@ -14995,18 +15088,26 @@ impl TableFlowable {
                     height: cell_height,
                 },
             );
-            let tagged = cell.tag_role.as_ref().map(|role| {
-                let col = u16::try_from(cursor_col).ok();
-                let row_span =
-                    self.semantic_row_span_for_draw_index(row_index, cell.row_span(), row_heights);
-                canvas.begin_table_cell_tag(
-                    role.as_ref(),
-                    cell.scope.clone(),
-                    self.table_id,
-                    col,
-                    (visible_span_columns, row_span),
-                );
-            });
+            let tagged = cell
+                .tag_role
+                .as_ref()
+                .filter(|_| !Self::row_is_collapsed(row))
+                .map(|role| {
+                    let col = u16::try_from(cursor_col).ok();
+                    let row_span = self.semantic_row_span_for_draw_index(
+                        row_index,
+                        cell.row_span(),
+                        row_heights,
+                    );
+                    canvas.begin_table_cell_tag(
+                        role.as_ref(),
+                        cell.scope.clone(),
+                        self.table_id,
+                        col,
+                        (visible_span_columns, row_span),
+                    );
+                    canvas.set_table_semantics(self.cell_semantics_for_draw_index(cell, row_index));
+                });
 
             let hide_empty_paint = matches!(self.border_collapse, BorderCollapseMode::Separate)
                 && cell.should_hide_empty_paint();
@@ -15978,6 +16079,9 @@ impl Flowable for TableFlowable {
             draw_background: self.draw_background,
             tag_role: self.tag_role.clone(),
             table_id: self.table_id,
+            table_semantics: self.table_semantics.clone(),
+            first_fragment: self.first_fragment,
+            last_fragment: false,
             border_collapse: self.border_collapse,
             border_spacing: self.border_spacing,
             table_layout: self.table_layout,
@@ -16006,6 +16110,9 @@ impl Flowable for TableFlowable {
             draw_background: self.draw_background,
             tag_role: self.tag_role.clone(),
             table_id: self.table_id,
+            table_semantics: self.table_semantics.clone(),
+            first_fragment: false,
+            last_fragment: self.last_fragment,
             border_collapse: self.border_collapse,
             border_spacing: self.border_spacing,
             table_layout: self.table_layout,
@@ -16029,6 +16136,7 @@ impl Flowable for TableFlowable {
         let perf = perf_start();
         let tagged = self.tag_role.as_ref().map(|role| {
             canvas.begin_tag(role.as_ref(), None, None, None, None, true);
+            canvas.set_table_semantics(self.table_semantics.clone());
         });
         let columns = self.max_columns();
         let (col_gap, row_gap) = self.resolve_spacing(avail_width);
@@ -16099,8 +16207,19 @@ impl Flowable for TableFlowable {
         };
         let mut row_index = 0usize;
         if self.include_header && !self.data.header_rows.is_empty() {
+            let repeated = self.table_semantics.is_some() && !self.first_fragment;
+            if repeated {
+                canvas.begin_artifact(None);
+            }
             let head_tagged = self.tag_role.as_ref().map(|_| {
                 canvas.begin_tag("THead", None, None, Some(self.table_id), None, true);
+                canvas.set_table_semantics(
+                    self.data
+                        .header_rows
+                        .iter()
+                        .flatten()
+                        .find_map(|cell| cell.table_container_semantics(false)),
+                );
             });
             for (idx, row) in self.data.header_rows.iter().enumerate() {
                 let cached_row_lines = cache.and_then(|c| c.header_row_lines.get(idx));
@@ -16160,6 +16279,9 @@ impl Flowable for TableFlowable {
             if head_tagged.is_some() {
                 canvas.end_tag();
             }
+            if repeated {
+                canvas.end_marked_content();
+            }
         }
 
         let mut body_tagged = false;
@@ -16199,11 +16321,15 @@ impl Flowable for TableFlowable {
             // Preserve authored row-group boundaries in the compiled tag tree.
             // A collapsed first row still starts a group for its next emitted
             // row; a fully collapsed group emits no empty semantic container.
-            if body_group_pending && self.tag_role.is_some() {
+            if body_group_pending && self.tag_role.is_some() && !Self::row_is_collapsed(row) {
                 if body_tagged {
                     canvas.end_tag();
                 }
                 canvas.begin_tag("TBody", None, None, Some(self.table_id), None, true);
+                canvas.set_table_semantics(
+                    row.iter()
+                        .find_map(|cell| cell.table_container_semantics(false)),
+                );
                 body_tagged = true;
                 body_group_pending = false;
             }
@@ -16244,8 +16370,18 @@ impl Flowable for TableFlowable {
         }
 
         if self.include_footer && self.footer_range.start < self.footer_range.end {
+            let repeated = self.table_semantics.is_some() && !self.last_fragment;
+            if repeated {
+                canvas.begin_artifact(None);
+            }
             let footer_tagged = self.tag_role.as_ref().map(|_| {
                 canvas.begin_tag("TFoot", None, None, Some(self.table_id), None, true);
+                canvas.set_table_semantics(
+                    self.data.body_rows[self.footer_range.clone()]
+                        .iter()
+                        .flatten()
+                        .find_map(|cell| cell.table_container_semantics(false)),
+                );
             });
             for (i, row) in self.data.body_rows[self.footer_range.clone()]
                 .iter()
@@ -16310,6 +16446,9 @@ impl Flowable for TableFlowable {
             }
             if footer_tagged.is_some() {
                 canvas.end_tag();
+            }
+            if repeated {
+                canvas.end_marked_content();
             }
         }
         if self.uses_centered_collapsed_edges() {

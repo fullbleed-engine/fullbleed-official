@@ -160,6 +160,11 @@ impl PartialEq for NodeRef {
 impl Eq for NodeRef {}
 
 impl NodeRef {
+    /// In-memory lookup only. Never serialize this address as document identity.
+    pub(crate) fn identity_key(&self) -> usize {
+        Rc::as_ptr(&self.0) as usize
+    }
+
     fn new(data: NodeData) -> Self {
         Self(Rc::new(Node {
             data,

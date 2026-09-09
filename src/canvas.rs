@@ -2,6 +2,7 @@ use crate::flowable::{MaskComposite, MaskMode, PaintFilterSpec};
 use crate::types::{
     Color, MixBlendMode, PageOrientation, PagePresentation, Pt, Rect, Shading, Size,
 };
+use std::sync::Arc;
 
 pub const META_FLOWABLE_BBOX_KEY: &str = "__fb_bbox";
 pub const META_HTML_CANVAS_BACKGROUND_KEY: &str = "__fb_html_canvas_background";
@@ -496,6 +497,7 @@ pub enum Command {
         /// Positive spans in this emitted table fragment; None means unknown.
         column_span: Option<u32>,
         row_span: Option<u32>,
+        table_semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
     },
     /// A tagged marked-content span whose accessible replacement is present
     /// only in the semantic tree. This is deliberately distinct from `alt`:
@@ -1558,6 +1560,7 @@ impl Canvas {
             group_only,
             column_span: None,
             row_span: None,
+            table_semantics: None,
         });
         mcid
     }
@@ -1583,6 +1586,18 @@ impl Canvas {
             *row_span = u32::try_from(spans.1).ok().filter(|span| *span > 0);
         }
         mcid
+    }
+
+    pub(crate) fn set_table_semantics(
+        &mut self,
+        semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
+    ) {
+        if let Some(Command::BeginTag {
+            table_semantics, ..
+        }) = self.current.commands.last_mut()
+        {
+            *table_semantics = semantics;
+        }
     }
 
     pub fn begin_tag_actual_text(

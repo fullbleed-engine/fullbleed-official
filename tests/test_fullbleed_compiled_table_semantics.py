@@ -3,6 +3,8 @@
 These are structural checks, not a PDF/UA or screen-reader acceptance claim.
 """
 
+import re
+
 import pytest
 
 import fullbleed
@@ -58,3 +60,54 @@ def test_tagged_fixed_geometry_binding_refusal_remains_explicit():
     assert plain.count(b"/Type /Page ") == 2
     assert b"Ada" in plain and b"Bea" in plain
     assert b"/StructTreeRoot" not in plain
+
+
+@pytest.mark.parametrize("mode", ["direct", "compiled", "repeat", "reflow", "compact"])
+def test_explicit_table_headers_are_record_scoped_across_supported_compiled_paths(mode):
+    html = """<table><thead><tr><th id='item'>Item</th><th id='price'>Price</th></tr></thead>
+    <tbody><tr><td headers='item'>{{label}}</td><td headers='item price'>12</td></tr></tbody></table>"""
+    engine = fullbleed.PdfEngine(pdf_profile="tagged", document_lang="en-US")
+
+    def render():
+        if mode == "direct":
+            return engine.render_pdf(html.replace("{{label}}", "Ada"), CSS)
+        compiled = engine.compile_pdf(html if mode in {"reflow", "compact"} else html.replace("{{label}}", "Ada"), CSS)
+        if mode == "compiled":
+            return compiled.render_pdf()
+        if mode == "repeat":
+            return compiled.render_pdf_batch(3)
+        return compiled.render_pdf_reflow_bindings(
+            {"label": ["Ada", "Bea", "Cy"]},
+            compression="compact" if mode == "compact" else "throughput",
+        )
+
+    pdf = render()
+    assert pdf == render(), "Global layout counters must not become persisted identities"
+    count = 1 if mode in {"direct", "compiled"} else 3
+    ids = re.findall(rb"/S /TH [^\r\n]* /ID \(([^)]+)\)", pdf)
+    assert len(ids) == count * 2 and len(set(ids)) == len(ids)
+    cells = [line for line in pdf.splitlines() if b"/S /TD " in line]
+    for index in range(count):
+        item, price = ids[index * 2 : index * 2 + 2]
+        assert b"/Headers [(" + item + b")]" in cells[index * 2]
+        assert b"/Headers [(" + item + b") (" + price + b")]" in cells[index * 2 + 1]
+    assert b"/IDTree " in pdf
+
+
+def test_table_header_trace_reports_unresolved_links_without_source_ids_or_record_text():
+    html = """<table><tr><th id='private-header-id'>Private header text</th>
+    <td headers='private-header-id missing-private-id'>Private recipient text</td></tr></table>"""
+    engine = fullbleed.PdfEngine(pdf_profile="tagged")
+    trace = engine.export_render_time_structure_trace(html, CSS)
+    assert trace["summary"]["explicit_table_header_cell_count"] == 1
+    assert trace["summary"]["resolved_table_header_link_count"] == 1
+    assert trace["summary"]["table_header_issue_counts"] == {"missing_header_target": 1}
+    assert "Private" not in str(trace) and "private-id" not in str(trace) and "private-header-id" not in str(trace)
+    semantics = [event["table_semantics"] for page in trace["pages"] for event in page["sample_events"] if "table_semantics" in event]
+    assert any(node["header_issues"] == ["missing_header_target"] for node in semantics)
+
+
+def test_installed_runtime_advertises_compiled_table_relationships():
+    features = fullbleed.build_features()
+    assert features["explicit_table_headers"] is True
+    assert features["logical_table_pagination"] is True

@@ -48,6 +48,9 @@ mod sfnt_outline;
 mod spill;
 mod style;
 mod svg;
+#[cfg(test)]
+mod table_header_tests;
+mod table_semantics;
 mod text_shape;
 mod types;
 mod unicode_data;
@@ -113,6 +116,7 @@ use perf::PerfLogger;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::f32::consts::PI;
 use std::sync::{Arc, Condvar, Mutex};
+pub use table_semantics::TableSemanticNode;
 pub use types::{Color, ColorSpace, I32F32, Margins, Pt, Rect, Size};
 
 const FILE_OUTPUT_BUFFER_BYTES: usize = 1024 * 1024;
@@ -10007,6 +10011,7 @@ mod tests {
                             group_only: false,
                             column_span: None,
                             row_span: None,
+                            table_semantics: None,
                         },
                         Command::DrawRect {
                             x: second_area.x,
@@ -10141,6 +10146,7 @@ mod tests {
                             group_only: false,
                             column_span: None,
                             row_span: None,
+                            table_semantics: None,
                         },
                         Command::DrawRect {
                             x: source_rect.x,

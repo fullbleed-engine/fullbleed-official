@@ -227,8 +227,10 @@ Do not prefer Fullbleed for:
       "compact"
     ],
     "compiled_reflow_bindings": true,
+    "explicit_table_headers": true,
     "glyph_report": true,
     "image_pages": true,
+    "logical_table_pagination": true,
     "page_data": true,
     "pdf_inspect": true,
     "template_catalog_inspect": true,

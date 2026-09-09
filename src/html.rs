@@ -110,16 +110,19 @@ struct CounterState {
     quote_depth: usize,
     target_texts: Arc<HashMap<String, String>>,
     target_pages: Arc<HashMap<String, usize>>,
+    table_semantics: Arc<crate::table_semantics::HtmlTableIndex>,
 }
 
 impl CounterState {
     fn with_target_context(
+        document: &NodeRef,
         target_texts: HashMap<String, String>,
         target_pages: Arc<HashMap<String, usize>>,
     ) -> Self {
         Self {
             target_texts: Arc::new(target_texts),
             target_pages,
+            table_semantics: Arc::new(crate::table_semantics::HtmlTableIndex::build(document)),
             ..Self::default()
         }
     }
@@ -1021,6 +1024,7 @@ pub(crate) fn html_document_to_story_with_resolver_and_fonts_and_report_and_targ
     let mut ancestors: Vec<ElementInfo> = Vec::new();
     let mut report = report;
     let mut counters = CounterState::with_target_context(
+        document,
         document_target_texts(document),
         target_pages.unwrap_or_else(|| Arc::new(HashMap::new())),
     );
@@ -15202,6 +15206,7 @@ fn table_flowable(
                 cells.push(
                     spanning_cell
                         .as_rowspan_placeholder()
+                        .with_table_semantics(counters.table_semantics.node(&row))
                         .with_row_collapsed(row_collapsed)
                         .with_row_border(
                             row_style.border_width,
@@ -15596,6 +15601,7 @@ fn table_flowable(
                 no_wrap(&cell_style),
             );
             let mut cell = cell
+                .with_table_semantics(counters.table_semantics.node(cell_child))
                 .with_border_styles(
                     border_styles.top,
                     border_styles.right,
@@ -15716,6 +15722,7 @@ fn table_flowable(
                 cells.push(
                     spanning_cell
                         .as_rowspan_placeholder()
+                        .with_table_semantics(counters.table_semantics.node(&row))
                         .with_row_collapsed(row_collapsed)
                         .with_row_border(
                             row_style.border_width,
@@ -15841,6 +15848,7 @@ fn table_flowable(
     }
 
     TableFlowable::new(body_rows)
+        .with_table_semantics(counters.table_semantics.node(node))
         .with_header(header_rows)
         .repeat_header(true)
         .with_footer_row_count(footer_row_count)

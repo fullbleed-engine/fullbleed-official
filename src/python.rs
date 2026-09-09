@@ -449,6 +449,8 @@ fn build_features(py: Python<'_>) -> PyResult<PyObject> {
     out.set_item("python", cfg!(feature = "python"))?;
     out.set_item("svg_raster", cfg!(feature = "svg_raster"))?;
     out.set_item("compiled_reflow", true)?;
+    out.set_item("explicit_table_headers", true)?;
+    out.set_item("logical_table_pagination", true)?;
     out.set_item(
         "compiled_flow_compression_modes",
         PyList::new(py, ["throughput", "compact"])?,
@@ -3945,6 +3947,20 @@ fn build_render_time_reading_order_trace_py(
 }
 
 fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyResult<PyObject> {
+    let table_catalog = crate::table_semantics::CompiledTableCatalog::from_document(doc);
+    let mut table_header_cells = 0usize;
+    let mut table_header_links = 0usize;
+    let mut table_header_issues = std::collections::BTreeMap::<String, usize>::new();
+    crate::table_semantics::for_each_emitted_table_node(doc, |_, _, _, node| {
+        let resolved = table_catalog.resolve(node);
+        if let Some(headers) = &resolved.header_cells {
+            table_header_cells += 1;
+            table_header_links += headers.len();
+        }
+        for issue in resolved.header_issues {
+            *table_header_issues.entry(issue).or_default() += 1;
+        }
+    });
     let out = PyDict::new(py);
     out.set_item("schema", "fullbleed.pdf.structure_trace.v1")?;
     out.set_item("schema_version", 1)?;
@@ -3984,6 +4000,7 @@ fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyRes
                     scope,
                     column_span,
                     row_span,
+                    table_semantics,
                     ..
                 } => {
                     begin_tag_count = begin_tag_count.saturating_add(1);
@@ -4005,6 +4022,22 @@ fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyRes
                         ev.set_item("scope", scope.clone())?;
                         ev.set_item("column_span", *column_span)?;
                         ev.set_item("row_span", *row_span)?;
+                        if let Some(node) = table_semantics {
+                            let resolved = table_catalog.resolve(node);
+                            let semantics = PyDict::new(py);
+                            semantics.set_item("table_key", node.table_key)?;
+                            semantics.set_item("cell_key", node.cell_key)?;
+                            semantics.set_item("row_key", node.row_key)?;
+                            semantics.set_item("group_key", node.group_key)?;
+                            semantics.set_item("header_cells", resolved.header_cells)?;
+                            semantics.set_item("header_issues", resolved.header_issues)?;
+                            semantics.set_item(
+                                "logical_row_span",
+                                table_catalog.logical_row_span(node).or(*row_span),
+                            )?;
+                            semantics.set_item("pagination_artifact", artifact_depth > 0)?;
+                            ev.set_item("table_semantics", semantics)?;
+                        }
                         events.append(ev)?;
                     }
                 }
@@ -4101,6 +4134,9 @@ fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyRes
     summary.set_item("artifact_text_draw_count", artifact_text_draw_count)?;
     summary.set_item("tagged_pages", tagged_pages)?;
     summary.set_item("tag_balance_underflow_count", tag_balance_underflow)?;
+    summary.set_item("explicit_table_header_cell_count", table_header_cells)?;
+    summary.set_item("resolved_table_header_link_count", table_header_links)?;
+    summary.set_item("table_header_issue_counts", table_header_issues)?;
     summary.set_item(
         "tag_balance_ok",
         tag_balance_underflow == 0 && end_tag_count <= begin_tag_count,

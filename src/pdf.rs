@@ -229,6 +229,9 @@ fn pdf_header_bytes(version: PdfVersion) -> &'static [u8] {
     }
 }
 
+#[path = "pdf_table.rs"]
+mod table_structure;
+
 #[derive(Debug, Clone)]
 struct TagRecord {
     page_index: usize,
@@ -240,6 +243,9 @@ struct TagRecord {
     parent: Option<usize>,
     column_span: Option<u32>,
     row_span: Option<u32>,
+    table_semantics: Option<Arc<crate::TableSemanticNode>>,
+    table_document: usize,
+    structure_id: Option<String>,
 }
 
 fn table_attributes(tag: &TagRecord) -> Option<String> {
@@ -257,6 +263,21 @@ fn table_attributes(tag: &TagRecord) -> Option<String> {
     }
     if let Some(span) = tag.row_span.filter(|span| *span > 1) {
         attributes.push_str(&format!(" /RowSpan {span}"));
+    }
+    if let Some(node) = &tag.table_semantics {
+        if let Some(headers) = &node.header_cells {
+            let ids = headers
+                .iter()
+                .map(|cell| {
+                    format!(
+                        "({})",
+                        table_structure::cell_id(tag.table_document, node.table_key, *cell)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            attributes.push_str(&format!(" /Headers [{ids}]"));
+        }
     }
     // ISO 32000 Table-owner attributes live under StructElem /A. Scope is
     // limited to Row/Column/Both; HTML rowgroup/colgroup are not PDF names.
@@ -291,6 +312,9 @@ fn normalize_definition_list_structure(records: Vec<TagRecord>) -> Vec<TagRecord
             parent,
             column_span: None,
             row_span: None,
+            table_semantics: None,
+            table_document: 0,
+            structure_id: None,
         }
     }
 
@@ -1086,6 +1110,7 @@ pub(crate) struct PdfStreamWriter<'a, W: Write> {
     type3_fonts: BTreeMap<(String, u8, u32), Type3StreamFont>,
     next_type3_resource: usize,
     current_doc_id: usize,
+    current_tag_document: usize,
     doc_font_usage: BTreeMap<usize, BTreeSet<String>>,
 
     image_resources: Vec<(String, usize)>,
@@ -1501,6 +1526,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             type3_fonts: BTreeMap::new(),
             next_type3_resource: 1,
             current_doc_id: 0,
+            current_tag_document: 0,
             doc_font_usage: BTreeMap::new(),
             image_resources: Vec::new(),
             image_name_map: HashMap::new(),
@@ -1577,6 +1603,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         }
         validate_profile_font_embedding(document, self.registry, &self.options)?;
         self.current_doc_id = doc_id;
+        self.current_tag_document = self.tag_records.len();
         self.shaped_cache.clear();
         for page in &document.pages {
             self.add_page(page)?;
@@ -1651,6 +1678,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         }
         validate_profile_font_embedding(document, self.registry, &self.options)?;
         self.current_doc_id = doc_id;
+        self.current_tag_document = self.tag_records.len();
         let document_key = document as *const Document as usize;
         let mut encoded_pages = encoded_pages.map(Vec::into_iter);
         for (source_page, (page, overrides)) in
@@ -2551,9 +2579,19 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         if self.options.pdf_profile.emits_tagged_structure() {
             let uses_pdf20_structure_namespace =
                 self.options.pdf_profile.uses_pdf20_structure_namespace();
-            let tag_records =
-                normalize_definition_list_structure(std::mem::take(&mut self.tag_records));
+            let tag_records = normalize_definition_list_structure(table_structure::normalize(
+                std::mem::take(&mut self.tag_records),
+            ));
             let tag_count = tag_records.len();
+            if let Some(debug) = &self.debug {
+                for tag in &tag_records {
+                    if let Some(node) = &tag.table_semantics {
+                        for issue in &node.header_issues {
+                            debug.log_json(&format!("{{\"type\":\"pdf.table_header_issue\",\"document\":{},\"table\":{},\"cell\":{},\"code\":\"{}\"}}", tag.table_document, node.table_key, node.cell_key.map(|key| key.to_string()).unwrap_or_else(|| "null".into()), crate::debug::json_escape(issue)));
+                        }
+                    }
+                }
+            }
             let extra_pdf20_structure_objects = if uses_pdf20_structure_namespace { 2 } else { 0 };
             let start_id = self.alloc_ids(tag_count + 2 + extra_pdf20_structure_objects);
             let parent_tree_id = start_id + tag_count;
@@ -2561,6 +2599,16 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             let document_node_id =
                 uses_pdf20_structure_namespace.then_some(start_id + tag_count + 2);
             let namespace_id = uses_pdf20_structure_namespace.then_some(start_id + tag_count + 3);
+            let ids = tag_records
+                .iter()
+                .enumerate()
+                .filter_map(|(index, tag)| {
+                    tag.structure_id
+                        .as_ref()
+                        .map(|id| (id.clone(), start_id + index))
+                })
+                .collect::<BTreeMap<_, _>>();
+            let id_tree_id = (!ids.is_empty()).then(|| self.alloc_ids(1));
 
             let mut children: Vec<Vec<usize>> = vec![Vec::new(); tag_count];
             for (idx, tag) in tag_records.iter().enumerate() {
@@ -2610,6 +2658,9 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     }
                     if let Some(attributes) = table_attributes(tag) {
                         obj.push_str(&attributes);
+                    }
+                    if let Some(structure_id) = &tag.structure_id {
+                        obj.push_str(&format!(" /ID ({structure_id})"));
                     }
                     obj.push_str(" >>");
                     self.write_object(id, &obj)?;
@@ -2664,8 +2715,14 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             let root_k_entry = document_node_id
                 .map(|id| format!("[{} 0 R]", id))
                 .unwrap_or_else(|| format!("[{}]", kids));
+            let id_tree_entry = if let Some(id_tree_id) = id_tree_id {
+                self.write_structure_id_tree(id_tree_id, &ids)?;
+                format!(" /IDTree {id_tree_id} 0 R")
+            } else {
+                String::new()
+            };
             let root_obj = format!(
-                "<< /Type /StructTreeRoot /K {} /ParentTree {} 0 R >>",
+                "<< /Type /StructTreeRoot /K {} /ParentTree {} 0 R{id_tree_entry} >>",
                 root_k_entry, parent_tree_id
             );
             self.write_object(root_id, &root_obj)?;
@@ -3431,6 +3488,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         let mut current_fill = Color::BLACK;
         let mut graphics_state_stack: Vec<(Pt, String, Color)> = Vec::new();
         let mut tag_stack: Vec<usize> = Vec::new();
+        let mut suppressed_tag_depth = 0usize;
         let mut marked_content_stack: Vec<bool> = Vec::new();
         let mut explicit_artifact_depth = 0usize;
         let mut automatic_artifact_open = false;
@@ -3556,9 +3614,14 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     column_span,
                     row_span,
                     group_only,
+                    table_semantics,
                     ..
                 } => {
                     if tag_enabled {
+                        if explicit_artifact_depth > 0 || suppressed_tag_depth > 0 {
+                            suppressed_tag_depth += 1;
+                            continue;
+                        }
                         let role_raw = role.clone();
                         let role = escape_pdf_name(role);
                         if *group_only {
@@ -3578,6 +3641,9 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             parent,
                             column_span: *column_span,
                             row_span: *row_span,
+                            table_semantics: table_semantics.clone(),
+                            table_document: self.current_tag_document,
+                            structure_id: None,
                         });
                         tag_stack.push(idx);
                     }
@@ -3588,6 +3654,10 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     actual_text,
                 } => {
                     if tag_enabled {
+                        if explicit_artifact_depth > 0 || suppressed_tag_depth > 0 {
+                            suppressed_tag_depth += 1;
+                            continue;
+                        }
                         let role_raw = role.clone();
                         let role = escape_pdf_name(role);
                         out.push_str(&format!(
@@ -3606,12 +3676,19 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             parent,
                             column_span: None,
                             row_span: None,
+                            table_semantics: None,
+                            table_document: self.current_tag_document,
+                            structure_id: None,
                         });
                         tag_stack.push(idx);
                     }
                 }
                 Command::EndTag => {
                     if tag_enabled {
+                        if suppressed_tag_depth > 0 {
+                            suppressed_tag_depth -= 1;
+                            continue;
+                        }
                         out.push_str("EMC\n");
                         let _ = tag_stack.pop();
                     }
@@ -4437,6 +4514,64 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         self.next_id = self.next_id.saturating_add(count);
         self.ensure_offsets_len(self.next_id);
         start
+    }
+
+    fn write_structure_id_tree(
+        &mut self,
+        root: usize,
+        ids: &BTreeMap<String, usize>,
+    ) -> io::Result<()> {
+        // Bounded fan-out is a wire-tree shape, not a document/record ceiling.
+        const FANOUT: usize = 64;
+        let entries: Vec<_> = ids.iter().collect();
+        let mut level = Vec::new();
+        for chunk in entries.chunks(FANOUT) {
+            let first = chunk[0].0.as_str();
+            let last = chunk[chunk.len() - 1].0.as_str();
+            let id = if entries.len() <= FANOUT {
+                root
+            } else {
+                self.alloc_ids(1)
+            };
+            let names = chunk
+                .iter()
+                .map(|(key, target)| format!("({key}) {target} 0 R"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let limits = if id == root {
+                String::new()
+            } else {
+                format!(" /Limits [({first}) ({last})]")
+            };
+            self.write_object(id, &format!("<< /Names [{names}]{limits} >>"))?;
+            level.push((first, last, id));
+        }
+        while level.len() > 1 {
+            let mut parents = Vec::new();
+            for chunk in level.chunks(FANOUT) {
+                let first = chunk[0].0;
+                let last = chunk[chunk.len() - 1].1;
+                let id = if level.len() <= FANOUT {
+                    root
+                } else {
+                    self.alloc_ids(1)
+                };
+                let kids = chunk
+                    .iter()
+                    .map(|(_, _, child)| format!("{child} 0 R"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let limits = if id == root {
+                    String::new()
+                } else {
+                    format!(" /Limits [({first}) ({last})]")
+                };
+                self.write_object(id, &format!("<< /Kids [{kids}]{limits} >>"))?;
+                parents.push((first, last, id));
+            }
+            level = parents;
+        }
+        Ok(())
     }
 
     fn write_object(&mut self, obj_id: usize, body: &str) -> io::Result<()> {
@@ -6320,6 +6455,9 @@ fn collect_tag_records(document: &Document) -> Vec<TagRecord> {
     let mut records = Vec::new();
     for (page_index, page) in document.pages.iter().enumerate() {
         let mut stack: Vec<usize> = Vec::new();
+        let mut artifact_depth = 0usize;
+        let mut suppressed_depth = 0usize;
+        let mut marked_content = Vec::new();
         for cmd in &page.commands {
             match cmd {
                 Command::BeginTag {
@@ -6330,8 +6468,13 @@ fn collect_tag_records(document: &Document) -> Vec<TagRecord> {
                     column_span,
                     row_span,
                     group_only: _,
+                    table_semantics,
                     ..
                 } => {
+                    if artifact_depth > 0 || suppressed_depth > 0 {
+                        suppressed_depth += 1;
+                        continue;
+                    }
                     let parent = stack.last().copied();
                     let idx = records.len();
                     records.push(TagRecord {
@@ -6344,6 +6487,9 @@ fn collect_tag_records(document: &Document) -> Vec<TagRecord> {
                         parent,
                         column_span: *column_span,
                         row_span: *row_span,
+                        table_semantics: table_semantics.clone(),
+                        table_document: 0,
+                        structure_id: None,
                     });
                     stack.push(idx);
                 }
@@ -6352,6 +6498,10 @@ fn collect_tag_records(document: &Document) -> Vec<TagRecord> {
                     mcid,
                     actual_text,
                 } => {
+                    if artifact_depth > 0 || suppressed_depth > 0 {
+                        suppressed_depth += 1;
+                        continue;
+                    }
                     let parent = stack.last().copied();
                     let idx = records.len();
                     records.push(TagRecord {
@@ -6364,11 +6514,26 @@ fn collect_tag_records(document: &Document) -> Vec<TagRecord> {
                         parent,
                         column_span: None,
                         row_span: None,
+                        table_semantics: None,
+                        table_document: 0,
+                        structure_id: None,
                     });
                     stack.push(idx);
                 }
                 Command::EndTag => {
+                    if suppressed_depth > 0 {
+                        suppressed_depth -= 1;
+                        continue;
+                    }
                     let _ = stack.pop();
+                }
+                Command::BeginArtifact { .. } => {
+                    marked_content.push(true);
+                    artifact_depth += 1;
+                }
+                Command::BeginOptionalContent { .. } => marked_content.push(false),
+                Command::EndMarkedContent if marked_content.pop() == Some(true) => {
+                    artifact_depth = artifact_depth.saturating_sub(1);
                 }
                 _ => {}
             }
@@ -7107,6 +7272,9 @@ fn render_page(
     let mut current_fill = Color::BLACK;
     let mut graphics_state_stack: Vec<(Pt, String, Color)> = Vec::new();
     let mut tag_stack: Vec<usize> = Vec::new();
+    let mut suppressed_tag_depth = 0usize;
+    let mut explicit_artifact_depth = 0usize;
+    let mut marked_content_stack = Vec::new();
 
     for cmd in &page.commands {
         match cmd {
@@ -7167,9 +7335,14 @@ fn render_page(
                 column_span,
                 row_span,
                 group_only,
+                table_semantics,
                 ..
             } => {
                 if options.pdf_profile.emits_tagged_structure() {
+                    if explicit_artifact_depth > 0 || suppressed_tag_depth > 0 {
+                        suppressed_tag_depth += 1;
+                        continue;
+                    }
                     let role_raw = role.clone();
                     let role = escape_pdf_name(role);
                     if *group_only {
@@ -7190,6 +7363,9 @@ fn render_page(
                             parent,
                             column_span: *column_span,
                             row_span: *row_span,
+                            table_semantics: table_semantics.clone(),
+                            table_document: 0,
+                            structure_id: None,
                         });
                         tag_stack.push(idx);
                     }
@@ -7201,6 +7377,10 @@ fn render_page(
                 actual_text,
             } => {
                 if options.pdf_profile.emits_tagged_structure() {
+                    if explicit_artifact_depth > 0 || suppressed_tag_depth > 0 {
+                        suppressed_tag_depth += 1;
+                        continue;
+                    }
                     let role_raw = role.clone();
                     let role = escape_pdf_name(role);
                     out.push_str(&format!(
@@ -7220,6 +7400,9 @@ fn render_page(
                             parent,
                             column_span: None,
                             row_span: None,
+                            table_semantics: None,
+                            table_document: 0,
+                            structure_id: None,
                         });
                         tag_stack.push(idx);
                     }
@@ -7227,11 +7410,17 @@ fn render_page(
             }
             Command::EndTag => {
                 if options.pdf_profile.emits_tagged_structure() {
+                    if suppressed_tag_depth > 0 {
+                        suppressed_tag_depth -= 1;
+                        continue;
+                    }
                     out.push_str("EMC\n");
                     let _ = tag_stack.pop();
                 }
             }
             Command::BeginArtifact { subtype } => {
+                marked_content_stack.push(true);
+                explicit_artifact_depth += 1;
                 if let Some(subtype) = subtype.as_deref() {
                     out.push_str(&format!(
                         "/Artifact <</Subtype /{}>> BDC\n",
@@ -7242,10 +7431,14 @@ fn render_page(
                 }
             }
             Command::BeginOptionalContent { name } => {
+                marked_content_stack.push(false);
                 out.push_str(&format!("/OC /{} BDC\n", escape_pdf_name(name)));
             }
             Command::EndMarkedContent => {
                 out.push_str("EMC\n");
+                if marked_content_stack.pop() == Some(true) {
+                    explicit_artifact_depth = explicit_artifact_depth.saturating_sub(1);
+                }
             }
             Command::SetFillColor(color) => {
                 current_fill = *color;
@@ -9433,6 +9626,9 @@ mod tests {
             parent: None,
             column_span: None,
             row_span: None,
+            table_semantics: None,
+            table_document: 0,
+            structure_id: None,
         };
         let normalized = normalize_definition_list_structure(vec![
             record("P"),
@@ -10289,6 +10485,7 @@ mod tests {
                 group_only: false,
                 column_span: None,
                 row_span: None,
+                table_semantics: None,
             },
             Command::SetFontName(inter_name),
             Command::SetFontSize(Pt::from_f32(21.0)),
@@ -10341,6 +10538,7 @@ mod tests {
                 group_only: false,
                 column_span: None,
                 row_span: None,
+                table_semantics: None,
             },
             Command::DrawRect {
                 x: Pt::from_f32(5.0),
@@ -10470,6 +10668,7 @@ mod tests {
                 group_only: false,
                 column_span: None,
                 row_span: None,
+                table_semantics: None,
             },
             Command::SetFontName(inter_name),
             Command::SetFontSize(Pt::from_f32(12.0)),

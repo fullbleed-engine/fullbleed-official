@@ -245,6 +245,10 @@ pub struct AuthoringReadingNode {
     /// Missing values are unavailable evidence, not implicit unit spans.
     pub column_span: Option<u32>,
     pub row_span: Option<u32>,
+    /// Compiler-resolved identities and explicit header links across all pages.
+    pub table_semantics: Option<crate::TableSemanticNode>,
+    /// Row span in the complete logical table, not just this page fragment.
+    pub logical_row_span: Option<u32>,
     pub group_only: bool,
     pub children: Vec<AuthoringReadingNode>,
     /// `inline`/`block` only when the lowered engine flow supplied evidence.
@@ -602,6 +606,7 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
                     group_only,
                     column_span,
                     row_span,
+                    table_semantics,
                     ..
                 } => {
                     if artifact_depth > 0 || role.eq_ignore_ascii_case("artifact") {
@@ -629,6 +634,8 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
                             column_index: *col_index,
                             column_span: *column_span,
                             row_span: *row_span,
+                            table_semantics: table_semantics.as_deref().cloned(),
+                            logical_row_span: None,
                             group_only: *group_only,
                             children: Vec::new(),
                             layout: current_layout.take(),
@@ -664,6 +671,8 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
                             column_index: None,
                             column_span: None,
                             row_span: None,
+                            table_semantics: None,
+                            logical_row_span: None,
                             group_only: false,
                             children: Vec::new(),
                             layout: current_layout.take(),
@@ -743,6 +752,19 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
             text_runs,
             content: root_content,
         });
+    }
+
+    let catalog = crate::table_semantics::CompiledTableCatalog::from_document(document);
+    let mut pending: Vec<_> = pages
+        .iter_mut()
+        .flat_map(|page| page.nodes.iter_mut())
+        .collect();
+    while let Some(node) = pending.pop() {
+        if let Some(semantics) = &node.table_semantics {
+            node.logical_row_span = catalog.logical_row_span(semantics).or(node.row_span);
+            node.table_semantics = Some(catalog.resolve(semantics));
+        }
+        pending.extend(&mut node.children);
     }
 
     let mut node_count = 0usize;
@@ -1191,7 +1213,7 @@ impl FullBleed {
         });
         let layout = layout_snapshot(request.html, &document);
         let reading = reading_preview(&document);
-        let diagnostics = if layout.nodes.iter().all(|node| node.geometry_available) {
+        let mut diagnostics = if layout.nodes.iter().all(|node| node.geometry_available) {
             Vec::new()
         } else {
             vec![AuthoringDiagnostic {
@@ -1201,6 +1223,24 @@ impl FullBleed {
                 source_id: None,
             }]
         };
+        let mut pending: Vec<_> = reading
+            .pages
+            .iter()
+            .flat_map(|page| page.nodes.iter())
+            .collect();
+        while let Some(node) = pending.pop() {
+            if let Some(semantics) = &node.table_semantics {
+                for issue in &semantics.header_issues {
+                    diagnostics.push(AuthoringDiagnostic {
+                        code: format!("TABLE_HEADERS_{}", issue.to_ascii_uppercase()),
+                        severity: AuthoringDiagnosticSeverity::Warning,
+                        message: format!("An explicit table header relationship could not be used ({issue}). Inspect this cell's headers and the target header in the same table."),
+                        source_id: node.source_id.clone(),
+                    });
+                }
+            }
+            pending.extend(node.children.iter().rev());
+        }
         progress(AuthoringPreviewProgress {
             phase: AuthoringPreviewPhase::Complete,
             completed: 1,
@@ -1457,7 +1497,7 @@ mod tests {
     }
 
     #[test]
-    fn compiled_table_spans_survive_repeated_headers_on_each_page() {
+    fn compiled_table_spans_keep_printed_header_copies_but_one_logical_header() {
         let rows = (0..12)
             .map(|index| format!("<tr><td>Row {index}</td><td>A</td><td>B</td></tr>"))
             .collect::<String>();
@@ -1472,9 +1512,24 @@ mod tests {
             let mut nodes = Vec::new();
             collect_reading_nodes(&page.nodes, &mut nodes);
             let headers: Vec<_> = nodes.iter().filter(|node| node.role == "TH").collect();
-            assert_eq!(headers.len(), 4, "Page {}", page.page_number);
-            assert_eq!(headers[0].row_span, Some(2));
-            assert_eq!(headers[1].column_span, Some(2));
+            if page.page_number == 1 {
+                assert_eq!(headers.len(), 4);
+                assert_eq!(headers[0].row_span, Some(2));
+                assert_eq!(headers[0].logical_row_span, Some(2));
+                assert_eq!(headers[1].column_span, Some(2));
+            } else {
+                assert!(
+                    headers.is_empty(),
+                    "Repeated headers are pagination artifacts on page {}",
+                    page.page_number
+                );
+            }
+            let printed = page
+                .text_runs
+                .iter()
+                .find(|run| run.text == "Amounts")
+                .expect("Header remains in the actual paint stream on every page");
+            assert_eq!(printed.artifact, page.page_number > 1);
             assert!(
                 nodes
                     .iter()
