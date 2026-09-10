@@ -6813,7 +6813,7 @@ fn load_image(source: &str) -> Option<ImageData> {
     }
 
     let path = Path::new(source);
-    let bytes = std::fs::read(path).ok()?;
+    let bytes = crate::assets::read_asset_path(path).ok()?;
     decode_image_bytes(&bytes, None)
 }
 
@@ -6833,7 +6833,7 @@ fn load_image_variant(
         );
     }
 
-    let bytes = std::fs::read(Path::new(source)).ok()?;
+    let bytes = crate::assets::read_asset_path(Path::new(source)).ok()?;
     decode_image_bytes_variant(&bytes, None, source_clip, target_width, target_height)
 }
 

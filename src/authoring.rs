@@ -1120,8 +1120,38 @@ impl FullBleed {
         &self,
         request: AuthoringPreviewRequest<'_>,
         cancellation: &AuthoringCancellationToken,
-        mut progress: impl FnMut(AuthoringPreviewProgress),
+        progress: impl FnMut(AuthoringPreviewProgress),
     ) -> Result<AuthoringPreviewArtifactV1, FullBleedError> {
+        self.render_authoring_preview_with_asset_scope(request, cancellation, progress, false)
+    }
+
+    /// Authoring preview for untrusted source. Image bytes must be supplied in
+    /// the bundle or inline. No source-controlled image path can fall back to
+    /// filesystem reads during layout, PDF emission, or preview rasterization.
+    /// This does not sandbox arbitrary caller code or the other rendering APIs.
+    pub fn render_authoring_preview_bundled_assets(
+        &self,
+        request: AuthoringPreviewRequest<'_>,
+        cancellation: &AuthoringCancellationToken,
+        progress: impl FnMut(AuthoringPreviewProgress),
+    ) -> Result<AuthoringPreviewArtifactV1, FullBleedError> {
+        self.render_authoring_preview_with_asset_scope(request, cancellation, progress, true)
+    }
+
+    fn render_authoring_preview_with_asset_scope(
+        &self,
+        request: AuthoringPreviewRequest<'_>,
+        cancellation: &AuthoringCancellationToken,
+        mut progress: impl FnMut(AuthoringPreviewProgress),
+        bundled_assets_only: bool,
+    ) -> Result<AuthoringPreviewArtifactV1, FullBleedError> {
+        let asset_audit = bundled_assets_only.then(|| {
+            Arc::new(crate::assets::AssetReadContext {
+                bundle: Arc::clone(&self.asset_bundle),
+                blocked: std::sync::atomic::AtomicUsize::new(0),
+            })
+        });
+        let _asset_scope = crate::assets::AssetReadScope::enter(asset_audit.clone());
         let started = Instant::now();
         check_cancelled(cancellation)?;
         progress(AuthoringPreviewProgress {
@@ -1138,7 +1168,10 @@ impl FullBleed {
             let worker = std::thread::Builder::new()
                 .name("fullbleed-authoring-layout".into())
                 .stack_size(AUTHORING_LAYOUT_STACK_BYTES)
-                .spawn_scoped(scope, || self.render_to_document(request.html, request.css))
+                .spawn_scoped(scope, || {
+                    let _asset_scope = crate::assets::AssetReadScope::enter(asset_audit.clone());
+                    self.render_to_document(request.html, request.css)
+                })
                 .map_err(FullBleedError::Io)?;
             worker.join().map_err(|_| {
                 FullBleedError::InvalidConfiguration(
@@ -1211,6 +1244,12 @@ impl FullBleed {
             total: png_pages.len(),
             elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
         });
+        if asset_audit
+            .as_ref()
+            .is_some_and(|audit| audit.blocked.load(Ordering::Relaxed) != 0)
+        {
+            return Err(FullBleedError::InvalidConfiguration("ASSET_FILESYSTEM_BLOCKED: Authoring preview requires supplied asset bytes; vendor the missing image or use an inline data URI".into()));
+        }
         let layout = layout_snapshot(request.html, &document);
         let reading = reading_preview(&document);
         let mut diagnostics = if layout.nodes.iter().all(|node| node.geometry_available) {
@@ -1263,6 +1302,121 @@ impl FullBleed {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundled_authoring_blocks_image_reads_in_layout_and_emission() {
+        let fixture = std::env::temp_dir().join(format!(
+            "fullbleed-authoring-policy-{}-{}.png",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&fixture, b"PRIVATE-ASSET-CANARY").unwrap();
+        let path = fixture.to_string_lossy().replace('\\', "/");
+        let engine = FullBleed::builder().build().unwrap();
+        let cancellation = AuthoringCancellationToken::new();
+        for (html, css) in [
+            (
+                format!("<html><body><img src='{path}' width='10' height='10'></body></html>"),
+                String::new(),
+            ),
+            (
+                "<html><body><p>Background</p></body></html>".into(),
+                format!("p {{ width: 100pt; height: 100pt; background-image: url('{path}'); }}"),
+            ),
+        ] {
+            let result = engine.render_authoring_preview_bundled_assets(
+                AuthoringPreviewRequest {
+                    html: &html,
+                    css: &css,
+                    dpi: 72,
+                },
+                &cancellation,
+                |_| {},
+            );
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("ASSET_FILESYSTEM_BLOCKED")
+            );
+        }
+        let html = "<html><body><h1>Safe source</h1></body></html>";
+        let first = engine
+            .render_authoring_preview(
+                AuthoringPreviewRequest {
+                    html,
+                    css: "",
+                    dpi: 72,
+                },
+                &cancellation,
+                |_| {},
+            )
+            .unwrap();
+        let restricted = engine
+            .render_authoring_preview_bundled_assets(
+                AuthoringPreviewRequest {
+                    html,
+                    css: "",
+                    dpi: 72,
+                },
+                &cancellation,
+                |_| {},
+            )
+            .unwrap();
+        assert_eq!(first.pdf, restricted.pdf);
+        assert_eq!(first.png_pages, restricted.png_pages);
+        std::fs::remove_file(fixture).unwrap();
+    }
+
+    #[test]
+    fn bundled_authoring_resolves_supplied_css_backgrounds_without_filesystem_access() {
+        let png = crate::image_native::encode_png_rgba8(&[10, 180, 70, 255], 1, 1).unwrap();
+        let mut bundle = crate::assets::AssetBundle::default();
+        bundle.add(crate::assets::Asset::new(
+            "scoped-background.png".into(),
+            crate::assets::AssetKind::Image,
+            png.clone(),
+            None,
+            false,
+        ));
+        let engine = FullBleed::builder()
+            .register_bundle(bundle)
+            .build()
+            .unwrap();
+        let html = "<html><body><p>Supplied background</p></body></html>";
+        let css = "p {width:100pt; height:100pt; background-image:url('scoped-background.png');}";
+        let cancellation = AuthoringCancellationToken::new();
+        let restricted = engine
+            .render_authoring_preview_bundled_assets(
+                AuthoringPreviewRequest { html, css, dpi: 72 },
+                &cancellation,
+                |_| {},
+            )
+            .unwrap();
+        let inline_css = css.replace(
+            "scoped-background.png",
+            &format!(
+                "data:image/png;base64,{}",
+                crate::base64::encode_standard(png)
+            ),
+        );
+        let inline = engine
+            .render_authoring_preview_bundled_assets(
+                AuthoringPreviewRequest {
+                    html,
+                    css: &inline_css,
+                    dpi: 72,
+                },
+                &cancellation,
+                |_| {},
+            )
+            .unwrap();
+        assert_eq!(restricted.png_pages, inline.png_pages);
+        assert_eq!(restricted.pdf, inline.pdf);
+    }
 
     #[test]
     fn authoring_language_report_uses_engine_html_and_css_parsers() {

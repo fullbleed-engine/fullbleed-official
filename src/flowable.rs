@@ -60,7 +60,7 @@ fn image_intrinsic_size_pt(source: &str) -> Option<(Pt, Pt)> {
     let bytes = if let Some((_, data)) = parse_image_data_uri(source) {
         data
     } else {
-        std::fs::read(FsPath::new(source)).ok()?
+        crate::assets::read_asset_path(FsPath::new(source)).ok()?
     };
     let (width, height) = crate::image_native::dimensions(&bytes).ok()?;
     if width == 0 || height == 0 {
