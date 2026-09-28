@@ -8472,7 +8472,7 @@ fn page_box_entries(profile: PdfProfile, geometry: PageGeometry) -> String {
 fn info_object(title: Option<&str>, profile: PdfProfile) -> String {
     let mut entries: Vec<String> = Vec::new();
     if let Some(title) = title {
-        entries.push(format!("/Title ({})", escape_pdf_string(title)));
+        entries.push(format!("/Title {}", pdf_text_string(title)));
     }
     if matches!(profile, PdfProfile::PdfX4 | PdfProfile::PdfVt1) {
         entries.push("/GTS_PDFXVersion (PDF/X-4)".to_string());
@@ -10647,6 +10647,44 @@ mod tests {
             count_token(&bytes, format!("/g{:04X}", glyph_id).as_bytes()),
             2
         );
+    }
+
+    #[test]
+    fn document_metadata_title_uses_pdf_text_encoding_without_changing_ascii() {
+        assert_eq!(
+            info_object(Some("Account (A)\\B"), PdfProfile::None),
+            r"<< /Title (Account \(A\)\\B) >>"
+        );
+        for profile in [PdfProfile::None, PdfProfile::Tagged, PdfProfile::PdfUa1] {
+            assert!(info_object(Some("Crédit & résumé"), profile).contains(
+                "/Title <FEFF0043007200E9006400690074002000260020007200E900730075006D00E9>"
+            ));
+            assert!(
+                info_object(Some("東京 🧾"), profile).contains("/Title <FEFF67714EAC0020D83EDDFE>")
+            );
+        }
+    }
+
+    #[test]
+    fn document_metadata_unicode_title_matches_info_and_xmp_in_rendered_pdf() {
+        let doc = one_page_document(vec![]);
+        let options = PdfOptions {
+            pdf_profile: PdfProfile::Tagged,
+            document_lang: Some("fr-CA".to_string()),
+            document_title: Some("Crédit & résumé".to_string()),
+            ..PdfOptions::default()
+        };
+        let bytes = document_to_pdf_with_metrics_and_registry(&doc, None, None, &options)
+            .expect("render Unicode metadata");
+        let pdf = String::from_utf8_lossy(&bytes);
+        assert!(
+            pdf.contains(
+                "/Title <FEFF0043007200E9006400690074002000260020007200E900730075006D00E9>"
+            )
+        );
+        assert!(pdf.contains("/Lang (fr-CA)"));
+        assert!(pdf.contains("Crédit &amp; résumé</rdf:li>"));
+        assert!(!pdf.contains("/Title (Crédit"));
     }
 
     #[test]

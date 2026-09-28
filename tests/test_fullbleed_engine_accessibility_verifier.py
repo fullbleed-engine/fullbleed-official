@@ -27,6 +27,17 @@ def test_figure_title_does_not_satisfy_document_title_requirement(tmp_path: Path
     assert any(row["rule_id"] == "fb.a11y.html.title_present_nonempty" for row in report["blocking_issue_summary"])
 
 
+@pytest.mark.parametrize("title", ["Crédit & résumé", "東京 🧾"])
+def test_document_title_uses_unicode_pdf_text_string(title: str) -> None:
+    _require_pdf_engine()
+    engine = fullbleed.PdfEngine(pdf_profile="tagged", document_lang="fr-CA", document_title=title)
+    pdf = engine.render_pdf("<html><body><p>Body</p></body></html>", "body {font-family:Helvetica}")
+    encoded = b"/Title <FEFF" + title.encode("utf-16-be").hex().upper().encode("ascii") + b">"
+    assert encoded in pdf
+    assert b"/Lang (fr-CA)" in pdf
+    assert title.replace("&", "&amp;").encode("utf-8") in pdf
+
+
 def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
