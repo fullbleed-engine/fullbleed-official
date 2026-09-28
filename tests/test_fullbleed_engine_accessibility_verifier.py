@@ -18,6 +18,15 @@ def _require_pdf_engine() -> None:
         pytest.skip("fullbleed native extension is not available in this test environment")
 
 
+def test_figure_title_does_not_satisfy_document_title_requirement(tmp_path: Path) -> None:
+    _require_pdf_engine()
+    html = _write(tmp_path / "doc.html", "<!doctype html><html lang='en'><head></head><body><main><svg><title>Figure name</title></svg><p>Body</p></main></body></html>")
+    css = _write(tmp_path / "doc.css", "body { font-family: Helvetica; }")
+    engine = fullbleed.PdfEngine(document_lang="en", document_title="Figure name")
+    report = engine.verify_accessibility_artifacts(str(html), str(css), profile="strict", mode="error")
+    assert any(row["rule_id"] == "fb.a11y.html.title_present_nonempty" for row in report["blocking_issue_summary"])
+
+
 def _write(path: Path, text: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")

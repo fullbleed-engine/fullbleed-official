@@ -9,6 +9,7 @@ mod css_queries;
 mod debug;
 mod doc_context;
 mod doc_template;
+mod document_metadata;
 mod error;
 mod finalize;
 mod flate_native;
@@ -79,6 +80,7 @@ pub use chart_document::{ChartDocumentArtifact, ChartDocumentEntry, PreparedChar
 use debug::DebugLogger;
 pub use doc_context::DocContext;
 pub use doc_template::DocTemplate;
+pub use document_metadata::{AuthoringDocumentMetadata, inspect_document_metadata};
 pub use error::FullBleedError;
 pub use finalize::{
     BindingSource, ComposeAnnotationMode, ComposePagePlan, FinalizeComposeSummary,
@@ -3646,23 +3648,9 @@ impl FullBleed {
     fn verify_accessibility_html_facts(&self, html: &str) -> A11yVerifierFacts {
         let document = html_dom::parse_html(html);
 
-        let mut html_lang: Option<String> = None;
-        if let Ok(mut html_nodes) = document.select("html") {
-            if let Some(node) = html_nodes.next() {
-                let attrs = node.attributes.borrow();
-                html_lang = attrs.get("lang").map(|v| v.trim().to_string());
-                if matches!(html_lang.as_deref(), Some("")) {
-                    html_lang = None;
-                }
-            }
-        }
-
-        let mut title = String::new();
-        if let Ok(mut titles) = document.select("head title, title") {
-            if let Some(node) = titles.next() {
-                title = node.text_contents().trim().to_string();
-            }
-        }
+        let metadata = document_metadata::metadata_from_document(&document);
+        let html_lang = metadata.language.filter(|value| !value.is_empty());
+        let title = metadata.title.unwrap_or_default();
 
         let mut main_count = 0usize;
         if let Ok(nodes) = document.select("main") {
