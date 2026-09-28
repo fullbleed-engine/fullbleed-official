@@ -2978,67 +2978,29 @@ fn node_to_flowables(
                             .or_else(|| attrs.get("title"))
                             .map(|s| s.to_string());
                         if let Some(xml) = svg_xml {
-                            if svg_raster_fallback && crate::svg::svg_needs_raster_fallback(&xml) {
-                                if let Some(data_uri) =
-                                    crate::svg::rasterize_svg_to_data_uri(&xml, width, height)
-                                {
-                                    let image = ImageFlowable::new_pt(width, height, data_uri)
-                                        .with_available_size(true)
-                                        .with_object_fit(style.object_fit)
-                                        .with_object_position(style.object_position)
-                                        .with_image_rendering(style.image_rendering)
-                                        .with_intrinsic_size(intrinsic_size)
-                                        .with_font_metrics(style.font_size, style.root_font_size)
-                                        .with_visible(style.visibility.paints())
-                                        .with_tag_role("Figure")
-                                        .with_alt(alt);
-                                    replaced_image_flowables(image, &style, replaced_sizing)
-                                } else {
-                                    let xml_len = xml.len() as u64;
-                                    let t_svg = std::time::Instant::now();
-                                    let svg = SvgFlowable::new_pt(width, height, xml)
-                                        .with_form_enabled(svg_form)
-                                        .with_object_fit(style.object_fit)
-                                        .with_object_position(style.object_position)
-                                        .with_intrinsic_size(intrinsic_size)
-                                        .with_font_metrics(style.font_size, style.root_font_size)
-                                        .with_visible(style.visibility.paints())
-                                        .with_tag_role("Figure")
-                                        .with_alt(alt);
-                                    if let Some(perf_logger) = perf {
-                                        let ms = t_svg.elapsed().as_secs_f64() * 1000.0;
-                                        perf_logger.log_span_ms("svg.compile", None, ms);
-                                        perf_logger.log_counts(
-                                            "svg.compile",
-                                            None,
-                                            &[("bytes", xml_len)],
-                                        );
-                                    }
-                                    replaced_svg_image_flowables(svg, &style, replaced_sizing)
-                                }
-                            } else {
-                                let xml_len = xml.len() as u64;
-                                let t_svg = std::time::Instant::now();
-                                let svg = SvgFlowable::new_pt(width, height, xml)
-                                    .with_form_enabled(svg_form)
-                                    .with_object_fit(style.object_fit)
-                                    .with_object_position(style.object_position)
-                                    .with_intrinsic_size(intrinsic_size)
-                                    .with_font_metrics(style.font_size, style.root_font_size)
-                                    .with_visible(style.visibility.paints())
-                                    .with_tag_role("Figure")
-                                    .with_alt(alt);
-                                if let Some(perf_logger) = perf {
-                                    let ms = t_svg.elapsed().as_secs_f64() * 1000.0;
-                                    perf_logger.log_span_ms("svg.compile", None, ms);
-                                    perf_logger.log_counts(
-                                        "svg.compile",
-                                        None,
-                                        &[("bytes", xml_len)],
-                                    );
-                                }
-                                replaced_svg_image_flowables(svg, &style, replaced_sizing)
+                            let raster_fallback =
+                                svg_raster_fallback && crate::svg::svg_needs_raster_fallback(&xml);
+                            let xml_len = xml.len() as u64;
+                            let t_svg = std::time::Instant::now();
+                            let svg = SvgFlowable::new_pt(width, height, xml)
+                                .with_form_enabled(svg_form)
+                                .with_replaced_raster_fallback(
+                                    raster_fallback,
+                                    style.image_rendering,
+                                )
+                                .with_object_fit(style.object_fit)
+                                .with_object_position(style.object_position)
+                                .with_intrinsic_size(intrinsic_size)
+                                .with_font_metrics(style.font_size, style.root_font_size)
+                                .with_visible(style.visibility.paints())
+                                .with_tag_role("Figure")
+                                .with_alt(alt);
+                            if let Some(perf_logger) = perf {
+                                let ms = t_svg.elapsed().as_secs_f64() * 1000.0;
+                                perf_logger.log_span_ms("svg.compile", None, ms);
+                                perf_logger.log_counts("svg.compile", None, &[("bytes", xml_len)]);
                             }
+                            replaced_svg_image_flowables(svg, &style, replaced_sizing)
                         } else {
                             let image_source =
                                 renderable_image_source(asset_bundle.as_deref(), src)
@@ -16485,7 +16447,11 @@ fn replaced_svg_image_flowables(
     style: &ComputedStyle,
     sizing: ReplacedImageSizing,
 ) -> Vec<LayoutItem> {
-    if is_direct_fixed_replaced_box(style, sizing) {
+    // CSS object-fit chooses the concrete SVG viewport. Compiling into the
+    // nominal CSS frame and then fitting that surface would apply SVG's
+    // preserveAspectRatio twice (or stretch it when percentages resolve).
+    svg = svg.with_replaced_viewport();
+    if is_direct_fixed_replaced_box(style, sizing) && style.paint_filter.is_none() {
         svg = svg
             .with_available_size(false)
             .with_pagination(style.pagination)

@@ -11340,14 +11340,54 @@ mod image_flowable_tests {
 }
 
 #[derive(Debug, Clone)]
+struct SvgCompiledSurface {
+    size: Size,
+    items: Vec<svg::CompiledItem>,
+    text_identity: u64,
+    authoring_fragments: Vec<svg::SvgAuthoringFragment>,
+    raster_source: Option<String>,
+}
+
+impl SvgCompiledSurface {
+    fn compile(
+        xml: &str,
+        size: Size,
+        font: Option<&svg::SvgFontContext>,
+        raster_fallback: bool,
+    ) -> Arc<Self> {
+        let items = svg::compile_svg_with_font_context(xml, size.width, size.height, font);
+        Arc::new(Self {
+            size,
+            text_identity: svg::compiled_text_identity(&items),
+            authoring_fragments: svg::authoring_fragments(&items),
+            raster_source: raster_fallback
+                .then(|| {
+                    svg::rasterize_svg_to_data_uri_with_font_context(
+                        xml,
+                        size.width,
+                        size.height,
+                        font,
+                    )
+                })
+                .flatten(),
+            items,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct SvgFlowable {
     width: Pt,
     height: Pt,
-    compiled_size: Size,
     svg_xml: String,
-    compiled: std::sync::Arc<Vec<svg::CompiledItem>>,
-    compiled_text_identity: u64,
-    authoring_fragments: std::sync::Arc<Vec<svg::SvgAuthoringFragment>>,
+    compiled: Arc<SvgCompiledSurface>,
+    // Only external/replaced SVG images resolve a new SVG viewport after CSS
+    // layout and object-fit. Inline SVG keeps its inherited font context and
+    // existing compiled coordinate space. Keep one recent viewport, not an
+    // unbounded cache of per-record sizes in a variable-data job.
+    replaced_viewport: Option<Arc<std::sync::Mutex<Option<Arc<SvgCompiledSurface>>>>>,
+    raster_fallback: bool,
+    image_rendering: ImageRenderingMode,
     use_available_size: bool,
     object_fit: ObjectFitMode,
     object_position: BackgroundPositionSpec,
@@ -11386,19 +11426,15 @@ impl SvgFlowable {
         let width = width.max(Pt::ZERO);
         let height = height.max(Pt::ZERO);
         let svg_xml = svg_xml.into();
-        let compiled = std::sync::Arc::new(svg::compile_svg_with_font_context(
-            &svg_xml, width, height, font,
-        ));
-        let compiled_text_identity = svg::compiled_text_identity(&compiled);
-        let authoring_fragments = std::sync::Arc::new(svg::authoring_fragments(&compiled));
+        let compiled = SvgCompiledSurface::compile(&svg_xml, Size { width, height }, font, false);
         Self {
             width,
             height,
-            compiled_size: Size { width, height },
             svg_xml,
             compiled,
-            compiled_text_identity,
-            authoring_fragments,
+            replaced_viewport: None,
+            raster_fallback: false,
+            image_rendering: ImageRenderingMode::Auto,
             use_available_size: false,
             object_fit: ObjectFitMode::Fill,
             object_position: BackgroundPositionSpec::center(),
@@ -11419,6 +11455,40 @@ impl SvgFlowable {
     pub fn with_pagination(mut self, pagination: Pagination) -> Self {
         self.pagination = pagination;
         self
+    }
+
+    pub(crate) fn with_replaced_viewport(mut self) -> Self {
+        self.replaced_viewport = Some(Arc::new(std::sync::Mutex::new(None)));
+        self
+    }
+
+    pub(crate) fn with_replaced_raster_fallback(
+        mut self,
+        enabled: bool,
+        image_rendering: ImageRenderingMode,
+    ) -> Self {
+        self.raster_fallback = enabled;
+        self.image_rendering = image_rendering;
+        self
+    }
+
+    fn compiled_for_viewport(&self, width: Pt, height: Pt) -> Arc<SvgCompiledSurface> {
+        let size = Size { width, height };
+        let Some(cache) = self.replaced_viewport.as_ref() else {
+            return Arc::clone(&self.compiled);
+        };
+        if self.compiled.size == size && !self.raster_fallback {
+            return Arc::clone(&self.compiled);
+        }
+        let mut cached = cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(surface) = cached.as_ref().filter(|surface| surface.size == size) {
+            return Arc::clone(surface);
+        }
+        let surface = SvgCompiledSurface::compile(&self.svg_xml, size, None, self.raster_fallback);
+        *cached = Some(Arc::clone(&surface));
+        surface
     }
 
     pub(crate) fn with_available_size(mut self, enabled: bool) -> Self {
@@ -11510,27 +11580,26 @@ impl SvgFlowable {
         )
     }
 
-    fn form_id(&self, isolated: bool) -> String {
+    fn form_id(&self, surface: &SvgCompiledSurface, isolated: bool) -> String {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.svg_xml.hash(&mut hasher);
-        self.compiled_size.width.to_milli_i64().hash(&mut hasher);
-        self.compiled_size.height.to_milli_i64().hash(&mut hasher);
-        self.compiled_text_identity.hash(&mut hasher);
+        surface.size.width.to_milli_i64().hash(&mut hasher);
+        surface.size.height.to_milli_i64().hash(&mut hasher);
+        surface.text_identity.hash(&mut hasher);
+        if surface.raster_source.is_some() {
+            "raster-fallback".hash(&mut hasher);
+            (self.image_rendering == ImageRenderingMode::Pixelated).hash(&mut hasher);
+        }
         let prefix = if isolated { "svg-blend" } else { "svg" };
         format!("{prefix}:{:x}", hasher.finish())
     }
 
-    fn compiled_form_commands(&self) -> Vec<Command> {
-        let mut temp = Canvas::new(self.compiled_size);
+    fn compiled_form_commands(&self, surface: &SvgCompiledSurface) -> Vec<Command> {
+        let mut temp = Canvas::new(surface.size);
         temp.save_state();
-        temp.clip_rect(
-            Pt::ZERO,
-            Pt::ZERO,
-            self.compiled_size.width,
-            self.compiled_size.height,
-        );
-        svg::render_compiled_items(&self.compiled, &mut temp, Pt::ZERO, Pt::ZERO);
+        temp.clip_rect(Pt::ZERO, Pt::ZERO, surface.size.width, surface.size.height);
+        self.paint_surface(surface, &mut temp, Pt::ZERO, Pt::ZERO);
         temp.restore_state();
         temp.finish()
             .pages
@@ -11539,8 +11608,25 @@ impl SvgFlowable {
             .unwrap_or_default()
     }
 
+    fn paint_surface(&self, surface: &SvgCompiledSurface, canvas: &mut Canvas, x: Pt, y: Pt) {
+        if let Some(source) = surface.raster_source.as_ref() {
+            canvas.draw_image_with_interpolation_and_source_clip(
+                x,
+                y,
+                surface.size.width,
+                surface.size.height,
+                source.clone(),
+                self.image_rendering != ImageRenderingMode::Pixelated,
+                None,
+            );
+        } else {
+            svg::render_compiled_items(&surface.items, canvas, x, y);
+        }
+    }
+
     fn record_authoring_fragments(
         &self,
+        surface: &SvgCompiledSurface,
         canvas: &mut Canvas,
         paint_x: Pt,
         paint_y: Pt,
@@ -11548,18 +11634,18 @@ impl SvgFlowable {
         paint_height: Pt,
         clip: Rect,
     ) {
-        if self.compiled_size.width <= Pt::ZERO
-            || self.compiled_size.height <= Pt::ZERO
+        if surface.size.width <= Pt::ZERO
+            || surface.size.height <= Pt::ZERO
             || paint_width <= Pt::ZERO
             || paint_height <= Pt::ZERO
         {
             return;
         }
-        let scale_x = paint_width.to_f32() / self.compiled_size.width.to_f32();
-        let scale_y = paint_height.to_f32() / self.compiled_size.height.to_f32();
+        let scale_x = paint_width.to_f32() / surface.size.width.to_f32();
+        let scale_y = paint_height.to_f32() / surface.size.height.to_f32();
         let clip_right = clip.x + clip.width;
         let clip_bottom = clip.y + clip.height;
-        for fragment in self.authoring_fragments.iter() {
+        for fragment in &surface.authoring_fragments {
             let left = (paint_x + Pt::from_f32(fragment.x.to_f32() * scale_x)).max(clip.x);
             let top = (paint_y + Pt::from_f32(fragment.y.to_f32() * scale_y)).max(clip.y);
             let right = (paint_x + Pt::from_f32((fragment.x + fragment.width).to_f32() * scale_x))
@@ -11660,6 +11746,7 @@ impl Flowable for SvgFlowable {
             self.object_fit_rect(fit_area.width, fit_area.height);
         let paint_x = x + offset_x;
         let paint_y = y + offset_y - self.slice_offset_y;
+        let surface = self.compiled_for_viewport(width, height);
 
         // A replaced SVG is one compiled vector surface. Pagination only
         // changes the page-local clip and translation; it never recompiles or
@@ -11667,32 +11754,30 @@ impl Flowable for SvgFlowable {
         canvas.save_state();
         canvas.clip_rect(x, y, area.width, area.height);
         if self.mix_blend_mode != MixBlendMode::Normal {
-            let form_id = self.form_id(true);
+            let form_id = self.form_id(&surface, true);
             canvas.define_isolated_form(
                 form_id.clone(),
-                self.compiled_size.width,
-                self.compiled_size.height,
-                self.compiled_form_commands(),
+                surface.size.width,
+                surface.size.height,
+                self.compiled_form_commands(&surface),
             );
             canvas.set_blend_mode(self.mix_blend_mode);
             canvas.draw_form(paint_x, paint_y, width, height, form_id);
-        } else if self.use_form
-            || width != self.compiled_size.width
-            || height != self.compiled_size.height
-        {
-            let form_id = self.form_id(false);
+        } else if self.use_form || width != surface.size.width || height != surface.size.height {
+            let form_id = self.form_id(&surface, false);
             canvas.define_form(
                 form_id.clone(),
-                self.compiled_size.width,
-                self.compiled_size.height,
-                self.compiled_form_commands(),
+                surface.size.width,
+                surface.size.height,
+                self.compiled_form_commands(&surface),
             );
             canvas.draw_form(paint_x, paint_y, width, height, form_id);
         } else {
-            svg::render_compiled_items(&self.compiled, canvas, paint_x, paint_y);
+            self.paint_surface(&surface, canvas, paint_x, paint_y);
         }
         canvas.restore_state();
         self.record_authoring_fragments(
+            &surface,
             canvas,
             paint_x,
             paint_y,
@@ -11721,6 +11806,59 @@ mod svg_flowable_tests {
     use crate::Canvas;
     use crate::canvas::{Command, META_FLOWABLE_BBOX_KEY};
     use crate::types::{MixBlendMode, Pt, Size};
+
+    #[test]
+    fn replaced_svg_viewports_are_compiled_at_the_fitted_size_and_reused() {
+        let svg = SvgFlowable::new(180.0, 180.0,
+            "<svg width='600' height='200' viewBox='0 0 600 200'><rect data-fb-id='shape' width='600' height='200'/></svg>")
+            .with_replaced_viewport()
+            .with_intrinsic_size(Some((Pt::from_f32(450.0), Pt::from_f32(150.0))))
+            .with_object_fit(crate::style::ObjectFitMode::Contain);
+        let (_, _, width, height, _) =
+            svg.object_fit_rect(Pt::from_f32(180.0), Pt::from_f32(180.0));
+        assert_eq!((width, height), (Pt::from_f32(180.0), Pt::from_f32(60.0)));
+        let surface = svg.compiled_for_viewport(width, height);
+        assert_eq!(surface.size, Size { width, height });
+        assert!(std::sync::Arc::ptr_eq(
+            &surface,
+            &svg.compiled_for_viewport(width, height)
+        ));
+        let shape = surface
+            .authoring_fragments
+            .iter()
+            .find(|item| item.source_id == "shape")
+            .unwrap();
+        assert_eq!((shape.y, shape.height), (Pt::ZERO, height));
+        let changed = svg.compiled_for_viewport(Pt::from_f32(90.0), Pt::from_f32(30.0));
+        assert!(!std::sync::Arc::ptr_eq(&surface, &changed));
+        assert!(std::sync::Arc::ptr_eq(
+            &changed,
+            &svg.compiled_for_viewport(Pt::from_f32(90.0), Pt::from_f32(30.0))
+        ));
+        assert_eq!(std::sync::Arc::strong_count(&surface), 1); // old viewport was evicted
+    }
+
+    #[test]
+    fn replaced_svg_fragmentation_keeps_one_full_viewport() {
+        let svg = SvgFlowable::new(100.0, 300.0,
+            "<svg width='100' height='100' viewBox='0 0 100 100'><rect width='100' height='100'/></svg>")
+            .with_replaced_viewport()
+            .with_form_enabled(true);
+        let (_, second) = svg.split(Pt::from_f32(100.0), Pt::from_f32(100.0)).unwrap();
+        let mut canvas = Canvas::new(Size {
+            width: Pt::from_f32(100.0),
+            height: Pt::from_f32(200.0),
+        });
+        second.draw(
+            &mut canvas,
+            Pt::ZERO,
+            Pt::ZERO,
+            Pt::from_f32(100.0),
+            Pt::from_f32(200.0),
+        );
+        let document = canvas.finish();
+        assert!(document.pages[0].commands.iter().any(|command| matches!(command, Command::DrawForm { y, height, .. } if *y == Pt::from_f32(-100.0) && *height == Pt::from_f32(300.0))));
+    }
 
     #[test]
     fn svg_mix_blend_mode_groups_the_vector_content() {
