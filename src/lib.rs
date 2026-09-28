@@ -20,6 +20,7 @@ mod glyph_report;
 mod html;
 mod html_dom;
 mod html_entities;
+mod icc;
 mod image_native;
 mod jit;
 mod jpeg_native;
@@ -32,6 +33,7 @@ mod parallel;
 mod pdf;
 mod pdf_encodings;
 mod pdf_native;
+mod pdf_profile;
 mod pdf_raster;
 mod pdfinspect;
 mod perf;
@@ -100,6 +102,7 @@ pub use frame::{AddResult, Frame};
 use fullbleed_audit_contract as audit_contract;
 pub use glyph_report::{GlyphCoverageReport, MissingGlyph};
 use html_dom::{NodeData, NodeRef};
+pub use icc::{IccProfileError, IccProfileInfo, inspect_output_intent_icc};
 pub use jit::JitMode;
 pub use metrics::{DocumentMetrics, PageMetrics};
 pub use page_data::{PageDataContext, PageDataOp, PageDataValue, PaginatedContextSpec};
@@ -107,6 +110,7 @@ use page_template::PageSelector;
 pub use page_template::{FrameSpec, PageTemplate};
 use pdf::PdfOptions;
 pub use pdf::{CompiledFlowCompression, OutputIntent, PdfProfile, PdfVersion};
+pub use pdf_profile::{ParsePdfProfileError, PdfProfileDescriptor};
 pub use pdfinspect::{
     PdfInspectError, PdfInspectErrorCode, PdfInspectReport, PdfInspectWarning,
     composition_compatibility_issues, inspect_pdf_bytes, inspect_pdf_path,

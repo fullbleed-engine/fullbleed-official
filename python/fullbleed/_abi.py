@@ -13,6 +13,11 @@ def _call(handle, operation, *payload):
     return _native._dispatch(handle, operation, payload)
 
 
+def pdf_profile_catalog():
+    """Engine-owned profile names, aliases and emission requirements (not conformance)."""
+    return _call(None, "pdf_profile_catalog")
+
+
 def _require_string(value, name):
     if not isinstance(value, str):
         raise TypeError(f"{name} must be a string")
@@ -926,6 +931,7 @@ def audit_sparse_page_visual_pair(source_png_path, render_png_path):
 
 
 __all__ = [
+    "pdf_profile_catalog",
     "PdfEngine",
     "CompiledDocument",
     "CompiledFlowCompression",

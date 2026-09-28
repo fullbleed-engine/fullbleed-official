@@ -1596,34 +1596,10 @@ fn parse_pdf_profile(arg: Option<&Bound<'_, PyAny>>) -> PyResult<Option<PdfProfi
         return Ok(None);
     }
     if let Ok(s) = arg.extract::<String>() {
-        let raw = s.trim().to_ascii_lowercase();
-        let profile = match raw.as_str() {
-            "" | "none" => PdfProfile::None,
-            "a" | "pdfa" | "pdf/a" | "pdfa2b" | "pdfa-2b" | "pdfa_2b" => PdfProfile::PdfA2b,
-            "pdfa1a" | "pdfa-1a" | "pdfa_1a" | "pdf/a-1a" | "pdf/a1a" => PdfProfile::PdfA1a,
-            "pdfa1b" | "pdfa-1b" | "pdfa_1b" | "pdf/a-1b" | "pdf/a1b" => PdfProfile::PdfA1b,
-            "pdfa2a" | "pdfa-2a" | "pdfa_2a" | "pdf/a-2a" | "pdf/a2a" => PdfProfile::PdfA2a,
-            "pdfa2u" | "pdfa-2u" | "pdfa_2u" | "pdf/a-2u" | "pdf/a2u" => PdfProfile::PdfA2u,
-            "pdfa3a" | "pdfa-3a" | "pdfa_3a" | "pdf/a-3a" | "pdf/a3a" => PdfProfile::PdfA3a,
-            "pdfa3b" | "pdfa-3b" | "pdfa_3b" | "pdf/a-3b" | "pdf/a3b" => PdfProfile::PdfA3b,
-            "pdfa3u" | "pdfa-3u" | "pdfa_3u" | "pdf/a-3u" | "pdf/a3u" => PdfProfile::PdfA3u,
-            "pdfa4" | "pdfa-4" | "pdfa_4" | "pdf/a-4" | "pdf/a4" => PdfProfile::PdfA4,
-            "pdfa4e" | "pdfa-4e" | "pdfa_4e" | "pdf/a-4e" | "pdf/a4e" => PdfProfile::PdfA4e,
-            "pdfa4f" | "pdfa-4f" | "pdfa_4f" | "pdf/a-4f" | "pdf/a4f" => PdfProfile::PdfA4f,
-            "pdfx4" | "pdfx-4" | "pdfx_4" | "pdf/x-4" | "pdf/x4" => PdfProfile::PdfX4,
-            "ua" | "pdfua" | "pdfua1" | "pdfua-1" | "pdf/ua" | "pdf/ua-1" => PdfProfile::PdfUa1,
-            "pdfua2" | "pdfua-2" | "pdf/ua-2" => PdfProfile::PdfUa2,
-            "vt" | "pdfvt" | "pdfvt1" | "pdfvt-1" | "pdf/vt" | "pdf/vt-1" => PdfProfile::PdfVt1,
-            "wtpdf1r" | "wtpdf-1r" | "wtpdf_1r" | "wt1r" | "wt-1r" => PdfProfile::Wtpdf1r,
-            "wtpdf1a" | "wtpdf-1a" | "wtpdf_1a" | "wt1a" | "wt-1a" => PdfProfile::Wtpdf1a,
-            "tagged" => PdfProfile::Tagged,
-            _ => {
-                return Err(PyValueError::new_err(format!(
-                    "Invalid pdf_profile: {s:?}. Expected one of: none, pdfa1a, pdfa1b, pdfa2a, pdfa2b, pdfa2u, pdfa3a, pdfa3b, pdfa3u, pdfa4, pdfa4e, pdfa4f, pdfx4, pdfua1, pdfua2, pdfvt1, wtpdf1r, wtpdf1a, tagged"
-                )));
-            }
-        };
-        return Ok(Some(profile));
+        return s
+            .parse::<PdfProfile>()
+            .map(Some)
+            .map_err(|error| PyValueError::new_err(error.to_string()));
     }
     Err(PyValueError::new_err(
         "pdf_profile must be a string like 'pdfua1', 'pdfua2', 'pdfa2a', 'pdfa2u', 'pdfa4', 'pdfa4e', 'pdfa4f', 'pdfvt1', 'wtpdf1r', 'wtpdf1a', 'tagged', or 'pdfx4'",

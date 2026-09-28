@@ -337,6 +337,307 @@ Do not prefer Fullbleed for:
     "wtpdf_1a": "wtpdf1a",
     "wtpdf_1r": "wtpdf1r"
   },
+  "pdf_profile_catalog": [
+    {
+      "aliases": [
+        "none"
+      ],
+      "default_pdf_version": "1.7",
+      "emits_tagged_structure": false,
+      "fixed_bindings_supported": true,
+      "name": "none",
+      "requires_embedded_fonts": false,
+      "requires_output_intent": false,
+      "uses_pdfx_page_boxes": false
+    },
+    {
+      "aliases": [
+        "pdfa1a",
+        "pdfa-1a",
+        "pdfa_1a",
+        "pdf/a-1a",
+        "pdf/a1a"
+      ],
+      "default_pdf_version": "1.7",
+      "emits_tagged_structure": true,
+      "fixed_bindings_supported": false,
+      "name": "pdfa1a",
+      "requires_embedded_fonts": true,
+      "requires_output_intent": true,
+      "uses_pdfx_page_boxes": false
+    },
+    {
+      "aliases": [
+        "pdfa1b",
+        "pdfa-1b",
+        "pdfa_1b",
+        "pdf/a-1b",
+        "pdf/a1b"
+      ],
+      "default_pdf_version": "1.7",
+      "emits_tagged_structure": false,
+      "fixed_bindings_supported": true,
+      "name": "pdfa1b",
+      "requires_embedded_fonts": true,
+      "requires_output_intent": true,
+      "uses_pdfx_page_boxes": false
+    },
+    {
+      "aliases": [
+        "pdfa2a",
+        "pdfa-2a",
+        "pdfa_2a",
+        "pdf/a-2a",
+        "pdf/a2a"
+      ],
+      "default_pdf_version": "1.7",
+      "emits_tagged_structure": true,
+      "fixed_bindings_supported": false,
+      "name": "pdfa2a",
+      "requires_embedded_fonts": true,
+      "requires_output_intent": true,
+      "uses_pdfx_page_boxes": false
+    },
+    {
+      "aliases": [
+        "pdfa2b",
+        "pdfa-2b",
+        "pdfa_2b",
+        "pdf/a-2b",
+        "pdf/a2b",
+        "a",
+        "pdfa",
+        "pdf/a"
+      ],
+      "default_pdf_version": "1.7",
+      "emits_tagged_structure": false,
+      "fixed_bindings_supported": true,
+      "name": "pdfa2b",
+      "requires_embedded_fonts": true,
+      "requires_output_intent": true,
+      "uses_pdfx_page_boxes": false
+    },
+    {
+      "aliases": [
+        "pdfa2u",
+        "pdfa-2u",
+        "pdfa_2u",
+        "pdf/a-2u",
+        "pdf/a2u"
+      ],
+      "default_pdf_version": "1.7",
+      "emits_tagged_structure": false,
+      "fixed_bindings_supported": true,
+      "name": "pdfa2u",
+      "requires_embedded_fonts": true,
+      "requires_output_intent": true,
+      "uses_pdfx_page_boxes": false
+    },
+    {
+      "aliases": [
+        "pdfa3a",
+        "pdfa-3a",
+        "pdfa_3a",
+        "pdf/a-3a",
+        "pdf/a3a"
+      ],
+      "default_pdf_version": "1.7",
+      "emits_tagged_structure": true,
+      "fixed_bindings_supported": false,
+      "name": "pdfa3a",
+      "requires_embedded_fonts": true,
+      "requires_output_intent": true,
+      "uses_pdfx_page_boxes": false
+    },
+    {
+      "aliases": [
+        "pdfa3b",
+        "pdfa-3b",
+        "pdfa_3b",
+        "pdf/a-3b",
+        "pdf/a3b"
+      ],
+      "default_pdf_version": "1.7",
+      "emits_tagged_structure": false,
+      "fixed_bindings_supported": true,
+      "name": "pdfa3b",
+      "requires_embedded_fonts": true,
+      "requires_output_intent": true,
+      "uses_pdfx_page_boxes": false
+    },
+    {
+      "aliases": [
+        "pdfa3u",
+        "pdfa-3u",
+        "pdfa_3u",
+        "pdf/a-3u",
+        "pdf/a3u"
+      ],
+      "default_pdf_version": "1.7",
+      "emits_tagged_structure": false,
+      "fixed_bindings_supported": true,
+      "name": "pdfa3u",
+      "requires_embedded_fonts": true,
+      "requires_output_intent": true,
+      "uses_pdfx_page_boxes": false
+    },
+    {
+      "aliases": [
+        "pdfa4",
+        "pdfa-4",
+        "pdfa_4",
+        "pdf/a-4",
+        "pdf/a4"
+      ],
+      "default_pdf_version": "2.0",
+      "emits_tagged_structure": false,
+      "fixed_bindings_supported": true,
+      "name": "pdfa4",
+      "requires_embedded_fonts": true,
+      "requires_output_intent": true,
+      "uses_pdfx_page_boxes": false
+    },
+    {
+      "aliases": [
+        "pdfa4e",
+        "pdfa-4e",
+        "pdfa_4e",
+        "pdf/a-4e",
+        "pdf/a4e"
+      ],
+      "default_pdf_version": "2.0",
+      "emits_tagged_structure": false,
+      "fixed_bindings_supported": true,
+      "name": "pdfa4e",
+      "requires_embedded_fonts": true,
+      "requires_output_intent": true,
+      "uses_pdfx_page_boxes": false
+    },
+    {
+      "aliases": [
+        "pdfa4f",
+        "pdfa-4f",
+        "pdfa_4f",
+        "pdf/a-4f",
+        "pdf/a4f"
+      ],
+      "default_pdf_version": "2.0",
+      "emits_tagged_structure": false,
+      "fixed_bindings_supported": true,
+      "name": "pdfa4f",
+      "requires_embedded_fonts": true,
+      "requires_output_intent": true,
+      "uses_pdfx_page_boxes": false
+    },
+    {
+      "aliases": [
+        "pdfx4",
+        "pdfx-4",
+        "pdfx_4",
+        "pdf/x-4",
+        "pdf/x4"
+      ],
+      "default_pdf_version": "1.7",
+      "emits_tagged_structure": false,
+      "fixed_bindings_supported": true,
+      "name": "pdfx4",
+      "requires_embedded_fonts": true,
+      "requires_output_intent": true,
+      "uses_pdfx_page_boxes": true
+    },
+    {
+      "aliases": [
+        "pdfua1",
+        "pdfua-1",
+        "pdf/ua-1",
+        "ua",
+        "pdfua",
+        "pdf/ua"
+      ],
+      "default_pdf_version": "1.7",
+      "emits_tagged_structure": true,
+      "fixed_bindings_supported": false,
+      "name": "pdfua1",
+      "requires_embedded_fonts": true,
+      "requires_output_intent": false,
+      "uses_pdfx_page_boxes": false
+    },
+    {
+      "aliases": [
+        "pdfua2",
+        "pdfua-2",
+        "pdf/ua-2"
+      ],
+      "default_pdf_version": "2.0",
+      "emits_tagged_structure": true,
+      "fixed_bindings_supported": false,
+      "name": "pdfua2",
+      "requires_embedded_fonts": true,
+      "requires_output_intent": false,
+      "uses_pdfx_page_boxes": false
+    },
+    {
+      "aliases": [
+        "pdfvt1",
+        "pdfvt-1",
+        "pdf/vt-1",
+        "vt",
+        "pdfvt",
+        "pdf/vt"
+      ],
+      "default_pdf_version": "1.7",
+      "emits_tagged_structure": false,
+      "fixed_bindings_supported": true,
+      "name": "pdfvt1",
+      "requires_embedded_fonts": true,
+      "requires_output_intent": true,
+      "uses_pdfx_page_boxes": true
+    },
+    {
+      "aliases": [
+        "wtpdf1r",
+        "wtpdf-1r",
+        "wtpdf_1r",
+        "wt1r",
+        "wt-1r"
+      ],
+      "default_pdf_version": "2.0",
+      "emits_tagged_structure": true,
+      "fixed_bindings_supported": false,
+      "name": "wtpdf1r",
+      "requires_embedded_fonts": true,
+      "requires_output_intent": false,
+      "uses_pdfx_page_boxes": false
+    },
+    {
+      "aliases": [
+        "wtpdf1a",
+        "wtpdf-1a",
+        "wtpdf_1a",
+        "wt1a",
+        "wt-1a"
+      ],
+      "default_pdf_version": "2.0",
+      "emits_tagged_structure": true,
+      "fixed_bindings_supported": false,
+      "name": "wtpdf1a",
+      "requires_embedded_fonts": true,
+      "requires_output_intent": false,
+      "uses_pdfx_page_boxes": false
+    },
+    {
+      "aliases": [
+        "tagged"
+      ],
+      "default_pdf_version": "1.7",
+      "emits_tagged_structure": true,
+      "fixed_bindings_supported": false,
+      "name": "tagged",
+      "requires_embedded_fonts": false,
+      "requires_output_intent": false,
+      "uses_pdfx_page_boxes": false
+    }
+  ],
   "pdf_profiles": [
     "none",
     "pdfa1a",

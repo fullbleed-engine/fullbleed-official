@@ -19,6 +19,7 @@ PUBLIC_NATIVE_NAMES = {
     "WatermarkSpec",
     "inspect_pdf",
     "build_features",
+    "pdf_profile_catalog",
     "inspect_template_catalog",
     "vendored_asset",
     "fetch_asset",

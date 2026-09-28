@@ -192,6 +192,33 @@ fn dispatch_free_function(
     payload: &Bound<'_, PyAny>,
 ) -> PyResult<PyObject> {
     match operation {
+        "pdf_profile_catalog" => {
+            expect_arity(payload, 0)?;
+            let profiles = PyList::empty(py);
+            for profile in PdfProfile::ALL {
+                let descriptor = profile.descriptor();
+                let item = PyDict::new(py);
+                item.set_item("name", descriptor.name)?;
+                item.set_item(
+                    "aliases",
+                    PyList::new(py, descriptor.aliases.iter().copied())?,
+                )?;
+                item.set_item("emits_tagged_structure", descriptor.emits_tagged_structure)?;
+                item.set_item("requires_output_intent", descriptor.requires_output_intent)?;
+                item.set_item(
+                    "requires_embedded_fonts",
+                    descriptor.requires_embedded_fonts,
+                )?;
+                item.set_item("uses_pdfx_page_boxes", descriptor.uses_pdfx_page_boxes)?;
+                item.set_item("default_pdf_version", descriptor.default_pdf_version)?;
+                item.set_item(
+                    "fixed_bindings_supported",
+                    descriptor.fixed_bindings_supported,
+                )?;
+                profiles.append(item)?;
+            }
+            Ok(profiles.unbind().into_any())
+        }
         "build_features" => {
             expect_arity(payload, 0)?;
             build_features(py)
