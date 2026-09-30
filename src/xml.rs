@@ -70,6 +70,17 @@ impl Document {
 }
 
 impl<'a> Node<'a> {
+    pub(crate) fn qualified_name(&self) -> &'a str {
+        &self.element().name
+    }
+
+    pub(crate) fn attributes(&self) -> impl Iterator<Item = (&'a str, &'a str)> {
+        self.element()
+            .attributes
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+    }
+
     pub(crate) const fn is_element(&self) -> bool {
         true
     }

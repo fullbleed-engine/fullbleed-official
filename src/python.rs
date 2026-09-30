@@ -325,6 +325,32 @@ fn inspect_report_to_py(
         "seed_blockers",
         PyList::new(py, &report.profile.seed_blockers)?,
     )?;
+    profile.set_item("pdfx_contract_valid", report.profile.pdfx_contract_valid)?;
+    profile.set_item("pdfvt_record_level", report.profile.pdfvt_record_level)?;
+    profile.set_item("pdfvt_record_count", report.profile.pdfvt_record_count)?;
+    profile.set_item("pdfvt_document_count", report.profile.pdfvt_document_count)?;
+    profile.set_item("pdfvt_dpm_node_count", report.profile.pdfvt_dpm_node_count)?;
+    profile.set_item("pdfvt_dpm_valid", report.profile.pdfvt_dpm_valid)?;
+    profile.set_item(
+        "pdfvt_reuse_hint_count",
+        report.profile.pdfvt_reuse_hint_count,
+    )?;
+    profile.set_item(
+        "pdfvt_encapsulated_xobject_count",
+        report.profile.pdfvt_encapsulated_xobject_count,
+    )?;
+    profile.set_item(
+        "pdfvt_reuse_hints_valid",
+        report.profile.pdfvt_reuse_hints_valid,
+    )?;
+    profile.set_item(
+        "pdfvt_parts",
+        pdf_vt::parts_to_py(py, &report.profile.pdfvt_parts)?,
+    )?;
+    profile.set_item(
+        "document_timestamp",
+        report.profile.document_timestamp.clone(),
+    )?;
     out.set_item("profile", profile)?;
 
     let issues = composition_compatibility_issues(report);
@@ -1617,18 +1643,19 @@ fn parse_pdf_version(arg: Option<&Bound<'_, PyAny>>) -> PyResult<Option<PdfVersi
         let raw = s.trim().to_ascii_lowercase();
         let version = match raw.as_str() {
             "" => return Ok(None),
+            "1.6" | "16" | "pdf1.6" | "pdf16" => PdfVersion::Pdf16,
             "1.7" | "1" | "17" | "pdf1.7" | "pdf17" => PdfVersion::Pdf17,
             "2.0" | "2" | "20" | "pdf2.0" | "pdf20" => PdfVersion::Pdf20,
             _ => {
                 return Err(PyValueError::new_err(format!(
-                    "Invalid pdf_version: {s:?}. Expected one of: 1.7, 2.0"
+                    "Invalid pdf_version: {s:?}. Expected one of: 1.6, 1.7, 2.0"
                 )));
             }
         };
         return Ok(Some(version));
     }
     Err(PyValueError::new_err(
-        "pdf_version must be a string like '1.7' or '2.0'",
+        "pdf_version must be a string like '1.6', '1.7' or '2.0'",
     ))
 }
 
@@ -4154,6 +4181,9 @@ struct PdfEngine {
     document_css_media: Option<String>,
     document_css_required: bool,
 }
+
+#[path = "python/pdf_vt.rs"]
+mod pdf_vt;
 
 impl PdfEngine {
     fn rebuild_from_builder(&mut self) -> PyResult<()> {
@@ -9294,6 +9324,8 @@ impl PdfEngine {
         debug_out: Option<String>,
         perf: bool,
         perf_out: Option<String>,
+        document_timestamp: Option<String>,
+        pdf_vt_job: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
         let mut builder = FullBleed::builder();
         let page_width = parse_py_length(page_width)?;
@@ -9393,6 +9425,18 @@ impl PdfEngine {
         }
         if let Some(title) = document_title {
             builder = builder.document_title(title);
+        }
+
+        if let Some(timestamp) = document_timestamp {
+            builder = builder.document_timestamp(
+                timestamp
+                    .parse::<crate::PdfTimestamp>()
+                    .map_err(|e| PyValueError::new_err(e.to_string()))?,
+            );
+        }
+
+        if let Some(job) = pdf_vt::parse_job(pdf_vt_job)? {
+            builder = builder.pdf_vt_job(job);
         }
 
         // Prefer HTML header if provided; otherwise fall back to plain text header.

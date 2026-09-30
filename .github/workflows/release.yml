@@ -23,7 +23,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  pdfvt-preflight:
+    uses: ./.github/workflows/pdfvt-release-gate.yml
+    with:
+      release_ref: ${{ github.ref }}
+
   validate:
+    needs: pdfvt-preflight
     name: Validate release metadata and source
     runs-on: ubuntu-latest
     outputs:

@@ -161,14 +161,34 @@ class FullbleedMcpServer:
         for key, flag in (
             ("document_lang", "--document-lang"),
             ("document_title", "--document-title"),
+            ("document_timestamp", "--timestamp"),
             ("pdf_profile", "--pdf-profile"),
+            ("output_intent_identifier", "--output-intent-identifier"),
+            ("output_intent_info", "--output-intent-info"),
         ):
             value = arguments.get(key)
             if value is not None:
                 if not isinstance(value, str):
                     raise ValueError(f"{key} must be a string")
                 result.extend([flag, value])
+        icc_path = arguments.get("output_intent_icc_path")
+        if icc_path is not None:
+            result.extend(["--output-intent-icc", str(self._path(str(icc_path), must_exist=True))])
+        if arguments.get("output_intent_components") is not None:
+            result.extend(["--output-intent-components", str(arguments["output_intent_components"])])
+        if arguments.get("pdf_vt_job") is not None:
+            result.extend(["--pdf-vt-job", json.dumps(arguments["pdf_vt_job"], allow_nan=False)])
+        for path in self._font_paths(arguments):
+            result.extend(["--asset", path])
+        if arguments.get("font_paths"):
+            result.extend(["--asset-kind", "font"])
         return result
+
+    def _font_paths(self, arguments: Mapping[str, Any]) -> list[str]:
+        paths = arguments.get("font_paths") or []
+        if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+            raise ValueError("font_paths must be an array of workspace-relative paths")
+        return [str(self._path(p, must_exist=True)) for p in paths]
 
     def _render(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         output = self._output_path(str(arguments.get("output_path", "")))
@@ -280,12 +300,20 @@ class FullbleedMcpServer:
         if not isinstance(css, str):
             raise ValueError("css must be a string")
         engine_options = {}
-        for key in ("document_lang", "document_title"):
+        for key in ("document_lang", "document_title", "document_timestamp", "pdf_profile",
+                    "output_intent_identifier", "output_intent_info"):
             value = arguments.get(key)
             if value is not None:
                 if not isinstance(value, str):
                     raise ValueError(f"{key} must be a string")
                 engine_options[key] = value
+        if arguments.get("output_intent_icc_path") is not None:
+            engine_options["output_intent_icc"] = str(self._path(str(arguments["output_intent_icc_path"]), must_exist=True))
+        for key in ("pdf_vt_job", "output_intent_components"):
+            if arguments.get(key) is not None:
+                engine_options[key] = arguments[key]
+        if arguments.get("font_paths"):
+            engine_options["font_files"] = self._font_paths(arguments)
         engine = fullbleed.PdfEngine(**engine_options)
         compiled = engine.compile_pdf(html, css)
         if len(self._compiled) >= self._max_compiled_handles:

@@ -212,6 +212,14 @@ fn dispatch_free_function(
                 item.set_item("uses_pdfx_page_boxes", descriptor.uses_pdfx_page_boxes)?;
                 item.set_item("default_pdf_version", descriptor.default_pdf_version)?;
                 item.set_item(
+                    "requires_document_title",
+                    descriptor.requires_document_title,
+                )?;
+                item.set_item(
+                    "requires_document_timestamp",
+                    descriptor.requires_document_timestamp,
+                )?;
+                item.set_item(
                     "fixed_bindings_supported",
                     descriptor.fixed_bindings_supported,
                 )?;
@@ -401,7 +409,8 @@ fn dispatch_bundle(
 }
 
 fn new_engine(payload: &Bound<'_, PyAny>) -> PyResult<PyObject> {
-    expect_arity(payload, 66)?;
+    expect_arity(payload, 68)?;
+    let pdf_vt_job = optional_bound(payload, 67)?;
     let page_width = optional_bound(payload, 0)?;
     let page_height = optional_bound(payload, 1)?;
     let margin = optional_bound(payload, 2)?;
@@ -488,6 +497,8 @@ fn new_engine(payload: &Bound<'_, PyAny>) -> PyResult<PyObject> {
         optional_argument(payload, 63)?,
         argument(payload, 64)?,
         optional_argument(payload, 65)?,
+        optional_argument(payload, 66)?,
+        pdf_vt_job.as_ref(),
     )?;
     capsule(engine, ENGINE_CAPSULE, drop_engine)
 }
@@ -514,6 +525,11 @@ fn dispatch_engine(
                 .into_py_value()
         }
         "PdfEngine.get_document_title" => engine.document_title().into_py_value(),
+        "PdfEngine.get_document_timestamp" => engine
+            .builder
+            .document_timestamp_value()
+            .map(str::to_owned)
+            .into_py_value(),
         "PdfEngine.set_document_title" => {
             expect_arity(payload, 1)?;
             engine

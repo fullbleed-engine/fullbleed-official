@@ -6,6 +6,7 @@ use crate::font::{
     FontProgramKind, FontRegistry, GlyphOutlineCommand, RegisteredFont, RegisteredGlyphOutline,
 };
 use crate::metrics::{DocumentMetrics, PageMetrics};
+use crate::pdf_identity::{IdentityWriter, PdfIdentity, PdfTimestamp};
 use crate::perf::PerfLogger;
 use crate::sfnt::{Face as SfntFace, GlyphId};
 use crate::types::{
@@ -30,6 +31,8 @@ pub(crate) struct PdfOptions {
     pub output_intent: Option<OutputIntent>,
     pub document_lang: Option<String>,
     pub document_title: Option<String>,
+    pub document_timestamp: Option<PdfTimestamp>,
+    pub pdf_vt_job: Option<crate::PdfVtJob>,
     pub color_space: ColorSpace,
     // When true, page/form command streams are Flate-compressed.
     pub compress_content_streams: bool,
@@ -52,6 +55,8 @@ impl Default for PdfOptions {
             output_intent: None,
             document_lang: None,
             document_title: None,
+            document_timestamp: None,
+            pdf_vt_job: None,
             color_space: ColorSpace::Rgb,
             compress_content_streams: true,
             compress_content_stream_min_bytes: 128,
@@ -78,6 +83,7 @@ impl CompiledFlowCompression {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PdfVersion {
+    Pdf16,
     Pdf17,
     Pdf20,
 }
@@ -199,6 +205,7 @@ impl PdfProfile {
 
     pub(crate) fn effective_pdf_version(self, requested: PdfVersion) -> PdfVersion {
         match self {
+            PdfProfile::PdfX4 | PdfProfile::PdfVt1 => PdfVersion::Pdf16,
             PdfProfile::PdfA4 | PdfProfile::PdfA4e | PdfProfile::PdfA4f | PdfProfile::PdfUa2 => {
                 PdfVersion::Pdf20
             }
@@ -224,6 +231,7 @@ impl PdfProfile {
 
 fn pdf_header_bytes(version: PdfVersion) -> &'static [u8] {
     match version {
+        PdfVersion::Pdf16 => b"%PDF-1.6\n",
         PdfVersion::Pdf17 => b"%PDF-1.7\n",
         PdfVersion::Pdf20 => b"%PDF-2.0\n",
     }
@@ -1094,7 +1102,7 @@ pub(crate) fn compile_binding_plan(
 }
 
 pub(crate) struct PdfStreamWriter<'a, W: Write> {
-    writer: &'a mut W,
+    writer: IdentityWriter<'a, W>,
     offset: usize,
     offsets: Vec<usize>, // index by object id; 0 is the free object.
     next_id: usize,
@@ -1181,6 +1189,10 @@ pub(crate) struct PdfStreamWriter<'a, W: Write> {
     font_program_subset_glyphs: usize,
     pdfvt_dpart_root_id: Option<usize>,
     pdfvt_dpart_node_id: Option<usize>,
+    pdfvt_sources: Vec<(usize, crate::PdfVtDocument)>,
+    pdfvt_records: Vec<crate::pdf_vt::RecordState>,
+    pdfvt_documents: Vec<crate::pdf_vt::DocumentState>,
+    pdfvt_page_parts: Vec<usize>,
 }
 
 /// A command-local binding for a compiled flow program. The layout document remains immutable;
@@ -1497,9 +1509,14 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             .pdf_profile
             .effective_pdf_version(options.pdf_version);
         validate_profile_output_intent(&options)?;
+        let mut writer = IdentityWriter::new(writer, options.pdf_profile.uses_pdfx_page_boxes());
         let mut offset: usize = 0;
-        write_bytes(writer, pdf_header_bytes(options.pdf_version), &mut offset)?;
-        write_bytes(writer, b"%\xE2\xE3\xCF\xD3\n", &mut offset)?;
+        write_bytes(
+            &mut writer,
+            pdf_header_bytes(options.pdf_version),
+            &mut offset,
+        )?;
+        write_bytes(&mut writer, b"%\xE2\xE3\xCF\xD3\n", &mut offset)?;
         let mut next_id = PDF_RESOURCES_ID + 1;
         let (pdfvt_dpart_root_id, pdfvt_dpart_node_id) =
             if options.pdf_profile == PdfProfile::PdfVt1 {
@@ -1511,6 +1528,19 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 (None, None)
             };
 
+        let pdfvt_sources = options
+            .pdf_vt_job
+            .as_ref()
+            .map(|job| {
+                job.records
+                    .iter()
+                    .enumerate()
+                    .flat_map(|(record, item)| {
+                        item.documents.iter().cloned().map(move |doc| (record, doc))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let s = Self {
             writer,
             offset,
@@ -1586,6 +1616,10 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             font_program_subset_glyphs: 0,
             pdfvt_dpart_root_id,
             pdfvt_dpart_node_id,
+            pdfvt_sources,
+            pdfvt_records: Vec::new(),
+            pdfvt_documents: Vec::new(),
+            pdfvt_page_parts: Vec::new(),
         };
 
         Ok(s)
@@ -1602,6 +1636,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             ));
         }
         validate_profile_font_embedding(document, self.registry, &self.options)?;
+        self.begin_vt_document(document.pages.len())?;
         self.current_doc_id = doc_id;
         self.current_tag_document = self.tag_records.len();
         self.shaped_cache.clear();
@@ -1613,6 +1648,66 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
 
     pub(crate) fn compiled_flow_program_cache(&self) -> Arc<CompiledFlowPdfProgramCache> {
         self.compiled_flow_page_programs.clone()
+    }
+
+    fn begin_vt_document(&mut self, page_count: usize) -> io::Result<()> {
+        if self.options.pdf_profile != PdfProfile::PdfVt1 {
+            return Ok(());
+        }
+        if page_count == 0 {
+            return Err(crate::pdf_vt::invalid(
+                "documents must contain at least one page",
+            ));
+        }
+        let source_index = self.pdfvt_documents.len();
+        let (record_index, source) = if self.pdfvt_sources.is_empty() {
+            (
+                source_index,
+                crate::PdfVtDocument {
+                    id: "document-1".to_owned(),
+                    metadata: BTreeMap::new(),
+                },
+            )
+        } else {
+            self.pdfvt_sources
+                .get(source_index)
+                .cloned()
+                .ok_or_else(|| {
+                    crate::pdf_vt::invalid("more input documents than declared in pdf_vt_job")
+                })?
+        };
+        if record_index == self.pdfvt_records.len() {
+            let object_id = self.alloc_ids(1);
+            let declared = self
+                .options
+                .pdf_vt_job
+                .as_ref()
+                .and_then(|job| job.records.get(record_index));
+            self.pdfvt_records.push(crate::pdf_vt::RecordState {
+                object_id,
+                id: declared
+                    .map(|record| record.id.clone())
+                    .unwrap_or_else(|| format!("record-{}", record_index + 1)),
+                metadata: declared
+                    .map(|record| record.metadata.clone())
+                    .unwrap_or_default(),
+                documents: Vec::new(),
+            });
+        }
+        let object_id = self.alloc_ids(1);
+        let record = &mut self.pdfvt_records[record_index];
+        record.documents.push(object_id);
+        let start = self.pdfvt_page_parts.len();
+        self.pdfvt_documents.push(crate::pdf_vt::DocumentState {
+            object_id,
+            parent_id: record.object_id,
+            start,
+            end: start + page_count - 1,
+            source,
+        });
+        self.pdfvt_page_parts
+            .extend(std::iter::repeat_n(object_id, page_count));
+        Ok(())
     }
 
     pub(crate) fn compiled_flow_replay_cache(&self) -> Arc<CompiledFlowPdfProgramCache> {
@@ -1677,6 +1772,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             ));
         }
         validate_profile_font_embedding(document, self.registry, &self.options)?;
+        self.begin_vt_document(document.pages.len())?;
         self.current_doc_id = doc_id;
         self.current_tag_document = self.tag_records.len();
         let document_key = document as *const Document as usize;
@@ -1770,6 +1866,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             }
         }
         for _copy in 0..copies {
+            self.begin_vt_document(document.pages.len())?;
             for (content_id, content_len, geometry) in &shared_contents {
                 self.add_page_reference_sized(*content_id, *content_len, *geometry)?;
             }
@@ -1885,6 +1982,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             .unwrap_or(0);
         let mut dynamic_content = Vec::with_capacity(max_dynamic_capacity);
         for row in 0..record_count {
+            self.begin_vt_document(document.pages.len())?;
             if cancelled() {
                 return Err(io::Error::new(
                     io::ErrorKind::Interrupted,
@@ -2229,7 +2327,8 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         };
         let page_boxes = page_box_entries(self.options.pdf_profile, geometry);
         let dpart = self
-            .pdfvt_dpart_node_id
+            .pdfvt_page_parts
+            .get(page_index)
             .map(|id| format!(" /DPart {} 0 R", id))
             .unwrap_or_default();
         let page_obj = format!(
@@ -2401,6 +2500,39 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             .as_ref()
                             .map(|value| value.glyph_count)
                             .or_else(|| cff_subset.as_ref().map(|value| value.glyph_count));
+                        let mut descriptor = font_descriptor_object(font, font_file_id, &base_name);
+                        if subset_tag.is_some()
+                            && matches!(
+                                self.options.pdf_profile,
+                                PdfProfile::PdfA1a | PdfProfile::PdfA1b
+                            )
+                        {
+                            // TrueType subsets preserve the original glyph namespace
+                            // (unused slots have empty outlines); CFF subsets use dense CIDs.
+                            let cid_count = if let Some(subset) = cff_subset.as_ref() {
+                                subset.glyph_count
+                            } else {
+                                SfntFace::parse(program, 0)
+                                    .map(|face| usize::from(face.number_of_glyphs()))
+                                    .unwrap_or(0)
+                            };
+                            if cid_count == 0 {
+                                return Err(io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    "PDF/A-1 subset font has no readable CID namespace",
+                                ));
+                            }
+                            let mut cid_set = vec![0xff; cid_count.div_ceil(8)];
+                            if cid_count % 8 != 0 {
+                                *cid_set.last_mut().unwrap() = 0xff << (8 - cid_count % 8);
+                            }
+                            let cid_set_id = self.alloc_ids(1);
+                            self.write_stream_object_bytes(cid_set_id, "", &cid_set)?;
+                            descriptor.insert_str(
+                                descriptor.len() - 2,
+                                &format!("/CIDSet {cid_set_id} 0 R "),
+                            );
+                        }
                         self.write_font_file_stream_object(
                             font_file_id,
                             program,
@@ -2409,10 +2541,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             font.data.len(),
                             subset_glyph_count,
                         )?;
-                        self.write_object(
-                            descriptor_id,
-                            &font_descriptor_object(font, font_file_id, &base_name),
-                        )?;
+                        self.write_object(descriptor_id, &descriptor)?;
 
                         let mut w_entries: Vec<String> = Vec::new();
                         for gid in &used_gids {
@@ -2730,27 +2859,72 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         }
 
         let mut pdfvt_dpart_root_id: Option<usize> = None;
-        if let (Some(root_id), Some(node_id), Some(first_page_id)) = (
-            self.pdfvt_dpart_root_id,
-            self.pdfvt_dpart_node_id,
-            self.page_ids.first().copied(),
-        ) {
-            let mut dpart_node = format!(
-                "<< /Type /DPart /Parent {} 0 R /Start {} 0 R",
-                root_id, first_page_id
-            );
-            if let Some(last_page_id) = self.page_ids.last().copied() {
-                if last_page_id != first_page_id {
-                    dpart_node.push_str(&format!(" /End {} 0 R", last_page_id));
-                }
+        if let (Some(root_id), Some(job_id)) = (self.pdfvt_dpart_root_id, self.pdfvt_dpart_node_id)
+        {
+            if self.page_ids.is_empty() || self.pdfvt_page_parts.len() != self.page_ids.len() {
+                return Err(crate::pdf_vt::invalid(
+                    "DPart page coverage does not match the rendered job",
+                ));
             }
-            dpart_node.push_str(" >>");
-            self.write_object(node_id, &dpart_node)?;
-            let dpart_root = format!(
-                "<< /Type /DPartRoot /DPartRootNode {} 0 R /NodeNameList [/Document] >>",
-                node_id
-            );
-            self.write_object(root_id, &dpart_root)?;
+            if !self.pdfvt_sources.is_empty()
+                && self.pdfvt_documents.len() != self.pdfvt_sources.len()
+            {
+                return Err(crate::pdf_vt::invalid(
+                    "fewer input documents than declared in pdf_vt_job",
+                ));
+            }
+            let documents = std::mem::take(&mut self.pdfvt_documents);
+            for part in documents {
+                let end = if part.end == part.start {
+                    String::new()
+                } else {
+                    format!(" /End {} 0 R", self.page_ids[part.end])
+                };
+                self.write_object(
+                    part.object_id,
+                    &format!(
+                        "<< /Type /DPart /Parent {} 0 R /Start {} 0 R{}{} >>",
+                        part.parent_id,
+                        self.page_ids[part.start],
+                        end,
+                        crate::pdf_vt::dpm(&part.source.id, &part.source.metadata)
+                    ),
+                )?;
+            }
+            let records = std::mem::take(&mut self.pdfvt_records);
+            let record_refs = records
+                .iter()
+                .map(|r| format!("{} 0 R", r.object_id))
+                .collect::<Vec<_>>()
+                .join(" ");
+            for record in records {
+                let children = record
+                    .documents
+                    .iter()
+                    .map(|id| format!("{id} 0 R"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                self.write_object(
+                    record.object_id,
+                    &format!(
+                        "<< /Type /DPart /Parent {job_id} 0 R /DParts [{children}]{} >>",
+                        crate::pdf_vt::dpm(&record.id, &record.metadata)
+                    ),
+                )?;
+            }
+            let default_job = crate::PdfVtJob {
+                id: "job".to_owned(),
+                ..Default::default()
+            };
+            let job = self.options.pdf_vt_job.as_ref().unwrap_or(&default_job);
+            let job_metadata = crate::pdf_vt::dpm(&job.id, &job.metadata);
+            self.write_object(
+                job_id,
+                &format!(
+                    "<< /Type /DPart /Parent {root_id} 0 R /DParts [{record_refs}]{job_metadata} >>"
+                ),
+            )?;
+            self.write_object(root_id, &format!("<< /Type /DPartRoot /DPartRootNode {job_id} 0 R /NodeNameList [/Job /Record /Document] /RecordLevel 1 >>"))?;
             pdfvt_dpart_root_id = Some(root_id);
         }
 
@@ -2764,12 +2938,39 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         let doc_lang = self.options.document_lang.clone();
         let doc_title = self.options.document_title.clone();
         let output_intent = self.options.output_intent.clone();
+        let timestamp = self
+            .options
+            .document_timestamp
+            .clone()
+            .unwrap_or_else(|| "1970-01-01T00:00:00Z".parse().unwrap());
+        let identity = self.writer.identity(
+            timestamp.clone(),
+            &[
+                pdf_profile.as_str().as_bytes(),
+                doc_lang.as_deref().unwrap_or("").as_bytes(),
+                doc_title.as_deref().unwrap_or("").as_bytes(),
+                output_intent
+                    .as_ref()
+                    .map_or(&[][..], |oi| oi.icc_profile.as_slice()),
+                output_intent
+                    .as_ref()
+                    .map_or("", |oi| oi.identifier.as_str())
+                    .as_bytes(),
+                output_intent
+                    .as_ref()
+                    .and_then(|oi| oi.info.as_deref())
+                    .unwrap_or("")
+                    .as_bytes(),
+            ],
+        );
         if pdf_profile != PdfProfile::None {
             if let Some(xmp) = build_xmp_metadata(
                 pdf_profile,
                 self.options.pdf_version,
                 doc_lang.as_deref(),
                 doc_title.as_deref(),
+                &timestamp,
+                identity.as_ref(),
             ) {
                 let id = self.alloc_ids(1);
                 self.write_object(id, &metadata_stream_object(&xmp))?;
@@ -2808,7 +3009,10 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             || matches!(pdf_profile, PdfProfile::PdfX4 | PdfProfile::PdfVt1)
         {
             let id = self.alloc_ids(1);
-            self.write_object(id, &info_object(doc_title.as_deref(), pdf_profile))?;
+            self.write_object(
+                id,
+                &info_object(doc_title.as_deref(), pdf_profile, identity.as_ref()),
+            )?;
             info_id = Some(id);
         }
         if let Some(id) = metadata_id {
@@ -2846,15 +3050,15 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         let total_objects = self.next_id.saturating_sub(1);
         let xref_start = self.offset;
         write_str(
-            self.writer,
+            &mut self.writer,
             &format!("xref\n0 {}\n", total_objects + 1),
             &mut self.offset,
         )?;
-        write_bytes(self.writer, b"0000000000 65535 f \n", &mut self.offset)?;
+        write_bytes(&mut self.writer, b"0000000000 65535 f \n", &mut self.offset)?;
         for id in 1..=total_objects {
             let obj_offset = self.offsets.get(id).copied().unwrap_or(0);
             write_str(
-                self.writer,
+                &mut self.writer,
                 &format!("{:010} 00000 n \n", obj_offset),
                 &mut self.offset,
             )?;
@@ -2868,19 +3072,24 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             trailer.push_str(&format!(" /Info {} 0 R", id));
         }
         if pdf_profile != PdfProfile::None {
-            let file_id = deterministic_file_id(
-                pdf_profile,
-                self.options.pdf_version,
-                doc_lang.as_deref(),
-                doc_title.as_deref(),
-                self.page_ids.len(),
-                total_objects,
-                xref_start,
-            );
+            let file_id = identity
+                .as_ref()
+                .map(|identity| identity.file_id.clone())
+                .unwrap_or_else(|| {
+                    deterministic_file_id(
+                        pdf_profile,
+                        self.options.pdf_version,
+                        doc_lang.as_deref(),
+                        doc_title.as_deref(),
+                        self.page_ids.len(),
+                        total_objects,
+                        xref_start,
+                    )
+                });
             trailer.push_str(&format!(" /ID [<{}> <{}>]", file_id, file_id));
         }
         trailer.push_str(&format!(" >>\nstartxref\n{}\n%%EOF", xref_start));
-        write_str(self.writer, &trailer, &mut self.offset)?;
+        write_str(&mut self.writer, &trailer, &mut self.offset)?;
 
         let bytes_written = self.offset;
         let content_ratio_ppm = if self.content_stream_raw_bytes == 0 {
@@ -2920,6 +3129,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             let profile_json = format!(
                 "{{\"type\":\"jit.pdf_profile\",\"pdf_version\":\"{}\",\"pdf_profile\":\"{}\",\"metadata\":{},\"output_intent\":{},\"tagged_structure\":{},\"struct_tree_root\":{},\"page_boxes\":{},\"pdfvt_dpart_root\":{},\"embedded_files\":{},\"pdf_declaration\":{},\"requires_output_intent\":{},\"requires_embedded_fonts\":{}}}",
                 match self.options.pdf_version {
+                    PdfVersion::Pdf16 => "1.6",
                     PdfVersion::Pdf17 => "1.7",
                     PdfVersion::Pdf20 => "2.0",
                 },
@@ -4576,7 +4786,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
 
     fn write_object(&mut self, obj_id: usize, body: &str) -> io::Result<()> {
         write_pdf_object(
-            self.writer,
+            &mut self.writer,
             &mut self.offset,
             &mut self.offsets,
             obj_id,
@@ -4590,8 +4800,23 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         dict_entries: &str,
         data: &[u8],
     ) -> io::Result<()> {
+        let hinted;
+        let dict_entries = if self.options.pdf_profile == PdfProfile::PdfVt1
+            && dict_entries.starts_with("/Type /XObject ")
+        {
+            // Resources are local to this file. Only explicitly color-managed,
+            // opaque image payloads are asserted independent of inherited state.
+            // Forms keep a conservative false encapsulation hint.
+            let encapsulated = dict_entries.starts_with("/Type /XObject /Subtype /Image ")
+                && dict_entries.contains(" /Intent /RelativeColorimetric")
+                && !dict_entries.contains(" /SMask ");
+            hinted = format!("{dict_entries} /GTS_Scope /File /GTS_Encapsulated {encapsulated}");
+            hinted.as_str()
+        } else {
+            dict_entries
+        };
         write_pdf_stream_object(
-            self.writer,
+            &mut self.writer,
             &mut self.offset,
             &mut self.offsets,
             obj_id,
@@ -4669,15 +4894,21 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             .decode
             .map(|value| format!(" /Decode {value}"))
             .unwrap_or_default();
+        let intent = if self.options.pdf_profile == PdfProfile::PdfVt1 && smask_id.is_none() {
+            " /Intent /RelativeColorimetric"
+        } else {
+            ""
+        };
         let dict = format!(
-            "/Type /XObject /Subtype /Image /Width {} /Height {} /ColorSpace {} /BitsPerComponent {} /Interpolate false /Filter {}{}{}",
+            "/Type /XObject /Subtype /Image /Width {} /Height {} /ColorSpace {} /BitsPerComponent {} /Interpolate false /Filter {}{}{}{}",
             image.width,
             image.height,
             image.color_space,
             image.bits_per_component,
             image.filter,
             decode,
-            smask
+            smask,
+            intent
         );
         self.write_stream_object_bytes(obj_id, &dict, &image.data)
     }
@@ -6381,13 +6612,21 @@ fn validate_profile_font_embedding(
 }
 
 pub(crate) fn validate_profile_output_intent(options: &PdfOptions) -> io::Result<()> {
+    if let Some(job) = &options.pdf_vt_job {
+        if options.pdf_profile != PdfProfile::PdfVt1 {
+            return Err(crate::pdf_vt::invalid(
+                "pdf_vt_job requires the pdfvt1 profile",
+            ));
+        }
+        job.validate()?;
+    }
     if !options.pdf_profile.requires_output_intent() {
         return Ok(());
     }
     let Some(intent) = options.output_intent.as_ref() else {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("{} requires an output intent", options.pdf_profile.as_str()),
+            format!("{} requires output_intent", options.pdf_profile.as_str()),
         ));
     };
     if intent.icc_profile.is_empty() {
@@ -6417,6 +6656,47 @@ pub(crate) fn validate_profile_output_intent(options: &PdfOptions) -> io::Result
                 options.pdf_profile.as_str()
             ),
         ));
+    }
+    if options.pdf_profile.uses_pdfx_page_boxes() {
+        let invalid = |message: String| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "PDF_PROFILE_CONTRACT_VIOLATION: {}: {message}",
+                    options.pdf_profile.as_str()
+                ),
+            )
+        };
+        let icc = crate::inspect_output_intent_icc(&intent.icc_profile)
+            .map_err(|e| invalid(e.to_string()))?;
+        if icc.components != intent.n_components {
+            return Err(invalid(
+                "output_intent components do not match the ICC color space".to_owned(),
+            ));
+        }
+        if options
+            .document_title
+            .as_deref()
+            .map_or(true, |title| title.trim().is_empty())
+        {
+            return Err(invalid("requires non-empty document title".to_owned()));
+        }
+        if options.document_title.as_ref().is_some_and(|title| {
+            title.chars().any(|c| {
+                (c < '\u{20}' && !matches!(c, '\t' | '\n' | '\r'))
+                    || matches!(c, '\u{fffe}' | '\u{ffff}')
+            })
+        }) {
+            return Err(invalid(
+                "document title contains characters forbidden in XML 1.0".to_owned(),
+            ));
+        }
+        if options.document_timestamp.is_none() {
+            return Err(invalid(
+                "requires explicit document_timestamp (UTC date, current, or source-date-epoch)"
+                    .to_owned(),
+            ));
+        }
     }
     Ok(())
 }
@@ -8416,6 +8696,7 @@ fn deterministic_file_id(
     xref_start: usize,
 ) -> String {
     let version = match version {
+        PdfVersion::Pdf16 => "1.6",
         PdfVersion::Pdf17 => "1.7",
         PdfVersion::Pdf20 => "2.0",
     };
@@ -8469,7 +8750,7 @@ fn page_box_entries(profile: PdfProfile, geometry: PageGeometry) -> String {
     )
 }
 
-fn info_object(title: Option<&str>, profile: PdfProfile) -> String {
+fn info_object(title: Option<&str>, profile: PdfProfile, identity: Option<&PdfIdentity>) -> String {
     let mut entries: Vec<String> = Vec::new();
     if let Some(title) = title {
         entries.push(format!("/Title {}", pdf_text_string(title)));
@@ -8480,6 +8761,12 @@ fn info_object(title: Option<&str>, profile: PdfProfile) -> String {
     }
     if profile == PdfProfile::PdfVt1 {
         entries.push("/GTS_PDFVTVersion (PDF/VT-1)".to_string());
+    }
+    if let Some(identity) = identity {
+        let date = identity.timestamp.pdf_date();
+        entries.push(format!(
+            "/CreationDate ({date}) /ModDate ({date}) /Producer (FullBleed)"
+        ));
     }
     if entries.is_empty() {
         entries.push("/Producer (FullBleed)".to_string());
@@ -8603,7 +8890,7 @@ fn escape_pdf_string(input: &str) -> String {
     out
 }
 
-fn pdf_text_string(input: &str) -> String {
+pub(crate) fn pdf_text_string(input: &str) -> String {
     if input.is_ascii() {
         return format!("({})", escape_pdf_string(input));
     }
@@ -8715,7 +9002,7 @@ fn truncate_preview(input: &str, max_chars: usize) -> String {
     out
 }
 
-fn escape_pdf_name(input: &str) -> String {
+pub(crate) fn escape_pdf_name(input: &str) -> String {
     let mut out = String::new();
     for ch in input.chars() {
         if ch.is_ascii_alphanumeric() || ch == '-' {
@@ -8756,6 +9043,8 @@ fn build_xmp_metadata(
     version: PdfVersion,
     lang: Option<&str>,
     title: Option<&str>,
+    timestamp: &PdfTimestamp,
+    identity: Option<&PdfIdentity>,
 ) -> Option<String> {
     if matches!(profile, PdfProfile::None) {
         return None;
@@ -8766,14 +9055,22 @@ fn build_xmp_metadata(
     out.push_str("\n<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n");
     out.push_str("<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n");
     out.push_str("<rdf:Description xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\" ");
-    out.push_str("xmp:CreateDate=\"1970-01-01T00:00:00Z\" ");
-    out.push_str("xmp:ModifyDate=\"1970-01-01T00:00:00Z\" ");
-    out.push_str("xmp:MetadataDate=\"1970-01-01T00:00:00Z\"/>\n");
+    out.push_str(&format!(
+        "xmp:CreateDate=\"{0}\" xmp:ModifyDate=\"{0}\" xmp:MetadataDate=\"{0}\"/>\n",
+        timestamp.as_str()
+    ));
+    if let Some(identity) = identity {
+        out.push_str(&format!("<rdf:Description xmlns:xmpMM=\"http://ns.adobe.com/xap/1.0/mm/\" xmpMM:DocumentID=\"{}\" xmpMM:InstanceID=\"{}\" xmpMM:VersionID=\"1\" xmpMM:RenditionClass=\"default\"/>\n", identity.document_id, identity.instance_id));
+    }
     out.push_str("<rdf:Description xmlns:pdf=\"http://ns.adobe.com/pdf/1.3/\" ");
     out.push_str("pdf:Producer=\"FullBleed\" ");
+    if profile.uses_pdfx_page_boxes() {
+        out.push_str("pdf:Trapped=\"False\" ");
+    }
     out.push_str(&format!(
         "pdf:PDFVersion=\"{}\"/>\n",
         match version {
+            PdfVersion::Pdf16 => "1.6",
             PdfVersion::Pdf17 => "1.7",
             PdfVersion::Pdf20 => "2.0",
         }
@@ -8843,7 +9140,10 @@ fn build_xmp_metadata(
             out.push_str("</rdf:Description>\n");
             out.push_str("<rdf:Description xmlns:pdfvtid=\"http://www.npes.org/pdfvt/ns/id/\" ");
             out.push_str("pdfvtid:GTS_PDFVTVersion=\"PDF/VT-1\" ");
-            out.push_str("pdfvtid:GTS_PDFVTModDate=\"1970-01-01T00:00:00Z\"/>\n");
+            out.push_str(&format!(
+                "pdfvtid:GTS_PDFVTModDate=\"{}\"/>\n",
+                timestamp.as_str()
+            ));
         }
         PdfProfile::Wtpdf1r => {
             push_pdf_declaration(&mut out, "http://pdfa.org/declarations/wtpdf#reuse1.0");
@@ -10272,7 +10572,7 @@ mod tests {
         let err = document_to_pdf_with_metrics_and_registry(&doc, None, None, &options)
             .expect_err("pdfx4 should fail without output intent");
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
-        assert!(err.to_string().contains("output intent"));
+        assert!(err.to_string().contains("output_intent"));
     }
 
     #[test]
@@ -10280,8 +10580,10 @@ mod tests {
         let doc = one_page_document(vec![]);
         let mut options = PdfOptions::default();
         options.pdf_profile = PdfProfile::PdfX4;
+        options.document_title = Some("Print specimen".into());
+        options.document_timestamp = Some("2026-09-30T00:00:00Z".parse().unwrap());
         options.output_intent = Some(OutputIntent::new(
-            vec![0x00, 0x01, 0x02],
+            crate::icc::tests::structural_fixture(),
             3,
             "sRGB IEC61966-2.1",
             Some("sRGB".to_string()),
@@ -10652,15 +10954,18 @@ mod tests {
     #[test]
     fn document_metadata_title_uses_pdf_text_encoding_without_changing_ascii() {
         assert_eq!(
-            info_object(Some("Account (A)\\B"), PdfProfile::None),
+            info_object(Some("Account (A)\\B"), PdfProfile::None, None),
             r"<< /Title (Account \(A\)\\B) >>"
         );
         for profile in [PdfProfile::None, PdfProfile::Tagged, PdfProfile::PdfUa1] {
-            assert!(info_object(Some("Crédit & résumé"), profile).contains(
-                "/Title <FEFF0043007200E9006400690074002000260020007200E900730075006D00E9>"
-            ));
             assert!(
-                info_object(Some("東京 🧾"), profile).contains("/Title <FEFF67714EAC0020D83EDDFE>")
+                info_object(Some("Crédit & résumé"), profile, None).contains(
+                    "/Title <FEFF0043007200E9006400690074002000260020007200E900730075006D00E9>"
+                )
+            );
+            assert!(
+                info_object(Some("東京 🧾"), profile, None)
+                    .contains("/Title <FEFF67714EAC0020D83EDDFE>")
             );
         }
     }
@@ -10788,8 +11093,10 @@ mod tests {
         let doc = one_page_document(vec![]);
         let mut options = PdfOptions::default();
         options.pdf_profile = PdfProfile::PdfVt1;
+        options.document_title = Some("Print specimen".into());
+        options.document_timestamp = Some("2026-09-30T00:00:00Z".parse().unwrap());
         options.output_intent = Some(OutputIntent::new(
-            vec![0x00, 0x01, 0x02],
+            crate::icc::tests::structural_fixture(),
             3,
             "sRGB IEC61966-2.1",
             Some("sRGB".to_string()),
@@ -10802,14 +11109,15 @@ mod tests {
         let pdf = String::from_utf8_lossy(&first);
         assert!(pdf.contains("<pdfxid:GTS_PDFXVersion>PDF/X-4</pdfxid:GTS_PDFXVersion>"));
         assert!(pdf.contains("pdfvtid:GTS_PDFVTVersion=\"PDF/VT-1\""));
-        assert!(pdf.contains("pdfvtid:GTS_PDFVTModDate=\"1970-01-01T00:00:00Z\""));
-        assert!(pdf.contains("xmp:ModifyDate=\"1970-01-01T00:00:00Z\""));
+        assert!(pdf.contains("pdfvtid:GTS_PDFVTModDate=\"2026-09-30T00:00:00Z\""));
+        assert!(pdf.contains("xmp:ModifyDate=\"2026-09-30T00:00:00Z\""));
         assert!(pdf.contains("/Type /Metadata /Subtype /XML"));
         assert!(pdf.contains("/S /GTS_PDFX"));
         assert!(pdf.contains("/GTS_PDFVTVersion (PDF/VT-1)"));
         assert!(pdf.contains("/DPartRoot"));
         assert!(pdf.contains("/DPartRootNode"));
-        assert!(pdf.contains("/NodeNameList [/Document]"));
+        assert!(pdf.contains("/NodeNameList [/Job /Record /Document]"));
+        assert!(pdf.contains("/RecordLevel 1"));
         assert!(pdf.contains("/Type /DPart"));
         assert!(pdf.contains("/DPart "));
         assert!(pdf.contains("/ID [<"));
@@ -10820,8 +11128,10 @@ mod tests {
         let doc = one_page_document(vec![]);
         let mut options = PdfOptions::default();
         options.pdf_profile = PdfProfile::PdfVt1;
+        options.document_title = Some("Print specimen".into());
+        options.document_timestamp = Some("2026-09-30T00:00:00Z".parse().unwrap());
         options.output_intent = Some(OutputIntent::new(
-            vec![0x00, 0x01, 0x02],
+            crate::icc::tests::structural_fixture(),
             3,
             "sRGB IEC61966-2.1",
             Some("sRGB".to_string()),
@@ -11238,8 +11548,10 @@ mod tests {
         let doc = one_page_document(vec![]);
         let mut options = PdfOptions::default();
         options.pdf_profile = PdfProfile::PdfX4;
+        options.document_title = Some("Print specimen".into());
+        options.document_timestamp = Some("2026-09-30T00:00:00Z".parse().unwrap());
         options.output_intent = Some(OutputIntent::new(
-            vec![0x00, 0x01, 0x02, 0x03],
+            crate::icc::tests::structural_fixture(),
             3,
             "sRGB IEC61966-2.1",
             Some("sRGB".to_string()),

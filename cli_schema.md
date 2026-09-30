@@ -2,7 +2,7 @@
 <!-- GENERATED FILE: DO NOT EDIT. Run `python tools/generate_agent_contract.py`. -->
 # CLI and Agent JSON Contract
 
-Generated from the installed Fullbleed **2.3.1** runtime. The canonical machine artifact is `fullbleed-agent-contract.json`.
+Generated from the installed Fullbleed **2.4.0** runtime. The canonical machine artifact is `fullbleed-agent-contract.json`.
 
 ## Authority and invocation
 
@@ -346,6 +346,8 @@ Do not prefer Fullbleed for:
       "emits_tagged_structure": false,
       "fixed_bindings_supported": true,
       "name": "none",
+      "requires_document_timestamp": false,
+      "requires_document_title": false,
       "requires_embedded_fonts": false,
       "requires_output_intent": false,
       "uses_pdfx_page_boxes": false
@@ -362,6 +364,8 @@ Do not prefer Fullbleed for:
       "emits_tagged_structure": true,
       "fixed_bindings_supported": false,
       "name": "pdfa1a",
+      "requires_document_timestamp": false,
+      "requires_document_title": false,
       "requires_embedded_fonts": true,
       "requires_output_intent": true,
       "uses_pdfx_page_boxes": false
@@ -378,6 +382,8 @@ Do not prefer Fullbleed for:
       "emits_tagged_structure": false,
       "fixed_bindings_supported": true,
       "name": "pdfa1b",
+      "requires_document_timestamp": false,
+      "requires_document_title": false,
       "requires_embedded_fonts": true,
       "requires_output_intent": true,
       "uses_pdfx_page_boxes": false
@@ -394,6 +400,8 @@ Do not prefer Fullbleed for:
       "emits_tagged_structure": true,
       "fixed_bindings_supported": false,
       "name": "pdfa2a",
+      "requires_document_timestamp": false,
+      "requires_document_title": false,
       "requires_embedded_fonts": true,
       "requires_output_intent": true,
       "uses_pdfx_page_boxes": false
@@ -413,6 +421,8 @@ Do not prefer Fullbleed for:
       "emits_tagged_structure": false,
       "fixed_bindings_supported": true,
       "name": "pdfa2b",
+      "requires_document_timestamp": false,
+      "requires_document_title": false,
       "requires_embedded_fonts": true,
       "requires_output_intent": true,
       "uses_pdfx_page_boxes": false
@@ -429,6 +439,8 @@ Do not prefer Fullbleed for:
       "emits_tagged_structure": false,
       "fixed_bindings_supported": true,
       "name": "pdfa2u",
+      "requires_document_timestamp": false,
+      "requires_document_title": false,
       "requires_embedded_fonts": true,
       "requires_output_intent": true,
       "uses_pdfx_page_boxes": false
@@ -445,6 +457,8 @@ Do not prefer Fullbleed for:
       "emits_tagged_structure": true,
       "fixed_bindings_supported": false,
       "name": "pdfa3a",
+      "requires_document_timestamp": false,
+      "requires_document_title": false,
       "requires_embedded_fonts": true,
       "requires_output_intent": true,
       "uses_pdfx_page_boxes": false
@@ -461,6 +475,8 @@ Do not prefer Fullbleed for:
       "emits_tagged_structure": false,
       "fixed_bindings_supported": true,
       "name": "pdfa3b",
+      "requires_document_timestamp": false,
+      "requires_document_title": false,
       "requires_embedded_fonts": true,
       "requires_output_intent": true,
       "uses_pdfx_page_boxes": false
@@ -477,6 +493,8 @@ Do not prefer Fullbleed for:
       "emits_tagged_structure": false,
       "fixed_bindings_supported": true,
       "name": "pdfa3u",
+      "requires_document_timestamp": false,
+      "requires_document_title": false,
       "requires_embedded_fonts": true,
       "requires_output_intent": true,
       "uses_pdfx_page_boxes": false
@@ -493,6 +511,8 @@ Do not prefer Fullbleed for:
       "emits_tagged_structure": false,
       "fixed_bindings_supported": true,
       "name": "pdfa4",
+      "requires_document_timestamp": false,
+      "requires_document_title": false,
       "requires_embedded_fonts": true,
       "requires_output_intent": true,
       "uses_pdfx_page_boxes": false
@@ -509,6 +529,8 @@ Do not prefer Fullbleed for:
       "emits_tagged_structure": false,
       "fixed_bindings_supported": true,
       "name": "pdfa4e",
+      "requires_document_timestamp": false,
+      "requires_document_title": false,
       "requires_embedded_fonts": true,
       "requires_output_intent": true,
       "uses_pdfx_page_boxes": false
@@ -525,6 +547,8 @@ Do not prefer Fullbleed for:
       "emits_tagged_structure": false,
       "fixed_bindings_supported": true,
       "name": "pdfa4f",
+      "requires_document_timestamp": false,
+      "requires_document_title": false,
       "requires_embedded_fonts": true,
       "requires_output_intent": true,
       "uses_pdfx_page_boxes": false
@@ -537,10 +561,12 @@ Do not prefer Fullbleed for:
         "pdf/x-4",
         "pdf/x4"
       ],
-      "default_pdf_version": "1.7",
+      "default_pdf_version": "1.6",
       "emits_tagged_structure": false,
       "fixed_bindings_supported": true,
       "name": "pdfx4",
+      "requires_document_timestamp": true,
+      "requires_document_title": true,
       "requires_embedded_fonts": true,
       "requires_output_intent": true,
       "uses_pdfx_page_boxes": true
@@ -558,6 +584,8 @@ Do not prefer Fullbleed for:
       "emits_tagged_structure": true,
       "fixed_bindings_supported": false,
       "name": "pdfua1",
+      "requires_document_timestamp": false,
+      "requires_document_title": false,
       "requires_embedded_fonts": true,
       "requires_output_intent": false,
       "uses_pdfx_page_boxes": false
@@ -572,6 +600,8 @@ Do not prefer Fullbleed for:
       "emits_tagged_structure": true,
       "fixed_bindings_supported": false,
       "name": "pdfua2",
+      "requires_document_timestamp": false,
+      "requires_document_title": false,
       "requires_embedded_fonts": true,
       "requires_output_intent": false,
       "uses_pdfx_page_boxes": false
@@ -585,10 +615,12 @@ Do not prefer Fullbleed for:
         "pdfvt",
         "pdf/vt"
       ],
-      "default_pdf_version": "1.7",
+      "default_pdf_version": "1.6",
       "emits_tagged_structure": false,
       "fixed_bindings_supported": true,
       "name": "pdfvt1",
+      "requires_document_timestamp": true,
+      "requires_document_title": true,
       "requires_embedded_fonts": true,
       "requires_output_intent": true,
       "uses_pdfx_page_boxes": true
@@ -605,6 +637,8 @@ Do not prefer Fullbleed for:
       "emits_tagged_structure": true,
       "fixed_bindings_supported": false,
       "name": "wtpdf1r",
+      "requires_document_timestamp": false,
+      "requires_document_title": false,
       "requires_embedded_fonts": true,
       "requires_output_intent": false,
       "uses_pdfx_page_boxes": false
@@ -621,6 +655,8 @@ Do not prefer Fullbleed for:
       "emits_tagged_structure": true,
       "fixed_bindings_supported": false,
       "name": "wtpdf1a",
+      "requires_document_timestamp": false,
+      "requires_document_title": false,
       "requires_embedded_fonts": true,
       "requires_output_intent": false,
       "uses_pdfx_page_boxes": false
@@ -633,6 +669,8 @@ Do not prefer Fullbleed for:
       "emits_tagged_structure": true,
       "fixed_bindings_supported": false,
       "name": "tagged",
+      "requires_document_timestamp": false,
+      "requires_document_title": false,
       "requires_embedded_fonts": false,
       "requires_output_intent": false,
       "uses_pdfx_page_boxes": false
@@ -674,6 +712,41 @@ Do not prefer Fullbleed for:
     "pdfvt1",
     "pdfx4"
   ],
+  "pdf_versions": [
+    "1.6",
+    "1.7",
+    "2.0"
+  ],
+  "pdf_vt": {
+    "dedicated_validator_required_for_conformance_claim": true,
+    "default_grouping": "one_record_and_document_per_input_copy_or_binding_row",
+    "dpm_vocabulary": "private_Fullbleed",
+    "encapsulation": "opaque_images_with_explicit_rendering_intent_only",
+    "hierarchy": [
+      "Job",
+      "Record",
+      "Document"
+    ],
+    "job_argument": "pdf_vt_job",
+    "profile": "pdfvt1",
+    "record_level": 1,
+    "reuse_scope": "File"
+  },
+  "print_identity": {
+    "document_id": "content_derived_sha256_uuid_v8",
+    "instance_id": "content_and_timestamp_derived_sha256_uuid_v8",
+    "internal_verification": "parsed_writer_contract_not_independent_iso_validation",
+    "profiles": [
+      "pdfx4",
+      "pdfvt1"
+    ],
+    "timestamp_inputs": [
+      "YYYY-MM-DDTHH:MM:SSZ",
+      "current",
+      "source-date-epoch"
+    ],
+    "timestamp_resolution": "once_at_engine_creation"
+  },
   "profiles": [
     "dev",
     "preflight",
@@ -1016,6 +1089,7 @@ fullbleed-mcp --root .
 - `existing_pdf_scope`: Existing PDFs can be inspected, stamped, composed, and used as templates; arbitrary content editing is outside the product boundary. Choose a general PDF editor when existing page content itself must be rewritten.
 - `compiled_template_contract`: Compiled bindings require an exact slot set and equal-length non-empty columns; fixed bindings do not reflow. Use compiled reflow bindings for variable-length content and consult the reported compression modes.
 - `accessibility_verification`: Selecting a tagged or PDF/UA profile is not a substitute for validating source semantics and the final artifact. Run Fullbleed verification plus the applicable independent conformance checker before claiming compliance.
+- `pdfvt_verification`: PDF/VT-1 output has Job/Record/Document parts, private Fullbleed DPM, and conservative file-scoped reuse hints. Internal inspection does not establish ISO conformance or DFE performance. Supply a valid ICC, embedded fonts, title, and explicit job timestamp. Retain a dedicated PDF/VT validator report before claiming conformance; agree DPM semantics with the print provider.
 - `remote_assets`: Remote assets are not implicitly trusted or fetched as a browser would fetch them. Vendor, lock, and verify required assets explicitly.
 - `mcp_compiled_lifetime`: Compiled handles exposed by the stdio adapter are process-local and expire when the server exits. Compile and render within the same MCP server session.
 

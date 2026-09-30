@@ -345,6 +345,8 @@ class PdfEngine(metaclass=_NativeFacadeType):
         debug_out=None,
         perf=False,
         perf_out=None,
+        document_timestamp=None,
+        pdf_vt_job=None,
     ):
         if watermark is not None:
             if not isinstance(watermark, WatermarkSpec):
@@ -419,7 +421,14 @@ class PdfEngine(metaclass=_NativeFacadeType):
             debug_out,
             perf,
             perf_out,
+            document_timestamp,
+            pdf_vt_job,
         )
+
+    @property
+    def document_timestamp(self, /):
+        """Resolved UTC write date; retain this value for reproducible replay."""
+        return _call(self._handle, "PdfEngine.get_document_timestamp")
 
     @property
     def document_lang(self, /):

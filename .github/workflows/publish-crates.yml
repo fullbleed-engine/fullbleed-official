@@ -10,7 +10,7 @@ on:
         description: "Annotated release tag whose exact source commit will be published"
         required: true
         type: string
-        default: "v2.3.1"
+        default: "v2.4.0"
       publish:
         description: "Publish after all validation gates pass"
         required: true
@@ -25,7 +25,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  pdfvt-preflight:
+    uses: ./.github/workflows/pdfvt-release-gate.yml
+    with:
+      release_ref: ${{ inputs.release_tag }}
+
   validate:
+    needs: pdfvt-preflight
     name: Validate exact crate release source
     runs-on: ubuntu-latest
     outputs:
@@ -129,7 +135,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo package --locked --list | tee target/fullbleed-package-files.txt
-          test "$(wc -l < target/fullbleed-package-files.txt)" -eq 67
+          test "$(wc -l < target/fullbleed-package-files.txt)" -eq 81
           ! grep -E '(^|/)(target|dist|secrets?)(/|$)|(^|/)\.env$' target/fullbleed-package-files.txt
 
       - name: Install declared Rust MSRV

@@ -1,0 +1,83 @@
+name: Dedicated PDF/VT release gate
+
+on:
+  workflow_call:
+    inputs:
+      release_ref:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      release_ref:
+        description: "Exact release commit or tag to validate"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  configuration:
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.check.outputs.runner }}
+    steps:
+      - name: Require a dedicated validator and runner
+        id: check
+        env:
+          RUNNER_JSON: ${{ vars.PDFVT_VALIDATOR_RUNNER }}
+          VALIDATOR_CMD: ${{ vars.PDFVT_VALIDATOR_CMD }}
+          VERSION_CMD: ${{ vars.PDFVT_VALIDATOR_VERSION_CMD }}
+          ICC_PATH: ${{ vars.PDFVT_OUTPUT_INTENT_ICC }}
+        shell: python
+        run: |
+          import json, os
+          required = ("RUNNER_JSON", "VALIDATOR_CMD", "VERSION_CMD", "ICC_PATH")
+          missing = [key for key in required if not os.environ.get(key, "").strip()]
+          if missing:
+              raise SystemExit("Dedicated PDF/VT release validation is not configured: " + ", ".join(missing))
+          labels = json.loads(os.environ["RUNNER_JSON"])
+          if not isinstance(labels, list) or not labels or not all(isinstance(x, str) and x for x in labels):
+              raise SystemExit("PDFVT_VALIDATOR_RUNNER must be a JSON array of runner labels")
+          if "{pdf}" not in os.environ["VALIDATOR_CMD"]:
+              raise SystemExit("PDFVT_VALIDATOR_CMD requires a {pdf} placeholder")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("runner=" + json.dumps(labels) + "\n")
+
+  preflight:
+    needs: configuration
+    runs-on: ${{ fromJSON(needs.configuration.outputs.runner) }}
+    timeout-minutes: 60
+    env:
+      FULLBLEED_PDFVT_VALIDATOR_CMD: ${{ vars.PDFVT_VALIDATOR_CMD }}
+      FULLBLEED_PDFVT_VALIDATOR_VERSION_CMD: ${{ vars.PDFVT_VALIDATOR_VERSION_CMD }}
+      FULLBLEED_OUTPUT_INTENT_ICC: ${{ vars.PDFVT_OUTPUT_INTENT_ICC }}
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_ref }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Build and install exact release wheel
+        shell: python
+        run: |
+          import pathlib, subprocess, sys
+          subprocess.run([sys.executable, "build_backend/fullbleed_build_backend.py", "wheel", "--out", "target/pdfvt-gate-wheel"], check=True)
+          wheels = list(pathlib.Path("target/pdfvt-gate-wheel").glob("*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit("Expected exactly one release wheel")
+          subprocess.run([sys.executable, "-m", "pip", "install", "--force-reinstall", "--no-deps", str(wheels[0])], check=True)
+      - name: Validate PDF/X substrate and all PDF/VT specimens
+        run: python tools/validate_pdf_profiles.py --profile pdfx4 --profile pdfvt1 --install-pdf-oxide --strict-external --require-dedicated-pdfvt --out target/pdfvt-release-evidence
+      - name: Retain PDFs, hashes, metadata, and raw validator reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pdfvt-release-evidence-${{ github.run_id }}
+          path: target/pdfvt-release-evidence/
+          if-no-files-found: error
+          retention-days: 90

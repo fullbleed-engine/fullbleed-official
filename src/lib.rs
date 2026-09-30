@@ -33,9 +33,12 @@ mod page_template;
 mod parallel;
 mod pdf;
 mod pdf_encodings;
+mod pdf_identity;
 mod pdf_native;
+mod pdf_print_contract;
 mod pdf_profile;
 mod pdf_raster;
+mod pdf_vt;
 mod pdfinspect;
 mod perf;
 mod plan;
@@ -112,9 +115,11 @@ use page_template::PageSelector;
 pub use page_template::{FrameSpec, PageTemplate};
 use pdf::PdfOptions;
 pub use pdf::{CompiledFlowCompression, OutputIntent, PdfProfile, PdfVersion};
+pub use pdf_identity::{PdfTimestamp, PdfTimestampError};
 pub use pdf_profile::{ParsePdfProfileError, PdfProfileDescriptor};
+pub use pdf_vt::{DpmMetadata, DpmValue, PdfVtDocument, PdfVtJob, PdfVtRecord};
 pub use pdfinspect::{
-    PdfInspectError, PdfInspectErrorCode, PdfInspectReport, PdfInspectWarning,
+    PdfInspectError, PdfInspectErrorCode, PdfInspectReport, PdfInspectWarning, PdfVtPartInspection,
     composition_compatibility_issues, inspect_pdf_bytes, inspect_pdf_path,
     require_pdf_composition_compatibility,
 };
@@ -2686,6 +2691,7 @@ fn layout_strategy_str(strategy: LayoutStrategy) -> &'static str {
 
 fn pdf_version_str(version: PdfVersion) -> &'static str {
     match version {
+        PdfVersion::Pdf16 => "1.6",
         PdfVersion::Pdf17 => "1.7",
         PdfVersion::Pdf20 => "2.0",
     }
@@ -2696,34 +2702,8 @@ fn pdf_profile_str(profile: PdfProfile) -> &'static str {
 }
 
 fn validate_pdf_options(options: &PdfOptions) -> Result<(), FullBleedError> {
-    if !options.pdf_profile.requires_output_intent() {
-        return Ok(());
-    }
-
-    let Some(intent) = options.output_intent.as_ref() else {
-        return Err(FullBleedError::InvalidConfiguration(format!(
-            "pdf_profile={} requires output_intent",
-            options.pdf_profile.as_str()
-        )));
-    };
-    if intent.icc_profile.is_empty() {
-        return Err(FullBleedError::InvalidConfiguration(
-            "output_intent ICC profile cannot be empty".to_string(),
-        ));
-    }
-    if !matches!(intent.n_components, 1 | 3 | 4) {
-        return Err(FullBleedError::InvalidConfiguration(format!(
-            "output_intent n_components must be one of 1, 3, or 4 (got {})",
-            intent.n_components
-        )));
-    }
-    if intent.identifier.trim().is_empty() {
-        return Err(FullBleedError::InvalidConfiguration(
-            "output_intent identifier cannot be empty".to_string(),
-        ));
-    }
-
-    Ok(())
+    pdf::validate_profile_output_intent(options)
+        .map_err(|error| FullBleedError::InvalidConfiguration(error.to_string()))
 }
 
 fn count_commands(doc: &Document) -> usize {
@@ -7782,6 +7762,45 @@ impl FullBleed {
         Ok(paths)
     }
 
+    // Preserve source document boundaries when linking PDF/VT records. Other
+    // profiles retain their established merged-document serialization.
+    fn write_batch_documents<W: std::io::Write>(
+        &self,
+        documents: Vec<Document>,
+        writer: &mut W,
+    ) -> Result<usize, FullBleedError> {
+        if self.pdf_options.pdf_profile == PdfProfile::PdfVt1 {
+            let page_size = documents
+                .first()
+                .ok_or(FullBleedError::EmptyDocumentSet)?
+                .page_size;
+            let mut stream = pdf::PdfStreamWriter::new(
+                writer,
+                page_size,
+                Some(self.font_registry.as_ref()),
+                self.pdf_options.clone(),
+                self.debug.clone(),
+                self.perf.clone(),
+            )?;
+            for (index, document) in documents.iter().enumerate() {
+                stream.add_document(index, document)?;
+            }
+            return Ok(stream.finish()?);
+        }
+        let merged = merge_documents(documents)?;
+        Ok(
+            pdf::document_to_pdf_with_metrics_and_registry_to_writer_with_logs(
+                &merged,
+                None,
+                Some(self.font_registry.as_ref()),
+                &self.pdf_options,
+                writer,
+                self.debug.clone(),
+                self.perf.clone(),
+            )?,
+        )
+    }
+
     pub fn render_many_to_buffer(
         &self,
         html_list: &[String],
@@ -7800,15 +7819,8 @@ impl FullBleed {
                 )?;
             documents.push(doc);
         }
-        let merged = merge_documents(documents)?;
-        let bytes = pdf::document_to_pdf_with_metrics_and_registry_with_logs(
-            &merged,
-            None,
-            Some(self.font_registry.as_ref()),
-            &self.pdf_options,
-            self.debug.clone(),
-            self.perf.clone(),
-        )?;
+        let mut bytes = Vec::new();
+        self.write_batch_documents(documents, &mut bytes)?;
         self.emit_debug_summary("render_many_to_buffer");
         Ok(bytes)
     }
@@ -7879,15 +7891,9 @@ impl FullBleed {
                 )?;
             documents.push(doc);
         }
-        let merged = merge_documents(documents)?;
-        Ok(pdf::document_to_pdf_with_metrics_and_registry_with_logs(
-            &merged,
-            None,
-            Some(self.font_registry.as_ref()),
-            &self.pdf_options,
-            self.debug.clone(),
-            self.perf.clone(),
-        )?)
+        let mut bytes = Vec::new();
+        self.write_batch_documents(documents, &mut bytes)?;
+        Ok(bytes)
     }
 
     pub fn render_many_to_writer_with_css<W: std::io::Write>(
@@ -8003,15 +8009,8 @@ impl FullBleed {
         if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
             return Err(FullBleedError::Cancelled);
         }
-        let merged = merge_documents(documents)?;
-        let bytes = pdf::document_to_pdf_with_metrics_and_registry_with_logs(
-            &merged,
-            None,
-            Some(self.font_registry.as_ref()),
-            &self.pdf_options,
-            self.debug.clone(),
-            self.perf.clone(),
-        )?;
+        let mut bytes = Vec::new();
+        self.write_batch_documents(documents, &mut bytes)?;
         if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
             return Err(FullBleedError::Cancelled);
         }
@@ -8047,15 +8046,8 @@ impl FullBleed {
             page_data_list.push(page_data);
         }
 
-        let merged = merge_documents(documents)?;
-        let bytes = pdf::document_to_pdf_with_metrics_and_registry_with_logs(
-            &merged,
-            None,
-            Some(self.font_registry.as_ref()),
-            &self.pdf_options,
-            self.debug.clone(),
-            self.perf.clone(),
-        )?;
+        let mut bytes = Vec::new();
+        self.write_batch_documents(documents, &mut bytes)?;
         Ok((bytes, page_data_list))
     }
 
@@ -8427,16 +8419,7 @@ impl FullBleed {
             page_data_list.push(page_data);
         }
 
-        let merged = merge_documents(documents)?;
-        let bytes_written = pdf::document_to_pdf_with_metrics_and_registry_to_writer_with_logs(
-            &merged,
-            None,
-            Some(self.font_registry.as_ref()),
-            &self.pdf_options,
-            writer,
-            self.debug.clone(),
-            self.perf.clone(),
-        )?;
+        let bytes_written = self.write_batch_documents(documents, writer)?;
         Ok((bytes_written, page_data_list))
     }
 
@@ -8645,6 +8628,25 @@ impl FullBleedBuilder {
     }
 
     // Document title for metadata (Info + XMP).
+    /// Explicit write date shared by XMP, PDF/VT identification, and Info.
+    pub fn document_timestamp(mut self, timestamp: PdfTimestamp) -> Self {
+        self.pdf_options.document_timestamp = Some(timestamp);
+        self
+    }
+
+    pub fn document_timestamp_value(&self) -> Option<&str> {
+        self.pdf_options
+            .document_timestamp
+            .as_ref()
+            .map(PdfTimestamp::as_str)
+    }
+
+    /// Group input documents into PDF/VT records with structured production metadata.
+    pub fn pdf_vt_job(mut self, job: PdfVtJob) -> Self {
+        self.pdf_options.pdf_vt_job = Some(job);
+        self
+    }
+
     pub fn document_title(mut self, title: impl Into<String>) -> Self {
         self.pdf_options.document_title = Some(title.into());
         self

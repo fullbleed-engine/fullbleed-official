@@ -370,6 +370,8 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
         "python -m pytest -q",
         "tools/smoke_crates_consumer.py",
         "rustup toolchain install 1.85.0",
+        "uses: ./.github/workflows/pdfvt-release-gate.yml",
+        "needs: pdfvt-preflight",
     ):
         if marker not in workflow:
             _flag(
@@ -388,6 +390,8 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
         "rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18",
         "tools/smoke_crates_consumer.py",
         "rustup toolchain install 1.85.0",
+        "uses: ./.github/workflows/pdfvt-release-gate.yml",
+        "needs: pdfvt-preflight",
     ):
         if marker not in crates_workflow:
             _flag(

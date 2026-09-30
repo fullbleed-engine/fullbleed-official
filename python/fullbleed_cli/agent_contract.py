@@ -231,6 +231,11 @@ KNOWN_LIMITATIONS = [
         "agent_action": "Run Fullbleed verification plus the applicable independent conformance checker before claiming compliance.",
     },
     {
+        "id": "pdfvt_verification",
+        "summary": "PDF/VT-1 output has Job/Record/Document parts, private Fullbleed DPM, and conservative file-scoped reuse hints. Internal inspection does not establish ISO conformance or DFE performance.",
+        "agent_action": "Supply a valid ICC, embedded fonts, title, and explicit job timestamp. Retain a dedicated PDF/VT validator report before claiming conformance; agree DPM semantics with the print provider.",
+    },
+    {
         "id": "remote_assets",
         "summary": "Remote assets are not implicitly trusted or fetched as a browser would fetch them.",
         "agent_action": "Vendor, lock, and verify required assets explicitly.",
@@ -426,7 +431,48 @@ def _tool(
 
 
 _EMPTY_OBJECT_SCHEMA = {"type": "object", "properties": {}, "additionalProperties": False}
+_PART_METADATA = {
+    "type": "object",
+    "description": "Private Fullbleed DPM: strings, signed 64-bit integers, finite reals within the PDF reader's single-precision range, booleans, arrays, and nested dictionaries; no nulls. At most 16 nesting levels and 10000 values per node.",
+}
+_PART_PROPERTIES = {"id": {"type": "string", "minLength": 1}, "metadata": _PART_METADATA}
+PDF_VT_JOB_SCHEMA = {
+    "type": "object",
+    "properties": {
+        **_PART_PROPERTIES,
+        "records": {
+            "type": "array",
+            "description": "Ordered records; omitted or empty generates one record per input document, compiled copy, or binding row.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    **_PART_PROPERTIES,
+                    "documents": {
+                        "type": "array", "minItems": 1,
+                        "items": {"type": "object", "properties": _PART_PROPERTIES,
+                                  "required": ["id"], "additionalProperties": False},
+                    },
+                },
+                "required": ["id", "documents"], "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["id"], "additionalProperties": False,
+}
+_ENGINE_PROPERTIES = {
+    "document_lang": {"type": "string"},
+    "document_title": {"type": "string"},
+    "document_timestamp": {"type": "string", "description": "UTC job write date YYYY-MM-DDTHH:MM:SSZ, current, or source-date-epoch. Resolved once when the engine is created."},
+    "pdf_profile": {"type": "string"},
+    "pdf_vt_job": PDF_VT_JOB_SCHEMA,
+    "output_intent_icc_path": {"type": "string", "description": "Workspace-relative ICC profile path."},
+    "output_intent_identifier": {"type": "string"},
+    "output_intent_info": {"type": "string"},
+    "output_intent_components": {"enum": [1, 3, 4]},
+    "font_paths": {"type": "array", "items": {"type": "string"}, "description": "Workspace-relative embeddable font paths."},
+}
 _HTML_CSS_PROPERTIES = {
+    **_ENGINE_PROPERTIES,
     "html": {"type": "string", "description": "Inline HTML or SVG markup."},
     "html_path": {"type": "string", "description": "Workspace-relative HTML or SVG path."},
     "css": {"type": "string", "description": "Inline CSS."},
@@ -435,9 +481,6 @@ _HTML_CSS_PROPERTIES = {
         "items": {"type": "string"},
         "description": "Workspace-relative CSS paths.",
     },
-    "document_lang": {"type": "string"},
-    "document_title": {"type": "string"},
-    "pdf_profile": {"type": "string"},
 }
 
 
@@ -593,8 +636,7 @@ MCP_TOOL_SPECS = [
             "properties": {
                 "html": {"type": "string"},
                 "css": {"type": "string"},
-                "document_lang": {"type": "string"},
-                "document_title": {"type": "string"},
+                **_ENGINE_PROPERTIES,
             },
             "required": ["html"],
             "additionalProperties": False,
@@ -638,6 +680,7 @@ MCP_TOOL_SPECS = [
             "properties": {
                 "html": {"type": "string"},
                 "css": {"type": "string"},
+                **_ENGINE_PROPERTIES,
                 "bindings": {
                     "type": "object",
                     "additionalProperties": {
@@ -649,8 +692,6 @@ MCP_TOOL_SPECS = [
                 "mode": {"enum": ["fixed_bindings", "reflow_bindings"]},
                 "output_path": {"type": "string"},
                 "compression": {"enum": ["throughput", "compact"]},
-                "document_lang": {"type": "string"},
-                "document_title": {"type": "string"},
             },
             "required": ["html", "bindings", "mode", "output_path"],
             "additionalProperties": False,

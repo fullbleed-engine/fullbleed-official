@@ -953,6 +953,8 @@ def _build_manifest(args):
             "color_space": getattr(args, "color_space", None),
             "document_lang": getattr(args, "document_lang", None),
             "document_title": getattr(args, "document_title", None),
+            "document_timestamp": getattr(args, "document_timestamp", None),
+            "pdf_vt_job": _read_json_or_path(getattr(args, "pdf_vt_job", None)),
         },
         "template": {
             "binding": getattr(args, "template_binding", None),
@@ -1036,6 +1038,9 @@ def _build_engine(args):
             color_space=args.color_space,
             document_lang=args.document_lang,
             document_title=args.document_title,
+            document_timestamp=("source-date-epoch" if getattr(args, "timestamp_source", None)
+                                else getattr(args, "document_timestamp", None)),
+            pdf_vt_job=_read_json_or_path(getattr(args, "pdf_vt_job", None)),
             header_each=getattr(args, "header_each", None),
             footer_each=getattr(args, "footer_each", None),
             watermark_text=args.watermark_text,
@@ -1052,6 +1057,9 @@ def _build_engine(args):
             perf=bool(emit_perf),
             perf_out=emit_perf,
         )
+        # Preserve the resolved date in manifests and subsequent renders in this job.
+        args.document_timestamp = engine.document_timestamp
+        args.timestamp_source = None
     except Exception as exc:
         message = str(exc)
         if "requires embedded fonts" in message.lower():
@@ -2284,6 +2292,8 @@ def cmd_render(args):
     effective_jit_path = user_emit_jit or internal_jit_path
     jit_insights = _collect_jit_insights(effective_jit_path)
     failures = _evaluate_failures(args, bytes_written, glyph_report, jit_insights)
+    profile_verification, profile_failures = _inspect_print_output(args, args.out, pdf_bytes)
+    failures.extend(profile_failures)
     fallback_summary = _collect_fallback_summary(args, glyph_report, jit_insights)
 
     manifest = _build_manifest(args)
@@ -2312,6 +2322,7 @@ def cmd_render(args):
             image_mode = "overlay_document"
 
     outputs = {
+        "pdf_profile_verification": profile_verification,
         "pdf": None if args.out == "-" else args.out,
         "jit": user_emit_jit,
         "perf": args.emit_perf,
@@ -2345,6 +2356,32 @@ def cmd_render(args):
         raise SystemExit(1)
     
     _emit_result(True, "fullbleed.render_result.v1", args.out, bytes_written, outputs, args)
+
+
+def _inspect_print_output(args, out_path, pdf_bytes):
+    profile = _normalize_pdf_profile(getattr(args, "pdf_profile", None))
+    if profile not in {"pdfx4", "pdfvt1"}:
+        return None, []
+    if out_path and out_path != "-":
+        report = fullbleed.inspect_pdf(str(out_path))
+    else:
+        with tempfile.TemporaryDirectory(prefix="fullbleed-print-check-") as directory:
+            path = Path(directory) / "output.pdf"
+            path.write_bytes(pdf_bytes)
+            report = fullbleed.inspect_pdf(str(path))
+    inspected = report.get("profile", {})
+    blockers = list(inspected.get("seed_blockers", []))
+    if profile not in inspected.get("claims", []):
+        blockers.append("requested_profile_identification_missing")
+    if inspected.get("pdfx_contract_valid") is not True:
+        blockers.append("print_contract_not_verified")
+    verification = {"scope": "internal_writer_contract", "independent_conformance": False,
+                    "profile": profile, "passed": not blockers, "blockers": sorted(set(blockers)),
+                    "inspection": inspected}
+    failures = [] if not blockers else [{"code": "PDF_PROFILE_CONTRACT_VIOLATION",
+        "message": f"{profile} artifact failed internal print checks", "blockers": verification["blockers"],
+        "recommended_actions": ["Inspect the retained PDF and profile diagnostics; run dedicated preflight before claiming conformance."]}]
+    return verification, failures
 
 
 def cmd_verify(args):
@@ -2390,6 +2427,8 @@ def cmd_verify(args):
     effective_jit_path = user_emit_jit or internal_jit_path
     jit_insights = _collect_jit_insights(effective_jit_path)
     failures = _evaluate_failures(args, bytes_written, glyph_report, jit_insights)
+    profile_verification, profile_failures = _inspect_print_output(args, out_path, pdf_bytes)
+    failures.extend(profile_failures)
     fallback_summary = _collect_fallback_summary(args, glyph_report, jit_insights)
 
     manifest = _build_manifest(args)
@@ -2413,6 +2452,7 @@ def cmd_verify(args):
     image_mode = "overlay_document" if getattr(args, "emit_image", None) else None
 
     outputs = {
+        "pdf_profile_verification": profile_verification,
         "pdf": None if out_path == "-" else out_path,
         "jit": user_emit_jit,
         "perf": args.emit_perf,
@@ -2617,9 +2657,9 @@ def cmd_doctor(args):
         "ok": ok,
         "python": sys.version.split()[0],
         "platform": sys.platform,
-        "pdf_versions": ["1.7", "2.0"],
         "pdf_profiles": PDF_PROFILE_CHOICES,
         "pdf_profile_catalog": PDF_PROFILE_CATALOG,
+        **_print_capabilities(),
         "pdf_profile_aliases": {
             key: value for key, value in sorted(PDF_PROFILE_ALIASES.items()) if value
         },
@@ -3156,6 +3196,7 @@ def _capabilities_payload(cli_surface=None):
         "profiles": list(PROFILES.keys()),
         "pdf_profiles": PDF_PROFILE_CHOICES,
         "pdf_profile_catalog": PDF_PROFILE_CATALOG,
+        **_print_capabilities(),
         "pdf_profile_aliases": {
             key: value for key, value in sorted(PDF_PROFILE_ALIASES.items()) if value
         },
@@ -3168,6 +3209,32 @@ def _capabilities_payload(cli_surface=None):
         "compliance": COMPLIANCE_POLICY,
     }
     return payload
+
+
+def _print_capabilities():
+    """Shared print facts for doctor, capabilities, and the agent contract."""
+    return {
+        "pdf_versions": ["1.6", "1.7", "2.0"],
+        "print_identity": {
+            "profiles": [p["name"] for p in PDF_PROFILE_CATALOG if p["requires_document_timestamp"]],
+            "timestamp_inputs": ["YYYY-MM-DDTHH:MM:SSZ", "current", "source-date-epoch"],
+            "timestamp_resolution": "once_at_engine_creation",
+            "document_id": "content_derived_sha256_uuid_v8",
+            "instance_id": "content_and_timestamp_derived_sha256_uuid_v8",
+            "internal_verification": "parsed_writer_contract_not_independent_iso_validation",
+        },
+        "pdf_vt": {
+            "profile": "pdfvt1",
+            "job_argument": "pdf_vt_job",
+            "hierarchy": ["Job", "Record", "Document"],
+            "record_level": 1,
+            "default_grouping": "one_record_and_document_per_input_copy_or_binding_row",
+            "dpm_vocabulary": "private_Fullbleed",
+            "reuse_scope": "File",
+            "encapsulation": "opaque_images_with_explicit_rendering_intent_only",
+            "dedicated_validator_required_for_conformance_claim": True,
+        },
+    }
 
 
 def cmd_capabilities(args):
@@ -3551,6 +3618,12 @@ def _add_common_flags(p):
     p.add_argument("--color-space")
     p.add_argument("--document-lang")
     p.add_argument("--document-title")
+    p.add_argument("--pdf-vt-job", help="PDF/VT job/record/document metadata as a JSON object or file")
+    timestamp = p.add_mutually_exclusive_group()
+    timestamp.add_argument("--timestamp", dest="document_timestamp",
+                           help="Explicit PDF write date: YYYY-MM-DDTHH:MM:SSZ (UTC) or current; required for PDF/X and PDF/VT")
+    timestamp.add_argument("--timestamp-source", choices=["SOURCE_DATE_EPOCH"],
+                           help="Resolve a reproducible PDF write date from SOURCE_DATE_EPOCH")
     p.add_argument("--header-each")
     p.add_argument("--header-html-each")
     p.add_argument("--footer-each")
@@ -4023,13 +4096,22 @@ def main(argv=None):
                 encoding="utf-8",
             )
         args.func(args)
+        if getattr(args, "emit_manifest", None):
+            # Engine creation resolves current/SOURCE_DATE_EPOCH once. Retain
+            # that value, rather than the initial unresolved command input.
+            Path(args.emit_manifest).write_text(
+                json.dumps(_build_manifest(args), ensure_ascii=True, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
     except Exception as exc:
         if args.json:
             recommended_actions, relevant_commands = _cli_error_hints(args)
             err = {
                 "schema": "fullbleed.error.v1",
                 "ok": False,
-                "code": "CLI_ERROR",
+                "code": next((code for code in (
+                    "PDF_PROFILE_CONTRACT_VIOLATION", "PDF_TIMESTAMP_INVALID", "PDF_VT_JOB_INVALID"
+                ) if code + ":" in str(exc)), "CLI_ERROR"),
                 "message": str(exc),
                 "command": getattr(args, "command", None),
                 "recommended_actions": recommended_actions,

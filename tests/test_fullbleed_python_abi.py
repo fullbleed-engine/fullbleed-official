@@ -130,6 +130,8 @@ def test_pdf_engine_constructor_and_method_signatures_remain_explicit() -> None:
         "debug_out",
         "perf",
         "perf_out",
+        "document_timestamp",
+        "pdf_vt_job",
     ]
     assert constructor.parameters["reuse_xobjects"].default is True
     assert constructor.parameters["watermark_layer"].default == "overlay"

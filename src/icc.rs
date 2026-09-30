@@ -117,10 +117,10 @@ pub fn inspect_output_intent_icc(bytes: &[u8]) -> Result<IccProfileInfo, IccProf
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn structural_fixture() -> Vec<u8> {
+    pub(crate) fn structural_fixture() -> Vec<u8> {
         let mut bytes = vec![0; 168];
         bytes[0..4].copy_from_slice(&168_u32.to_be_bytes());
         bytes[8] = 4;
