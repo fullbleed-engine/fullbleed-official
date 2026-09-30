@@ -26,7 +26,7 @@ jobs:
   pdfvt-preflight:
     uses: ./.github/workflows/pdfvt-release-gate.yml
     with:
-      release_ref: ${{ github.ref }}
+      release_ref: ${{ github.sha }}
 
   validate:
     needs: pdfvt-preflight
