@@ -120,6 +120,13 @@ automatically.
 
 Profile conformance gate:
 
+`pdfx4` and `pdfvt1` force PDF 1.6 and require `--document-title` and an explicit
+`--timestamp current`, `--timestamp YYYY-MM-DDTHH:MM:SSZ`, or
+`--timestamp-source SOURCE_DATE_EPOCH`. `--pdf-vt-job` accepts a JSON description
+or path. See [PDF/VT composition](pdf-vt.md) for grouping and DPM rules. `render`
+and `verify` parse the resulting print artifact and expose the internal writer
+contract result separately from independent conformance validation.
+
 ```bash
 python tools/validate_pdf_profiles.py \
   --out output/conformance_validation \
@@ -138,14 +145,14 @@ WTPDF profiles are validated with veraPDF `wt1r`/`wt1a` and checked for PDF
 Declaration evidence. PDF/A-4f is additionally checked for its associated `EmbeddedFiles` name tree.
 PDF/VT is additionally checked for PDF/VT identification, matching modification
 dates, and a parsed DPart graph: catalog `DPartRoot`, root `DPartRootNode`,
-one-level `NodeNameList`, leaf `DPart` page range, and page `/DPart` references.
+`NodeNameList [/Job /Record /Document]`, leaf `DPart` page range, and page `/DPart` references.
 The gate also renders a supplemental multipage PDF/VT specimen to prove the
 `/Start` and `/End` range. The inspect report exposes those PDF/VT graph checks
 as individual boolean fields as well as the aggregate `pdfvt_dpart_graph_valid`
 gate.
 A dedicated PDF/VT
 preflight tool is still required for third-party PDF/VT certification; wire one
-into the same gate with `--pdfvt-cmd "tool --input {pdf}" --require-dedicated-pdfvt`.
+into the same gate with `--pdfvt-cmd "tool --input {pdf}" --pdfvt-version-cmd "tool --version" --require-dedicated-pdfvt`.
 
 Default Fullbleed Python wheels are built with `--features python,svg_raster`.
 Use the same feature set for local source builds when testing

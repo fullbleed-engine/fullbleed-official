@@ -1,4 +1,65 @@
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+
+thread_local! {
+    // The authoring API explicitly propagates this scope to its layout worker.
+    // This is a render-boundary capability, never an ambient environment switch.
+    static RESTRICTED_ASSET_READS: RefCell<Option<Arc<AssetReadContext>>> = const { RefCell::new(None) };
+}
+
+pub(crate) struct AssetReadContext {
+    pub(crate) bundle: Arc<AssetBundle>,
+    pub(crate) blocked: AtomicUsize,
+}
+
+pub(crate) struct AssetReadScope(Option<Arc<AssetReadContext>>);
+impl AssetReadScope {
+    pub(crate) fn enter(audit: Option<Arc<AssetReadContext>>) -> Self {
+        Self(RESTRICTED_ASSET_READS.with(|slot| {
+            let previous = slot.borrow().clone();
+            *slot.borrow_mut() = audit.or_else(|| previous.clone());
+            previous
+        }))
+    }
+}
+impl Drop for AssetReadScope {
+    fn drop(&mut self) {
+        RESTRICTED_ASSET_READS.with(|slot| *slot.borrow_mut() = self.0.take());
+    }
+}
+
+/// Single filesystem gate for image resolution, intrinsic layout, PDF emission
+/// and native rasterization. Bundle/data-URI decoding does not use this gate.
+pub(crate) fn read_asset_path(path: impl AsRef<Path>) -> std::io::Result<Vec<u8>> {
+    let path = path.as_ref();
+    let supplied = RESTRICTED_ASSET_READS.with(|slot| {
+        slot.borrow().as_ref().and_then(|audit| {
+            bundle_lookup(&audit.bundle, &path.to_string_lossy()).map(|asset| asset.data.clone())
+        })
+    });
+    if let Some(bytes) = supplied {
+        return Ok(bytes);
+    }
+    let denied = RESTRICTED_ASSET_READS.with(|slot| {
+        if let Some(audit) = slot.borrow().as_ref() {
+            audit.blocked.fetch_add(1, Ordering::Relaxed);
+            true
+        } else {
+            false
+        }
+    });
+    if denied {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "ASSET_FILESYSTEM_BLOCKED: Supply asset bytes in the bundle or a data URI",
+        ));
+    }
+    std::fs::read(path)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssetKind {
@@ -255,6 +316,11 @@ pub fn raster_image_intrinsic_dimensions(
 }
 
 pub fn resolve_image_asset(bundle: Option<&AssetBundle>, source: &str) -> ResolvedAsset {
+    // Backgrounds, border images and generated content also resolve at lower
+    // layers which do not carry the bundle parameter. Use this render's exact
+    // supplied bytes there; never weaken the filesystem boundary.
+    let inherited = RESTRICTED_ASSET_READS.with(|slot| slot.borrow().clone());
+    let bundle = bundle.or_else(|| inherited.as_ref().map(|audit| audit.bundle.as_ref()));
     let trimmed = source.trim();
     if trimmed.is_empty() {
         return ResolvedAsset {
@@ -325,7 +391,7 @@ pub fn resolve_image_asset(bundle: Option<&AssetBundle>, source: &str) -> Resolv
 
 fn resolve_local_path(source: &str, path: PathBuf, resolver: &str) -> ResolvedAsset {
     let normalized = path.to_string_lossy().to_string();
-    match std::fs::read(&path) {
+    match read_asset_path(&path) {
         Ok(bytes) => {
             let mime = infer_image_mime_from_label(&normalized);
             let content_kind = content_kind_for(mime.as_deref(), &normalized, &bytes);
@@ -507,6 +573,68 @@ mod tests {
         renderable_image_source, resolve_image_asset,
     };
     use std::path::Path;
+
+    #[test]
+    fn restricted_asset_scope_denies_reads_before_io_and_restores_on_drop() {
+        let mut supplied = AssetBundle::default();
+        supplied.add(Asset::new(
+            "scoped.png".into(),
+            AssetKind::Image,
+            b"scoped".to_vec(),
+            None,
+            false,
+        ));
+        let audit = std::sync::Arc::new(super::AssetReadContext {
+            bundle: std::sync::Arc::new(supplied),
+            blocked: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let fixture = std::env::temp_dir().join(format!(
+            "fullbleed-asset-scope-{}-{}.png",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&fixture, b"PRIVATE-ASSET-CANARY").unwrap();
+        {
+            let _scope = super::AssetReadScope::enter(Some(audit.clone()));
+            assert_eq!(super::read_asset_path("scoped.png").unwrap(), b"scoped");
+            assert_eq!(resolve_image_asset(None, "scoped.png").bytes, b"scoped");
+            assert_eq!(
+                super::read_asset_path(&fixture).unwrap_err().kind(),
+                std::io::ErrorKind::PermissionDenied
+            );
+            assert!(
+                !resolve_image_asset(None, fixture.to_str().unwrap())
+                    .trace
+                    .success
+            );
+            let mut bundle = AssetBundle::default();
+            bundle.add(Asset::new(
+                "supplied.png".into(),
+                AssetKind::Image,
+                b"supplied".to_vec(),
+                None,
+                false,
+            ));
+            assert_eq!(
+                resolve_image_asset(Some(&bundle), "supplied.png").bytes,
+                b"supplied"
+            );
+            assert!(
+                resolve_image_asset(None, "data:image/png;base64,c3VwcGxpZWQ=")
+                    .trace
+                    .success
+            );
+        }
+        assert_eq!(
+            super::read_asset_path(&fixture).unwrap(),
+            b"PRIVATE-ASSET-CANARY"
+        );
+        assert_eq!(audit.blocked.load(std::sync::atomic::Ordering::Relaxed), 2);
+        std::fs::remove_file(fixture).unwrap();
+    }
 
     #[test]
     fn asset_kind_pdf_roundtrip() {

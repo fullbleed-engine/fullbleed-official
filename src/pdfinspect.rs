@@ -3,6 +3,20 @@ use crate::pdf_native::{
 };
 use std::path::Path;
 
+#[path = "pdf_vt_inspect.rs"]
+mod vt;
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PdfVtPartInspection {
+    pub object_id: u32,
+    pub depth: usize,
+    pub name: String,
+    pub id: Option<String>,
+    pub first_page: Option<usize>,
+    pub last_page: Option<usize>,
+    pub metadata: crate::DpmMetadata,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PdfInspectErrorCode {
     PdfParseFailed,
@@ -63,6 +77,17 @@ pub struct PdfProfileInspection {
     pub pdfvt_dpart_page_range_valid: bool,
     pub pdfvt_dpart_graph_valid: bool,
     pub pdfvt_mod_date_matches_xmp: Option<bool>,
+    pub pdfx_contract_valid: Option<bool>,
+    pub document_timestamp: Option<String>,
+    pub pdfvt_record_level: Option<usize>,
+    pub pdfvt_record_count: usize,
+    pub pdfvt_document_count: usize,
+    pub pdfvt_dpm_node_count: usize,
+    pub pdfvt_dpm_valid: bool,
+    pub pdfvt_parts: Vec<PdfVtPartInspection>,
+    pub pdfvt_reuse_hint_count: usize,
+    pub pdfvt_encapsulated_xobject_count: usize,
+    pub pdfvt_reuse_hints_valid: Option<bool>,
     pub seed_blockers: Vec<String>,
 }
 
@@ -137,7 +162,7 @@ fn contains_pdfa_identification(bytes: &[u8], part: &[u8], conformance: Option<&
     contains_token(bytes, part) && conformance.map_or(true, |token| contains_token(bytes, token))
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 struct PdfVtDPartInspection {
     dpart_root_present: bool,
     dpart_present: bool,
@@ -148,6 +173,12 @@ struct PdfVtDPartInspection {
     leaf_valid: bool,
     page_range_valid: bool,
     graph_valid: bool,
+    record_level: Option<usize>,
+    record_count: usize,
+    document_count: usize,
+    dpm_node_count: usize,
+    dpm_valid: bool,
+    parts: Vec<PdfVtPartInspection>,
 }
 
 fn dict_reference(dict: &LoDictionary, key: &[u8]) -> Option<LoObjectId> {
@@ -165,84 +196,12 @@ fn dict_has_type(dict: &LoDictionary, expected: &[u8]) -> bool {
         .map_or(false, |name| name == expected)
 }
 
-fn node_name_list_is_single_document_level(dict: &LoDictionary) -> bool {
-    dict.get(b"NodeNameList")
-        .ok()
-        .and_then(|obj| obj.as_array().ok())
-        .map_or(false, |items| {
-            items.len() == 1
-                && items.first().and_then(|item| item.as_name().ok())
-                    == Some(b"Document".as_slice())
-        })
-}
-
 fn page_dpart_reference(pdf: &LoDocument, page_id: LoObjectId) -> Option<LoObjectId> {
     object_dict(pdf, page_id).and_then(|page| dict_reference(page, b"DPart"))
 }
 
 fn inspect_pdfvt_dpart_graph(pdf: &LoDocument) -> PdfVtDPartInspection {
-    let mut out = PdfVtDPartInspection::default();
-    let pages: Vec<LoObjectId> = pdf.get_pages().values().copied().collect();
-    if pages.is_empty() {
-        return out;
-    }
-
-    let Some(catalog_id) = pdf
-        .trailer
-        .get(b"Root")
-        .ok()
-        .and_then(|obj| obj.as_reference().ok())
-    else {
-        return out;
-    };
-    let Some(catalog) = object_dict(pdf, catalog_id) else {
-        return out;
-    };
-    let Some(dpart_root_id) = dict_reference(catalog, b"DPartRoot") else {
-        return out;
-    };
-    let Some(dpart_root) = object_dict(pdf, dpart_root_id) else {
-        return out;
-    };
-    out.dpart_root_present = dict_has_type(dpart_root, b"DPartRoot");
-    out.node_name_list_valid = node_name_list_is_single_document_level(dpart_root);
-
-    let Some(dpart_node_id) = dict_reference(dpart_root, b"DPartRootNode") else {
-        return out;
-    };
-    let Some(dpart_node) = object_dict(pdf, dpart_node_id) else {
-        return out;
-    };
-    out.dpart_present = dict_has_type(dpart_node, b"DPart");
-    out.root_node_valid = out.dpart_root_present && out.dpart_present;
-
-    let page_dparts_match = pages
-        .iter()
-        .all(|page_id| page_dpart_reference(pdf, *page_id) == Some(dpart_node_id));
-    out.page_dpart_present = page_dparts_match;
-
-    let parent_ok = dict_reference(dpart_node, b"Parent") == Some(dpart_root_id);
-    let start_ok = pages.first().copied() == dict_reference(dpart_node, b"Start");
-    let end_ref = dict_reference(dpart_node, b"End");
-    let end_ok = if pages.len() > 1 {
-        pages.last().copied() == end_ref
-    } else {
-        end_ref.is_none()
-    };
-    out.parent_valid = parent_ok;
-    out.page_range_valid = start_ok && end_ok;
-    out.leaf_valid =
-        dpart_node.get(b"DParts").is_err() && dict_reference(dpart_node, b"Start").is_some();
-
-    out.graph_valid = out.dpart_root_present
-        && out.dpart_present
-        && out.page_dpart_present
-        && out.root_node_valid
-        && out.parent_valid
-        && out.node_name_list_valid
-        && out.leaf_valid
-        && out.page_range_valid;
-    out
+    vt::inspect(pdf)
 }
 
 fn inspect_profile_markers(bytes: &[u8], pdf: &LoDocument) -> PdfProfileInspection {
@@ -265,6 +224,12 @@ fn inspect_profile_markers(bytes: &[u8], pdf: &LoDocument) -> PdfProfileInspecti
         pdfvt_dpart_leaf_valid: pdfvt_dpart.leaf_valid,
         pdfvt_dpart_page_range_valid: pdfvt_dpart.page_range_valid,
         pdfvt_dpart_graph_valid: pdfvt_dpart.graph_valid,
+        pdfvt_record_level: pdfvt_dpart.record_level,
+        pdfvt_record_count: pdfvt_dpart.record_count,
+        pdfvt_document_count: pdfvt_dpart.document_count,
+        pdfvt_dpm_node_count: pdfvt_dpart.dpm_node_count,
+        pdfvt_dpm_valid: pdfvt_dpart.dpm_valid,
+        pdfvt_parts: pdfvt_dpart.parts,
         ..PdfProfileInspection::default()
     };
 
@@ -439,9 +404,25 @@ fn inspect_profile_markers(bytes: &[u8], pdf: &LoDocument) -> PdfProfileInspecti
         out.seed_blockers
             .push("wtpdf_missing_pdf_declaration".to_string());
     }
+    if out.claims.iter().any(|c| c == "pdfx4" || c == "pdfvt1") {
+        let (blockers, timestamp) =
+            crate::pdf_print_contract::inspect(pdf, out.claims.iter().any(|c| c == "pdfvt1"));
+        out.pdfx_contract_valid = Some(blockers.is_empty());
+        out.document_timestamp = timestamp;
+        out.seed_blockers.extend(blockers);
+    }
     if out.claims.iter().any(|c| c == "pdfvt1") {
-        let pdfvt_mod = extract_xml_attr(bytes, b"pdfvtid:GTS_PDFVTModDate=");
-        let xmp_mod = extract_xml_attr(bytes, b"xmp:ModifyDate=");
+        let (count, encapsulated, valid) = vt::inspect_hints(pdf, out.pdfvt_record_level);
+        out.pdfvt_reuse_hint_count = count;
+        out.pdfvt_encapsulated_xobject_count = encapsulated;
+        out.pdfvt_reuse_hints_valid = Some(valid);
+        if !valid {
+            out.seed_blockers
+                .push("pdfvt_invalid_reuse_hint".to_owned());
+        }
+        let metadata = crate::pdf_print_contract::metadata(pdf).unwrap_or_default();
+        let pdfvt_mod = extract_xml_attr(&metadata, b"pdfvtid:GTS_PDFVTModDate=");
+        let xmp_mod = extract_xml_attr(&metadata, b"xmp:ModifyDate=");
         out.pdfvt_mod_date_matches_xmp = match (pdfvt_mod, xmp_mod) {
             (Some(a), Some(b)) => Some(a == b),
             _ => Some(false),
@@ -587,9 +568,11 @@ mod tests {
         };
         let mut options = PdfOptions::default();
         options.pdf_profile = profile;
+        options.document_title = Some("Print specimen".into());
+        options.document_timestamp = Some("2026-09-30T00:00:00Z".parse().unwrap());
         if profile.requires_output_intent() {
             options.output_intent = Some(OutputIntent::new(
-                vec![0x00, 0x01, 0x02],
+                crate::icc::tests::structural_fixture(),
                 3,
                 "sRGB IEC61966-2.1",
                 Some("sRGB".to_string()),
@@ -769,7 +752,7 @@ mod tests {
         assert!(report.profile.pdfvt_dpart_parent_valid);
         assert!(report.profile.pdfvt_dpart_node_name_list_valid);
         assert!(!report.profile.pdfvt_dpart_leaf_valid);
-        assert!(report.profile.pdfvt_dpart_page_range_valid);
+        assert!(!report.profile.pdfvt_dpart_page_range_valid);
         assert!(!report.profile.pdfvt_dpart_graph_valid);
         assert!(
             report

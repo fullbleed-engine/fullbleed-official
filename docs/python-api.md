@@ -71,7 +71,10 @@ Common constructor options:
   embedded font counts, PDF/UA structure markers, and granular PDF/VT DPart
   graph markers. The harness includes a supplemental multipage PDF/VT specimen
   for `/Start` and `/End` range evidence.
-- document metadata: `document_lang`, `document_title`
+- document metadata: `document_lang`, `document_title`, `document_timestamp`
+- PDF/VT composition: `pdf_vt_job` with ordered records, documents, and private
+  DPM. `pdfx4`/`pdfvt1` force PDF 1.6 and require a title and explicit timestamp.
+  See [PDF/VT composition](pdf-vt.md) for the full input and validation contract.
 - page template decorations: header/footer text and HTML variants
 - watermark controls: `watermark_*` fields or `watermark=WatermarkSpec(...)`
 - diagnostics: `jit_mode`, `debug/debug_out`, `perf/perf_out`

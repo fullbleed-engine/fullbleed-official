@@ -63,7 +63,7 @@ These are consumed by CLI `--fail-on` policies and repro workflows.
 
 Engine options include:
 
-- `pdf_version`: `1.7` or `2.0`
+- `pdf_version`: `1.6`, `1.7`, or `2.0`
 - `pdf_profile`: `none`, `pdfa1a`, `pdfa1b`, `pdfa2a`, `pdfa2b`, `pdfa2u`, `pdfa3a`, `pdfa3b`, `pdfa3u`, `pdfa4`, `pdfa4e`, `pdfa4f`, `pdfx4`, `pdfua1`, `pdfua2`, `pdfvt1`, `wtpdf1r`, `wtpdf1a`, `tagged`
 - `color_space`: `rgb` or `cmyk`
 - output intent ICC embedding and metadata fields
@@ -74,17 +74,22 @@ and WTPDF profiles require embedded fonts when text is used. `pdfa4`, `pdfa4e`, 
 metadata. Use the accessibility verifier/seed traces as the machine gate before
 making external conformance claims.
 
+PDF/X-4 and PDF/VT-1 force PDF 1.6 and require a nonempty title and explicit
+`PdfTimestamp`. `FullBleedBuilder::pdf_vt_job` attaches ordered `PdfVtRecord`
+and `PdfVtDocument` definitions with typed DPM. See [PDF/VT composition](pdf-vt.md)
+for identity, final-page grouping, conservative hints, and independent validation.
+
 Use `python tools/validate_pdf_profiles.py --download-verapdf --install-pdf-oxide --strict-external`
 for the profile conformance gate. It regenerates canonical profile specimens,
 records inspect/JIT evidence, verifies byte-for-byte replay determinism, runs
 veraPDF for PDF/A/PDF/UA/WTPDF profiles, and runs PDF/X-4 validation for `pdfx4` and
 the PDF/X-4 base of `pdfvt1`. PDF/A-4f specimens also emit and inspect a
 deterministic associated-file `EmbeddedFiles` name tree. WTPDF specimens emit and inspect PDF Declaration evidence. PDF/VT specimens also emit and inspect a minimal
-document-part graph (`DPartRoot`, `DPartRootNode`, one-level `NodeNameList`,
+document-part graph (`DPartRoot`, `DPartRootNode`, `NodeNameList [/Job /Record /Document]`,
 leaf page range, and page `/DPart` references), plus a supplemental multipage
 specimen that proves `/Start` and `/End`, reported as granular booleans plus
 the aggregate `pdfvt_dpart_graph_valid` gate.
-Pass `--pdfvt-cmd "tool --input {pdf}" --require-dedicated-pdfvt` to make a
+Pass `--pdfvt-cmd "tool --input {pdf}" --pdfvt-version-cmd "tool --version" --require-dedicated-pdfvt` to make a
 dedicated PDF/VT preflight tool part of the same gate.
 
 The distributed Python wheel feature set is `python,svg_raster`; the latter is

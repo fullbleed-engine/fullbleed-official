@@ -2,6 +2,7 @@ use crate::assets::{
     AssetBundle, load_svg_xml_from_image_source, raster_image_intrinsic_dimensions,
     renderable_image_source,
 };
+use crate::canvas::META_READING_LAYOUT_KEY;
 use crate::flowable::{
     AbsolutePositionedFlowable, AlignContent, AlignItems, BackgroundPaint, BackgroundPaintFlowable,
     BorderRadiiSpec, BorderSpacingSpec, BorderSpec, CalcLength, CjkDecimalMarkerFlowable,
@@ -109,16 +110,19 @@ struct CounterState {
     quote_depth: usize,
     target_texts: Arc<HashMap<String, String>>,
     target_pages: Arc<HashMap<String, usize>>,
+    table_semantics: Arc<crate::table_semantics::HtmlTableIndex>,
 }
 
 impl CounterState {
     fn with_target_context(
+        document: &NodeRef,
         target_texts: HashMap<String, String>,
         target_pages: Arc<HashMap<String, usize>>,
     ) -> Self {
         Self {
             target_texts: Arc::new(target_texts),
             target_pages,
+            table_semantics: Arc::new(crate::table_semantics::HtmlTableIndex::build(document)),
             ..Self::default()
         }
     }
@@ -882,6 +886,53 @@ fn compute_boxed_style(
     Box::new(resolver.compute_style(info, parent_style, inline_style, ancestors))
 }
 
+/// Resolve only chart ancestors, not every cell of potentially very large
+/// semantic tables. This shares the final HTML compiler's cascade and selector
+/// context. Heap-owned styles avoid recursive native stack growth.
+pub(crate) fn chart_marker_text_styles(
+    html: &str,
+    resolver: &StyleResolver,
+) -> Vec<(String, TextStyle)> {
+    let document = parse_html(html);
+    let mut output = Vec::new();
+    for selected in document
+        .select("svg[data-fb-chart-pending]")
+        .expect("static chart selector")
+    {
+        let node = selected.as_node();
+        let key = node
+            .as_element()
+            .expect("selected SVG")
+            .attributes
+            .borrow()
+            .get("data-fb-chart-pending")
+            .expect("selected marker")
+            .to_string();
+        let mut chain = node
+            .ancestors()
+            .filter(|ancestor| ancestor.as_element().is_some())
+            .collect::<Vec<_>>();
+        chain.reverse();
+        let mut style = Box::new(resolver.default_style());
+        let mut ancestors = Vec::new();
+        for ancestor in chain {
+            let mut info = element_info(&ancestor, resolver.has_sibling_selectors());
+            let inline = ancestor
+                .as_element()
+                .expect("element ancestor")
+                .attributes
+                .borrow()
+                .get("style")
+                .map(str::to_owned);
+            style = compute_boxed_style(resolver, &info, &style, inline.as_deref(), &ancestors);
+            info.apply_computed_container_style(&style);
+            ancestors.push(info);
+        }
+        output.push((key, style.to_text_style()));
+    }
+    output
+}
+
 pub fn html_to_story_with_resolver_and_fonts_and_report(
     html: &str,
     resolver: &StyleResolver,
@@ -973,6 +1024,7 @@ pub(crate) fn html_document_to_story_with_resolver_and_fonts_and_report_and_targ
     let mut ancestors: Vec<ElementInfo> = Vec::new();
     let mut report = report;
     let mut counters = CounterState::with_target_context(
+        document,
         document_target_texts(document),
         target_pages.unwrap_or_else(|| Arc::new(HashMap::new())),
     );
@@ -1579,8 +1631,8 @@ fn collect_children(
                 out.extend(text_node_to_flowables(
                     &text.borrow(),
                     parent_style,
-                    !has_before,
-                    !has_after,
+                    !has_before && !matches!(parent_style.display, DisplayMode::Inline),
+                    !has_after && !matches!(parent_style.display, DisplayMode::Inline),
                     font_registry.clone(),
                     report.as_deref_mut(),
                     perf,
@@ -1713,7 +1765,7 @@ fn text_node_to_flowables(
             ))
             .with_pagination(parent_style.pagination)
             .with_font_registry(font_registry.clone())
-            .with_tag_role("P");
+            .with_tag_role(if inline_context { "Span" } else { "P" });
         items.push(inline_item(Box::new(paragraph)));
     }
     if trailing_space && has_text {
@@ -1722,7 +1774,51 @@ fn text_node_to_flowables(
             font_registry,
         ))));
     }
+    annotate_reading_layout(items)
+}
+
+/// Retain the actual lowered formatting context, including ID-free source and
+/// anonymous text. This evidence never participates in painting or geometry.
+fn annotate_reading_layout(items: Vec<LayoutItem>) -> Vec<LayoutItem> {
     items
+        .into_iter()
+        .map(|item| match item {
+            LayoutItem::Block {
+                flowable,
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            } => LayoutItem::Block {
+                flowable: Box::new(MetaFlowable::new(
+                    flowable,
+                    vec![(META_READING_LAYOUT_KEY.into(), "block".into())],
+                )),
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            },
+            LayoutItem::Inline {
+                flowable,
+                valign,
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            } => LayoutItem::Inline {
+                flowable: Box::new(MetaFlowable::new(
+                    flowable,
+                    vec![(META_READING_LAYOUT_KEY.into(), "inline".into())],
+                )),
+                valign,
+                flex_grow,
+                flex_shrink,
+                width_spec,
+                order,
+            },
+        })
+        .collect()
 }
 
 fn inherited_subgrid_line_names(
@@ -2882,67 +2978,29 @@ fn node_to_flowables(
                             .or_else(|| attrs.get("title"))
                             .map(|s| s.to_string());
                         if let Some(xml) = svg_xml {
-                            if svg_raster_fallback && crate::svg::svg_needs_raster_fallback(&xml) {
-                                if let Some(data_uri) =
-                                    crate::svg::rasterize_svg_to_data_uri(&xml, width, height)
-                                {
-                                    let image = ImageFlowable::new_pt(width, height, data_uri)
-                                        .with_available_size(true)
-                                        .with_object_fit(style.object_fit)
-                                        .with_object_position(style.object_position)
-                                        .with_image_rendering(style.image_rendering)
-                                        .with_intrinsic_size(intrinsic_size)
-                                        .with_font_metrics(style.font_size, style.root_font_size)
-                                        .with_visible(style.visibility.paints())
-                                        .with_tag_role("Figure")
-                                        .with_alt(alt);
-                                    replaced_image_flowables(image, &style, replaced_sizing)
-                                } else {
-                                    let xml_len = xml.len() as u64;
-                                    let t_svg = std::time::Instant::now();
-                                    let svg = SvgFlowable::new_pt(width, height, xml)
-                                        .with_form_enabled(svg_form)
-                                        .with_object_fit(style.object_fit)
-                                        .with_object_position(style.object_position)
-                                        .with_intrinsic_size(intrinsic_size)
-                                        .with_font_metrics(style.font_size, style.root_font_size)
-                                        .with_visible(style.visibility.paints())
-                                        .with_tag_role("Figure")
-                                        .with_alt(alt);
-                                    if let Some(perf_logger) = perf {
-                                        let ms = t_svg.elapsed().as_secs_f64() * 1000.0;
-                                        perf_logger.log_span_ms("svg.compile", None, ms);
-                                        perf_logger.log_counts(
-                                            "svg.compile",
-                                            None,
-                                            &[("bytes", xml_len)],
-                                        );
-                                    }
-                                    replaced_svg_image_flowables(svg, &style, replaced_sizing)
-                                }
-                            } else {
-                                let xml_len = xml.len() as u64;
-                                let t_svg = std::time::Instant::now();
-                                let svg = SvgFlowable::new_pt(width, height, xml)
-                                    .with_form_enabled(svg_form)
-                                    .with_object_fit(style.object_fit)
-                                    .with_object_position(style.object_position)
-                                    .with_intrinsic_size(intrinsic_size)
-                                    .with_font_metrics(style.font_size, style.root_font_size)
-                                    .with_visible(style.visibility.paints())
-                                    .with_tag_role("Figure")
-                                    .with_alt(alt);
-                                if let Some(perf_logger) = perf {
-                                    let ms = t_svg.elapsed().as_secs_f64() * 1000.0;
-                                    perf_logger.log_span_ms("svg.compile", None, ms);
-                                    perf_logger.log_counts(
-                                        "svg.compile",
-                                        None,
-                                        &[("bytes", xml_len)],
-                                    );
-                                }
-                                replaced_svg_image_flowables(svg, &style, replaced_sizing)
+                            let raster_fallback =
+                                svg_raster_fallback && crate::svg::svg_needs_raster_fallback(&xml);
+                            let xml_len = xml.len() as u64;
+                            let t_svg = std::time::Instant::now();
+                            let svg = SvgFlowable::new_pt(width, height, xml)
+                                .with_form_enabled(svg_form)
+                                .with_replaced_raster_fallback(
+                                    raster_fallback,
+                                    style.image_rendering,
+                                )
+                                .with_object_fit(style.object_fit)
+                                .with_object_position(style.object_position)
+                                .with_intrinsic_size(intrinsic_size)
+                                .with_font_metrics(style.font_size, style.root_font_size)
+                                .with_visible(style.visibility.paints())
+                                .with_tag_role("Figure")
+                                .with_alt(alt);
+                            if let Some(perf_logger) = perf {
+                                let ms = t_svg.elapsed().as_secs_f64() * 1000.0;
+                                perf_logger.log_span_ms("svg.compile", None, ms);
+                                perf_logger.log_counts("svg.compile", None, &[("bytes", xml_len)]);
                             }
+                            replaced_svg_image_flowables(svg, &style, replaced_sizing)
                         } else {
                             let image_source =
                                 renderable_image_source(asset_bundle.as_deref(), src)
@@ -2964,6 +3022,10 @@ fn node_to_flowables(
                         // Inline SVG. We intentionally treat this as a leaf node and render it with a
                         // dedicated subset parser, rather than trying to interpret SVG children as HTML.
                         let xml = serialize_svg_node(node);
+                        let font_context = crate::svg::SvgFontContext {
+                            style: style.to_text_style(),
+                            registry: font_registry.clone(),
+                        };
                         let attrs = element.attributes.borrow();
                         let (inline_w, inline_h) = inline_dimensions(inline_style.as_deref());
                         let (width, height) = resolve_svg_dimensions(
@@ -2980,7 +3042,12 @@ fn node_to_flowables(
                             .map(|s| s.to_string());
                         if svg_raster_fallback && crate::svg::svg_needs_raster_fallback(&xml) {
                             if let Some(data_uri) =
-                                crate::svg::rasterize_svg_to_data_uri(&xml, width, height)
+                                crate::svg::rasterize_svg_to_data_uri_with_font_context(
+                                    &xml,
+                                    width,
+                                    height,
+                                    Some(&font_context),
+                                )
                             {
                                 let image = ImageFlowable::new_pt(width, height, data_uri)
                                     .with_object_fit(style.object_fit)
@@ -2999,11 +3066,16 @@ fn node_to_flowables(
                             } else {
                                 let xml_len = xml.len() as u64;
                                 let t_svg = std::time::Instant::now();
-                                let svg = SvgFlowable::new_pt(width, height, xml)
-                                    .with_form_enabled(svg_form)
-                                    .with_visible(style.visibility.paints())
-                                    .with_tag_role("Figure")
-                                    .with_alt(alt);
+                                let svg = SvgFlowable::new_pt_with_font_context(
+                                    width,
+                                    height,
+                                    xml,
+                                    Some(&font_context),
+                                )
+                                .with_form_enabled(svg_form)
+                                .with_visible(style.visibility.paints())
+                                .with_tag_role("Figure")
+                                .with_alt(alt);
                                 if let Some(perf_logger) = perf {
                                     let ms = t_svg.elapsed().as_secs_f64() * 1000.0;
                                     perf_logger.log_span_ms("svg.compile", None, ms);
@@ -3023,11 +3095,16 @@ fn node_to_flowables(
                         } else {
                             let xml_len = xml.len() as u64;
                             let t_svg = std::time::Instant::now();
-                            let svg = SvgFlowable::new_pt(width, height, xml)
-                                .with_form_enabled(svg_form)
-                                .with_visible(style.visibility.paints())
-                                .with_tag_role("Figure")
-                                .with_alt(alt);
+                            let svg = SvgFlowable::new_pt_with_font_context(
+                                width,
+                                height,
+                                xml,
+                                Some(&font_context),
+                            )
+                            .with_form_enabled(svg_form)
+                            .with_visible(style.visibility.paints())
+                            .with_tag_role("Figure")
+                            .with_alt(alt);
                             if let Some(perf_logger) = perf {
                                 let ms = t_svg.elapsed().as_secs_f64() * 1000.0;
                                 perf_logger.log_span_ms("svg.compile", None, ms);
@@ -4002,7 +4079,7 @@ fn node_to_flowables(
 
             ancestors.pop();
             counters.pop_reset_scopes(&counter_reset_scopes);
-            items
+            annotate_reading_layout(items)
         }
         _ => Vec::new(),
     }
@@ -15091,6 +15168,7 @@ fn table_flowable(
                 cells.push(
                     spanning_cell
                         .as_rowspan_placeholder()
+                        .with_table_semantics(counters.table_semantics.node(&row))
                         .with_row_collapsed(row_collapsed)
                         .with_row_border(
                             row_style.border_width,
@@ -15485,6 +15563,7 @@ fn table_flowable(
                 no_wrap(&cell_style),
             );
             let mut cell = cell
+                .with_table_semantics(counters.table_semantics.node(cell_child))
                 .with_border_styles(
                     border_styles.top,
                     border_styles.right,
@@ -15557,6 +15636,14 @@ fn table_flowable(
                 )
                 .with_row_min_height(row_min_height.max(cell_min_height))
                 .with_row_span(row_span)
+                .with_authoring_source_id(
+                    cell_el
+                        .attributes
+                        .borrow()
+                        .get("data-fb-id")
+                        .filter(|value| !value.is_empty())
+                        .map(Arc::<str>::from),
+                )
                 .with_hide_empty_cells(cell_style.empty_cells_hide)
                 .with_establishes_abs_containing_block(establishes_abs_containing_block(cell_style))
                 .with_overflow_hidden(matches!(
@@ -15597,6 +15684,7 @@ fn table_flowable(
                 cells.push(
                     spanning_cell
                         .as_rowspan_placeholder()
+                        .with_table_semantics(counters.table_semantics.node(&row))
                         .with_row_collapsed(row_collapsed)
                         .with_row_border(
                             row_style.border_width,
@@ -15722,6 +15810,7 @@ fn table_flowable(
     }
 
     TableFlowable::new(body_rows)
+        .with_table_semantics(counters.table_semantics.node(node))
         .with_header(header_rows)
         .repeat_header(true)
         .with_footer_row_count(footer_row_count)
@@ -16358,7 +16447,11 @@ fn replaced_svg_image_flowables(
     style: &ComputedStyle,
     sizing: ReplacedImageSizing,
 ) -> Vec<LayoutItem> {
-    if is_direct_fixed_replaced_box(style, sizing) {
+    // CSS object-fit chooses the concrete SVG viewport. Compiling into the
+    // nominal CSS frame and then fitting that surface would apply SVG's
+    // preserveAspectRatio twice (or stretch it when percentages resolve).
+    svg = svg.with_replaced_viewport();
+    if is_direct_fixed_replaced_box(style, sizing) && style.paint_filter.is_none() {
         svg = svg
             .with_available_size(false)
             .with_pagination(style.pagination)

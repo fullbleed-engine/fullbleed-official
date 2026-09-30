@@ -4,10 +4,17 @@ This directory is the release-operations layer for Fullbleed. It is separate
 from feature documentation so release decisions can be audited without reading
 engine internals.
 
+## 2.4.0 Documents
+
+- `docs/release/2.4.0-runbook.md`: candidate release and print-profile verification gate.
+- `docs/release/2.4.0-validation-report.md`: candidate verification results and retained evidence.
+- `docs/pdf-vt.md`: print identity, record composition, DPM, and reuse-hint contracts.
+- `ReleaseNotes.MD`: 2.4.0 release summary and verification boundaries.
+
 ## 2.3.1 Documents
 
 - `docs/release/2.3.1-runbook.md`: current Cargo, PyPI, wheel-matrix, and GitHub release procedure.
-- `ReleaseNotes.MD`: current 2.3.1 custom-font binding and finalized-preview patch summary.
+- `ReleaseNotes.MD`: historical 2.3.1 notes are retained in the `v2.3.1` GitHub release.
 
 ## 2.3.0 Documents
 

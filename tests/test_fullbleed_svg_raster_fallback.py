@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import zlib
+from pathlib import Path
 
 import pytest
 
@@ -90,6 +91,34 @@ def _decode_png_rgba(data: bytes) -> tuple[int, int, list[bytes]]:
         prev = row
 
     return width, height, rows
+
+
+@pytest.mark.parametrize("raster_fallback", [False, True])
+def test_inline_svg_inherits_vendored_font_in_vector_and_raster_paths(raster_fallback: bool) -> None:
+    _require_pdf_engine()
+    if raster_fallback:
+        _require_svg_raster_feature()
+    font_path = Path(__file__).resolve().parents[1] / "python/fullbleed_assets/fonts/NotoSans-Regular.ttf"
+    engine = fullbleed.PdfEngine(font_files=[str(font_path)], svg_raster_fallback=raster_fallback)
+    effect = ' filter="url(#blur)"' if raster_fallback else ""
+    svg = (
+        '<svg width="260" height="70" viewBox="0 0 260 70">'
+        '<defs><filter id="blur"><feGaussianBlur stdDeviation="0.2"/></filter></defs>'
+        f'<text x="130" y="46" font-size="32" text-anchor="middle"{effect}>WWii FONT</text>'
+        '</svg>'
+    )
+    html = f"<!doctype html><html><body>{svg}</body></html>"
+    css = "@page { size: 260px 70px; margin: 0; } body { margin: 0; font-family: 'Noto Sans'; } svg { display: block; }"
+    inherited = list(engine.render_image_pages(html, css, 144))
+    explicit_html = html.replace('<svg width=', '<svg font-family="Noto Sans" width=')
+    base_css = css.replace("'Noto Sans'", "Helvetica")
+    assert inherited == list(engine.render_image_pages(explicit_html, base_css, 144))
+    assert inherited != list(engine.render_image_pages(html, base_css, 144))
+    assert inherited == list(engine.render_image_pages(html, css, 144))
+    pdf = bytes(engine.render_pdf(html, css))
+    assert pdf == bytes(engine.render_pdf(html, css))
+    if not raster_fallback:
+        assert b"/FontFile2" in pdf
 
 
 def test_svg_text_renders_through_native_vector_path() -> None:

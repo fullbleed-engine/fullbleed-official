@@ -4745,7 +4745,7 @@ fn load_image_pixmap(source: &str) -> Option<Pixmap> {
     }
 
     let path = FsPath::new(source);
-    let bytes = std::fs::read(path).ok()?;
+    let bytes = crate::assets::read_asset_path(path).ok()?;
     decode_image_to_pixmap(&bytes, None)
 }
 

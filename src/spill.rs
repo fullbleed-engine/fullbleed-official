@@ -396,15 +396,37 @@ fn write_command<W: Write>(out: &mut W, command: &Command) -> io::Result<()> {
             table_id,
             col_index,
             group_only,
+            column_span,
+            row_span,
+            table_semantics,
         } => {
-            write_u8(out, 32)?;
+            // Keep legacy opcodes byte-for-byte; 53 appends source semantics.
+            let spans_present = column_span.is_some() || row_span.is_some();
+            write_u8(
+                out,
+                if table_semantics.is_some() {
+                    53
+                } else if spans_present {
+                    52
+                } else {
+                    32
+                },
+            )?;
             write_string(out, role)?;
             write_option_u32(out, *mcid)?;
             write_option_string(out, alt.as_deref())?;
             write_option_string(out, scope.as_deref())?;
             write_option_u32(out, table_id.map(|v| v as u32))?;
             write_option_u16(out, *col_index)?;
-            write_bool(out, *group_only)
+            write_bool(out, *group_only)?;
+            if spans_present || table_semantics.is_some() {
+                write_option_u32(out, *column_span)?;
+                write_option_u32(out, *row_span)?;
+            }
+            if let Some(semantics) = table_semantics {
+                write_table_semantics(out, semantics)?;
+            }
+            Ok(())
         }
         Command::BeginTagActualText {
             role,
@@ -748,6 +770,33 @@ fn read_command<R: Read>(input: &mut R) -> io::Result<Command> {
             table_id: read_option_u32(input)?,
             col_index: read_option_u16(input)?,
             group_only: read_bool(input)?,
+            column_span: None,
+            row_span: None,
+            table_semantics: None,
+        },
+        52 => Command::BeginTag {
+            role: read_string(input)?,
+            mcid: read_option_u32(input)?,
+            alt: read_option_string(input)?,
+            scope: read_option_string(input)?,
+            table_id: read_option_u32(input)?,
+            col_index: read_option_u16(input)?,
+            group_only: read_bool(input)?,
+            column_span: read_option_u32(input)?,
+            row_span: read_option_u32(input)?,
+            table_semantics: None,
+        },
+        53 => Command::BeginTag {
+            role: read_string(input)?,
+            mcid: read_option_u32(input)?,
+            alt: read_option_string(input)?,
+            scope: read_option_string(input)?,
+            table_id: read_option_u32(input)?,
+            col_index: read_option_u16(input)?,
+            group_only: read_bool(input)?,
+            column_span: read_option_u32(input)?,
+            row_span: read_option_u32(input)?,
+            table_semantics: Some(std::sync::Arc::new(read_table_semantics(input)?)),
         },
         51 => Command::BeginTagActualText {
             role: read_string(input)?,
@@ -1680,6 +1729,88 @@ fn read_u16<R: Read>(input: &mut R) -> io::Result<u16> {
     Ok(u16::from_le_bytes(buf))
 }
 
+fn write_table_semantics<W: Write>(
+    out: &mut W,
+    value: &crate::TableSemanticNode,
+) -> io::Result<()> {
+    out.write_all(&value.table_key.to_le_bytes())?;
+    for key in [
+        value.cell_key,
+        value.row_key,
+        value.group_key,
+        value.row_span_end,
+    ] {
+        write_bool(out, key.is_some())?;
+        if let Some(key) = key {
+            out.write_all(&key.to_le_bytes())?;
+        }
+    }
+    write_bool(out, value.header_cells.is_some())?;
+    if let Some(headers) = &value.header_cells {
+        write_semantic_len(out, headers.len())?;
+        for key in headers {
+            out.write_all(&key.to_le_bytes())?;
+        }
+    }
+    write_semantic_len(out, value.header_issues.len())?;
+    for issue in &value.header_issues {
+        write_string(out, issue)?;
+    }
+    Ok(())
+}
+
+fn write_semantic_len<W: Write>(out: &mut W, len: usize) -> io::Result<()> {
+    let value = u32::try_from(len).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Table semantic vector exceeds spill wire capacity",
+        )
+    })?;
+    write_u32(out, value)
+}
+
+fn read_table_semantics<R: Read>(input: &mut R) -> io::Result<crate::TableSemanticNode> {
+    fn key<R: Read>(input: &mut R) -> io::Result<u64> {
+        let mut bytes = [0; 8];
+        input.read_exact(&mut bytes)?;
+        Ok(u64::from_le_bytes(bytes))
+    }
+    fn optional_key<R: Read>(input: &mut R) -> io::Result<Option<u64>> {
+        if read_bool(input)? {
+            Ok(Some(key(input)?))
+        } else {
+            Ok(None)
+        }
+    }
+    let table_key = key(input)?;
+    let cell_key = optional_key(input)?;
+    let row_key = optional_key(input)?;
+    let group_key = optional_key(input)?;
+    let row_span_end = optional_key(input)?;
+    let header_cells = if read_bool(input)? {
+        let mut headers = Vec::new();
+        for _ in 0..read_u32(input)? {
+            headers.push(key(input)?);
+        }
+        Some(headers)
+    } else {
+        None
+    };
+    let mut header_issues = Vec::new();
+    for _ in 0..read_u32(input)? {
+        header_issues.push(read_string(input)?);
+    }
+    Ok(crate::TableSemanticNode {
+        table_key,
+        cell_key,
+        row_key,
+        group_key,
+        row_span_end,
+        header_cells,
+        header_issues,
+    })
+}
+
 fn write_u32<W: Write>(out: &mut W, value: u32) -> io::Result<()> {
     out.write_all(&value.to_le_bytes())
 }
@@ -1706,4 +1837,111 @@ fn write_f32<W: Write>(out: &mut W, value: f32) -> io::Result<()> {
 
 fn read_f32<R: Read>(input: &mut R) -> io::Result<f32> {
     Ok(f32::from_bits(read_u32(input)?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_table_tag_spill_bytes_remain_readable_and_unchanged() {
+        let bytes = [32, 2, 0, 0, 0, b'T', b'D', 0, 0, 0, 0, 0, 0];
+        let tag = read_command(&mut bytes.as_slice()).unwrap();
+        assert!(
+            matches!(&tag, Command::BeginTag { role, column_span: None, row_span: None, .. } if role == "TD")
+        );
+        let mut encoded = Vec::new();
+        write_command(&mut encoded, &tag).unwrap();
+        assert_eq!(encoded, bytes);
+    }
+
+    #[test]
+    fn resolved_table_spans_round_trip_without_shifting_following_commands() {
+        for column_span in [None, Some(1), Some(3)] {
+            for row_span in [None, Some(1), Some(2)] {
+                let tag = Command::BeginTag {
+                    role: "TH".into(),
+                    mcid: Some(4),
+                    alt: Some("café".into()),
+                    scope: Some("Column".into()),
+                    table_id: Some(9),
+                    col_index: Some(2),
+                    group_only: false,
+                    column_span,
+                    row_span,
+                    table_semantics: None,
+                };
+                let mut encoded = Vec::new();
+                write_command(&mut encoded, &tag).unwrap();
+                assert_eq!(
+                    encoded[0],
+                    if column_span.is_some() || row_span.is_some() {
+                        52
+                    } else {
+                        32
+                    }
+                );
+                write_command(&mut encoded, &Command::EndTag).unwrap();
+                let mut input = encoded.as_slice();
+                let decoded = read_command(&mut input).unwrap();
+                assert!(
+                    matches!(&decoded, Command::BeginTag { column_span: columns, row_span: rows, .. } if *columns == column_span && *rows == row_span)
+                );
+                assert!(matches!(read_command(&mut input).unwrap(), Command::EndTag));
+                assert!(input.is_empty());
+                let mut repeated = Vec::new();
+                write_command(&mut repeated, &decoded).unwrap();
+                write_command(&mut repeated, &Command::EndTag).unwrap();
+                assert_eq!(repeated, encoded);
+            }
+        }
+    }
+
+    #[test]
+    fn table_semantics_spill_preserves_empty_vs_absent_and_full_width_keys() {
+        for headers in [None, Some(vec![]), Some(vec![17, u64::MAX])] {
+            let semantics = std::sync::Arc::new(crate::TableSemanticNode {
+                table_key: u64::MAX,
+                cell_key: Some(9),
+                row_key: Some(8),
+                group_key: None,
+                row_span_end: Some(35),
+                header_cells: headers,
+                header_issues: vec!["missing_header_target".into()],
+            });
+            let tag = Command::BeginTag {
+                role: "TD".into(),
+                mcid: Some(3),
+                alt: None,
+                scope: None,
+                table_id: Some(7),
+                col_index: Some(1),
+                group_only: false,
+                column_span: Some(2),
+                row_span: Some(3),
+                table_semantics: Some(semantics.clone()),
+            };
+            let mut encoded = Vec::new();
+            write_command(&mut encoded, &tag).unwrap();
+            assert_eq!(encoded[0], 53);
+            for length in 0..encoded.len() {
+                assert!(
+                    read_command(&mut &encoded[..length]).is_err(),
+                    "Truncation at {length} cannot silently lose relationships"
+                );
+            }
+            write_command(&mut encoded, &Command::EndTag).unwrap();
+            let mut input = encoded.as_slice();
+            let decoded = read_command(&mut input).unwrap();
+            assert!(
+                matches!(&decoded, Command::BeginTag {table_semantics:Some(value), ..} if value == &semantics)
+            );
+            assert!(matches!(read_command(&mut input).unwrap(), Command::EndTag));
+            assert!(input.is_empty());
+            let mut repeated = Vec::new();
+            write_command(&mut repeated, &decoded).unwrap();
+            write_command(&mut repeated, &Command::EndTag).unwrap();
+            assert_eq!(repeated, encoded);
+        }
+    }
 }

@@ -170,7 +170,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-2.3.1-cp310-abi3-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-2.4.0-cp310-abi3-win_amd64.whl
 ```
 
 From a source checkout with Rust installed, no Python build package is needed:
@@ -552,18 +552,22 @@ Render/verify/plan key flags:
   Profile targets: `none`, `pdfa1a`, `pdfa1b`, `pdfa2a`, `pdfa2b`, `pdfa2u`, `pdfa3a`, `pdfa3b`, `pdfa3u`, `pdfa4`, `pdfa4e`, `pdfa4f`, `pdfx4`, `pdfua1`, `pdfua2`, `pdfvt1`, `wtpdf1r`, `wtpdf1a`, `tagged`.
   Aliases: `a`, `ua`, `vt`, `wt1r`, `wt1a`, `pdf/a`, `pdf/ua`, `pdf/vt`.
   Output intent metadata (`--output-intent-identifier|--output-intent-info|--output-intent-components`) requires `--output-intent-icc`.
+  `pdfx4` and `pdfvt1` force PDF 1.6 and require a title and explicit write date
+  (`--timestamp current`, a fixed UTC date, or `--timestamp-source SOURCE_DATE_EPOCH`).
+  [PDF/VT composition](docs/pdf-vt.md) documents record hierarchies, `--pdf-vt-job`,
+  private DPM, conservative reuse hints, and the independent release-validation boundary.
   Run `python tools/validate_pdf_profiles.py --download-verapdf --install-pdf-oxide --strict-external`
   to regenerate profile specimens, capture inspect/JIT evidence, replay
   deterministic hashes, validate PDF/A and PDF/UA with veraPDF, and validate
   PDF/X-4 with `pdf_oxide`. WTPDF profiles are validated with veraPDF
   `wt1r`/`wt1a` and include PDF Declaration evidence. `pdfa4f` emits and
   checks an associated `EmbeddedFiles` name tree. `pdfvt1` also emits and checks a parsed
-  DPart graph (`DPartRoot`, `DPartRootNode`, one-level `NodeNameList`, leaf page range,
+  DPart graph (`DPartRoot`, `DPartRootNode`, `NodeNameList [/Job /Record /Document]`, leaf page range,
   and page `/DPart` references), including a supplemental multipage specimen
   for `/Start` and `/End`, reported as granular booleans plus
   `pdfvt_dpart_graph_valid`; use a dedicated PDF/VT preflight tool
   for third-party PDF/VT certification, or wire one into the same harness with
-  `--pdfvt-cmd "tool --input {pdf}" --require-dedicated-pdfvt`.
+  `--pdfvt-cmd "tool --input {pdf}" --pdfvt-version-cmd "tool --version" --require-dedicated-pdfvt`.
 - Watermarking: `--watermark-text`, `--watermark-html`, `--watermark-image`, `--watermark-layer`, `--watermark-semantics`, `--watermark-opacity`, `--watermark-rotation`
 - Artifacts: `--emit-jit`, `--emit-perf`, `--emit-glyph-report`, `--emit-page-data`, `--emit-compose-plan`, `--emit-image`, `--image-dpi`, `--deterministic-hash`
 - Assets: `--asset`, `--asset-kind`, `--asset-name`, `--asset-trusted`, `--allow-remote-assets`
@@ -874,6 +878,14 @@ Entrypoint formats:
 
 - `module_name:factory_or_engine`
 - `path/to/file.py:factory_or_engine`
+
+## Rust chart compilation
+
+For Rust-based visual/source frontends, the engine also provides
+[document-context chart compilation](docs/chart-typography.md): normal CSS font
+selection and size, project-font legend measurement/wrapping, semantic tables,
+and observable layout failures. Generated SVG is derived output, not authoring
+source.
 
 ## Python API Quick Start
 

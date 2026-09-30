@@ -21637,7 +21637,7 @@ fn font_style_debug_string(mode: FontStyleMode) -> String {
     }
 }
 
-fn parse_font_style_str(raw: &str) -> Option<FontStyleMode> {
+pub(crate) fn parse_font_style_str(raw: &str) -> Option<FontStyleMode> {
     let raw = raw.trim().to_ascii_lowercase();
     if raw.is_empty() {
         return None;

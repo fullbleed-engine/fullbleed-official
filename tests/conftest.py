@@ -6,6 +6,26 @@ import os
 import sys
 import types
 from pathlib import Path
+import base64
+import pytest
+
+
+@pytest.fixture
+def print_icc_uri():
+    """Structurally valid ICC for contract tests, not a color/conformance specimen."""
+    data = bytearray(168)
+    data[0:4] = len(data).to_bytes(4, "big")
+    data[8] = 4
+    data[12:24] = b"mntrRGB XYZ "
+    data[36:40] = b"acsp"
+    data[128:132] = (2).to_bytes(4, "big")
+    for index, signature in enumerate([b"rTRC", b"gTRC"]):
+        offset = 132 + index * 12
+        data[offset:offset + 4] = signature
+        data[offset + 4:offset + 8] = (156).to_bytes(4, "big")
+        data[offset + 8:offset + 12] = (12).to_bytes(4, "big")
+    data[156:160] = b"curv"
+    return "data:application/octet-stream;base64," + base64.b64encode(data).decode("ascii")
 
 
 ROOT = Path(__file__).resolve().parents[1]

@@ -2,6 +2,7 @@ use crate::flowable::{MaskComposite, MaskMode, PaintFilterSpec};
 use crate::types::{
     Color, MixBlendMode, PageOrientation, PagePresentation, Pt, Rect, Shading, Size,
 };
+use std::sync::Arc;
 
 pub const META_FLOWABLE_BBOX_KEY: &str = "__fb_bbox";
 pub const META_HTML_CANVAS_BACKGROUND_KEY: &str = "__fb_html_canvas_background";
@@ -16,6 +17,11 @@ pub const META_RUNNING_ELEMENT_PREFIX: &str = "__fb_running_element:";
 pub const META_NAMED_STRING_PREFIX: &str = "__fb_named_string:";
 pub const META_DIAGNOSTIC_SCOPE_BEGIN_KEY: &str = "__fb_diag_scope_begin";
 pub const META_DIAGNOSTIC_SCOPE_END_KEY: &str = "__fb_diag_scope_end";
+/// Non-painting compiler evidence for logical text and its formatting context.
+pub const META_READING_LAYOUT_KEY: &str = "fb.reading.layout";
+pub const META_READING_TEXT_KEY: &str = "fb.reading.text";
+pub const META_READING_TEXT_BEGIN_KEY: &str = "fb.reading.text.begin";
+pub const META_READING_TEXT_END_KEY: &str = "fb.reading.text.end";
 
 /// A compact projective vector transform retained only while the display list
 /// is being compiled. Geometry is lowered to ordinary PDF path commands at
@@ -303,8 +309,9 @@ pub enum Command {
     RestoreState,
     Translate(Pt, Pt),
     /// Translate around a point expressed in FullBleed's top-down page space.
-    /// PDF emission converts the y coordinate to bottom-up space; raster/JIT
-    /// consumers keep it top-down. `inverse` emits the return translation.
+    /// PDF and raster emission convert the y coordinate to bottom-up space;
+    /// diagnostic consumers must conjugate that transform back to page space.
+    /// `inverse` emits the return translation.
     CssTransformOrigin {
         x: Pt,
         y: Pt,
@@ -487,6 +494,10 @@ pub enum Command {
         table_id: Option<u32>,
         col_index: Option<u16>,
         group_only: bool,
+        /// Positive spans in this emitted table fragment; None means unknown.
+        column_span: Option<u32>,
+        row_span: Option<u32>,
+        table_semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
     },
     /// A tagged marked-content span whose accessible replacement is present
     /// only in the semantic tree. This is deliberately distinct from `alt`:
@@ -1547,8 +1558,46 @@ impl Canvas {
             table_id,
             col_index,
             group_only,
+            column_span: None,
+            row_span: None,
+            table_semantics: None,
         });
         mcid
+    }
+
+    /// Begin a table cell with compiler-resolved (column, row) spans. The
+    /// existing begin_tag API continues to represent unknown span metadata.
+    pub fn begin_table_cell_tag(
+        &mut self,
+        role: impl Into<String>,
+        scope: Option<String>,
+        table_id: u32,
+        col_index: Option<u16>,
+        spans: (usize, usize),
+    ) -> Option<u32> {
+        let mcid = self.begin_tag(role, None, scope, Some(table_id), col_index, false);
+        if let Some(Command::BeginTag {
+            column_span,
+            row_span,
+            ..
+        }) = self.current.commands.last_mut()
+        {
+            *column_span = u32::try_from(spans.0).ok().filter(|span| *span > 0);
+            *row_span = u32::try_from(spans.1).ok().filter(|span| *span > 0);
+        }
+        mcid
+    }
+
+    pub(crate) fn set_table_semantics(
+        &mut self,
+        semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
+    ) {
+        if let Some(Command::BeginTag {
+            table_semantics, ..
+        }) = self.current.commands.last_mut()
+        {
+            *table_semantics = semantics;
+        }
     }
 
     pub fn begin_tag_actual_text(

@@ -10,7 +10,8 @@ use fullbleed_audit_contract::sha256::Sha256;
 
 use crate::canvas::{
     Command, META_DIAGNOSTIC_SCOPE_BEGIN_KEY, META_DIAGNOSTIC_SCOPE_END_KEY,
-    META_FLOWABLE_BBOX_KEY, PageGeometry,
+    META_FLOWABLE_BBOX_KEY, META_READING_LAYOUT_KEY, META_READING_TEXT_BEGIN_KEY,
+    META_READING_TEXT_END_KEY, META_READING_TEXT_KEY, PageGeometry,
 };
 use crate::css_native::{AtRuleBlock, Rule};
 use crate::html_dom::{NodeData, parse_html};
@@ -196,6 +197,8 @@ pub struct AuthoringReadingPreviewV1 {
     pub alternate_text_count: usize,
     pub untagged_text_run_count: usize,
     pub artifact_marked_content_count: usize,
+    /// Drawn forms can contain text that is not present in the page-level text index.
+    pub unindexed_form_count: usize,
     pub pages: Vec<AuthoringReadingPage>,
 }
 
@@ -203,10 +206,33 @@ pub struct AuthoringReadingPreviewV1 {
 pub struct AuthoringReadingPage {
     pub page_number: usize,
     pub nodes: Vec<AuthoringReadingNode>,
+    /// Compiled command order, including untagged and artifact text. Never source DOM text.
+    pub text_runs: Vec<AuthoringTextRun>,
+    /// Ordered text/child references from the compiled command stream.
+    pub content: Vec<AuthoringReadingContent>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AuthoringTextRun {
+    pub command_index: usize,
+    pub reading_command_index: Option<usize>,
+    pub source_id: Option<String>,
+    /// `painted`, `actual_text`, or `alternate_text`.
+    pub kind: String,
+    pub artifact: bool,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthoringReadingContent {
+    Text(String),
+    Child(usize),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AuthoringReadingNode {
+    /// Page-local compiled command destination, also valid for ID-free HTML.
+    pub command_index: usize,
     pub role: String,
     pub source_id: Option<String>,
     pub text: String,
@@ -215,8 +241,19 @@ pub struct AuthoringReadingNode {
     pub scope: Option<String>,
     pub table_id: Option<u32>,
     pub column_index: Option<u16>,
+    /// Positive spans of the emitted cell in this compiled page fragment.
+    /// Missing values are unavailable evidence, not implicit unit spans.
+    pub column_span: Option<u32>,
+    pub row_span: Option<u32>,
+    /// Compiler-resolved identities and explicit header links across all pages.
+    pub table_semantics: Option<crate::TableSemanticNode>,
+    /// Row span in the complete logical table, not just this page fragment.
+    pub logical_row_span: Option<u32>,
     pub group_only: bool,
     pub children: Vec<AuthoringReadingNode>,
+    /// `inline`/`block` only when the lowered engine flow supplied evidence.
+    pub layout: Option<String>,
+    pub content: Vec<AuthoringReadingContent>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -405,26 +442,50 @@ fn normalize_reading_text(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn append_reading_text(target: &mut String, value: &str) {
-    let value = normalize_reading_text(value);
-    if value.is_empty() {
+fn append_reading_content(content: &mut Vec<AuthoringReadingContent>, text: &str) {
+    if text.is_empty() {
         return;
     }
-    if !target.is_empty() {
-        target.push(' ');
+    if let Some(AuthoringReadingContent::Text(previous)) = content.last_mut() {
+        previous.push_str(text);
+    } else {
+        content.push(AuthoringReadingContent::Text(text.into()));
     }
-    target.push_str(&value);
+}
+
+fn append_reading_text(
+    stack: &mut [ReadingStackEntry],
+    roots: &mut Vec<AuthoringReadingContent>,
+    text: &str,
+) {
+    match stack.last_mut() {
+        Some(ReadingStackEntry::Node(node)) => {
+            node.text.push_str(text);
+            append_reading_content(&mut node.content, text);
+        }
+        Some(ReadingStackEntry::Suppressed) => {}
+        None => append_reading_content(roots, text),
+    }
 }
 
 fn attach_reading_node(
     node: AuthoringReadingNode,
     stack: &mut [ReadingStackEntry],
     roots: &mut Vec<AuthoringReadingNode>,
+    root_content: &mut Vec<AuthoringReadingContent>,
 ) {
     match stack.last_mut() {
-        Some(ReadingStackEntry::Node(parent)) => parent.children.push(node),
+        Some(ReadingStackEntry::Node(parent)) => {
+            parent
+                .content
+                .push(AuthoringReadingContent::Child(parent.children.len()));
+            parent.children.push(node);
+        }
         Some(ReadingStackEntry::Suppressed) => {}
-        None => roots.push(node),
+        None => {
+            root_content.push(AuthoringReadingContent::Child(roots.len()));
+            roots.push(node);
+        }
     }
 }
 
@@ -475,25 +536,55 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
     let mut pages = Vec::with_capacity(document.pages.len());
     let mut untagged_text_run_count = 0usize;
     let mut artifact_marked_content_count = 0usize;
+    let mut unindexed_form_count = 0usize;
 
     for (page_index, page) in document.pages.iter().enumerate() {
         let mut roots = Vec::new();
+        let mut root_content = Vec::new();
+        let mut text_runs = Vec::new();
         let mut stack = Vec::<ReadingStackEntry>::new();
         let mut current_source = None::<String>;
         let mut source_stack = Vec::<Option<String>>::new();
         let mut marked_content_stack = Vec::<bool>::new();
         let mut artifact_depth = 0usize;
+        let mut logical_text_depth = 0usize;
+        let mut current_layout = None::<String>;
+        let mut layout_stack = Vec::<Option<String>>::new();
 
-        for command in &page.commands {
+        for (command_index, command) in page.commands.iter().enumerate() {
             match command {
                 Command::Meta { key, .. } if key == META_DIAGNOSTIC_SCOPE_BEGIN_KEY => {
                     source_stack.push(current_source.clone());
+                    layout_stack.push(current_layout.clone());
                 }
                 Command::Meta { key, .. } if key == META_DIAGNOSTIC_SCOPE_END_KEY => {
                     current_source = source_stack.pop().unwrap_or_default();
+                    current_layout = layout_stack.pop().unwrap_or_default();
                 }
                 Command::Meta { key, value } if key == "fb.owner.source_id" => {
                     current_source = Some(value.clone());
+                }
+                Command::Meta { key, value } if key == META_READING_LAYOUT_KEY => {
+                    current_layout =
+                        matches!(value.as_str(), "inline" | "block").then(|| value.clone());
+                }
+                Command::Meta { key, value }
+                    if key == META_READING_TEXT_KEY || key == META_READING_TEXT_BEGIN_KEY =>
+                {
+                    if logical_text_depth == 0
+                        && artifact_depth == 0
+                        && !stack
+                            .iter()
+                            .any(|entry| matches!(entry, ReadingStackEntry::Suppressed))
+                    {
+                        append_reading_text(&mut stack, &mut root_content, value);
+                    }
+                    if key == META_READING_TEXT_BEGIN_KEY {
+                        logical_text_depth += 1;
+                    }
+                }
+                Command::Meta { key, .. } if key == META_READING_TEXT_END_KEY => {
+                    logical_text_depth = logical_text_depth.saturating_sub(1);
                 }
                 Command::BeginArtifact { .. } => {
                     marked_content_stack.push(true);
@@ -513,12 +604,26 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
                     table_id,
                     col_index,
                     group_only,
+                    column_span,
+                    row_span,
+                    table_semantics,
                     ..
                 } => {
                     if artifact_depth > 0 || role.eq_ignore_ascii_case("artifact") {
                         stack.push(ReadingStackEntry::Suppressed);
                     } else {
+                        if let Some(text) = alt.as_deref().filter(|text| !text.trim().is_empty()) {
+                            text_runs.push(AuthoringTextRun {
+                                command_index,
+                                reading_command_index: Some(command_index),
+                                source_id: current_source.clone(),
+                                kind: "alternate_text".into(),
+                                artifact: false,
+                                text: normalize_reading_text(text),
+                            });
+                        }
                         stack.push(ReadingStackEntry::Node(AuthoringReadingNode {
+                            command_index,
                             role: role.clone(),
                             source_id: current_source.clone(),
                             text: String::new(),
@@ -527,8 +632,14 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
                             scope: scope.clone(),
                             table_id: *table_id,
                             column_index: *col_index,
+                            column_span: *column_span,
+                            row_span: *row_span,
+                            table_semantics: table_semantics.as_deref().cloned(),
+                            logical_row_span: None,
                             group_only: *group_only,
                             children: Vec::new(),
+                            layout: current_layout.take(),
+                            content: Vec::new(),
                         }));
                     }
                 }
@@ -538,7 +649,18 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
                     if artifact_depth > 0 || role.eq_ignore_ascii_case("artifact") {
                         stack.push(ReadingStackEntry::Suppressed);
                     } else {
+                        if !actual_text.trim().is_empty() {
+                            text_runs.push(AuthoringTextRun {
+                                command_index,
+                                reading_command_index: Some(command_index),
+                                source_id: current_source.clone(),
+                                kind: "actual_text".into(),
+                                artifact: false,
+                                text: normalize_reading_text(actual_text),
+                            });
+                        }
                         stack.push(ReadingStackEntry::Node(AuthoringReadingNode {
+                            command_index,
                             role: role.clone(),
                             source_id: current_source.clone(),
                             text: String::new(),
@@ -547,25 +669,68 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
                             scope: None,
                             table_id: None,
                             column_index: None,
+                            column_span: None,
+                            row_span: None,
+                            table_semantics: None,
+                            logical_row_span: None,
                             group_only: false,
                             children: Vec::new(),
+                            layout: current_layout.take(),
+                            content: Vec::new(),
                         }));
                     }
                 }
                 Command::EndTag => {
                     if let Some(ReadingStackEntry::Node(node)) = stack.pop() {
-                        attach_reading_node(finish_reading_node(node), &mut stack, &mut roots);
+                        attach_reading_node(
+                            finish_reading_node(node),
+                            &mut stack,
+                            &mut roots,
+                            &mut root_content,
+                        );
                     }
                 }
                 Command::DrawString { text, .. } | Command::DrawStringTransformed { text, .. } => {
+                    let artifact = artifact_depth > 0
+                        || stack
+                            .iter()
+                            .any(|entry| matches!(entry, ReadingStackEntry::Suppressed));
+                    if !text.trim().is_empty() {
+                        text_runs.push(AuthoringTextRun {
+                            command_index,
+                            reading_command_index: if artifact {
+                                None
+                            } else {
+                                stack.iter().rev().find_map(|entry| match entry {
+                                    ReadingStackEntry::Node(node) => Some(node.command_index),
+                                    ReadingStackEntry::Suppressed => None,
+                                })
+                            },
+                            source_id: current_source.clone(),
+                            kind: "painted".into(),
+                            artifact,
+                            text: normalize_reading_text(text),
+                        });
+                    }
                     if artifact_depth > 0 {
                         continue;
                     }
-                    if let Some(ReadingStackEntry::Node(node)) = stack.last_mut() {
-                        append_reading_text(&mut node.text, text);
-                    } else if !text.trim().is_empty() {
+                    if let Some(ReadingStackEntry::Node(node)) = stack.last() {
+                        if logical_text_depth == 0 {
+                            // Opaque/table/SVG paint paths without logical-text
+                            // provenance retain the legacy normalized-run fallback.
+                            let mut fallback = normalize_reading_text(text);
+                            if !fallback.is_empty() && !node.text.is_empty() {
+                                fallback.insert(0, ' ');
+                            }
+                            append_reading_text(&mut stack, &mut root_content, &fallback);
+                        }
+                    } else if !text.trim().is_empty() && !artifact {
                         untagged_text_run_count = untagged_text_run_count.saturating_add(1);
                     }
+                }
+                Command::DrawForm { .. } => {
+                    unindexed_form_count = unindexed_form_count.saturating_add(1);
                 }
                 _ => {}
             }
@@ -573,13 +738,33 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
 
         while let Some(entry) = stack.pop() {
             if let ReadingStackEntry::Node(node) = entry {
-                attach_reading_node(finish_reading_node(node), &mut stack, &mut roots);
+                attach_reading_node(
+                    finish_reading_node(node),
+                    &mut stack,
+                    &mut roots,
+                    &mut root_content,
+                );
             }
         }
         pages.push(AuthoringReadingPage {
             page_number: page_index + 1,
             nodes: roots,
+            text_runs,
+            content: root_content,
         });
+    }
+
+    let catalog = crate::table_semantics::CompiledTableCatalog::from_document(document);
+    let mut pending: Vec<_> = pages
+        .iter_mut()
+        .flat_map(|page| page.nodes.iter_mut())
+        .collect();
+    while let Some(node) = pending.pop() {
+        if let Some(semantics) = &node.table_semantics {
+            node.logical_row_span = catalog.logical_row_span(semantics).or(node.row_span);
+            node.table_semantics = Some(catalog.resolve(semantics));
+        }
+        pending.extend(&mut node.children);
     }
 
     let mut node_count = 0usize;
@@ -616,6 +801,7 @@ fn reading_preview(document: &Document) -> AuthoringReadingPreviewV1 {
         alternate_text_count,
         untagged_text_run_count,
         artifact_marked_content_count,
+        unindexed_form_count,
         pages,
     }
 }
@@ -934,8 +1120,38 @@ impl FullBleed {
         &self,
         request: AuthoringPreviewRequest<'_>,
         cancellation: &AuthoringCancellationToken,
-        mut progress: impl FnMut(AuthoringPreviewProgress),
+        progress: impl FnMut(AuthoringPreviewProgress),
     ) -> Result<AuthoringPreviewArtifactV1, FullBleedError> {
+        self.render_authoring_preview_with_asset_scope(request, cancellation, progress, false)
+    }
+
+    /// Authoring preview for untrusted source. Image bytes must be supplied in
+    /// the bundle or inline. No source-controlled image path can fall back to
+    /// filesystem reads during layout, PDF emission, or preview rasterization.
+    /// This does not sandbox arbitrary caller code or the other rendering APIs.
+    pub fn render_authoring_preview_bundled_assets(
+        &self,
+        request: AuthoringPreviewRequest<'_>,
+        cancellation: &AuthoringCancellationToken,
+        progress: impl FnMut(AuthoringPreviewProgress),
+    ) -> Result<AuthoringPreviewArtifactV1, FullBleedError> {
+        self.render_authoring_preview_with_asset_scope(request, cancellation, progress, true)
+    }
+
+    fn render_authoring_preview_with_asset_scope(
+        &self,
+        request: AuthoringPreviewRequest<'_>,
+        cancellation: &AuthoringCancellationToken,
+        mut progress: impl FnMut(AuthoringPreviewProgress),
+        bundled_assets_only: bool,
+    ) -> Result<AuthoringPreviewArtifactV1, FullBleedError> {
+        let asset_audit = bundled_assets_only.then(|| {
+            Arc::new(crate::assets::AssetReadContext {
+                bundle: Arc::clone(&self.asset_bundle),
+                blocked: std::sync::atomic::AtomicUsize::new(0),
+            })
+        });
+        let _asset_scope = crate::assets::AssetReadScope::enter(asset_audit.clone());
         let started = Instant::now();
         check_cancelled(cancellation)?;
         progress(AuthoringPreviewProgress {
@@ -952,7 +1168,10 @@ impl FullBleed {
             let worker = std::thread::Builder::new()
                 .name("fullbleed-authoring-layout".into())
                 .stack_size(AUTHORING_LAYOUT_STACK_BYTES)
-                .spawn_scoped(scope, || self.render_to_document(request.html, request.css))
+                .spawn_scoped(scope, || {
+                    let _asset_scope = crate::assets::AssetReadScope::enter(asset_audit.clone());
+                    self.render_to_document(request.html, request.css)
+                })
                 .map_err(FullBleedError::Io)?;
             worker.join().map_err(|_| {
                 FullBleedError::InvalidConfiguration(
@@ -1025,9 +1244,15 @@ impl FullBleed {
             total: png_pages.len(),
             elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
         });
+        if asset_audit
+            .as_ref()
+            .is_some_and(|audit| audit.blocked.load(Ordering::Relaxed) != 0)
+        {
+            return Err(FullBleedError::InvalidConfiguration("ASSET_FILESYSTEM_BLOCKED: Authoring preview requires supplied asset bytes; vendor the missing image or use an inline data URI".into()));
+        }
         let layout = layout_snapshot(request.html, &document);
         let reading = reading_preview(&document);
-        let diagnostics = if layout.nodes.iter().all(|node| node.geometry_available) {
+        let mut diagnostics = if layout.nodes.iter().all(|node| node.geometry_available) {
             Vec::new()
         } else {
             vec![AuthoringDiagnostic {
@@ -1037,6 +1262,24 @@ impl FullBleed {
                 source_id: None,
             }]
         };
+        let mut pending: Vec<_> = reading
+            .pages
+            .iter()
+            .flat_map(|page| page.nodes.iter())
+            .collect();
+        while let Some(node) = pending.pop() {
+            if let Some(semantics) = &node.table_semantics {
+                for issue in &semantics.header_issues {
+                    diagnostics.push(AuthoringDiagnostic {
+                        code: format!("TABLE_HEADERS_{}", issue.to_ascii_uppercase()),
+                        severity: AuthoringDiagnosticSeverity::Warning,
+                        message: format!("An explicit table header relationship could not be used ({issue}). Inspect this cell's headers and the target header in the same table."),
+                        source_id: node.source_id.clone(),
+                    });
+                }
+            }
+            pending.extend(node.children.iter().rev());
+        }
         progress(AuthoringPreviewProgress {
             phase: AuthoringPreviewPhase::Complete,
             completed: 1,
@@ -1059,6 +1302,121 @@ impl FullBleed {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundled_authoring_blocks_image_reads_in_layout_and_emission() {
+        let fixture = std::env::temp_dir().join(format!(
+            "fullbleed-authoring-policy-{}-{}.png",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&fixture, b"PRIVATE-ASSET-CANARY").unwrap();
+        let path = fixture.to_string_lossy().replace('\\', "/");
+        let engine = FullBleed::builder().build().unwrap();
+        let cancellation = AuthoringCancellationToken::new();
+        for (html, css) in [
+            (
+                format!("<html><body><img src='{path}' width='10' height='10'></body></html>"),
+                String::new(),
+            ),
+            (
+                "<html><body><p>Background</p></body></html>".into(),
+                format!("p {{ width: 100pt; height: 100pt; background-image: url('{path}'); }}"),
+            ),
+        ] {
+            let result = engine.render_authoring_preview_bundled_assets(
+                AuthoringPreviewRequest {
+                    html: &html,
+                    css: &css,
+                    dpi: 72,
+                },
+                &cancellation,
+                |_| {},
+            );
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("ASSET_FILESYSTEM_BLOCKED")
+            );
+        }
+        let html = "<html><body><h1>Safe source</h1></body></html>";
+        let first = engine
+            .render_authoring_preview(
+                AuthoringPreviewRequest {
+                    html,
+                    css: "",
+                    dpi: 72,
+                },
+                &cancellation,
+                |_| {},
+            )
+            .unwrap();
+        let restricted = engine
+            .render_authoring_preview_bundled_assets(
+                AuthoringPreviewRequest {
+                    html,
+                    css: "",
+                    dpi: 72,
+                },
+                &cancellation,
+                |_| {},
+            )
+            .unwrap();
+        assert_eq!(first.pdf, restricted.pdf);
+        assert_eq!(first.png_pages, restricted.png_pages);
+        std::fs::remove_file(fixture).unwrap();
+    }
+
+    #[test]
+    fn bundled_authoring_resolves_supplied_css_backgrounds_without_filesystem_access() {
+        let png = crate::image_native::encode_png_rgba8(&[10, 180, 70, 255], 1, 1).unwrap();
+        let mut bundle = crate::assets::AssetBundle::default();
+        bundle.add(crate::assets::Asset::new(
+            "scoped-background.png".into(),
+            crate::assets::AssetKind::Image,
+            png.clone(),
+            None,
+            false,
+        ));
+        let engine = FullBleed::builder()
+            .register_bundle(bundle)
+            .build()
+            .unwrap();
+        let html = "<html><body><p>Supplied background</p></body></html>";
+        let css = "p {width:100pt; height:100pt; background-image:url('scoped-background.png');}";
+        let cancellation = AuthoringCancellationToken::new();
+        let restricted = engine
+            .render_authoring_preview_bundled_assets(
+                AuthoringPreviewRequest { html, css, dpi: 72 },
+                &cancellation,
+                |_| {},
+            )
+            .unwrap();
+        let inline_css = css.replace(
+            "scoped-background.png",
+            &format!(
+                "data:image/png;base64,{}",
+                crate::base64::encode_standard(png)
+            ),
+        );
+        let inline = engine
+            .render_authoring_preview_bundled_assets(
+                AuthoringPreviewRequest {
+                    html,
+                    css: &inline_css,
+                    dpi: 72,
+                },
+                &cancellation,
+                |_| {},
+            )
+            .unwrap();
+        assert_eq!(restricted.png_pages, inline.png_pages);
+        assert_eq!(restricted.pdf, inline.pdf);
+    }
 
     #[test]
     fn authoring_language_report_uses_engine_html_and_css_parsers() {
@@ -1149,6 +1507,488 @@ mod tests {
             collected.push(node);
             collect_reading_nodes(&node.children, collected);
         }
+    }
+
+    fn ordered_text(
+        content: &[AuthoringReadingContent],
+        children: &[AuthoringReadingNode],
+    ) -> String {
+        content
+            .iter()
+            .map(|part| match part {
+                AuthoringReadingContent::Text(text) => text.clone(),
+                AuthoringReadingContent::Child(index) => {
+                    let child = &children[*index];
+                    child
+                        .actual_text
+                        .clone()
+                        .unwrap_or_else(|| ordered_text(&child.content, &child.children))
+                }
+            })
+            .collect()
+    }
+
+    fn reading_fixture(html: &str, css: &str) -> AuthoringPreviewArtifactV1 {
+        FullBleed::builder()
+            .build()
+            .unwrap()
+            .render_authoring_preview(
+                AuthoringPreviewRequest { html, css, dpi: 72 },
+                &AuthoringCancellationToken::new(),
+                |_| {},
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn compiled_table_spans_reach_standard_pdf_table_attributes() {
+        let engine = FullBleed::builder().build().unwrap();
+        let document = engine.render_to_document(
+            "<table><thead><tr><th colspan='2' scope='col'>Items</th><th scope='col'>Price</th></tr></thead><tbody><tr><th rowspan='2' scope='row'>Group</th><td>A</td><td>10</td></tr><tr><td>B</td><td>20</td></tr></tbody></table>",
+            "@page {size:300pt 300pt;margin:12pt;} table {width:100%;} th,td {padding:4pt;}",
+        ).unwrap();
+        let options = crate::pdf::PdfOptions {
+            pdf_profile: crate::pdf::PdfProfile::Tagged,
+            ..Default::default()
+        };
+        let bytes = pdf::document_to_pdf_with_metrics_and_registry_with_logs(
+            &document,
+            None,
+            Some(engine.font_registry.as_ref()),
+            &options,
+            None,
+            None,
+        )
+        .unwrap();
+        let pdf = String::from_utf8_lossy(&bytes);
+        let headers: Vec<_> = pdf
+            .lines()
+            .filter(|line| line.contains("/S /TH "))
+            .collect();
+        assert_eq!(headers.len(), 3);
+        assert!(headers[0].contains("/A << /O /Table"), "{headers:#?}");
+        assert!(headers[0].contains("/ColSpan 2"), "{headers:#?}");
+        assert!(headers[0].contains("/Scope /Column"), "{headers:#?}");
+        assert!(headers[2].contains("/RowSpan 2"), "{headers:#?}");
+        assert!(headers[2].contains("/Scope /Row"), "{headers:#?}");
+        assert!(
+            !pdf.contains("/Headers ["),
+            "Do not invent header associations from column positions"
+        );
+    }
+
+    #[test]
+    fn compiled_table_spans_resolve_id_free_zero_clamping_and_row_groups() {
+        let artifact = reading_fixture(
+            "<table><thead><tr><th colspan='2' scope='col'>Items</th><th>Price</th></tr></thead><tbody><tr><td rowspan='0'>Anchor</td><td>A</td><td>10</td></tr><tr><td>B</td><td>20</td></tr></tbody><tbody><tr style='visibility:collapse'><td colspan='3'>Hidden group start</td></tr><tr><td rowspan='99' colspan='3'>Last group</td></tr></tbody></table>",
+            "@page {size:300pt 300pt;margin:12pt;} table {width:100%;} th,td {padding:4pt;}",
+        );
+        assert_eq!(artifact.reading.pages.len(), 1);
+        let mut nodes = Vec::new();
+        collect_reading_nodes(&artifact.reading.pages[0].nodes, &mut nodes);
+        assert!(nodes.iter().all(|node| node.source_id.is_none()));
+        let groups: Vec<_> = nodes.iter().filter(|node| node.role == "TBody").collect();
+        assert_eq!(
+            groups.len(),
+            2,
+            "Authored tbody boundaries survive collapsed first rows"
+        );
+        assert_eq!(groups[0].children.len(), 2);
+        assert_eq!(groups[1].children.len(), 1);
+        let cells: Vec<_> = nodes
+            .iter()
+            .filter(|node| matches!(node.role.as_str(), "TH" | "TD"))
+            .collect();
+        assert_eq!(
+            cells.len(),
+            8,
+            "Do not emit rowspan placeholders as extra cells"
+        );
+        let spans: Vec<_> = cells
+            .iter()
+            .map(|node| {
+                (
+                    ordered_text(&node.content, &node.children),
+                    node.column_span,
+                    node.row_span,
+                )
+            })
+            .collect();
+        assert_eq!(spans[0], ("Items".into(), Some(2), Some(1)));
+        assert_eq!(spans[2], ("Anchor".into(), Some(1), Some(2)));
+        assert_eq!(spans[7], ("Last group".into(), Some(3), Some(1)));
+        assert!(
+            cells
+                .iter()
+                .all(|node| node.column_span.is_some_and(|span| span > 0)
+                    && node.row_span.is_some_and(|span| span > 0))
+        );
+        assert!(
+            nodes
+                .iter()
+                .filter(|node| !matches!(node.role.as_str(), "TH" | "TD"))
+                .all(|node| node.column_span.is_none() && node.row_span.is_none())
+        );
+    }
+
+    #[test]
+    fn compiled_table_spans_count_only_emitted_rows_and_columns() {
+        let artifact = reading_fixture(
+            "<table><colgroup><col><col style='visibility:collapse'><col><col></colgroup><tbody><tr><td colspan='3' rowspan='3'>Anchor</td><td>A</td></tr><tr style='visibility:collapse'><td>Hidden</td></tr><tr><td>B</td></tr></tbody></table>",
+            "@page {size:400pt 300pt;margin:12pt;} table {width:100%;table-layout:fixed;} tr {height:24pt;} td {padding:4pt;}",
+        );
+        let mut nodes = Vec::new();
+        collect_reading_nodes(&artifact.reading.pages[0].nodes, &mut nodes);
+        let cells: Vec<_> = nodes.iter().filter(|node| node.role == "TD").collect();
+        assert_eq!(cells.len(), 3, "{cells:#?}");
+        assert_eq!(cells[0].column_span, Some(2));
+        assert_eq!(cells[0].row_span, Some(2));
+        assert_eq!(
+            cells[2].column_index,
+            Some(3),
+            "Source-grid column positions remain unchanged"
+        );
+    }
+
+    #[test]
+    fn compiled_table_spans_keep_printed_header_copies_but_one_logical_header() {
+        let rows = (0..12)
+            .map(|index| format!("<tr><td>Row {index}</td><td>A</td><td>B</td></tr>"))
+            .collect::<String>();
+        let artifact = reading_fixture(
+            &format!(
+                "<table><thead><tr><th rowspan='2' scope='col'>Item</th><th colspan='2' scope='col'>Amounts</th></tr><tr><th scope='col'>Net</th><th scope='col'>Gross</th></tr></thead><tbody>{rows}</tbody></table>"
+            ),
+            "@page {size:300pt 150pt;margin:10pt;} body {margin:0;} table {width:100%;} tr {height:24pt;} th,td {font-size:10pt;padding:2pt;}",
+        );
+        assert!(artifact.reading.pages.len() >= 3);
+        for page in &artifact.reading.pages {
+            let mut nodes = Vec::new();
+            collect_reading_nodes(&page.nodes, &mut nodes);
+            let headers: Vec<_> = nodes.iter().filter(|node| node.role == "TH").collect();
+            if page.page_number == 1 {
+                assert_eq!(headers.len(), 4);
+                assert_eq!(headers[0].row_span, Some(2));
+                assert_eq!(headers[0].logical_row_span, Some(2));
+                assert_eq!(headers[1].column_span, Some(2));
+            } else {
+                assert!(
+                    headers.is_empty(),
+                    "Repeated headers are pagination artifacts on page {}",
+                    page.page_number
+                );
+            }
+            let printed = page
+                .text_runs
+                .iter()
+                .find(|run| run.text == "Amounts")
+                .expect("Header remains in the actual paint stream on every page");
+            assert_eq!(printed.artifact, page.page_number > 1);
+            assert!(
+                nodes
+                    .iter()
+                    .filter(|node| node.role == "TD")
+                    .all(|node| node.row_span == Some(1) && node.column_span == Some(1))
+            );
+        }
+    }
+
+    #[test]
+    fn compiled_table_spans_are_nonpainting_and_untagged_pdf_neutral() {
+        let engine = FullBleed::builder().build().unwrap();
+        let mut document = engine.render_to_document(
+            "<table><tr><th colspan='2' scope='col'>Items</th></tr><tr><td rowspan='2'>Anchor</td><td>A</td></tr><tr><td>B</td></tr></table>",
+            "@page {size:240pt 240pt;margin:12pt;} table {width:100%;border-collapse:collapse;} th,td {border:1pt solid black;padding:4pt;}",
+        ).unwrap();
+        let pdf = |document: &Document, profile| {
+            pdf::document_to_pdf_with_metrics_and_registry_with_logs(
+                document,
+                None,
+                Some(engine.font_registry.as_ref()),
+                &crate::pdf::PdfOptions {
+                    pdf_profile: profile,
+                    ..Default::default()
+                },
+                None,
+                None,
+            )
+            .unwrap()
+        };
+        let raster = |document: &Document| {
+            raster::document_to_png_pages(
+                document,
+                72,
+                Some(engine.font_registry.as_ref()),
+                engine.pdf_options.shape_text,
+            )
+            .unwrap()
+        };
+        let untagged = pdf(&document, crate::pdf::PdfProfile::None);
+        let tagged = pdf(&document, crate::pdf::PdfProfile::Tagged);
+        let png = raster(&document);
+        for page in &mut document.pages {
+            for command in &mut page.commands {
+                if let Command::BeginTag {
+                    column_span,
+                    row_span,
+                    ..
+                } = command
+                {
+                    *column_span = None;
+                    *row_span = None;
+                }
+            }
+        }
+        assert_eq!(untagged, pdf(&document, crate::pdf::PdfProfile::None));
+        assert_eq!(png, raster(&document));
+        assert_ne!(
+            tagged,
+            pdf(&document, crate::pdf::PdfProfile::Tagged),
+            "Tagged structure intentionally gains table attributes"
+        );
+    }
+
+    #[test]
+    fn ordered_reading_preserves_id_free_inline_text_and_lowered_block_boundaries() {
+        let artifact = reading_fixture(
+            "<main><span class='row'>BILL TO</span><span class='row'>Aster Corporation</span><span class='row postal'>123 Business Park Drive\nAustin, TX 78701</span><p>Before <strong>middle</strong> after.</p><p><span>micro</span><strong>scope</strong></p><p><span>Hello </span><strong>world</strong><span>!</span></p></main>",
+            "@page { size: 500pt 680pt; margin: 24pt; } .row { display:block; } .postal { white-space: pre-line; } strong { color: red; font-weight:700; }",
+        );
+        let page = &artifact.reading.pages[0];
+        let text = ordered_text(&page.content, &page.nodes);
+        assert_eq!(
+            text,
+            "BILL TOAster Corporation123 Business Park Drive\nAustin, TX 78701Before middle after.microscopeHello world!"
+        );
+        let mut nodes = Vec::new();
+        collect_reading_nodes(&page.nodes, &mut nodes);
+        for label in ["BILL TO", "Aster Corporation"] {
+            assert!(
+                nodes.iter().any(|node| node.role == "Span"
+                    && node.layout.as_deref() == Some("block")
+                    && ordered_text(&node.content, &node.children) == label),
+                "{nodes:#?}"
+            );
+        }
+        assert!(nodes.iter().all(|node| node.source_id.is_none()));
+    }
+
+    #[test]
+    fn ordered_reading_retains_hard_breaks_code_spacing_and_words_across_paint_runs() {
+        let artifact = reading_fixture(
+            "<main><p>First line<br>Second line</p><p>One <strong>bold</strong><br>Two <em>italic</em><br><br>Four</p><pre>const first = 1;\n  const second = 2;</pre><p class='tracked'>ABCDEFGHIJKL</p><p class='wrapped'>uninterruptedidentifieruninterruptedidentifier</p></main>",
+            "@page { size:500pt 680pt; margin:24pt; } .tracked { letter-spacing:1pt; text-shadow:1pt 1pt #888; } .wrapped { width:110pt; overflow-wrap:anywhere; } strong {color:red;} em {color:blue;}",
+        );
+        let page = &artifact.reading.pages[0];
+        let text = ordered_text(&page.content, &page.nodes);
+        assert_eq!(
+            text,
+            "First line\nSecond lineOne bold\nTwo italic\n\nFourconst first = 1;\n  const second = 2;ABCDEFGHIJKLuninterruptedidentifieruninterruptedidentifier"
+        );
+    }
+
+    #[test]
+    fn ordered_reading_preserves_soft_wrap_provenance_across_page_fragments() {
+        let identifier = "uninterruptedidentifier".repeat(12);
+        let prose = "one two three four five six seven eight nine ten ".repeat(8);
+        let artifact = reading_fixture(
+            &format!("<p>{identifier}</p><p>{prose}</p>"),
+            "@page { size:120pt 110pt; margin:10pt; } body { margin:0; font-size:12pt; } p { margin:0; overflow-wrap:anywhere; }",
+        );
+        assert!(artifact.reading.pages.len() > 2);
+        let text: String = artifact
+            .reading
+            .pages
+            .iter()
+            .map(|page| ordered_text(&page.content, &page.nodes))
+            .collect();
+        assert_eq!(text, format!("{identifier}{}", prose.trim_end()));
+    }
+
+    #[test]
+    fn ordered_reading_retains_legacy_spacing_for_table_paint_without_logical_provenance() {
+        let artifact = reading_fixture(
+            "<table><tr><td>one two three four five six seven eight nine ten</td></tr></table>",
+            "@page {size:120pt 400pt;margin:12pt;} table {width:65pt;} td {font-size:12pt;}",
+        );
+        let text: String = artifact
+            .reading
+            .pages
+            .iter()
+            .map(|page| ordered_text(&page.content, &page.nodes))
+            .collect();
+        assert_eq!(text, "one two three four five six seven eight nine ten");
+    }
+
+    #[test]
+    fn reading_metadata_is_nonpainting_and_excludes_clamped_hidden_and_artifact_text() {
+        let engine = FullBleed::builder().build().unwrap();
+        let mut document = engine.render_to_document(
+            "<main><p class='clamp'>Visible words that wrap across many lines HIDDEN_TAIL</p><p class='hidden'>HIDDEN_SOURCE</p><p data-fb-a11y-role='Artifact'>RUNNING_ARTIFACT</p><span data-fb-a11y-only='true'>Nonvisual instruction</span></main>",
+            "@page {size:300pt 300pt;margin:12pt;} .clamp {width:60pt;line-clamp:1;} .hidden {display:none;}",
+        ).unwrap();
+        let reading = reading_preview(&document);
+        let text: String = reading
+            .pages
+            .iter()
+            .map(|page| ordered_text(&page.content, &page.nodes))
+            .collect();
+        assert!(!text.contains("HIDDEN_SOURCE"));
+        assert!(!text.contains("HIDDEN_TAIL"), "{text}");
+        assert!(text.contains("Nonvisual instruction"));
+        let pdf = pdf::document_to_pdf_with_metrics_and_registry_with_logs(
+            &document,
+            None,
+            Some(engine.font_registry.as_ref()),
+            &engine.pdf_options,
+            None,
+            None,
+        )
+        .unwrap();
+        let png = raster::document_to_png_pages(
+            &document,
+            72,
+            Some(engine.font_registry.as_ref()),
+            engine.pdf_options.shape_text,
+        )
+        .unwrap();
+        for page in &mut document.pages {
+            page.commands.retain(|command| !matches!(command, Command::Meta { key, .. } if key.starts_with("fb.reading.")));
+        }
+        assert_eq!(
+            pdf,
+            pdf::document_to_pdf_with_metrics_and_registry_with_logs(
+                &document,
+                None,
+                Some(engine.font_registry.as_ref()),
+                &engine.pdf_options,
+                None,
+                None
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            png,
+            raster::document_to_png_pages(
+                &document,
+                72,
+                Some(engine.font_registry.as_ref()),
+                engine.pdf_options.shape_text
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn text_index_includes_untagged_artifact_and_transformed_runs_in_page_command_order() {
+        use crate::canvas::Page;
+        use crate::types::{Pt, Size};
+        let document = Document {
+            page_size: Size {
+                width: Pt::from_f32(200.0),
+                height: Pt::from_f32(200.0),
+            },
+            pages: vec![
+                Page {
+                    commands: vec![
+                        Command::DrawString {
+                            x: Pt::ZERO,
+                            y: Pt::ZERO,
+                            text: "Untagged first".into(),
+                        },
+                        Command::BeginArtifact { subtype: None },
+                        Command::DrawString {
+                            x: Pt::ZERO,
+                            y: Pt::ZERO,
+                            text: "Running footer".into(),
+                        },
+                        Command::EndMarkedContent,
+                        Command::DrawStringTransformed {
+                            x: Pt::ZERO,
+                            y: Pt::ZERO,
+                            text: "Rotated text".into(),
+                            m00: 0.0,
+                            m01: 1.0,
+                            m10: -1.0,
+                            m11: 0.0,
+                        },
+                        Command::DrawForm {
+                            x: Pt::ZERO,
+                            y: Pt::ZERO,
+                            width: Pt::from_f32(10.0),
+                            height: Pt::from_f32(10.0),
+                            resource_id: "opaque-form".into(),
+                        },
+                    ],
+                },
+                Page {
+                    commands: vec![Command::DrawString {
+                        x: Pt::ZERO,
+                        y: Pt::ZERO,
+                        text: "Second page".into(),
+                    }],
+                },
+            ],
+        };
+        let reading = reading_preview(&document);
+        assert_eq!(reading.coverage, "unavailable");
+        assert_eq!(reading.unindexed_form_count, 1);
+        assert_eq!(
+            reading.pages[0]
+                .text_runs
+                .iter()
+                .map(|run| (run.command_index, run.text.as_str(), run.artifact))
+                .collect::<Vec<_>>(),
+            [
+                (0, "Untagged first", false),
+                (2, "Running footer", true),
+                (4, "Rotated text", false)
+            ]
+        );
+        assert!(
+            reading.pages[0]
+                .text_runs
+                .iter()
+                .all(|run| run.reading_command_index.is_none())
+        );
+        assert_eq!(reading.pages[1].page_number, 2);
+        assert_eq!(reading.pages[1].text_runs[0].text, "Second page");
+        assert_eq!(reading_preview(&document), reading);
+    }
+
+    #[test]
+    fn id_free_text_index_links_to_compiled_semantics_and_excludes_hidden_source() {
+        let engine = FullBleed::builder().build().unwrap();
+        let artifact = engine.render_authoring_preview(AuthoringPreviewRequest {
+            html: "<main><h1>First heading</h1><p>Before <strong>middle</strong> after</p><p hidden style='display:none'>Hidden secret</p><span data-fb-a11y-only='true'>Nonvisual explanation</span><h2 style='break-before:page'>Second heading</h2></main>",
+            css: "@page { size: 240pt 240pt; margin: 12pt; }", dpi: 72,
+        }, &AuthoringCancellationToken::new(), |_| {}).unwrap();
+        assert_eq!(artifact.reading.pages.len(), 2);
+        for page in &artifact.reading.pages {
+            let mut nodes = Vec::new();
+            collect_reading_nodes(&page.nodes, &mut nodes);
+            for run in &page.text_runs {
+                assert!(run.source_id.is_none());
+                assert!(!run.text.contains("Hidden secret"));
+                if let Some(command_index) = run.reading_command_index {
+                    assert!(nodes.iter().any(|node| node.command_index == command_index));
+                }
+            }
+        }
+        let text = artifact.reading.pages[0]
+            .text_runs
+            .iter()
+            .filter(|run| run.kind == "painted")
+            .map(|run| run.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(text.contains("Before middle after"), "{text}");
+        assert!(
+            artifact.reading.pages[0]
+                .text_runs
+                .iter()
+                .any(|run| run.kind == "actual_text" && run.text == "Nonvisual explanation")
+        );
     }
 
     #[test]
@@ -1280,6 +2120,161 @@ mod tests {
             source_ids("<p data-fb-id = 'first'></p><p data-fb-id=\"second\"></p>"),
             ["first", "second"]
         );
+    }
+
+    #[test]
+    fn table_cells_expose_engine_span_bounds_without_changing_pdf_or_pixels() {
+        let engine = FullBleed::builder().build().unwrap();
+        let html = "<table><tbody><tr><td data-fb-id='anchor' colspan='2' rowspan='2'>Anchor</td><td data-fb-id='top'>Top</td></tr><tr><td data-fb-id='bottom'>Bottom</td></tr></tbody></table>";
+        let plain = html
+            .replace(" data-fb-id='anchor'", "")
+            .replace(" data-fb-id='top'", "")
+            .replace(" data-fb-id='bottom'", "");
+        for mode in ["auto", "fixed"] {
+            for direction in ["ltr", "rtl"] {
+                let css = format!(
+                    "@page {{size:240pt 160pt; margin:10pt;}} body {{margin:0; font:10pt Helvetica;}} table {{width:210pt; table-layout:{mode}; direction:{direction}; border-collapse:collapse;}} td {{padding:5pt; border:1pt solid #aaa;}}"
+                );
+                let render = |html: &str| {
+                    engine
+                        .render_authoring_preview(
+                            AuthoringPreviewRequest {
+                                html,
+                                css: &css,
+                                dpi: 72,
+                            },
+                            &AuthoringCancellationToken::new(),
+                            |_| {},
+                        )
+                        .unwrap()
+                };
+                let artifact = render(html);
+                let fragment = |id: &str| {
+                    let node = artifact
+                        .layout
+                        .nodes
+                        .iter()
+                        .find(|node| node.source_id == id)
+                        .unwrap();
+                    assert!(node.geometry_available, "{mode}/{direction}: missing {id}");
+                    assert_eq!(
+                        node.fragments.len(),
+                        1,
+                        "rowspan placeholders must not duplicate an authored cell"
+                    );
+                    &node.fragments[0]
+                };
+                let anchor = fragment("anchor");
+                let top = fragment("top");
+                let bottom = fragment("bottom");
+                // Auto layout distributes intrinsic widths, not equal logical
+                // columns. Only fixed layout promises this width relationship.
+                assert!(anchor.width_milli_pt > 0 && top.width_milli_pt > 0);
+                if mode == "fixed" {
+                    assert!(anchor.width_milli_pt > top.width_milli_pt);
+                }
+                assert!(anchor.height_milli_pt > top.height_milli_pt);
+                assert!(bottom.y_milli_pt > top.y_milli_pt);
+                assert_eq!(anchor.x_milli_pt < top.x_milli_pt, direction == "ltr");
+                let without_ids = render(&plain);
+                assert_eq!(
+                    artifact.pdf, without_ids.pdf,
+                    "source ownership metadata does not alter PDF emission"
+                );
+                assert_eq!(
+                    artifact.png_pages, without_ids.png_pages,
+                    "source ownership metadata does not alter paint"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn empty_and_translated_table_cells_have_balanced_authored_geometry() {
+        let engine = FullBleed::builder().build().unwrap();
+        let html = "<table data-fb-id='table'><tbody><tr><td data-fb-id='empty'></td><td data-fb-id='rich'><p data-fb-id='child'>Rich text</p></td></tr></tbody></table><p data-fb-id='after'>After table</p>";
+        let render = |offset: &str| {
+            engine.render_authoring_preview(AuthoringPreviewRequest { html, css: &format!("@page {{size:240pt 200pt; margin:10pt;}} body {{margin:0; font:10pt Helvetica;}} table {{width:210pt; empty-cells:hide; border-collapse:separate; {offset}}} td {{padding:5pt; border:1pt solid black;}} p {{margin:0;}}"), dpi:72 }, &AuthoringCancellationToken::new(), |_| {}).unwrap()
+        };
+        let before = render("");
+        let shifted = render("position:relative; left:9pt; top:13pt;");
+        let fragment = |artifact: &AuthoringPreviewArtifactV1, id: &str| {
+            let node = artifact
+                .layout
+                .nodes
+                .iter()
+                .find(|node| node.source_id == id)
+                .unwrap();
+            assert!(node.geometry_available, "missing {id}");
+            assert_eq!(
+                node.fragments.len(),
+                1,
+                "cell/child metadata ownership must not leak"
+            );
+            node.fragments[0].clone()
+        };
+        for id in ["empty", "rich", "child"] {
+            let original = fragment(&before, id);
+            let moved = fragment(&shifted, id);
+            assert_eq!(moved.x_milli_pt - original.x_milli_pt, 9_000);
+            assert_eq!(moved.y_milli_pt - original.y_milli_pt, 13_000);
+        }
+        let after_before = fragment(&before, "after");
+        let after_shifted = fragment(&shifted, "after");
+        // Relative positioning changes paint-command order, not subsequent flow.
+        assert_eq!(
+            (
+                after_before.page_number,
+                after_before.x_milli_pt,
+                after_before.y_milli_pt,
+                after_before.width_milli_pt,
+                after_before.height_milli_pt
+            ),
+            (
+                after_shifted.page_number,
+                after_shifted.x_milli_pt,
+                after_shifted.y_milli_pt,
+                after_shifted.width_milli_pt,
+                after_shifted.height_milli_pt
+            )
+        );
+        assert!(
+            fragment(&before, "rich").width_milli_pt > fragment(&before, "child").width_milli_pt
+        );
+    }
+
+    #[test]
+    fn repeated_header_cell_geometry_tracks_each_real_page_fragment() {
+        let engine = FullBleed::builder().build().unwrap();
+        let rows = (0..18)
+            .map(|index| format!("<tr><td data-fb-id='row-{index}'>Row {index}</td></tr>"))
+            .collect::<String>();
+        let html = format!(
+            "<table><thead><tr><th data-fb-id='heading'>Repeated heading</th></tr></thead><tbody>{rows}</tbody></table>"
+        );
+        let artifact = engine.render_authoring_preview(AuthoringPreviewRequest { html: &html, css: "@page {size:200pt 120pt; margin:10pt;} body {margin:0; font:10pt Helvetica;} table {width:180pt;} th,td {padding:5pt; border:1pt solid black;}", dpi:72 }, &AuthoringCancellationToken::new(), |_| {}).unwrap();
+        assert!(artifact.layout.pages.len() > 2);
+        let heading = artifact
+            .layout
+            .nodes
+            .iter()
+            .find(|node| node.source_id == "heading")
+            .unwrap();
+        assert_eq!(heading.fragments.len(), artifact.layout.pages.len());
+        for (index, fragment) in heading.fragments.iter().enumerate() {
+            assert_eq!(fragment.page_number, index + 1);
+            assert!(fragment.width_milli_pt > 0 && fragment.height_milli_pt > 0);
+        }
+        for index in 0..18 {
+            let node = artifact
+                .layout
+                .nodes
+                .iter()
+                .find(|node| node.source_id == format!("row-{index}"))
+                .unwrap();
+            assert!(node.geometry_available);
+            assert_eq!(node.fragments.len(), 1);
+        }
     }
 
     #[test]

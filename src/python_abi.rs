@@ -457,6 +457,9 @@ pub(crate) type PyObject = Py<PyAny>;
 pub(crate) type PyRef<'py, T> = &'py T;
 
 impl<'py> Bound<'py, PyAny> {
+    pub(crate) fn is_builtin_instance(&self, name: &str) -> PyResult<bool> {
+        is_builtin_instance(self.as_ptr(), name)
+    }
     pub(crate) fn downcast<T: PythonType>(&self) -> PyResult<&Bound<'py, T>> {
         if !T::matches(self.as_ptr())? {
             return Err(PyErr::type_error(format!("expected {}", T::NAME)));

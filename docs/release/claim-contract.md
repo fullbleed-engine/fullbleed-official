@@ -1,6 +1,6 @@
-# Fullbleed 1.0 Claim Contract
+# Fullbleed Claim Contract
 
-This document defines public claim language for the 1.0 release line.
+This document defines public claim language for Fullbleed.
 
 ## Safe Claim
 
@@ -79,8 +79,17 @@ Claim:
 
 Boundary:
 
-- PDF/VT support is deterministic PDF/VT-1 seed/DPart support with PDF/X-4 base
-  validation unless a dedicated PDF/VT validator is configured.
+- PDF/VT-oriented composition includes Job/Record/Document parts, private
+  Fullbleed DPM, explicit print identity, and conservative file-scoped reuse hints.
+  Internal writer checks and PDF/X-4 base validation do not establish PDF/VT-1
+  conformance. Retain dedicated validator reports for the exact release specimens
+  before strengthening that claim. The 2.4.0 release workflows require external
+  PDF/X checks, separate-parser VT contract checks, source-assignment checks,
+  mutation controls, and deterministic replay. Dedicated PDF/VT preflight is
+  an additional gate when configured, not a prerequisite to shipping those
+  tested features with qualified claims.
+- Private DPM fields do not imply CIP4/JDF/ISO 21812 interoperability, and reuse
+  hints do not establish DFE/RIP performance improvements.
 - `tagged` is a utility structural profile, not one of the 17 standard profile
   specimens in the conformance harness.
 

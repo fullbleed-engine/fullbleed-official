@@ -5,6 +5,9 @@
 //! rectangles, lines, circles, and text; it never relies on scripting,
 //! animation, filters, masks, markers, or browser layout.
 
+use crate::flowable::{TextStyle, resolve_font_stack};
+use crate::font::FontRegistry;
+use crate::types::Pt;
 use std::fmt::{Display, Write as _};
 
 pub const CHART_COMPILER_SCHEMA: &str = "fullbleed.chart_compiler.v1";
@@ -118,6 +121,14 @@ pub struct ChartTrace {
     pub primitive_count: usize,
     pub native_vector: bool,
     pub table: String,
+    /// SVG user units (CSS pixels at the chart's intrinsic dimensions).
+    pub label_font_size: String,
+    pub label_font_family: String,
+    pub label_metrics: String,
+    pub legend_row_count: usize,
+    pub legend_line_count: usize,
+    pub category_label_count: usize,
+    pub layout_valid: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -130,6 +141,7 @@ pub struct ChartArtifact {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChartError {
+    InvalidDocumentContext(String),
     InvalidDimensions {
         width: u32,
         height: u32,
@@ -150,6 +162,7 @@ pub enum ChartError {
 impl Display for ChartError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidDocumentContext(message) => formatter.write_str(message),
             Self::InvalidDimensions { width, height } => write!(
                 formatter,
                 "chart dimensions must be at least 160 by 100 logical pixels; received {width} by {height}"
@@ -190,6 +203,21 @@ impl std::error::Error for ChartError {}
 /// observable empty state. Category rows are never implicitly sampled or
 /// rejected by a fixed record-count ceiling.
 pub fn compile_chart(spec: &ChartSpec) -> Result<ChartArtifact, ChartError> {
+    let registry = FontRegistry::new();
+    let typography = ChartTypography::new(
+        &registry,
+        &TextStyle {
+            font_size: Pt::from_f32(7.5),
+            ..TextStyle::default()
+        },
+    );
+    compile_chart_with_typography(spec, &typography)
+}
+
+pub(crate) fn compile_chart_with_typography(
+    spec: &ChartSpec,
+    typography: &ChartTypography<'_>,
+) -> Result<ChartArtifact, ChartError> {
     validate_spec(spec)?;
     let missing_value_count = spec
         .series
@@ -230,7 +258,21 @@ pub fn compile_chart(spec: &ChartSpec) -> Result<ChartArtifact, ChartError> {
     }
 
     let safe_id = xml_id(&spec.id);
-    let (svg, primitive_count) = render_svg(spec, &safe_id);
+    if typography.registry.resolve(&typography.font).is_none() && spec.kind != ChartKind::Sparkline
+    {
+        diagnostics.push(ChartDiagnostic {
+            code: "CHART_FONT_METRICS_FALLBACK".into(),
+            message: format!("No registered font metrics for {}; chart labels use the native SVG fallback estimate. Vendor this font to use exact project-font measurements.", typography.font),
+        });
+    }
+    let layout = ChartLayout::new(spec, typography);
+    if !layout.valid {
+        diagnostics.push(ChartDiagnostic {
+            code: "CHART_LAYOUT_INSUFFICIENT_SPACE".into(),
+            message: "Chart labels do not fit at the selected font size. Increase chart width/height or reduce font-size; no values were sampled or discarded from the semantic table.".into(),
+        });
+    }
+    let (svg, primitive_count) = render_svg(spec, &safe_id, typography, &layout);
     let table_html = if spec.table == ChartTable::Visible {
         render_table(spec, &safe_id)
     } else {
@@ -252,11 +294,23 @@ pub fn compile_chart(spec: &ChartSpec) -> Result<ChartArtifact, ChartError> {
             primitive_count,
             native_vector: true,
             table: spec.table.as_str().into(),
+            label_font_size: fmt_num(typography.size),
+            label_font_family: typography.font.clone(),
+            label_metrics: if typography.registry.resolve(&typography.font).is_some() {
+                "registered_font"
+            } else {
+                "estimated_fallback"
+            }
+            .into(),
+            legend_row_count: layout.legend_rows,
+            legend_line_count: layout.legend.iter().map(|item| item.lines.len()).sum(),
+            category_label_count: layout.categories.len(),
+            layout_valid: layout.valid,
         },
     })
 }
 
-fn validate_spec(spec: &ChartSpec) -> Result<(), ChartError> {
+pub(crate) fn validate_spec(spec: &ChartSpec) -> Result<(), ChartError> {
     if spec.width < 160 || spec.height < 100 {
         return Err(ChartError::InvalidDimensions {
             width: spec.width,
@@ -292,9 +346,7 @@ fn validate_spec(spec: &ChartSpec) -> Result<(), ChartError> {
     Ok(())
 }
 
-fn render_svg(spec: &ChartSpec, safe_id: &str) -> (String, usize) {
-    let width = f64::from(spec.width);
-    let height = f64::from(spec.height);
+pub(crate) fn svg_header(spec: &ChartSpec, safe_id: &str) -> String {
     let title_id = format!("{safe_id}-title");
     let description_id = format!("{safe_id}-description");
     let table_id = format!("{safe_id}-table");
@@ -330,69 +382,124 @@ fn render_svg(spec: &ChartSpec, safe_id: &str) -> (String, usize) {
     )
     .expect("writing to a string is infallible");
 
-    if spec.categories.is_empty() {
+    svg
+}
+
+fn render_svg(
+    spec: &ChartSpec,
+    safe_id: &str,
+    typography: &ChartTypography<'_>,
+    layout: &ChartLayout,
+) -> (String, usize) {
+    let width = f64::from(spec.width);
+    let height = f64::from(spec.height);
+    let mut svg = svg_header(spec, safe_id);
+    // Retained compile evidence belongs to derived SVG, never authored source.
+    let header_end = svg.find('>').expect("SVG header");
+    svg.insert_str(header_end, &format!(
+        " data-fb-chart-label-size=\"{}\" data-fb-chart-legend-rows=\"{}\" data-fb-chart-layout-valid=\"{}\"",
+        fmt_num(typography.size), layout.legend_rows, layout.valid,
+    ));
+
+    if spec.categories.is_empty() || !layout.valid {
+        let message = if spec.categories.is_empty() {
+            "No chart data for this record"
+        } else {
+            "Chart labels need more space"
+        };
         write!(
             svg,
-            "<rect x=\"1\" y=\"1\" width=\"{}\" height=\"{}\" fill=\"#f7f9fb\" stroke=\"#a8b3bf\"/><text x=\"{}\" y=\"{}\" text-anchor=\"middle\" font-family=\"Helvetica, sans-serif\" font-size=\"14\" fill=\"#52606d\">No chart data for this record</text></svg>",
+            "<rect x=\"1\" y=\"1\" width=\"{}\" height=\"{}\" fill=\"#f7f9fb\" stroke=\"#a8b3bf\"/>",
             spec.width.saturating_sub(2),
             spec.height.saturating_sub(2),
-            fmt_num(width / 2.0),
-            fmt_num(height / 2.0)
         )
         .expect("writing to a string is infallible");
-        return (svg, 2);
+        // A diagnostic remains legible even if an authored huge/zero font
+        // makes the chart impossible. Ordinary data labels never shrink.
+        let fallback = ChartTypography::new(
+            typography.registry,
+            &TextStyle {
+                font_name: typography.font.clone().into(),
+                font_size: Pt::from_f32(7.5),
+                ..TextStyle::default()
+            },
+        );
+        let state_font = if layout.valid { typography } else { &fallback };
+        let lines = state_font.wrap(message, width - state_font.gap() * 2.0);
+        let baseline =
+            (height - lines.len() as f64 * state_font.line_height) / 2.0 + state_font.ascent;
+        let count = write_label_lines(
+            &mut svg,
+            &lines,
+            width / 2.0,
+            baseline,
+            "middle",
+            state_font,
+            "state",
+        );
+        svg.push_str("</svg>");
+        return (svg, 1 + count);
     }
 
     let compact = spec.kind == ChartKind::Sparkline;
-    let left = if compact { 8.0 } else { 52.0 };
-    let right = if compact { 8.0 } else { 18.0 };
-    let legend = if compact {
-        Vec::new()
-    } else {
-        legend_layout(spec, left, width - right)
-    };
-    let top = if compact {
-        8.0
-    } else {
-        legend.last().map_or(18.0, |(_, y, _)| y + 22.0).max(18.0)
-    };
-    let bottom = if compact { 8.0 } else { 42.0 };
+    let left = layout.left;
+    let right = layout.right;
+    let top = layout.top;
+    let bottom = layout.bottom;
     let plot_width = (width - left - right).max(1.0);
     let plot_height = (height - top - bottom).max(1.0);
     let (domain_min, domain_max) = value_domain(spec);
     let baseline = scale_y(0.0, domain_min, domain_max, top, plot_height);
     let mut primitive_count = 0;
 
-    for (series_index, (x, y, _)) in legend.iter().enumerate() {
+    for (series_index, item) in layout.legend.iter().enumerate() {
         let series = &spec.series[series_index];
         write!(
             svg,
-            "<rect x=\"{}\" y=\"{}\" width=\"10\" height=\"10\" rx=\"1.5\" fill=\"{}\"/><text x=\"{}\" y=\"{}\" font-family=\"Helvetica, sans-serif\" font-size=\"10\" fill=\"#364452\">{}</text>",
-            fmt_num(*x),
-            fmt_num(*y),
+            "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"1.5\" fill=\"{}\"/>",
+            fmt_num(item.x),
+            fmt_num(item.y + (typography.ascent - typography.swatch()).max(0.0)),
+            fmt_num(typography.swatch()),
+            fmt_num(typography.swatch()),
             xml_attribute(series_color(series, series_index)),
-            fmt_num(*x + 15.0),
-            fmt_num(*y + 9.0),
-            xml_text(&series.label)
         )
         .expect("writing to a string is infallible");
-        primitive_count += 2;
+        primitive_count += 1 + write_label_lines(
+            &mut svg,
+            &item.lines,
+            item.x + typography.swatch() + typography.gap(),
+            item.y + typography.ascent,
+            "start",
+            typography,
+            "legend",
+        );
     }
 
     if !compact {
-        for tick in 0..=4 {
-            let fraction = f64::from(tick) / 4.0;
+        let tick_budget = (plot_height / typography.line_height).floor() as u32;
+        // Subsets of the five measured ticks keep reserved widths exact;
+        // thirds could introduce new, wider recurring-decimal labels.
+        let tick_intervals = if tick_budget >= 4 {
+            4
+        } else if tick_budget >= 2 {
+            2
+        } else {
+            1
+        };
+        for tick in 0..=tick_intervals {
+            let fraction = f64::from(tick) / f64::from(tick_intervals);
             let y = top + plot_height * fraction;
             let value = domain_max - (domain_max - domain_min) * fraction;
             write!(
                 svg,
-                "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"#d9e0e7\" stroke-width=\"1\"/><text x=\"{}\" y=\"{}\" text-anchor=\"end\" font-family=\"Helvetica, sans-serif\" font-size=\"10\" fill=\"#52606d\">{}</text>",
+            "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"#d9e0e7\" stroke-width=\"1\"/><text x=\"{}\" y=\"{}\" text-anchor=\"end\" font-size=\"{}\" fill=\"#52606d\" data-fb-chart-label=\"axis\">{}</text>",
                 fmt_num(left),
                 fmt_num(y),
                 fmt_num(left + plot_width),
                 fmt_num(y),
                 fmt_num(left - 7.0),
-                fmt_num(y + 3.5),
+                fmt_num(y + (typography.ascent - typography.descent) / 2.0),
+                fmt_num(typography.size),
                 xml_text(&format_value(value))
             )
             .expect("writing to a string is infallible");
@@ -438,18 +545,6 @@ fn render_svg(spec: &ChartSpec, safe_id: &str) -> (String, usize) {
                     .expect("writing to a string is infallible");
                     primitive_count += 1;
                 }
-                write_category_label(
-                    &mut svg,
-                    category,
-                    left + slot * (category_index as f64 + 0.5),
-                    top + plot_height + 16.0,
-                    category_index,
-                    spec.categories.len(),
-                );
-                primitive_count += usize::from(category_label_visible(
-                    category_index,
-                    spec.categories.len(),
-                ));
             }
         }
         ChartKind::Line | ChartKind::Sparkline => {
@@ -506,28 +601,24 @@ fn render_svg(spec: &ChartSpec, safe_id: &str) -> (String, usize) {
                     }
                 }
             }
-            if !compact {
-                for (index, category) in spec.categories.iter().enumerate() {
-                    let x = left + plot_width * index as f64 / denominator;
-                    write_category_label(
-                        &mut svg,
-                        category,
-                        x,
-                        top + plot_height + 16.0,
-                        index,
-                        spec.categories.len(),
-                    );
-                    primitive_count +=
-                        usize::from(category_label_visible(index, spec.categories.len()));
-                }
-            }
         }
+    }
+    for category in &layout.categories {
+        primitive_count += write_label_lines(
+            &mut svg,
+            &category.lines,
+            category.x,
+            top + plot_height + typography.gap() + typography.ascent,
+            category.anchor,
+            typography,
+            "category",
+        );
     }
     svg.push_str("</svg>");
     (svg, primitive_count)
 }
 
-fn render_table(spec: &ChartSpec, safe_id: &str) -> String {
+pub(crate) fn render_table(spec: &ChartSpec, safe_id: &str) -> String {
     let mut table = String::new();
     write!(
         table,
@@ -594,44 +685,238 @@ fn series_color(series: &ChartSeries, index: usize) -> &str {
         .unwrap_or(DEFAULT_PALETTE[index % DEFAULT_PALETTE.len()])
 }
 
-fn legend_layout(spec: &ChartSpec, left: f64, right: f64) -> Vec<(f64, f64, f64)> {
-    let mut positions = Vec::with_capacity(spec.series.len());
-    let mut x = left;
-    let mut y = 5.0;
-    for series in &spec.series {
-        let item_width = (series.label.chars().count() as f64 * 5.8 + 32.0).max(70.0);
-        if x > left && x + item_width > right {
-            x = left;
-            y += 18.0;
+pub(crate) struct ChartTypography<'a> {
+    registry: &'a FontRegistry,
+    font: String,
+    size: f64,
+    ascent: f64,
+    descent: f64,
+    line_height: f64,
+}
+
+impl<'a> ChartTypography<'a> {
+    pub(crate) fn new(registry: &'a FontRegistry, style: &TextStyle) -> Self {
+        let font = resolve_font_stack(Some(registry), style).0.to_string();
+        let size = f64::from(style.font_size.to_f32()) / 0.75;
+        let size_pt = Pt::from_f32(size as f32);
+        let (ascent, descent) = registry
+            .vertical_metrics(&font, size_pt)
+            .map(|(a, d)| (f64::from(a.to_f32()), f64::from(d.to_f32())))
+            .unwrap_or((size * 0.8, size * 0.2));
+        Self {
+            registry,
+            font,
+            size,
+            ascent,
+            descent,
+            line_height: (ascent + descent).max(size * 1.25),
         }
-        positions.push((x, y, item_width));
-        x += item_width;
     }
-    positions
+
+    fn width(&self, text: &str) -> f64 {
+        // Same resolved face, units and measurement entrypoint as native SVG.
+        f64::from(
+            self.registry
+                .measure_text_width(&self.font, Pt::from_f32(self.size as f32), text)
+                .to_f32(),
+        )
+    }
+
+    fn gap(&self) -> f64 {
+        (self.size * 0.5).max(4.0)
+    }
+    fn swatch(&self) -> f64 {
+        self.size.max(8.0)
+    }
+
+    fn wrap(&self, text: &str, width: f64) -> Vec<String> {
+        let mut lines = Vec::new();
+        let mut line = String::new();
+        for word in text.split_whitespace() {
+            let candidate = if line.is_empty() {
+                word.to_string()
+            } else {
+                format!("{line} {word}")
+            };
+            if !line.is_empty() && self.width(&candidate) > width {
+                lines.push(std::mem::take(&mut line));
+                line.push_str(word);
+            } else {
+                line = candidate;
+            }
+        }
+        if !line.is_empty() {
+            lines.push(line);
+        }
+        if lines.is_empty() {
+            lines.push(String::new());
+        }
+        lines
+    }
 }
 
-fn category_label_visible(index: usize, count: usize) -> bool {
-    count <= 12 || index % count.div_ceil(12) == 0 || index + 1 == count
-}
-
-fn write_category_label(
-    svg: &mut String,
-    category: &str,
+struct LegendItem {
     x: f64,
     y: f64,
-    index: usize,
-    count: usize,
-) {
-    if category_label_visible(index, count) {
+    lines: Vec<String>,
+}
+struct CategoryLabel {
+    x: f64,
+    anchor: &'static str,
+    lines: Vec<String>,
+}
+struct ChartLayout {
+    left: f64,
+    right: f64,
+    top: f64,
+    bottom: f64,
+    legend: Vec<LegendItem>,
+    legend_rows: usize,
+    categories: Vec<CategoryLabel>,
+    valid: bool,
+}
+
+impl ChartLayout {
+    fn new(spec: &ChartSpec, font: &ChartTypography<'_>) -> Self {
+        let mut layout = Self {
+            left: 8.0,
+            right: 8.0,
+            top: 8.0,
+            bottom: 8.0,
+            legend: Vec::new(),
+            legend_rows: 0,
+            categories: Vec::new(),
+            valid: font.size.is_finite() && font.size > 0.0,
+        };
+        if spec.categories.is_empty() && layout.valid {
+            let available = f64::from(spec.width) - font.gap() * 2.0;
+            let lines = font.wrap("No chart data for this record", available);
+            layout.valid = lines.iter().all(|line| font.width(line) <= available)
+                && lines.len() as f64 * font.line_height
+                    <= f64::from(spec.height) - font.gap() * 2.0;
+            return layout;
+        }
+        if spec.kind == ChartKind::Sparkline && !spec.categories.is_empty() {
+            layout.valid = true;
+            return layout;
+        }
+        if !layout.valid {
+            return layout;
+        }
+        let (minimum, maximum) = value_domain(spec);
+        let widest_tick = (0..=4)
+            .map(|tick| {
+                font.width(&format_value(
+                    maximum - (maximum - minimum) * f64::from(tick) / 4.0,
+                ))
+            })
+            .fold(0.0, f64::max);
+        layout.left = (widest_tick + 7.0 + font.gap()).max(52.0);
+        layout.right = font.gap().max(18.0);
+        let available = f64::from(spec.width) - layout.left - layout.right;
+        if available <= font.size * 2.0 {
+            layout.valid = false;
+            return layout;
+        }
+
+        let mut x = layout.left;
+        let mut y = font.gap();
+        let mut row_height: f64 = 0.0;
+        layout.legend_rows = 1;
+        for series in &spec.series {
+            let text_available = available - font.swatch() - font.gap();
+            let lines = font.wrap(&series.label, text_available);
+            let text_width = lines
+                .iter()
+                .map(|line| font.width(line))
+                .fold(0.0, f64::max);
+            layout.valid &= text_width <= text_available;
+            let item_width = font.swatch() + font.gap() + text_width;
+            if x > layout.left && x + item_width > f64::from(spec.width) - layout.right {
+                x = layout.left;
+                y += row_height + font.gap();
+                row_height = 0.0;
+                layout.legend_rows += 1;
+            }
+            row_height = row_height
+                .max(font.line_height * lines.len() as f64)
+                .max(font.swatch());
+            layout.legend.push(LegendItem { x, y, lines });
+            x += item_width + font.gap() * 2.0;
+        }
+        layout.top = y + row_height + font.gap() + (font.ascent - font.descent).abs() / 2.0;
+
+        // Axis labels can be sparse; the marks and semantic table are never
+        // sampled. Base spacing on actual unbreakable words, not character counts.
+        let widest_word = spec
+            .categories
+            .iter()
+            .flat_map(|category| category.split_whitespace())
+            .map(|word| font.width(word))
+            .fold(font.size, f64::max);
+        let capacity = ((available / (widest_word + font.gap() * 2.0)).floor() as usize).max(1);
+        let count = spec.categories.len().min(12).min(capacity);
+        let selected = (0..count)
+            .map(|index| index * (spec.categories.len() - 1) / count.saturating_sub(1).max(1))
+            .collect::<Vec<_>>();
+        let label_width = available / selected.len().max(1) as f64 - font.gap() * 2.0;
+        let mut max_lines = 1;
+        for index in selected {
+            let lines = font.wrap(&spec.categories[index], label_width);
+            let text_width = lines
+                .iter()
+                .map(|line| font.width(line))
+                .fold(0.0, f64::max);
+            layout.valid &= text_width <= label_width;
+            max_lines = max_lines.max(lines.len());
+            let fraction = if spec.kind == ChartKind::Bar {
+                (index as f64 + 0.5) / spec.categories.len() as f64
+            } else {
+                index as f64 / spec.categories.len().saturating_sub(1).max(1) as f64
+            };
+            let half_width = text_width.min(available) / 2.0;
+            let x = (layout.left + available * fraction).clamp(
+                layout.left + half_width,
+                layout.left + available - half_width,
+            );
+            layout.categories.push(CategoryLabel {
+                x,
+                anchor: "middle",
+                lines,
+            });
+        }
+        layout.bottom = font.gap() * 2.0 + max_lines as f64 * font.line_height;
+        // Tick density adapts to the available height without shrinking fonts.
+        // A very small plot still needs a useful extent and two readable ticks.
+        layout.valid &= f64::from(spec.height) - layout.top - layout.bottom
+            >= (font.line_height * 1.5).max(32.0);
+        layout
+    }
+}
+
+fn write_label_lines(
+    svg: &mut String,
+    lines: &[String],
+    x: f64,
+    y: f64,
+    anchor: &str,
+    font: &ChartTypography<'_>,
+    role: &str,
+) -> usize {
+    for (index, line) in lines.iter().enumerate() {
         write!(
             svg,
-            "<text x=\"{}\" y=\"{}\" text-anchor=\"middle\" font-family=\"Helvetica, sans-serif\" font-size=\"10\" fill=\"#364452\">{}</text>",
+            "<text x=\"{}\" y=\"{}\" text-anchor=\"{}\" font-size=\"{}\" fill=\"#364452\" data-fb-chart-label=\"{}\">{}</text>",
             fmt_num(x),
-            fmt_num(y),
-            xml_text(category)
+            fmt_num(y + index as f64 * font.line_height),
+            anchor,
+            fmt_num(font.size),
+            role,
+            xml_text(line)
         )
         .expect("writing to a string is infallible");
     }
+    lines.len()
 }
 
 fn fmt_num(value: f64) -> String {
@@ -662,7 +947,7 @@ fn format_value(value: f64) -> String {
     fmt_num(value)
 }
 
-fn xml_id(value: &str) -> String {
+pub(crate) fn xml_id(value: &str) -> String {
     let mut output = value
         .chars()
         .map(|character| {

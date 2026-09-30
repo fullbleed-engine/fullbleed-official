@@ -325,6 +325,32 @@ fn inspect_report_to_py(
         "seed_blockers",
         PyList::new(py, &report.profile.seed_blockers)?,
     )?;
+    profile.set_item("pdfx_contract_valid", report.profile.pdfx_contract_valid)?;
+    profile.set_item("pdfvt_record_level", report.profile.pdfvt_record_level)?;
+    profile.set_item("pdfvt_record_count", report.profile.pdfvt_record_count)?;
+    profile.set_item("pdfvt_document_count", report.profile.pdfvt_document_count)?;
+    profile.set_item("pdfvt_dpm_node_count", report.profile.pdfvt_dpm_node_count)?;
+    profile.set_item("pdfvt_dpm_valid", report.profile.pdfvt_dpm_valid)?;
+    profile.set_item(
+        "pdfvt_reuse_hint_count",
+        report.profile.pdfvt_reuse_hint_count,
+    )?;
+    profile.set_item(
+        "pdfvt_encapsulated_xobject_count",
+        report.profile.pdfvt_encapsulated_xobject_count,
+    )?;
+    profile.set_item(
+        "pdfvt_reuse_hints_valid",
+        report.profile.pdfvt_reuse_hints_valid,
+    )?;
+    profile.set_item(
+        "pdfvt_parts",
+        pdf_vt::parts_to_py(py, &report.profile.pdfvt_parts)?,
+    )?;
+    profile.set_item(
+        "document_timestamp",
+        report.profile.document_timestamp.clone(),
+    )?;
     out.set_item("profile", profile)?;
 
     let issues = composition_compatibility_issues(report);
@@ -449,6 +475,8 @@ fn build_features(py: Python<'_>) -> PyResult<PyObject> {
     out.set_item("python", cfg!(feature = "python"))?;
     out.set_item("svg_raster", cfg!(feature = "svg_raster"))?;
     out.set_item("compiled_reflow", true)?;
+    out.set_item("explicit_table_headers", true)?;
+    out.set_item("logical_table_pagination", true)?;
     out.set_item(
         "compiled_flow_compression_modes",
         PyList::new(py, ["throughput", "compact"])?,
@@ -1594,34 +1622,10 @@ fn parse_pdf_profile(arg: Option<&Bound<'_, PyAny>>) -> PyResult<Option<PdfProfi
         return Ok(None);
     }
     if let Ok(s) = arg.extract::<String>() {
-        let raw = s.trim().to_ascii_lowercase();
-        let profile = match raw.as_str() {
-            "" | "none" => PdfProfile::None,
-            "a" | "pdfa" | "pdf/a" | "pdfa2b" | "pdfa-2b" | "pdfa_2b" => PdfProfile::PdfA2b,
-            "pdfa1a" | "pdfa-1a" | "pdfa_1a" | "pdf/a-1a" | "pdf/a1a" => PdfProfile::PdfA1a,
-            "pdfa1b" | "pdfa-1b" | "pdfa_1b" | "pdf/a-1b" | "pdf/a1b" => PdfProfile::PdfA1b,
-            "pdfa2a" | "pdfa-2a" | "pdfa_2a" | "pdf/a-2a" | "pdf/a2a" => PdfProfile::PdfA2a,
-            "pdfa2u" | "pdfa-2u" | "pdfa_2u" | "pdf/a-2u" | "pdf/a2u" => PdfProfile::PdfA2u,
-            "pdfa3a" | "pdfa-3a" | "pdfa_3a" | "pdf/a-3a" | "pdf/a3a" => PdfProfile::PdfA3a,
-            "pdfa3b" | "pdfa-3b" | "pdfa_3b" | "pdf/a-3b" | "pdf/a3b" => PdfProfile::PdfA3b,
-            "pdfa3u" | "pdfa-3u" | "pdfa_3u" | "pdf/a-3u" | "pdf/a3u" => PdfProfile::PdfA3u,
-            "pdfa4" | "pdfa-4" | "pdfa_4" | "pdf/a-4" | "pdf/a4" => PdfProfile::PdfA4,
-            "pdfa4e" | "pdfa-4e" | "pdfa_4e" | "pdf/a-4e" | "pdf/a4e" => PdfProfile::PdfA4e,
-            "pdfa4f" | "pdfa-4f" | "pdfa_4f" | "pdf/a-4f" | "pdf/a4f" => PdfProfile::PdfA4f,
-            "pdfx4" | "pdfx-4" | "pdfx_4" | "pdf/x-4" | "pdf/x4" => PdfProfile::PdfX4,
-            "ua" | "pdfua" | "pdfua1" | "pdfua-1" | "pdf/ua" | "pdf/ua-1" => PdfProfile::PdfUa1,
-            "pdfua2" | "pdfua-2" | "pdf/ua-2" => PdfProfile::PdfUa2,
-            "vt" | "pdfvt" | "pdfvt1" | "pdfvt-1" | "pdf/vt" | "pdf/vt-1" => PdfProfile::PdfVt1,
-            "wtpdf1r" | "wtpdf-1r" | "wtpdf_1r" | "wt1r" | "wt-1r" => PdfProfile::Wtpdf1r,
-            "wtpdf1a" | "wtpdf-1a" | "wtpdf_1a" | "wt1a" | "wt-1a" => PdfProfile::Wtpdf1a,
-            "tagged" => PdfProfile::Tagged,
-            _ => {
-                return Err(PyValueError::new_err(format!(
-                    "Invalid pdf_profile: {s:?}. Expected one of: none, pdfa1a, pdfa1b, pdfa2a, pdfa2b, pdfa2u, pdfa3a, pdfa3b, pdfa3u, pdfa4, pdfa4e, pdfa4f, pdfx4, pdfua1, pdfua2, pdfvt1, wtpdf1r, wtpdf1a, tagged"
-                )));
-            }
-        };
-        return Ok(Some(profile));
+        return s
+            .parse::<PdfProfile>()
+            .map(Some)
+            .map_err(|error| PyValueError::new_err(error.to_string()));
     }
     Err(PyValueError::new_err(
         "pdf_profile must be a string like 'pdfua1', 'pdfua2', 'pdfa2a', 'pdfa2u', 'pdfa4', 'pdfa4e', 'pdfa4f', 'pdfvt1', 'wtpdf1r', 'wtpdf1a', 'tagged', or 'pdfx4'",
@@ -1639,18 +1643,19 @@ fn parse_pdf_version(arg: Option<&Bound<'_, PyAny>>) -> PyResult<Option<PdfVersi
         let raw = s.trim().to_ascii_lowercase();
         let version = match raw.as_str() {
             "" => return Ok(None),
+            "1.6" | "16" | "pdf1.6" | "pdf16" => PdfVersion::Pdf16,
             "1.7" | "1" | "17" | "pdf1.7" | "pdf17" => PdfVersion::Pdf17,
             "2.0" | "2" | "20" | "pdf2.0" | "pdf20" => PdfVersion::Pdf20,
             _ => {
                 return Err(PyValueError::new_err(format!(
-                    "Invalid pdf_version: {s:?}. Expected one of: 1.7, 2.0"
+                    "Invalid pdf_version: {s:?}. Expected one of: 1.6, 1.7, 2.0"
                 )));
             }
         };
         return Ok(Some(version));
     }
     Err(PyValueError::new_err(
-        "pdf_version must be a string like '1.7' or '2.0'",
+        "pdf_version must be a string like '1.6', '1.7' or '2.0'",
     ))
 }
 
@@ -1969,6 +1974,7 @@ fn accumulate_owner_hint(
 
 fn collect_render_time_text_blocks_for_page(
     page: &crate::canvas::Page,
+    page_height: Pt,
     engine: Option<&FullBleed>,
 ) -> TracePageTextCollection {
     let mut out = TracePageTextCollection::default();
@@ -1987,28 +1993,14 @@ fn collect_render_time_text_blocks_for_page(
             Command::RestoreState => {
                 state = state_stack.pop().unwrap_or_else(TraceTextState::new);
             }
-            Command::Translate(dx, dy) => {
+            Command::Translate(..)
+            | Command::CssTransformOrigin { .. }
+            | Command::Scale(..)
+            | Command::Rotate(..)
+            | Command::ConcatMatrix { .. } => {
                 state.transform = state
                     .transform
-                    .mul(Transform::translate(dx.to_f32(), dy.to_f32()));
-            }
-            Command::CssTransformOrigin { x, y, inverse } => {
-                let sign = if *inverse { -1.0 } else { 1.0 };
-                state.transform = state
-                    .transform
-                    .mul(Transform::translate(x.to_f32() * sign, y.to_f32() * sign));
-            }
-            Command::Scale(sx, sy) => {
-                state.transform = state.transform.mul(Transform::scale(*sx, *sy));
-            }
-            Command::Rotate(angle) => {
-                state.transform = state.transform.mul(Transform::rotate(*angle));
-            }
-            Command::ConcatMatrix { a, b, c, d, e, f } => {
-                state.transform =
-                    state
-                        .transform
-                        .mul(Transform::matrix(*a, *b, *c, *d, e.to_f32(), f.to_f32()));
+                    .mul(Transform::for_command(cmd, page_height).unwrap());
             }
             Command::SetFontName(name) => state.font_name = name.clone(),
             Command::SetFontSize(size) => state.font_size = *size,
@@ -2071,13 +2063,27 @@ fn collect_render_time_text_blocks_for_page(
                     owner: current_owner.clone(),
                 });
             }
-            Command::DrawStringTransformed { x, y, text, .. } => {
+            Command::DrawStringTransformed {
+                x,
+                y,
+                text,
+                m00,
+                m01,
+                m10,
+                m11,
+            } => {
                 if artifact_depth > 0 {
                     out.artifact_text_blocks_excluded =
                         out.artifact_text_blocks_excluded.saturating_add(1);
                     continue;
                 }
-                let bbox = estimate_trace_text_bbox(engine, &state, *x, *y, text);
+                let text_state = TraceTextState {
+                    transform: state.transform.mul(Transform::page_basis(page_height)).mul(
+                        Transform::matrix(*m00, *m01, *m10, *m11, x.to_f32(), y.to_f32()),
+                    ),
+                    ..state.clone()
+                };
+                let bbox = estimate_trace_text_bbox(engine, &text_state, Pt::ZERO, Pt::ZERO, text);
                 if tag_stack.last().is_none() {
                     out.untagged_text_blocks = out.untagged_text_blocks.saturating_add(1);
                 }
@@ -2226,7 +2232,13 @@ fn build_render_time_typography_drift_trace_py(
     let mut suspicious_char_width_block_count = 0usize;
 
     for (page_index, page) in doc.pages.iter().enumerate() {
-        let text_collection = collect_render_time_text_blocks_for_page(page, Some(engine));
+        let text_collection = collect_render_time_text_blocks_for_page(
+            page,
+            crate::canvas::PageGeometry::for_page(page, doc.page_size)
+                .logical_size
+                .height,
+            Some(engine),
+        );
         let flagged_blocks = PyList::empty(py);
         let mut page_flagged_count = 0usize;
 
@@ -2429,7 +2441,13 @@ fn build_render_time_region_text_alignment_trace_py(
     let mut dense_region_candidate_page_count = 0usize;
 
     for (page_index, page) in doc.pages.iter().enumerate() {
-        let text_collection = collect_render_time_text_blocks_for_page(page, Some(engine));
+        let text_collection = collect_render_time_text_blocks_for_page(
+            page,
+            crate::canvas::PageGeometry::for_page(page, doc.page_size)
+                .logical_size
+                .height,
+            Some(engine),
+        );
         let mut table_blocks: Vec<&TraceTextBlockRow> = text_collection
             .blocks
             .iter()
@@ -3299,7 +3317,13 @@ fn build_render_time_pagination_trace_py(
             std::collections::BTreeMap::new();
         let mut page_issue_flowables: std::collections::BTreeMap<String, usize> =
             std::collections::BTreeMap::new();
-        let text_collection = collect_render_time_text_blocks_for_page(page, Some(engine));
+        let text_collection = collect_render_time_text_blocks_for_page(
+            page,
+            crate::canvas::PageGeometry::for_page(page, doc.page_size)
+                .logical_size
+                .height,
+            Some(engine),
+        );
 
         for cmd in &page.commands {
             if is_visible_command(cmd) {
@@ -3829,7 +3853,13 @@ fn build_render_time_reading_order_trace_py(
 
     for (page_index, page) in doc.pages.iter().enumerate() {
         let blocks = PyList::empty(py);
-        let text_collection = collect_render_time_text_blocks_for_page(page, engine);
+        let text_collection = collect_render_time_text_blocks_for_page(
+            page,
+            crate::canvas::PageGeometry::for_page(page, doc.page_size)
+                .logical_size
+                .height,
+            engine,
+        );
         let block_count = text_collection.blocks.len();
         let page_draw_form_count = text_collection.draw_form_count;
         let page_define_form_count = text_collection.define_form_count;
@@ -3875,8 +3905,9 @@ fn build_render_time_reading_order_trace_py(
         let page_row = PyDict::new(py);
         page_row.set_item("page_index", page_index)?;
         page_row.set_item("page", page_index + 1)?;
-        page_row.set_item("width", doc.page_size.width.to_f32())?;
-        page_row.set_item("height", doc.page_size.height.to_f32())?;
+        let page_size = crate::canvas::PageGeometry::for_page(page, doc.page_size).logical_size;
+        page_row.set_item("width", page_size.width.to_f32())?;
+        page_row.set_item("height", page_size.height.to_f32())?;
         page_row.set_item("block_count", block_count)?;
         page_row.set_item("blocks", blocks)?;
         page_row.set_item("draw_form_count", page_draw_form_count)?;
@@ -3919,6 +3950,20 @@ fn build_render_time_reading_order_trace_py(
 }
 
 fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyResult<PyObject> {
+    let table_catalog = crate::table_semantics::CompiledTableCatalog::from_document(doc);
+    let mut table_header_cells = 0usize;
+    let mut table_header_links = 0usize;
+    let mut table_header_issues = std::collections::BTreeMap::<String, usize>::new();
+    crate::table_semantics::for_each_emitted_table_node(doc, |_, _, _, node| {
+        let resolved = table_catalog.resolve(node);
+        if let Some(headers) = &resolved.header_cells {
+            table_header_cells += 1;
+            table_header_links += headers.len();
+        }
+        for issue in resolved.header_issues {
+            *table_header_issues.entry(issue).or_default() += 1;
+        }
+    });
     let out = PyDict::new(py);
     out.set_item("schema", "fullbleed.pdf.structure_trace.v1")?;
     out.set_item("schema_version", 1)?;
@@ -3956,6 +4001,9 @@ fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyRes
                     mcid,
                     alt,
                     scope,
+                    column_span,
+                    row_span,
+                    table_semantics,
                     ..
                 } => {
                     begin_tag_count = begin_tag_count.saturating_add(1);
@@ -3975,6 +4023,24 @@ fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyRes
                         ev.set_item("mcid", mcid.map(|v| v as u64))?;
                         ev.set_item("alt_present", alt.is_some())?;
                         ev.set_item("scope", scope.clone())?;
+                        ev.set_item("column_span", *column_span)?;
+                        ev.set_item("row_span", *row_span)?;
+                        if let Some(node) = table_semantics {
+                            let resolved = table_catalog.resolve(node);
+                            let semantics = PyDict::new(py);
+                            semantics.set_item("table_key", node.table_key)?;
+                            semantics.set_item("cell_key", node.cell_key)?;
+                            semantics.set_item("row_key", node.row_key)?;
+                            semantics.set_item("group_key", node.group_key)?;
+                            semantics.set_item("header_cells", resolved.header_cells)?;
+                            semantics.set_item("header_issues", resolved.header_issues)?;
+                            semantics.set_item(
+                                "logical_row_span",
+                                table_catalog.logical_row_span(node).or(*row_span),
+                            )?;
+                            semantics.set_item("pagination_artifact", artifact_depth > 0)?;
+                            ev.set_item("table_semantics", semantics)?;
+                        }
                         events.append(ev)?;
                     }
                 }
@@ -4071,6 +4137,9 @@ fn build_render_time_structure_trace_py(py: Python<'_>, doc: &Document) -> PyRes
     summary.set_item("artifact_text_draw_count", artifact_text_draw_count)?;
     summary.set_item("tagged_pages", tagged_pages)?;
     summary.set_item("tag_balance_underflow_count", tag_balance_underflow)?;
+    summary.set_item("explicit_table_header_cell_count", table_header_cells)?;
+    summary.set_item("resolved_table_header_link_count", table_header_links)?;
+    summary.set_item("table_header_issue_counts", table_header_issues)?;
     summary.set_item(
         "tag_balance_ok",
         tag_balance_underflow == 0 && end_tag_count <= begin_tag_count,
@@ -4112,6 +4181,9 @@ struct PdfEngine {
     document_css_media: Option<String>,
     document_css_required: bool,
 }
+
+#[path = "python/pdf_vt.rs"]
+mod pdf_vt;
 
 impl PdfEngine {
     fn rebuild_from_builder(&mut self) -> PyResult<()> {
@@ -9252,6 +9324,8 @@ impl PdfEngine {
         debug_out: Option<String>,
         perf: bool,
         perf_out: Option<String>,
+        document_timestamp: Option<String>,
+        pdf_vt_job: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<Self> {
         let mut builder = FullBleed::builder();
         let page_width = parse_py_length(page_width)?;
@@ -9351,6 +9425,18 @@ impl PdfEngine {
         }
         if let Some(title) = document_title {
             builder = builder.document_title(title);
+        }
+
+        if let Some(timestamp) = document_timestamp {
+            builder = builder.document_timestamp(
+                timestamp
+                    .parse::<crate::PdfTimestamp>()
+                    .map_err(|e| PyValueError::new_err(e.to_string()))?,
+            );
+        }
+
+        if let Some(job) = pdf_vt::parse_job(pdf_vt_job)? {
+            builder = builder.pdf_vt_job(job);
         }
 
         // Prefer HTML header if provided; otherwise fall back to plain text header.

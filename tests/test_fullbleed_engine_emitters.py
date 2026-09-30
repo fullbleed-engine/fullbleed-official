@@ -364,12 +364,14 @@ def test_pdf_engine_pdfvt1_profile_requires_output_intent() -> None:
         fullbleed.PdfEngine(pdf_profile="vt")
 
 
-def test_pdf_engine_pdfvt1_profile_emits_deterministic_identifiers() -> None:
+def test_pdf_engine_pdfvt1_profile_emits_deterministic_identifiers(print_icc_uri) -> None:
     _require_pdf_engine()
 
     engine = fullbleed.PdfEngine(
         pdf_profile="pdf/vt",
-        output_intent_icc="data:application/octet-stream;base64,AAAA",
+        output_intent_icc=print_icc_uri,
+        document_title="Print specimen",
+        document_timestamp="2026-09-30T00:00:00Z",
         output_intent_identifier="sRGB IEC61966-2.1",
         output_intent_info="sRGB",
     )
@@ -380,16 +382,18 @@ def test_pdf_engine_pdfvt1_profile_emits_deterministic_identifiers() -> None:
 
     assert first == second
     assert b'pdfvtid:GTS_PDFVTVersion="PDF/VT-1"' in first
-    assert b'pdfvtid:GTS_PDFVTModDate="1970-01-01T00:00:00Z"' in first
+    assert b'pdfvtid:GTS_PDFVTModDate="2026-09-30T00:00:00Z"' in first
     assert b"/GTS_PDFVTVersion (PDF/VT-1)" in first
 
 
-def test_inspect_pdf_reports_profile_seed_markers(tmp_path: Path) -> None:
+def test_inspect_pdf_reports_profile_seed_markers(tmp_path: Path, print_icc_uri) -> None:
     _require_pdf_engine()
 
     engine = fullbleed.PdfEngine(
         pdf_profile="pdf/vt",
-        output_intent_icc="data:application/octet-stream;base64,AAAA",
+        output_intent_icc=print_icc_uri,
+        document_title="Print specimen",
+        document_timestamp="2026-09-30T00:00:00Z",
         output_intent_identifier="sRGB IEC61966-2.1",
         output_intent_info="sRGB",
     )

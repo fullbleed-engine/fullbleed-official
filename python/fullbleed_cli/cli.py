@@ -19,6 +19,7 @@ import argparse
 import importlib.metadata as metadata
 import hashlib
 import json
+import math
 import os
 import sys
 import tempfile
@@ -63,134 +64,18 @@ PROFILES = {
 }
 
 FAIL_ON_CHOICES = ["overflow", "missing-glyphs", "font-subst", "budget"]
-PDF_PROFILE_CHOICES = [
-    "none",
-    "pdfa1a",
-    "pdfa1b",
-    "pdfa2a",
-    "pdfa2b",
-    "pdfa2u",
-    "pdfa3a",
-    "pdfa3b",
-    "pdfa3u",
-    "pdfa4",
-    "pdfa4e",
-    "pdfa4f",
-    "pdfx4",
-    "pdfua1",
-    "pdfua2",
-    "pdfvt1",
-    "wtpdf1r",
-    "wtpdf1a",
-    "tagged",
-]
-PDF_PROFILE_ALIASES = {
-    "": None,
-    "none": "none",
-    "a": "pdfa2b",
-    "pdfa": "pdfa2b",
-    "pdf/a": "pdfa2b",
-    "pdfa1a": "pdfa1a",
-    "pdfa-1a": "pdfa1a",
-    "pdfa_1a": "pdfa1a",
-    "pdf/a-1a": "pdfa1a",
-    "pdf/a1a": "pdfa1a",
-    "pdfa1b": "pdfa1b",
-    "pdfa-1b": "pdfa1b",
-    "pdfa_1b": "pdfa1b",
-    "pdf/a-1b": "pdfa1b",
-    "pdf/a1b": "pdfa1b",
-    "pdfa2a": "pdfa2a",
-    "pdfa-2a": "pdfa2a",
-    "pdfa_2a": "pdfa2a",
-    "pdf/a-2a": "pdfa2a",
-    "pdf/a2a": "pdfa2a",
-    "pdfa2b": "pdfa2b",
-    "pdfa-2b": "pdfa2b",
-    "pdfa_2b": "pdfa2b",
-    "pdf/a-2b": "pdfa2b",
-    "pdf/a2b": "pdfa2b",
-    "pdfa2u": "pdfa2u",
-    "pdfa-2u": "pdfa2u",
-    "pdfa_2u": "pdfa2u",
-    "pdf/a-2u": "pdfa2u",
-    "pdf/a2u": "pdfa2u",
-    "pdfa3a": "pdfa3a",
-    "pdfa-3a": "pdfa3a",
-    "pdfa_3a": "pdfa3a",
-    "pdf/a-3a": "pdfa3a",
-    "pdf/a3a": "pdfa3a",
-    "pdfa3b": "pdfa3b",
-    "pdfa-3b": "pdfa3b",
-    "pdfa_3b": "pdfa3b",
-    "pdf/a-3b": "pdfa3b",
-    "pdf/a3b": "pdfa3b",
-    "pdfa3u": "pdfa3u",
-    "pdfa-3u": "pdfa3u",
-    "pdfa_3u": "pdfa3u",
-    "pdf/a-3u": "pdfa3u",
-    "pdf/a3u": "pdfa3u",
-    "pdfa4": "pdfa4",
-    "pdfa-4": "pdfa4",
-    "pdfa_4": "pdfa4",
-    "pdf/a-4": "pdfa4",
-    "pdf/a4": "pdfa4",
-    "pdfa4e": "pdfa4e",
-    "pdfa-4e": "pdfa4e",
-    "pdfa_4e": "pdfa4e",
-    "pdf/a-4e": "pdfa4e",
-    "pdf/a4e": "pdfa4e",
-    "pdfa4f": "pdfa4f",
-    "pdfa-4f": "pdfa4f",
-    "pdfa_4f": "pdfa4f",
-    "pdf/a-4f": "pdfa4f",
-    "pdf/a4f": "pdfa4f",
-    "pdfx4": "pdfx4",
-    "pdfx-4": "pdfx4",
-    "pdfx_4": "pdfx4",
-    "pdf/x-4": "pdfx4",
-    "pdf/x4": "pdfx4",
-    "ua": "pdfua1",
-    "pdfua": "pdfua1",
-    "pdfua1": "pdfua1",
-    "pdfua-1": "pdfua1",
-    "pdf/ua": "pdfua1",
-    "pdf/ua-1": "pdfua1",
-    "pdfua2": "pdfua2",
-    "pdfua-2": "pdfua2",
-    "pdf/ua-2": "pdfua2",
-    "vt": "pdfvt1",
-    "pdfvt": "pdfvt1",
-    "pdfvt1": "pdfvt1",
-    "pdfvt-1": "pdfvt1",
-    "pdf/vt": "pdfvt1",
-    "pdf/vt-1": "pdfvt1",
-    "wtpdf1r": "wtpdf1r",
-    "wtpdf-1r": "wtpdf1r",
-    "wtpdf_1r": "wtpdf1r",
-    "wt1r": "wtpdf1r",
-    "wt-1r": "wtpdf1r",
-    "wtpdf1a": "wtpdf1a",
-    "wtpdf-1a": "wtpdf1a",
-    "wtpdf_1a": "wtpdf1a",
-    "wt1a": "wtpdf1a",
-    "wt-1a": "wtpdf1a",
-    "tagged": "tagged",
-}
+# Names and emission requirements come from the installed native engine.
+PDF_PROFILE_CATALOG = fullbleed.pdf_profile_catalog()
+PDF_PROFILE_CHOICES = [profile["name"] for profile in PDF_PROFILE_CATALOG]
+PDF_PROFILE_ALIASES = {"": None}
+PDF_PROFILE_ALIASES.update({
+    alias: profile["name"]
+    for profile in PDF_PROFILE_CATALOG
+    for alias in profile["aliases"]
+})
 PDF_PROFILES_REQUIRING_OUTPUT_INTENT = {
-    "pdfa1a",
-    "pdfa1b",
-    "pdfa2a",
-    "pdfa2b",
-    "pdfa2u",
-    "pdfa3a",
-    "pdfa3b",
-    "pdfa3u",
-    "pdfa4",
-    "pdfa4e",
-    "pdfa4f",
-    "pdfx4",
-    "pdfvt1",
+    profile["name"] for profile in PDF_PROFILE_CATALOG
+    if profile["requires_output_intent"]
 }
 WATERMARK_LAYER_ALIASES = {"underlay": "background"}
 WATERMARK_LAYER_CHOICES = {"background", "overlay"}
@@ -545,6 +430,8 @@ SCHEMA_DEFS = {
                 ],
                 "properties": {
                     "compiled_document": {"type": "boolean"},
+                    "explicit_table_headers": {"type": "boolean"},
+                    "logical_table_pagination": {"type": "boolean"},
                     "compiled_reflow_bindings": {"type": "boolean"},
                     "compiled_flow_compression_modes": {
                         "type": "array",
@@ -677,34 +564,34 @@ def _get_version():
 
 
 def _compliance_roots():
-    """Candidate directories where compliance docs might exist."""
-    roots = []
-    for candidate in [Path.cwd(), *Path(__file__).resolve().parents[:4]]:
-        try:
-            resolved = candidate.resolve()
-        except Exception:
-            continue
-        if resolved not in roots:
-            roots.append(resolved)
-    return roots
+    """Actual source checkout only; ambient cwd/site-packages are not ours."""
+    module = Path(__file__).resolve()
+    for root in module.parents[:4]:
+        if (root / "python" / "fullbleed_cli" / "cli.py").resolve() == module:
+            return [root]
+    return []
 
 
 def _find_compliance_file(rel_name):
-    """Locate a compliance file in a source tree or installed distribution."""
-    for root in _compliance_roots():
-        path = root / rel_name
-        if path.exists():
-            return path
-
+    """Prefer Fullbleed's own distribution notices, never another package's."""
     try:
         distribution = metadata.distribution("fullbleed")
     except metadata.PackageNotFoundError:
-        return None
+        distribution = None
     expected_name = Path(rel_name).name
-    for entry in distribution.files or ():
-        if Path(str(entry)).name != expected_name:
+    for entry in (distribution.files or ()) if distribution is not None else ():
+        parts = Path(str(entry)).parts
+        # PEP 639 licenses/ and legacy direct dist-info notices. An asset's
+        # basename LICENSE is not the primary package license either.
+        if not (len(parts) in (2, 3) and parts[0].endswith(".dist-info")
+                and (len(parts) == 2 or parts[1] == "licenses")
+                and parts[-1] == expected_name):
             continue
         path = Path(distribution.locate_file(entry))
+        if path.is_file():
+            return path
+    for root in _compliance_roots():
+        path = root / rel_name
         if path.is_file():
             return path
     return None
@@ -1066,6 +953,8 @@ def _build_manifest(args):
             "color_space": getattr(args, "color_space", None),
             "document_lang": getattr(args, "document_lang", None),
             "document_title": getattr(args, "document_title", None),
+            "document_timestamp": getattr(args, "document_timestamp", None),
+            "pdf_vt_job": _read_json_or_path(getattr(args, "pdf_vt_job", None)),
         },
         "template": {
             "binding": getattr(args, "template_binding", None),
@@ -1149,6 +1038,9 @@ def _build_engine(args):
             color_space=args.color_space,
             document_lang=args.document_lang,
             document_title=args.document_title,
+            document_timestamp=("source-date-epoch" if getattr(args, "timestamp_source", None)
+                                else getattr(args, "document_timestamp", None)),
+            pdf_vt_job=_read_json_or_path(getattr(args, "pdf_vt_job", None)),
             header_each=getattr(args, "header_each", None),
             footer_each=getattr(args, "footer_each", None),
             watermark_text=args.watermark_text,
@@ -1165,6 +1057,9 @@ def _build_engine(args):
             perf=bool(emit_perf),
             perf_out=emit_perf,
         )
+        # Preserve the resolved date in manifests and subsequent renders in this job.
+        args.document_timestamp = engine.document_timestamp
+        args.timestamp_source = None
     except Exception as exc:
         message = str(exc)
         if "requires embedded fonts" in message.lower():
@@ -1931,6 +1826,7 @@ def _collect_jit_insights(jit_log_path):
         "pages": None,
         "total_ms": None,
     }
+    overflow_complete = True
 
     if not jit_log_path:
         return insights
@@ -1975,14 +1871,27 @@ def _collect_jit_insights(jit_log_path):
         elif entry_type == "jit.docplan":
             page_size = entry.get("page_size", {})
             if not isinstance(page_size, dict):
+                overflow_complete = False
                 continue
             page_w = _as_float(page_size.get("w"))
             page_h = _as_float(page_size.get("h"))
-            if page_w is None or page_h is None:
+            if any(value is None or not math.isfinite(value) or value <= 0 for value in (page_w, page_h)):
+                overflow_complete = False
                 continue
             insights["overflow_signal"] = True
             for page in entry.get("pages", []) or []:
                 if not isinstance(page, dict):
+                    continue
+                # New engines emit the actual logical size for each named page.
+                # Older diagnostic streams retain the document-size fallback.
+                current_size = page.get("page_size", page_size)
+                if not isinstance(current_size, dict):
+                    overflow_complete = False
+                    continue
+                current_w = _as_float(current_size.get("w"))
+                current_h = _as_float(current_size.get("h"))
+                if any(value is None or not math.isfinite(value) or value <= 0 for value in (current_w, current_h)):
+                    overflow_complete = False
                     continue
                 page_number = page.get("n")
                 for placement in page.get("placements", []) or []:
@@ -1995,18 +1904,20 @@ def _collect_jit_insights(jit_log_path):
                     y = _as_float(bbox.get("y"))
                     w = _as_float(bbox.get("w"))
                     h = _as_float(bbox.get("h"))
-                    if x is None or y is None or w is None or h is None:
+                    if any(value is None or not math.isfinite(value) for value in (x, y, w, h)) or w < 0 or h < 0:
+                        overflow_complete = False
                         continue
-                    if x < -0.01 or y < -0.01 or (x + w) > (page_w + 0.01) or (y + h) > (page_h + 0.01):
+                    if x < -0.01 or y < -0.01 or (x + w) > (current_w + 0.01) or (y + h) > (current_h + 0.01):
                         insights["overflow_count"] += 1
                         if len(insights["overflow_samples"]) < 5:
                             insights["overflow_samples"].append(
                                 {
                                     "page": page_number,
                                     "bbox": {"x": x, "y": y, "w": w, "h": h},
-                                    "page_size": {"w": page_w, "h": page_h},
+                                    "page_size": {"w": current_w, "h": current_h},
                                 }
                             )
+    insights["overflow_signal"] = insights["overflow_signal"] and overflow_complete
     return insights
 
 
@@ -2381,6 +2292,8 @@ def cmd_render(args):
     effective_jit_path = user_emit_jit or internal_jit_path
     jit_insights = _collect_jit_insights(effective_jit_path)
     failures = _evaluate_failures(args, bytes_written, glyph_report, jit_insights)
+    profile_verification, profile_failures = _inspect_print_output(args, args.out, pdf_bytes)
+    failures.extend(profile_failures)
     fallback_summary = _collect_fallback_summary(args, glyph_report, jit_insights)
 
     manifest = _build_manifest(args)
@@ -2409,6 +2322,7 @@ def cmd_render(args):
             image_mode = "overlay_document"
 
     outputs = {
+        "pdf_profile_verification": profile_verification,
         "pdf": None if args.out == "-" else args.out,
         "jit": user_emit_jit,
         "perf": args.emit_perf,
@@ -2442,6 +2356,32 @@ def cmd_render(args):
         raise SystemExit(1)
     
     _emit_result(True, "fullbleed.render_result.v1", args.out, bytes_written, outputs, args)
+
+
+def _inspect_print_output(args, out_path, pdf_bytes):
+    profile = _normalize_pdf_profile(getattr(args, "pdf_profile", None))
+    if profile not in {"pdfx4", "pdfvt1"}:
+        return None, []
+    if out_path and out_path != "-":
+        report = fullbleed.inspect_pdf(str(out_path))
+    else:
+        with tempfile.TemporaryDirectory(prefix="fullbleed-print-check-") as directory:
+            path = Path(directory) / "output.pdf"
+            path.write_bytes(pdf_bytes)
+            report = fullbleed.inspect_pdf(str(path))
+    inspected = report.get("profile", {})
+    blockers = list(inspected.get("seed_blockers", []))
+    if profile not in inspected.get("claims", []):
+        blockers.append("requested_profile_identification_missing")
+    if inspected.get("pdfx_contract_valid") is not True:
+        blockers.append("print_contract_not_verified")
+    verification = {"scope": "internal_writer_contract", "independent_conformance": False,
+                    "profile": profile, "passed": not blockers, "blockers": sorted(set(blockers)),
+                    "inspection": inspected}
+    failures = [] if not blockers else [{"code": "PDF_PROFILE_CONTRACT_VIOLATION",
+        "message": f"{profile} artifact failed internal print checks", "blockers": verification["blockers"],
+        "recommended_actions": ["Inspect the retained PDF and profile diagnostics; run dedicated preflight before claiming conformance."]}]
+    return verification, failures
 
 
 def cmd_verify(args):
@@ -2487,6 +2427,8 @@ def cmd_verify(args):
     effective_jit_path = user_emit_jit or internal_jit_path
     jit_insights = _collect_jit_insights(effective_jit_path)
     failures = _evaluate_failures(args, bytes_written, glyph_report, jit_insights)
+    profile_verification, profile_failures = _inspect_print_output(args, out_path, pdf_bytes)
+    failures.extend(profile_failures)
     fallback_summary = _collect_fallback_summary(args, glyph_report, jit_insights)
 
     manifest = _build_manifest(args)
@@ -2510,6 +2452,7 @@ def cmd_verify(args):
     image_mode = "overlay_document" if getattr(args, "emit_image", None) else None
 
     outputs = {
+        "pdf_profile_verification": profile_verification,
         "pdf": None if out_path == "-" else out_path,
         "jit": user_emit_jit,
         "perf": args.emit_perf,
@@ -2714,8 +2657,9 @@ def cmd_doctor(args):
         "ok": ok,
         "python": sys.version.split()[0],
         "platform": sys.platform,
-        "pdf_versions": ["1.7", "2.0"],
         "pdf_profiles": PDF_PROFILE_CHOICES,
+        "pdf_profile_catalog": PDF_PROFILE_CATALOG,
+        **_print_capabilities(),
         "pdf_profile_aliases": {
             key: value for key, value in sorted(PDF_PROFILE_ALIASES.items()) if value
         },
@@ -3159,6 +3103,8 @@ def _capabilities_payload(cli_surface=None):
         },
         "engine": {
             "compiled_document": bool(pdf_engine and hasattr(pdf_engine, "compile_pdf")),
+            "explicit_table_headers": bool(build_features.get("explicit_table_headers", False)),
+            "logical_table_pagination": bool(build_features.get("logical_table_pagination", False)),
             "compiled_reflow_bindings": bool(
                 build_features.get("compiled_reflow", False)
                 and pdf_engine
@@ -3231,6 +3177,15 @@ def _capabilities_payload(cli_surface=None):
         "charts": {
             "engine_owned": True,
             "rust_api": "fullbleed::compile_chart",
+            "document_context_rust_api": "fullbleed::FullBleed::compile_chart_document",
+            "document_context_input": "fullbleed::PreparedChart placeholders in resolved HTML plus CSS",
+            "typography": {
+                "css_properties": ["font-family", "font-size", "font-weight", "font-style"],
+                "font_metrics": "registered project fonts; explicit estimated-fallback diagnostic otherwise",
+                "legend_layout": "measured word wrapping",
+                "category_labels": "measured sparse labels with exact unsampled marks and table",
+                "insufficient_space": "diagnostic placeholder and retained semantic table",
+            },
             "input_contract": "resolved_chart_spec",
             "kinds": ["bar", "line", "sparkline"],
             "outputs": ["native_inline_svg", "semantic_html_table"],
@@ -3240,6 +3195,8 @@ def _capabilities_payload(cli_surface=None):
         },
         "profiles": list(PROFILES.keys()),
         "pdf_profiles": PDF_PROFILE_CHOICES,
+        "pdf_profile_catalog": PDF_PROFILE_CATALOG,
+        **_print_capabilities(),
         "pdf_profile_aliases": {
             key: value for key, value in sorted(PDF_PROFILE_ALIASES.items()) if value
         },
@@ -3252,6 +3209,32 @@ def _capabilities_payload(cli_surface=None):
         "compliance": COMPLIANCE_POLICY,
     }
     return payload
+
+
+def _print_capabilities():
+    """Shared print facts for doctor, capabilities, and the agent contract."""
+    return {
+        "pdf_versions": ["1.6", "1.7", "2.0"],
+        "print_identity": {
+            "profiles": [p["name"] for p in PDF_PROFILE_CATALOG if p["requires_document_timestamp"]],
+            "timestamp_inputs": ["YYYY-MM-DDTHH:MM:SSZ", "current", "source-date-epoch"],
+            "timestamp_resolution": "once_at_engine_creation",
+            "document_id": "content_derived_sha256_uuid_v8",
+            "instance_id": "content_and_timestamp_derived_sha256_uuid_v8",
+            "internal_verification": "parsed_writer_contract_not_independent_iso_validation",
+        },
+        "pdf_vt": {
+            "profile": "pdfvt1",
+            "job_argument": "pdf_vt_job",
+            "hierarchy": ["Job", "Record", "Document"],
+            "record_level": 1,
+            "default_grouping": "one_record_and_document_per_input_copy_or_binding_row",
+            "dpm_vocabulary": "private_Fullbleed",
+            "reuse_scope": "File",
+            "encapsulation": "opaque_images_with_explicit_rendering_intent_only",
+            "dedicated_validator_required_for_conformance_claim": True,
+        },
+    }
 
 
 def cmd_capabilities(args):
@@ -3635,6 +3618,12 @@ def _add_common_flags(p):
     p.add_argument("--color-space")
     p.add_argument("--document-lang")
     p.add_argument("--document-title")
+    p.add_argument("--pdf-vt-job", help="PDF/VT job/record/document metadata as a JSON object or file")
+    timestamp = p.add_mutually_exclusive_group()
+    timestamp.add_argument("--timestamp", dest="document_timestamp",
+                           help="Explicit PDF write date: YYYY-MM-DDTHH:MM:SSZ (UTC) or current; required for PDF/X and PDF/VT")
+    timestamp.add_argument("--timestamp-source", choices=["SOURCE_DATE_EPOCH"],
+                           help="Resolve a reproducible PDF write date from SOURCE_DATE_EPOCH")
     p.add_argument("--header-each")
     p.add_argument("--header-html-each")
     p.add_argument("--footer-each")
@@ -4107,13 +4096,22 @@ def main(argv=None):
                 encoding="utf-8",
             )
         args.func(args)
+        if getattr(args, "emit_manifest", None):
+            # Engine creation resolves current/SOURCE_DATE_EPOCH once. Retain
+            # that value, rather than the initial unresolved command input.
+            Path(args.emit_manifest).write_text(
+                json.dumps(_build_manifest(args), ensure_ascii=True, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
     except Exception as exc:
         if args.json:
             recommended_actions, relevant_commands = _cli_error_hints(args)
             err = {
                 "schema": "fullbleed.error.v1",
                 "ok": False,
-                "code": "CLI_ERROR",
+                "code": next((code for code in (
+                    "PDF_PROFILE_CONTRACT_VIOLATION", "PDF_TIMESTAMP_INVALID", "PDF_VT_JOB_INVALID"
+                ) if code + ":" in str(exc)), "CLI_ERROR"),
                 "message": str(exc),
                 "command": getattr(args, "command", None),
                 "recommended_actions": recommended_actions,

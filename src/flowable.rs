@@ -1,7 +1,8 @@
 use crate::canvas::{
     Canvas, Command, CompiledMaskLayer, ImageSourceClip, META_DIAGNOSTIC_SCOPE_BEGIN_KEY,
-    META_DIAGNOSTIC_SCOPE_END_KEY, META_NAMED_STRING_PREFIX, META_RUNNING_ELEMENT_PREFIX,
-    PerspectiveContext, ProjectiveTransform,
+    META_DIAGNOSTIC_SCOPE_END_KEY, META_NAMED_STRING_PREFIX, META_READING_LAYOUT_KEY,
+    META_READING_TEXT_BEGIN_KEY, META_READING_TEXT_END_KEY, META_READING_TEXT_KEY,
+    META_RUNNING_ELEMENT_PREFIX, PerspectiveContext, ProjectiveTransform,
 };
 use crate::font::{FontRegistry, GlyphOutlineCommand, RegisteredPositionedGlyphOutline};
 use crate::perf::PerfLogger;
@@ -59,7 +60,7 @@ fn image_intrinsic_size_pt(source: &str) -> Option<(Pt, Pt)> {
     let bytes = if let Some((_, data)) = parse_image_data_uri(source) {
         data
     } else {
-        std::fs::read(FsPath::new(source)).ok()?
+        crate::assets::read_asset_path(FsPath::new(source)).ok()?
     };
     let (width, height) = crate::image_native::dimensions(&bytes).ok()?;
     if width == 0 || height == 0 {
@@ -277,6 +278,24 @@ fn perf_end(name: &str, start: Option<Instant>) {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum ReadingSeparator {
+    #[default]
+    None,
+    Space,
+    Line,
+}
+
+impl ReadingSeparator {
+    fn text(self) -> &'static str {
+        match self {
+            Self::None => "",
+            Self::Space => " ",
+            Self::Line => "\n",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct LineLayout {
     text: String,
@@ -284,6 +303,7 @@ struct LineLayout {
     text_width: Pt,
     indent: Pt,
     forced_start: bool,
+    reading_separator: ReadingSeparator,
 }
 
 #[derive(Debug, Clone)]
@@ -4688,7 +4708,7 @@ fn resolve_font_variant_name(
     base.clone()
 }
 
-fn synthetic_italic_shear(style: crate::style::FontStyleMode) -> f32 {
+pub(crate) fn synthetic_italic_shear(style: crate::style::FontStyleMode) -> f32 {
     match style {
         crate::style::FontStyleMode::Oblique(centideg) => {
             let degrees = (centideg as f32 / 100.0).clamp(-89.0, 89.0);
@@ -5564,7 +5584,7 @@ fn explicit_text_underline_offset(style: &TextStyle) -> Option<Pt> {
     }
 }
 
-fn resolve_font_stack(
+pub(crate) fn resolve_font_stack(
     registry: Option<&FontRegistry>,
     style: &TextStyle,
 ) -> (Arc<str>, Vec<Arc<str>>) {
@@ -6085,6 +6105,9 @@ fn apply_first_line_text_transform(text: &str, mode: TextTransformMode) -> Strin
 #[derive(Debug, Clone)]
 pub struct Paragraph {
     text: String,
+    // Pagination retains line boxes using newlines in `text`. Keep their real
+    // logical separators separately so those paint breaks do not alter words.
+    reading_line_separators: Option<Vec<ReadingSeparator>>,
     style: TextStyle,
     align: TextAlign,
     align_last: Option<TextAlign>,
@@ -6111,6 +6134,7 @@ impl Paragraph {
     pub fn new(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
+            reading_line_separators: None,
             style: TextStyle::default(),
             align: TextAlign::Left,
             align_last: None,
@@ -6539,6 +6563,7 @@ impl Paragraph {
     ) -> Self {
         let mut variant = self.clone();
         variant.text = text;
+        variant.reading_line_separators = None;
         variant.style = style;
         variant.suppress_first_line_indent = suppress_first_line_indent;
         variant.initial_letter = None;
@@ -6558,7 +6583,8 @@ impl Paragraph {
             self.suppress_first_line_indent,
         );
         let probe_lines = probe.layout_lines(max_width);
-        let first_line = probe_lines.first()?.clone();
+        let mut first_line = probe_lines.first()?.clone();
+        first_line.reading_separator = self.reading_separator_for_segment(0);
 
         // Normal white-space layout collapses every separator between words.
         // Counting formatted words therefore maps the dynamically selected
@@ -6580,7 +6606,8 @@ impl Paragraph {
 
         let mut lines = vec![first_line];
         if !remainder.is_empty() {
-            let base = self.style_variant_for_text(remainder, self.style.clone(), true);
+            let mut base = self.style_variant_for_text(remainder, self.style.clone(), true);
+            base.reading_line_separators = Some(vec![ReadingSeparator::Space]);
             lines.extend(base.layout_lines(max_width).iter().cloned());
         }
         Some(lines)
@@ -7341,6 +7368,18 @@ impl Paragraph {
         }
     }
 
+    fn reading_separator_for_segment(&self, index: usize) -> ReadingSeparator {
+        self.reading_line_separators
+            .as_ref()
+            .and_then(|separators| separators.get(index))
+            .copied()
+            .unwrap_or(if index == 0 {
+                ReadingSeparator::None
+            } else {
+                ReadingSeparator::Line
+            })
+    }
+
     fn layout_lines(&self, avail_width: Pt) -> Arc<Vec<LineLayout>> {
         let perf = perf_start();
         let max_width = avail_width.max(Pt::from_f32(1.0));
@@ -7409,6 +7448,7 @@ impl Paragraph {
                     text_width,
                     indent: line_indent,
                     forced_start,
+                    reading_separator: self.reading_separator_for_segment(idx),
                 });
             }
             let lines = Arc::new(line_layouts);
@@ -7442,9 +7482,12 @@ impl Paragraph {
             ) || matches!(self.style.line_break, crate::style::LineBreakMode::Anywhere);
 
         let mut lines: Vec<PendingLineLayout> = Vec::new();
+        let mut reading_prefixes = HashMap::<usize, ReadingSeparator>::new();
         let mut word_widths: HashMap<&str, Pt> = HashMap::new();
         if self.preserve_whitespace {
             for (segment_idx, segment) in self.text.split('\n').enumerate() {
+                reading_prefixes
+                    .insert(lines.len(), self.reading_separator_for_segment(segment_idx));
                 push_preserved_wrapped_segment(
                     self,
                     segment,
@@ -7458,6 +7501,8 @@ impl Paragraph {
         } else {
             let space_width = self.measure_text_width(" ");
             for (segment_idx, segment) in self.text.split('\n').enumerate() {
+                reading_prefixes
+                    .insert(lines.len(), self.reading_separator_for_segment(segment_idx));
                 let mut current_forced_start = segment_idx > 0;
                 if segment.is_empty() {
                     lines.push(PendingLineLayout {
@@ -7481,7 +7526,10 @@ impl Paragraph {
                         (word, width)
                     })
                     .collect();
-                for (word, word_width) in words {
+                for (word_index, (word, word_width)) in words.into_iter().enumerate() {
+                    if word_index > 0 && current.is_empty() {
+                        reading_prefixes.insert(lines.len(), ReadingSeparator::Space);
+                    }
                     let current_indent =
                         self.line_text_indent(lines.len(), current_forced_start, indent_value);
                     let current_limit = self.line_limit(max_width, current_indent);
@@ -7602,6 +7650,7 @@ impl Paragraph {
                                 text: current,
                                 forced_start: current_forced_start,
                             });
+                            reading_prefixes.insert(lines.len(), ReadingSeparator::Space);
                             current = String::new();
                             current_forced_start = false;
                             let follow_indent =
@@ -7710,6 +7759,7 @@ impl Paragraph {
                 text_width,
                 indent,
                 forced_start: line.forced_start,
+                reading_separator: reading_prefixes.get(&idx).copied().unwrap_or_default(),
             });
         }
         let lines = Arc::new(line_layouts);
@@ -8518,6 +8568,12 @@ impl Flowable for Paragraph {
             .join("\n");
         let first = Paragraph {
             text: first_text,
+            reading_line_separators: Some(
+                lines[..split_at]
+                    .iter()
+                    .map(|line| line.reading_separator)
+                    .collect(),
+            ),
             style: self.style.clone(),
             align: self.align,
             align_last: self.align_last,
@@ -8545,6 +8601,12 @@ impl Flowable for Paragraph {
         };
         let second = Paragraph {
             text: second_text,
+            reading_line_separators: Some(
+                lines[split_at..]
+                    .iter()
+                    .map(|line| line.reading_separator)
+                    .collect(),
+            ),
             style: self.style.clone(),
             align: self.align,
             align_last: self.align_last,
@@ -8582,10 +8644,26 @@ impl Flowable for Paragraph {
         let tagged = self.tag_role.as_ref().map(|role| {
             canvas.begin_tag(role.as_ref(), None, None, None, None, false);
         });
+        let reading_lines = self.layout_lines(if self.is_vertical_text() {
+            avail_height
+        } else {
+            avail_width
+        });
+        let mut reading_text = self
+            .initial_letter
+            .as_ref()
+            .map(|initial| initial.text.clone())
+            .unwrap_or_default();
+        for line in reading_lines.iter() {
+            reading_text.push_str(line.reading_separator.text());
+            reading_text.push_str(&line.text);
+        }
+        canvas.meta(META_READING_TEXT_BEGIN_KEY, reading_text);
         canvas.set_fill_color(self.style.color);
         canvas.set_font_size(self.style.font_size);
         if self.is_vertical_text() {
             self.draw_vertical_text(canvas, x, y, avail_width, avail_height);
+            canvas.meta(META_READING_TEXT_END_KEY, "");
             if tagged.is_some() {
                 canvas.end_tag();
             }
@@ -8629,7 +8707,7 @@ impl Flowable for Paragraph {
             canvas.set_font_size(self.style.font_size);
         }
 
-        let lines = self.layout_lines(avail_width);
+        let lines = reading_lines;
         let round_each_css_line_baseline =
             self.round_each_css_line_baseline && self.first_line_style.is_none() && lines.len() > 1;
         let mut cursor_y = y;
@@ -8734,6 +8812,7 @@ impl Flowable for Paragraph {
             );
             cursor_y = cursor_y + annotated_line_height;
         }
+        canvas.meta(META_READING_TEXT_END_KEY, "");
         if tagged.is_some() {
             canvas.end_tag();
         }
@@ -10273,7 +10352,9 @@ impl Flowable for CollapsibleSpaceFlowable {
         None
     }
 
-    fn draw(&self, _canvas: &mut Canvas, _x: Pt, _y: Pt, _avail_width: Pt, _avail_height: Pt) {}
+    fn draw(&self, canvas: &mut Canvas, _x: Pt, _y: Pt, _avail_width: Pt, _avail_height: Pt) {
+        canvas.meta(META_READING_TEXT_KEY, " ");
+    }
 }
 
 #[derive(Clone)]
@@ -11259,13 +11340,54 @@ mod image_flowable_tests {
 }
 
 #[derive(Debug, Clone)]
+struct SvgCompiledSurface {
+    size: Size,
+    items: Vec<svg::CompiledItem>,
+    text_identity: u64,
+    authoring_fragments: Vec<svg::SvgAuthoringFragment>,
+    raster_source: Option<String>,
+}
+
+impl SvgCompiledSurface {
+    fn compile(
+        xml: &str,
+        size: Size,
+        font: Option<&svg::SvgFontContext>,
+        raster_fallback: bool,
+    ) -> Arc<Self> {
+        let items = svg::compile_svg_with_font_context(xml, size.width, size.height, font);
+        Arc::new(Self {
+            size,
+            text_identity: svg::compiled_text_identity(&items),
+            authoring_fragments: svg::authoring_fragments(&items),
+            raster_source: raster_fallback
+                .then(|| {
+                    svg::rasterize_svg_to_data_uri_with_font_context(
+                        xml,
+                        size.width,
+                        size.height,
+                        font,
+                    )
+                })
+                .flatten(),
+            items,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct SvgFlowable {
     width: Pt,
     height: Pt,
-    compiled_size: Size,
     svg_xml: String,
-    compiled: std::sync::Arc<Vec<svg::CompiledItem>>,
-    authoring_fragments: std::sync::Arc<Vec<svg::SvgAuthoringFragment>>,
+    compiled: Arc<SvgCompiledSurface>,
+    // Only external/replaced SVG images resolve a new SVG viewport after CSS
+    // layout and object-fit. Inline SVG keeps its inherited font context and
+    // existing compiled coordinate space. Keep one recent viewport, not an
+    // unbounded cache of per-record sizes in a variable-data job.
+    replaced_viewport: Option<Arc<std::sync::Mutex<Option<Arc<SvgCompiledSurface>>>>>,
+    raster_fallback: bool,
+    image_rendering: ImageRenderingMode,
     use_available_size: bool,
     object_fit: ObjectFitMode,
     object_position: BackgroundPositionSpec,
@@ -11292,18 +11414,27 @@ impl SvgFlowable {
     }
 
     pub fn new_pt(width: Pt, height: Pt, svg_xml: impl Into<String>) -> Self {
+        Self::new_pt_with_font_context(width, height, svg_xml, None)
+    }
+
+    pub(crate) fn new_pt_with_font_context(
+        width: Pt,
+        height: Pt,
+        svg_xml: impl Into<String>,
+        font: Option<&svg::SvgFontContext>,
+    ) -> Self {
         let width = width.max(Pt::ZERO);
         let height = height.max(Pt::ZERO);
         let svg_xml = svg_xml.into();
-        let compiled = std::sync::Arc::new(svg::compile_svg(&svg_xml, width, height));
-        let authoring_fragments = std::sync::Arc::new(svg::authoring_fragments(&compiled));
+        let compiled = SvgCompiledSurface::compile(&svg_xml, Size { width, height }, font, false);
         Self {
             width,
             height,
-            compiled_size: Size { width, height },
             svg_xml,
             compiled,
-            authoring_fragments,
+            replaced_viewport: None,
+            raster_fallback: false,
+            image_rendering: ImageRenderingMode::Auto,
             use_available_size: false,
             object_fit: ObjectFitMode::Fill,
             object_position: BackgroundPositionSpec::center(),
@@ -11324,6 +11455,40 @@ impl SvgFlowable {
     pub fn with_pagination(mut self, pagination: Pagination) -> Self {
         self.pagination = pagination;
         self
+    }
+
+    pub(crate) fn with_replaced_viewport(mut self) -> Self {
+        self.replaced_viewport = Some(Arc::new(std::sync::Mutex::new(None)));
+        self
+    }
+
+    pub(crate) fn with_replaced_raster_fallback(
+        mut self,
+        enabled: bool,
+        image_rendering: ImageRenderingMode,
+    ) -> Self {
+        self.raster_fallback = enabled;
+        self.image_rendering = image_rendering;
+        self
+    }
+
+    fn compiled_for_viewport(&self, width: Pt, height: Pt) -> Arc<SvgCompiledSurface> {
+        let size = Size { width, height };
+        let Some(cache) = self.replaced_viewport.as_ref() else {
+            return Arc::clone(&self.compiled);
+        };
+        if self.compiled.size == size && !self.raster_fallback {
+            return Arc::clone(&self.compiled);
+        }
+        let mut cached = cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(surface) = cached.as_ref().filter(|surface| surface.size == size) {
+            return Arc::clone(surface);
+        }
+        let surface = SvgCompiledSurface::compile(&self.svg_xml, size, None, self.raster_fallback);
+        *cached = Some(Arc::clone(&surface));
+        surface
     }
 
     pub(crate) fn with_available_size(mut self, enabled: bool) -> Self {
@@ -11415,26 +11580,26 @@ impl SvgFlowable {
         )
     }
 
-    fn form_id(&self, isolated: bool) -> String {
+    fn form_id(&self, surface: &SvgCompiledSurface, isolated: bool) -> String {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.svg_xml.hash(&mut hasher);
-        self.compiled_size.width.to_milli_i64().hash(&mut hasher);
-        self.compiled_size.height.to_milli_i64().hash(&mut hasher);
+        surface.size.width.to_milli_i64().hash(&mut hasher);
+        surface.size.height.to_milli_i64().hash(&mut hasher);
+        surface.text_identity.hash(&mut hasher);
+        if surface.raster_source.is_some() {
+            "raster-fallback".hash(&mut hasher);
+            (self.image_rendering == ImageRenderingMode::Pixelated).hash(&mut hasher);
+        }
         let prefix = if isolated { "svg-blend" } else { "svg" };
         format!("{prefix}:{:x}", hasher.finish())
     }
 
-    fn compiled_form_commands(&self) -> Vec<Command> {
-        let mut temp = Canvas::new(self.compiled_size);
+    fn compiled_form_commands(&self, surface: &SvgCompiledSurface) -> Vec<Command> {
+        let mut temp = Canvas::new(surface.size);
         temp.save_state();
-        temp.clip_rect(
-            Pt::ZERO,
-            Pt::ZERO,
-            self.compiled_size.width,
-            self.compiled_size.height,
-        );
-        svg::render_compiled_items(&self.compiled, &mut temp, Pt::ZERO, Pt::ZERO);
+        temp.clip_rect(Pt::ZERO, Pt::ZERO, surface.size.width, surface.size.height);
+        self.paint_surface(surface, &mut temp, Pt::ZERO, Pt::ZERO);
         temp.restore_state();
         temp.finish()
             .pages
@@ -11443,8 +11608,25 @@ impl SvgFlowable {
             .unwrap_or_default()
     }
 
+    fn paint_surface(&self, surface: &SvgCompiledSurface, canvas: &mut Canvas, x: Pt, y: Pt) {
+        if let Some(source) = surface.raster_source.as_ref() {
+            canvas.draw_image_with_interpolation_and_source_clip(
+                x,
+                y,
+                surface.size.width,
+                surface.size.height,
+                source.clone(),
+                self.image_rendering != ImageRenderingMode::Pixelated,
+                None,
+            );
+        } else {
+            svg::render_compiled_items(&surface.items, canvas, x, y);
+        }
+    }
+
     fn record_authoring_fragments(
         &self,
+        surface: &SvgCompiledSurface,
         canvas: &mut Canvas,
         paint_x: Pt,
         paint_y: Pt,
@@ -11452,18 +11634,18 @@ impl SvgFlowable {
         paint_height: Pt,
         clip: Rect,
     ) {
-        if self.compiled_size.width <= Pt::ZERO
-            || self.compiled_size.height <= Pt::ZERO
+        if surface.size.width <= Pt::ZERO
+            || surface.size.height <= Pt::ZERO
             || paint_width <= Pt::ZERO
             || paint_height <= Pt::ZERO
         {
             return;
         }
-        let scale_x = paint_width.to_f32() / self.compiled_size.width.to_f32();
-        let scale_y = paint_height.to_f32() / self.compiled_size.height.to_f32();
+        let scale_x = paint_width.to_f32() / surface.size.width.to_f32();
+        let scale_y = paint_height.to_f32() / surface.size.height.to_f32();
         let clip_right = clip.x + clip.width;
         let clip_bottom = clip.y + clip.height;
-        for fragment in self.authoring_fragments.iter() {
+        for fragment in &surface.authoring_fragments {
             let left = (paint_x + Pt::from_f32(fragment.x.to_f32() * scale_x)).max(clip.x);
             let top = (paint_y + Pt::from_f32(fragment.y.to_f32() * scale_y)).max(clip.y);
             let right = (paint_x + Pt::from_f32((fragment.x + fragment.width).to_f32() * scale_x))
@@ -11564,6 +11746,7 @@ impl Flowable for SvgFlowable {
             self.object_fit_rect(fit_area.width, fit_area.height);
         let paint_x = x + offset_x;
         let paint_y = y + offset_y - self.slice_offset_y;
+        let surface = self.compiled_for_viewport(width, height);
 
         // A replaced SVG is one compiled vector surface. Pagination only
         // changes the page-local clip and translation; it never recompiles or
@@ -11571,32 +11754,30 @@ impl Flowable for SvgFlowable {
         canvas.save_state();
         canvas.clip_rect(x, y, area.width, area.height);
         if self.mix_blend_mode != MixBlendMode::Normal {
-            let form_id = self.form_id(true);
+            let form_id = self.form_id(&surface, true);
             canvas.define_isolated_form(
                 form_id.clone(),
-                self.compiled_size.width,
-                self.compiled_size.height,
-                self.compiled_form_commands(),
+                surface.size.width,
+                surface.size.height,
+                self.compiled_form_commands(&surface),
             );
             canvas.set_blend_mode(self.mix_blend_mode);
             canvas.draw_form(paint_x, paint_y, width, height, form_id);
-        } else if self.use_form
-            || width != self.compiled_size.width
-            || height != self.compiled_size.height
-        {
-            let form_id = self.form_id(false);
+        } else if self.use_form || width != surface.size.width || height != surface.size.height {
+            let form_id = self.form_id(&surface, false);
             canvas.define_form(
                 form_id.clone(),
-                self.compiled_size.width,
-                self.compiled_size.height,
-                self.compiled_form_commands(),
+                surface.size.width,
+                surface.size.height,
+                self.compiled_form_commands(&surface),
             );
             canvas.draw_form(paint_x, paint_y, width, height, form_id);
         } else {
-            svg::render_compiled_items(&self.compiled, canvas, paint_x, paint_y);
+            self.paint_surface(&surface, canvas, paint_x, paint_y);
         }
         canvas.restore_state();
         self.record_authoring_fragments(
+            &surface,
             canvas,
             paint_x,
             paint_y,
@@ -11625,6 +11806,59 @@ mod svg_flowable_tests {
     use crate::Canvas;
     use crate::canvas::{Command, META_FLOWABLE_BBOX_KEY};
     use crate::types::{MixBlendMode, Pt, Size};
+
+    #[test]
+    fn replaced_svg_viewports_are_compiled_at_the_fitted_size_and_reused() {
+        let svg = SvgFlowable::new(180.0, 180.0,
+            "<svg width='600' height='200' viewBox='0 0 600 200'><rect data-fb-id='shape' width='600' height='200'/></svg>")
+            .with_replaced_viewport()
+            .with_intrinsic_size(Some((Pt::from_f32(450.0), Pt::from_f32(150.0))))
+            .with_object_fit(crate::style::ObjectFitMode::Contain);
+        let (_, _, width, height, _) =
+            svg.object_fit_rect(Pt::from_f32(180.0), Pt::from_f32(180.0));
+        assert_eq!((width, height), (Pt::from_f32(180.0), Pt::from_f32(60.0)));
+        let surface = svg.compiled_for_viewport(width, height);
+        assert_eq!(surface.size, Size { width, height });
+        assert!(std::sync::Arc::ptr_eq(
+            &surface,
+            &svg.compiled_for_viewport(width, height)
+        ));
+        let shape = surface
+            .authoring_fragments
+            .iter()
+            .find(|item| item.source_id == "shape")
+            .unwrap();
+        assert_eq!((shape.y, shape.height), (Pt::ZERO, height));
+        let changed = svg.compiled_for_viewport(Pt::from_f32(90.0), Pt::from_f32(30.0));
+        assert!(!std::sync::Arc::ptr_eq(&surface, &changed));
+        assert!(std::sync::Arc::ptr_eq(
+            &changed,
+            &svg.compiled_for_viewport(Pt::from_f32(90.0), Pt::from_f32(30.0))
+        ));
+        assert_eq!(std::sync::Arc::strong_count(&surface), 1); // old viewport was evicted
+    }
+
+    #[test]
+    fn replaced_svg_fragmentation_keeps_one_full_viewport() {
+        let svg = SvgFlowable::new(100.0, 300.0,
+            "<svg width='100' height='100' viewBox='0 0 100 100'><rect width='100' height='100'/></svg>")
+            .with_replaced_viewport()
+            .with_form_enabled(true);
+        let (_, second) = svg.split(Pt::from_f32(100.0), Pt::from_f32(100.0)).unwrap();
+        let mut canvas = Canvas::new(Size {
+            width: Pt::from_f32(100.0),
+            height: Pt::from_f32(200.0),
+        });
+        second.draw(
+            &mut canvas,
+            Pt::ZERO,
+            Pt::ZERO,
+            Pt::from_f32(100.0),
+            Pt::from_f32(200.0),
+        );
+        let document = canvas.finish();
+        assert!(document.pages[0].commands.iter().any(|command| matches!(command, Command::DrawForm { y, height, .. } if *y == Pt::from_f32(-100.0) && *height == Pt::from_f32(300.0))));
+    }
 
     #[test]
     fn svg_mix_blend_mode_groups_the_vector_content() {
@@ -11941,6 +12175,8 @@ pub struct TableCell {
     pub box_shadow: Option<BoxShadowSpec>,
     pub tag_role: Option<Arc<str>>,
     pub scope: Option<String>,
+    table_semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
+    authoring_source_id: Option<Arc<str>>,
     col_span: usize,
     row_span: usize,
     rowspan_placeholder: bool,
@@ -12018,6 +12254,8 @@ impl TableCell {
             box_shadow,
             tag_role,
             scope,
+            table_semantics: None,
+            authoring_source_id: None,
             col_span: col_span.max(1),
             row_span: 1,
             rowspan_placeholder: false,
@@ -12063,6 +12301,44 @@ impl TableCell {
         self
     }
 
+    pub(crate) fn with_authoring_source_id(mut self, source_id: Option<Arc<str>>) -> Self {
+        self.authoring_source_id = source_id;
+        self
+    }
+
+    pub(crate) fn with_table_semantics(
+        mut self,
+        semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
+    ) -> Self {
+        self.table_semantics = semantics;
+        self
+    }
+
+    fn table_container_semantics(
+        &self,
+        row: bool,
+    ) -> Option<Arc<crate::table_semantics::TableSemanticNode>> {
+        let mut value = self.table_semantics.as_deref()?.clone();
+        value.cell_key = None;
+        if !row {
+            value.row_key = None;
+        }
+        value.header_cells = None;
+        value.row_span_end = None;
+        value.header_issues.clear();
+        Some(Arc::new(value))
+    }
+
+    fn begin_authoring_scope(&self, canvas: &mut Canvas, bounds: Rect) -> bool {
+        let Some(source_id) = &self.authoring_source_id else {
+            return false;
+        };
+        canvas.meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "table-cell");
+        canvas.meta("fb.owner.source_id", source_id.to_string());
+        canvas.record_flowable_bounds(bounds);
+        true
+    }
+
     pub(crate) fn as_rowspan_placeholder(&self) -> Self {
         let mut placeholder = self.clone();
         placeholder.text.clear();
@@ -12070,6 +12346,7 @@ impl TableCell {
         placeholder.box_shadow = None;
         placeholder.tag_role = None;
         placeholder.scope = None;
+        placeholder.authoring_source_id = None;
         placeholder.col_span = 1;
         placeholder.row_span = 1;
         placeholder.rowspan_placeholder = true;
@@ -12376,6 +12653,7 @@ impl TableCell {
                     text_width: width,
                     indent: Pt::ZERO,
                     forced_start: false,
+                    reading_separator: ReadingSeparator::None,
                 });
             }
             let lines = Arc::new(line_layouts);
@@ -12512,6 +12790,7 @@ impl TableCell {
                 text_width: width,
                 indent: Pt::ZERO,
                 forced_start: false,
+                reading_separator: ReadingSeparator::None,
             });
         }
         let lines = Arc::new(line_layouts);
@@ -12942,6 +13221,9 @@ pub struct TableFlowable {
     draw_background: bool,
     tag_role: Option<Arc<str>>,
     table_id: u32,
+    table_semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
+    first_fragment: bool,
+    last_fragment: bool,
     border_collapse: BorderCollapseMode,
     border_spacing: BorderSpacingSpec,
     table_layout: TableLayoutMode,
@@ -12983,6 +13265,9 @@ impl TableFlowable {
             draw_background: false,
             tag_role: None,
             table_id,
+            table_semantics: None,
+            first_fragment: true,
+            last_fragment: true,
             border_collapse: BorderCollapseMode::Separate,
             border_spacing: BorderSpacingSpec::zero(),
             table_layout: TableLayoutMode::Auto,
@@ -12996,6 +13281,14 @@ impl TableFlowable {
             minimum_height: Pt::ZERO,
             pagination: Pagination::default(),
         }
+    }
+
+    pub(crate) fn with_table_semantics(
+        mut self,
+        semantics: Option<Arc<crate::table_semantics::TableSemanticNode>>,
+    ) -> Self {
+        self.table_semantics = semantics;
+        self
     }
 
     pub fn with_header(mut self, header_rows: Vec<Vec<TableCell>>) -> Self {
@@ -13844,6 +14137,89 @@ impl TableFlowable {
             .copied()
             .fold(Pt::ZERO, |sum, height| sum + height);
         rows + row_gap * (span.saturating_sub(1) as i32)
+    }
+
+    fn semantic_row_span_for_draw_index(
+        &self,
+        draw_row_index: usize,
+        row_span: usize,
+        row_heights: &[Pt],
+    ) -> usize {
+        // Count emitted rows, not collapsed/source-only rows or the repeated
+        // header/footer on another page. Span tables bypass the height cache;
+        // these are the exact heights used by draw(). HTML lowering has already
+        // resolved rowspan=0 and bounded spans to authored row groups.
+        if row_span <= 1 {
+            return 1;
+        }
+        let header_end = if self.include_header {
+            self.data.header_rows.len()
+        } else {
+            0
+        };
+        let body_end = header_end + self.body_range.len();
+        let section_end = if draw_row_index < header_end {
+            header_end
+        } else if draw_row_index < body_end {
+            body_end
+        } else {
+            row_heights.len()
+        };
+        let end = draw_row_index
+            .saturating_add(row_span)
+            .min(section_end)
+            .min(row_heights.len());
+        row_heights
+            .get(draw_row_index..end)
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+            .filter(|(offset, height)| {
+                **height > Pt::ZERO
+                    && !self
+                        .row_by_draw_index(draw_row_index + offset)
+                        .is_some_and(Self::row_is_collapsed)
+            })
+            .count()
+            .max(1)
+    }
+
+    fn cell_semantics_for_draw_index(
+        &self,
+        cell: &TableCell,
+        draw_row_index: usize,
+    ) -> Option<Arc<crate::TableSemanticNode>> {
+        let mut semantics = cell.table_semantics.clone()?;
+        if cell.row_span() > 1 {
+            let header_len = if self.include_header {
+                self.data.header_rows.len()
+            } else {
+                0
+            };
+            let (rows, start) = if draw_row_index < header_len {
+                (&self.data.header_rows, draw_row_index)
+            } else if draw_row_index < header_len + self.body_range.len() {
+                (
+                    &self.data.body_rows,
+                    self.body_range.start + draw_row_index - header_len,
+                )
+            } else {
+                (
+                    &self.data.body_rows,
+                    self.footer_range.start + draw_row_index - header_len - self.body_range.len(),
+                )
+            };
+            Arc::make_mut(&mut semantics).row_span_end = rows
+                .get(start.saturating_add(cell.row_span() - 1))
+                .and_then(|row| {
+                    row.iter().find_map(|cell| {
+                        cell.table_semantics
+                            .as_ref()
+                            .and_then(|value| value.row_key)
+                    })
+                });
+        }
+        Some(semantics)
     }
 
     fn row_by_draw_index(&self, draw_row_index: usize) -> Option<&[TableCell]> {
@@ -14740,9 +15116,19 @@ impl TableFlowable {
         row_heights: &[Pt],
         row_gap: Pt,
     ) -> Pt {
-        let row_tagged = self.tag_role.as_ref().map(|_| {
-            canvas.begin_tag("TR", None, None, Some(self.table_id), None, true);
-        });
+        // Collapsed rows can retain a fractional border strut. Keep its layout
+        // and paint behavior, but never emit an empty logical row or its cells.
+        let row_tagged = self
+            .tag_role
+            .as_ref()
+            .filter(|_| !Self::row_is_collapsed(row))
+            .map(|_| {
+                canvas.begin_tag("TR", None, None, Some(self.table_id), None, true);
+                canvas.set_table_semantics(
+                    row.iter()
+                        .find_map(|cell| cell.table_container_semantics(true)),
+                );
+            });
         let total_columns = col_widths.len().max(1);
         let visible_columns = self.visible_column_count(total_columns);
         let rtl = matches!(self.direction, DirectionMode::Rtl);
@@ -14828,17 +15214,38 @@ impl TableFlowable {
             let pad_top = padding.top + layout_border.top;
             let pad_bottom = padding.bottom + layout_border.bottom;
 
-            let tagged = cell.tag_role.as_ref().map(|role| {
-                let col = u16::try_from(cursor_col).ok();
-                canvas.begin_tag(
-                    role.as_ref(),
-                    None,
-                    cell.scope.clone(),
-                    Some(self.table_id),
-                    col,
-                    false,
-                );
-            });
+            // These are the engine's final cell coordinates, including spans,
+            // RTL placement and fragment row heights. Never synthesize them in
+            // an authoring frontend from text or neighboring browser boxes.
+            let authoring_scope = cell.begin_authoring_scope(
+                canvas,
+                Rect {
+                    x: cell_x,
+                    y: cell_y,
+                    width: col_width,
+                    height: cell_height,
+                },
+            );
+            let tagged = cell
+                .tag_role
+                .as_ref()
+                .filter(|_| !Self::row_is_collapsed(row))
+                .map(|role| {
+                    let col = u16::try_from(cursor_col).ok();
+                    let row_span = self.semantic_row_span_for_draw_index(
+                        row_index,
+                        cell.row_span(),
+                        row_heights,
+                    );
+                    canvas.begin_table_cell_tag(
+                        role.as_ref(),
+                        cell.scope.clone(),
+                        self.table_id,
+                        col,
+                        (visible_span_columns, row_span),
+                    );
+                    canvas.set_table_semantics(self.cell_semantics_for_draw_index(cell, row_index));
+                });
 
             let hide_empty_paint = matches!(self.border_collapse, BorderCollapseMode::Separate)
                 && cell.should_hide_empty_paint();
@@ -14846,6 +15253,9 @@ impl TableFlowable {
             if hide_empty_paint {
                 if tagged.is_some() {
                     canvas.end_tag();
+                }
+                if authoring_scope {
+                    canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "table-cell");
                 }
                 cursor_x = if rtl {
                     cursor_x - col_width
@@ -15376,6 +15786,9 @@ impl TableFlowable {
             if tagged.is_some() {
                 canvas.end_tag();
             }
+            if authoring_scope {
+                canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "table-cell");
+            }
             cursor_x = if rtl {
                 cursor_x - col_width
             } else {
@@ -15804,6 +16217,9 @@ impl Flowable for TableFlowable {
             draw_background: self.draw_background,
             tag_role: self.tag_role.clone(),
             table_id: self.table_id,
+            table_semantics: self.table_semantics.clone(),
+            first_fragment: self.first_fragment,
+            last_fragment: false,
             border_collapse: self.border_collapse,
             border_spacing: self.border_spacing,
             table_layout: self.table_layout,
@@ -15832,6 +16248,9 @@ impl Flowable for TableFlowable {
             draw_background: self.draw_background,
             tag_role: self.tag_role.clone(),
             table_id: self.table_id,
+            table_semantics: self.table_semantics.clone(),
+            first_fragment: false,
+            last_fragment: self.last_fragment,
             border_collapse: self.border_collapse,
             border_spacing: self.border_spacing,
             table_layout: self.table_layout,
@@ -15855,6 +16274,7 @@ impl Flowable for TableFlowable {
         let perf = perf_start();
         let tagged = self.tag_role.as_ref().map(|role| {
             canvas.begin_tag(role.as_ref(), None, None, None, None, true);
+            canvas.set_table_semantics(self.table_semantics.clone());
         });
         let columns = self.max_columns();
         let (col_gap, row_gap) = self.resolve_spacing(avail_width);
@@ -15925,8 +16345,19 @@ impl Flowable for TableFlowable {
         };
         let mut row_index = 0usize;
         if self.include_header && !self.data.header_rows.is_empty() {
+            let repeated = self.table_semantics.is_some() && !self.first_fragment;
+            if repeated {
+                canvas.begin_artifact(None);
+            }
             let head_tagged = self.tag_role.as_ref().map(|_| {
                 canvas.begin_tag("THead", None, None, Some(self.table_id), None, true);
+                canvas.set_table_semantics(
+                    self.data
+                        .header_rows
+                        .iter()
+                        .flatten()
+                        .find_map(|cell| cell.table_container_semantics(false)),
+                );
             });
             for (idx, row) in self.data.header_rows.iter().enumerate() {
                 let cached_row_lines = cache.and_then(|c| c.header_row_lines.get(idx));
@@ -15986,16 +16417,21 @@ impl Flowable for TableFlowable {
             if head_tagged.is_some() {
                 canvas.end_tag();
             }
+            if repeated {
+                canvas.end_marked_content();
+            }
         }
 
-        let body_tagged = self.tag_role.as_ref().map(|_| {
-            canvas.begin_tag("TBody", None, None, Some(self.table_id), None, true);
-        });
+        let mut body_tagged = false;
+        let mut body_group_pending = true;
         for (i, row) in self.data.body_rows[self.body_range.clone()]
             .iter()
             .enumerate()
         {
             let meta_index = self.body_range.start + i;
+            if row.first().is_some_and(|cell| cell.row_group_starts) {
+                body_group_pending = true;
+            }
             let cached_row_lines = cache.and_then(|c| c.body_row_lines.get(meta_index));
             let mut owned_row_lines: Option<Vec<Arc<Vec<LineLayout>>>> = None;
             let row_height = if let Some(value) =
@@ -16020,6 +16456,21 @@ impl Flowable for TableFlowable {
             } else {
                 owned_row_lines.as_ref().map(|lines| lines.as_slice())
             };
+            // Preserve authored row-group boundaries in the compiled tag tree.
+            // A collapsed first row still starts a group for its next emitted
+            // row; a fully collapsed group emits no empty semantic container.
+            if body_group_pending && self.tag_role.is_some() && !Self::row_is_collapsed(row) {
+                if body_tagged {
+                    canvas.end_tag();
+                }
+                canvas.begin_tag("TBody", None, None, Some(self.table_id), None, true);
+                canvas.set_table_semantics(
+                    row.iter()
+                        .find_map(|cell| cell.table_container_semantics(false)),
+                );
+                body_tagged = true;
+                body_group_pending = false;
+            }
             if let Some(meta) = self.data.body_row_meta.get(meta_index) {
                 for (k, v) in meta {
                     canvas.meta(k.clone(), v.clone());
@@ -16052,13 +16503,23 @@ impl Flowable for TableFlowable {
                 cursor_y = cursor_y + row_gap;
             }
         }
-        if body_tagged.is_some() {
+        if body_tagged {
             canvas.end_tag();
         }
 
         if self.include_footer && self.footer_range.start < self.footer_range.end {
+            let repeated = self.table_semantics.is_some() && !self.last_fragment;
+            if repeated {
+                canvas.begin_artifact(None);
+            }
             let footer_tagged = self.tag_role.as_ref().map(|_| {
                 canvas.begin_tag("TFoot", None, None, Some(self.table_id), None, true);
+                canvas.set_table_semantics(
+                    self.data.body_rows[self.footer_range.clone()]
+                        .iter()
+                        .flatten()
+                        .find_map(|cell| cell.table_container_semantics(false)),
+                );
             });
             for (i, row) in self.data.body_rows[self.footer_range.clone()]
                 .iter()
@@ -16123,6 +16584,9 @@ impl Flowable for TableFlowable {
             }
             if footer_tagged.is_some() {
                 canvas.end_tag();
+            }
+            if repeated {
+                canvas.end_marked_content();
             }
         }
         if self.uses_centered_collapsed_edges() {
@@ -17103,6 +17567,7 @@ struct InlineLineLayout {
     parent_font_ascent: Pt,
     parent_font_descent: Pt,
     items: Vec<InlineItemLayout>,
+    reading_break_after: bool,
 }
 
 #[derive(Clone)]
@@ -17543,6 +18008,7 @@ impl InlineBlockLayoutFlowable {
                 parent_font_ascent,
                 parent_font_descent,
                 items,
+                reading_break_after: false,
             });
         };
 
@@ -17561,6 +18027,7 @@ impl InlineBlockLayoutFlowable {
                         parent_font_ascent: Pt::ZERO,
                         parent_font_descent: Pt::ZERO,
                         items: Vec::new(),
+                        reading_break_after: false,
                     });
                 } else {
                     line_height = line_height.max(break_height);
@@ -17572,6 +18039,9 @@ impl InlineBlockLayoutFlowable {
                         &mut max_width,
                         &mut total_height,
                     );
+                }
+                if let Some(line) = lines.last_mut() {
+                    line.reading_break_after = true;
                 }
                 line_width = Pt::ZERO;
                 raw_line_width = Pt::ZERO;
@@ -18061,6 +18531,9 @@ impl Flowable for InlineBlockLayoutFlowable {
                 } else {
                     child.draw(canvas, item_x, cursor_y + y_off, item_width, item_height);
                 }
+            }
+            if line.reading_break_after {
+                canvas.meta(META_READING_TEXT_KEY, "\n");
             }
             cursor_y = cursor_y + line.line_height;
         }
@@ -36861,6 +37334,12 @@ impl MetaFlowable {
             .any(|(key, value)| key == "fb.owner.source_id" && !value.is_empty())
     }
 
+    fn requires_metadata_carrier(&self) -> bool {
+        self.metadata
+            .iter()
+            .any(|(key, _)| key != META_READING_LAYOUT_KEY)
+    }
+
     fn record_authored_bounds(
         &self,
         canvas: &mut Canvas,
@@ -36883,6 +37362,64 @@ impl MetaFlowable {
 }
 
 impl Flowable for MetaFlowable {
+    fn freeze_replaced_fragmentation_size(
+        &self,
+        width: Pt,
+        height: Pt,
+    ) -> Option<Box<dyn Flowable>> {
+        self.child
+            .freeze_replaced_fragmentation_size(width, height)
+            .map(|child| {
+                Box::new(Self::new(child, self.metadata.as_ref().clone())) as Box<dyn Flowable>
+            })
+    }
+
+    fn expands_inline_fill(&self) -> bool {
+        self.child.expands_inline_fill()
+    }
+    fn is_collapsible_inline_space(&self) -> bool {
+        self.child.is_collapsible_inline_space()
+    }
+    fn forced_line_break_height(&self) -> Option<Pt> {
+        self.child.forced_line_break_height()
+    }
+    fn css_line_baselines_are_self_snapped(&self, width: Pt) -> bool {
+        self.child.css_line_baselines_are_self_snapped(width)
+    }
+    fn inline_box_ascent(&self, width: Pt) -> Option<Pt> {
+        self.child.inline_box_ascent(width)
+    }
+    fn inline_x_height(&self, width: Pt) -> Option<Pt> {
+        self.child.inline_x_height(width)
+    }
+    fn inline_font_extents(&self, width: Pt) -> Option<(Pt, Pt)> {
+        self.child.inline_font_extents(width)
+    }
+    fn uses_parent_content_height(&self) -> bool {
+        self.child.uses_parent_content_height()
+    }
+    fn repeats_parent_fragment_block_start_padding(&self) -> bool {
+        self.child.repeats_parent_fragment_block_start_padding()
+    }
+
+    fn draw_expanding_inline_fill(
+        &self,
+        canvas: &mut Canvas,
+        x: Pt,
+        y: Pt,
+        width: Pt,
+        height: Pt,
+        line_origin_x: Pt,
+    ) {
+        canvas.meta(META_DIAGNOSTIC_SCOPE_BEGIN_KEY, "flowable");
+        for (key, value) in self.metadata.iter() {
+            canvas.meta(key.clone(), value.clone());
+        }
+        self.child
+            .draw_expanding_inline_fill(canvas, x, y, width, height, line_origin_x);
+        self.record_authored_bounds(canvas, x, y, width, height, Size { width, height });
+        canvas.meta(META_DIAGNOSTIC_SCOPE_END_KEY, "flowable");
+    }
     fn with_sliced_decoration_block_extension(&self, extra: Pt) -> Box<dyn Flowable> {
         let mut extended = self.clone();
         extended.child = self
@@ -36976,7 +37513,8 @@ impl Flowable for MetaFlowable {
 
     fn wrap(&self, avail_width: Pt, avail_height: Pt) -> Size {
         let mut size = self.child.wrap(avail_width, avail_height);
-        if !self.metadata.is_empty() && size.height <= Pt::ZERO && !self.child.out_of_flow() {
+        if self.requires_metadata_carrier() && size.height <= Pt::ZERO && !self.child.out_of_flow()
+        {
             size.height = Pt::from_f32(0.01);
         }
         size
@@ -36984,7 +37522,8 @@ impl Flowable for MetaFlowable {
 
     fn wrap_flexed_width(&self, avail_width: Pt, avail_height: Pt) -> Size {
         let mut size = self.child.wrap_flexed_width(avail_width, avail_height);
-        if !self.metadata.is_empty() && size.height <= Pt::ZERO && !self.child.out_of_flow() {
+        if self.requires_metadata_carrier() && size.height <= Pt::ZERO && !self.child.out_of_flow()
+        {
             size.height = Pt::from_f32(0.01);
         }
         size
@@ -37001,7 +37540,8 @@ impl Flowable for MetaFlowable {
             containing_block_width,
             avail_height,
         );
-        if !self.metadata.is_empty() && size.height <= Pt::ZERO && !self.child.out_of_flow() {
+        if self.requires_metadata_carrier() && size.height <= Pt::ZERO && !self.child.out_of_flow()
+        {
             size.height = Pt::from_f32(0.01);
         }
         size

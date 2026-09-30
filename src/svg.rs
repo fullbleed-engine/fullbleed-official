@@ -1,8 +1,19 @@
 use crate::Canvas;
 use crate::css_native::{self, AtRuleBlock, Declaration, DeclarationBlock, Rule as CssRule};
-use crate::flowable::{FilterDropShadowSpec, PaintFilterSpec};
+use crate::flowable::{FilterDropShadowSpec, PaintFilterSpec, TextStyle, resolve_font_stack};
+use crate::font::FontRegistry;
+use crate::style::FontStyleMode;
 use crate::types::{Color, Pt};
 use crate::xml::{ContentNode as XmlContentNode, Document as XmlDocument, Node as XmlNode};
+use std::sync::Arc;
+
+/// The HTML cascade owns the selected face. Inline SVG may inherit it, while
+/// explicit SVG font declarations remain overrides. No host-font discovery.
+#[derive(Debug, Clone)]
+pub(crate) struct SvgFontContext {
+    pub style: TextStyle,
+    pub registry: Option<Arc<FontRegistry>>,
+}
 
 // Lightweight detection for SVG features that our vector compiler does not support yet.
 // When present, we can optionally fall back to rasterization.
@@ -29,8 +40,17 @@ pub(crate) fn svg_needs_raster_fallback(svg_xml: &str) -> bool {
     false
 }
 
-#[cfg(feature = "svg_raster")]
 pub(crate) fn rasterize_svg_to_data_uri(svg_xml: &str, width: Pt, height: Pt) -> Option<String> {
+    rasterize_svg_to_data_uri_with_font_context(svg_xml, width, height, None)
+}
+
+#[cfg(feature = "svg_raster")]
+pub(crate) fn rasterize_svg_to_data_uri_with_font_context(
+    svg_xml: &str,
+    width: Pt,
+    height: Pt,
+    font: Option<&SvgFontContext>,
+) -> Option<String> {
     let width = width.max(Pt::from_f32(1.0e-3));
     let height = height.max(Pt::from_f32(1.0e-3));
     // Use one canvas point per CSS source pixel, then rasterize one point per
@@ -42,22 +62,32 @@ pub(crate) fn rasterize_svg_to_data_uri(svg_xml: &str, width: Pt, height: Pt) ->
         width: raster_width,
         height: raster_height,
     });
-    let compiled = compile_svg(svg_xml, raster_width, raster_height);
+    let compiled = compile_svg_with_font_context(svg_xml, raster_width, raster_height, font);
     if compiled.is_empty() {
         return None;
     }
     render_compiled_items(&compiled, &mut canvas, Pt::ZERO, Pt::ZERO);
     let document = canvas.finish();
-    let png = crate::raster::document_to_transparent_png_pages(&document, 72, None, true)
-        .ok()?
-        .into_iter()
-        .next()?;
+    let png = crate::raster::document_to_transparent_png_pages(
+        &document,
+        72,
+        font.and_then(|font| font.registry.as_deref()),
+        true,
+    )
+    .ok()?
+    .into_iter()
+    .next()?;
     let b64 = crate::base64::encode_standard(&png);
     Some(format!("data:image/png;base64,{}", b64))
 }
 
 #[cfg(not(feature = "svg_raster"))]
-pub(crate) fn rasterize_svg_to_data_uri(_svg_xml: &str, _width: Pt, _height: Pt) -> Option<String> {
+pub(crate) fn rasterize_svg_to_data_uri_with_font_context(
+    _svg_xml: &str,
+    _width: Pt,
+    _height: Pt,
+    _font: Option<&SvgFontContext>,
+) -> Option<String> {
     None
 }
 
@@ -185,9 +215,13 @@ struct SvgStyle {
     stroke_opacity: f32,
     fill_shading: Option<crate::types::Shading>,
     font_family: String,
+    resolved_font_name: Option<String>,
     font_size: f32,
     font_weight: u16,
-    font_italic: bool,
+    font_style: FontStyleMode,
+    font_synthesis_weight: bool,
+    font_face_satisfies_weight: bool,
+    font_face_satisfies_style: bool,
     text_anchor: TextAnchor,
     marker_start: Option<String>,
     marker_mid: Option<String>,
@@ -224,9 +258,13 @@ impl SvgStyle {
             stroke_opacity: 1.0,
             fill_shading: None,
             font_family: "Helvetica".to_string(),
+            resolved_font_name: None,
             font_size: 16.0,
             font_weight: 400,
-            font_italic: false,
+            font_style: FontStyleMode::Normal,
+            font_synthesis_weight: true,
+            font_face_satisfies_weight: false,
+            font_face_satisfies_style: false,
             text_anchor: TextAnchor::Start,
             marker_start: None,
             marker_mid: None,
@@ -261,6 +299,9 @@ struct SvgCssRule {
 #[derive(Debug, Clone, Default)]
 struct SvgStylesheet {
     rules: Vec<SvgCssRule>,
+    // Compile-time only: mutable font caches must never enter compiled item
+    // debug identities or reusable SVG form hashes.
+    font_registry: Option<Arc<FontRegistry>>,
 }
 
 #[derive(Debug, Clone)]
@@ -298,6 +339,9 @@ pub(crate) struct CompiledText {
     text: String,
     font_name: String,
     font_size: f32,
+    advance_width: f32,
+    synthetic_bold: bool,
+    italic_shear: f32,
     fill: Color,
     opacity: f32,
     anchor: TextAnchor,
@@ -337,6 +381,15 @@ pub(crate) struct SvgAuthoringFragment {
 }
 
 pub(crate) fn compile_svg(svg_xml: &str, width: Pt, height: Pt) -> Vec<CompiledItem> {
+    compile_svg_with_font_context(svg_xml, width, height, None)
+}
+
+pub(crate) fn compile_svg_with_font_context(
+    svg_xml: &str,
+    width: Pt,
+    height: Pt,
+    font: Option<&SvgFontContext>,
+) -> Vec<CompiledItem> {
     let Ok(doc) = XmlDocument::parse(svg_xml) else {
         return Vec::new();
     };
@@ -347,7 +400,8 @@ pub(crate) fn compile_svg(svg_xml: &str, width: Pt, height: Pt) -> Vec<CompiledI
         return Vec::new();
     };
 
-    let stylesheet = extract_svg_stylesheet(&doc);
+    let mut stylesheet = extract_svg_stylesheet(&doc);
+    stylesheet.font_registry = font.and_then(|font| font.registry.clone());
     let gradients = extract_gradients(&doc, &stylesheet);
     let id_map = build_id_map(&doc);
     let view_box = parse_viewbox(
@@ -381,7 +435,24 @@ pub(crate) fn compile_svg(svg_xml: &str, width: Pt, height: Pt) -> Vec<CompiledI
     };
     let base = viewport;
 
-    let style = SvgStyle::default();
+    let mut style = SvgStyle::default();
+    if let Some(font) = font {
+        style.font_family = std::iter::once(&font.style.font_name)
+            .chain(&font.style.font_fallbacks)
+            .map(|name| name.as_ref())
+            .collect::<Vec<_>>()
+            .join(", ");
+        style.resolved_font_name = Some(
+            resolve_font_stack(font.registry.as_deref(), &font.style)
+                .0
+                .to_string(),
+        );
+        style.font_weight = font.style.font_weight;
+        style.font_style = font.style.font_style;
+        style.font_synthesis_weight = font.style.font_synthesis_weight;
+        style.font_face_satisfies_weight = font.style.font_face_satisfies_weight;
+        style.font_face_satisfies_style = font.style.font_face_satisfies_style;
+    }
     let mut out = Vec::new();
     let mut resolving_ids = Vec::new();
     compile_element_with_source_capture(
@@ -515,16 +586,34 @@ fn concat_top_left_matrix(canvas: &mut Canvas, transform: Matrix, x: Pt, y: Pt) 
     );
 }
 
+/// XML alone cannot identify an inline SVG form: the same markup can inherit
+/// different document fonts. Hash only immutable compiled text, never registry
+/// caches, so warm/cold compilation and per-record reuse stay deterministic.
+pub(crate) fn compiled_text_identity(items: &[CompiledItem]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    fn absorb(items: &[CompiledItem], hasher: &mut impl Hasher) {
+        for item in items {
+            match item {
+                CompiledItem::Text(text) => format!("{text:?}").hash(hasher),
+                CompiledItem::Group(group) => absorb(&group.items, hasher),
+                _ => {}
+            }
+        }
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    absorb(items, &mut hasher);
+    hasher.finish()
+}
+
 fn draw_compiled_text(canvas: &mut Canvas, text: &CompiledText, x: Pt, y: Pt) {
     if text.text.is_empty() || text.font_size <= 0.0 || text.opacity <= 0.0 {
         return;
     }
 
-    let approximate_width = text.font_size * 0.6 * text.text.chars().count() as f32;
     let anchor_offset = match text.anchor {
         TextAnchor::Start => 0.0,
-        TextAnchor::Middle => approximate_width * 0.5,
-        TextAnchor::End => approximate_width,
+        TextAnchor::Middle => text.advance_width * 0.5,
+        TextAnchor::End => text.advance_width,
     };
 
     canvas.save_state();
@@ -533,11 +622,23 @@ fn draw_compiled_text(canvas: &mut Canvas, text: &CompiledText, x: Pt, y: Pt) {
     canvas.set_opacity(text.opacity, text.opacity);
     canvas.set_font_name(&text.font_name);
     canvas.set_font_size(Pt::from_f32(text.font_size));
-    canvas.draw_string(
-        Pt::from_f32(text.x - anchor_offset),
-        Pt::from_f32(text.y - text.font_size),
-        text.text.clone(),
-    );
+    let x = Pt::from_f32(text.x - anchor_offset);
+    let y = Pt::from_f32(text.y - text.font_size);
+    let strength = Pt::from_f32((text.font_size / 32.0).max(0.25));
+    match (text.synthetic_bold, text.italic_shear != 0.0) {
+        (true, true) => canvas.draw_string_synthetic_bold_italic(
+            x,
+            y,
+            text.text.clone(),
+            strength,
+            text.italic_shear,
+        ),
+        (true, false) => canvas.draw_string_synthetic_bold(x, y, text.text.clone(), strength),
+        (false, true) => {
+            canvas.draw_string_synthetic_italic(x, y, text.text.clone(), text.italic_shear)
+        }
+        (false, false) => canvas.draw_string(x, y, text.text.clone()),
+    }
     canvas.restore_state();
 }
 
@@ -1187,22 +1288,43 @@ fn compile_text_content(
                 if text.trim().is_empty() {
                     continue;
                 }
+                let font_name = svg_font_name(style, stylesheet);
+                let advance_width = svg_text_width(&text, style, stylesheet);
                 let Some(fill) = style.fill.color else {
-                    cursor.x += approximate_text_width(&text, style.font_size);
+                    cursor.x += advance_width;
                     continue;
+                };
+                let synthetic_bold = style.font_synthesis_weight
+                    && !style.font_face_satisfies_weight
+                    && stylesheet.font_registry.as_ref().is_some_and(|registry| {
+                        registry.requires_synthetic_bold(&font_name, style.font_weight)
+                    });
+                let italic_shear = if style.font_synthesis_weight
+                    && !style.font_face_satisfies_style
+                    && stylesheet
+                        .font_registry
+                        .as_ref()
+                        .is_some_and(|registry| registry.requires_synthetic_italic(&font_name))
+                {
+                    crate::flowable::synthetic_italic_shear(style.font_style)
+                } else {
+                    0.0
                 };
                 out.push(CompiledItem::Text(CompiledText {
                     x: q(cursor.x),
                     y: q(cursor.y),
                     text: text.clone(),
-                    font_name: svg_font_name(style),
+                    font_name,
                     font_size: q(style.font_size.max(0.0)),
+                    advance_width: q(advance_width),
+                    synthetic_bold,
+                    italic_shear,
                     fill,
                     opacity: style.fill_opacity.clamp(0.0, 1.0),
                     anchor: TextAnchor::Start,
                     transform: ctm,
                 }));
-                cursor.x += approximate_text_width(&text, style.font_size);
+                cursor.x += advance_width;
             }
             XmlContentNode::Element(child) => {
                 let tag = child.tag_name().name();
@@ -1258,7 +1380,7 @@ fn estimate_text_content_width(
     for content in node.content() {
         match content {
             XmlContentNode::Text(raw) => {
-                width += approximate_text_width(&collapse_svg_text(raw), style.font_size);
+                width += svg_text_width(&collapse_svg_text(raw), style, stylesheet);
             }
             XmlContentNode::Element(child)
                 if child.tag_name().name().eq_ignore_ascii_case("tspan")
@@ -1298,6 +1420,21 @@ fn approximate_text_width(text: &str, font_size: f32) -> f32 {
     text.chars().count() as f32 * font_size.max(0.0) * 0.6
 }
 
+fn svg_text_width(text: &str, style: &SvgStyle, stylesheet: &SvgStylesheet) -> f32 {
+    stylesheet.font_registry.as_ref().map_or_else(
+        || approximate_text_width(text, style.font_size),
+        |registry| {
+            registry
+                .measure_text_width(
+                    &svg_font_name(style, stylesheet),
+                    Pt::from_f32(style.font_size.max(0.0)),
+                    text,
+                )
+                .to_f32()
+        },
+    )
+}
+
 fn first_length(value: Option<&str>) -> Option<f32> {
     value?
         .split(|ch: char| ch.is_whitespace() || ch == ',')
@@ -1305,44 +1442,88 @@ fn first_length(value: Option<&str>) -> Option<f32> {
         .and_then(parse_number)
 }
 
-fn svg_font_name(style: &SvgStyle) -> String {
-    let family = style
+fn apply_svg_font_family(value: &str, style: &mut SvgStyle) {
+    let value = value.trim();
+    if value.is_empty() || matches!(value.to_ascii_lowercase().as_str(), "inherit" | "unset") {
+        return;
+    }
+    if value != style.font_family {
+        style.resolved_font_name = None;
+        style.font_face_satisfies_weight = false;
+        style.font_face_satisfies_style = false;
+        style.font_family = if value.eq_ignore_ascii_case("initial") {
+            "Helvetica".to_string()
+        } else {
+            value.to_string()
+        };
+    }
+}
+
+fn apply_svg_font_weight(value: &str, style: &mut SvgStyle) {
+    if let Some(weight) = parse_svg_font_weight(value) {
+        if weight != style.font_weight {
+            style.resolved_font_name = None;
+            style.font_face_satisfies_weight = false;
+            style.font_weight = weight;
+        }
+    }
+}
+
+fn apply_svg_font_style(value: &str, style: &mut SvgStyle) {
+    let font_style = if value.trim().eq_ignore_ascii_case("initial") {
+        FontStyleMode::Normal
+    } else if let Some(parsed) = crate::style::parse_font_style_str(value) {
+        parsed
+    } else {
+        return;
+    };
+    if font_style != style.font_style {
+        style.resolved_font_name = None;
+        style.font_face_satisfies_style = false;
+        style.font_style = font_style;
+    }
+}
+
+fn svg_font_name(style: &SvgStyle, stylesheet: &SvgStylesheet) -> String {
+    if let Some(name) = &style.resolved_font_name {
+        return name.clone();
+    }
+    let mut families = style
         .font_family
         .split(',')
-        .next()
-        .unwrap_or("Helvetica")
-        .trim()
-        .trim_matches('"')
-        .trim_matches('\'');
+        .map(|name| svg_font_family_name(name, stylesheet.font_registry.as_deref()));
+    let text_style = TextStyle {
+        font_name: families.next().unwrap_or_else(|| Arc::from("Helvetica")),
+        font_fallbacks: families.collect(),
+        font_weight: style.font_weight,
+        font_style: style.font_style,
+        ..TextStyle::default()
+    };
+    resolve_font_stack(stylesheet.font_registry.as_deref(), &text_style)
+        .0
+        .to_string()
+}
+
+fn svg_font_family_name(family: &str, registry: Option<&FontRegistry>) -> Arc<str> {
+    let family = family.trim().trim_matches('"').trim_matches('\'');
+    // A vendored Arial/Courier/Times face wins over the legacy Base-14 alias.
+    if registry.is_some_and(|registry| registry.resolve(family).is_some()) {
+        return Arc::from(family);
+    }
     let compact = family
         .to_ascii_lowercase()
         .chars()
         .filter(|ch| ch.is_ascii_alphanumeric())
         .collect::<String>();
-    let (base, base14) = match compact.as_str() {
+    Arc::from(match compact.as_str() {
         "arial" | "arialmt" | "helvetica" | "helveticaneue" | "sansserif" | "systemui" => {
-            ("Helvetica".to_string(), true)
+            "Helvetica"
         }
-        "times" | "timesroman" | "timesnewroman" | "serif" => ("Times".to_string(), true),
-        "courier" | "couriernew" | "monospace" => ("Courier".to_string(), true),
-        _ if family.is_empty() => ("Helvetica".to_string(), true),
-        _ => (family.to_string(), false),
-    };
-    let bold = style.font_weight >= 600;
-    match (base14, base.as_str(), bold, style.font_italic) {
-        (true, "Times", false, false) => "Times-Roman".to_string(),
-        (true, "Times", true, false) => "Times-Bold".to_string(),
-        (true, "Times", false, true) => "Times-Italic".to_string(),
-        (true, "Times", true, true) => "Times-BoldItalic".to_string(),
-        (true, _, false, false) => base,
-        (true, _, true, false) => format!("{base}-Bold"),
-        (true, _, false, true) => format!("{base}-Oblique"),
-        (true, _, true, true) => format!("{base}-BoldOblique"),
-        (false, _, false, false) => base,
-        (false, _, true, false) => format!("{base} Bold"),
-        (false, _, false, true) => format!("{base} Italic"),
-        (false, _, true, true) => format!("{base} Bold Italic"),
-    }
+        "times" | "timesroman" | "timesnewroman" | "serif" => "Times-Roman",
+        "courier" | "couriernew" | "monospace" => "Courier",
+        _ if family.is_empty() => "Helvetica",
+        _ => family,
+    })
 }
 
 fn build_id_map(doc: &XmlDocument) -> std::collections::HashMap<String, XmlNode<'_>> {
@@ -2130,7 +2311,7 @@ fn compiled_item_bounds(item: &CompiledItem) -> Option<SvgBounds> {
             }
         }
         CompiledItem::Text(text) => {
-            let width = text.font_size * 0.6 * text.text.chars().count() as f32;
+            let width = text.advance_width;
             let anchor_offset = match text.anchor {
                 TextAnchor::Start => 0.0,
                 TextAnchor::Middle => width * 0.5,
@@ -2993,7 +3174,7 @@ fn apply_presentation_and_style(
         }
     }
     if let Some(value) = node.attribute("font-family") {
-        style.font_family = value.trim().to_string();
+        apply_svg_font_family(value, style);
     }
     if let Some(value) = node.attribute("font-size") {
         if let Some(size) = parse_svg_font_size(value, style.font_size) {
@@ -3001,15 +3182,10 @@ fn apply_presentation_and_style(
         }
     }
     if let Some(value) = node.attribute("font-weight") {
-        if let Some(weight) = parse_svg_font_weight(value) {
-            style.font_weight = weight;
-        }
+        apply_svg_font_weight(value, style);
     }
     if let Some(value) = node.attribute("font-style") {
-        style.font_italic = matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "italic" | "oblique"
-        );
+        apply_svg_font_style(value, style);
     }
     if let Some(value) = node.attribute("text-anchor") {
         style.text_anchor = parse_text_anchor(value);
@@ -3143,25 +3319,14 @@ fn apply_svg_declaration(declaration: &Declaration, style: &mut SvgStyle) {
                 style.stroke_opacity *= opacity;
             }
         }
-        "font-family" => style.font_family = value.to_string(),
+        "font-family" => apply_svg_font_family(value, style),
         "font-size" => {
             if let Some(size) = parse_svg_font_size(value, style.font_size) {
                 style.font_size = size;
             }
         }
-        "font-weight" => {
-            if let Some(weight) = parse_svg_font_weight(value) {
-                style.font_weight = weight;
-            }
-        }
-        "font-style" => {
-            let lower = value.to_ascii_lowercase();
-            if lower == "normal" {
-                style.font_italic = false;
-            } else if lower == "italic" || lower == "oblique" || lower.starts_with("oblique ") {
-                style.font_italic = true;
-            }
-        }
+        "font-weight" => apply_svg_font_weight(value, style),
+        "font-style" => apply_svg_font_style(value, style),
         "text-anchor" => match value.to_ascii_lowercase().as_str() {
             "start" | "middle" | "end" => style.text_anchor = parse_text_anchor(value),
             _ => {}
@@ -3241,7 +3406,7 @@ fn parse_svg_font_size(value: &str, inherited: f32) -> Option<f32> {
 
 fn parse_svg_font_weight(value: &str) -> Option<u16> {
     match value.trim().to_ascii_lowercase().as_str() {
-        "normal" => Some(400),
+        "normal" | "initial" => Some(400),
         "bold" => Some(700),
         "bolder" => Some(700),
         "lighter" => Some(300),
@@ -4622,6 +4787,200 @@ mod tests {
         assert!(texts[0].x < texts[1].x && texts[1].x < texts[2].x);
         assert!(texts[0].fill.r > 0.7 && texts[0].fill.b < 0.1);
         assert!(texts[1].fill.b > 0.7 && texts[1].fill.r < 0.1);
+    }
+
+    fn noto_font_context() -> SvgFontContext {
+        let mut registry = FontRegistry::new();
+        registry.register_file(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("python/fullbleed_assets/fonts/NotoSans-Regular.ttf"),
+        );
+        assert!(registry.resolve("Noto Sans").is_some());
+        SvgFontContext {
+            style: TextStyle {
+                font_name: Arc::from("Noto Sans"),
+                ..TextStyle::default()
+            },
+            registry: Some(Arc::new(registry)),
+        }
+    }
+
+    fn compiled_texts(items: &[CompiledItem]) -> Vec<&CompiledText> {
+        let mut texts = Vec::new();
+        for item in items {
+            match item {
+                CompiledItem::Text(text) => texts.push(text),
+                CompiledItem::Group(group) => texts.extend(compiled_texts(&group.items)),
+                _ => {}
+            }
+        }
+        texts
+    }
+
+    #[test]
+    fn registered_svg_font_metrics_drive_anchors_runs_and_authoring_bounds() {
+        let context = noto_font_context();
+        let registry = context.registry.as_ref().unwrap();
+        let measure = |text| {
+            registry
+                .measure_text_width("Noto Sans", Pt::from_f32(20.0), text)
+                .to_f32()
+        };
+        let width = measure("WW") + measure("ii");
+        assert!((width - approximate_text_width("WWii", 20.0)).abs() > 0.1);
+        let xml = r#"<svg width="300" height="100"><text data-fb-id="center" x="150" y="30" font-size="20" text-anchor="middle">WW<tspan>ii</tspan></text><text data-fb-id="end" x="280" y="70" font-size="20" text-anchor="end">WWii</text></svg>"#;
+        let compiled = compile_svg_with_font_context(
+            xml,
+            Pt::from_f32(300.0),
+            Pt::from_f32(100.0),
+            Some(&context),
+        );
+        let texts = compiled_texts(&compiled);
+        assert_eq!(texts.len(), 3);
+        assert!((texts[0].x - (150.0 - width / 2.0)).abs() < 0.002);
+        assert!((texts[1].x - (texts[0].x + measure("WW"))).abs() < 0.002);
+        assert!((texts[2].x - (280.0 - measure("WWii"))).abs() < 0.002);
+        let fragments = authoring_fragments(&compiled);
+        let center = fragments
+            .iter()
+            .find(|fragment| fragment.source_id == "center")
+            .unwrap();
+        assert!((center.width.to_f32() - width).abs() < 0.003);
+        assert!((center.x.to_f32() - texts[0].x).abs() < 0.003);
+    }
+
+    #[test]
+    fn svg_font_overrides_resolve_registered_fallbacks_and_preserve_inherit() {
+        let mut context = noto_font_context();
+        context.style.font_weight = 700;
+        context.style.font_style = FontStyleMode::Italic;
+        let xml = r#"<svg width="300" height="100"><text y="20">INHERIT</text><text y="40" style="font-family: inherit; font-weight: inherit; font-style: inherit">KEYWORDS</text><text y="60" font-family="Missing, Noto Sans, serif" font-weight="normal" font-style="normal">FALLBACK</text><text y="80" font-family="Courier" font-weight="normal" font-style="normal">OVERRIDE</text><text y="100" font-style="oblique 0.05turn">ANGLE</text></svg>"#;
+        let compiled = compile_svg_with_font_context(
+            xml,
+            Pt::from_f32(300.0),
+            Pt::from_f32(100.0),
+            Some(&context),
+        );
+        let texts = compiled_texts(&compiled);
+        assert_eq!(texts.len(), 5);
+        for text in &texts[..2] {
+            assert_eq!(text.font_name, "Noto Sans");
+            assert!(text.synthetic_bold);
+            assert_eq!(text.italic_shear, 0.25);
+        }
+        assert_eq!(texts[2].font_name, "Noto Sans");
+        assert!(!texts[2].synthetic_bold);
+        assert_eq!(texts[2].italic_shear, 0.0);
+        assert_eq!(texts[3].font_name, "Courier");
+        assert!(!texts[3].synthetic_bold);
+        assert_eq!(texts[3].italic_shear, 0.0);
+        assert!((texts[4].italic_shear - 18.0f32.to_radians().tan()).abs() < 0.0001);
+        let mut canvas = Canvas::new(Size {
+            width: Pt::from_f32(300.0),
+            height: Pt::from_f32(100.0),
+        });
+        render_compiled_items(&compiled, &mut canvas, Pt::ZERO, Pt::ZERO);
+        let document = canvas.finish();
+        assert!(
+            document.pages[0]
+                .commands
+                .iter()
+                .any(|command| matches!(command,
+            Command::DrawStringTransformed { text, m10, .. } if text == "INHERIT" && *m10 == 0.25))
+        );
+        assert!(
+            document.pages[0]
+                .commands
+                .iter()
+                .any(|command| matches!(command, Command::SetTextRenderingMode(2)))
+        );
+    }
+
+    #[test]
+    fn svg_font_synthesis_respects_document_opt_out_and_selected_face_metadata() {
+        let mut context = noto_font_context();
+        context.style.font_weight = 700;
+        context.style.font_style = FontStyleMode::Oblique(1200);
+        let xml = r#"<svg width="100" height="40"><text y="20">TEXT</text></svg>"#;
+        let compile = |context: &SvgFontContext| {
+            compile_svg_with_font_context(
+                xml,
+                Pt::from_f32(100.0),
+                Pt::from_f32(40.0),
+                Some(context),
+            )
+        };
+        let synthesized = compile(&context);
+        assert!(compiled_texts(&synthesized)[0].synthetic_bold);
+        assert!(
+            (compiled_texts(&synthesized)[0].italic_shear - 12.0f32.to_radians().tan()).abs()
+                < 0.0001
+        );
+        context.style.font_synthesis_weight = false;
+        let opted_out = compile(&context);
+        assert!(!compiled_texts(&opted_out)[0].synthetic_bold);
+        assert_eq!(compiled_texts(&opted_out)[0].italic_shear, 0.0);
+        context.style.font_synthesis_weight = true;
+        context.style.font_face_satisfies_weight = true;
+        context.style.font_face_satisfies_style = true;
+        let selected_face = compile(&context);
+        assert!(!compiled_texts(&selected_face)[0].synthetic_bold);
+        assert_eq!(compiled_texts(&selected_face)[0].italic_shear, 0.0);
+    }
+
+    #[test]
+    fn svg_text_identity_depends_on_resolved_fonts_not_registry_cache_history() {
+        let context = noto_font_context();
+        let xml = r#"<svg width="200" height="80"><g data-fb-id="labels"><text x="100" y="40" text-anchor="middle">WWii</text></g></svg>"#;
+        let compile = |context: &SvgFontContext| {
+            compile_svg_with_font_context(
+                xml,
+                Pt::from_f32(200.0),
+                Pt::from_f32(80.0),
+                Some(context),
+            )
+        };
+        let cold = compile(&context);
+        context.registry.as_ref().unwrap().measure_text_width(
+            "Noto Sans",
+            Pt::from_f32(32.0),
+            "Unrelated cache contents",
+        );
+        let warm = compile(&context);
+        assert_eq!(format!("{cold:?}"), format!("{warm:?}"));
+        assert_eq!(compiled_text_identity(&cold), compiled_text_identity(&warm));
+        let mut different = context.clone();
+        different.style.font_name = Arc::from("Courier");
+        assert_ne!(
+            compiled_text_identity(&cold),
+            compiled_text_identity(&compile(&different))
+        );
+        different.style = context.style.clone();
+        different.style.font_weight = 700;
+        assert_ne!(
+            compiled_text_identity(&cold),
+            compiled_text_identity(&compile(&different))
+        );
+    }
+
+    #[cfg(feature = "svg_raster")]
+    #[test]
+    fn svg_raster_fallback_uses_the_same_project_font_bytes() {
+        let context = noto_font_context();
+        let xml = r#"<svg width="200" height="40"><text x="4" y="24">WWii FONT</text></svg>"#;
+        let render = |font| {
+            rasterize_svg_to_data_uri_with_font_context(
+                xml,
+                Pt::from_f32(150.0),
+                Pt::from_f32(30.0),
+                font,
+            )
+            .unwrap()
+        };
+        let inherited = render(Some(&context));
+        assert!(inherited.starts_with("data:image/png;base64,"));
+        assert_ne!(inherited, render(None));
+        assert_eq!(inherited, render(Some(&context)));
     }
 
     #[test]
