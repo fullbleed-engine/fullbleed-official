@@ -74,3 +74,32 @@ def test_verapdf_repairs_an_incomplete_extracted_cache(tmp_path):
     entrypoint.unlink()
     assert harness.download_verapdf_classpath(tmp_path) == cli_dir
     assert entrypoint.read_bytes() == b"test class"
+
+
+def test_separate_parser_gate_requires_real_positive_and_negative_evidence():
+    from copy import deepcopy
+
+    report = {"schema": "fullbleed.pdfvt_separate_parser.v1", "status": "passed",
+              "independent_iso_conformance": False,
+              "specimens": {name: {"status": "passed"} for name in
+                            ("basic", "multipage", "grouped", "fixed", "reflow")},
+              "negative_controls": {"status": "passed", "rewrite_positive_control": {"status": "passed"},
+                  "controls": {str(i): {"status": "passed", "expected_error": str(i),
+                               "validation": {"status": "failed", "errors": [str(i)]}} for i in range(21)}}}
+    assert harness.valid_separate_parser_report(report)
+    assert not harness.valid_separate_parser_report({"status": "passed"})
+    missing_specimen = deepcopy(report)
+    missing_specimen["specimens"].pop("grouped")
+    assert not harness.valid_separate_parser_report(missing_specimen)
+    missing_control = deepcopy(report)
+    missing_control["negative_controls"]["controls"].pop("0")
+    assert not harness.valid_separate_parser_report(missing_control)
+    crashed = deepcopy(report)
+    crashed["negative_controls"]["controls"]["0"]["validation"]["status"] = "error"
+    assert not harness.valid_separate_parser_report(crashed)
+    wrong_failure = deepcopy(report)
+    wrong_failure["negative_controls"]["controls"]["0"]["validation"]["errors"] = ["parse_error"]
+    assert not harness.valid_separate_parser_report(wrong_failure)
+    broken_rewrite = deepcopy(report)
+    broken_rewrite["negative_controls"]["rewrite_positive_control"]["status"] = "failed"
+    assert not harness.valid_separate_parser_report(broken_rewrite)

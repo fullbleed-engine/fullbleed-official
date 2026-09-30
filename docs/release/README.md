@@ -6,10 +6,10 @@ engine internals.
 
 ## 2.4.0 Documents
 
-- `docs/release/2.4.0-runbook.md`: candidate release and dedicated PDF/VT gate.
+- `docs/release/2.4.0-runbook.md`: candidate release and print-profile verification gate.
 - `docs/release/2.4.0-validation-report.md`: candidate verification results and retained evidence.
 - `docs/pdf-vt.md`: print identity, record composition, DPM, and reuse-hint contracts.
-- `ReleaseNotes.MD`: current candidate summary; publication requires retained validation evidence.
+- `ReleaseNotes.MD`: 2.4.0 release summary and verification boundaries.
 
 ## 2.3.1 Documents
 

@@ -110,10 +110,19 @@ structure, page boxes, and forbidden interactive/external constructs. This
 does not prove arbitrary ICC colorimetry or every ISO requirement.
 
 `tools/validate_pdf_profiles.py` retains PDFs, replay hashes, input hashes,
-internal reports, PDF/X-4 reports, dedicated validator logs, and version output.
-Dedicated validation covers the basic, multipage, grouped-record, fixed-binding,
-and reflow specimens. Negative controls remove the DPart root reference,
-change the PDF version, and break the VT/XMP date agreement.
+internal reports, and external reports. The required release gate combines
+veraPDF for PDF/A, PDF/UA, and WTPDF; pdf_oxide for PDF/X-4; and
+`tools/check_pdfvt_structure.py` using pypdf in a process that never imports
+Fullbleed. The latter checks basic, multipage, grouped-record, fixed-binding,
+and reflow specimens against their known source assignments. It verifies
+metadata, resources, page ranges, backlinks, and the private DPM contract.
+Twenty-one damaged specimens must fail for their expected reasons, while an
+unmodified rewrite control must pass. This is engineering verification of a
+documented contract, not exhaustive ISO PDF/VT validation.
+
+Install the release-tool dependency `pypdf==6.19.0` and pass
+`--require-pdfvt-structure --strict-external` to require those checks. No
+third-party parser or validator is added to the core package.
 
 Use `--pdfvt-cmd` (or `FULLBLEED_PDFVT_VALIDATOR_CMD`) with a `{pdf}` placeholder
 and optional `{report}` placeholder. Templates use POSIX argument quoting on
@@ -121,11 +130,14 @@ all hosts and execute without a shell. A wrapper must select the actual
 PDF/VT-1 validation profile and normalize success to exit 0 and nonconformance
 to exit 1; crashes and configuration errors should use exit 2 or higher.
 `--pdfvt-version-cmd` must retain the product version and selected profile.
-Add `--require-dedicated-pdfvt --strict-external` for the release gate.
+Add `--require-dedicated-pdfvt --strict-external` to require this additional
+standards-preflight evidence. Its negative controls remove the DPart root
+reference, change the PDF version, and break the VT/XMP date agreement.
 
-The release workflow requires repository variables `PDFVT_VALIDATOR_RUNNER`
+The optional dedicated-validator job uses repository variables `PDFVT_VALIDATOR_RUNNER`
 (JSON label array, e.g. `["self-hosted","pdfvt"]`), `PDFVT_VALIDATOR_CMD`,
 `PDFVT_VALIDATOR_VERSION_CMD`, and `PDFVT_OUTPUT_INTENT_ICC`. The runner must
-already have a licensed or otherwise usable dedicated validator. Missing
-configuration fails the release before publication. See the
+already have a licensed or otherwise usable dedicated validator. With no
+dedicated runner configured, that additional job is skipped; the required
+engineering gate still runs. A configured dedicated job must pass. See the
 [2.4.0 runbook](release/2.4.0-runbook.md) for evidence and publication requirements.

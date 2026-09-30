@@ -807,6 +807,47 @@ def validate_pdfvt_negative_controls(pdf_path, out_dir, command):
     return {"status": "passed" if all(r["status"] == "passed" for r in results.values()) else "failed", "controls": results}
 
 
+def valid_separate_parser_report(report):
+    if not isinstance(report, dict) or report.get("status") != "passed":
+        return False
+    specimens = report.get("specimens", {})
+    controls = report.get("negative_controls", {})
+    mutations = controls.get("controls", {})
+    return (report.get("schema") == "fullbleed.pdfvt_separate_parser.v1"
+            and report.get("independent_iso_conformance") is False
+            and set(specimens) == {"basic", "multipage", "grouped", "fixed", "reflow"}
+            and all(value.get("status") == "passed" for value in specimens.values())
+            and controls.get("status") == "passed"
+            and controls.get("rewrite_positive_control", {}).get("status") == "passed"
+            and len(mutations) >= 21
+            and all(value.get("status") == "passed"
+                    and value.get("validation", {}).get("status") == "failed"
+                    and value.get("expected_error") in value.get("validation", {}).get("errors", [])
+                    for value in mutations.values()))
+
+
+def validate_pdfvt_separate_parser(pdf_path, multipage, composition, out_dir, icc_path):
+    """Run the source-assignment oracle in a process that never imports Fullbleed."""
+    folder = out_dir / "separate-parser"
+    folder.mkdir(parents=True, exist_ok=True)
+    try:
+        specimens = {"basic": str(pdf_path.resolve()),
+                     "multipage": str(Path(multipage["render"]["pdf"]).resolve())}
+        specimens.update({name: str(Path(value["pdf"]).resolve())
+                          for name, value in composition["specimens"].items()})
+        manifest = folder / "inputs.json"
+        write_json(manifest, {"specimens": specimens, "icc_sha256": sha256_file(icc_path)})
+        code = run_capture([sys.executable, str(REPO_ROOT / "tools/check_pdfvt_structure.py"),
+                            "--suite", str(manifest), "--out", str(folder)],
+                           folder / "stdout.txt", folder / "stderr.txt")
+        report = decode_json_report(folder / "report.json")
+        return {"status": "passed" if code == 0 and valid_separate_parser_report(report) else "failed",
+                "exit": code, "scope": "separate_parser_writer_contract",
+                "independent_iso_conformance": False, "report": str(folder / "report.json")}
+    except Exception as error:
+        return {"status": "failed", "error": str(error)}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", default=str(REPO_ROOT / "output" / "conformance_validation"))
@@ -823,6 +864,8 @@ def main() -> int:
     parser.add_argument("--download-verapdf", action="store_true")
     parser.add_argument("--install-pdf-oxide", action="store_true")
     parser.add_argument("--pdf-oxide-version", default="0.3.78")
+    parser.add_argument("--require-pdfvt-structure", action="store_true",
+                        help="Require pypdf-based VT writer-contract checks, source assignments, and mutation controls (not full ISO certification).")
     parser.add_argument(
         "--pdfvt-version-cmd", default=os.environ.get("FULLBLEED_PDFVT_VALIDATOR_VERSION_CMD"),
         help="Command that identifies the dedicated validator version and validation profile; its output is retained.",
@@ -930,6 +973,11 @@ def main() -> int:
                        validate_pdfvt_composition(out_dir, font_path, icc_path, pdf_oxide, args.pdfvt_cmd))
         negative_controls = ({"status": "not_applicable"} if profile != "pdfvt1" or render["exit"] != 0 else
                              validate_pdfvt_negative_controls(pdf_path, out_dir, args.pdfvt_cmd))
+        separate_parser = {"status": "not_applicable" if profile != "pdfvt1" else "skipped"}
+        if args.require_pdfvt_structure and profile == "pdfvt1":
+            separate_parser = validate_pdfvt_separate_parser(pdf_path, pdfvt_multipage, composition, out_dir, icc_path)
+            if separate_parser["status"] != "passed":
+                profile_ok = False
         if composition["status"] == "failed" or negative_controls["status"] == "failed":
             profile_ok = False
         for external in [verapdf_result, pdf_oxide_result]:
@@ -964,6 +1012,7 @@ def main() -> int:
             "pdfvt_multipage": pdfvt_multipage,
             "pdfvt_composition": composition,
             "pdfvt_negative_controls": negative_controls,
+            "pdfvt_separate_parser": separate_parser,
             "determinism": determinism,
         }
         if not profile_ok:

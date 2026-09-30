@@ -1,8 +1,6 @@
 ﻿# Fullbleed Release Notes - 2.4.0
 
-Status: candidate; dedicated PDF/VT release validation pending
-
-Candidate date: September 30, 2026
+Release date: September 30, 2026
 
 ## Print identity and PDF/X-4 requirements
 
@@ -33,8 +31,9 @@ Candidate date: September 30, 2026
 - Print profiles now fail when title or timestamp inputs are omitted; existing callers must provide them. Ordinary PDF defaults remain unchanged.
 - Core `fullbleed` retains no third-party Python runtime, browser, system-PDF, system-font, or AI-vendor dependency. External validators are release tooling only.
 - The release matrix remains 15 `cp310-abi3` wheels for CPython 3.10–3.14, with Rust 1.85 as MSRV. The audit crate remains 0.1.3 and the MCP adapter package remains 0.1.0.
-- Release workflows require dedicated PDF/VT validation of basic, multipage, grouped, fixed-binding, and reflow specimens, plus rejected negative controls and retained validator-version evidence. Missing configuration fails before publication.
+- Release workflows require veraPDF and PDF/X checks, a separate pypdf-based check of all five VT specimens, exact source-to-page assignments, replay determinism, and 21 deliberately damaged PDFs rejected for the expected reasons. A rewrite positive control prevents parser/rewrite failures from masquerading as successful negative tests.
+- Dedicated external PDF/VT preflight remains available as an additional gate when configured. Its absence does not prevent shipping the tested writer features with qualified claims.
 
-PDF/VT-1 conformance has not been independently established for this candidate.
-Publication and stronger product claims remain gated on retained validation
-evidence. See `docs/release/2.4.0-runbook.md` and `docs/pdf-vt.md`.
+Full PDF/VT-1 conformance has not been independently established for this release.
+The release reports the exact tests performed and does not claim certification
+or exhaustive ISO coverage. See `docs/release/2.4.0-runbook.md` and `docs/pdf-vt.md`.

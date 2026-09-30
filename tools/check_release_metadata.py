@@ -401,6 +401,13 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
                 f"Missing crates.io release marker: {marker}",
             )
 
+    profile_gate = repo_root / ".github" / "workflows" / "pdfvt-release-gate.yml"
+    profile_workflow = _read(profile_gate) if profile_gate.exists() else ""
+    for marker in ("--strict-external", "--require-pdfvt-structure", "--download-verapdf", "pypdf==6.19.0"):
+        if marker not in profile_workflow:
+            _flag(flags, "REL_PROFILE_GATE_MISSING", str(profile_gate.relative_to(repo_root)),
+                  f"Missing required print-profile gate marker: {marker}")
+
     for relative_path, marker in (
         ("README.md", f"fullbleed-{expected_version}"),
         ("ReleaseNotes.MD", f"Release Notes - {expected_version}"),

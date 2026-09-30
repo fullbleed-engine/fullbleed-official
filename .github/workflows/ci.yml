@@ -20,6 +20,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  print-profile-preflight:
+    uses: ./.github/workflows/pdfvt-release-gate.yml
+    with:
+      release_ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
   rust-tests:
     name: Rust Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
