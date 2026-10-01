@@ -1,0 +1,5 @@
+# Development-only framework clients; Fullbleed is installed separately.
+-r requirements-fastapi.txt
+-r requirements-flask.txt
+-r requirements-django.txt
+httpx2==2.13.1
