@@ -16,12 +16,12 @@ def test_mcp_registry_metadata_is_generated_from_package_metadata() -> None:
     assert observed == expected
     assert observed["$schema"].endswith("/2025-12-11/server.schema.json")
     assert observed["name"] == "io.github.fullbleed-engine/fullbleed-mcp"
-    assert observed["version"] == "0.1.0"
+    assert observed["version"] == "0.1.1"
     assert observed["packages"] == [
         {
             "registryType": "pypi",
             "identifier": "fullbleed-mcp",
-            "version": "0.1.0",
+            "version": "0.1.1",
             "transport": {"type": "stdio"},
         }
     ]
@@ -42,7 +42,7 @@ def test_mcp_distribution_wraps_runtime_without_duplicate_renderer() -> None:
     metadata = (PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     core_metadata = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert "from fullbleed_cli.mcp import" in module
-    assert 'dependencies = ["fullbleed>=2.3.0,<3"]' in metadata
+    assert 'dependencies = ["fullbleed>=2.5.1,<3"]' in metadata
     assert "fullbleed-mcp" not in core_metadata.split("[project.scripts]", 1)[1].split(
         "[project.urls]", 1
     )[0]

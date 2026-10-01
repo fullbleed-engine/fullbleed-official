@@ -7,7 +7,7 @@ on:
         description: "Git ref containing the MCP package metadata"
         required: true
         type: string
-        default: "v2.5.1"
+        default: "mcp-v0.1.1"
       publish_pypi:
         description: "Publish fullbleed-mcp to PyPI after validation"
         required: true
@@ -47,7 +47,7 @@ jobs:
       - name: Install validation tools and public Fullbleed runtime
         run: |
           python -m pip install --upgrade pip
-          python -m pip install build jsonschema twine "fullbleed>=2.3.0,<3"
+          python -m pip install build jsonschema twine "fullbleed>=2.5.1,<3"
 
       - name: Resolve package metadata
         id: metadata
@@ -80,7 +80,18 @@ jobs:
           python -m build packages/fullbleed-mcp --outdir dist
           python -m twine check dist/*
           python -m pip install --no-deps --force-reinstall dist/fullbleed_mcp-*.whl
+          python -m pip check
           python tools/smoke_mcp_stdio.py --json
+
+      - name: Setup Node for official MCP client validation
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Verify the installed adapter with the official MCP client
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund --prefix tools/mcp-client-smoke
+          node tools/mcp-client-smoke/smoke.mjs
 
       - name: Upload MCP distributions
         uses: actions/upload-artifact@v7
