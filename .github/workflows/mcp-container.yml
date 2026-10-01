@@ -8,6 +8,7 @@ on:
       - glama.json
       - packages/fullbleed-mcp/**
       - tools/smoke_mcp_stdio.py
+      - tools/mcp-client-smoke/**
       - .github/workflows/mcp-container.yml
   push:
     branches: [master, main]
@@ -17,6 +18,7 @@ on:
       - glama.json
       - packages/fullbleed-mcp/**
       - tools/smoke_mcp_stdio.py
+      - tools/mcp-client-smoke/**
       - .github/workflows/mcp-container.yml
   workflow_dispatch:
 
@@ -51,6 +53,13 @@ jobs:
           docker run --rm --network none --entrypoint python fullbleed-mcp:check -c 'import importlib.metadata as m, json; print(json.dumps({"fullbleed":m.version("fullbleed"),"fullbleed-mcp":m.version("fullbleed-mcp")}))' > evidence/versions.json
       - name: Exercise MCP with networking disabled and a read-only image
         run: python tools/smoke_mcp_stdio.py --container-image fullbleed-mcp:check --json > evidence/stdio.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Validate the running container with the official MCP client
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund --prefix tools/mcp-client-smoke
+          node tools/mcp-client-smoke/smoke.mjs --container-image fullbleed-mcp:check > evidence/official-sdk.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

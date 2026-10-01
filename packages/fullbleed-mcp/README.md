@@ -11,6 +11,13 @@ python -m pip install fullbleed-mcp
 fullbleed-mcp --root .
 ```
 
+Fullbleed MCP 0.1.1 requires Fullbleed 2.5.1 or newer. This includes the tool
+schema correction needed by strict MCP clients. To update an existing install:
+
+```text
+python -m pip install --upgrade fullbleed-mcp
+```
+
 The initial transport is newline-delimited JSON-RPC over stdio. User-supplied document paths are confined to `--root`. The server does not require credentials, network access, a browser, system fonts, or a system PDF runtime.
 
 The adapter delegates rendering and discovery to the installed `fullbleed` distribution. It does not maintain a second renderer or capability database. Start with `fullbleed_capabilities` or `fullbleed_agent_contract` and trust their runtime-reported values.
@@ -19,7 +26,8 @@ Use this server for structured reports, invoices, statements, letters, forms, ce
 
 ## Direct core entrypoint
 
-Fullbleed 2.3 and newer also expose the same dependency-free adapter as:
+Fullbleed also exposes the same dependency-free adapter directly. Use version
+2.5.1 or newer for compatibility with strict MCP clients:
 
 ```text
 fullbleed mcp --root .
@@ -31,7 +39,7 @@ The separate `fullbleed-mcp` distribution exists for package and MCP Registry di
 
 The optional repository-root `Dockerfile` packages the stdio server for container
 users and MCP directories. It builds the adapter from this repository and installs
-the released Fullbleed 2.5.0 engine from hash-checked Linux wheels. It does not add
+the released Fullbleed 2.5.1 engine from hash-checked Linux wheels. It does not add
 Docker or other dependencies to the Python package.
 
 From the repository root:
@@ -49,10 +57,14 @@ your current user. Keep `-i` and omit `-t` when connecting an MCP client over st
 The `MCP container` workflow builds the image and exercises initialization, tool
 discovery, previews, inspection, verification, and three-record VDP output. Its
 smoke run disables networking, makes the image read-only, and checks that a tool
-cannot read outside its document workspace. To run the same check locally:
+cannot read outside its document workspace. A second check uses the official
+TypeScript MCP SDK to validate tool discovery and structured results against the
+running container. To run these checks locally:
 
 ```text
 python tools/smoke_mcp_stdio.py --container-image fullbleed-mcp:local --json
+npm ci --ignore-scripts --no-audit --no-fund --prefix tools/mcp-client-smoke
+node tools/mcp-client-smoke/smoke.mjs --container-image fullbleed-mcp:local
 ```
 
 `container-requirements.txt` pins the released engine used by this distribution.

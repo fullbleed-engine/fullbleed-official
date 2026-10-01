@@ -14,6 +14,16 @@ The Python environment must contain the wheel under test and `fullbleed-mcp`.
 The Python argument defaults to `python` on `PATH`. The check retains its own
 temporary workspace and reports its path so generated PDFs can be inspected.
 
+To check a locally built container on a Docker host:
+
+```text
+node tools/mcp-client-smoke/smoke.mjs --container-image fullbleed-mcp:local
+```
+
+The container runs with networking disabled and a read-only root, with writes
+confined to the check's temporary document workspace and `/tmp`. On Linux it
+uses the invoking user's UID/GID to write the temporary bind mount.
+
 Fullbleed 2.5.0 reproduces a discovery failure: its `outputSchema` lacks the
 required root `type: "object"`. Fullbleed 2.5.1 adds that type in the shared
 runtime definition while preserving the existing success/error union.
