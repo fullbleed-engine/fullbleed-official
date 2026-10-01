@@ -36,7 +36,7 @@ Open `invoice.pdf`. The [quickstart](https://docs.fullbleed.dev/getting-started/
 | You want to build | Start here |
 | --- | --- |
 | An invoice from JSON | [Complete, checked example](examples/agent_workflows) |
-| Automatic rebuilds while editing HTML/CSS (unreleased) | [Watch-mode invoice example](examples/render_watch) |
+| Automatic rebuilds while editing HTML/CSS (2.5.0+) | [Watch-mode invoice example](examples/render_watch) |
 | A PDF download in FastAPI, Flask, or Django | [Runnable web app examples](examples/web_frameworks) |
 | A styled invoice from CSV | [Acme invoice project](examples/acme_invoice) |
 | A report that flows across pages | [Business report example](examples/agent_workflows) |
@@ -210,7 +210,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-2.4.0-cp310-abi3-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-2.5.0-cp310-abi3-win_amd64.whl
 ```
 
 From a source checkout with Rust installed, no Python build package is needed:

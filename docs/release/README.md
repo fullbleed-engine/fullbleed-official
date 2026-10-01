@@ -4,12 +4,18 @@ This directory is the release-operations layer for Fullbleed. It is separate
 from feature documentation so release decisions can be audited without reading
 engine internals.
 
+## 2.5.0 Documents
+
+- `docs/release/2.5.0-runbook.md`: watch-mode release, package verification, and publication procedure.
+- `docs/render-watch.md`: automatic rebuilds, explicit dependencies, result streaming, and limits.
+- `ReleaseNotes.MD`: 2.5.0 release summary.
+
 ## 2.4.0 Documents
 
 - `docs/release/2.4.0-runbook.md`: candidate release and print-profile verification gate.
 - `docs/release/2.4.0-validation-report.md`: candidate verification results and retained evidence.
 - `docs/pdf-vt.md`: print identity, record composition, DPM, and reuse-hint contracts.
-- `ReleaseNotes.MD`: 2.4.0 release summary and verification boundaries.
+- The `v2.4.0` GitHub release retains the 2.4.0 notes and verification boundaries.
 
 ## 2.3.1 Documents
 

@@ -1,8 +1,8 @@
 # Edit a document with automatic rebuilds
 
-`--watch` is an unreleased feature on the source branch. Build and install the
-current checkout using the [contributor setup](../../CONTRIBUTING.md#set-up-a-source-checkout)
-before trying this example. The public 2.4.0 wheel does not include it.
+`--watch` requires **Fullbleed 2.5.0 or newer**. Check with
+`python -m fullbleed --version`. To build a source checkout, use the
+[contributor setup](../../CONTRIBUTING.md#set-up-a-source-checkout).
 
 From this directory, run:
 

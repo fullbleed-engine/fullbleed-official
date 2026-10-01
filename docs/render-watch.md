@@ -1,8 +1,8 @@
 # Rebuild PDFs as you edit
 
-**Unreleased:** watch mode is available in the source checkout. It is not part
-of the public 2.4.0 wheel. Follow the [contributor setup](../CONTRIBUTING.md#set-up-a-source-checkout)
-to build and install this branch before running these commands.
+Watch mode requires **Fullbleed 2.5.0 or newer**. Check your installed version
+with `python -m fullbleed --version`. For a source build, follow the
+[contributor setup](../CONTRIBUTING.md#set-up-a-source-checkout).
 
 Use `fullbleed render --watch` to render a document immediately, then rebuild it
 after input changes. It uses Python's standard library and adds no runtime
