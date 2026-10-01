@@ -1,0 +1,2 @@
+# Keep upstream font licenses byte-for-byte, including their original whitespace.
+fonts/*-OFL.txt -text -whitespace

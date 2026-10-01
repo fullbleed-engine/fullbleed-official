@@ -168,6 +168,17 @@ jobs:
       - name: Run installed-wheel agent workflow examples
         run: python examples/agent_workflows/run_examples.py --out target/agent-examples --json
 
+      - name: Render and verify the designed document showcase
+        run: python examples/design_showcase/render.py --out target/design-showcase
+
+      - name: Retain showcase PDFs, previews, and verification
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: design-showcase-${{ runner.os }}
+          path: target/design-showcase
+          if-no-files-found: warn
+
       - name: Install notebook check tools
         run: python -m pip install -r examples/notebooks/requirements-check.txt
 

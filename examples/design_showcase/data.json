@@ -1,0 +1,27 @@
+{
+  "invoice": [
+    {"description": "Discovery & brand workshop", "detail": "Positioning, priorities, and a clear creative direction", "hours": 8, "rate": "125.00"},
+    {"description": "Digital design & implementation", "detail": "A cohesive visual system, from layout to launch", "hours": 6, "rate": "95.00"},
+    {"description": "Review & studio handoff", "detail": "Final refinements, documentation, and delivery", "hours": 2, "rate": "150.00"}
+  ],
+  "report": {
+    "households": 1240,
+    "volunteer_hours": 4860,
+    "spaces": 12,
+    "quarterly_households": [420, 560, 790, 980],
+    "allocations": [
+      {"name": "Neighborhood spaces", "amount": 168000},
+      {"name": "Learning & workshops", "amount": 126000},
+      {"name": "Shared meals & gardens", "amount": 84000},
+      {"name": "Access & transport", "amount": 42000}
+    ]
+  },
+  "statements": {
+    "monthly_contributions": [120, 180, 140, 200, 180, 250],
+    "members": [
+      {"member_name": "Jordan Ellis", "address": "742 Summit Lane, Riverton", "account_id": "HC-104829", "opening_balance": "320.00"},
+      {"member_name": "Maya Chen", "address": "18 Willow Court, Riverton", "account_id": "HC-104830", "opening_balance": "650.00"},
+      {"member_name": "Avery Morgan", "address": "96 Orchard Road, Riverton", "account_id": "HC-104831", "opening_balance": "910.00"}
+    ]
+  }
+}

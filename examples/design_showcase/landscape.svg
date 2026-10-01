@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 504 260" width="672" height="347" role="img" aria-label="An illustrated neighborhood of homes, hills, trees, and a bridge">
+<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f8f5ec"/><stop offset="1" stop-color="#e5e5ca"/></linearGradient><linearGradient id="sun" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#d97336"/><stop offset="1" stop-color="#b74822"/></linearGradient></defs>
+<rect width="504" height="260" fill="url(#sky)"/><circle cx="279" cy="100" r="82" fill="url(#sun)"/>
+<path d="M0 132 Q70 72 155 129 T320 121 T504 110 V260 H0Z" fill="#6e8652"/>
+<path d="M0 150 Q112 97 208 161 T387 128 T504 156 V260 H0Z" fill="#315f40"/>
+<path d="M0 184 Q90 131 165 185 T304 173 T504 187 V260 H0Z" fill="#173e2c"/>
+<path d="M0 229 Q147 181 228 216 T504 216 V260 H0Z" fill="#a4ae78"/>
+<path d="M0 260 Q166 200 256 233 T504 250" fill="none" stroke="#d9dbc0" stroke-width="17"/>
+<path d="M51 195 L62 45 L74 195Z M82 207 L92 94 L105 207Z M455 192 L466 72 L478 192Z" fill="#183d2a"/>
+<g fill="#f6efd8"><rect x="292" y="158" width="34" height="40"/><rect x="335" y="136" width="31" height="50"/><rect x="377" y="159" width="42" height="47"/></g>
+<g fill="#c65328"><path d="M287 158 L309 140 L331 158Z M330 137 L350 120 L372 137Z M372 159 L398 140 L424 159Z"/></g>
+<g fill="#a4b081"><rect x="306" y="174" width="9" height="24"/><rect x="345" y="153" width="8" height="13"/><rect x="386" y="172" width="9" height="14"/><rect x="404" y="172" width="9" height="14"/></g>
+<path d="M93 218 V185 H235 V218 H220 V200 A13 13 0 0 0 194 200 V218 H176 V200 A13 13 0 0 0 150 200 V218 H132 V200 A13 13 0 0 0 106 200 V218Z" fill="#d6d9b7"/>
+<path d="M0 260 Q40 191 107 246 L130 260Z M393 260 Q427 160 491 228 L504 260Z" fill="#567649"/>
+</svg>
