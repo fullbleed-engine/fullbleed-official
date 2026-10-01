@@ -38,11 +38,14 @@ Path("invoice.pdf").write_bytes(pdf)
 
 Open `invoice.pdf`. The [quickstart](https://docs.fullbleed.dev/getting-started/quickstart/) adds fonts, previews, and a complete project. The runnable source is in [`examples/quickstart/hello.py`](examples/quickstart/hello.py).
 
+**Using Rust?** Start with the [native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/). The [`fullbleed` crate](https://crates.io/crates/fullbleed) exposes `FullBleed::builder()` and `render_to_buffer(...)`, with no Python requirement. The guide includes runnable invoice and report examples with explicit fonts and PNG previews, plus the [Rust API reference](https://docs.rs/fullbleed/2.5.0/fullbleed/).
+
 ## Choose your starting point
 
 | You want to build | Start here |
 | --- | --- |
 | Distinctive invoices, reports, notices, and statements | [Designed showcase with fonts and source](examples/design_showcase) |
+| A native Rust application | [Rust quickstart and runnable examples](https://docs.fullbleed.dev/getting-started/rust/) |
 | An invoice from JSON | [Complete, checked example](examples/agent_workflows) |
 | Automatic rebuilds while editing HTML/CSS (2.5.0+) | [Watch-mode invoice example](examples/render_watch) |
 | A PDF download in FastAPI, Flask, or Django | [Runnable web app examples](examples/web_frameworks) |
