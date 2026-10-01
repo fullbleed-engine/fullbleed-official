@@ -1,0 +1,10 @@
+**
+!Dockerfile
+!packages/
+!packages/fullbleed-mcp/
+!packages/fullbleed-mcp/**
+packages/fullbleed-mcp/**/__pycache__/
+packages/fullbleed-mcp/**/*.pyc
+packages/fullbleed-mcp/build/
+packages/fullbleed-mcp/dist/
+packages/fullbleed-mcp/**/*.egg-info/

@@ -1,0 +1,58 @@
+name: MCP container
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - glama.json
+      - packages/fullbleed-mcp/**
+      - tools/smoke_mcp_stdio.py
+      - .github/workflows/mcp-container.yml
+  push:
+    branches: [master, main]
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - glama.json
+      - packages/fullbleed-mcp/**
+      - tools/smoke_mcp_stdio.py
+      - .github/workflows/mcp-container.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-container-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MCP_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.MCP_REVISION }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Build the local stdio image
+        run: docker build --pull --label "org.opencontainers.image.revision=$MCP_REVISION" -t fullbleed-mcp:check .
+      - name: Verify installation and default user
+        run: |
+          mkdir -p evidence
+          docker image inspect fullbleed-mcp:check > evidence/image.json
+          test "$(docker image inspect --format '{{.Config.User}}' fullbleed-mcp:check)" = '10001:10001'
+          docker run --rm --network none --entrypoint python fullbleed-mcp:check -m pip check
+          docker run --rm --network none --entrypoint python fullbleed-mcp:check -c 'import importlib.metadata as m, json; print(json.dumps({"fullbleed":m.version("fullbleed"),"fullbleed-mcp":m.version("fullbleed-mcp")}))' > evidence/versions.json
+      - name: Exercise MCP with networking disabled and a read-only image
+        run: python tools/smoke_mcp_stdio.py --container-image fullbleed-mcp:check --json > evidence/stdio.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mcp-container-verification
+          path: evidence/
