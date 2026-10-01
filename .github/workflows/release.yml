@@ -345,6 +345,17 @@ jobs:
           python -m fullbleed doctor --strict --json
           python -m fullbleed compliance --strict --json
 
+      - name: Verify installed CLI watch mode on the native platform
+        run: python -I tools/smoke_render_watch.py --out target/watch-smoke
+
+      - name: Retain native watch results and document stages
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-watch-${{ matrix.label }}
+          path: target/watch-smoke
+          if-no-files-found: warn
+
   test-linux-wheels:
     name: Smoke Linux wheel (${{ matrix.label }}, Python ${{ matrix.python }})
     needs:
@@ -543,7 +554,7 @@ jobs:
 
   publish-pypi:
     name: Publish PyPI distributions
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_pypi
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish_pypi)
     needs:
       - assemble
     runs-on: ubuntu-latest
