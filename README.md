@@ -35,6 +35,7 @@ Open `invoice.pdf`. The [quickstart](https://docs.fullbleed.dev/getting-started/
 
 | You want to build | Start here |
 | --- | --- |
+| Distinctive invoices, reports, notices, and statements | [Designed showcase with fonts and source](examples/design_showcase) |
 | An invoice from JSON | [Complete, checked example](examples/agent_workflows) |
 | Automatic rebuilds while editing HTML/CSS (unreleased) | [Watch-mode invoice example](examples/render_watch) |
 | A PDF download in FastAPI, Flask, or Django | [Runnable web app examples](examples/web_frameworks) |

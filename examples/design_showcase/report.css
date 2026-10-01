@@ -1,0 +1,33 @@
+.report .masthead { display: flex; justify-content: space-between; border-bottom: .8pt solid #183d2b; padding-bottom: 11pt; margin-bottom: 22pt; }
+.report .brand { font: 15pt/1 'DM Serif Display'; }
+.report .cover-title { font: 106pt/.83 'Bebas Neue'; letter-spacing: -.5pt; }
+.report .cover-deck { display: grid; grid-template-columns: 1fr 1fr; align-items: start; margin-top: 23pt; }
+.report .cover-deck p { font: 20pt/1.08 'DM Serif Display'; }
+.report .year { font: 58pt/.9 'Bebas Neue'; color: #c65328; text-align: right; }
+.report .landscape { display: block; width: 100%; height: 92mm; margin-top: 10pt; }
+.report .contents { display: grid; grid-template-columns: .8fr 1fr 1fr; gap: 12pt; margin-top: 18pt; border-top: .7pt solid #8da28e; padding-top: 14pt; }
+.report .contents > div + div { border-left: .7pt solid #c65328; padding-left: 13pt; }
+.report .contents .serif { font-size: 12pt; margin-top: 4pt; line-height: 1.1; }
+.report h1.section-title { font: 50pt/.96 'Bebas Neue'; margin: 12pt 0 14pt; }
+.report h2 { font: 21pt/1.12 'DM Serif Display'; margin-bottom: 10pt; }
+.report .deck { font-size: 11pt; line-height: 1.55; max-width: 450pt; }
+.report .metrics { border-top: 1pt solid #244535; border-bottom: 1pt solid #244535; padding: 16pt 0 14pt; margin: 18pt 0; }
+.report .metrics .value { font: 44pt/1 'Bebas Neue'; color: #b74624; margin-bottom: 5pt; }
+.report .metric-caption { font-size: 8pt; }
+.report .chart-panel { padding: 18pt; background: #1f4435; color: #f9f2dd; margin: 18pt 0; }
+.report .chart-panel h2 { font-size: 21pt; }
+.report .chart-bars { height: 127pt; display: flex; gap: 20pt; align-items: flex-end; margin: 12pt 0 8pt; border-bottom: .5pt solid #83a48b; }
+.report .chart-col { width: 20%; text-align: center; }
+.report .chart-value { font: 17pt 'Bebas Neue'; margin-bottom: 5pt; }
+.report .bar { width: 100%; background: linear-gradient(180deg,#d9bc77,#a9b884); }
+.report .chart-labels { display: flex; gap: 20pt; font-size: 7pt; }
+.report .chart-labels span { display: block; flex: 1; text-align: center; }
+.report .quote { font: 26pt/1.16 'DM Serif Display'; color: #a53e25; }
+.report .note { font-size: 8.5pt; line-height: 1.55; }
+.report .funding-table td { padding: 8pt 0; }
+.report .funding-table .share { width: 88pt; }
+.report .share-track { height: 5pt; background: #e3e5d7; width: 76pt; margin-top: 7pt; }
+.report .share-fill { height: 5pt; background: #c65328; }
+.report .allocation-total { background: #e4eadc; padding: 14pt; margin: 17pt 0 19pt; display: flex; align-items: baseline; justify-content: space-between; }
+.report .allocation-total strong { font: 39pt 'Bebas Neue'; }
+.report .callout { border-left: 3pt solid #c65328; padding-left: 14pt; }

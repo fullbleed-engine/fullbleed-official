@@ -1,0 +1,26 @@
+@page { size: A4; margin: 0; }
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body { font-family: Inter; font-size: 10pt; line-height: 1.45; color: #17382e; }
+h1, h2, h3, p, figure { margin: 0; }
+h1, h2, h3 { font-weight: 400; }
+.page { width: 210mm; height: 296.9mm; padding: 15mm 16mm; position: relative; break-after: page; background: #f8f5ec; }
+.page:last-child { break-after: auto; }
+.kicker { font-size: 7.2pt; font-weight: 600; letter-spacing: 1.4pt; text-transform: uppercase; }
+.serif { font-family: 'DM Serif Display'; font-weight: 400; }
+.display { font-family: 'Bebas Neue'; font-weight: 400; }
+.muted { color: #5b6c64; }
+.small { font-size: 8pt; }
+.rule { border-top: .6pt solid #9eafa4; }
+.row { display: flex; justify-content: space-between; gap: 16pt; }
+.grid-2 { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 24pt; }
+.grid-2 > * { min-width: 0; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16pt; }
+.footer { position: absolute; left: 16mm; right: 16mm; bottom: 12mm; border-top: .6pt solid #9eafa4; padding-top: 8pt; display: flex; justify-content: space-between; gap: 12pt; font-size: 6.6pt; letter-spacing: .45pt; }
+table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+th { font-size: 7.5pt; font-weight: 600; text-align: left; }
+th, td { padding: 10pt 0; border-bottom: .55pt solid #bdc8bf; vertical-align: top; }
+.number { text-align: right; white-space: nowrap; }
+.money { font-variant-numeric: tabular-nums; }
+strong { font-weight: 600; }
+a { color: inherit; }
