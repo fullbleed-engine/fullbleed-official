@@ -1,27 +1,59 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Fullbleed PDF Engine
 
-Fullbleed PDF Engine is a deterministic, self-contained document-generation runtime for Python and Rust. It turns structured data plus static HTML/CSS into reports, invoices, statements, letters, forms, certificates, accessible PDFs, print-ready documents, and high-volume compiled VDP output—without a browser or system PDF stack.
+**Create PDFs from Python, HTML, and CSS. One install. MIT licensed.**
 
-It is designed for human developers, automation, and AI agents alike: the installed runtime exposes its exact version, capabilities, commands, schemas, compliance profiles, examples, limitations, and tool-selection boundary as a generated machine contract.
+Build invoices, reports, statements, and variable-data print jobs with a deterministic Rust engine and a Python API. The wheel includes the rendering engine, fonts, and CLI, with no required third-party Python packages or system PDF stack.
 
+[Documentation](https://fullbleed-engine.github.io/docs/) · [Examples](https://fullbleed-engine.github.io/docs/examples/) · [PyPI](https://pypi.org/project/fullbleed/) · [Release notes](https://github.com/fullbleed-engine/fullbleed-official/releases) · [MIT license](LICENSE)
 
-License: MIT.
+## Your first PDF
 
+Python 3.10–3.14 on Windows, macOS, or Linux:
 
+```bash
+python -m pip install fullbleed
+```
 
-- **Install:** `pip install fullbleed`
-- **Try:** `fullbleed init . && python report.py`
-- **Discover:** `fullbleed agent-contract --format json`
-- **Outputs:** `output/report.pdf` 
-- Deterministic + reproducible (`--repro-record` / `--repro-check`)
-- Agent-safe JSON schemas (`--json-only`, `--schema`)
+Save this as `hello.py`, then run `python hello.py`:
 
-## Positioning
+```python
+from pathlib import Path
+import fullbleed
 
-Fullbleed is a deterministic, offline-first document rendering engine for structured print-document and transactional/VDP pipelines (not a browser, not a hosted web-to-print SaaS, and not a general editor for arbitrary existing PDF content).
+html = "<h1>Invoice INV-1042</h1><p>Consulting: USD 1,200.00</p>"
+css = "@page { size: A4; margin: 20mm; } h1 { color: #175c52; }"
+pdf = fullbleed.PdfEngine().render_pdf(html, css)
+Path("invoice.pdf").write_bytes(pdf)
+```
 
-HTML and CSS are used as a familiar DSL for layout, styling, and data placement in transactional documents.
+Open `invoice.pdf`. The [quickstart](https://fullbleed-engine.github.io/docs/getting-started/quickstart/) adds fonts, previews, and a complete project. The runnable source is in [`examples/quickstart/hello.py`](examples/quickstart/hello.py).
+
+## Choose your starting point
+
+| You want to build | Start here |
+| --- | --- |
+| An invoice from JSON | [Complete, checked example](examples/agent_workflows) |
+| A styled invoice from CSV | [Acme invoice project](examples/acme_invoice) |
+| A report that flows across pages | [Business report example](examples/agent_workflows) |
+| Tagged output with accessibility checks | [Accessibility workflow](docs/ui-accessibility.md) |
+| Many documents from one template | [Fixed and reflowing variable-data examples](examples/agent_workflows) |
+| Print profiles and PDF/VT record hierarchies | [Print output and verification scope](docs/pdf-vt.md) |
+| A coding-agent or MCP integration | [Agent setup](#agent-discovery-and-integrations) |
+
+[See generated PDFs and their source →](https://fullbleed-engine.github.io/docs/examples/)
+
+## Why use Fullbleed?
+
+- **Simple deployment:** prebuilt wheels for 15 platform targets, with no browser or system-font installation needed for the bundled workflow.
+- **Repeatable documents:** explicit assets and metadata, deterministic rendering, and SHA-256 reproducibility checks.
+- **Document-focused layout:** pagination, headers and footers, tables, template overlays, and per-page data.
+- **Volume workflows:** compile a template once, then bind fixed or reflowing records. [Measured workloads and limits](docs/performance-pass-2026-08-04.md).
+- **Inspectable output:** PDF inspection, PNG previews, structured diagnostics, and profile verification tooling.
+
+Fullbleed uses static HTML/CSS as a document layout language. Check the [CSS coverage and remaining gaps](docs/css-coverage.md) for your templates. Use a browser when JavaScript or live website behavior is part of the required result.
+
+Profile selection alone does not establish standards conformance. The [release evidence](docs/release/2.4.0-validation-report.md) records the checks performed and their limits.
 
 ## Agent discovery and integrations
 
