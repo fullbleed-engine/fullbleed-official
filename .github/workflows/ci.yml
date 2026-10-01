@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.0"
+  FULLBLEED_CI_VERSION: "2.5.1"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -164,6 +164,16 @@ jobs:
         run: |
           python -m pip install --no-deps target/mcp-wheels/fullbleed_mcp-*.whl
           python tools/smoke_mcp_stdio.py --json
+
+      - name: Set up Node for the independent MCP client check
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Check installed MCP server with the official client SDK
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund --prefix tools/mcp-client-smoke
+          node tools/mcp-client-smoke/smoke.mjs
 
       - name: Run installed-wheel agent workflow examples
         run: python examples/agent_workflows/run_examples.py --out target/agent-examples --json

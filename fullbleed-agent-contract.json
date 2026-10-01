@@ -4206,7 +4206,7 @@
     "license": "MIT",
     "name": "Fullbleed PDF Engine",
     "python_package": "fullbleed",
-    "version": "2.5.0"
+    "version": "2.5.1"
   },
   "profiles": {
     "pdf": {
@@ -5561,7 +5561,8 @@
               ],
               "type": "object"
             }
-          ]
+          ],
+          "type": "object"
         },
         "title": "Fullbleed capabilities"
       },
@@ -5640,7 +5641,8 @@
               ],
               "type": "object"
             }
-          ]
+          ],
+          "type": "object"
         },
         "title": "Fullbleed agent contract"
       },
@@ -5732,7 +5734,8 @@
               ],
               "type": "object"
             }
-          ]
+          ],
+          "type": "object"
         },
         "title": "Create a Fullbleed project"
       },
@@ -5952,7 +5955,8 @@
               ],
               "type": "object"
             }
-          ]
+          ],
+          "type": "object"
         },
         "title": "Render a print document"
       },
@@ -6163,7 +6167,8 @@
               ],
               "type": "object"
             }
-          ]
+          ],
+          "type": "object"
         },
         "title": "Render a PDF and page previews"
       },
@@ -6376,7 +6381,8 @@
               ],
               "type": "object"
             }
-          ]
+          ],
+          "type": "object"
         },
         "title": "Verify a print document"
       },
@@ -6463,7 +6469,8 @@
               ],
               "type": "object"
             }
-          ]
+          ],
+          "type": "object"
         },
         "title": "Inspect a PDF"
       },
@@ -6571,7 +6578,8 @@
               ],
               "type": "object"
             }
-          ]
+          ],
+          "type": "object"
         },
         "title": "Manage Fullbleed assets"
       },
@@ -6757,7 +6765,8 @@
               ],
               "type": "object"
             }
-          ]
+          ],
+          "type": "object"
         },
         "title": "Compile a document family"
       },
@@ -6888,7 +6897,8 @@
               ],
               "type": "object"
             }
-          ]
+          ],
+          "type": "object"
         },
         "title": "Render a compiled document"
       },
@@ -7118,7 +7128,8 @@
               ],
               "type": "object"
             }
-          ]
+          ],
+          "type": "object"
         },
         "title": "Compile and render a VDP job"
       }

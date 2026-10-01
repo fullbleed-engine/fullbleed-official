@@ -1,0 +1,8 @@
+{
+  "name": "fullbleed-mcp-client-smoke",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node smoke.mjs" },
+  "devDependencies": { "@modelcontextprotocol/sdk": "1.31.0" }
+}

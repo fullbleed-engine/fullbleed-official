@@ -43,6 +43,7 @@ def test_mcp_initialization_and_tool_discovery(tmp_path: Path) -> None:
         "fullbleed_compile_vdp",
     }
     assert all(tool["inputSchema"]["type"] == "object" for tool in tools)
+    assert all(tool["outputSchema"]["type"] == "object" for tool in tools)
     assert all(tool["outputSchema"].get("anyOf") for tool in tools)
     compile_tool = next(tool for tool in tools if tool["name"] == "fullbleed_compile")
     assert compile_tool["annotations"]["readOnlyHint"] is False
