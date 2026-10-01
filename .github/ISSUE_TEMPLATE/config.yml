@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Usage questions and examples
+    url: https://github.com/fullbleed-engine/fullbleed-official/discussions
+    about: Ask how to build a document, share an example, or discuss an approach.
+  - name: Documentation and quickstart
+    url: https://docs.fullbleed.dev/
+    about: Install Fullbleed, generate your first PDF, and browse runnable examples.

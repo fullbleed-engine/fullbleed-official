@@ -68,7 +68,7 @@ fullbleed = "fullbleed_cli.cli:main"
 [project.urls]
 Homepage = "https://fullbleed.dev"
 Repository = "https://github.com/fullbleed-engine/fullbleed-official"
-Documentation = "https://github.com/fullbleed-engine/fullbleed-official#readme"
+Documentation = "https://docs.fullbleed.dev/"
 Issues = "https://github.com/fullbleed-engine/fullbleed-official/issues"
 Agent-Contract = "https://github.com/fullbleed-engine/fullbleed-official/blob/master/fullbleed-agent-contract.json"
 Agent-Skill = "https://github.com/fullbleed-engine/fullbleed-official/tree/master/skills/fullbleed"
