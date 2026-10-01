@@ -848,6 +848,15 @@
       "preflight",
       "prod"
     ],
+    "render_watch": {
+      "available": true,
+      "extra_inputs_flag": "--watch-path",
+      "flag": "--watch",
+      "json_output": "newline_delimited_render_results_and_errors",
+      "polling": "python_standard_library",
+      "stdin_supported": false,
+      "stop_exit_code": 130
+    },
     "schema": "fullbleed.capabilities.v1",
     "svg": {
       "asset_bundle": {
@@ -3240,6 +3249,41 @@
               "--out"
             ],
             "required": true
+          },
+          {
+            "dest": "watch",
+            "flags": [
+              "--watch"
+            ],
+            "help": "Rebuild after local input changes until Ctrl-C; JSON results stream one per line",
+            "nargs": 0,
+            "required": false
+          },
+          {
+            "dest": "watch_path",
+            "flags": [
+              "--watch-path"
+            ],
+            "help": "Additional file or recursive directory to watch (repeatable; requires --watch)",
+            "required": false
+          },
+          {
+            "dest": "watch_interval",
+            "flags": [
+              "--watch-interval"
+            ],
+            "help": "Seconds between watch polls (default: 0.5)",
+            "required": false,
+            "value_type": "float"
+          },
+          {
+            "dest": "watch_debounce",
+            "flags": [
+              "--watch-debounce"
+            ],
+            "help": "Seconds inputs must remain unchanged before rebuilding (default: 0.2)",
+            "required": false,
+            "value_type": "float"
           }
         ],
         "subcommands": {}
@@ -3934,6 +3978,24 @@
       "command": [
         "fullbleed",
         "--json-only",
+        "render",
+        "--html",
+        "invoice.html",
+        "--css",
+        "invoice.css",
+        "--out",
+        "invoice.pdf",
+        "--watch"
+      ],
+      "id": "watch_document_cli",
+      "intent": "Rebuild a local document after HTML/CSS edits until Ctrl-C; emits a stream of render results and errors.",
+      "interface": "cli",
+      "result_schema": "fullbleed.render_result.v1"
+    },
+    {
+      "command": [
+        "fullbleed",
+        "--json-only",
         "verify",
         "--html",
         "report.html",
@@ -4057,6 +4119,11 @@
     }
   ],
   "known_limitations": [
+    {
+      "agent_action": "Use --watch-path for extra dependencies. Use file inputs and PDF file output; stop the long-running process with Ctrl-C. Use one-shot render for delivery gates.",
+      "id": "watch_scope",
+      "summary": "Render watch mode polls explicit local input files and optional recursive watch paths. It does not run a Python data generator or discover every file referenced inside HTML/CSS or JSON."
+    },
     {
       "agent_action": "Use browser automation when browser behavior or a website screenshot is the requested artifact.",
       "id": "not_a_browser",

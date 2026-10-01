@@ -136,6 +136,16 @@ EXAMPLES = [
         "result_schema": "fullbleed.render_result.v1",
     },
     {
+        "id": "watch_document_cli",
+        "intent": "Rebuild a local document after HTML/CSS edits until Ctrl-C; emits a stream of render results and errors.",
+        "interface": "cli",
+        "command": [
+            "fullbleed", "--json-only", "render", "--html", "invoice.html",
+            "--css", "invoice.css", "--out", "invoice.pdf", "--watch",
+        ],
+        "result_schema": "fullbleed.render_result.v1",
+    },
+    {
         "id": "verify_before_delivery_cli",
         "intent": "Validate a document and fail on overflow or missing glyphs.",
         "interface": "cli",
@@ -205,6 +215,11 @@ EXAMPLES = [
 
 
 KNOWN_LIMITATIONS = [
+    {
+        "id": "watch_scope",
+        "summary": "Render watch mode polls explicit local input files and optional recursive watch paths. It does not run a Python data generator or discover every file referenced inside HTML/CSS or JSON.",
+        "agent_action": "Use --watch-path for extra dependencies. Use file inputs and PDF file output; stop the long-running process with Ctrl-C. Use one-shot render for delivery gates.",
+    },
     {
         "id": "not_a_browser",
         "summary": "Fullbleed does not execute JavaScript or reproduce live browser state.",

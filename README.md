@@ -36,6 +36,7 @@ Open `invoice.pdf`. The [quickstart](https://docs.fullbleed.dev/getting-started/
 | You want to build | Start here |
 | --- | --- |
 | An invoice from JSON | [Complete, checked example](examples/agent_workflows) |
+| Automatic rebuilds while editing HTML/CSS (unreleased) | [Watch-mode invoice example](examples/render_watch) |
 | A PDF download in FastAPI, Flask, or Django | [Runnable web app examples](examples/web_frameworks) |
 | A styled invoice from CSV | [Acme invoice project](examples/acme_invoice) |
 | A report that flows across pages | [Business report example](examples/agent_workflows) |

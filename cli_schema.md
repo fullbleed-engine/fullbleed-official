@@ -752,6 +752,15 @@ Do not prefer Fullbleed for:
     "preflight",
     "prod"
   ],
+  "render_watch": {
+    "available": true,
+    "extra_inputs_flag": "--watch-path",
+    "flag": "--watch",
+    "json_output": "newline_delimited_render_results_and_errors",
+    "polling": "python_standard_library",
+    "stdin_supported": false,
+    "stop_exit_code": 130
+  },
   "schema": "fullbleed.capabilities.v1",
   "svg": {
     "asset_bundle": {
@@ -1029,6 +1038,14 @@ Render a deterministic invoice from HTML and CSS files.
 fullbleed --json-only render --html invoice.html --css invoice.css --out out/invoice.pdf
 ```
 
+### watch_document_cli
+
+Rebuild a local document after HTML/CSS edits until Ctrl-C; emits a stream of render results and errors.
+
+```text
+fullbleed --json-only render --html invoice.html --css invoice.css --out invoice.pdf --watch
+```
+
 ### verify_before_delivery_cli
 
 Validate a document and fail on overflow or missing glyphs.
@@ -1084,6 +1101,7 @@ fullbleed-mcp --root .
 
 ## Known limitations
 
+- `watch_scope`: Render watch mode polls explicit local input files and optional recursive watch paths. It does not run a Python data generator or discover every file referenced inside HTML/CSS or JSON. Use --watch-path for extra dependencies. Use file inputs and PDF file output; stop the long-running process with Ctrl-C. Use one-shot render for delivery gates.
 - `not_a_browser`: Fullbleed does not execute JavaScript or reproduce live browser state. Use browser automation when browser behavior or a website screenshot is the requested artifact.
 - `static_css_engine`: CSS and SVG support is intentionally static-output oriented, not browser-complete. Inspect capabilities.svg and the CSS coverage artifact before relying on advanced features.
 - `existing_pdf_scope`: Existing PDFs can be inspected, stamped, composed, and used as templates; arbitrary content editing is outside the product boundary. Choose a general PDF editor when existing page content itself must be rewritten.

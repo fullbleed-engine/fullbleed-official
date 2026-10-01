@@ -101,6 +101,7 @@ High-value options:
 - image artifacts: `--emit-image`, `--image-dpi`
 - policy: `--profile`, `--fail-on`, `--allow-fallbacks`, budget flags
 - reproducibility: `--deterministic-hash`, `--repro-record`, `--repro-check`
+- development (unreleased): `--watch`, repeatable `--watch-path`, `--watch-interval`, `--watch-debounce`; see [automatic rebuilds](render-watch.md)
 
 Template auto-compose notes:
 - When `--templates` is set on `render`, CLI renders overlay, resolves template bindings, and finalizes via Rust compose in one command.
