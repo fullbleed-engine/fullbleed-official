@@ -5,7 +5,7 @@
 
 Build invoices, reports, statements, and variable-data print jobs with a deterministic Rust engine and a Python API. The wheel includes the rendering engine, fonts, and CLI, with no required third-party Python packages or system PDF stack.
 
-[Documentation](https://fullbleed-engine.github.io/docs/) · [Examples](https://fullbleed-engine.github.io/docs/examples/) · [PyPI](https://pypi.org/project/fullbleed/) · [Release notes](https://github.com/fullbleed-engine/fullbleed-official/releases) · [MIT license](LICENSE)
+[Documentation](https://docs.fullbleed.dev/) · [Examples](https://docs.fullbleed.dev/examples/) · [PyPI](https://pypi.org/project/fullbleed/) · [Release notes](https://github.com/fullbleed-engine/fullbleed-official/releases) · [MIT license](LICENSE)
 
 ## Your first PDF
 
@@ -27,7 +27,7 @@ pdf = fullbleed.PdfEngine().render_pdf(html, css)
 Path("invoice.pdf").write_bytes(pdf)
 ```
 
-Open `invoice.pdf`. The [quickstart](https://fullbleed-engine.github.io/docs/getting-started/quickstart/) adds fonts, previews, and a complete project. The runnable source is in [`examples/quickstart/hello.py`](examples/quickstart/hello.py).
+Open `invoice.pdf`. The [quickstart](https://docs.fullbleed.dev/getting-started/quickstart/) adds fonts, previews, and a complete project. The runnable source is in [`examples/quickstart/hello.py`](examples/quickstart/hello.py).
 
 ## Choose your starting point
 
@@ -41,7 +41,7 @@ Open `invoice.pdf`. The [quickstart](https://fullbleed-engine.github.io/docs/get
 | Print profiles and PDF/VT record hierarchies | [Print output and verification scope](docs/pdf-vt.md) |
 | A coding-agent or MCP integration | [Agent setup](#agent-discovery-and-integrations) |
 
-[See generated PDFs and their source →](https://fullbleed-engine.github.io/docs/examples/)
+[See generated PDFs and their source →](https://docs.fullbleed.dev/examples/)
 
 ## Why use Fullbleed?
 
@@ -54,6 +54,10 @@ Open `invoice.pdf`. The [quickstart](https://fullbleed-engine.github.io/docs/get
 Fullbleed uses static HTML/CSS as a document layout language. Check the [CSS coverage and remaining gaps](docs/css-coverage.md) for your templates. Use a browser when JavaScript or live website behavior is part of the required result.
 
 Profile selection alone does not establish standards conformance. The [release evidence](docs/release/2.4.0-validation-report.md) records the checks performed and their limits.
+
+## Get help and contribute
+
+Ask usage questions and share documents in [Discussions](https://github.com/fullbleed-engine/fullbleed-official/discussions). For a reproducible bug or feature proposal, [open an issue](https://github.com/fullbleed-engine/fullbleed-official/issues/new/choose). The [contributor guide](CONTRIBUTING.md) covers local setup, tests, and where to make changes.
 
 ## Agent discovery and integrations
 

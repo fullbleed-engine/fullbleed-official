@@ -8,7 +8,7 @@ This folder documents the Fullbleed stack at three layers:
 
 ## Version scope
 
-These docs target the current repository source layout. For the published release, use the [documentation site](https://fullbleed-engine.github.io/docs/) or the documentation at the matching Git tag. Agent-facing commands, schemas, capabilities, and profiles are generated from the installed runtime; use `fullbleed agent-contract --format json` as the source of truth.
+These docs target the current repository source layout. For the published release, use the [documentation site](https://docs.fullbleed.dev/) or the documentation at the matching Git tag. Agent-facing commands, schemas, capabilities, and profiles are generated from the installed runtime; use `fullbleed agent-contract --format json` as the source of truth.
 
 ## Documents
 

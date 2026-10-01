@@ -1,0 +1,23 @@
+name: Feature proposal
+description: Describe a document workflow that Fullbleed could support better.
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: workflow
+    attributes:
+      label: What document or workflow are you trying to build?
+      description: Describe the inputs, desired output, and current limitation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Include a small input/output example or API sketch if possible.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Current workaround and constraints
+      description: For example, required output format, platform, determinism, or a measured workload.

@@ -1,0 +1,43 @@
+name: Bug report
+description: Report a reproducible engine, layout, CLI, or installation problem.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Fullbleed. For usage questions, use [Discussions](https://github.com/fullbleed-engine/fullbleed-official/discussions). Please use synthetic data and assets you can share publicly.
+  - type: input
+    id: version
+    attributes:
+      label: Fullbleed version
+      description: Run `python -m fullbleed --version`.
+      placeholder: Fullbleed version or source commit
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Python version, operating system, architecture, and installation method.
+      placeholder: Python 3.12, Windows 11 x64, pip wheel
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include the command or Python script, HTML/CSS, and required assets. Attach a small input file if useful.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual output
+      description: Identify the affected page or element. Attach a PDF or screenshot for layout problems.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Include relevant errors or `python -m fullbleed doctor --json` output. For profile issues, include the validator version, profile, and report if available.
