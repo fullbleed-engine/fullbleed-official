@@ -9,6 +9,8 @@ Build invoices, reports, statements, and variable-data print jobs with a determi
 
 ## Your first PDF
 
+Try the [editable invoice notebook in Colab](https://colab.research.google.com/github/fullbleed-engine/fullbleed-official/blob/master/examples/notebooks/first_invoice.ipynb) to render, preview, and download a PDF without a local setup. Or start with a Python script:
+
 Python 3.10–3.14 on Windows, macOS, or Linux:
 
 ```bash

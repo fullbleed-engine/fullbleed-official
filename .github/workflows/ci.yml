@@ -152,6 +152,20 @@ jobs:
       - name: Run installed-wheel agent workflow examples
         run: python examples/agent_workflows/run_examples.py --out target/agent-examples --json
 
+      - name: Install notebook check tools
+        run: python -m pip install -r examples/notebooks/requirements-check.txt
+
+      - name: Execute the first-invoice notebook with the installed wheel
+        run: python tools/check_quickstart_notebook.py --skip-install --out target/notebook-check
+
+      - name: Retain executed notebook and generated invoice
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: first-invoice-notebook-${{ runner.os }}
+          path: target/notebook-check
+          if-no-files-found: warn
+
       - name: Prepare neutral AgentDocBench smoke task
         run: python tools/agentdocbench.py prepare --workspace target/agentdocbench --task invoice --json
 
