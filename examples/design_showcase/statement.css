@@ -1,0 +1,25 @@
+.statement { background: #f8f4f6; color: #382047; }
+.statement .masthead { display: flex; justify-content: space-between; align-items: center; border-bottom: .8pt solid #705876; padding-bottom: 17pt; }
+.statement .brand { font: 24pt 'DM Serif Display'; }
+.statement .title-row { display: grid; grid-template-columns: 2fr 1fr; gap: 21pt; margin: 23pt 0 18pt; }
+.statement h1 { font: 40pt/.98 'DM Serif Display'; letter-spacing: -.6pt; }
+.statement .account { border-left: .6pt solid #a18caa; padding-left: 17pt; font-size: 8pt; line-height: 1.8; }
+.statement .recipient { font-size: 9pt; margin-top: 13pt; }
+.statement .balance { background: #e8ddec; border-top: 1pt solid #67456e; padding: 20pt 22pt; margin: 21pt 0; display: grid; grid-template-columns: 2fr 1fr; align-items: center; }
+.statement .balance .value { font: 62pt/1 'DM Serif Display'; margin-top: 7pt; letter-spacing: -1pt; }
+.statement .balance .tagline { font: 16pt/1.2 'DM Serif Display'; border-left: .6pt solid #94779e; padding-left: 17pt; }
+.statement h2 { font: 16pt 'DM Serif Display'; margin-bottom: 10pt; }
+.statement .summary td { padding: 7pt 0; font-size: 8.2pt; border-color: #cdbed0; }
+.statement .summary .closing { background: #e6d9e9; font-weight: 600; }
+.statement .chart { display: flex; height: 92pt; align-items: flex-end; gap: 9pt; border-bottom: .6pt solid #94779e; padding-top: 9pt; }
+.statement .chart-col { width: 26pt; flex: 1; min-width: 0; text-align: center; }
+.statement .chart-value { font-size: 6.5pt; margin-bottom: 4pt; }
+.statement .bar { background: #785487; width: 100%; }
+.statement .chart-labels { display: flex; gap: 9pt; margin-top: 5pt; font-size: 6pt; }
+.statement .chart-labels span { display: block; flex: 1; text-align: center; }
+.statement .transactions { margin-top: 23pt; }
+.statement .transactions td { padding: 8pt 0; font-size: 8pt; border-color: #cdbed0; }
+.statement .transactions th { border-color: #85648f; }
+.statement .closing-note { display: grid; grid-template-columns: 1fr 1fr; gap: 24pt; border-top: 1pt solid #705876; padding-top: 12pt; margin-top: 14pt; }
+.statement .closing-note .serif { font-size: 21pt; font-style: italic; line-height: 1.15; }
+.statement .footer { border-color: #a28aaa; }

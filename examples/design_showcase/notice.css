@@ -1,0 +1,24 @@
+.notice { color: #123c79; background: #f6f5ef; }
+.notice .masthead { display: flex; justify-content: space-between; align-items: center; padding-bottom: 18pt; border-bottom: 1pt solid #426eaa; }
+.notice .brand { font: 26pt/1.05 'DM Serif Display'; }
+.notice .masthead .kicker { font-size: 6.6pt; line-height: 1.7; }
+.notice .notice-title { display: grid; grid-template-columns: 2.3fr 1fr; gap: 22pt; padding: 23pt 0 18pt; }
+.notice h1 { font: 47pt/.95 'Bebas Neue'; margin-top: 9pt; }
+.notice .date { border-left: 1pt solid #6485b2; padding-left: 18pt; }
+.notice .date strong { font: 34pt/1 'Bebas Neue'; display: block; }
+.notice .date strong span { display: block; line-height: 1; }
+.notice .date .time { font: 14pt/1.2 'Bebas Neue'; margin-top: 9pt; }
+.notice .intro { font: 18pt/1.18 'DM Serif Display'; margin-bottom: 20pt; }
+.notice .alert { background: #143e7b; color: white; padding: 20pt 22pt; border-left: 5pt solid #dcb845; margin-bottom: 23pt; }
+.notice .alert p { font-size: 11pt; margin-top: 7pt; line-height: 1.5; }
+.notice h2 { font-size: 8.5pt; font-weight: 600; letter-spacing: 1.2pt; text-transform: uppercase; margin-bottom: 10pt; }
+.notice .details { font-size: 9.5pt; line-height: 1.55; }
+.notice .details > div + div { border-left: .65pt solid #8ba2bd; padding-left: 22pt; }
+.notice ul { padding-left: 13pt; margin: 0; }
+.notice li { margin-bottom: 7pt; }
+.notice .help { background: #e0e9f2; padding: 15pt; margin-top: 17pt; }
+.notice .help p { font-size: 8.5pt; line-height: 1.6; }
+.notice .timeline { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12pt; margin-top: 28pt; padding-top: 13pt; border-top: 2pt solid #1c4a86; }
+.notice .timeline strong { display: block; font: 16pt 'Bebas Neue'; }
+.notice .timeline p { font-size: 8pt; margin-top: 4pt; }
+.notice .footer { border-color: #7d9bbf; }
