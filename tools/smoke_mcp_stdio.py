@@ -6,10 +6,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
+import uuid
 
 
 def _request(request_id: int, method: str, params: dict | None = None) -> dict:
@@ -21,24 +24,27 @@ def _request(request_id: int, method: str, params: dict | None = None) -> dict:
     }
 
 
-def run(executable: str | None = None) -> dict:
+def run(executable: str | None = None, *, container_image: str | None = None) -> dict:
     with tempfile.TemporaryDirectory(prefix="fullbleed-mcp-smoke-") as raw:
+        container_name = None
         command = (
             [executable, "--root", raw]
             if executable
             else [sys.executable, "-m", "fullbleed_mcp", "--root", raw]
         )
-        process = subprocess.Popen(
-            command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-        )
-        assert process.stdin is not None
-        assert process.stdout is not None
-        assert process.stderr is not None
+        if container_image:
+            container_name = f"fullbleed-mcp-smoke-{uuid.uuid4().hex}"
+            command = [
+                "docker", "run", "--rm", "-i", "--name", container_name,
+                "--network", "none", "--cap-drop", "ALL",
+                "--security-opt", "no-new-privileges", "--read-only",
+                "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
+                "--mount", f"type=bind,source={Path(raw).resolve()},target=/workspace",
+            ]
+            if os.name == "posix":
+                # Let the container write only this temporary host workspace.
+                command.extend(["--user", f"{os.getuid()}:{os.getgid()}"])
+            command.extend([container_image, "--root", "/workspace"])
         requests = [
             _request(
                 1,
@@ -104,20 +110,53 @@ def run(executable: str | None = None) -> dict:
                 },
             ),
         ]
+        if container_image:
+            requests.append(_request(8, "tools/call", {
+                "name": "fullbleed_inspect", "arguments": {"path": "/etc/passwd"},
+            }))
+        process = subprocess.Popen(
+            command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, encoding="utf-8",
+        )
+        assert process.stdin is not None
+        assert process.stdout is not None
+        assert process.stderr is not None
+        # Bound each cold-process session, including a stalled stdout read.
+        timer = threading.Timer(90, process.kill)
+        timer.daemon = True
+        timer.start()
         responses = []
-        for request in requests:
-            process.stdin.write(json.dumps(request) + "\n")
-            process.stdin.flush()
-            line = process.stdout.readline()
-            if not line:
-                raise AssertionError(
-                    "MCP server closed stdout before responding: "
-                    + process.stderr.read()
+        try:
+            for request in requests:
+                process.stdin.write(json.dumps(request) + "\n")
+                process.stdin.flush()
+                line = process.stdout.readline()
+                if not line:
+                    raise AssertionError("MCP server closed stdout before responding")
+                responses.append(json.loads(line))
+                if request["method"] == "initialize":
+                    process.stdin.write(json.dumps({
+                        "jsonrpc": "2.0", "method": "notifications/initialized",
+                    }) + "\n")
+                    process.stdin.flush()
+            process.stdin.close()
+            return_code = process.wait(timeout=15)
+            stderr = process.stderr.read()
+        finally:
+            timer.cancel()
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=15)
+            if container_name:
+                # --rm handles normal exits; also clean up our container on timeout.
+                subprocess.run(
+                    ["docker", "rm", "--force", container_name],
+                    capture_output=True, timeout=20, check=False,
                 )
-            responses.append(json.loads(line))
-        process.stdin.close()
-        return_code = process.wait(timeout=15)
-        stderr = process.stderr.read()
+        if len(responses) != len(requests):
+            raise AssertionError(f"MCP response count mismatch: {len(responses)}; {stderr}")
+        if [response.get("id") for response in responses] != [request["id"] for request in requests]:
+            raise AssertionError("MCP response IDs do not match the requests")
         artifacts = {
             "preview_pdf": (Path(raw) / "preview" / "preview.pdf").is_file(),
             "preview_png": any((Path(raw) / "preview" / "pages").glob("*.png")),
@@ -133,7 +172,7 @@ def run(executable: str | None = None) -> dict:
         inspect_call,
         verify_call,
         vdp_call,
-    ) = responses
+    ) = responses[:7]
     if initialized["result"]["protocolVersion"] != "2025-11-25":
         raise AssertionError("MCP protocol negotiation failed")
     tool_names = {tool["name"] for tool in listed["result"]["tools"]}
@@ -167,7 +206,7 @@ def run(executable: str | None = None) -> dict:
         raise AssertionError("MCP compiled VDP did not produce three records/pages")
     if not all(artifacts.values()):
         raise AssertionError(f"MCP artifact set is incomplete: {artifacts}")
-    return {
+    result = {
         "schema": "fullbleed.mcp_stdio_smoke.v1",
         "ok": True,
         "protocol_version": initialized["result"]["protocolVersion"],
@@ -180,17 +219,32 @@ def run(executable: str | None = None) -> dict:
             "bytes_written": vdp["bytes_written"],
         },
     }
+    if container_image:
+        denied = responses[7].get("result", {})
+        if not denied.get("isError") or "escapes MCP workspace root" not in json.dumps(denied):
+            raise AssertionError("MCP container did not reject a path outside its workspace")
+        result["container"] = {
+            "image": container_image,
+            "network": "none",
+            "read_only_image": True,
+            "workspace_escape_rejected": True,
+        }
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
+    transport = parser.add_mutually_exclusive_group()
+    transport.add_argument(
         "--executable",
         help="Optional fullbleed-mcp executable; defaults to the current Python module",
     )
+    transport.add_argument(
+        "--container-image", help="Exercise a built MCP Docker image with a temporary workspace",
+    )
     parser.add_argument("--json", action="store_true")
     arguments = parser.parse_args(argv)
-    result = run(arguments.executable)
+    result = run(arguments.executable, container_image=arguments.container_image)
     if arguments.json:
         sys.stdout.write(json.dumps(result, ensure_ascii=True) + "\n")
     else:
