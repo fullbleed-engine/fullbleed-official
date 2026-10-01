@@ -1,0 +1,14 @@
+@page { size: A4; margin: 20mm; }
+body { font-family: "Noto Sans"; font-size: 11pt; color: #203a36; }
+.brand { color: #175c52; font-size: 12pt; font-weight: 700; letter-spacing: 1pt; }
+h1 { color: #175c52; font-size: 28pt; margin: 24pt 0 8pt; }
+h2 { font-size: 10pt; color: #526660; margin: 0 0 6pt; }
+p { margin: 0 0 12pt; }
+.muted { color: #526660; font-size: 10pt; }
+.bill-to { margin: 24pt 0; }
+table { width: 100%; border-collapse: collapse; }
+th { background: #eaf1ef; color: #175c52; text-align: left; }
+th, td { padding: 10pt 7pt; border-bottom: 1pt solid #d3dfda; }
+.number { text-align: right; }
+.total { margin-top: 24pt; font-size: 17pt; text-align: right; }
+.thanks { margin-top: 30pt; }

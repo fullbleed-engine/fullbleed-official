@@ -2247,6 +2247,22 @@ def _emit_result(ok, schema, out_path, bytes_written, outputs, args, error=None)
 
 def cmd_render(args):
     """CLI handler for `fullbleed render`."""
+    if getattr(args, "watch", False):
+        from . import watch
+
+        _validate_pdf_options(args)
+        _validate_budget_configuration(args)
+        return watch.run(
+            args, _execute_command, _emit_cli_error,
+            asset_paths=[path for path, _kind, _name in _resolve_assets(args)],
+        )
+    if getattr(args, "watch_path", None):
+        raise ValueError("--watch-path requires --watch")
+    return _cmd_render_once(args)
+
+
+def _cmd_render_once(args):
+    """Run one render, shared by ordinary and watched invocations."""
     html = _collect_html(args)
     css = _collect_css(args)
     _validate_pdf_options(args)
@@ -2356,6 +2372,7 @@ def cmd_render(args):
         raise SystemExit(1)
     
     _emit_result(True, "fullbleed.render_result.v1", args.out, bytes_written, outputs, args)
+    return outputs
 
 
 def _inspect_print_output(args, out_path, pdf_bytes):
@@ -3065,6 +3082,15 @@ def _capabilities_payload(cli_surface=None):
             "--repro-record",
             "--repro-check",
         ],
+        "render_watch": {
+            "available": True,
+            "flag": "--watch",
+            "polling": "python_standard_library",
+            "json_output": "newline_delimited_render_results_and_errors",
+            "extra_inputs_flag": "--watch-path",
+            "stdin_supported": False,
+            "stop_exit_code": 130,
+        },
         "agent_contract": {
             "available": True,
             "schema": AGENT_CONTRACT_SCHEMA,
@@ -3754,6 +3780,14 @@ def _build_parser():
     p_render = sub.add_parser("render", help="Render HTML/CSS to PDF (optionally emit PNG pages)")
     _add_common_flags(p_render)
     p_render.add_argument("--out", required=True)
+    p_render.add_argument("--watch", action="store_true",
+                         help="Rebuild after local input changes until Ctrl-C; JSON results stream one per line")
+    p_render.add_argument("--watch-path", action="append",
+                         help="Additional file or recursive directory to watch (repeatable; requires --watch)")
+    p_render.add_argument("--watch-interval", type=float, default=0.5,
+                         help="Seconds between watch polls (default: 0.5)")
+    p_render.add_argument("--watch-debounce", type=float, default=0.2,
+                         help="Seconds inputs must remain unchanged before rebuilding (default: 0.2)")
     p_render.set_defaults(func=cmd_render)
 
     p_verify = sub.add_parser("verify", help="Validation render path with optional PDF/PNG artifacts")
@@ -4063,6 +4097,46 @@ def _cli_error_hints(args):
     return hints, relevant
 
 
+def _execute_command(args):
+    """Dispatch one command, retaining its resolved input manifest when requested."""
+    watching = bool(getattr(args, "watch", False))
+    manifest_path = getattr(args, "emit_manifest", None)
+    if manifest_path and not watching:
+        if manifest_path == "-":
+            raise ValueError("--emit-manifest cannot be '-' (stdout). Provide a file path.")
+        Path(manifest_path).write_text(
+            json.dumps(_build_manifest(args), ensure_ascii=True, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+    result = args.func(args)
+    if manifest_path and not watching:
+        Path(manifest_path).write_text(
+            json.dumps(_build_manifest(args), ensure_ascii=True, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+    return result
+
+
+def _emit_cli_error(args, exc):
+    """Share ordinary command errors with recoverable watch-cycle errors."""
+    if args.json:
+        recommended_actions, relevant_commands = _cli_error_hints(args)
+        err = {
+            "schema": "fullbleed.error.v1",
+            "ok": False,
+            "code": next((code for code in (
+                "PDF_PROFILE_CONTRACT_VIOLATION", "PDF_TIMESTAMP_INVALID", "PDF_VT_JOB_INVALID"
+            ) if code + ":" in str(exc)), "CLI_ERROR"),
+            "message": str(exc),
+            "command": getattr(args, "command", None),
+            "recommended_actions": recommended_actions,
+            "relevant_commands": relevant_commands,
+        }
+        sys.stdout.write(json.dumps(err, ensure_ascii=True) + "\n")
+    else:
+        sys.stderr.write(f"[error] {exc}\n")
+
+
 def main(argv=None):
     """Execute CLI command dispatch and standardized error handling."""
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -4087,39 +4161,9 @@ def main(argv=None):
         args.json = True
     _apply_global_flags(args)
     try:
-        if getattr(args, "emit_manifest", None):
-            if args.emit_manifest == "-":
-                raise ValueError("--emit-manifest cannot be '-' (stdout). Provide a file path.")
-            manifest = _build_manifest(args)
-            Path(args.emit_manifest).write_text(
-                json.dumps(manifest, ensure_ascii=True, indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
-        args.func(args)
-        if getattr(args, "emit_manifest", None):
-            # Engine creation resolves current/SOURCE_DATE_EPOCH once. Retain
-            # that value, rather than the initial unresolved command input.
-            Path(args.emit_manifest).write_text(
-                json.dumps(_build_manifest(args), ensure_ascii=True, indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
+        _execute_command(args)
     except Exception as exc:
-        if args.json:
-            recommended_actions, relevant_commands = _cli_error_hints(args)
-            err = {
-                "schema": "fullbleed.error.v1",
-                "ok": False,
-                "code": next((code for code in (
-                    "PDF_PROFILE_CONTRACT_VIOLATION", "PDF_TIMESTAMP_INVALID", "PDF_VT_JOB_INVALID"
-                ) if code + ":" in str(exc)), "CLI_ERROR"),
-                "message": str(exc),
-                "command": getattr(args, "command", None),
-                "recommended_actions": recommended_actions,
-                "relevant_commands": relevant_commands,
-            }
-            sys.stdout.write(json.dumps(err, ensure_ascii=True) + "\n")
-        else:
-            sys.stderr.write(f"[error] {exc}\n")
+        _emit_cli_error(args, exc)
         return 3
     return 0
 

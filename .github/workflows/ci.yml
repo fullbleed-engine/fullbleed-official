@@ -135,6 +135,22 @@ jobs:
       - name: Smoke-test installed wheel
         run: python tools/smoke_installed_package.py --expected-version "${{ env.FULLBLEED_CI_VERSION }}" --json
 
+      - name: Check render watch behavior with the installed engine
+        env:
+          FULLBLEED_TEST_INSTALLED_NATIVE: "1"
+        run: python -m pytest tests/test_fullbleed_cli_watch.py -q
+
+      - name: Exercise the installed CLI watcher as a real process
+        run: python -I tools/smoke_render_watch.py --out target/watch-smoke
+
+      - name: Retain watch results, PDFs, and previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: render-watch-${{ runner.os }}
+          path: target/watch-smoke
+          if-no-files-found: warn
+
       - name: Verify agent artifacts match the installed wheel
         run: python tools/generate_agent_contract.py --python python --check --json
 
