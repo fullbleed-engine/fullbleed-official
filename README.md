@@ -7,6 +7,13 @@ Build invoices, reports, statements, and variable-data print jobs with a determi
 
 [Documentation](https://docs.fullbleed.dev/) · [Examples](https://docs.fullbleed.dev/examples/) · [PyPI](https://pypi.org/project/fullbleed/) · [Release notes](https://github.com/fullbleed-engine/fullbleed-official/releases) · [MIT license](LICENSE)
 
+<p>
+  <a href="https://docs.fullbleed.dev/assets/showcase/invoice.pdf"><img src="https://docs.fullbleed.dev/assets/showcase/invoice-1.png" width="48%" alt="Northstar Studio invoice rendered by Fullbleed, with serif typography and forest-green tables"></a>
+  <a href="https://docs.fullbleed.dev/assets/showcase/report.pdf"><img src="https://docs.fullbleed.dev/assets/showcase/report-1.png" width="48%" alt="Common Ground community report rendered by Fullbleed, with a vector landscape illustration and editorial layout"></a>
+</p>
+
+Actual Fullbleed output. Open either preview for its PDF, or [explore all four designs with complete HTML/CSS, data, and licensed fonts](https://docs.fullbleed.dev/examples/).
+
 ## Your first PDF
 
 Try the [editable invoice notebook in Colab](https://colab.research.google.com/github/fullbleed-engine/fullbleed-official/blob/master/examples/notebooks/first_invoice.ipynb) to render, preview, and download a PDF without a local setup. Or start with a Python script:
