@@ -1,3 +1,35 @@
+# Fullbleed Release Notes - 2.5.1
+
+Release date: October 1, 2026
+
+## MCP client compatibility
+
+MCP tool discovery now declares `"type": "object"` at the root of every tool's
+output schema. Earlier schemas already described object-valued success and
+error results through `anyOf`, but strict clients rejected `tools/list` because
+the required top-level type was missing.
+
+The correction lives in the shared runtime tool definitions. Generated agent
+contracts and both MCP entrypoints therefore describe the same schemas. Tool
+names, inputs, structured results, and error variants keep their existing shape.
+
+Upgrade the engine in the Python environment used by your MCP client:
+
+```sh
+python -m pip install --upgrade fullbleed fullbleed-mcp
+```
+
+The release adds an independent interoperability check using the official
+TypeScript MCP SDK. It exercises discovery, a structured capabilities result,
+PDF preview generation, and a structured tool error against the installed wheel.
+The SDK is a development-only test dependency; the core Python package gains
+no runtime dependency. The Rust renderer is unchanged.
+
+See the [2.5.1 release runbook](docs/release/2.5.1-runbook.md) for required checks
+and the evidence retained before publication.
+
+---
+
 # Fullbleed Release Notes - 2.5.0
 
 Release date: October 1, 2026

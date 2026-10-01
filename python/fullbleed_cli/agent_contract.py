@@ -431,6 +431,7 @@ def _tool(
         "description": description,
         "inputSchema": dict(input_schema),
         "outputSchema": {
+            "type": "object",
             "anyOf": [
                 deepcopy(_MCP_SUCCESS_SCHEMAS[name]),
                 deepcopy(_MCP_ERROR_SCHEMA),
