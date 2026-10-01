@@ -30,6 +30,7 @@ or verify command for delivery gates.
 
 - A runnable first-invoice notebook includes a Colab link and a generated PDF preview.
 - FastAPI, Flask, and Django examples serve the same invoice with shared rendering code and verified HTTP response headers.
+- The [designed showcase](https://docs.fullbleed.dev/examples/) includes an editorial invoice, a vector-illustrated report, a tagged notice, and compiled member statements, with complete HTML/CSS, data, and licensed font sources. Its published PDFs remain reproducible with the public 2.4.0 wheel.
 - The generated agent contract and CLI reference expose watch-mode flags, result streaming, and scope limits from the installed runtime.
 
 ## Compatibility and verification
