@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.3"
+  FULLBLEED_CI_VERSION: "2.5.4"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -67,6 +67,9 @@ jobs:
         run: |
           Write-Host "FULLBLEED_FONT_DIR=$env:FULLBLEED_FONT_DIR"
           Get-ChildItem $env:FULLBLEED_FONT_DIR | Select-Object -First 5 Name, Length
+
+      - name: Check bundled Standard 14 metric tables
+        run: python tools/generate_base14_metrics.py --check
 
       - name: Run rust test suite
         run: cargo test --locked -- --nocapture
@@ -134,6 +137,17 @@ jobs:
 
       - name: Smoke-test installed wheel
         run: python tools/smoke_installed_package.py --expected-version "${{ env.FULLBLEED_CI_VERSION }}" --json
+
+      - name: Verify native Standard 14 preview spacing
+        run: python -I tools/smoke_base14_preview.py --out target/base14-preview
+
+      - name: Retain Standard 14 preview evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: base14-preview-${{ runner.os }}
+          path: target/base14-preview
+          if-no-files-found: warn
 
       - name: Check render watch behavior with the installed engine
         env:

@@ -10,7 +10,7 @@ on:
         description: "Annotated release tag whose exact source commit will be published"
         required: true
         type: string
-        default: "v2.5.3"
+        default: "v2.5.4"
       publish:
         description: "Publish after all validation gates pass"
         required: true
@@ -120,6 +120,9 @@ jobs:
 
       - name: Check Rust formatting
         run: cargo fmt --all --check
+
+      - name: Check bundled Standard 14 metric tables
+        run: python tools/generate_base14_metrics.py --check
 
       - name: Test Rust source
         run: cargo test --locked

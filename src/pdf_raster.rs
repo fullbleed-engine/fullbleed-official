@@ -214,6 +214,7 @@ struct PdfFontMetrics {
     code_encoding: PdfCharCodeWidthEncoding,
     single_byte_text_encoding: PdfSingleByteTextEncoding,
     single_byte_code_map: HashMap<u8, String>,
+    standard14: bool,
 }
 
 #[derive(Clone, Default)]
@@ -1102,6 +1103,15 @@ fn emit_text_by_codes(
 }
 
 fn decode_single_code(code: u16, font: &PdfFontResource) -> String {
+    // ToUnicode describes searchable text. Standard fonts paint the glyph chosen
+    // by their encoding, even when a ToUnicode map assigns it different text.
+    if font.metrics.standard14 {
+        return u8::try_from(code)
+            .ok()
+            .and_then(|code| font.metrics.single_byte_code_map.get(&code))
+            .cloned()
+            .unwrap_or_default();
+    }
     if let Some(mapped) = font.to_unicode.get_u16(code, font.metrics.code_encoding) {
         return mapped;
     }
@@ -1709,6 +1719,7 @@ fn parse_type0_font_metrics(
         code_encoding,
         single_byte_text_encoding: PdfSingleByteTextEncoding::default(),
         single_byte_code_map: HashMap::new(),
+        standard14: false,
     }
 }
 
@@ -1853,12 +1864,91 @@ fn parse_simple_font_metrics(doc: &LoDocument, font_dict: &LoDictionary) -> PdfF
     let single_byte_code_map =
         parse_simple_font_code_map(doc, font_dict, single_byte_text_encoding);
 
-    PdfFontMetrics {
+    let mut metrics = PdfFontMetrics {
         default_width,
         widths,
         code_encoding: PdfCharCodeWidthEncoding::SingleByte,
         single_byte_text_encoding,
         single_byte_code_map,
+        standard14: false,
+    };
+    apply_base14_metrics(doc, font_dict, &mut metrics);
+    metrics
+}
+
+fn apply_base14_metrics(doc: &LoDocument, font_dict: &LoDictionary, metrics: &mut PdfFontMetrics) {
+    let subtype = font_dict
+        .get(b"Subtype")
+        .ok()
+        .and_then(|object| resolve_object(doc, object).ok())
+        .and_then(|object| object.as_name().ok());
+    if subtype != Some(b"Type1".as_slice()) {
+        return;
+    }
+    let name = font_dict
+        .get(b"BaseFont")
+        .ok()
+        .and_then(|object| resolve_object(doc, object).ok())
+        .and_then(|object| object.as_name().ok())
+        .map(name_bytes_to_string)
+        .map(|name| normalize_pdf_font_name(&name));
+    let Some(font) = name.as_deref().and_then(crate::base14_metrics::font) else {
+        return;
+    };
+    // An embedded replacement program must keep its own widths and encoding.
+    let embedded = font_dict
+        .get(b"FontDescriptor")
+        .ok()
+        .and_then(|object| resolve_object(doc, object).ok())
+        .and_then(|object| object.as_dict().ok())
+        .is_some_and(|descriptor| {
+            [b"FontFile".as_slice(), b"FontFile2", b"FontFile3"]
+                .iter()
+                .any(|key| descriptor.get(key).is_ok())
+        });
+    if embedded {
+        return;
+    }
+    metrics.standard14 = true;
+    let encoding = font_dict
+        .get(b"Encoding")
+        .ok()
+        .and_then(|object| resolve_object(doc, object).ok())
+        .and_then(|object| {
+            object.as_name().ok().or_else(|| {
+                object
+                    .as_dict()
+                    .ok()
+                    .and_then(|dictionary| dictionary.get(b"BaseEncoding").ok())
+                    .and_then(|object| resolve_object(doc, object).ok())
+                    .and_then(|object| object.as_name().ok())
+            })
+        })
+        .and_then(PdfSingleByteTextEncoding::from_pdf_name);
+    let differences = parse_simple_font_glyph_names(doc, font_dict);
+    let use_standard_widths = font_dict.get(b"Widths").is_err();
+    for code in u8::MIN..=u8::MAX {
+        let glyph = if let Some(name) = differences.get(&code) {
+            font.glyph_by_name(name)
+        } else if let Some(encoding) = encoding {
+            encoding
+                .decode_byte(code)
+                .and_then(|ch| font.glyph_by_unicode(ch))
+        } else {
+            font.builtin_glyph(code)
+        };
+        // Respect the font's built-in encoding (including Symbol and ZapfDingbats)
+        // and explicit Differences. Undefined glyphs must not inherit a Latin letter.
+        metrics
+            .single_byte_code_map
+            .insert(code, glyph.map_or("", |glyph| glyph.text).to_string());
+        if use_standard_widths {
+            if let Some(glyph) = glyph {
+                metrics
+                    .widths
+                    .insert(u16::from(code), f32::from(glyph.width));
+            }
+        }
     }
 }
 
@@ -1899,6 +1989,16 @@ fn parse_simple_font_code_map(
     font_dict: &LoDictionary,
     _base_encoding: PdfSingleByteTextEncoding,
 ) -> HashMap<u8, String> {
+    parse_simple_font_glyph_names(doc, font_dict)
+        .into_iter()
+        .filter_map(|(code, name)| glyph_name_to_unicode(&name).map(|text| (code, text)))
+        .collect()
+}
+
+fn parse_simple_font_glyph_names(
+    doc: &LoDocument,
+    font_dict: &LoDictionary,
+) -> HashMap<u8, Vec<u8>> {
     let encoding_obj = match font_dict.get(b"Encoding") {
         Ok(obj) => obj,
         Err(_) => return HashMap::new(),
@@ -1936,9 +2036,7 @@ fn parse_simple_font_code_map(
         };
         if let Ok(name) = resolved_item.as_name() {
             if code <= u8::MAX as u16 {
-                if let Some(mapped) = glyph_name_to_unicode(name) {
-                    out.insert(code as u8, mapped);
-                }
+                out.insert(code as u8, name.to_vec());
             }
             code = code.saturating_add(1);
         }
@@ -4451,6 +4549,221 @@ endbfrange
             .expect("preview PNG")
             .into_rgba8();
         assert!(has_non_white_pixel(&image));
+    }
+
+    #[test]
+    fn base14_preview_uses_standard_helvetica_advances_without_widths() {
+        let doc = LoDocument::with_version("1.7");
+        let font = resolve_font_resource(
+            &doc,
+            &LoObject::Dictionary(dictionary! {
+                "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+                "Encoding" => "WinAnsiEncoding",
+            }),
+        )
+        .expect("standard font");
+        let mut state = ParseState::default();
+        state.font_size = Pt::from_f32(12.0);
+        // Adobe Helvetica widths are i=222, W=944, and space=278 per 1000 em.
+        for (code, advance) in [(b'i', 2.664), (b'W', 11.328), (b' ', 3.336)] {
+            assert!(
+                (glyph_advance_text_space(u16::from(code), &state, &font) - advance).abs() < 0.0001
+            );
+        }
+        assert!((advance_from_pdf_codes(b"iWi", &state, &font).unwrap() - 16.656).abs() < 0.0001);
+    }
+
+    #[test]
+    fn base14_preview_recognizes_all_standard_fonts_and_builtin_symbols() {
+        let doc = LoDocument::with_version("1.7");
+        for (name, space) in [
+            ("Courier", 600.0),
+            ("Courier-Bold", 600.0),
+            ("Courier-Oblique", 600.0),
+            ("Courier-BoldOblique", 600.0),
+            ("Helvetica", 278.0),
+            ("Helvetica-Bold", 278.0),
+            ("Helvetica-Oblique", 278.0),
+            ("Helvetica-BoldOblique", 278.0),
+            ("Times-Roman", 250.0),
+            ("Times-Bold", 250.0),
+            ("Times-Italic", 250.0),
+            ("Times-BoldItalic", 250.0),
+            ("Symbol", 250.0),
+            ("ZapfDingbats", 278.0),
+        ] {
+            let font = resolve_font_resource(
+                &doc,
+                &LoObject::Dictionary(dictionary! {
+                    "Type" => "Font", "Subtype" => "Type1",
+                    "BaseFont" => LoObject::Name(name.as_bytes().to_vec()),
+                }),
+            )
+            .unwrap();
+            assert!(font.metrics.standard14, "{name}");
+            assert_eq!(font.metrics.widths.get(&32), Some(&space), "{name}");
+            match name {
+                "Symbol" => {
+                    assert_eq!(decode_single_code(65, &font), "\u{0391}");
+                    assert_eq!(font.metrics.widths.get(&65), Some(&722.0));
+                }
+                "ZapfDingbats" => {
+                    assert_eq!(decode_single_code(33, &font), "\u{2701}");
+                    assert_eq!(font.metrics.widths.get(&33), Some(&974.0));
+                }
+                _ => assert_eq!(decode_single_code(65, &font), "A"),
+            }
+        }
+    }
+
+    #[test]
+    fn base14_preview_applies_base_encodings_and_differences() {
+        let doc = LoDocument::with_version("1.7");
+        for (encoding, code, text, width) in [
+            ("StandardEncoding", 39, "\u{2019}", 222.0),
+            ("WinAnsiEncoding", 39, "'", 191.0),
+            ("WinAnsiEncoding", 128, "\u{20ac}", 556.0),
+            ("MacRomanEncoding", 128, "\u{00c4}", 667.0),
+        ] {
+            let font = resolve_font_resource(
+                &doc,
+                &LoObject::Dictionary(dictionary! {
+                    "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+                    "Encoding" => LoObject::Name(encoding.as_bytes().to_vec()),
+                }),
+            )
+            .unwrap();
+            assert_eq!(decode_single_code(code, &font), text, "{encoding}");
+            assert_eq!(font.metrics.widths.get(&code), Some(&width), "{encoding}");
+        }
+        let font = resolve_font_resource(
+            &doc,
+            &LoObject::Dictionary(dictionary! {
+                "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+                "Encoding" => LoObject::Dictionary(dictionary! {
+                    "BaseEncoding" => "WinAnsiEncoding",
+                    "Differences" => LoObject::Array(vec![65.into(), LoObject::Name(b"W".to_vec()),
+                        LoObject::Name(b"i".to_vec()), LoObject::Name(b"fi".to_vec()),
+                        LoObject::Name(b"not_a_real_glyph".to_vec())]),
+                }),
+            }),
+        )
+        .unwrap();
+        for (code, text, width) in [(65, "W", 944.0), (66, "i", 222.0), (67, "\u{fb01}", 500.0)] {
+            assert_eq!(decode_single_code(code, &font), text);
+            assert_eq!(font.metrics.widths.get(&code), Some(&width));
+        }
+        assert_eq!(decode_single_code(68, &font), "");
+        assert!(!font.metrics.widths.contains_key(&68));
+    }
+
+    #[test]
+    fn base14_preview_preserves_explicit_widths_embedded_fonts_and_unknown_fonts() {
+        let mut doc = LoDocument::with_version("1.7");
+        let font = resolve_font_resource(
+            &doc,
+            &LoObject::Dictionary(dictionary! {
+                "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+                "FirstChar" => 105, "LastChar" => 106,
+                "Widths" => LoObject::Array(vec![900.into(), 20.into()]),
+                "FontDescriptor" => LoObject::Dictionary(dictionary! { "MissingWidth" => 123 }),
+            }),
+        )
+        .unwrap();
+        assert_eq!(font.metrics.widths.len(), 2);
+        assert_eq!(font.metrics.widths.get(&105), Some(&900.0));
+        assert_eq!(font.metrics.widths.get(&106), Some(&20.0));
+        assert_eq!(font.metrics.default_width, 123.0);
+        assert!(!font.metrics.widths.contains_key(&u16::from(b'W')));
+
+        let program = doc.add_object(LoStream::new(dictionary! {}, vec![0u8]));
+        let embedded = resolve_font_resource(
+            &doc,
+            &LoObject::Dictionary(dictionary! {
+                "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+                "FontDescriptor" => LoObject::Dictionary(dictionary! { "FontFile2" => program }),
+            }),
+        )
+        .unwrap();
+        assert!(!embedded.metrics.standard14);
+        assert!(embedded.metrics.widths.is_empty());
+        let unknown = resolve_font_resource(
+            &doc,
+            &LoObject::Dictionary(dictionary! {
+                "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "CustomFont",
+            }),
+        )
+        .unwrap();
+        assert!(!unknown.metrics.standard14);
+        assert!(unknown.metrics.widths.is_empty());
+        assert_eq!(unknown.metrics.default_width, 500.0);
+    }
+
+    #[test]
+    fn base14_preview_positions_text_with_spacing_and_horizontal_scale() {
+        let doc = LoDocument::with_version("1.7");
+        let font = resolve_font_resource(
+            &doc,
+            &LoObject::Dictionary(dictionary! {
+                "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+            }),
+        )
+        .unwrap();
+        let mut state = ParseState::default();
+        state.font_size = Pt::from_f32(12.0);
+        state.text_matrix = Matrix::translation(20.0, 30.0);
+        state.char_spacing = 2.0;
+        state.word_spacing = 3.0;
+        state.text_h_scale = 0.5;
+        let codes: Vec<_> = b"iW i".iter().copied().map(u16::from).collect();
+        let mut commands = Vec::new();
+        assert!(emit_text_by_codes(
+            &mut commands,
+            &state,
+            100.0,
+            &codes,
+            &font
+        ));
+        let positions: Vec<_> = commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::DrawString { x, .. } => Some(x.to_f32()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(positions.len(), 4);
+        for (actual, expected) in positions.iter().zip([20.0, 22.332, 28.996, 33.164]) {
+            assert!(
+                (actual - expected).abs() < 0.002,
+                "{actual} versus {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn base14_preview_keeps_visible_glyph_separate_from_to_unicode_text() {
+        let doc = LoDocument::with_version("1.7");
+        let mut font = resolve_font_resource(
+            &doc,
+            &LoObject::Dictionary(dictionary! {
+                "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+            }),
+        )
+        .unwrap();
+        font.to_unicode.insert(1, u32::from(b'W'), "i".to_string());
+        assert_eq!(decode_single_code(u16::from(b'W'), &font), "W");
+        assert_eq!(
+            decode_text_operand(
+                Some(&LoObject::String(
+                    b"W".to_vec(),
+                    crate::pdf_native::StringFormat::Literal
+                )),
+                Some(&font)
+            )
+            .as_deref(),
+            Some("i")
+        );
+        assert_eq!(font.metrics.widths.get(&u16::from(b'W')), Some(&944.0));
     }
 
     #[test]

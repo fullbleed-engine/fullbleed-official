@@ -1,5 +1,6 @@
 mod assets;
 mod authoring;
+mod base14_metrics;
 mod base64;
 mod canvas;
 mod chart;

@@ -941,6 +941,7 @@ def _sdist_files() -> list[Path]:
             "Cargo.lock",
             "build.rs",
             "pyproject.toml",
+            "tools/generate_base14_metrics.py",
             str(project.get("readme", "README.md")),
             *project.get("license-files", []),
         )
@@ -948,6 +949,7 @@ def _sdist_files() -> list[Path]:
     roots = [
         _ROOT / "src",
         _ROOT / "build_backend",
+        _ROOT / "tools" / "data" / "base14",
         _ROOT / "crates" / "fullbleed_audit_contract" / "src",
         _ROOT / "crates" / "fullbleed_audit_contract" / "specs",
     ]

@@ -394,3 +394,20 @@ def test_sdist_archive_is_reproducible_and_pep517_complete(
     assert f"{root}/build.rs" in names
     assert f"{root}/build_backend/fullbleed_build_backend.py" in names
     assert not any("/target/" in f"/{name}/" for name in names)
+
+    # A source distribution must retain the complete metric derivation, including
+    # upstream permission files. Exercise regeneration from the archive itself.
+    unpacked = tmp_path / "metric-source"
+    with tarfile.open(first / filename, "r:gz") as archive:
+        for member in archive.getmembers():
+            relative = Path(member.name).relative_to(root)
+            if (relative.as_posix().startswith("tools/data/base14/") or
+                    relative.as_posix() in {"tools/generate_base14_metrics.py",
+                                            "src/base14_metrics_data.rs",
+                                            "THIRD_PARTY_LICENSES.md"}):
+                assert ".." not in relative.parts and member.isfile()
+                target = unpacked / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(archive.extractfile(member).read())
+    subprocess.run([sys.executable, str(unpacked / "tools/generate_base14_metrics.py"), "--check"],
+                   check=True, cwd=unpacked)

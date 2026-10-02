@@ -4,6 +4,11 @@ This directory is the release-operations layer for Fullbleed. It is separate
 from feature documentation so release decisions can be audited without reading
 engine internals.
 
+## 2.5.4 Documents
+
+- `docs/release/2.5.4-runbook.md`: native Standard 14 preview spacing and retained visual checks.
+- `tools/smoke_base14_preview.py`: actual PDF/PNG comparisons against explicit reference widths, with negative controls.
+
 ## 2.5.3 Documents
 
 - `docs/release/2.5.3-runbook.md`: reproducibility baseline validation, failure controls, and installed-package verification.

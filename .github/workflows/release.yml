@@ -63,6 +63,9 @@ jobs:
       - name: Validate MIT license metadata
         run: python tools/check_license_integrity.py --json
 
+      - name: Check bundled Standard 14 metric tables
+        run: python tools/generate_base14_metrics.py --check
+
       - name: Validate clean release worktree
         run: python tools/check_release_worktree.py --json
 
@@ -99,6 +102,17 @@ jobs:
 
       - name: Exercise installed reproducibility failure controls
         run: python -I tools/smoke_repro_check.py --out target/repro-smoke
+
+      - name: Verify native Standard 14 preview spacing
+        run: python -I tools/smoke_base14_preview.py --out target/base14-preview
+
+      - name: Retain Standard 14 preview evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-base14-preview
+          path: target/base14-preview
+          if-no-files-found: warn
 
       - name: Retain release reproducibility evidence
         if: always()

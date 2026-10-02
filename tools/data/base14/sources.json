@@ -1,0 +1,97 @@
+{
+  "schema": "fullbleed.base14_metric_sources.v1",
+  "afm_source_commit": "c4d556abc9d5f0cbc486d459c84682321dd38ff4",
+  "glyph_list_source_commit": "4036a9ca80a62f64f9de4f7321a9a045ad0ecfd6",
+  "files": {
+    "Courier.afm": {
+      "url": "https://raw.githubusercontent.com/apache/pdfbox/c4d556abc9d5f0cbc486d459c84682321dd38ff4/pdfbox/src/main/resources/org/apache/pdfbox/resources/afm/Courier.afm",
+      "bytes": 15677,
+      "sha256": "e72833dda79161e3aaf385adfeb59c61c89a4a3e184f27d21c178056eea30e17"
+    },
+    "Courier-Bold.afm": {
+      "url": "https://raw.githubusercontent.com/apache/pdfbox/c4d556abc9d5f0cbc486d459c84682321dd38ff4/pdfbox/src/main/resources/org/apache/pdfbox/resources/afm/Courier-Bold.afm",
+      "bytes": 15675,
+      "sha256": "1e86f0a949e316c08df32adc2fc2e2a92ed9902ffd54e3516e5a66a32db856da"
+    },
+    "Courier-Oblique.afm": {
+      "url": "https://raw.githubusercontent.com/apache/pdfbox/c4d556abc9d5f0cbc486d459c84682321dd38ff4/pdfbox/src/main/resources/org/apache/pdfbox/resources/afm/Courier-Oblique.afm",
+      "bytes": 15783,
+      "sha256": "9e3494b4abb127a6586c095a377924514dd6956973f8f3b0bd7d6d00fcc89ea6"
+    },
+    "Courier-BoldOblique.afm": {
+      "url": "https://raw.githubusercontent.com/apache/pdfbox/c4d556abc9d5f0cbc486d459c84682321dd38ff4/pdfbox/src/main/resources/org/apache/pdfbox/resources/afm/Courier-BoldOblique.afm",
+      "bytes": 15741,
+      "sha256": "e1349f5f306b16338972eaf7f43d7913535cc075a15189b5f3efc841aee3d02e"
+    },
+    "Helvetica.afm": {
+      "url": "https://raw.githubusercontent.com/apache/pdfbox/c4d556abc9d5f0cbc486d459c84682321dd38ff4/pdfbox/src/main/resources/org/apache/pdfbox/resources/afm/Helvetica.afm",
+      "bytes": 77343,
+      "sha256": "5654761eab868ccb3080122accf13b4fb79edf37af09e1c57a881c35c334ee03"
+    },
+    "Helvetica-Bold.afm": {
+      "url": "https://raw.githubusercontent.com/apache/pdfbox/c4d556abc9d5f0cbc486d459c84682321dd38ff4/pdfbox/src/main/resources/org/apache/pdfbox/resources/afm/Helvetica-Bold.afm",
+      "bytes": 72096,
+      "sha256": "59ac93091bc7e76eb6baf60210526a4df88fe107dd5e13eb0ae70c9fc6d91fb9"
+    },
+    "Helvetica-Oblique.afm": {
+      "url": "https://raw.githubusercontent.com/apache/pdfbox/c4d556abc9d5f0cbc486d459c84682321dd38ff4/pdfbox/src/main/resources/org/apache/pdfbox/resources/afm/Helvetica-Oblique.afm",
+      "bytes": 77443,
+      "sha256": "8c00ac46ca5963df22d4fc1153ea1246c8778475820378640c8d54d4fd3a46fe"
+    },
+    "Helvetica-BoldOblique.afm": {
+      "url": "https://raw.githubusercontent.com/apache/pdfbox/c4d556abc9d5f0cbc486d459c84682321dd38ff4/pdfbox/src/main/resources/org/apache/pdfbox/resources/afm/Helvetica-BoldOblique.afm",
+      "bytes": 72192,
+      "sha256": "1f848276efd76c0e5020ef98ccb459005f5a022f56cb8579e52c98e33ffab03b"
+    },
+    "Times-Roman.afm": {
+      "url": "https://raw.githubusercontent.com/apache/pdfbox/c4d556abc9d5f0cbc486d459c84682321dd38ff4/pdfbox/src/main/resources/org/apache/pdfbox/resources/afm/Times-Roman.afm",
+      "bytes": 62879,
+      "sha256": "b6dbde33196ff61f051f8468fb81a0dece63997a80b7fba058e8295f49480026"
+    },
+    "Times-Bold.afm": {
+      "url": "https://raw.githubusercontent.com/apache/pdfbox/c4d556abc9d5f0cbc486d459c84682321dd38ff4/pdfbox/src/main/resources/org/apache/pdfbox/resources/afm/Times-Bold.afm",
+      "bytes": 66839,
+      "sha256": "37efa084183acfb06f45ad73bd75f6dd09b20d1e498c66ce1b9aa72b00db4ac7"
+    },
+    "Times-Italic.afm": {
+      "url": "https://raw.githubusercontent.com/apache/pdfbox/c4d556abc9d5f0cbc486d459c84682321dd38ff4/pdfbox/src/main/resources/org/apache/pdfbox/resources/afm/Times-Italic.afm",
+      "bytes": 68995,
+      "sha256": "2f34d3bc49530532daa690aec165b68368162d4c27d24fbe6a3fb24aae49a74a"
+    },
+    "Times-BoldItalic.afm": {
+      "url": "https://raw.githubusercontent.com/apache/pdfbox/c4d556abc9d5f0cbc486d459c84682321dd38ff4/pdfbox/src/main/resources/org/apache/pdfbox/resources/afm/Times-BoldItalic.afm",
+      "bytes": 62026,
+      "sha256": "1bf83cee5300d4de1ce90681a2a2d70fd1876c664e91c1c4c6b6b5b12873b6da"
+    },
+    "Symbol.afm": {
+      "url": "https://raw.githubusercontent.com/apache/pdfbox/c4d556abc9d5f0cbc486d459c84682321dd38ff4/pdfbox/src/main/resources/org/apache/pdfbox/resources/afm/Symbol.afm",
+      "bytes": 9953,
+      "sha256": "13eeef80def2f9a8d3a31a980731376823e8b48340ff3891ffc1cc0299c0b4fe"
+    },
+    "ZapfDingbats.afm": {
+      "url": "https://raw.githubusercontent.com/apache/pdfbox/c4d556abc9d5f0cbc486d459c84682321dd38ff4/pdfbox/src/main/resources/org/apache/pdfbox/resources/afm/ZapfDingbats.afm",
+      "bytes": 9752,
+      "sha256": "d3e7b9f6366ab0df06acbb217c8586c5962ff2efbd4e1b5566c7eaf5b745dd41"
+    },
+    "MustRead.html": {
+      "url": "https://raw.githubusercontent.com/apache/pdfbox/c4d556abc9d5f0cbc486d459c84682321dd38ff4/pdfbox/src/main/resources/org/apache/pdfbox/resources/afm/MustRead.html",
+      "bytes": 937,
+      "sha256": "b226bfc00e1b8b8a80c7b3cfbbc322d13b4b0401f94cdeafdd93b2210ad802eb"
+    },
+    "agl-glyphlist.txt": {
+      "url": "https://raw.githubusercontent.com/adobe-type-tools/agl-aglfn/4036a9ca80a62f64f9de4f7321a9a045ad0ecfd6/glyphlist.txt",
+      "bytes": 78060,
+      "sha256": "a3b2f61ced9f3644cc0d4ecde5c59df34ca286c689d9484a43a710a81c466789"
+    },
+    "agl-zapfdingbats.txt": {
+      "url": "https://raw.githubusercontent.com/adobe-type-tools/agl-aglfn/4036a9ca80a62f64f9de4f7321a9a045ad0ecfd6/zapfdingbats.txt",
+      "bytes": 3879,
+      "sha256": "f6394e3cb8a447e84a1dad75d4baaf2aa7f45dc104faf369f4720e1a774ef2dc"
+    },
+    "agl-LICENSE.md": {
+      "url": "https://raw.githubusercontent.com/adobe-type-tools/agl-aglfn/4036a9ca80a62f64f9de4f7321a9a045ad0ecfd6/LICENSE.md",
+      "bytes": 1404,
+      "sha256": "58147d341e7a34aa2196862395a34d2fd95716c41d5ed26efb59ab0e12f92089"
+    }
+  }
+}
