@@ -4,11 +4,22 @@ This directory is the release-operations layer for Fullbleed. It is separate
 from feature documentation so release decisions can be audited without reading
 engine internals.
 
+## 2.5.2 Documents
+
+- `docs/release/2.5.2-runbook.md`: MCP input guidance, side-effect hints, and public package verification.
+- `docs/agent-discovery.md`: Agent Skill installation and MCP discovery procedures.
+- `ReleaseNotes.MD`: current release summary and retained earlier notes.
+
+## 2.5.1 Documents
+
+- `docs/release/2.5.1-runbook.md`: strict MCP client compatibility and installed-wheel interoperability checks.
+- `tools/mcp-client-smoke/README.md`: official client SDK reproduction and validation.
+
 ## 2.5.0 Documents
 
 - `docs/release/2.5.0-runbook.md`: watch-mode release, package verification, and publication procedure.
 - `docs/render-watch.md`: automatic rebuilds, explicit dependencies, result streaming, and limits.
-- `ReleaseNotes.MD`: 2.5.0 release summary.
+- `ReleaseNotes.MD`: retained 2.5.0 release summary.
 
 ## 2.4.0 Documents
 
@@ -19,7 +30,7 @@ engine internals.
 
 ## 2.3.1 Documents
 
-- `docs/release/2.3.1-runbook.md`: current Cargo, PyPI, wheel-matrix, and GitHub release procedure.
+- `docs/release/2.3.1-runbook.md`: historical Cargo, PyPI, wheel-matrix, and GitHub release procedure.
 - `ReleaseNotes.MD`: historical 2.3.1 notes are retained in the `v2.3.1` GitHub release.
 
 ## 2.3.0 Documents
@@ -29,7 +40,7 @@ engine internals.
 
 ## 2.2.5 Documents
 
-- `docs/release/2.2.5-runbook.md`: current Cargo, PyPI, wheel-matrix, and GitHub
+- `docs/release/2.2.5-runbook.md`: historical Cargo, PyPI, wheel-matrix, and GitHub
   release procedure.
 - `docs/performance-pass-2026-08-04.md`: compiled content-reflow architecture, exact-parity
   evidence, and the independently measured 8,095.8-pages/s hot median (10,355.3-pages/s best).
