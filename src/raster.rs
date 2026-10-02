@@ -92,6 +92,7 @@ struct RasterState {
     mask_shader_phase: (f32, f32),
     filtered_output_bounds: Option<PixelBounds>,
     discrete_image_sampling: bool,
+    pdf_semantics: bool,
 }
 
 impl Default for RasterState {
@@ -116,6 +117,7 @@ impl Default for RasterState {
             mask_shader_phase: (0.0, 0.0),
             filtered_output_bounds: None,
             discrete_image_sampling: false,
+            pdf_semantics: false,
         }
     }
 }
@@ -583,7 +585,16 @@ pub(crate) fn document_to_png_pages(
     registry: Option<&FontRegistry>,
     shape_text: bool,
 ) -> Result<Vec<Vec<u8>>, FullBleedError> {
-    document_to_png_pages_with_background(document, dpi, registry, shape_text, false)
+    document_to_png_pages_with_background(document, dpi, registry, shape_text, false, false)
+}
+
+pub(crate) fn document_to_png_pages_from_pdf(
+    document: &Document,
+    dpi: u32,
+    registry: Option<&FontRegistry>,
+    shape_text: bool,
+) -> Result<Vec<Vec<u8>>, FullBleedError> {
+    document_to_png_pages_with_background(document, dpi, registry, shape_text, false, true)
 }
 
 pub(crate) fn document_to_transparent_png_pages(
@@ -592,7 +603,7 @@ pub(crate) fn document_to_transparent_png_pages(
     registry: Option<&FontRegistry>,
     shape_text: bool,
 ) -> Result<Vec<Vec<u8>>, FullBleedError> {
-    document_to_png_pages_with_background(document, dpi, registry, shape_text, true)
+    document_to_png_pages_with_background(document, dpi, registry, shape_text, true, false)
 }
 
 fn document_to_png_pages_with_background(
@@ -601,6 +612,7 @@ fn document_to_png_pages_with_background(
     registry: Option<&FontRegistry>,
     shape_text: bool,
     transparent: bool,
+    pdf_semantics: bool,
 ) -> Result<Vec<Vec<u8>>, FullBleedError> {
     let dpi = if dpi == 0 { 150 } else { dpi };
     let scale = dpi as f32 / 72.0;
@@ -647,7 +659,10 @@ fn document_to_png_pages_with_background(
             pixmap.fill(RasterColor::from_rgba8(255, 255, 255, 255));
         }
 
-        let mut state = RasterState::default();
+        let mut state = RasterState {
+            pdf_semantics,
+            ..RasterState::default()
+        };
         let mut stack: Vec<RasterState> = Vec::new();
         let mut path_builder = PathBuilder::new();
         let mut has_path = false;
@@ -795,7 +810,14 @@ fn render_mask_coverage(
                 // The pixmap is premultiplied, so luminance of its RGB
                 // channels already includes source alpha.
                 MaskMode::Luminance => {
-                    (0.2126 * pixel[0] as f32 + 0.7152 * pixel[1] as f32 + 0.0722 * pixel[2] as f32)
+                    let weights = if parent_state.pdf_semantics {
+                        [0.3, 0.59, 0.11]
+                    } else {
+                        [0.2126, 0.7152, 0.0722]
+                    };
+                    (weights[0] * pixel[0] as f32
+                        + weights[1] * pixel[1] as f32
+                        + weights[2] * pixel[2] as f32)
                         / 255.0
                 }
             })
@@ -838,6 +860,9 @@ fn render_commands(
     registry: Option<&FontRegistry>,
     shape_text: bool,
 ) -> Result<(), FullBleedError> {
+    // Keep the page/form extent fixed while content-stream CTMs change the
+    // shading field. Forms start with their placement transform already set.
+    let shading_extent_transform = state.transform;
     for cmd in commands {
         match cmd {
             Command::SaveState => stack.push(state.clone()),
@@ -972,6 +997,7 @@ fn render_commands(
                     page_height_pt,
                     page_width_pt,
                     base_transform,
+                    shading_extent_transform,
                 );
             }
             Command::MoveTo { x, y } => {
@@ -1467,7 +1493,11 @@ fn render_commands(
                     *height,
                     base_transform,
                     state,
-                    (MASK_SHADER_PHASE_PT, MASK_SHADER_PHASE_PT),
+                    if state.pdf_semantics {
+                        (0.0, 0.0)
+                    } else {
+                        (MASK_SHADER_PHASE_PT, MASK_SHADER_PHASE_PT)
+                    },
                     forms,
                     image_cache,
                     registry,
@@ -3131,6 +3161,7 @@ fn draw_shading_fill(
     page_height_pt: f32,
     page_width_pt: f32,
     base_transform: Transform,
+    extent_transform: Transform,
 ) {
     let Some(page_rect) =
         Rect::from_xywh(0.0, 0.0, page_width_pt.max(0.0), page_height_pt.max(0.0))
@@ -3143,11 +3174,17 @@ fn draw_shading_fill(
         page_height_pt,
         state.fill_opacity,
         state.mask_shader_phase,
+        state.pdf_semantics,
     ) else {
         return;
     };
     let mut paint = Paint::default();
-    paint.shader = shader;
+    // A shading fills the current clipping region. Its CTM transforms the
+    // color field, not an additional page-sized rectangle in local space.
+    let Some(inverse_extent) = extent_transform.inverse() else {
+        return;
+    };
+    paint.shader = shader.transformed(inverse_extent.pre_concat(state.transform));
     paint.anti_alias = true;
     paint.blend_mode = sk_blend_mode(state.blend_mode);
     fill_path_blended(
@@ -3155,7 +3192,7 @@ fn draw_shading_fill(
         &page_path,
         &paint,
         FillRule::Winding,
-        base_transform.pre_concat(state.transform),
+        base_transform.pre_concat(extent_transform),
         state.clip_mask.as_ref(),
         state.blend_mode,
     );
@@ -3166,6 +3203,7 @@ fn build_shading_shader(
     page_height_pt: f32,
     opacity: f32,
     mask_phase: (f32, f32),
+    pdf_semantics: bool,
 ) -> Option<Shader<'static>> {
     match shading {
         Shading::Axial {
@@ -3192,16 +3230,19 @@ fn build_shading_shader(
         } => {
             let start = Point::from_xy(*x0 + mask_phase.0, page_height_pt - *y0 - mask_phase.1);
             let end = Point::from_xy(*x1 + mask_phase.0, page_height_pt - *y1 - mask_phase.1);
-            let radius = (*r1 - *r0).abs().max(0.0001);
             let stops = shading_stops(stops, opacity);
-            RadialGradient::new(
-                start,
-                end,
-                radius,
-                stops,
-                SpreadMode::Pad,
-                Transform::identity(),
-            )
+            if *r0 == 0.0 && !pdf_semantics {
+                RadialGradient::new(
+                    start,
+                    end,
+                    *r1,
+                    stops,
+                    SpreadMode::Pad,
+                    Transform::identity(),
+                )
+            } else {
+                RadialGradient::two_circle(start, *r0, end, *r1, stops, Transform::identity())
+            }
         }
         Shading::Conic {
             center_x,

@@ -242,7 +242,7 @@ impl Transform {
         }
     }
 
-    fn inverse(self) -> Option<Self> {
+    pub(crate) fn inverse(self) -> Option<Self> {
         let determinant = self.sx as f64 * self.sy as f64 - self.kx as f64 * self.ky as f64;
         if !determinant.is_finite() || determinant.abs() <= f64::EPSILON {
             return None;
@@ -534,6 +534,14 @@ enum ShaderKind {
         stops: Vec<GradientStop>,
         transform: Transform,
     },
+    TwoCircleRadial {
+        start: Point,
+        start_radius: f32,
+        end: Point,
+        end_radius: f32,
+        stops: Vec<GradientStop>,
+        transform: Transform,
+    },
     Conic {
         center: Point,
         start_angle_deg: f32,
@@ -549,6 +557,19 @@ pub(crate) struct Shader<'a> {
 }
 
 impl<'a> Shader<'a> {
+    pub(crate) fn transformed(mut self, matrix: Transform) -> Self {
+        match &mut self.kind {
+            ShaderKind::Solid(_) => {}
+            ShaderKind::Linear { transform, .. }
+            | ShaderKind::Radial { transform, .. }
+            | ShaderKind::TwoCircleRadial { transform, .. }
+            | ShaderKind::Conic { transform, .. } => {
+                *transform = matrix.pre_concat(*transform);
+            }
+        }
+        self
+    }
+
     fn solid(color: Color) -> Self {
         Self {
             kind: ShaderKind::Solid(color),
@@ -601,6 +622,48 @@ impl<'a> Shader<'a> {
                 let c = q.x * q.x + q.y * q.y;
                 let t = solve_gradient_parameter(a, b, c).unwrap_or(0.0);
                 sample_stops(stops, t.clamp(0.0, 1.0))
+            }
+            ShaderKind::TwoCircleRadial {
+                start,
+                start_radius,
+                end,
+                end_radius,
+                stops,
+                transform,
+            } => {
+                let Some(inverse) = transform.inverse() else {
+                    return Color::from_rgba8(0, 0, 0, 0);
+                };
+                let point = inverse.map(point);
+                let dx = f64::from(end.x - start.x);
+                let dy = f64::from(end.y - start.y);
+                let dr = f64::from(end_radius - start_radius);
+                let qx = f64::from(point.x - start.x);
+                let qy = f64::from(point.y - start.y);
+                let r0 = f64::from(*start_radius);
+                let a = dx * dx + dy * dy - dr * dr;
+                let b = -2.0 * (qx * dx + qy * dy + r0 * dr);
+                let c = qx * qx + qy * qy - r0 * r0;
+                let roots = if a.abs() <= 1e-12 {
+                    if b.abs() <= 1e-12 {
+                        [f64::NAN; 2]
+                    } else {
+                        [-c / b; 2]
+                    }
+                } else {
+                    let root = (b * b - 4.0 * a * c).sqrt();
+                    [(-b - root) / (2.0 * a), (-b + root) / (2.0 * a)]
+                };
+                let parameter = roots
+                    .into_iter()
+                    .filter(|t| t.is_finite() && r0 + dr * t >= 0.0)
+                    // PDF paints circles in increasing parameter order. Where
+                    // they overlap, the greatest valid parameter is visible.
+                    .max_by(f64::total_cmp);
+                let Some(parameter) = parameter else {
+                    return Color::from_rgba8(0, 0, 0, 0);
+                };
+                sample_stops(stops, parameter.clamp(0.0, 1.0) as f32)
             }
             ShaderKind::Conic {
                 center,
@@ -709,6 +772,38 @@ impl LinearGradient {
 pub(crate) struct RadialGradient;
 
 impl RadialGradient {
+    pub(crate) fn two_circle(
+        start: Point,
+        start_radius: f32,
+        end: Point,
+        end_radius: f32,
+        mut stops: Vec<GradientStop>,
+        transform: Transform,
+    ) -> Option<Shader<'static>> {
+        if !finite_point(start)
+            || !finite_point(end)
+            || !start_radius.is_finite()
+            || !end_radius.is_finite()
+            || start_radius < 0.0
+            || end_radius < 0.0
+            || stops.is_empty()
+        {
+            return None;
+        }
+        stops.sort_by(|left, right| left.offset.total_cmp(&right.offset));
+        Some(Shader {
+            kind: ShaderKind::TwoCircleRadial {
+                start,
+                start_radius,
+                end,
+                end_radius,
+                stops,
+                transform,
+            },
+            marker: PhantomData,
+        })
+    }
+
     pub(crate) fn new(
         start: Point,
         end: Point,

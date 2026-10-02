@@ -13,6 +13,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
+mod forms;
+mod shading;
+
 #[derive(Clone, Copy, Debug)]
 struct Matrix {
     a: f32,
@@ -229,8 +232,9 @@ enum PdfCodeToGlyphMap {
 struct PdfResources {
     fonts: HashMap<String, PdfFontResource>,
     xobjects: HashMap<String, ObjectId>,
-    extgstates: HashMap<String, (f32, f32)>,
+    extgstates: HashMap<String, PdfExtGState>,
     color_spaces: HashMap<String, RasterColorSpace>,
+    shadings: HashMap<String, LoObject>,
 }
 
 impl PdfResources {
@@ -243,13 +247,23 @@ impl PdfResources {
             out.xobjects.insert(k.clone(), *v);
         }
         for (k, v) in &child.extgstates {
-            out.extgstates.insert(k.clone(), *v);
+            out.extgstates.insert(k.clone(), v.clone());
         }
         for (k, v) in &child.color_spaces {
             out.color_spaces.insert(k.clone(), v.clone());
         }
+        for (k, v) in &child.shadings {
+            out.shadings.insert(k.clone(), v.clone());
+        }
         out
     }
+}
+
+#[derive(Clone, Default)]
+struct PdfExtGState {
+    fill: Option<f32>,
+    stroke: Option<f32>,
+    soft_mask: Option<LoObject>,
 }
 
 #[derive(Clone)]
@@ -272,6 +286,8 @@ struct ParseState {
     opacity_scale_stroke: f32,
     fill_color_space: Option<RasterColorSpace>,
     stroke_color_space: Option<RasterColorSpace>,
+    // A soft mask's coordinate system is fixed when `gs` installs it.
+    soft_mask: Option<(LoObject, Matrix)>,
 }
 
 impl Default for ParseState {
@@ -295,6 +311,7 @@ impl Default for ParseState {
             opacity_scale_stroke: 1.0,
             fill_color_space: Some(RasterColorSpace::Direct(RasterDirectColor::Gray)),
             stroke_color_space: Some(RasterColorSpace::Direct(RasterDirectColor::Gray)),
+            soft_mask: None,
         }
     }
 }
@@ -308,6 +325,8 @@ struct ParsedPage {
 #[derive(Default)]
 struct PdfRasterCache {
     image_data_uri_by_object: HashMap<ObjectId, String>,
+    page_width: f32,
+    next_form: usize,
 }
 
 pub(crate) fn pdf_path_to_png_pages(
@@ -353,7 +372,7 @@ pub(crate) fn pdf_bytes_to_png_pages(
             }],
         };
         let mut pngs =
-            raster::document_to_png_pages(&document, dpi, effective_registry, shape_text)?;
+            raster::document_to_png_pages_from_pdf(&document, dpi, effective_registry, shape_text)?;
         if let Some(page_png) = pngs.pop() {
             out.push(page_png);
         } else {
@@ -385,6 +404,7 @@ fn parse_page(
     embedded_fonts: &mut HashMap<String, Arc<Vec<u8>>>,
 ) -> Result<ParsedPage, FullBleedError> {
     let size = page_size_for_id(doc, page_id)?;
+    cache.page_width = size.width.to_f32();
     let resources = resources_from_page(doc, page_id, embedded_fonts)?;
     let content_bytes = doc.get_page_content(page_id).map_err(pdf_err)?;
     let content = decode_content_with_fallback(&content_bytes)?;
@@ -482,9 +502,21 @@ fn parse_operations(
             }
             "gs" => {
                 if let Some(name) = op_name(op, 0) {
-                    if let Some((fill, stroke)) = resources.extgstates.get(&name).copied() {
-                        state.active_fill_opacity = fill.clamp(0.0, 1.0);
-                        state.active_stroke_opacity = stroke.clamp(0.0, 1.0);
+                    if let Some(gs) = resources.extgstates.get(&name) {
+                        if let Some(fill) = gs.fill {
+                            state.active_fill_opacity = fill;
+                        }
+                        if let Some(stroke) = gs.stroke {
+                            state.active_stroke_opacity = stroke;
+                        }
+                        if let Some(mask) = &gs.soft_mask {
+                            state.soft_mask =
+                                if resolve_object(doc, mask)?.as_name().ok() == Some(b"None") {
+                                    None
+                                } else {
+                                    Some((mask.clone(), state.ctm))
+                                };
+                        }
                         let effective_fill =
                             (state.active_fill_opacity * state.opacity_scale_fill).clamp(0.0, 1.0);
                         let effective_stroke = (state.active_stroke_opacity
@@ -821,6 +853,26 @@ fn parse_operations(
                     }
                 }
             }
+            "sh" => {
+                if let Some(name) = op_name(op, 0) {
+                    let object = resources.shadings.get(&name).ok_or_else(|| {
+                        FullBleedError::InvalidConfiguration(format!(
+                            "pdf raster error: missing shading resource {name}"
+                        ))
+                    })?;
+                    forms::paint_shading(
+                        doc,
+                        object,
+                        resources,
+                        state,
+                        page_height,
+                        commands,
+                        visited_forms,
+                        cache,
+                        embedded_fonts,
+                    )?;
+                }
+            }
             "Do" => {
                 if let Some(name) = op_name(op, 0) {
                     if let Some(obj_id) = resources.xobjects.get(&name).copied() {
@@ -870,8 +922,10 @@ fn parse_xobject(
         .unwrap_or_default();
 
     if subtype == "Form" {
-        if !visited_forms.insert(obj_id) {
-            return Ok(());
+        if visited_forms.len() >= 64 || !visited_forms.insert(obj_id) {
+            return Err(FullBleedError::InvalidConfiguration(
+                "pdf raster error: cyclic or excessively deep form reference".to_string(),
+            ));
         }
         let form_bytes = stream
             .get_plain_content()
@@ -909,6 +963,16 @@ fn parse_xobject(
                 (state.opacity_scale_stroke * state.active_stroke_opacity).clamp(0.0, 1.0);
         }
         let mut nested_stack = Vec::new();
+        // Give forms their own path and graphics state, as PDF requires. Their
+        // coordinates are already mapped into page space by the parser.
+        let mut form_commands = Vec::new();
+        forms::clip_bbox(
+            doc,
+            &stream.dict,
+            nested_state.ctm,
+            page_height,
+            &mut form_commands,
+        )?;
         parse_operations(
             doc,
             &form_content.operations,
@@ -916,12 +980,13 @@ fn parse_xobject(
             page_height,
             &mut nested_state,
             &mut nested_stack,
-            commands,
+            &mut form_commands,
             visited_forms,
             cache,
             embedded_fonts,
         )?;
         visited_forms.remove(&obj_id);
+        forms::emit_form(form_commands, page_height, cache, commands);
         return Ok(());
     }
 
@@ -1579,6 +1644,13 @@ fn resources_from_object(
         }
     }
 
+    if let Ok(shading_obj) = dict.get(b"Shading") {
+        for (name, object) in resolve_dict(doc, shading_obj)?.iter() {
+            out.shadings
+                .insert(name_bytes_to_string(name), object.clone());
+        }
+    }
+
     if let Ok(gs_obj) = dict.get(b"ExtGState") {
         let gs_dict = resolve_dict(doc, gs_obj)?;
         for (name, gs_ref_obj) in gs_dict.iter() {
@@ -1591,16 +1663,21 @@ fn resources_from_object(
             let fill = gs_dict
                 .get(b"ca")
                 .ok()
-                .and_then(obj_to_f32)
-                .unwrap_or(1.0)
-                .clamp(0.0, 1.0);
+                .and_then(|value| resolved_obj_to_f32(doc, value))
+                .map(|value| value.clamp(0.0, 1.0));
             let stroke = gs_dict
                 .get(b"CA")
                 .ok()
-                .and_then(obj_to_f32)
-                .unwrap_or(1.0)
-                .clamp(0.0, 1.0);
-            out.extgstates.insert(gs_name, (fill, stroke));
+                .and_then(|value| resolved_obj_to_f32(doc, value))
+                .map(|value| value.clamp(0.0, 1.0));
+            out.extgstates.insert(
+                gs_name,
+                PdfExtGState {
+                    fill,
+                    stroke,
+                    soft_mask: gs_dict.get(b"SMask").ok().cloned(),
+                },
+            );
         }
     }
 
@@ -3102,7 +3179,7 @@ fn resolve_object<'a>(
     doc: &'a LoDocument,
     mut obj: &'a LoObject,
 ) -> Result<&'a LoObject, FullBleedError> {
-    loop {
+    for _ in 0..128 {
         match obj {
             LoObject::Reference(id) => {
                 obj = doc.get_object(*id).map_err(pdf_err)?;
@@ -3110,6 +3187,9 @@ fn resolve_object<'a>(
             _ => return Ok(obj),
         }
     }
+    Err(FullBleedError::InvalidConfiguration(
+        "pdf raster error: cyclic or excessively deep object reference".to_string(),
+    ))
 }
 
 fn resolve_dict(doc: &LoDocument, obj: &LoObject) -> Result<LoDictionary, FullBleedError> {
