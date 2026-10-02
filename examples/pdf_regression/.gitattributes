@@ -1,0 +1,9 @@
+*.py text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.txt text eol=lf
+fonts/*.txt -text
+*.ttf binary
+*.pdf binary

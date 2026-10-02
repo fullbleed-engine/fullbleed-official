@@ -48,6 +48,7 @@ Open `invoice.pdf`. The [quickstart](https://docs.fullbleed.dev/getting-started/
 | A native Rust application | [Rust quickstart and runnable examples](https://docs.fullbleed.dev/getting-started/rust/) |
 | An invoice from JSON | [Complete, checked example](examples/agent_workflows) |
 | Automatic rebuilds while editing HTML/CSS (2.5.0+) | [Watch-mode invoice example](examples/render_watch) |
+| Catch PDF changes in pull requests | [Standalone project with a reviewed baseline and CI workflow](examples/pdf_regression) |
 | A PDF download in FastAPI, Flask, or Django | [Runnable web app examples](examples/web_frameworks) |
 | A styled PDF report from a pandas DataFrame | [Paginated report with CSV data and verification](examples/pandas_report) |
 | A styled invoice from CSV | [Acme invoice project](examples/acme_invoice) |

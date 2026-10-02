@@ -1,0 +1,30 @@
+name: PDF regression check
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  document:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --only-binary=:all: -r requirements.txt
+      - name: Compare with the reviewed baseline
+        run: python check.py
+      - name: Retain the baseline and current output for review
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pdf-review
+          path: |
+            baseline.pdf
+            output/
+          if-no-files-found: error
+          retention-days: 7
