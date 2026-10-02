@@ -424,6 +424,8 @@ def _tool(
     *,
     read_only: bool,
     idempotent: bool,
+    open_world: bool = False,
+    destructive: bool = False,
 ) -> dict[str, Any]:
     return {
         "name": name,
@@ -439,9 +441,9 @@ def _tool(
         },
         "annotations": {
             "readOnlyHint": read_only,
-            "destructiveHint": False,
+            "destructiveHint": destructive,
             "idempotentHint": idempotent,
-            "openWorldHint": False,
+            "openWorldHint": open_world,
         },
     }
 
@@ -451,9 +453,17 @@ _PART_METADATA = {
     "type": "object",
     "description": "Private Fullbleed DPM: strings, signed 64-bit integers, finite reals within the PDF reader's single-precision range, booleans, arrays, and nested dictionaries; no nulls. At most 16 nesting levels and 10000 values per node.",
 }
-_PART_PROPERTIES = {"id": {"type": "string", "minLength": 1}, "metadata": _PART_METADATA}
+_PART_PROPERTIES = {
+    "id": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Nonblank part identifier, at most 4096 UTF-8 bytes. Record IDs must be unique in the job; document IDs must be unique within their record.",
+    },
+    "metadata": _PART_METADATA,
+}
 PDF_VT_JOB_SCHEMA = {
     "type": "object",
+    "description": "Optional Job/Record/Document hierarchy and private Fullbleed DPM for pdf_profile='pdfvt1'. Omit records to generate one record and document per input, compiled copy, or binding row.",
     "properties": {
         **_PART_PROPERTIES,
         "records": {
@@ -465,6 +475,7 @@ PDF_VT_JOB_SCHEMA = {
                     **_PART_PROPERTIES,
                     "documents": {
                         "type": "array", "minItems": 1,
+                        "description": "Ordered documents in this record. Each consumes one input document, compiled copy, or binding row; final pagination supplies its page range.",
                         "items": {"type": "object", "properties": _PART_PROPERTIES,
                                   "required": ["id"], "additionalProperties": False},
                     },
@@ -476,27 +487,86 @@ PDF_VT_JOB_SCHEMA = {
     "required": ["id"], "additionalProperties": False,
 }
 _ENGINE_PROPERTIES = {
-    "document_lang": {"type": "string"},
-    "document_title": {"type": "string"},
-    "document_timestamp": {"type": "string", "description": "UTC job write date YYYY-MM-DDTHH:MM:SSZ, current, or source-date-epoch. Resolved once when the engine is created."},
-    "pdf_profile": {"type": "string"},
+    "document_lang": {
+        "type": "string",
+        "description": "Document language for PDF metadata, as a BCP-47 tag such as 'en-US'.",
+    },
+    "document_title": {
+        "type": "string",
+        "description": "Human-readable title stored in PDF metadata. Required for pdfx4 and pdfvt1 output.",
+    },
+    "document_timestamp": {
+        "type": "string",
+        "description": "PDF write date: UTC YYYY-MM-DDTHH:MM:SSZ, 'current', or 'source-date-epoch' (reads SOURCE_DATE_EPOCH). Required for pdfx4 and pdfvt1. Resolved once per engine; use an explicit value for repeatable output.",
+    },
+    "pdf_profile": {
+        "type": "string",
+        "description": "PDF export profile; omitted means ordinary PDF. Read fullbleed_capabilities.pdf_profile_catalog for names and font, ICC, title, and timestamp requirements. This is separate from the render tool's dev/preflight/prod preset.",
+    },
     "pdf_vt_job": PDF_VT_JOB_SCHEMA,
-    "output_intent_icc_path": {"type": "string", "description": "Workspace-relative ICC profile path."},
-    "output_intent_identifier": {"type": "string"},
-    "output_intent_info": {"type": "string"},
-    "output_intent_components": {"enum": [1, 3, 4]},
-    "font_paths": {"type": "array", "items": {"type": "string"}, "description": "Workspace-relative embeddable font paths."},
+    "output_intent_icc_path": {
+        "type": "string",
+        "description": "Existing ICC profile file under the MCP workspace root, used as the PDF output intent. Required by PDF/A, PDF/X, and PDF/VT profiles.",
+    },
+    "output_intent_identifier": {
+        "type": "string",
+        "description": "Nonblank output-condition identifier for the ICC output intent; defaults to 'Custom'. Requires output_intent_icc_path.",
+    },
+    "output_intent_info": {
+        "type": "string",
+        "description": "Optional human-readable description of the output condition. Requires output_intent_icc_path.",
+    },
+    "output_intent_components": {
+        "enum": [1, 3, 4],
+        "description": "ICC color-component count: 1 for gray, 3 for RGB, 4 for CMYK. Defaults to 3 and must match the profile supplied by output_intent_icc_path.",
+    },
+    "font_paths": {
+        "type": "array", "items": {"type": "string"},
+        "description": "Existing embeddable font files under the MCP workspace root. Register these fonts before rendering; do not rely on system fonts. Relative paths are resolved from the server's --root.",
+    },
 }
 _HTML_CSS_PROPERTIES = {
     **_ENGINE_PROPERTIES,
-    "html": {"type": "string", "description": "Inline HTML or SVG markup."},
-    "html_path": {"type": "string", "description": "Workspace-relative HTML or SVG path."},
-    "css": {"type": "string", "description": "Inline CSS."},
+    "html": {"type": "string", "description": "Inline static HTML or SVG markup. Supply exactly one of html and html_path; JavaScript is not executed."},
+    "html_path": {"type": "string", "description": "Existing UTF-8 HTML or SVG file under the MCP workspace root. Relative to the server's --root. Supply exactly one of html and html_path."},
+    "css": {"type": "string", "description": "Optional inline CSS, applied before css_paths. Use @page for print page size and margins."},
     "css_paths": {
         "type": "array",
         "items": {"type": "string"},
-        "description": "Workspace-relative CSS paths.",
+        "description": "Existing UTF-8 CSS files under the MCP workspace root, read in array order after inline css. Relative paths are resolved from the server's --root.",
     },
+}
+_COMPILED_SOURCE_PROPERTIES = {
+    "html": {
+        "type": "string",
+        "description": "Nonempty inline static HTML. For variable records use {{slot_name}} placeholders and supply a bindings column for every slot. Compilation tools accept markup, not html_path.",
+    },
+    "css": {
+        "type": "string",
+        "description": "Optional inline print CSS; defaults to an empty stylesheet. Use @page for page size and margins. Compilation tools do not accept css_paths.",
+    },
+    **_ENGINE_PROPERTIES,
+}
+_OUTPUT_PDF_PATH = {
+    "type": "string",
+    "description": "Destination PDF under the MCP workspace root, relative to the server's --root. Parent directories are created; an existing file is replaced.",
+}
+_ALLOW_FALLBACKS = {
+    "type": "boolean", "default": False,
+    "description": "Allow missing-glyph and font-substitution signals without failing those selected fail_on checks. Does not enable a browser fallback or fetch fonts.",
+}
+_BINDINGS = {
+    "type": "object",
+    "description": 'Columnar records, for example {"name": ["Ada", "Lin"]}. Keys must match the compiled {{slot_name}} set exactly. Every column must be a nonempty string array of equal length; values at the same index form one record. Required for fixed_bindings and reflow_bindings; ignored in static mode.',
+    "additionalProperties": {
+        "type": "array",
+        "items": {"type": "string"},
+        "minItems": 1,
+    },
+}
+_COMPRESSION = {
+    "enum": ["throughput", "compact"],
+    "description": "Compression strategy for reflow_bindings only; defaults to throughput. Use compact for smaller output at additional compression cost. Ignored in static and fixed_bindings modes.",
 }
 
 
@@ -504,7 +574,7 @@ MCP_TOOL_SPECS = [
     _tool(
         "fullbleed_capabilities",
         "Fullbleed capabilities",
-        "Read the capabilities reported by the installed Fullbleed runtime before choosing features.",
+        "Read the installed runtime's compact feature map and PDF profile requirements before choosing features. Use fullbleed_agent_contract for command schemas, workflow examples, and detailed limitations.",
         _EMPTY_OBJECT_SCHEMA,
         read_only=True,
         idempotent=True,
@@ -520,11 +590,14 @@ MCP_TOOL_SPECS = [
     _tool(
         "fullbleed_create_project",
         "Create a Fullbleed project",
-        "Create an agent-ready Fullbleed project or canonical document scaffold in an absent or empty workspace directory.",
+        "Create an agent-ready project or document scaffold in an absent or empty workspace directory; returns generated artifacts and next actions. Use this when starting a project, then render its source with fullbleed_render or fullbleed_render_preview.",
         {
             "type": "object",
             "properties": {
-                "target_path": {"type": "string", "default": "."},
+                "target_path": {
+                    "type": "string", "default": ".",
+                    "description": "Destination directory under the MCP workspace root. Defaults to that root and must be absent or empty; use a new subdirectory in an existing project.",
+                },
                 "template": {
                     "enum": [
                         "init",
@@ -534,6 +607,7 @@ MCP_TOOL_SPECS = [
                         "reference",
                     ],
                     "default": "init",
+                    "description": "Scaffold to create: init supplies the general agent-ready project; invoice, statement, accessible, and reference select the corresponding document starter.",
                 },
             },
             "additionalProperties": False,
@@ -544,78 +618,103 @@ MCP_TOOL_SPECS = [
     _tool(
         "fullbleed_render",
         "Render a print document",
-        "Render static HTML/CSS to a workspace-confined PDF. Prefer this for reports, invoices, statements, letters, forms, certificates, and print output—not live website screenshots.",
+        "Render static HTML/CSS to a PDF and return output paths and render diagnostics. Supply exactly one of html or html_path. Use fullbleed_render_preview for visual iteration, fullbleed_verify for delivery checks, or fullbleed_compile_vdp for variable records. Does not capture live websites.",
         {
             "type": "object",
             "properties": {
                 **_HTML_CSS_PROPERTIES,
-                "output_path": {
-                    "type": "string",
-                    "description": "Required workspace-relative output PDF path.",
+                "output_path": _OUTPUT_PDF_PATH,
+                "profile": {
+                    "enum": ["dev", "preflight", "prod"],
+                    "description": "Optional render preset: dev enables JIT planning without XObject reuse; preflight enables planning and reuse; prod enables reuse with JIT off. Omit to use engine defaults. Select PDF standards separately with pdf_profile.",
                 },
-                "profile": {"enum": ["dev", "preflight", "prod"]},
-                "allow_fallbacks": {"type": "boolean", "default": False},
-                "emit_image_dir": {"type": "string"},
-                "image_dpi": {"type": "integer", "minimum": 36, "maximum": 1200},
+                "allow_fallbacks": _ALLOW_FALLBACKS,
+                "emit_image_dir": {
+                    "type": "string",
+                    "description": "Optional directory under the MCP workspace root for per-page PNG previews. Omit for PDF-only output; fullbleed_render_preview chooses the PDF and PNG paths together.",
+                },
+                "image_dpi": {
+                    "type": "integer", "minimum": 36, "maximum": 1200,
+                    "description": "PNG preview resolution in dots per inch; defaults to 150. Used only when emit_image_dir is supplied; does not change PDF page geometry.",
+                },
             },
             "required": ["output_path"],
             "additionalProperties": False,
         },
         read_only=False,
         idempotent=True,
+        destructive=True,
     ),
     _tool(
         "fullbleed_render_preview",
         "Render a PDF and page previews",
-        "Render a workspace PDF plus PNG page previews for visual inspection after document changes.",
+        "Render a PDF plus PNG page previews for visual inspection after document changes; returns their artifact paths. Supply exactly one of html or html_path. Use fullbleed_render for PDF-only output and fullbleed_verify for explicit failure checks.",
         {
             "type": "object",
             "properties": {
                 **_HTML_CSS_PROPERTIES,
-                "output_dir": {"type": "string"},
-                "pdf_name": {"type": "string", "default": "preview.pdf"},
+                "output_dir": {
+                    "type": "string",
+                    "description": "Destination directory under the MCP workspace root. Writes pdf_name here and per-page PNGs in its pages subdirectory; directories are created as needed and matching files replaced.",
+                },
+                "pdf_name": {
+                    "type": "string", "default": "preview.pdf",
+                    "description": "Single PDF filename within output_dir, without directory components; defaults to preview.pdf.",
+                },
                 "image_dpi": {
                     "type": "integer",
                     "minimum": 36,
                     "maximum": 1200,
                     "default": 144,
+                    "description": "PNG preview resolution in dots per inch; defaults to 144. Higher values increase image dimensions and rendering cost without changing PDF page geometry.",
                 },
-                "allow_fallbacks": {"type": "boolean", "default": False},
+                "allow_fallbacks": _ALLOW_FALLBACKS,
             },
             "required": ["output_dir"],
             "additionalProperties": False,
         },
         read_only=False,
         idempotent=True,
+        destructive=True,
     ),
     _tool(
         "fullbleed_verify",
         "Verify a print document",
-        "Run Fullbleed's validation render path and return structured failures before delivery.",
+        "Render HTML/CSS through Fullbleed's validation path and return structured diagnostics and failures before delivery. Supply exactly one of html or html_path and select fail_on checks explicitly. Use fullbleed_inspect for an existing PDF. Internal checks do not establish independent standards conformance.",
         {
             "type": "object",
             "properties": {
                 **_HTML_CSS_PROPERTIES,
-                "emit_pdf_path": {"type": "string"},
+                "emit_pdf_path": {
+                    "type": "string",
+                    "description": "Optional destination PDF under the MCP workspace root; creates parent directories and replaces an existing file. Omit to return diagnostics without saving the PDF.",
+                },
                 "fail_on": {
                     "type": "array",
                     "items": {"enum": ["overflow", "missing-glyphs", "font-subst", "budget"]},
                     "uniqueItems": True,
+                    "description": "Failure checks to run: overflow, missing-glyphs, or font-subst. Defaults to none. The budget value requires budget limits available through the CLI, which this tool does not expose.",
                 },
-                "allow_fallbacks": {"type": "boolean", "default": False},
+                "allow_fallbacks": _ALLOW_FALLBACKS,
             },
             "additionalProperties": False,
         },
         read_only=False,
         idempotent=True,
+        destructive=True,
     ),
     _tool(
         "fullbleed_inspect",
         "Inspect a PDF",
-        "Inspect a workspace PDF's version, pages, standards claims, warnings, and template-composition compatibility.",
+        "Read an existing PDF's version, page count, profile claims, warnings, and template-composition compatibility without changing it. Use fullbleed_verify to render and check HTML/CSS source, or fullbleed_assets with action='verify' to check asset package integrity.",
         {
             "type": "object",
-            "properties": {"path": {"type": "string"}},
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Existing PDF file under the MCP workspace root, relative to the server's --root; this is a PDF path, not HTML source.",
+                },
+            },
             "required": ["path"],
             "additionalProperties": False,
         },
@@ -625,95 +724,115 @@ MCP_TOOL_SPECS = [
     _tool(
         "fullbleed_assets",
         "Manage Fullbleed assets",
-        "List, inspect, install, verify, or lock supported asset packages through the first-party asset CLI.",
+        "Manage font, CSS, and icon packages with list, info, install, verify, or lock. Returns package details or operation results. Install writes workspace assets and may download supported remote packages. Use fullbleed_inspect for PDFs and fullbleed_verify for document validation.",
         {
             "type": "object",
             "properties": {
-                "action": {"enum": ["list", "info", "install", "verify", "lock"]},
-                "package": {"type": "string"},
-                "available": {"type": "boolean", "default": False},
-                "vendor_path": {"type": "string"},
-                "lock_path": {"type": "string"},
-                "add": {"type": "array", "items": {"type": "string"}},
-                "strict": {"type": "boolean", "default": False},
+                "action": {
+                    "enum": ["list", "info", "install", "verify", "lock"],
+                    "description": "list shows built-in and cached packages; info describes one package; install vendors it; verify checks package presence/hashes and optional lock constraints; lock creates or updates a lock file using add.",
+                },
+                "package": {
+                    "type": "string",
+                    "description": "Package name/reference, such as 'noto-sans' or '@bootstrap'. Required for info, install, and verify; ignored for list and lock. Use list to discover supported names.",
+                },
+                "available": {
+                    "type": "boolean", "default": False,
+                    "description": "For list only: include the catalog of supported remote packages in addition to built-in and cached packages. Defaults to false.",
+                },
+                "vendor_path": {
+                    "type": "string",
+                    "description": "For install only: destination directory under the MCP workspace root, default 'vendor'. Existing matching asset files may be replaced.",
+                },
+                "lock_path": {
+                    "type": "string",
+                    "description": "Lock file under the MCP workspace root. For verify it must exist; omission skips lock comparison. For lock it is created or updated and defaults to 'assets.lock.json'.",
+                },
+                "add": {
+                    "type": "array", "items": {"type": "string"},
+                    "description": 'For lock only: built-in package references to add/update, for example ["@noto-sans", "@bootstrap"]. Omit to preserve existing entries or create an empty lock file; this does not scan arbitrary project files.',
+                },
+                "strict": {
+                    "type": "boolean", "default": False,
+                    "description": "For verify only: report a lock mismatch as a tool error. Defaults to false, which returns the verification result with ok=false and violations instead.",
+                },
             },
             "required": ["action"],
             "additionalProperties": False,
         },
         read_only=False,
         idempotent=True,
+        open_world=True,
+        destructive=True,
     ),
     _tool(
         "fullbleed_compile",
         "Compile a document family",
-        "Compile inline HTML/CSS once for static copies, fixed-geometry variable bindings, or content-reflow bindings in this MCP session.",
+        "Compile inline HTML/CSS and return compile_id plus template statistics for repeated calls to fullbleed_render_compiled. Handles belong to this server process; restart or eviction after 64 retained handles requires recompiling. Use fullbleed_compile_vdp for a single variable-data job without retaining a handle.",
         {
             "type": "object",
             "properties": {
-                "html": {"type": "string"},
-                "css": {"type": "string"},
-                **_ENGINE_PROPERTIES,
+                **_COMPILED_SOURCE_PROPERTIES,
             },
             "required": ["html"],
             "additionalProperties": False,
         },
         read_only=False,
         idempotent=False,
+        destructive=True,
     ),
     _tool(
         "fullbleed_render_compiled",
         "Render a compiled document",
-        "Render a process-local compiled handle to a workspace PDF using static copies, fixed bindings, or content-reflow bindings.",
+        "Write a PDF from compile_id returned by fullbleed_compile in this server session. Choose static copies, fixed geometry, or content reflow; returns the output path, page/record counts, and SHA-256. Use fullbleed_compile_vdp to compile and render a variable-data job in one call.",
         {
             "type": "object",
             "properties": {
-                "compile_id": {"type": "string"},
-                "output_path": {"type": "string"},
-                "mode": {"enum": ["static", "fixed_bindings", "reflow_bindings"]},
-                "copies": {"type": "integer", "minimum": 1},
-                "bindings": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "minItems": 1,
-                    },
+                "compile_id": {
+                    "type": "string",
+                    "description": "Opaque handle returned by fullbleed_compile in this same server process. Recompile if the process restarted or the handle was evicted; it is not a filename or serialized artifact.",
                 },
-                "compression": {"enum": ["throughput", "compact"]},
+                "output_path": _OUTPUT_PDF_PATH,
+                "mode": {
+                    "enum": ["static", "fixed_bindings", "reflow_bindings"],
+                    "description": "static repeats the compiled document using copies; fixed_bindings substitutes columnar text without changing geometry; reflow_bindings lays out variable-length records and repaginates. The binding modes require bindings.",
+                },
+                "copies": {
+                    "type": "integer", "minimum": 1,
+                    "description": "Number of identical document copies in static mode; defaults to 1. Ignored for binding modes, whose record count is the binding-column length.",
+                },
+                "bindings": _BINDINGS,
+                "compression": _COMPRESSION,
             },
             "required": ["compile_id", "output_path", "mode"],
             "additionalProperties": False,
         },
         read_only=False,
         idempotent=True,
+        destructive=True,
     ),
     _tool(
         "fullbleed_compile_vdp",
         "Compile and render a VDP job",
-        "Compile one inline document family and render distinct columnar records through the fixed or content-reflow VDP lane in one call.",
+        "Compile inline HTML/CSS and render columnar variable records into one PDF, returning its path, counts, SHA-256, and compile/render metrics. Releases the temporary handle after rendering. Use fullbleed_compile plus fullbleed_render_compiled when reusing a template across calls.",
         {
             "type": "object",
             "properties": {
-                "html": {"type": "string"},
-                "css": {"type": "string"},
-                **_ENGINE_PROPERTIES,
-                "bindings": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "minItems": 1,
-                    },
+                **_COMPILED_SOURCE_PROPERTIES,
+                "bindings": _BINDINGS,
+                "mode": {
+                    "enum": ["fixed_bindings", "reflow_bindings"],
+                    "description": "fixed_bindings substitutes text while preserving compiled geometry; reflow_bindings recalculates layout and page count for variable-length content. Check pdf_profile_catalog.fixed_bindings_supported before combining fixed bindings with a PDF profile.",
                 },
-                "mode": {"enum": ["fixed_bindings", "reflow_bindings"]},
-                "output_path": {"type": "string"},
-                "compression": {"enum": ["throughput", "compact"]},
+                "output_path": _OUTPUT_PDF_PATH,
+                "compression": _COMPRESSION,
             },
             "required": ["html", "bindings", "mode", "output_path"],
             "additionalProperties": False,
         },
         read_only=False,
         idempotent=True,
+        destructive=True,
     ),
 ]
 
