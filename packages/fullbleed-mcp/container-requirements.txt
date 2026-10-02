@@ -1,4 +1,4 @@
 # Released Linux x86_64 and aarch64 wheels. The adapter is built from this repo.
-fullbleed==2.5.1 \
-    --hash=sha256:738d99d3bb368d286bbb154a62f16db50604481727cf5ce27808ce5321a35194 \
-    --hash=sha256:6fa3a245688cfb93d0d31f412341cd6f20927f2d5290bd772ec386e07fe8bee4
+fullbleed==2.5.2 \
+    --hash=sha256:3c06c1099074e0a2d136e87f2c6df7a6f545dd25fdd68ef8499b02bfbed33884 \
+    --hash=sha256:436dbe425d00dc0338b0cf389f0fbcb09d005ffbcc21e8c8f2a9ee1eb518fac3
