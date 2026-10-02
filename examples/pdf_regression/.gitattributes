@@ -1,0 +1,10 @@
+*.py text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.txt text eol=lf
+# Preserve the hashed upstream font licenses, including their whitespace.
+fonts/*.txt -text -whitespace
+*.ttf binary
+*.pdf binary
