@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.4"
+  FULLBLEED_CI_VERSION: "2.5.5"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -140,6 +140,17 @@ jobs:
 
       - name: Verify native Standard 14 preview spacing
         run: python -I tools/smoke_base14_preview.py --out target/base14-preview
+
+      - name: Verify finalized PDF gradient previews
+        run: python -I tools/smoke_gradient_preview.py --out target/gradient-preview
+
+      - name: Retain gradient PDFs and preview evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gradient-preview-${{ runner.os }}
+          path: target/gradient-preview
+          if-no-files-found: warn
 
       - name: Retain Standard 14 preview evidence
         if: always()

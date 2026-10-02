@@ -1,3 +1,34 @@
+# Fullbleed Release Notes - 2.5.5
+
+Release date: October 2, 2026
+
+## Keep gradients visible in finalized PDF previews
+
+Native previews now paint linear and radial gradient fills from finalized PDFs.
+Earlier versions ignored the PDF shading operator, leaving chart bars and other
+gradient backgrounds blank even though a PDF viewer displayed them correctly.
+
+The reader preserves stitched color stops, coordinate transforms, clipping, and
+the gradient opacity masks emitted by Fullbleed. Form boundaries clip their
+contents and keep their paths and graphics state separate from the caller.
+Bounded function parsing rejects unsupported gradient programs explicitly.
+The change adds no core runtime dependency.
+
+The supported preview subset includes exponential and stitching functions for
+axial and extended radial shadings, plus Fullbleed's generated hard radial bands.
+Arbitrary calculator functions, mesh shadings, nonextended radial shadings, and
+nonidentity mask transfer functions remain unsupported. These checks do not
+establish general PDF rendering parity or standards conformance.
+
+Affected PNG hashes change. Review corrected previews before updating stored
+baselines. The retained authoring fixtures check that this preview fix leaves
+their PDF bytes unchanged.
+
+See the [2.5.5 release runbook](docs/release/2.5.5-runbook.md) for the installed-wheel
+gradient checks, earlier-version negative control, and independent comparisons.
+
+---
+
 # Fullbleed Release Notes - 2.5.4
 
 Release date: October 2, 2026

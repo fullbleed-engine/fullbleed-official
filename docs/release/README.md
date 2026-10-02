@@ -4,6 +4,11 @@ This directory is the release-operations layer for Fullbleed. It is separate
 from feature documentation so release decisions can be audited without reading
 engine internals.
 
+## 2.5.5 Documents
+
+- `docs/release/2.5.5-runbook.md`: finalized gradient previews, source PDF preservation, and independent visual checks.
+- `tools/smoke_gradient_preview.py`: installed-wheel color probes with retained PDFs and deterministic PNGs.
+
 ## 2.5.4 Documents
 
 - `docs/release/2.5.4-runbook.md`: native Standard 14 preview spacing and retained visual checks.
