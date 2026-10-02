@@ -93,6 +93,8 @@ fullbleed agent skill-path --json
 fullbleed agent export-skill .agents/skills/fullbleed --json
 ```
 
+You can also [install the Skill directly from a pinned GitHub release](https://docs.fullbleed.dev/guides/ai-agents/#from-github) with `gh skill`. The guide shows how to check its source and version; the Python package supplies the rendering engine.
+
 For tool-calling agents, install the separately versioned adapter so the core package remains dependency-free:
 
 ```bash
