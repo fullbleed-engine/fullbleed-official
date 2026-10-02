@@ -22,7 +22,20 @@ PyPI is the primary installation and Python retrieval surface. The core package 
 
 The repository name, description, README opening, and topics should classify Fullbleed as a PDF/document-generation engine, not only as an HTML renderer. The Skill follows the open [Agent Skills specification](https://agentskills.io/specification) and remains in the conventional `skills/fullbleed` directory for repository-level discovery and `gh skill` installation. Agents may export it to `.agents/skills`, `.github/skills`, `.claude/skills`, or another supported location without changing the canonical source.
 
-GitHub's skill publishing command is currently public preview. Validate with `gh skill publish --dry-run` before publishing, inspect the exact diff or metadata it proposes, and do not create duplicate copies of `SKILL.md` merely to satisfy one client.
+GitHub's skill commands are currently in public preview. Validate the canonical source with `gh skill publish --dry-run`. The publishing command creates a GitHub release; Fullbleed's normal engine releases already include the Skill, so a second Skill-only release is unnecessary. Keep one canonical `skills/fullbleed` source tree.
+
+Check the public discovery and installation path after a release. For example, the 2.5.1 Skill can be inspected and installed into an isolated directory with:
+
+```bash
+gh skill search fullbleed --owner fullbleed-engine
+gh skill preview fullbleed-engine/fullbleed-official fullbleed@v2.5.1
+gh skill install fullbleed-engine/fullbleed-official fullbleed --pin v2.5.1 --dir target/skill-check
+gh skill list --dir target/skill-check
+```
+
+Retain the selected tag, installed source metadata, and comparisons against the Skill exported from the matching public wheel. GitHub CLI adds source-tracking frontmatter, and Windows wheel resources can use CRLF line endings; account for those differences while checking the actual guidance and reference files. An isolated maintainer install verifies distribution, not third-party adoption.
+
+The [agent setup guide](https://docs.fullbleed.dev/guides/ai-agents/#install-the-bundled-agent-skill) gives project-level installation instructions. The Skill directs agents back to their installed engine's capabilities; pinning the Skill's source does not pin the Python runtime.
 
 ### Official MCP Registry
 
@@ -41,7 +54,7 @@ Submit only after the primary package, Skill, MCP entry, examples, and acceptanc
 3. Publish the GitHub release and update repository description/topics.
 4. Build `fullbleed-mcp` against the public core release; publish and verify it on PyPI.
 5. Validate and publish `server.json` to the official MCP Registry.
-6. Run the GitHub Agent Skill dry-run/publish flow.
+6. Validate the Skill source and verify discovery, preview, and installation from the existing public engine release.
 7. Record registry URLs and raw acceptance/benchmark evidence; only then consider curated directory submissions.
 
 This order prevents a registry entry or Skill from pointing agents at an installation that is not yet available.
