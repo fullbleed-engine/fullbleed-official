@@ -38,7 +38,8 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install the published engine and optional example dependency
-        run: python -m pip install --only-binary=:all: "fullbleed==2.5.2" "pandas==${{ matrix.pandas }}"
+        run: >-
+          python -m pip install --only-binary=:all: "fullbleed==2.5.2" "pandas==${{ matrix.pandas }}"
       - name: Check environment dependencies
         run: python -m pip check
       - name: Render and verify the DataFrame reports
