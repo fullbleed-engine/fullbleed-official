@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.2"
+  FULLBLEED_CI_VERSION: "2.5.3"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -142,6 +142,21 @@ jobs:
 
       - name: Exercise the installed CLI watcher as a real process
         run: python -I tools/smoke_render_watch.py --out target/watch-smoke
+
+      - name: Check reproducibility baselines and failure controls
+        env:
+          FULLBLEED_TEST_INSTALLED_NATIVE: "1"
+        run: |
+          python -m pytest tests/test_fullbleed_cli_repro.py -q
+          python -I tools/smoke_repro_check.py --out target/repro-smoke
+
+      - name: Retain reproducibility checks and changed PDFs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: repro-check-${{ runner.os }}
+          path: target/repro-smoke
+          if-no-files-found: warn
 
       - name: Retain watch results, PDFs, and previews
         if: always()

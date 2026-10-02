@@ -108,6 +108,7 @@ COMPLIANCE_POLICY = {
 }
 
 SCHEMA_REGISTRY = {
+    "repro-record": "fullbleed.repro_record.v1",
     "render": "fullbleed.render_result.v1",
     "verify": "fullbleed.verify_result.v1",
     "plan": "fullbleed.plan_result.v1",
@@ -543,12 +544,20 @@ SCHEMA_DEFS = {
         "type": "object",
         "required": ["schema", "input_fingerprint_sha256", "output_pdf_sha256"],
         "properties": {
-            "schema": {"type": "string"},
+            "schema": {"type": "string", "const": "fullbleed.repro_record.v1"},
             "cli_version": {"type": "string"},
-            "input_manifest_sha256": {"type": "string"},
-            "input_fingerprint_sha256": {"type": "string"},
-            "output_pdf_sha256": {"type": "string"},
-            "output_bytes_written": {"type": "integer"},
+            "input_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "input_fingerprint_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "output_pdf_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "output_bytes_written": {"type": "integer", "minimum": 0},
+            "assets_lock": {
+                "type": ["object", "null"],
+                "required": ["sha256"],
+                "properties": {
+                    "path": {"type": "string"},
+                    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                },
+            },
         },
     },
 }
@@ -2119,6 +2128,9 @@ def _enrich_repro_failures(failures):
         "REPRO_RECORD_INVALID": [
             "Regenerate the record from a trusted clean render; do not edit digest fields manually."
         ],
+        "REPRO_RECORD_CONFLICT": [
+            "Use different files for --repro-record and --repro-check so checking cannot replace the baseline."
+        ],
         "REPRO_INPUT_DRIFT": [
             "Compare the input manifest, vendored assets, fonts, and assets.lock.json with the recorded run."
         ],
@@ -2143,6 +2155,36 @@ def _enrich_repro_failures(failures):
             )
 
 
+def _repro_record_error(value, definition=None, location="record"):
+    """Validate the record using the same shape and digest rules exposed by --schema."""
+    if definition is None:
+        definition = SCHEMA_DEFS["fullbleed.repro_record.v1"]
+    expected_types = definition["type"]
+    if isinstance(expected_types, str):
+        expected_types = [expected_types]
+    types = {"object": dict, "string": str, "integer": int, "null": type(None)}
+    if not any(type(value) is types[name] for name in expected_types):
+        return f"{location} must have type {' or '.join(expected_types)}"
+    if value is None:
+        return None
+    if "const" in definition and value != definition["const"]:
+        return f"{location} must be {definition['const']}"
+    if "pattern" in definition and re.fullmatch(definition["pattern"], value) is None:
+        return f"{location} must be a lowercase SHA-256 digest (64 hexadecimal characters)"
+    if "minimum" in definition and value < definition["minimum"]:
+        return f"{location} must be at least {definition['minimum']}"
+    if isinstance(value, dict):
+        for key in definition.get("required", []):
+            if key not in value:
+                return f"{location}.{key} is required"
+        for key, child in definition.get("properties", {}).items():
+            if key in value:
+                error = _repro_record_error(value[key], child, f"{location}.{key}")
+                if error:
+                    return error
+    return None
+
+
 def _run_repro_record_or_check(args, manifest, html, css, output_hash, bytes_written):
     """Write/check reproducibility records and return associated failures."""
     repro_record_path = getattr(args, "repro_record", None)
@@ -2153,11 +2195,16 @@ def _run_repro_record_or_check(args, manifest, html, css, output_hash, bytes_wri
     current_record = _build_repro_record(args, manifest, html, css, output_hash, bytes_written)
     failures = []
 
-    if repro_record_path:
-        Path(repro_record_path).write_text(
-            _json_dumps(current_record, indent=2),
-            encoding="utf-8",
-        )
+    if repro_record_path and repro_check_path:
+        record_file, check_file = Path(repro_record_path), Path(repro_check_path)
+        same_file = record_file.resolve() == check_file.resolve()
+        if not same_file and record_file.exists() and check_file.exists():
+            same_file = record_file.samefile(check_file)
+        if same_file:
+            return current_record, [{
+                "code": "REPRO_RECORD_CONFLICT",
+                "message": "The record output and checked baseline refer to the same file",
+            }]
 
     if repro_check_path:
         check_file = Path(repro_check_path)
@@ -2171,46 +2218,53 @@ def _run_repro_record_or_check(args, manifest, html, css, output_hash, bytes_wri
         else:
             try:
                 expected = json.loads(check_file.read_text(encoding="utf-8"))
-            except json.JSONDecodeError as exc:
+            except (ValueError, OSError) as exc:
                 failures.append(
                     {
                         "code": "REPRO_RECORD_INVALID",
-                        "message": f"Failed to parse repro record JSON: {exc}",
+                        "message": f"Failed to read repro record JSON: {exc}",
                     }
                 )
-                expected = {}
-            expected_input = expected.get("input_fingerprint_sha256")
-            expected_output = expected.get("output_pdf_sha256")
-            if expected_input and expected_input != current_record["input_fingerprint_sha256"]:
+                expected = None
+            else:
+                error = _repro_record_error(expected)
+                if error:
+                    failures.append({"code": "REPRO_RECORD_INVALID", "message": error})
+                    expected = None
+            if expected is not None and expected["input_fingerprint_sha256"] != current_record["input_fingerprint_sha256"]:
                 failures.append(
                     {
                         "code": "REPRO_INPUT_DRIFT",
                         "message": "Input fingerprint drift detected compared to repro record",
-                        "expected": expected_input,
+                        "expected": expected["input_fingerprint_sha256"],
                         "observed": current_record["input_fingerprint_sha256"],
                     }
                 )
-            if expected_output and expected_output != current_record["output_pdf_sha256"]:
+            if expected is not None and expected["output_pdf_sha256"] != current_record["output_pdf_sha256"]:
                 failures.append(
                     {
                         "code": "REPRO_HASH_MISMATCH",
                         "message": "Output PDF hash mismatch against repro record",
-                        "expected": expected_output,
+                        "expected": expected["output_pdf_sha256"],
                         "observed": current_record["output_pdf_sha256"],
                     }
                 )
-            expected_lock = (expected.get("assets_lock") or {}).get("sha256")
+            expected_lock = ((expected or {}).get("assets_lock") or {}).get("sha256")
             observed_lock = (current_record.get("assets_lock") or {}).get("sha256")
-            if expected_lock and observed_lock and expected_lock != observed_lock:
+            if expected is not None and "assets_lock" in expected and expected_lock != observed_lock:
                 failures.append(
                     {
                         "code": "REPRO_LOCK_MISMATCH",
-                        "message": "assets.lock.json hash mismatch against repro record",
+                        "message": "assets.lock.json content or presence differs from the repro record",
                         "expected": expected_lock,
                         "observed": observed_lock,
                     }
                 )
 
+    if repro_record_path:
+        Path(repro_record_path).write_text(
+            _json_dumps(current_record, indent=2), encoding="utf-8"
+        )
     return current_record, failures
 
 

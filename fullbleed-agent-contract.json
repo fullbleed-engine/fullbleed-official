@@ -961,6 +961,7 @@
       "new:statement": "fullbleed.new_template.v1",
       "plan": "fullbleed.plan_result.v1",
       "render": "fullbleed.render_result.v1",
+      "repro-record": "fullbleed.repro_record.v1",
       "run": "fullbleed.run_result.v1",
       "verify": "fullbleed.verify_result.v1"
     },
@@ -4206,7 +4207,7 @@
     "license": "MIT",
     "name": "Fullbleed PDF Engine",
     "python_package": "fullbleed",
-    "version": "2.5.2"
+    "version": "2.5.3"
   },
   "profiles": {
     "pdf": {
@@ -5281,22 +5282,45 @@
       },
       "fullbleed.repro_record.v1": {
         "properties": {
+          "assets_lock": {
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "sha256": {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "sha256"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "cli_version": {
             "type": "string"
           },
           "input_fingerprint_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
             "type": "string"
           },
           "input_manifest_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
             "type": "string"
           },
           "output_bytes_written": {
+            "minimum": 0,
             "type": "integer"
           },
           "output_pdf_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
             "type": "string"
           },
           "schema": {
+            "const": "fullbleed.repro_record.v1",
             "type": "string"
           }
         },
