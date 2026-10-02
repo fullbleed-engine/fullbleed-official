@@ -5492,7 +5492,7 @@
           "openWorldHint": false,
           "readOnlyHint": true
         },
-        "description": "Read the capabilities reported by the installed Fullbleed runtime before choosing features.",
+        "description": "Read the installed runtime's compact feature map and PDF profile requirements before choosing features. Use fullbleed_agent_contract for command schemas, workflow examples, and detailed limitations.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {},
@@ -5653,16 +5653,18 @@
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Create an agent-ready Fullbleed project or canonical document scaffold in an absent or empty workspace directory.",
+        "description": "Create an agent-ready project or document scaffold in an absent or empty workspace directory; returns generated artifacts and next actions. Use this when starting a project, then render its source with fullbleed_render or fullbleed_render_preview.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
             "target_path": {
               "default": ".",
+              "description": "Destination directory under the MCP workspace root. Defaults to that root and must be absent or empty; use a new subdirectory in an existing project.",
               "type": "string"
             },
             "template": {
               "default": "init",
+              "description": "Scaffold to create: init supplies the general agent-ready project; invoice, statement, accessible, and reference select the corresponding document starter.",
               "enum": [
                 "init",
                 "invoice",
@@ -5741,64 +5743,70 @@
       },
       {
         "annotations": {
-          "destructiveHint": false,
+          "destructiveHint": true,
           "idempotentHint": true,
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Render static HTML/CSS to a workspace-confined PDF. Prefer this for reports, invoices, statements, letters, forms, certificates, and print output\u2014not live website screenshots.",
+        "description": "Render static HTML/CSS to a PDF and return output paths and render diagnostics. Supply exactly one of html or html_path. Use fullbleed_render_preview for visual iteration, fullbleed_verify for delivery checks, or fullbleed_compile_vdp for variable records. Does not capture live websites.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
             "allow_fallbacks": {
               "default": false,
+              "description": "Allow missing-glyph and font-substitution signals without failing those selected fail_on checks. Does not enable a browser fallback or fetch fonts.",
               "type": "boolean"
             },
             "css": {
-              "description": "Inline CSS.",
+              "description": "Optional inline CSS, applied before css_paths. Use @page for print page size and margins.",
               "type": "string"
             },
             "css_paths": {
-              "description": "Workspace-relative CSS paths.",
+              "description": "Existing UTF-8 CSS files under the MCP workspace root, read in array order after inline css. Relative paths are resolved from the server's --root.",
               "items": {
                 "type": "string"
               },
               "type": "array"
             },
             "document_lang": {
+              "description": "Document language for PDF metadata, as a BCP-47 tag such as 'en-US'.",
               "type": "string"
             },
             "document_timestamp": {
-              "description": "UTC job write date YYYY-MM-DDTHH:MM:SSZ, current, or source-date-epoch. Resolved once when the engine is created.",
+              "description": "PDF write date: UTC YYYY-MM-DDTHH:MM:SSZ, 'current', or 'source-date-epoch' (reads SOURCE_DATE_EPOCH). Required for pdfx4 and pdfvt1. Resolved once per engine; use an explicit value for repeatable output.",
               "type": "string"
             },
             "document_title": {
+              "description": "Human-readable title stored in PDF metadata. Required for pdfx4 and pdfvt1 output.",
               "type": "string"
             },
             "emit_image_dir": {
+              "description": "Optional directory under the MCP workspace root for per-page PNG previews. Omit for PDF-only output; fullbleed_render_preview chooses the PDF and PNG paths together.",
               "type": "string"
             },
             "font_paths": {
-              "description": "Workspace-relative embeddable font paths.",
+              "description": "Existing embeddable font files under the MCP workspace root. Register these fonts before rendering; do not rely on system fonts. Relative paths are resolved from the server's --root.",
               "items": {
                 "type": "string"
               },
               "type": "array"
             },
             "html": {
-              "description": "Inline HTML or SVG markup.",
+              "description": "Inline static HTML or SVG markup. Supply exactly one of html and html_path; JavaScript is not executed.",
               "type": "string"
             },
             "html_path": {
-              "description": "Workspace-relative HTML or SVG path.",
+              "description": "Existing UTF-8 HTML or SVG file under the MCP workspace root. Relative to the server's --root. Supply exactly one of html and html_path.",
               "type": "string"
             },
             "image_dpi": {
+              "description": "PNG preview resolution in dots per inch; defaults to 150. Used only when emit_image_dir is supplied; does not change PDF page geometry.",
               "maximum": 1200,
               "minimum": 36,
               "type": "integer"
             },
             "output_intent_components": {
+              "description": "ICC color-component count: 1 for gray, 3 for RGB, 4 for CMYK. Defaults to 3 and must match the profile supplied by output_intent_icc_path.",
               "enum": [
                 1,
                 3,
@@ -5806,26 +5814,31 @@
               ]
             },
             "output_intent_icc_path": {
-              "description": "Workspace-relative ICC profile path.",
+              "description": "Existing ICC profile file under the MCP workspace root, used as the PDF output intent. Required by PDF/A, PDF/X, and PDF/VT profiles.",
               "type": "string"
             },
             "output_intent_identifier": {
+              "description": "Nonblank output-condition identifier for the ICC output intent; defaults to 'Custom'. Requires output_intent_icc_path.",
               "type": "string"
             },
             "output_intent_info": {
+              "description": "Optional human-readable description of the output condition. Requires output_intent_icc_path.",
               "type": "string"
             },
             "output_path": {
-              "description": "Required workspace-relative output PDF path.",
+              "description": "Destination PDF under the MCP workspace root, relative to the server's --root. Parent directories are created; an existing file is replaced.",
               "type": "string"
             },
             "pdf_profile": {
+              "description": "PDF export profile; omitted means ordinary PDF. Read fullbleed_capabilities.pdf_profile_catalog for names and font, ICC, title, and timestamp requirements. This is separate from the render tool's dev/preflight/prod preset.",
               "type": "string"
             },
             "pdf_vt_job": {
               "additionalProperties": false,
+              "description": "Optional Job/Record/Document hierarchy and private Fullbleed DPM for pdf_profile='pdfvt1'. Omit records to generate one record and document per input, compiled copy, or binding row.",
               "properties": {
                 "id": {
+                  "description": "Nonblank part identifier, at most 4096 UTF-8 bytes. Record IDs must be unique in the job; document IDs must be unique within their record.",
                   "minLength": 1,
                   "type": "string"
                 },
@@ -5839,10 +5852,12 @@
                     "additionalProperties": false,
                     "properties": {
                       "documents": {
+                        "description": "Ordered documents in this record. Each consumes one input document, compiled copy, or binding row; final pagination supplies its page range.",
                         "items": {
                           "additionalProperties": false,
                           "properties": {
                             "id": {
+                              "description": "Nonblank part identifier, at most 4096 UTF-8 bytes. Record IDs must be unique in the job; document IDs must be unique within their record.",
                               "minLength": 1,
                               "type": "string"
                             },
@@ -5860,6 +5875,7 @@
                         "type": "array"
                       },
                       "id": {
+                        "description": "Nonblank part identifier, at most 4096 UTF-8 bytes. Record IDs must be unique in the job; document IDs must be unique within their record.",
                         "minLength": 1,
                         "type": "string"
                       },
@@ -5883,6 +5899,7 @@
               "type": "object"
             },
             "profile": {
+              "description": "Optional render preset: dev enables JIT planning without XObject reuse; preflight enables planning and reuse; prod enables reuse with JIT off. Omit to use engine defaults. Select PDF standards separately with pdf_profile.",
               "enum": [
                 "dev",
                 "preflight",
@@ -5962,65 +5979,71 @@
       },
       {
         "annotations": {
-          "destructiveHint": false,
+          "destructiveHint": true,
           "idempotentHint": true,
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Render a workspace PDF plus PNG page previews for visual inspection after document changes.",
+        "description": "Render a PDF plus PNG page previews for visual inspection after document changes; returns their artifact paths. Supply exactly one of html or html_path. Use fullbleed_render for PDF-only output and fullbleed_verify for explicit failure checks.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
             "allow_fallbacks": {
               "default": false,
+              "description": "Allow missing-glyph and font-substitution signals without failing those selected fail_on checks. Does not enable a browser fallback or fetch fonts.",
               "type": "boolean"
             },
             "css": {
-              "description": "Inline CSS.",
+              "description": "Optional inline CSS, applied before css_paths. Use @page for print page size and margins.",
               "type": "string"
             },
             "css_paths": {
-              "description": "Workspace-relative CSS paths.",
+              "description": "Existing UTF-8 CSS files under the MCP workspace root, read in array order after inline css. Relative paths are resolved from the server's --root.",
               "items": {
                 "type": "string"
               },
               "type": "array"
             },
             "document_lang": {
+              "description": "Document language for PDF metadata, as a BCP-47 tag such as 'en-US'.",
               "type": "string"
             },
             "document_timestamp": {
-              "description": "UTC job write date YYYY-MM-DDTHH:MM:SSZ, current, or source-date-epoch. Resolved once when the engine is created.",
+              "description": "PDF write date: UTC YYYY-MM-DDTHH:MM:SSZ, 'current', or 'source-date-epoch' (reads SOURCE_DATE_EPOCH). Required for pdfx4 and pdfvt1. Resolved once per engine; use an explicit value for repeatable output.",
               "type": "string"
             },
             "document_title": {
+              "description": "Human-readable title stored in PDF metadata. Required for pdfx4 and pdfvt1 output.",
               "type": "string"
             },
             "font_paths": {
-              "description": "Workspace-relative embeddable font paths.",
+              "description": "Existing embeddable font files under the MCP workspace root. Register these fonts before rendering; do not rely on system fonts. Relative paths are resolved from the server's --root.",
               "items": {
                 "type": "string"
               },
               "type": "array"
             },
             "html": {
-              "description": "Inline HTML or SVG markup.",
+              "description": "Inline static HTML or SVG markup. Supply exactly one of html and html_path; JavaScript is not executed.",
               "type": "string"
             },
             "html_path": {
-              "description": "Workspace-relative HTML or SVG path.",
+              "description": "Existing UTF-8 HTML or SVG file under the MCP workspace root. Relative to the server's --root. Supply exactly one of html and html_path.",
               "type": "string"
             },
             "image_dpi": {
               "default": 144,
+              "description": "PNG preview resolution in dots per inch; defaults to 144. Higher values increase image dimensions and rendering cost without changing PDF page geometry.",
               "maximum": 1200,
               "minimum": 36,
               "type": "integer"
             },
             "output_dir": {
+              "description": "Destination directory under the MCP workspace root. Writes pdf_name here and per-page PNGs in its pages subdirectory; directories are created as needed and matching files replaced.",
               "type": "string"
             },
             "output_intent_components": {
+              "description": "ICC color-component count: 1 for gray, 3 for RGB, 4 for CMYK. Defaults to 3 and must match the profile supplied by output_intent_icc_path.",
               "enum": [
                 1,
                 3,
@@ -6028,26 +6051,32 @@
               ]
             },
             "output_intent_icc_path": {
-              "description": "Workspace-relative ICC profile path.",
+              "description": "Existing ICC profile file under the MCP workspace root, used as the PDF output intent. Required by PDF/A, PDF/X, and PDF/VT profiles.",
               "type": "string"
             },
             "output_intent_identifier": {
+              "description": "Nonblank output-condition identifier for the ICC output intent; defaults to 'Custom'. Requires output_intent_icc_path.",
               "type": "string"
             },
             "output_intent_info": {
+              "description": "Optional human-readable description of the output condition. Requires output_intent_icc_path.",
               "type": "string"
             },
             "pdf_name": {
               "default": "preview.pdf",
+              "description": "Single PDF filename within output_dir, without directory components; defaults to preview.pdf.",
               "type": "string"
             },
             "pdf_profile": {
+              "description": "PDF export profile; omitted means ordinary PDF. Read fullbleed_capabilities.pdf_profile_catalog for names and font, ICC, title, and timestamp requirements. This is separate from the render tool's dev/preflight/prod preset.",
               "type": "string"
             },
             "pdf_vt_job": {
               "additionalProperties": false,
+              "description": "Optional Job/Record/Document hierarchy and private Fullbleed DPM for pdf_profile='pdfvt1'. Omit records to generate one record and document per input, compiled copy, or binding row.",
               "properties": {
                 "id": {
+                  "description": "Nonblank part identifier, at most 4096 UTF-8 bytes. Record IDs must be unique in the job; document IDs must be unique within their record.",
                   "minLength": 1,
                   "type": "string"
                 },
@@ -6061,10 +6090,12 @@
                     "additionalProperties": false,
                     "properties": {
                       "documents": {
+                        "description": "Ordered documents in this record. Each consumes one input document, compiled copy, or binding row; final pagination supplies its page range.",
                         "items": {
                           "additionalProperties": false,
                           "properties": {
                             "id": {
+                              "description": "Nonblank part identifier, at most 4096 UTF-8 bytes. Record IDs must be unique in the job; document IDs must be unique within their record.",
                               "minLength": 1,
                               "type": "string"
                             },
@@ -6082,6 +6113,7 @@
                         "type": "array"
                       },
                       "id": {
+                        "description": "Nonblank part identifier, at most 4096 UTF-8 bytes. Record IDs must be unique in the job; document IDs must be unique within their record.",
                         "minLength": 1,
                         "type": "string"
                       },
@@ -6174,44 +6206,49 @@
       },
       {
         "annotations": {
-          "destructiveHint": false,
+          "destructiveHint": true,
           "idempotentHint": true,
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Run Fullbleed's validation render path and return structured failures before delivery.",
+        "description": "Render HTML/CSS through Fullbleed's validation path and return structured diagnostics and failures before delivery. Supply exactly one of html or html_path and select fail_on checks explicitly. Use fullbleed_inspect for an existing PDF. Internal checks do not establish independent standards conformance.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
             "allow_fallbacks": {
               "default": false,
+              "description": "Allow missing-glyph and font-substitution signals without failing those selected fail_on checks. Does not enable a browser fallback or fetch fonts.",
               "type": "boolean"
             },
             "css": {
-              "description": "Inline CSS.",
+              "description": "Optional inline CSS, applied before css_paths. Use @page for print page size and margins.",
               "type": "string"
             },
             "css_paths": {
-              "description": "Workspace-relative CSS paths.",
+              "description": "Existing UTF-8 CSS files under the MCP workspace root, read in array order after inline css. Relative paths are resolved from the server's --root.",
               "items": {
                 "type": "string"
               },
               "type": "array"
             },
             "document_lang": {
+              "description": "Document language for PDF metadata, as a BCP-47 tag such as 'en-US'.",
               "type": "string"
             },
             "document_timestamp": {
-              "description": "UTC job write date YYYY-MM-DDTHH:MM:SSZ, current, or source-date-epoch. Resolved once when the engine is created.",
+              "description": "PDF write date: UTC YYYY-MM-DDTHH:MM:SSZ, 'current', or 'source-date-epoch' (reads SOURCE_DATE_EPOCH). Required for pdfx4 and pdfvt1. Resolved once per engine; use an explicit value for repeatable output.",
               "type": "string"
             },
             "document_title": {
+              "description": "Human-readable title stored in PDF metadata. Required for pdfx4 and pdfvt1 output.",
               "type": "string"
             },
             "emit_pdf_path": {
+              "description": "Optional destination PDF under the MCP workspace root; creates parent directories and replaces an existing file. Omit to return diagnostics without saving the PDF.",
               "type": "string"
             },
             "fail_on": {
+              "description": "Failure checks to run: overflow, missing-glyphs, or font-subst. Defaults to none. The budget value requires budget limits available through the CLI, which this tool does not expose.",
               "items": {
                 "enum": [
                   "overflow",
@@ -6224,21 +6261,22 @@
               "uniqueItems": true
             },
             "font_paths": {
-              "description": "Workspace-relative embeddable font paths.",
+              "description": "Existing embeddable font files under the MCP workspace root. Register these fonts before rendering; do not rely on system fonts. Relative paths are resolved from the server's --root.",
               "items": {
                 "type": "string"
               },
               "type": "array"
             },
             "html": {
-              "description": "Inline HTML or SVG markup.",
+              "description": "Inline static HTML or SVG markup. Supply exactly one of html and html_path; JavaScript is not executed.",
               "type": "string"
             },
             "html_path": {
-              "description": "Workspace-relative HTML or SVG path.",
+              "description": "Existing UTF-8 HTML or SVG file under the MCP workspace root. Relative to the server's --root. Supply exactly one of html and html_path.",
               "type": "string"
             },
             "output_intent_components": {
+              "description": "ICC color-component count: 1 for gray, 3 for RGB, 4 for CMYK. Defaults to 3 and must match the profile supplied by output_intent_icc_path.",
               "enum": [
                 1,
                 3,
@@ -6246,22 +6284,27 @@
               ]
             },
             "output_intent_icc_path": {
-              "description": "Workspace-relative ICC profile path.",
+              "description": "Existing ICC profile file under the MCP workspace root, used as the PDF output intent. Required by PDF/A, PDF/X, and PDF/VT profiles.",
               "type": "string"
             },
             "output_intent_identifier": {
+              "description": "Nonblank output-condition identifier for the ICC output intent; defaults to 'Custom'. Requires output_intent_icc_path.",
               "type": "string"
             },
             "output_intent_info": {
+              "description": "Optional human-readable description of the output condition. Requires output_intent_icc_path.",
               "type": "string"
             },
             "pdf_profile": {
+              "description": "PDF export profile; omitted means ordinary PDF. Read fullbleed_capabilities.pdf_profile_catalog for names and font, ICC, title, and timestamp requirements. This is separate from the render tool's dev/preflight/prod preset.",
               "type": "string"
             },
             "pdf_vt_job": {
               "additionalProperties": false,
+              "description": "Optional Job/Record/Document hierarchy and private Fullbleed DPM for pdf_profile='pdfvt1'. Omit records to generate one record and document per input, compiled copy, or binding row.",
               "properties": {
                 "id": {
+                  "description": "Nonblank part identifier, at most 4096 UTF-8 bytes. Record IDs must be unique in the job; document IDs must be unique within their record.",
                   "minLength": 1,
                   "type": "string"
                 },
@@ -6275,10 +6318,12 @@
                     "additionalProperties": false,
                     "properties": {
                       "documents": {
+                        "description": "Ordered documents in this record. Each consumes one input document, compiled copy, or binding row; final pagination supplies its page range.",
                         "items": {
                           "additionalProperties": false,
                           "properties": {
                             "id": {
+                              "description": "Nonblank part identifier, at most 4096 UTF-8 bytes. Record IDs must be unique in the job; document IDs must be unique within their record.",
                               "minLength": 1,
                               "type": "string"
                             },
@@ -6296,6 +6341,7 @@
                         "type": "array"
                       },
                       "id": {
+                        "description": "Nonblank part identifier, at most 4096 UTF-8 bytes. Record IDs must be unique in the job; document IDs must be unique within their record.",
                         "minLength": 1,
                         "type": "string"
                       },
@@ -6393,11 +6439,12 @@
           "openWorldHint": false,
           "readOnlyHint": true
         },
-        "description": "Inspect a workspace PDF's version, pages, standards claims, warnings, and template-composition compatibility.",
+        "description": "Read an existing PDF's version, page count, profile claims, warnings, and template-composition compatibility without changing it. Use fullbleed_verify to render and check HTML/CSS source, or fullbleed_assets with action='verify' to check asset package integrity.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
             "path": {
+              "description": "Existing PDF file under the MCP workspace root, relative to the server's --root; this is a PDF path, not HTML source.",
               "type": "string"
             }
           },
@@ -6476,16 +6523,17 @@
       },
       {
         "annotations": {
-          "destructiveHint": false,
+          "destructiveHint": true,
           "idempotentHint": true,
-          "openWorldHint": false,
+          "openWorldHint": true,
           "readOnlyHint": false
         },
-        "description": "List, inspect, install, verify, or lock supported asset packages through the first-party asset CLI.",
+        "description": "Manage font, CSS, and icon packages with list, info, install, verify, or lock. Returns package details or operation results. Install writes workspace assets and may download supported remote packages. Use fullbleed_inspect for PDFs and fullbleed_verify for document validation.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
             "action": {
+              "description": "list shows built-in and cached packages; info describes one package; install vendors it; verify checks package presence/hashes and optional lock constraints; lock creates or updates a lock file using add.",
               "enum": [
                 "list",
                 "info",
@@ -6495,6 +6543,7 @@
               ]
             },
             "add": {
+              "description": "For lock only: built-in package references to add/update, for example [\"@noto-sans\", \"@bootstrap\"]. Omit to preserve existing entries or create an empty lock file; this does not scan arbitrary project files.",
               "items": {
                 "type": "string"
               },
@@ -6502,19 +6551,24 @@
             },
             "available": {
               "default": false,
+              "description": "For list only: include the catalog of supported remote packages in addition to built-in and cached packages. Defaults to false.",
               "type": "boolean"
             },
             "lock_path": {
+              "description": "Lock file under the MCP workspace root. For verify it must exist; omission skips lock comparison. For lock it is created or updated and defaults to 'assets.lock.json'.",
               "type": "string"
             },
             "package": {
+              "description": "Package name/reference, such as 'noto-sans' or '@bootstrap'. Required for info, install, and verify; ignored for list and lock. Use list to discover supported names.",
               "type": "string"
             },
             "strict": {
               "default": false,
+              "description": "For verify only: report a lock mismatch as a tool error. Defaults to false, which returns the verification result with ok=false and violations instead.",
               "type": "boolean"
             },
             "vendor_path": {
+              "description": "For install only: destination directory under the MCP workspace root, default 'vendor'. Existing matching asset files may be replaced.",
               "type": "string"
             }
           },
@@ -6585,39 +6639,44 @@
       },
       {
         "annotations": {
-          "destructiveHint": false,
+          "destructiveHint": true,
           "idempotentHint": false,
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Compile inline HTML/CSS once for static copies, fixed-geometry variable bindings, or content-reflow bindings in this MCP session.",
+        "description": "Compile inline HTML/CSS and return compile_id plus template statistics for repeated calls to fullbleed_render_compiled. Handles belong to this server process; restart or eviction after 64 retained handles requires recompiling. Use fullbleed_compile_vdp for a single variable-data job without retaining a handle.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
             "css": {
+              "description": "Optional inline print CSS; defaults to an empty stylesheet. Use @page for page size and margins. Compilation tools do not accept css_paths.",
               "type": "string"
             },
             "document_lang": {
+              "description": "Document language for PDF metadata, as a BCP-47 tag such as 'en-US'.",
               "type": "string"
             },
             "document_timestamp": {
-              "description": "UTC job write date YYYY-MM-DDTHH:MM:SSZ, current, or source-date-epoch. Resolved once when the engine is created.",
+              "description": "PDF write date: UTC YYYY-MM-DDTHH:MM:SSZ, 'current', or 'source-date-epoch' (reads SOURCE_DATE_EPOCH). Required for pdfx4 and pdfvt1. Resolved once per engine; use an explicit value for repeatable output.",
               "type": "string"
             },
             "document_title": {
+              "description": "Human-readable title stored in PDF metadata. Required for pdfx4 and pdfvt1 output.",
               "type": "string"
             },
             "font_paths": {
-              "description": "Workspace-relative embeddable font paths.",
+              "description": "Existing embeddable font files under the MCP workspace root. Register these fonts before rendering; do not rely on system fonts. Relative paths are resolved from the server's --root.",
               "items": {
                 "type": "string"
               },
               "type": "array"
             },
             "html": {
+              "description": "Nonempty inline static HTML. For variable records use {{slot_name}} placeholders and supply a bindings column for every slot. Compilation tools accept markup, not html_path.",
               "type": "string"
             },
             "output_intent_components": {
+              "description": "ICC color-component count: 1 for gray, 3 for RGB, 4 for CMYK. Defaults to 3 and must match the profile supplied by output_intent_icc_path.",
               "enum": [
                 1,
                 3,
@@ -6625,22 +6684,27 @@
               ]
             },
             "output_intent_icc_path": {
-              "description": "Workspace-relative ICC profile path.",
+              "description": "Existing ICC profile file under the MCP workspace root, used as the PDF output intent. Required by PDF/A, PDF/X, and PDF/VT profiles.",
               "type": "string"
             },
             "output_intent_identifier": {
+              "description": "Nonblank output-condition identifier for the ICC output intent; defaults to 'Custom'. Requires output_intent_icc_path.",
               "type": "string"
             },
             "output_intent_info": {
+              "description": "Optional human-readable description of the output condition. Requires output_intent_icc_path.",
               "type": "string"
             },
             "pdf_profile": {
+              "description": "PDF export profile; omitted means ordinary PDF. Read fullbleed_capabilities.pdf_profile_catalog for names and font, ICC, title, and timestamp requirements. This is separate from the render tool's dev/preflight/prod preset.",
               "type": "string"
             },
             "pdf_vt_job": {
               "additionalProperties": false,
+              "description": "Optional Job/Record/Document hierarchy and private Fullbleed DPM for pdf_profile='pdfvt1'. Omit records to generate one record and document per input, compiled copy, or binding row.",
               "properties": {
                 "id": {
+                  "description": "Nonblank part identifier, at most 4096 UTF-8 bytes. Record IDs must be unique in the job; document IDs must be unique within their record.",
                   "minLength": 1,
                   "type": "string"
                 },
@@ -6654,10 +6718,12 @@
                     "additionalProperties": false,
                     "properties": {
                       "documents": {
+                        "description": "Ordered documents in this record. Each consumes one input document, compiled copy, or binding row; final pagination supplies its page range.",
                         "items": {
                           "additionalProperties": false,
                           "properties": {
                             "id": {
+                              "description": "Nonblank part identifier, at most 4096 UTF-8 bytes. Record IDs must be unique in the job; document IDs must be unique within their record.",
                               "minLength": 1,
                               "type": "string"
                             },
@@ -6675,6 +6741,7 @@
                         "type": "array"
                       },
                       "id": {
+                        "description": "Nonblank part identifier, at most 4096 UTF-8 bytes. Record IDs must be unique in the job; document IDs must be unique within their record.",
                         "minLength": 1,
                         "type": "string"
                       },
@@ -6772,12 +6839,12 @@
       },
       {
         "annotations": {
-          "destructiveHint": false,
+          "destructiveHint": true,
           "idempotentHint": true,
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Render a process-local compiled handle to a workspace PDF using static copies, fixed bindings, or content-reflow bindings.",
+        "description": "Write a PDF from compile_id returned by fullbleed_compile in this server session. Choose static copies, fixed geometry, or content reflow; returns the output path, page/record counts, and SHA-256. Use fullbleed_compile_vdp to compile and render a variable-data job in one call.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -6789,22 +6856,27 @@
                 "minItems": 1,
                 "type": "array"
               },
+              "description": "Columnar records, for example {\"name\": [\"Ada\", \"Lin\"]}. Keys must match the compiled {{slot_name}} set exactly. Every column must be a nonempty string array of equal length; values at the same index form one record. Required for fixed_bindings and reflow_bindings; ignored in static mode.",
               "type": "object"
             },
             "compile_id": {
+              "description": "Opaque handle returned by fullbleed_compile in this same server process. Recompile if the process restarted or the handle was evicted; it is not a filename or serialized artifact.",
               "type": "string"
             },
             "compression": {
+              "description": "Compression strategy for reflow_bindings only; defaults to throughput. Use compact for smaller output at additional compression cost. Ignored in static and fixed_bindings modes.",
               "enum": [
                 "throughput",
                 "compact"
               ]
             },
             "copies": {
+              "description": "Number of identical document copies in static mode; defaults to 1. Ignored for binding modes, whose record count is the binding-column length.",
               "minimum": 1,
               "type": "integer"
             },
             "mode": {
+              "description": "static repeats the compiled document using copies; fixed_bindings substitutes columnar text without changing geometry; reflow_bindings lays out variable-length records and repaginates. The binding modes require bindings.",
               "enum": [
                 "static",
                 "fixed_bindings",
@@ -6812,6 +6884,7 @@
               ]
             },
             "output_path": {
+              "description": "Destination PDF under the MCP workspace root, relative to the server's --root. Parent directories are created; an existing file is replaced.",
               "type": "string"
             }
           },
@@ -6904,12 +6977,12 @@
       },
       {
         "annotations": {
-          "destructiveHint": false,
+          "destructiveHint": true,
           "idempotentHint": true,
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Compile one inline document family and render distinct columnar records through the fixed or content-reflow VDP lane in one call.",
+        "description": "Compile inline HTML/CSS and render columnar variable records into one PDF, returning its path, counts, SHA-256, and compile/render metrics. Releases the temporary handle after rendering. Use fullbleed_compile plus fullbleed_render_compiled when reusing a template across calls.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -6921,44 +6994,52 @@
                 "minItems": 1,
                 "type": "array"
               },
+              "description": "Columnar records, for example {\"name\": [\"Ada\", \"Lin\"]}. Keys must match the compiled {{slot_name}} set exactly. Every column must be a nonempty string array of equal length; values at the same index form one record. Required for fixed_bindings and reflow_bindings; ignored in static mode.",
               "type": "object"
             },
             "compression": {
+              "description": "Compression strategy for reflow_bindings only; defaults to throughput. Use compact for smaller output at additional compression cost. Ignored in static and fixed_bindings modes.",
               "enum": [
                 "throughput",
                 "compact"
               ]
             },
             "css": {
+              "description": "Optional inline print CSS; defaults to an empty stylesheet. Use @page for page size and margins. Compilation tools do not accept css_paths.",
               "type": "string"
             },
             "document_lang": {
+              "description": "Document language for PDF metadata, as a BCP-47 tag such as 'en-US'.",
               "type": "string"
             },
             "document_timestamp": {
-              "description": "UTC job write date YYYY-MM-DDTHH:MM:SSZ, current, or source-date-epoch. Resolved once when the engine is created.",
+              "description": "PDF write date: UTC YYYY-MM-DDTHH:MM:SSZ, 'current', or 'source-date-epoch' (reads SOURCE_DATE_EPOCH). Required for pdfx4 and pdfvt1. Resolved once per engine; use an explicit value for repeatable output.",
               "type": "string"
             },
             "document_title": {
+              "description": "Human-readable title stored in PDF metadata. Required for pdfx4 and pdfvt1 output.",
               "type": "string"
             },
             "font_paths": {
-              "description": "Workspace-relative embeddable font paths.",
+              "description": "Existing embeddable font files under the MCP workspace root. Register these fonts before rendering; do not rely on system fonts. Relative paths are resolved from the server's --root.",
               "items": {
                 "type": "string"
               },
               "type": "array"
             },
             "html": {
+              "description": "Nonempty inline static HTML. For variable records use {{slot_name}} placeholders and supply a bindings column for every slot. Compilation tools accept markup, not html_path.",
               "type": "string"
             },
             "mode": {
+              "description": "fixed_bindings substitutes text while preserving compiled geometry; reflow_bindings recalculates layout and page count for variable-length content. Check pdf_profile_catalog.fixed_bindings_supported before combining fixed bindings with a PDF profile.",
               "enum": [
                 "fixed_bindings",
                 "reflow_bindings"
               ]
             },
             "output_intent_components": {
+              "description": "ICC color-component count: 1 for gray, 3 for RGB, 4 for CMYK. Defaults to 3 and must match the profile supplied by output_intent_icc_path.",
               "enum": [
                 1,
                 3,
@@ -6966,25 +7047,31 @@
               ]
             },
             "output_intent_icc_path": {
-              "description": "Workspace-relative ICC profile path.",
+              "description": "Existing ICC profile file under the MCP workspace root, used as the PDF output intent. Required by PDF/A, PDF/X, and PDF/VT profiles.",
               "type": "string"
             },
             "output_intent_identifier": {
+              "description": "Nonblank output-condition identifier for the ICC output intent; defaults to 'Custom'. Requires output_intent_icc_path.",
               "type": "string"
             },
             "output_intent_info": {
+              "description": "Optional human-readable description of the output condition. Requires output_intent_icc_path.",
               "type": "string"
             },
             "output_path": {
+              "description": "Destination PDF under the MCP workspace root, relative to the server's --root. Parent directories are created; an existing file is replaced.",
               "type": "string"
             },
             "pdf_profile": {
+              "description": "PDF export profile; omitted means ordinary PDF. Read fullbleed_capabilities.pdf_profile_catalog for names and font, ICC, title, and timestamp requirements. This is separate from the render tool's dev/preflight/prod preset.",
               "type": "string"
             },
             "pdf_vt_job": {
               "additionalProperties": false,
+              "description": "Optional Job/Record/Document hierarchy and private Fullbleed DPM for pdf_profile='pdfvt1'. Omit records to generate one record and document per input, compiled copy, or binding row.",
               "properties": {
                 "id": {
+                  "description": "Nonblank part identifier, at most 4096 UTF-8 bytes. Record IDs must be unique in the job; document IDs must be unique within their record.",
                   "minLength": 1,
                   "type": "string"
                 },
@@ -6998,10 +7085,12 @@
                     "additionalProperties": false,
                     "properties": {
                       "documents": {
+                        "description": "Ordered documents in this record. Each consumes one input document, compiled copy, or binding row; final pagination supplies its page range.",
                         "items": {
                           "additionalProperties": false,
                           "properties": {
                             "id": {
+                              "description": "Nonblank part identifier, at most 4096 UTF-8 bytes. Record IDs must be unique in the job; document IDs must be unique within their record.",
                               "minLength": 1,
                               "type": "string"
                             },
@@ -7019,6 +7108,7 @@
                         "type": "array"
                       },
                       "id": {
+                        "description": "Nonblank part identifier, at most 4096 UTF-8 bytes. Record IDs must be unique in the job; document IDs must be unique within their record.",
                         "minLength": 1,
                         "type": "string"
                       },
