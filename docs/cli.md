@@ -109,6 +109,34 @@ Template auto-compose notes:
 - When `--emit-image` is used with template auto-compose, image artifacts are emitted from the finalized composed PDF (not overlay-only preview) via native Rust rasterization in the engine.
 - `--deterministic-hash` writes PDF SHA-256 by default; when `--emit-image` is set, it writes an artifact-set digest (`fullbleed.artifact_digest.v1`) computed from PDF SHA-256 plus ordered page-image SHA-256 values.
 
+### Reproducibility checks
+
+Use `--repro-record baseline.json` to retain the input fingerprint and PDF digest
+from a reviewed render. Use `--repro-check baseline.json` on subsequent renders.
+Changed inputs or PDF bytes return a nonzero exit status with structured failure
+codes. The PDF and requested previews remain available for inspection.
+
+Use **2.5.3 or newer** for this gate: earlier versions could report a pass for an
+empty object or a record without hashes. Records must use
+`fullbleed.repro_record.v1` and contain valid `input_fingerprint_sha256` and
+`output_pdf_sha256` values. Inspect the installed definition with
+`fullbleed --schema repro-record`.
+
+Malformed records return `REPRO_RECORD_INVALID`. A recorded asset lock detects
+changes to its contents or presence with `REPRO_LOCK_MISMATCH`. To save a candidate
+record while checking, combine `--repro-check baseline.json` with
+`--repro-record candidate.json`; the paths must refer to different files.
+`REPRO_RECORD_CONFLICT` prevents a check from replacing its own baseline.
+
+Keep the engine version, input data, options, metadata, and font/image bytes
+pinned. Use project-relative asset paths from a consistent working directory when
+sharing a baseline between machines. An input fingerprint may change even when
+the PDF looks the same. Inspect the PDF and every preview before intentionally
+recording a new baseline; CI should check the committed record, not refresh it.
+Matching bytes do not establish visual correctness, accessibility, or conformance.
+
+### PDF profiles
+
 PDF profile targets include `none`, `pdfa1a`, `pdfa1b`, `pdfa2a`, `pdfa2b`,
 `pdfa2u`, `pdfa3a`, `pdfa3b`, `pdfa3u`, `pdfa4`, `pdfa4e`, `pdfa4f`,
 `pdfx4`, `pdfua1`, `pdfua2`, `pdfvt1`, `wtpdf1r`, `wtpdf1a`, and `tagged`. Aliases `a`, `ua`, `vt`, `wt1r`, `wt1a`, `pdf/a`, `pdf/ua`, and

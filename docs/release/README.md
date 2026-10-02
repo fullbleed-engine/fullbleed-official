@@ -4,6 +4,11 @@ This directory is the release-operations layer for Fullbleed. It is separate
 from feature documentation so release decisions can be audited without reading
 engine internals.
 
+## 2.5.3 Documents
+
+- `docs/release/2.5.3-runbook.md`: reproducibility baseline validation, failure controls, and installed-package verification.
+- `tools/smoke_repro_check.py`: retained real-process checks for passing, changed, malformed, missing, and conflicting records.
+
 ## 2.5.2 Documents
 
 - `docs/release/2.5.2-runbook.md`: MCP input guidance, side-effect hints, and public package verification.

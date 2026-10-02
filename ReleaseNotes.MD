@@ -1,3 +1,37 @@
+# Fullbleed Release Notes - 2.5.3
+
+Release date: October 2, 2026
+
+## Reproducibility checks reject invalid baselines
+
+`--repro-check` now rejects empty or malformed records, unsupported record schemas,
+missing or invalid SHA-256 fields, and invalid asset-lock metadata. Earlier releases
+could report success for `{}` or a record without hashes. Unreadable JSON and
+non-object JSON return a structured `REPRO_RECORD_INVALID` failure.
+
+A recorded asset lock now detects file removal, addition, and changed contents.
+Using `--repro-record` and `--repro-check` on the same file, including an existing
+hard-link alias, returns `REPRO_RECORD_CONFLICT` without replacing the baseline.
+Different files remain supported so a failed check can retain a candidate record
+alongside the changed PDF and previews for review.
+
+Valid `fullbleed.repro_record.v1` baselines remain compatible. Unknown metadata
+fields remain accepted. The installed record schema supplies the validation rules
+and generated agent contract. This patch changes CLI checks, not rendering code,
+and adds no core runtime dependency.
+
+Upgrade before using reproducibility records as CI gates:
+
+```sh
+python -m pip install --upgrade fullbleed
+```
+
+See the [CLI reproducibility notes](docs/cli.md#reproducibility-checks) and
+[2.5.3 release runbook](docs/release/2.5.3-runbook.md). A matching hash establishes
+agreement with the recorded fixture, not visual correctness or PDF conformance.
+
+---
+
 # Fullbleed Release Notes - 2.5.2
 
 Release date: October 2, 2026
