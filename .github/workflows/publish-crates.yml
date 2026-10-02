@@ -138,7 +138,33 @@ jobs:
         run: |
           set -euo pipefail
           cargo package --locked --list | tee target/fullbleed-package-files.txt
-          test "$(wc -l < target/fullbleed-package-files.txt)" -eq 81
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          import subprocess
+
+          expected = {
+              ".cargo_vcs_info.json", "Cargo.toml", "Cargo.toml.orig", "Cargo.lock",
+              "build.rs", "README.md", "LICENSE", "COPYRIGHT", "LICENSING.md",
+              "THIRD_PARTY_LICENSES.md",
+          }
+          tracked_source = subprocess.check_output(
+              ["git", "ls-files", "-z", "--", "src/"], text=True, encoding="utf-8"
+          ).split("\0")
+          expected.update(filter(None, tracked_source))
+          packaged = [Path(line).as_posix() for line in
+                      Path("target/fullbleed-package-files.txt").read_text(encoding="utf-8").splitlines()]
+          actual = set(packaged)
+          report = {
+              "ok": actual == expected and len(packaged) == len(actual),
+              "files": len(packaged),
+              "missing": sorted(expected - actual),
+              "unexpected": sorted(actual - expected),
+          }
+          print(json.dumps(report))
+          if not report["ok"]:
+              raise SystemExit("Cargo package does not match the checked-out release source")
+          PY
           ! grep -E '(^|/)(target|dist|secrets?)(/|$)|(^|/)\.env$' target/fullbleed-package-files.txt
 
       - name: Install declared Rust MSRV
