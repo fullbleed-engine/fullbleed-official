@@ -1,0 +1,41 @@
+sku,product,category,units,net_sales_cents,last_restock
+GL-001,Atlas notebook / Original,Desk,64,80000,2026-09-01
+GL-002,Spoke travel cup / Original,Travel,101,169175,2026-09-08
+GL-003,Cedar organizer / Original,Desk,138,289800,2026-09-15
+GL-004,Canvas tool roll / Original,Studio,175,441875,2026-09-22
+GL-005,Stoneware vessel / Original,Home,212,625400,2026-09-01
+GL-006,Pen & pencil set / Original,Desk,69,232875,2026-09-08
+GL-007,Trail packing cube / Original,Travel,106,402800,2026-09-15
+GL-008,Linen sketchbook / Original,Studio,143,178750,2026-09-22
+GL-009,Ridge catchall / Original,Home,180,301500,
+GL-010,München desk mat / Original,Desk,217,455700,2026-09-08
+GL-011,Atlas notebook / Slate,Desk,74,186850,2026-09-15
+GL-012,Spoke travel cup / Slate,Travel,111,327450,2026-09-22
+GL-013,Cedar organizer / Slate,Desk,148,499500,2026-09-01
+GL-014,Canvas tool roll / Slate,Studio,185,703000,2026-09-08
+GL-015,Stoneware vessel / Slate,Home,222,277500,2026-09-15
+GL-016,Pen & pencil set / Slate,Desk,79,132325,2026-09-22
+GL-017,Trail packing cube / Slate,Travel,116,243600,2026-09-01
+GL-018,Linen sketchbook / Slate,Studio,153,386325,2026-09-08
+GL-019,Ridge catchall / Slate,Home,190,560500,2026-09-15
+GL-020,München desk mat / Slate,Desk,227,766125,2026-09-22
+GL-021,Atlas notebook / Clay,Desk,84,319200,2026-09-01
+GL-022,Spoke travel cup / Clay,Travel,121,151250,2026-09-08
+GL-023,Cedar organizer / Clay,Desk,158,264650,2026-09-15
+GL-024,Canvas tool roll / Clay,Studio,195,409500,2026-09-22
+GL-025,Stoneware vessel / Clay,Home,232,585800,2026-09-01
+GL-026,Pen & pencil set / Clay,Desk,89,262550,
+GL-027,Trail packing cube / Clay,Travel,126,425250,2026-09-15
+GL-028,Linen sketchbook / Clay,Studio,163,619400,2026-09-22
+GL-029,Ridge catchall / Clay,Home,200,250000,2026-09-01
+GL-030,München desk mat / Clay,Desk,237,396975,2026-09-08
+GL-031,Atlas notebook / Moss,Desk,94,197400,2026-09-15
+GL-032,Spoke travel cup / Moss,Travel,131,330775,2026-09-22
+GL-033,Cedar organizer / Moss,Desk,168,495600,2026-09-01
+GL-034,Canvas tool roll / Moss,Studio,205,691875,2026-09-08
+GL-035,Stoneware vessel / Moss,Home,242,919600,2026-09-15
+GL-036,Pen & pencil set / Moss,Desk,99,123750,2026-09-22
+GL-037,Trail packing cube / Moss,Travel,136,227800,2026-09-01
+GL-038,Linen sketchbook / Moss,Studio,173,363300,2026-09-08
+GL-039,Ridge catchall / Moss,Home,210,530250,2026-09-15
+GL-040,München desk mat / Moss,Desk,67,197650,2026-09-22

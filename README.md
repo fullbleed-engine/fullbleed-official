@@ -49,6 +49,7 @@ Open `invoice.pdf`. The [quickstart](https://docs.fullbleed.dev/getting-started/
 | An invoice from JSON | [Complete, checked example](examples/agent_workflows) |
 | Automatic rebuilds while editing HTML/CSS (2.5.0+) | [Watch-mode invoice example](examples/render_watch) |
 | A PDF download in FastAPI, Flask, or Django | [Runnable web app examples](examples/web_frameworks) |
+| A styled PDF report from a pandas DataFrame | [Paginated report with CSV data and verification](examples/pandas_report) |
 | A styled invoice from CSV | [Acme invoice project](examples/acme_invoice) |
 | A report that flows across pages | [Business report example](examples/agent_workflows) |
 | Tagged output with accessibility checks | [Accessibility workflow](docs/ui-accessibility.md) |

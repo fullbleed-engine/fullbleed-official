@@ -1,0 +1,52 @@
+name: Pandas report example
+
+on:
+  pull_request:
+    paths:
+      - examples/pandas_report/**
+      - .github/workflows/pandas-report.yml
+  push:
+    branches: [master, main]
+    paths:
+      - examples/pandas_report/**
+      - .github/workflows/pandas-report.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pandas-report-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    name: Report (${{ matrix.os }}, pandas ${{ matrix.pandas }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        pandas: ['2.3.3', '3.0.6']
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install the published engine and optional example dependency
+        run: >-
+          python -m pip install --only-binary=:all: "fullbleed==2.5.2" "pandas==${{ matrix.pandas }}"
+      - name: Check environment dependencies
+        run: python -m pip check
+      - name: Render and verify the DataFrame reports
+        run: python -I examples/pandas_report/verify.py --out target/pandas-report-verification
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: pandas-report-${{ runner.os }}-${{ matrix.pandas }}
+          path: target/pandas-report-verification/
+          if-no-files-found: error
