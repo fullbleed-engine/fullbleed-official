@@ -1,0 +1,3 @@
+# Retain the pinned upstream metrics and license bytes exactly.
+tools/data/base14/* -text -whitespace
+src/base14_metrics_data.rs text eol=lf

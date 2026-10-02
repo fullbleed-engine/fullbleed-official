@@ -1,3 +1,31 @@
+# Fullbleed Release Notes - 2.5.4
+
+Release date: October 2, 2026
+
+## Correct spacing in native Standard 14 previews
+
+Native previews of finalized PDFs now use the standard advances for unembedded
+Helvetica, Times, Courier, Symbol, and ZapfDingbats fonts when the PDF omits
+`/Widths`. Earlier versions used a constant fallback advance, which could spread
+narrow letters apart or overlap wide letters even when a separate PDF viewer
+displayed the document correctly.
+
+The preview reader respects built-in encodings and explicit encoding differences.
+Explicit PDF widths and embedded replacement fonts keep their existing behavior.
+The bundled metric and character tables add no runtime dependency. Their pinned
+sources, generator, and redistribution notices are included in the source tree.
+
+This patch changes native preview placement, so stored preview hashes may change
+for affected PDFs. Review the new images before updating a reproducibility
+baseline. PDF authoring and layout measurements are unchanged. Unembedded fonts
+still use the preview renderer's available substitute outlines; the fix does not
+promise identical outlines across PDF viewers.
+
+See the [2.5.4 release runbook](docs/release/2.5.4-runbook.md) for regression checks
+against explicit reference widths and the scope of retained verification.
+
+---
+
 # Fullbleed Release Notes - 2.5.3
 
 Release date: October 2, 2026
