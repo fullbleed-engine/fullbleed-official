@@ -38,7 +38,9 @@ Path("invoice.pdf").write_bytes(pdf)
 
 Open `invoice.pdf`. The [quickstart](https://docs.fullbleed.dev/getting-started/quickstart/) adds fonts, previews, and a complete project. The runnable source is in [`examples/quickstart/hello.py`](examples/quickstart/hello.py).
 
-**Using Rust?** Start with the [native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/). The [`fullbleed` crate](https://crates.io/crates/fullbleed) exposes `FullBleed::builder()` and `render_to_buffer(...)`, with no Python requirement. The guide includes runnable invoice and report examples with explicit fonts and PNG previews, plus the [Rust API reference](https://docs.rs/fullbleed/2.5.0/fullbleed/).
+**Using Rust?** Start with the [native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/). The [`fullbleed` crate](https://crates.io/crates/fullbleed) exposes `FullBleed::builder()` and `render_to_buffer(...)`, with no Python requirement. The guide includes runnable invoice and report examples with explicit fonts and PNG previews, plus the [Rust API reference](https://docs.rs/fullbleed/2.5.4/fullbleed/).
+
+**Using Node.js?** The [Node.js quickstart](https://docs.fullbleed.dev/getting-started/node/) includes a downloadable designed invoice project. The separate [Node package](https://github.com/fullbleed-engine/fullbleed-node) bundles the engine as WebAssembly and includes fonts, ESM/CommonJS support, TypeScript declarations, and PNG previews. It requires Node 22+ and covers ordinary PDF generation.
 
 ## Choose your starting point
 
@@ -46,6 +48,7 @@ Open `invoice.pdf`. The [quickstart](https://docs.fullbleed.dev/getting-started/
 | --- | --- |
 | Distinctive invoices, reports, notices, and statements | [Designed showcase with fonts and source](examples/design_showcase) |
 | A native Rust application | [Rust quickstart and runnable examples](https://docs.fullbleed.dev/getting-started/rust/) |
+| A Node.js or TypeScript application | [Node quickstart and designed invoice project](https://docs.fullbleed.dev/getting-started/node/) |
 | An invoice from JSON | [Complete, checked example](examples/agent_workflows) |
 | Automatic rebuilds while editing HTML/CSS (2.5.0+) | [Watch-mode invoice example](examples/render_watch) |
 | Catch PDF changes in pull requests | [Standalone project with a reviewed baseline and CI workflow](examples/pdf_regression) |
