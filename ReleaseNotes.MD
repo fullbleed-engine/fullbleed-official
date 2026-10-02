@@ -1,3 +1,42 @@
+# Fullbleed Release Notes - 2.5.2
+
+Release date: October 2, 2026
+
+## Clearer inputs for document agents
+
+The MCP tools now explain every input parameter, including source selection,
+workspace paths, preview resolution, PDF profile prerequisites, and asset action
+requirements. Compiled-document tools describe columnar bindings, static versus
+reflow output, handle reuse, and handle expiration. Verification guidance makes
+the selected failure checks explicit.
+
+Tool descriptions distinguish rendering, previewing, document verification,
+existing-PDF inspection, and asset integrity checks. The asset action is correctly
+named `info`. Side-effect hints acknowledge file replacement, compiled-handle
+eviction, and possible network access when installing remote asset packages.
+These hints describe existing behavior; they do not grant permissions or change
+tool execution.
+
+The shared runtime definitions supply the generated agent contract and both MCP
+entrypoints. Input and output validation constraints retain their existing shapes.
+This release adds no core runtime dependency and makes no rendering algorithm
+changes. The separately versioned MCP adapter remains 0.1.1.
+
+Upgrade the engine in the Python environment used by your MCP client, then restart
+that client:
+
+```sh
+python -m pip install --upgrade fullbleed fullbleed-mcp
+```
+
+The [agent setup guide](https://docs.fullbleed.dev/guides/ai-agents/) covers local
+MCP configuration and installing the Agent Skill from a pinned GitHub release.
+See the [2.5.2 release runbook](docs/release/2.5.2-runbook.md) for the required
+verification and publication checks. Tool descriptions and profile selection do
+not establish PDF standards conformance.
+
+---
+
 # Fullbleed Release Notes - 2.5.1
 
 Release date: October 1, 2026
