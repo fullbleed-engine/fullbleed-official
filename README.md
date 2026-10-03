@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Fullbleed PDF Engine
 
-**Create PDFs from HTML and CSS in Python, Rust, and Node.js. MIT licensed.**
+**Create PDFs from HTML and CSS in Python, Rust, Node.js, and C#. MIT licensed.**
 
-Build invoices, reports, statements, and variable-data print jobs with a deterministic Rust engine. Use the native Rust API, the Python package, or the optional Node.js package. The Python wheel includes the engine, fonts, and CLI with no required third-party Python packages or system PDF stack; the Node package includes the WebAssembly engine and fonts.
+Build invoices, reports, statements, and variable-data print jobs with a deterministic Rust engine. Use the native Rust API, the Python package, or the optional Node.js and .NET integrations. The Python wheel includes the engine, fonts, and CLI with no required third-party Python packages or system PDF stack. The Node package includes the WebAssembly engine and fonts; the .NET package includes native libraries for in-process rendering.
 
 [Try in your browser](https://docs.fullbleed.dev/playground/) · [Documentation](https://docs.fullbleed.dev/) · [Examples](https://docs.fullbleed.dev/examples/) · [PyPI](https://pypi.org/project/fullbleed/) · [crates.io](https://crates.io/crates/fullbleed) · [npm](https://www.npmjs.com/package/fullbleed) · [Release notes](https://github.com/fullbleed-engine/fullbleed-official/releases) · [MIT license](LICENSE)
 
@@ -21,8 +21,10 @@ Actual Fullbleed output. Open either preview for its PDF, or [explore all four d
 | Python | `python -m pip install fullbleed` | [Python quickstart](https://docs.fullbleed.dev/getting-started/quickstart/) |
 | Rust | `cargo add fullbleed` | [Native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/) |
 | Node.js / TypeScript | `npm install fullbleed` | [Node quickstart](https://docs.fullbleed.dev/getting-started/node/) · [Next.js PDF download](https://docs.fullbleed.dev/guides/nextjs-pdf/) |
+| C# / .NET | `dotnet add package FullBleed.DotNet --version 0.1.2` | [C# quickstart and designed invoice](https://docs.fullbleed.dev/getting-started/dotnet/) |
 
 The Node integration is independently versioned and covers ordinary PDF generation.
+The independently versioned .NET package targets .NET 8, with native rendering, compiled bindings, and previews. Its separate CLI adapter requires the Python CLI.
 The Python package provides the complete CLI, including compiled variable-data jobs and print profiles; the Rust guide covers the native API.
 
 ## Your first PDF
@@ -74,6 +76,10 @@ Open `invoice.pdf` or its PNG preview. The [Node.js quickstart](https://docs.ful
 
 Start with the [native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/). The [`fullbleed` crate](https://crates.io/crates/fullbleed) exposes `FullBleed::builder()` and `render_to_buffer(...)`, with no Python requirement. The guide includes runnable invoice and report examples with explicit fonts and PNG previews, plus the [Rust API reference](https://docs.rs/fullbleed/2.5.6/fullbleed/).
 
+### C# and .NET
+
+Install [`FullBleed.DotNet`](https://www.nuget.org/packages/FullBleed.DotNet/0.1.2) in a .NET 8 project and follow the [C# quickstart](https://docs.fullbleed.dev/getting-started/dotnet/). The guide includes a runnable invoice with explicit fonts and HTML/CSS source. Native rendering runs inside the .NET process on Windows x64, Linux x64, Intel macOS, and Apple Silicon macOS, without a Python or browser runtime.
+
 ## Choose your starting point
 
 | You want to build | Start here |
@@ -81,6 +87,7 @@ Start with the [native Rust quickstart](https://docs.fullbleed.dev/getting-start
 | Distinctive invoices, reports, notices, and statements | [Designed showcase with fonts and source](examples/design_showcase) |
 | A native Rust application | [Rust quickstart and runnable examples](https://docs.fullbleed.dev/getting-started/rust/) |
 | A Node.js or TypeScript application | [Node quickstart and designed invoice project](https://docs.fullbleed.dev/getting-started/node/) |
+| A C# or .NET application | [NuGet quickstart and designed invoice](https://docs.fullbleed.dev/getting-started/dotnet/) |
 | An invoice from JSON | [Complete, checked example](examples/agent_workflows) |
 | Automatic rebuilds while editing HTML/CSS (2.5.0+) | [Watch-mode invoice example](examples/render_watch) |
 | Catch PDF changes in pull requests | [Standalone project with a reviewed baseline and CI workflow](examples/pdf_regression) |
