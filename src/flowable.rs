@@ -5658,7 +5658,7 @@ fn draw_registered_text_run(
     let italic_shear = synthetic_italic_shear(style.font_style);
     // Fixed VDP substitutes slot values after layout. Keep binding-bearing
     // text as a patchable text command instead of compiling the placeholder's
-    // glyph IDs into the reusable Type 3 synthetic-bold shader.
+    // glyph IDs into the reusable synthetic-bold paint program.
     if contains_binding_slot && synthetic_bold {
         if synthetic_italic {
             canvas.draw_string_synthetic_bold_italic(x, y, text, strength, italic_shear);
@@ -5696,8 +5696,7 @@ fn draw_registered_text_run(
                 canvas, registry, style, font_name, x, y, &text, strength, 0.0,
             ) {
                 // Preserve search, copy, accessibility, and tagged-PDF text
-                // while the visible glyphs follow Chromium's unhinted Type 3
-                // synthetic-bold geometry.
+                // while the visible glyphs use reusable unhinted paint forms.
                 canvas.save_state();
                 canvas.set_text_rendering_mode(3);
                 canvas.draw_string(x, y, text);
@@ -5797,9 +5796,9 @@ fn draw_registered_synthetic_bold_outline_run(
     }
 
     // Chromium serializes synthetic browser bold as unhinted Type 3 outlines.
-    // Compile the shaped run into reusable glyph programs. The Type 3 font
-    // matrix supplies Chromium's paint phase itself; the correction used by
-    // direct page paths would apply that phase twice. This replaces
+    // Compile the shaped run into reusable paint-only glyph programs, keeping
+    // the same font-space transform. The correction used by direct page paths
+    // would apply that phase twice. This replaces
     // O(occurrences × outline commands) display lists with O(unique glyphs)
     // vector programs plus compact run references.
     canvas.save_state();
@@ -5840,7 +5839,7 @@ fn draw_registered_synthetic_bold_outline_run(
         return true;
     }
 
-    // Oblique synthesis retains the direct path until the Type 3 shader grows
+    // Oblique synthesis retains the direct path until the reusable shader grows
     // a full affine font matrix; this preserves existing combined bold/italic
     // geometry without weakening the common reusable upright path.
     let (phase_x, phase_y) = browser_synthetic_bold_outline_phase(style.font_size);

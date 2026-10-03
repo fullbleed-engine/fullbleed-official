@@ -38,7 +38,7 @@ Path("invoice.pdf").write_bytes(pdf)
 
 Open `invoice.pdf`. The [quickstart](https://docs.fullbleed.dev/getting-started/quickstart/) adds fonts, previews, and a complete project. The runnable source is in [`examples/quickstart/hello.py`](examples/quickstart/hello.py).
 
-**Using Rust?** Start with the [native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/). The [`fullbleed` crate](https://crates.io/crates/fullbleed) exposes `FullBleed::builder()` and `render_to_buffer(...)`, with no Python requirement. The guide includes runnable invoice and report examples with explicit fonts and PNG previews, plus the [Rust API reference](https://docs.rs/fullbleed/2.5.5/fullbleed/).
+**Using Rust?** Start with the [native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/). The [`fullbleed` crate](https://crates.io/crates/fullbleed) exposes `FullBleed::builder()` and `render_to_buffer(...)`, with no Python requirement. The guide includes runnable invoice and report examples with explicit fonts and PNG previews, plus the [Rust API reference](https://docs.rs/fullbleed/2.5.6/fullbleed/).
 
 **Using Node.js?** The [Node.js quickstart](https://docs.fullbleed.dev/getting-started/node/) includes a downloadable designed invoice project. The separate [Node package](https://github.com/fullbleed-engine/fullbleed-node) bundles the engine as WebAssembly and includes fonts, ESM/CommonJS support, TypeScript declarations, and PNG previews. It requires Node 22+ and covers ordinary PDF generation.
 
@@ -230,7 +230,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-2.5.5-cp310-abi3-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-2.5.6-cp310-abi3-win_amd64.whl
 ```
 
 From a source checkout with Rust installed, no Python build package is needed:

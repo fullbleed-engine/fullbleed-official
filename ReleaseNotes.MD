@@ -1,3 +1,30 @@
+# Fullbleed Release Notes - 2.5.6
+
+Release date: October 3, 2026
+
+## Keep synthesized bold text searchable once
+
+PDFs using upright synthesized bold previously contained both visible Type 3
+glyph text and an invisible logical text copy. Independent readers could extract
+headings twice or interleave their letters. Visible glyphs now use shared vector
+paint forms, leaving one logical text copy for search and extraction.
+
+The finalized preview reader preserves the affine transform of those path forms
+so outlines and strokes scale together. Selecting an unused fallback font after
+a transformed element no longer causes an embedded-font profile to reject the
+document. Fonts used by actual text still require embedding for those profiles.
+
+Installed-wheel checks cover 36 styled fixtures across ordinary, tagged, and
+PDF/UA-1-profile output, with retained PDF/PNG evidence and an independent text
+reader in CI. Local comparisons use four text readers. These fixture checks do
+not establish general renderer parity, screen-reader acceptance, or standards
+conformance. The core gains no runtime dependency.
+
+Affected PDF and finalized-preview hashes change. Review saved baselines before
+updating them. See the [2.5.6 release runbook](docs/release/2.5.6-runbook.md).
+
+---
+
 # Fullbleed Release Notes - 2.5.5
 
 Release date: October 2, 2026

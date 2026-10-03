@@ -422,8 +422,8 @@ pub enum Command {
         m11: f32,
     },
     /// Reusable vector-shader path for browser-synthesized bold. The PDF
-    /// backend compiles each unique glyph into a shared Type 3 program instead
-    /// of serializing the same expanded outline at every text occurrence.
+    /// backend compiles each unique glyph into a shared paint-only Form;
+    /// the accompanying logical text command supplies searchable text once.
     DrawSyntheticBoldGlyphRun {
         x: Pt,
         y: Pt,
