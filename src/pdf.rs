@@ -1129,6 +1129,7 @@ pub(crate) struct PdfStreamWriter<'a, W: Write> {
     image_bytes_total: usize,
 
     form_resources: Vec<(String, usize)>,
+    glyph_form_map: BTreeMap<(String, u16, u32), String>,
     form_name_map: HashMap<String, String>,
     form_content_map: HashMap<u64, (String, usize)>,
     form_size_map: HashMap<String, Size>,
@@ -1565,6 +1566,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             next_image_index: 1,
             image_bytes_total: 0,
             form_resources: Vec::new(),
+            glyph_form_map: BTreeMap::new(),
             form_name_map: HashMap::new(),
             form_content_map: HashMap::new(),
             form_size_map: HashMap::new(),
@@ -3299,9 +3301,9 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         pre_shaped: Option<&ShapedText>,
     ) -> io::Result<bool> {
         let font_key = self.font_key(font_name);
-        if !self.fonts.contains_key(&font_key) {
-            self.ensure_font(font_name)?;
-        }
+        // Resolve only fonts used by text, and record usage in each document
+        // even when the shared font resource was created by an earlier one.
+        self.ensure_font(font_name)?;
         let Some((resource, encoding)) = self
             .fonts
             .get(&font_key)
@@ -3696,7 +3698,8 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         let mut current_font_size = Pt::from_f32(12.0);
         let mut current_font_name = "Helvetica".to_string();
         let mut current_fill = Color::BLACK;
-        let mut graphics_state_stack: Vec<(Pt, String, Color)> = Vec::new();
+        let mut current_text_rendering_mode = 0u8;
+        let mut graphics_state_stack: Vec<(Pt, String, Color, u8)> = Vec::new();
         let mut tag_stack: Vec<usize> = Vec::new();
         let mut suppressed_tag_depth = 0usize;
         let mut marked_content_stack: Vec<bool> = Vec::new();
@@ -3766,14 +3769,18 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                         current_font_size,
                         current_font_name.clone(),
                         current_fill,
+                        current_text_rendering_mode,
                     ));
                     out.push_str("q\n");
                 }
                 Command::RestoreState => {
-                    if let Some((font_size, font_name, fill)) = graphics_state_stack.pop() {
+                    if let Some((font_size, font_name, fill, text_mode)) =
+                        graphics_state_stack.pop()
+                    {
                         current_font_size = font_size;
                         current_font_name = font_name;
                         current_fill = fill;
+                        current_text_rendering_mode = text_mode;
                     }
                     out.push_str("Q\n");
                 }
@@ -3974,12 +3981,12 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                 Command::ApplyBackdropFilter { .. } => {}
                 Command::SetFontName(name) => {
                     current_font_name = name.clone();
-                    self.ensure_font(&current_font_name)?;
                 }
                 Command::SetFontSize(size) => {
                     current_font_size = *size;
                 }
                 Command::SetTextRenderingMode(mode) => {
+                    current_text_rendering_mode = (*mode).min(7);
                     out.push_str(&format!("{} Tr\n", (*mode).min(7)));
                 }
                 Command::ClipRect {
@@ -4181,29 +4188,33 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     offsets,
                     stroke_width,
                 } => {
+                    // Like the Type 3 glyphs this replaces, only invisible
+                    // text mode suppresses paint (ISO 32000-1, 9.3.6).
+                    if current_text_rendering_mode == 3 {
+                        continue;
+                    }
                     let synthetic_bold_millionths =
                         synthetic_bold_ratio_millionths(*stroke_width, current_font_size);
                     let mut pen_x = *x;
                     let mut pen_y = *y;
                     for (index, glyph_id) in glyph_ids.iter().copied().enumerate() {
                         let offset = offsets.get(index).copied().unwrap_or((Pt::ZERO, Pt::ZERO));
-                        if let Some(resource) = self.ensure_type3_glyph(
+                        if let Some(resource) = self.ensure_glyph_paint_form(
                             &current_font_name,
                             glyph_id,
                             synthetic_bold_millionths,
                         )? {
-                            out.push_str("BT\n");
+                            // The authored text is emitted once by the following
+                            // invisible DrawString. Painting these same glyphs as
+                            // Type 3 text makes readers extract both copies.
                             out.push_str(&format!(
-                                "/{} {} Tf\n",
-                                resource,
-                                fmt_pt(current_font_size)
-                            ));
-                            out.push_str(&format!(
-                                "1 0 0 1 {} {} Tm\n",
+                                "q\n{} 0 0 {} {} {} cm\n/{} Do\nQ\n",
+                                format_fixed(current_font_size.to_milli_i64(), 6),
+                                format_fixed(-current_font_size.to_milli_i64(), 6),
                                 fmt_pt(pen_x + offset.0),
                                 fmt_pt(page_height - pen_y - offset.1),
+                                resource,
                             ));
-                            out.push_str(&format!("<{:02X}> Tj\nET\n", glyph_id & 0x00ff));
                         }
                         if let Some((advance_x, advance_y)) = advances.get(index) {
                             pen_x = pen_x + *advance_x;
@@ -5123,6 +5134,46 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
         };
         font.glyph_ids.insert(glyph_id);
         Ok(Some(font.resource.clone()))
+    }
+
+    fn ensure_glyph_paint_form(
+        &mut self,
+        name: &str,
+        glyph_id: u16,
+        synthetic_bold_millionths: u32,
+    ) -> io::Result<Option<String>> {
+        if glyph_id == 0 {
+            return Ok(None);
+        }
+        let logical_name = self.canonical_font_name(name);
+        let key = (
+            normalize_font_key(&logical_name),
+            glyph_id,
+            synthetic_bold_millionths,
+        );
+        if let Some(resource) = self.glyph_form_map.get(&key) {
+            return Ok(Some(resource.clone()));
+        }
+        let Some(outline) = self
+            .registry
+            .and_then(|registry| registry.glyph_outline_for_id(&logical_name, glyph_id))
+        else {
+            return Ok(None);
+        };
+        let (program, bbox, _) = glyph_outline_program(&outline, synthetic_bold_millionths);
+        let resource = format!("GlyphPaint{}", self.glyph_form_map.len() + 1);
+        let object_id = self.alloc_ids(1);
+        let dictionary = format!(
+            "/Type /XObject /Subtype /Form /BBox [{} {} {} {}] /Resources << >>",
+            fmt(bbox[0]),
+            fmt(bbox[1]),
+            fmt(bbox[2]),
+            fmt(bbox[3]),
+        );
+        self.write_stream_object_bytes(object_id, &dictionary, program.as_bytes())?;
+        self.form_resources.push((resource.clone(), object_id));
+        self.glyph_form_map.insert(key, resource.clone());
+        Ok(Some(resource))
     }
 
     fn write_type3_font(
@@ -9409,6 +9460,23 @@ fn type3_glyph_program(
     outline: &RegisteredGlyphOutline,
     synthetic_bold_millionths: u32,
 ) -> (String, [f32; 4], f32) {
+    let (paint, bbox, width) = glyph_outline_program(outline, synthetic_bold_millionths);
+    let program = format!(
+        "{} 0 {} {} {} {} d1\n{}",
+        fmt(width),
+        fmt(bbox[0]),
+        fmt(bbox[1]),
+        fmt(bbox[2]),
+        fmt(bbox[3]),
+        paint,
+    );
+    (program, bbox, width)
+}
+
+fn glyph_outline_program(
+    outline: &RegisteredGlyphOutline,
+    synthetic_bold_millionths: u32,
+) -> (String, [f32; 4], f32) {
     let scale = 1000.0 / f32::from(outline.units_per_em.max(1));
     let transform = |x: f32, y: f32| (x * scale, -y * scale);
     let mut path = String::new();
@@ -9501,17 +9569,10 @@ fn type3_glyph_program(
         bbox[3] += expansion;
     }
     let width = f32::from(outline.advance) * scale;
-    let mut program = format!(
-        "{} 0 {} {} {} {} d1\n",
-        fmt(width),
-        fmt(bbox[0]),
-        fmt(bbox[1]),
-        fmt(bbox[2]),
-        fmt(bbox[3]),
-    );
+    let mut program = String::new();
     if stroke_width > 0.0 {
         // Skia's synthetic font weight is a fill plus centered outline with a
-        // four-unit miter limit. Keeping it inside the Type 3 glyph program
+        // four-unit miter limit. Keeping it inside the shared glyph program
         // makes the expansion reusable and gives every occurrence the same
         // unhinted vector-mask raster phase.
         program.push_str(&format!(
@@ -10764,7 +10825,7 @@ mod tests {
     }
 
     #[test]
-    fn pdfua1_type3_synthetic_bold_font_maps_visible_glyphs_to_unicode() {
+    fn pdfua1_synthetic_bold_keeps_one_logical_text_copy() {
         let inter_path = repo_font_path("Inter-Variable.ttf");
         let inter_bytes = std::fs::read(&inter_path).expect("read inter");
         let mut registry = FontRegistry::new();
@@ -10816,9 +10877,17 @@ mod tests {
             document_to_pdf_with_metrics_and_registry(&doc, None, Some(&registry), &options)
                 .expect("render PDF/UA synthetic bold text");
         let pdf = String::from_utf8_lossy(&bytes);
-        assert!(pdf.contains("/Subtype /Type3"));
-        assert!(pdf.contains("/CMapName /FullBleed-Type3-UCS"));
-        assert!(pdf.contains(&format!("<{:02X}> <0041>", glyph_id & 0x00ff)));
+        let content = page_content_bytes(&bytes);
+        assert!(!pdf.contains("/Subtype /Type3"));
+        assert!(pdf.contains("/Subtype /Form"));
+        assert!(pdf.contains("/ToUnicode"));
+        assert!(pdf.contains("<0041>"));
+        assert_eq!(
+            count_token(&content, b" Tj") + count_token(&content, b" TJ"),
+            1
+        );
+        assert_eq!(count_token(&content, b"/P <</MCID 0>> BDC"), 1);
+        assert_eq!(count_token(&content, b"/GlyphPaint1 Do"), 1);
     }
 
     #[test]
@@ -10904,7 +10973,7 @@ mod tests {
     }
 
     #[test]
-    fn synthetic_bold_glyph_run_reuses_one_stroked_type3_program() {
+    fn synthetic_bold_glyph_run_reuses_one_stroked_paint_form() {
         let inter_path = repo_font_path("Inter-Variable.ttf");
         let inter_bytes = std::fs::read(&inter_path).expect("read inter");
         let mut registry = FontRegistry::new();
@@ -10939,16 +11008,12 @@ mod tests {
         .expect("render reusable synthetic-bold glyph run");
         let pdf = String::from_utf8_lossy(&bytes);
         let content = page_content_bytes(&bytes);
-        assert!(pdf.contains("/Subtype /Type3"));
+        assert!(!pdf.contains("/Subtype /Type3"));
+        assert_eq!(count_token(&bytes, b"/Subtype /Form"), 1);
         assert!(pdf.contains("31.238 w"));
         assert!(pdf.contains("B\n"));
-        assert_eq!(count_token(&content, b" Tj"), 3);
-        // CharProc and Encoding each name the glyph once; repeated page draws
-        // reference that shared program instead of expanding its outline.
-        assert_eq!(
-            count_token(&bytes, format!("/g{:04X}", glyph_id).as_bytes()),
-            2
-        );
+        assert_eq!(count_token(&content, b" Tj"), 0);
+        assert_eq!(count_token(&content, b"/GlyphPaint1 Do"), 3);
     }
 
     #[test]
@@ -11054,6 +11119,33 @@ mod tests {
             .expect_err("pdf/ua-1 text should fail without an embedded font registry");
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
         assert!(err.to_string().contains("pdfua1 requires a font registry"));
+    }
+
+    #[test]
+    fn pdfua1_does_not_require_an_unused_restored_font() {
+        let inter_path = repo_font_path("Inter-Variable.ttf");
+        let mut registry = FontRegistry::new();
+        let name = registry
+            .register_bytes(std::fs::read(&inter_path).unwrap(), None)
+            .expect("register font");
+        let mut doc = text_page(&name, "Embedded text");
+        // A transformed element restores the canvas's default font after its
+        // last text run. Selection alone must not embed or validate that font.
+        doc.pages[0]
+            .commands
+            .push(Command::SetFontName("Helvetica".to_string()));
+        let options = PdfOptions {
+            pdf_profile: PdfProfile::PdfUa1,
+            document_lang: Some("en-US".to_string()),
+            document_title: Some("Unused font selection".to_string()),
+            ..PdfOptions::default()
+        };
+        let bytes =
+            document_to_pdf_with_metrics_and_registry(&doc, None, Some(&registry), &options)
+                .expect("only painted text requires an embedded font");
+        let pdf = String::from_utf8_lossy(&bytes);
+        assert!(pdf.contains("/FontFile2"));
+        assert!(!pdf.contains("/BaseFont /Helvetica"));
     }
 
     #[test]

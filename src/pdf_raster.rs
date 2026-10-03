@@ -966,6 +966,44 @@ fn parse_xobject(
         // Give forms their own path and graphics state, as PDF requires. Their
         // coordinates are already mapped into page space by the parser.
         let mut form_commands = Vec::new();
+        // Keep a path-only form's affine transform on the raster graphics
+        // state. Baking it into coordinates while leaving `w` in font units
+        // makes small reusable glyph forms render as solid stroked boxes.
+        // The native path renderer then transforms both outlines and strokes,
+        // including nonuniform scale and shear, without a scalar approximation.
+        if form_content.operations.iter().all(|op| {
+            matches!(
+                op.operator.as_str(),
+                "m" | "l"
+                    | "c"
+                    | "h"
+                    | "re"
+                    | "f"
+                    | "F"
+                    | "f*"
+                    | "S"
+                    | "s"
+                    | "B"
+                    | "B*"
+                    | "b"
+                    | "b*"
+                    | "w"
+                    | "J"
+                    | "j"
+                    | "M"
+            )
+        }) {
+            let matrix = nested_state.ctm;
+            form_commands.push(Command::ConcatMatrix {
+                a: matrix.a,
+                b: -matrix.b,
+                c: -matrix.c,
+                d: matrix.d,
+                e: Pt::from_f32(matrix.e),
+                f: Pt::from_f32(-matrix.f),
+            });
+            nested_state.ctm = Matrix::identity();
+        }
         forms::clip_bbox(
             doc,
             &stream.dict,
@@ -4576,7 +4614,7 @@ endbfrange
     }
 
     #[test]
-    fn finalized_preview_recovers_generated_synthetic_bold_type3_glyphs() {
+    fn finalized_preview_paints_generated_synthetic_bold_forms() {
         let mut bundle = crate::AssetBundle::default();
         bundle.add(crate::Asset::new(
             "PreviewRegular".to_string(),
@@ -4596,31 +4634,20 @@ endbfrange
             )
             .expect("synthetic-bold PDF");
         assert!(
-            pdf.windows(b"/Subtype /Type3".len())
-                .any(|window| window == b"/Subtype /Type3"),
-            "fixture must exercise the generated Type 3 path"
+            pdf.windows(b"/Subtype /Form".len())
+                .any(|window| window == b"/Subtype /Form"),
+            "fixture must exercise the reusable glyph paint path"
         );
 
         let doc = LoDocument::load_mem(&pdf).expect("parse PDF");
         let (pages, embedded_fonts) = parse_pdf_pages(&doc).expect("lower PDF for preview");
         assert!(!embedded_fonts.is_empty());
-        let synthetic_runs = pages[0]
-            .commands
-            .iter()
-            .filter_map(|command| match command {
-                Command::DrawSyntheticBoldGlyphRun {
-                    glyph_ids,
-                    stroke_width,
-                    ..
-                } => Some((glyph_ids, stroke_width)),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert!(!synthetic_runs.is_empty());
         assert!(
-            synthetic_runs
-                .iter()
-                .all(|(glyph_ids, stroke_width)| !glyph_ids.is_empty() && **stroke_width > Pt::ZERO)
+            pages[0].commands.iter().any(
+                |command| matches!(command, Command::DefineForm { commands, .. }
+                    if commands.iter().any(|command| matches!(command, Command::FillStroke)))
+            ),
+            "preview must lower the visible glyph forms to painted paths"
         );
 
         let previews = pdf_bytes_to_png_pages(&pdf, 120, None, true).expect("finalized preview");

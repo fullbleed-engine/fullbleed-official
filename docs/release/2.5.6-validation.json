@@ -1,0 +1,657 @@
+{
+  "schema": "fullbleed.release_validation.v1",
+  "release": "2.5.6",
+  "status": "local candidate; release CI and public distribution checks are separate gates",
+  "checked_at": "2026-10-03T16:04:35.189892+00:00",
+  "source_sha256": {
+    "src/pdf.rs": "519e68b11f5d6f3e7531617ac98626ec31eacaf6b999a50519aed423cd99a089",
+    "src/pdf_raster.rs": "bea771a2f47c8df3578b011d4c21174230f35e6f4479032a73a3aa5e7cd8b995",
+    "src/canvas.rs": "e3eb446fd5f0f289612ef5665b9fdc41d2fe259d0f084bc6e8822562f8d6560e",
+    "src/flowable.rs": "1436393e32717f37f3da4bde0ac57465eb6c5c49aaa445b516f9219082dd751b",
+    "tools/smoke_text_extraction.py": "cd5ad976ea7c9f56f3e4cf562394283e0b5af4e9211e5df03d6c2483c3fbc285",
+    "tests/test_fullbleed_text_extraction.py": "ce70abf4fcb66ed1038fde200315261cbadbcd0a4e36e9b5def3caf16ac47389"
+  },
+  "local_wheel_sha256": "935da66d35f6d229a296708ab497a07175c9d1798c8513029f49ad237fac18fa",
+  "tests": {
+    "rust_default": 1306,
+    "rust_python_svg": 1307,
+    "python": 497,
+    "styled_documents": 36,
+    "golden_documents": 3
+  },
+  "readers": {
+    "pypdf": "6.1.1",
+    "PyMuPDF": "1.26.5",
+    "pdfminer.six": "20251230",
+    "pypdfium2": "5.4.0",
+    "fullbleed": "2.5.6"
+  },
+  "negative_control": {
+    "version": "2.5.5",
+    "case": "quickstart",
+    "expected": "Invoice INV-1042 Consulting: USD 1,200.00",
+    "extracted": "Invoice INV-1042Invoice INV-1042 Consulting: USD 1,200.00",
+    "pdf_sha256": "84c66b14e4b7a54bd524f87ba4fab6cfee52cc4d902a2a9abc703685a5f5a18c"
+  },
+  "cases": [
+    {
+      "profile": "none",
+      "name": "quickstart",
+      "pdf_sha256": "2ae9b416e62bd34871a89eb73ec90f50c69dcb4cdc53c81e4e5c20d21dd0dc03",
+      "extracted": {
+        "pymupdf": "Invoice INV-1042 Consulting: USD 1,200.00",
+        "pdfminer": "Invoice INV-1042 Consulting: USD 1,200.00",
+        "pdfium": "Invoice INV-1042 Consulting: USD 1,200.00"
+      },
+      "expected": "Invoice INV-1042 Consulting: USD 1,200.00",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 6,
+        "mean_absolute": 1.595497506037961e-05,
+        "max_channel": 36,
+        "relative_ink_delta": 2.371487604530727e-05
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "none",
+      "name": "repeated",
+      "pdf_sha256": "c1113351fd49ca138af8c34da18493b449f921d1966bc541fcb756840e038b18",
+      "extracted": {
+        "pymupdf": "ABBA ABBA 2026",
+        "pdfminer": "ABBA ABBA 2026",
+        "pdfium": "ABBA ABBA 2026"
+      },
+      "expected": "ABBA ABBA 2026",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 6,
+        "mean_absolute": 4.487336735731765e-06,
+        "max_channel": 7,
+        "relative_ink_delta": 2.259291335617728e-05
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "none",
+      "name": "small-heading",
+      "pdf_sha256": "085049979566b2adc1cf9925d3a94dfbdcf521d3855ffa7f6762d0bc78bb7f45",
+      "extracted": {
+        "pymupdf": "Small heading",
+        "pdfminer": "Small heading",
+        "pdfium": "Small heading"
+      },
+      "expected": "Small heading",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 0,
+        "mean_absolute": 0.0,
+        "max_channel": 0,
+        "relative_ink_delta": 0.0
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "none",
+      "name": "large-bold",
+      "pdf_sha256": "8b3a2515b76d799ada358717d83de31e5280ccf28bff11fff7a41861e79346fe",
+      "extracted": {
+        "pymupdf": "Large bold 48",
+        "pdfminer": "Large bold 48",
+        "pdfium": "Large bold 48"
+      },
+      "expected": "Large bold 48",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 0,
+        "mean_absolute": 0.0,
+        "max_channel": 0,
+        "relative_ink_delta": 0.0
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "none",
+      "name": "bold-italic",
+      "pdf_sha256": "8f56f6b79bad7309b84d7b143c1939a6577cfcf6112480c6ff502c7460f0fbf1",
+      "extracted": {
+        "pymupdf": "Bold italic office",
+        "pdfminer": "Bold italic office",
+        "pdfium": "Bold italic office"
+      },
+      "expected": "Bold italic office",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 0,
+        "mean_absolute": 0.0,
+        "max_channel": 0,
+        "relative_ink_delta": 0.0
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "none",
+      "name": "unicode",
+      "pdf_sha256": "7cea574f1cb9ebc19144b5c205aa8e89dc7122e78d963b416fe783d57d406b98",
+      "extracted": {
+        "pymupdf": "R\u00e9sum\u00e9 caf\u00e9 office",
+        "pdfminer": "R\u00e9sum\u00e9 caf\u00e9 office",
+        "pdfium": "R\u00e9sum\u00e9 caf\u00e9 office"
+      },
+      "expected": "R\u00e9sum\u00e9 caf\u00e9 office",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 15,
+        "mean_absolute": 5.48452267700549e-06,
+        "max_channel": 5,
+        "relative_ink_delta": 1.2641234188976339e-05
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "none",
+      "name": "mixed",
+      "pdf_sha256": "f51618b10af043f62acd889e5a5bb827bb93dfddf1186699f270439bc80f18b6",
+      "extracted": {
+        "pymupdf": "Plain bold plain italic.",
+        "pdfminer": "Plain bold plain italic.",
+        "pdfium": "Plain bold plain italic."
+      },
+      "expected": "Plain bold plain italic.",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 0,
+        "mean_absolute": 0.0,
+        "max_channel": 0,
+        "relative_ink_delta": 0.0
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "none",
+      "name": "opacity",
+      "pdf_sha256": "211fd713d83f4af31a31533e5ad32537463e65a736036bd920fb3fbffd04cf3f",
+      "extracted": {
+        "pymupdf": "Translucent heading",
+        "pdfminer": "Translucent heading",
+        "pdfium": "Translucent heading"
+      },
+      "expected": "Translucent heading",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 0,
+        "mean_absolute": 0.0,
+        "max_channel": 0,
+        "relative_ink_delta": 0.0
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "none",
+      "name": "transform",
+      "pdf_sha256": "bcf657e5ca08bc764dad0cc4fc588d554a6ecdbede21b8121edb7d369f242504",
+      "extracted": {
+        "pymupdf": "Rotated heading",
+        "pdfminer": "Rotated heading",
+        "pdfium": "Rotated heading"
+      },
+      "expected": "Rotated heading",
+      "text_ok": true
+    },
+    {
+      "profile": "none",
+      "name": "scaled",
+      "pdf_sha256": "2244841c52af34d013f33101524789d7b42e400aee712ab89c769b6c1fc421cc",
+      "extracted": {
+        "pymupdf": "Scaled heading",
+        "pdfminer": "Scaled heading",
+        "pdfium": "Scaled heading"
+      },
+      "expected": "Scaled heading",
+      "text_ok": true
+    },
+    {
+      "profile": "none",
+      "name": "sheared",
+      "pdf_sha256": "757e48c2621fa88f7d9588b796fb8b93d172f9152d4768110ef4f89310e571e9",
+      "extracted": {
+        "pymupdf": "Sheared heading",
+        "pdfminer": "Sheared heading",
+        "pdfium": "Sheared heading"
+      },
+      "expected": "Sheared heading",
+      "text_ok": true
+    },
+    {
+      "profile": "none",
+      "name": "shadow",
+      "pdf_sha256": "b43e7df0d79962ac0765a731cd8699e5aea01175b3489760018d94e11ef30031",
+      "extracted": {
+        "pymupdf": "Shadow heading",
+        "pdfminer": "Shadow heading",
+        "pdfium": "Shadow heading"
+      },
+      "expected": "Shadow heading",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 0,
+        "mean_absolute": 0.0,
+        "max_channel": 0,
+        "relative_ink_delta": 0.0
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "tagged",
+      "name": "quickstart",
+      "pdf_sha256": "c9199af586d22d25c74496298dfaed4f82cef4bf0cebd0a70bddd7322799648a",
+      "extracted": {
+        "pymupdf": "Invoice INV-1042 Consulting: USD 1,200.00",
+        "pdfminer": "Invoice INV-1042 Consulting: USD 1,200.00",
+        "pdfium": "Invoice INV-1042 Consulting: USD 1,200.00"
+      },
+      "expected": "Invoice INV-1042 Consulting: USD 1,200.00",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 6,
+        "mean_absolute": 1.595497506037961e-05,
+        "max_channel": 36,
+        "relative_ink_delta": 2.371487604530727e-05
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "tagged",
+      "name": "repeated",
+      "pdf_sha256": "f87766a097517ee4427d634afc435cccece82f4899d0c4b47a2aeaa4ef235062",
+      "extracted": {
+        "pymupdf": "ABBA ABBA 2026",
+        "pdfminer": "ABBA ABBA 2026",
+        "pdfium": "ABBA ABBA 2026"
+      },
+      "expected": "ABBA ABBA 2026",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 6,
+        "mean_absolute": 4.487336735731765e-06,
+        "max_channel": 7,
+        "relative_ink_delta": 2.259291335617728e-05
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "tagged",
+      "name": "small-heading",
+      "pdf_sha256": "8fb56fe47ba5be86eeeef52c6644d9f5b44c5d59e0704bd8f529fd1f8a38a8e1",
+      "extracted": {
+        "pymupdf": "Small heading",
+        "pdfminer": "Small heading",
+        "pdfium": "Small heading"
+      },
+      "expected": "Small heading",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 0,
+        "mean_absolute": 0.0,
+        "max_channel": 0,
+        "relative_ink_delta": 0.0
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "tagged",
+      "name": "large-bold",
+      "pdf_sha256": "f7b7ded1a27451a8eacfb6cc9b9f25e35c3508cc6f70439d08b5a5d7836a9be1",
+      "extracted": {
+        "pymupdf": "Large bold 48",
+        "pdfminer": "Large bold 48",
+        "pdfium": "Large bold 48"
+      },
+      "expected": "Large bold 48",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 0,
+        "mean_absolute": 0.0,
+        "max_channel": 0,
+        "relative_ink_delta": 0.0
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "tagged",
+      "name": "bold-italic",
+      "pdf_sha256": "bdd9ce699fdbbe6f95d68190f6638c7ee5cac9fed14d3bf6cbcabe41e8e357ac",
+      "extracted": {
+        "pymupdf": "Bold italic office",
+        "pdfminer": "Bold italic office",
+        "pdfium": "Bold italic office"
+      },
+      "expected": "Bold italic office",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 0,
+        "mean_absolute": 0.0,
+        "max_channel": 0,
+        "relative_ink_delta": 0.0
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "tagged",
+      "name": "unicode",
+      "pdf_sha256": "795b9a5fe44f450fc364eb455636483159f0f067aed68e6e86b231c4e46d3182",
+      "extracted": {
+        "pymupdf": "R\u00e9sum\u00e9 caf\u00e9 office",
+        "pdfminer": "R\u00e9sum\u00e9 caf\u00e9 office",
+        "pdfium": "R\u00e9sum\u00e9 caf\u00e9 office"
+      },
+      "expected": "R\u00e9sum\u00e9 caf\u00e9 office",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 15,
+        "mean_absolute": 5.48452267700549e-06,
+        "max_channel": 5,
+        "relative_ink_delta": 1.2641234188976339e-05
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "tagged",
+      "name": "mixed",
+      "pdf_sha256": "afbdb914286e3e3311d1a8864c3f18cd6a30c268a3a50955f6a0bf4306656c70",
+      "extracted": {
+        "pymupdf": "Plain bold plain italic.",
+        "pdfminer": "Plain bold plain italic.",
+        "pdfium": "Plain bold plain italic."
+      },
+      "expected": "Plain bold plain italic.",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 0,
+        "mean_absolute": 0.0,
+        "max_channel": 0,
+        "relative_ink_delta": 0.0
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "tagged",
+      "name": "opacity",
+      "pdf_sha256": "1ef7dd3b9990907237eb2e2f340a6b633950d543c05a120d01c444a42fc28fb8",
+      "extracted": {
+        "pymupdf": "Translucent heading",
+        "pdfminer": "Translucent heading",
+        "pdfium": "Translucent heading"
+      },
+      "expected": "Translucent heading",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 0,
+        "mean_absolute": 0.0,
+        "max_channel": 0,
+        "relative_ink_delta": 0.0
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "tagged",
+      "name": "transform",
+      "pdf_sha256": "f1460e1deda6b1c6c8ac6e76d329ba6446f60fa40bfd5226a2e7bf3c285fd3c1",
+      "extracted": {
+        "pymupdf": "Rotated heading",
+        "pdfminer": "Rotated heading",
+        "pdfium": "Rotated heading"
+      },
+      "expected": "Rotated heading",
+      "text_ok": true
+    },
+    {
+      "profile": "tagged",
+      "name": "scaled",
+      "pdf_sha256": "8a6e3c1fbc92ff6d4c8ee11814495e72aae2d0d13f12795de6a8ffa424ec63ab",
+      "extracted": {
+        "pymupdf": "Scaled heading",
+        "pdfminer": "Scaled heading",
+        "pdfium": "Scaled heading"
+      },
+      "expected": "Scaled heading",
+      "text_ok": true
+    },
+    {
+      "profile": "tagged",
+      "name": "sheared",
+      "pdf_sha256": "eb5a82e9d4fb55de1fe6b45683d8c0e875abc8d5d2a68efd5c3d6876ba161606",
+      "extracted": {
+        "pymupdf": "Sheared heading",
+        "pdfminer": "Sheared heading",
+        "pdfium": "Sheared heading"
+      },
+      "expected": "Sheared heading",
+      "text_ok": true
+    },
+    {
+      "profile": "tagged",
+      "name": "shadow",
+      "pdf_sha256": "88f2699ab9a84f905644a01c6a9a8153587f6cde3c4f918ec5b45a8c0eae128b",
+      "extracted": {
+        "pymupdf": "Shadow heading",
+        "pdfminer": "Shadow heading",
+        "pdfium": "Shadow heading"
+      },
+      "expected": "Shadow heading",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 0,
+        "mean_absolute": 0.0,
+        "max_channel": 0,
+        "relative_ink_delta": 0.0
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "pdfua-1",
+      "name": "quickstart",
+      "pdf_sha256": "cecac76edc06ec15f744af89d9e44433ce68f9a8da89405fba71600510aef56d",
+      "extracted": {
+        "pymupdf": "Invoice INV-1042 Consulting: USD 1,200.00",
+        "pdfminer": "Invoice INV-1042 Consulting: USD 1,200.00",
+        "pdfium": "Invoice INV-1042 Consulting: USD 1,200.00"
+      },
+      "expected": "Invoice INV-1042 Consulting: USD 1,200.00",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 6,
+        "mean_absolute": 1.595497506037961e-05,
+        "max_channel": 36,
+        "relative_ink_delta": 2.371487604530727e-05
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "pdfua-1",
+      "name": "repeated",
+      "pdf_sha256": "1fb74dc74e4bace5b901ae20b0739306423edd8ae0234412649eed67fd733109",
+      "extracted": {
+        "pymupdf": "ABBA ABBA 2026",
+        "pdfminer": "ABBA ABBA 2026",
+        "pdfium": "ABBA ABBA 2026"
+      },
+      "expected": "ABBA ABBA 2026",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 6,
+        "mean_absolute": 4.487336735731765e-06,
+        "max_channel": 7,
+        "relative_ink_delta": 2.259291335617728e-05
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "pdfua-1",
+      "name": "small-heading",
+      "pdf_sha256": "6c6bf83f2b90d3baeab1924ea8a0fd1b6bd5b9324d0fe3809adc4f4587af5530",
+      "extracted": {
+        "pymupdf": "Small heading",
+        "pdfminer": "Small heading",
+        "pdfium": "Small heading"
+      },
+      "expected": "Small heading",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 0,
+        "mean_absolute": 0.0,
+        "max_channel": 0,
+        "relative_ink_delta": 0.0
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "pdfua-1",
+      "name": "large-bold",
+      "pdf_sha256": "4fd7ee81117269ed13b0c8e228d6c6ae8d49c66d4970a5031fbed367591493b0",
+      "extracted": {
+        "pymupdf": "Large bold 48",
+        "pdfminer": "Large bold 48",
+        "pdfium": "Large bold 48"
+      },
+      "expected": "Large bold 48",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 0,
+        "mean_absolute": 0.0,
+        "max_channel": 0,
+        "relative_ink_delta": 0.0
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "pdfua-1",
+      "name": "bold-italic",
+      "pdf_sha256": "d21032cedd3501775e97ef7eef98a46cf88d33580ae96988144a14010327089c",
+      "extracted": {
+        "pymupdf": "Bold italic office",
+        "pdfminer": "Bold italic office",
+        "pdfium": "Bold italic office"
+      },
+      "expected": "Bold italic office",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 0,
+        "mean_absolute": 0.0,
+        "max_channel": 0,
+        "relative_ink_delta": 0.0
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "pdfua-1",
+      "name": "unicode",
+      "pdf_sha256": "d9794a038991d63e3542015b3378fccff35cda57a6e7428f5880f983ed6fb91d",
+      "extracted": {
+        "pymupdf": "R\u00e9sum\u00e9 caf\u00e9 office",
+        "pdfminer": "R\u00e9sum\u00e9 caf\u00e9 office",
+        "pdfium": "R\u00e9sum\u00e9 caf\u00e9 office"
+      },
+      "expected": "R\u00e9sum\u00e9 caf\u00e9 office",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 15,
+        "mean_absolute": 5.48452267700549e-06,
+        "max_channel": 5,
+        "relative_ink_delta": 1.2641234188976339e-05
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "pdfua-1",
+      "name": "mixed",
+      "pdf_sha256": "27b688815c967ca4b1c5656b23f13bfc83f5f2635279b906ccbbea424dba4170",
+      "extracted": {
+        "pymupdf": "Plain bold plain italic.",
+        "pdfminer": "Plain bold plain italic.",
+        "pdfium": "Plain bold plain italic."
+      },
+      "expected": "Plain bold plain italic.",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 0,
+        "mean_absolute": 0.0,
+        "max_channel": 0,
+        "relative_ink_delta": 0.0
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "pdfua-1",
+      "name": "opacity",
+      "pdf_sha256": "50c9f670de97a2212a955dbdca2de83e1a4c84df8e6eb01aef97fac736af80fc",
+      "extracted": {
+        "pymupdf": "Translucent heading",
+        "pdfminer": "Translucent heading",
+        "pdfium": "Translucent heading"
+      },
+      "expected": "Translucent heading",
+      "text_ok": true,
+      "external_visual_delta": {
+        "changed_channels": 0,
+        "mean_absolute": 0.0,
+        "max_channel": 0,
+        "relative_ink_delta": 0.0
+      },
+      "legacy_native_preview_unchanged": true
+    },
+    {
+      "profile": "pdfua-1",
+      "name": "transform",
+      "pdf_sha256": "f9c9c32e3a53a5412d79a447be5b88396c7a6460551fbda0950ed1862aa20061",
+      "extracted": {
+        "pymupdf": "Rotated heading",
+        "pdfminer": "Rotated heading",
+        "pdfium": "Rotated heading"
+      },
+      "expected": "Rotated heading",
+      "text_ok": true
+    },
+    {
+      "profile": "pdfua-1",
+      "name": "scaled",
+      "pdf_sha256": "613a0b20d4b08897f100280587615fe0aeb274c1b4d900f9c1ad3264d0d59745",
+      "extracted": {
+        "pymupdf": "Scaled heading",
+        "pdfminer": "Scaled heading",
+        "pdfium": "Scaled heading"
+      },
+      "expected": "Scaled heading",
+      "text_ok": true
+    },
+    {
+      "profile": "pdfua-1",
+      "name": "sheared",
+      "pdf_sha256": "60f3c9228842686e50fa62d30eda7785f7b11ce39e6734f7d6ee142010921528",
+      "extracted": {
+        "pymupdf": "Sheared heading",
+        "pdfminer": "Sheared heading",
+        "pdfium": "Sheared heading"
+      },
+      "expected": "Sheared heading",
+      "text_ok": true
+    },
+    {
+      "profile": "pdfua-1",
+      "name": "shadow",
+      "pdf_sha256": "0572bb356a6d8c3578fdfcdbd4854dfa301398f780a0063b685f20291195d594",
+      "extracted": {
+        "pymupdf": "Shadow heading",
+        "pdfminer": "Shadow heading",
+        "pdfium": "Shadow heading"
+      },
+      "expected": "Shadow heading",
+      "text_ok": true
+    }
+  ],
+  "limitations": [
+    "Fixture evidence is not general renderer parity, screen-reader acceptance, or standards conformance.",
+    "The dedicated PDF/VT validator is not configured."
+  ],
+  "evidence": "CI retains the source HTML/CSS, PDFs, native previews, text, and hashes in text-extraction artifacts; the release evidence archive adds local independent-reader comparisons."
+}

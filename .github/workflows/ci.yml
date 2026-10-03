@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.5"
+  FULLBLEED_CI_VERSION: "2.5.6"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -143,6 +143,19 @@ jobs:
 
       - name: Verify finalized PDF gradient previews
         run: python -I tools/smoke_gradient_preview.py --out target/gradient-preview
+
+      - name: Verify single-copy styled PDF text with an independent reader
+        run: |
+          python -m pip install pypdf==6.19.0
+          python -I tools/smoke_text_extraction.py --out target/text-extraction
+
+      - name: Retain styled PDF text and preview evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: text-extraction-${{ runner.os }}
+          path: target/text-extraction
+          if-no-files-found: warn
 
       - name: Retain gradient PDFs and preview evidence
         if: always()

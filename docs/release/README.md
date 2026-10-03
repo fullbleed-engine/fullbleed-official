@@ -4,6 +4,11 @@ This directory is the release-operations layer for Fullbleed. It is separate
 from feature documentation so release decisions can be audited without reading
 engine internals.
 
+## 2.5.6 Documents
+
+- `docs/release/2.5.6-runbook.md`: single-copy synthesized-bold text, affine glyph previews, and retained extraction checks.
+- `tools/smoke_text_extraction.py`: installed-wheel styled PDFs, independent text extraction, and native preview coverage checks.
+
 ## 2.5.5 Documents
 
 - `docs/release/2.5.5-runbook.md`: finalized gradient previews, source PDF preservation, and independent visual checks.
