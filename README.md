@@ -1,11 +1,11 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Fullbleed PDF Engine
 
-**Create PDFs from Python, HTML, and CSS. One install. MIT licensed.**
+**Create PDFs from HTML and CSS in Python, Rust, and Node.js. MIT licensed.**
 
-Build invoices, reports, statements, and variable-data print jobs with a deterministic Rust engine and a Python API. The wheel includes the rendering engine, fonts, and CLI, with no required third-party Python packages or system PDF stack.
+Build invoices, reports, statements, and variable-data print jobs with a deterministic Rust engine. Use the native Rust API, the Python package, or the optional Node.js package. The Python wheel includes the engine, fonts, and CLI with no required third-party Python packages or system PDF stack; the Node package includes the WebAssembly engine and fonts.
 
-[Try in your browser](https://docs.fullbleed.dev/playground/) · [Documentation](https://docs.fullbleed.dev/) · [Examples](https://docs.fullbleed.dev/examples/) · [PyPI](https://pypi.org/project/fullbleed/) · [Release notes](https://github.com/fullbleed-engine/fullbleed-official/releases) · [MIT license](LICENSE)
+[Try in your browser](https://docs.fullbleed.dev/playground/) · [Documentation](https://docs.fullbleed.dev/) · [Examples](https://docs.fullbleed.dev/examples/) · [PyPI](https://pypi.org/project/fullbleed/) · [crates.io](https://crates.io/crates/fullbleed) · [npm](https://www.npmjs.com/package/fullbleed) · [Release notes](https://github.com/fullbleed-engine/fullbleed-official/releases) · [MIT license](LICENSE)
 
 <p>
   <a href="https://docs.fullbleed.dev/assets/showcase/invoice.pdf"><img src="https://docs.fullbleed.dev/assets/showcase/invoice-1.png" width="48%" alt="Northstar Studio invoice rendered by Fullbleed, with serif typography and forest-green tables"></a>
@@ -14,9 +14,22 @@ Build invoices, reports, statements, and variable-data print jobs with a determi
 
 Actual Fullbleed output. Open either preview for its PDF, or [explore all four designs with complete HTML/CSS, data, and licensed fonts](https://docs.fullbleed.dev/examples/).
 
+## Choose your language
+
+| Language | Install | Start building |
+| --- | --- | --- |
+| Python | `python -m pip install fullbleed` | [Python quickstart](https://docs.fullbleed.dev/getting-started/quickstart/) |
+| Rust | `cargo add fullbleed` | [Native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/) |
+| Node.js / TypeScript | `npm install fullbleed` | [Node quickstart](https://docs.fullbleed.dev/getting-started/node/) · [Next.js PDF download](https://docs.fullbleed.dev/guides/nextjs-pdf/) |
+
+The Node integration is independently versioned and covers ordinary PDF generation.
+The Python package provides the complete CLI, including compiled variable-data jobs and print profiles; the Rust guide covers the native API.
+
 ## Your first PDF
 
 Start in the [HTML/CSS playground](https://docs.fullbleed.dev/playground/) to edit a designed invoice or report and download a real PDF. It runs locally in your browser with no account or document upload. You can also use the [Python notebook in Colab](https://colab.research.google.com/github/fullbleed-engine/fullbleed-official/blob/master/examples/notebooks/first_invoice.ipynb), or start with a local script:
+
+### Python
 
 Python 3.10–3.14 on Windows, macOS, or Linux:
 
@@ -38,9 +51,28 @@ Path("invoice.pdf").write_bytes(pdf)
 
 Open `invoice.pdf`. The [quickstart](https://docs.fullbleed.dev/getting-started/quickstart/) adds fonts, previews, and a complete project. The runnable source is in [`examples/quickstart/hello.py`](examples/quickstart/hello.py).
 
-**Using Rust?** Start with the [native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/). The [`fullbleed` crate](https://crates.io/crates/fullbleed) exposes `FullBleed::builder()` and `render_to_buffer(...)`, with no Python requirement. The guide includes runnable invoice and report examples with explicit fonts and PNG previews, plus the [Rust API reference](https://docs.rs/fullbleed/2.5.6/fullbleed/).
+### Node.js
 
-**Using Node.js?** The [Node.js quickstart](https://docs.fullbleed.dev/getting-started/node/) includes a downloadable designed invoice project. The separate [Node package](https://github.com/fullbleed-engine/fullbleed-node) bundles the engine as WebAssembly and includes fonts, ESM/CommonJS support, TypeScript declarations, and PNG previews. It requires Node 22+ and covers ordinary PDF generation.
+Use Node.js 22 or newer. Run `npm install fullbleed`, save this as `invoice.mjs`, then run `node invoice.mjs`:
+
+```javascript
+import { writeFile } from 'node:fs/promises';
+import { renderPdf } from 'fullbleed';
+
+const result = await renderPdf({
+  html: '<h1>Invoice INV-1042</h1><p>Consulting: USD 1,200.00</p>',
+  css: '@page { size: A4; margin: 20mm } h1 { color: #175c52 }',
+  previewDpi: 96,
+});
+await writeFile('invoice.pdf', result.pdf);
+await writeFile('invoice.png', result.previews[0]);
+```
+
+Open `invoice.pdf` or its PNG preview. The [Node.js quickstart](https://docs.fullbleed.dev/getting-started/node/) includes a downloadable designed invoice project. The separate [Node package](https://github.com/fullbleed-engine/fullbleed-node) supports ESM, CommonJS, and TypeScript. For an application route, use the [Next.js starter](https://docs.fullbleed.dev/guides/nextjs-pdf/).
+
+### Rust
+
+Start with the [native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/). The [`fullbleed` crate](https://crates.io/crates/fullbleed) exposes `FullBleed::builder()` and `render_to_buffer(...)`, with no Python requirement. The guide includes runnable invoice and report examples with explicit fonts and PNG previews, plus the [Rust API reference](https://docs.rs/fullbleed/2.5.6/fullbleed/).
 
 ## Choose your starting point
 
