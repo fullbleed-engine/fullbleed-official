@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>Fullbleed · Python invoice starter</title>
+  <style>
+    :root { color-scheme: light; font-family: Arial, sans-serif; color: #193b31; background: #f5f2ea; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    header { display: flex; justify-content: space-between; gap: 20px; padding: 24px 5vw; border-bottom: 1px solid #c5cdc4; }
+    .wordmark { font-size: 23px; font-weight: 800; letter-spacing: -1px; }
+    .label { font-size: 11px; font-weight: 700; letter-spacing: 1.8px; text-transform: uppercase; }
+    header .label { align-self: center; }
+    main { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 7vw; max-width: 1220px; margin: auto; padding: 64px 5vw; }
+    .intro { padding-top: 24px; }
+    .eyebrow { color: #a53720; }
+    h1 { font: normal clamp(42px,5.5vw,72px)/1.04 Georgia, serif; letter-spacing: -2px; margin: 22px 0; }
+    p { font-size: 16px; line-height: 1.65; max-width: 34em; }
+    .lead { color: #486358; }
+    .button { display: inline-block; margin: 16px 0 12px; padding: 17px 24px; background: #193b31; color: #fff; text-decoration: none; font-size: 15px; font-weight: 700; border-radius: 3px; }
+    .button:hover { background: #2c5847; }
+    a:focus-visible { outline: 3px solid #c54e2e; outline-offset: 5px; }
+    .note { font-size: 12px; color: #53675f; }
+    .details { display: flex; gap: 32px; padding: 24px 0; border-top: 1px solid #c5cdc4; border-bottom: 1px solid #c5cdc4; margin-top: 28px; }
+    .details span { display: block; margin-top: 9px; font: 23px Georgia,serif; letter-spacing: 0; text-transform: none; white-space: nowrap; }
+    .edit { margin-top: 30px; font-size: 14px; }
+    .edit a { color: inherit; text-underline-offset: 4px; }
+    figure { margin: 0; }
+    figure img { display: block; width: 100%; height: auto; box-shadow: 0 15px 45px #193b311a; border: 1px solid #deded3; }
+    figcaption { padding-top: 16px; font-size: 12px; color: #53675f; line-height: 1.6; }
+    footer { padding: 24px 5vw; border-top: 1px solid #c5cdc4; font-size: 12px; color: #53675f; }
+    @media (max-width: 720px) { main { grid-template-columns: 1fr; gap: 38px; padding: 28px 7vw 42px; } header { padding: 20px 7vw; } header .label { font-size: 9px; letter-spacing: 1px; } .intro { padding-top: 0; } h1 { letter-spacing: -1.5px; } .details { gap: 25px; } .details span { font-size: 21px; } .button { width: 100%; text-align: center; } }
+  </style>
+</head>
+<body>
+  <header><div class="wordmark">fullbleed<span aria-hidden="true">.</span></div><span class="label">Python invoice starter</span></header>
+  <main>
+    <section class="intro" aria-labelledby="title">
+      <p class="label eyebrow">From application data to paper</p>
+      <h1 id="title">Make the details<br>look the part.</h1>
+      <p class="lead">A designed invoice, rendered by Fullbleed and delivered by your Python web framework.</p>
+      <a class="button" href="/invoices/INV-1042.pdf">Download invoice</a>
+      <p class="note">Generated on request · A4 PDF · Fictional sample</p>
+      <div class="details"><div class="label">Invoice<span>INV-1042</span></div><div class="label">Total due<span>USD 1,870.00</span></div></div>
+      <p class="edit">Make it yours: edit the included HTML and CSS, then download again. The README shows where to change the template and connect your own authorized invoice lookup.</p>
+      <p class="edit"><a href="https://docs.fullbleed.dev/guides/web-frameworks/">Read the Python integration guide</a></p>
+    </section>
+    <figure><img src="/preview.png" width="909" height="1286" alt="Northstar Studio invoice with oversized green typography, detailed line items, and an orange-accented total panel."><figcaption>Included invoice preview. Downloads use your current template; the README explains how to update this saved preview after editing.</figcaption></figure>
+  </main>
+  <footer>A local integration example using fictional data. Add your application's access controls before serving real invoices.</footer>
+</body>
+</html>
