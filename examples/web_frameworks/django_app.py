@@ -8,6 +8,7 @@ from django.http import Http404, HttpResponse
 from django.urls import path
 from django.views.decorators.http import require_safe
 
+from demo import DEMO_HEADERS, page_html, preview_bytes
 from invoice import PDF_HEADERS, load_invoice, render_invoice
 
 
@@ -22,6 +23,16 @@ INSTALLED_APPS = []
 
 
 @require_safe
+def index(request) -> HttpResponse:
+    return HttpResponse(page_html(), content_type="text/html", headers=DEMO_HEADERS)
+
+
+@require_safe
+def preview(request) -> HttpResponse:
+    return HttpResponse(preview_bytes(), content_type="image/png", headers=DEMO_HEADERS)
+
+
+@require_safe
 def invoice_pdf(request, invoice_id: str) -> HttpResponse:
     invoice = load_invoice(invoice_id)
     if invoice is None:
@@ -31,7 +42,10 @@ def invoice_pdf(request, invoice_id: str) -> HttpResponse:
     )
 
 
-urlpatterns = [path("invoices/<str:invoice_id>.pdf", invoice_pdf)]
+urlpatterns = [
+    path("", index), path("preview.png", preview),
+    path("invoices/<str:invoice_id>.pdf", invoice_pdf),
+]
 
 
 if __name__ == "__main__":
