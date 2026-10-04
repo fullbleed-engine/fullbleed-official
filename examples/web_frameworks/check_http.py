@@ -70,7 +70,9 @@ def check_servers(out: Path, expected_pdf: bytes) -> list[dict]:
         with server(name, out) as origin:
             code, headers, page = fetch(origin)
             assert code == 200 and headers.get_content_type() == "text/html"
-            assert page == (ROOT / "static/index.html").read_bytes()
+            # The app reads HTML as text, normalizing CRLF in Windows checkouts.
+            expected_html = (ROOT / "static/index.html").read_text(encoding="utf-8")
+            assert page.decode("utf-8") == expected_html
             code, headers, preview = fetch(origin + "/preview.png")
             assert code == 200 and headers.get_content_type() == "image/png"
             assert preview == (ROOT / "static/invoice.png").read_bytes()
