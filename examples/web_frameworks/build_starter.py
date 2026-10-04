@@ -37,6 +37,10 @@ def main():
     content = {name: committed(ROOT/name) for name in FILES}
     for path in sorted((ROOT/"fonts").iterdir()):
         if path.is_file(): content[path.relative_to(ROOT).as_posix()] = committed(path)
+    for item in json.loads(content["fonts/sources.json"])["files"]:
+        data = content["fonts/"+item["file"]]
+        assert len(data) == item["bytes"]
+        assert hashlib.sha256(data).hexdigest() == item["sha256"], item["file"]
     content["LICENSE"] = committed(REPOSITORY/"LICENSE")
     content[".gitignore"] = b".venv/\n__pycache__/\noutput/\n"
     pdf = render_invoice(load_invoice("INV-1042"))

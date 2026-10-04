@@ -75,6 +75,11 @@ def main() -> int:
     args = parser.parse_args()
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
+    fonts = Path(__file__).resolve().parent / "fonts"
+    for item in json.loads((fonts / "sources.json").read_text(encoding="utf-8"))["files"]:
+        font_bytes = (fonts / item["file"]).read_bytes()
+        assert len(font_bytes) == item["bytes"]
+        assert hashlib.sha256(font_bytes).hexdigest() == item["sha256"], item["file"]
 
     from fastapi.testclient import TestClient
     from fastapi_app import app as fastapi_app
@@ -121,6 +126,7 @@ def main() -> int:
         "http_servers": http,
         "all_framework_pdf_bytes_identical": True,
         "literal_customer_text_check": "passed",
+        "font_and_license_source_hashes": "passed",
         "fastapi_openapi_pdf_type": "passed",
         "preview": str(previews[0]),
         "scope": "Test clients and actual local HTTP servers, independent PDF text, headers, font embedding, saved preview, and matching parallel responses; no throughput, hosted-deployment, or standards-conformance claim.",
