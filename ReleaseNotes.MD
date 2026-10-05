@@ -1,3 +1,28 @@
+# Fullbleed Release Notes - 2.5.8
+
+Release date: October 5, 2026
+
+## Select the regular face for normal family text
+
+Registering an italic face before its regular sibling previously made normal
+family text use the italic font. Family aliases now prefer an upright face and
+the CSS weight-400 fallback order. Both legacy and typographic family names are
+recognized, and directory registration uses sorted paths. Face-specific names,
+explicit source aliases, and `@font-face` mappings remain available; duplicate
+explicit aliases and equally ranked family faces retain first-registration
+priority.
+
+Affected PDFs can change appearance, line breaks, and hashes. Review saved
+baselines before accepting updates. The core adds no dependency or public API.
+The installed-wheel check compares 54 cases / 84 pages with explicit-face
+controls, inspecting embedded fonts, extracted text, and native/PDFium previews.
+This is focused regression evidence, not complete CSS font matching conformance.
+
+See [font registration](docs/font-registration.md) and the
+[2.5.8 release runbook](docs/release/2.5.8-runbook.md).
+
+---
+
 # Fullbleed Release Notes - 2.5.7
 
 Release date: October 5, 2026
