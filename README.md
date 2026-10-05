@@ -74,7 +74,7 @@ Open `invoice.pdf` or its PNG preview. The [Node.js quickstart](https://docs.ful
 
 ### Rust
 
-Start with the [native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/). The [`fullbleed` crate](https://crates.io/crates/fullbleed) exposes `FullBleed::builder()` and `render_to_buffer(...)`, with no Python requirement. The guide includes runnable invoice and report examples with explicit fonts and PNG previews, plus the [Rust API reference](https://docs.rs/fullbleed/2.5.8/fullbleed/).
+Start with the [native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/). The [`fullbleed` crate](https://crates.io/crates/fullbleed) exposes `FullBleed::builder()` and `render_to_buffer(...)`, with no Python requirement. The guide includes runnable invoice and report examples with explicit fonts and PNG previews, plus the [latest hosted Rust API reference](https://docs.rs/fullbleed/latest/fullbleed/).
 
 ### C# and .NET
 
