@@ -3,7 +3,10 @@
 //! The PDF text path emits original glyph IDs through Identity-H. Keeping those IDs stable avoids
 //! a CID remap table and lets subsetting happen at link time: unused `glyf` records become empty,
 //! while used glyphs and every recursively referenced composite component retain their original
-//! indices. All other tables remain byte-for-byte compatible with the original glyph namespace.
+//! indices. Character maps and metrics are compacted within that original glyph namespace;
+//! PostScript glyph names are omitted because PDF text selects glyphs by ID or character map.
+
+mod cmap;
 
 use std::collections::{BTreeSet, VecDeque};
 
@@ -101,7 +104,11 @@ pub(crate) fn subset_truetype(
 
     let (new_glyf, new_loca) =
         rebuild_glyph_tables(glyf, &old_offsets, glyph_total, &keep, loca_is_long)?;
-    let data = rebuild_sfnt(source, signature, &records, &new_glyf, &new_loca)?;
+    let hmtx = subset_metrics(&records, glyph_total, &keep)?;
+    let hhea = subset_horizontal_header(&records, glyf, &old_offsets, &hmtx, &keep)?;
+    let data = rebuild_sfnt(
+        signature, &records, &new_glyf, &new_loca, &hmtx, &hhea, &keep,
+    )?;
     if data.len() >= source.len() {
         return None;
     }
@@ -286,12 +293,97 @@ fn rebuild_glyph_tables(
     Some((glyf, loca))
 }
 
+fn subset_metrics(
+    records: &[TableRecord<'_>],
+    glyph_total: usize,
+    keep: &BTreeSet<u16>,
+) -> Option<Vec<u8>> {
+    let hhea = table(records, *b"hhea")?;
+    let hmtx = table(records, *b"hmtx")?;
+    let long_count = usize::from(read_u16(hhea, 34)?);
+    if long_count == 0 || long_count > glyph_total {
+        return None;
+    }
+    let length = long_count.checked_mul(4)? + (glyph_total - long_count).checked_mul(2)?;
+    let mut result = hmtx.get(..length)?.to_vec();
+    // The final long metric's advance also belongs to every trailing bearing-only glyph.
+    let shared_advance_used = keep.iter().any(|glyph| usize::from(*glyph) >= long_count);
+    for glyph in 0..glyph_total {
+        if keep.contains(&u16::try_from(glyph).ok()?) {
+            continue;
+        }
+        if glyph < long_count {
+            if glyph + 1 != long_count || !shared_advance_used {
+                write_u16(&mut result, glyph * 4, 0)?;
+            }
+            write_u16(&mut result, glyph * 4 + 2, 0)?;
+        } else {
+            write_u16(&mut result, long_count * 4 + (glyph - long_count) * 2, 0)?;
+        }
+    }
+    Some(result)
+}
+
+fn subset_post(source: &[u8]) -> Option<Vec<u8>> {
+    // OpenType post version 3 retains the 32-byte header and omits glyph names. Font naming,
+    // licensing records, underline metrics and italic angle remain in their original tables.
+    let mut result = source.get(..32)?.to_vec();
+    write_u32(&mut result, 0, 0x0003_0000)?;
+    Some(result)
+}
+
+fn subset_horizontal_header(
+    records: &[TableRecord<'_>],
+    glyf: &[u8],
+    offsets: &[usize],
+    hmtx: &[u8],
+    keep: &BTreeSet<u16>,
+) -> Option<Vec<u8>> {
+    let mut result = table(records, *b"hhea")?.to_vec();
+    let long_count = usize::from(read_u16(&result, 34)?);
+    let mut max_advance = 0u16;
+    let mut bounds: Option<(i32, i32, i32)> = None;
+    for glyph in keep {
+        let index = usize::from(*glyph);
+        let advance = read_u16(hmtx, index.min(long_count.checked_sub(1)?) * 4)?;
+        max_advance = max_advance.max(advance);
+        let outline = glyf.get(*offsets.get(index)?..*offsets.get(index + 1)?)?;
+        if outline.is_empty() || read_i16(outline, 0)? == 0 {
+            continue;
+        }
+        let bearing_offset = if index < long_count {
+            index * 4 + 2
+        } else {
+            long_count * 4 + (index - long_count) * 2
+        };
+        let left = i32::from(read_i16(hmtx, bearing_offset)?);
+        let extent = left + i32::from(read_i16(outline, 6)?) - i32::from(read_i16(outline, 2)?);
+        let right = i32::from(advance) - extent;
+        bounds = Some(match bounds {
+            Some((min_left, min_right, max_extent)) => (
+                min_left.min(left),
+                min_right.min(right),
+                max_extent.max(extent),
+            ),
+            None => (left, right, extent),
+        });
+    }
+    write_u16(&mut result, 10, max_advance)?;
+    let (left, right, extent) = bounds.unwrap_or((0, 0, 0));
+    for (offset, value) in [(12, left), (14, right), (16, extent)] {
+        write_u16(&mut result, offset, i16::try_from(value).ok()? as u16)?;
+    }
+    Some(result)
+}
+
 fn rebuild_sfnt(
-    _source: &[u8],
     signature: [u8; 4],
     records: &[TableRecord<'_>],
     glyf: &[u8],
     loca: &[u8],
+    hmtx: &[u8],
+    hhea: &[u8],
+    keep: &BTreeSet<u16>,
 ) -> Option<Vec<u8>> {
     let mut tables: Vec<([u8; 4], Vec<u8>)> = Vec::with_capacity(records.len());
     for record in records {
@@ -304,6 +396,12 @@ fn rebuild_sfnt(
         let mut data = match record.tag {
             tag if tag == *b"glyf" => glyf.to_vec(),
             tag if tag == *b"loca" => loca.to_vec(),
+            tag if tag == *b"hmtx" => hmtx.to_vec(),
+            tag if tag == *b"hhea" => hhea.to_vec(),
+            tag if tag == *b"post" => subset_post(record.data)?,
+            tag if tag == *b"cmap" => {
+                cmap::subset(record.data, keep).unwrap_or_else(|| record.data.to_vec())
+            }
             _ => record.data.to_vec(),
         };
         if record.tag == *b"head" {
@@ -443,7 +541,8 @@ fn checksum(data: &[u8]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        CHECKSUM_MAGIC, checksum, read_i16, read_loca, subset_truetype, table, table_records,
+        CHECKSUM_MAGIC, TableRecord, checksum, read_i16, read_loca, read_u16, read_u32,
+        subset_metrics, subset_truetype, table, table_records,
     };
     use crate::sfnt::{Face, GlyphId};
     use crate::sfnt_outline::OutlineBuilder;
@@ -550,5 +649,62 @@ mod tests {
             assert!(parsed.outline_glyph(GlyphId(glyph), &mut outline).is_some());
             assert!(outline.0 > 0);
         }
+    }
+
+    #[test]
+    fn subset_metadata_preserves_mapped_glyphs_metrics_and_font_notices() {
+        let inter = include_bytes!("../python/fullbleed_assets/fonts/Inter-Variable.ttf");
+        for source in [NOTO, VARIABLE_NOTO, inter.as_slice()] {
+            let original = Face::parse(source, 0).expect("source font");
+            let characters: Vec<(char, GlyphId)> = "A z\u{e9}\u{100}\u{3a9}\u{2211}\u{1d49c}"
+                .chars()
+                .filter_map(|ch| original.glyph_index(ch as u32).map(|gid| (ch, gid)))
+                .collect();
+            let glyphs = characters.iter().map(|(_, gid)| gid.0).collect();
+            let subset = subset_truetype(source, &glyphs).expect("subset");
+            let face = Face::parse(&subset.data, 0).expect("subset face");
+            let before = table_records(source).unwrap();
+            let after = table_records(&subset.data).unwrap();
+            assert_eq!(table(&after, *b"name"), table(&before, *b"name"));
+            let post = table(&after, *b"post").unwrap();
+            assert_eq!(post.len(), 32);
+            assert_eq!(read_u32(post, 0), Some(0x0003_0000));
+            assert_eq!(&post[4..], &table(&before, *b"post").unwrap()[4..32]);
+            assert!(
+                table(&after, *b"cmap").unwrap().len() < table(&before, *b"cmap").unwrap().len()
+            );
+            assert_eq!(checksum(&subset.data), CHECKSUM_MAGIC);
+            for (ch, gid) in characters {
+                assert_eq!(face.glyph_index(ch as u32), Some(gid), "{ch}");
+                assert_eq!(face.glyph_hor_advance(gid), original.glyph_hor_advance(gid));
+            }
+            let unused = original.glyph_index('Q' as u32).unwrap();
+            assert_eq!(face.glyph_index('Q' as u32), None);
+            assert_eq!(face.glyph_hor_advance(unused), Some(0));
+        }
+    }
+
+    #[test]
+    fn sparse_metrics_keep_shared_advance_for_a_used_trailing_glyph() {
+        let mut hhea = [0u8; 36];
+        hhea[35] = 2;
+        let hmtx = [0x01, 0xf4, 0, 10, 0x02, 0x58, 0, 20, 0, 30, 0, 40];
+        let records = [
+            TableRecord {
+                tag: *b"hhea",
+                data: &hhea,
+            },
+            TableRecord {
+                tag: *b"hmtx",
+                data: &hmtx,
+            },
+        ];
+        let result = subset_metrics(&records, 4, &BTreeSet::from([0, 3])).unwrap();
+        assert_eq!(result, [0x01, 0xf4, 0, 10, 0x02, 0x58, 0, 0, 0, 0, 0, 40]);
+        let result = subset_metrics(&records, 4, &BTreeSet::from([0])).unwrap();
+        assert_eq!(read_u16(&result, 4), Some(0));
+        assert_eq!(&result[..4], &hmtx[..4]);
+        assert!(subset_metrics(&records, 1, &BTreeSet::from([0])).is_none());
+        assert!(subset_metrics(&records, 5, &BTreeSet::from([0])).is_none());
     }
 }

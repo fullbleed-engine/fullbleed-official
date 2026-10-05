@@ -1,14 +1,14 @@
 {
   "schema": "fullbleed.golden_suite.v1",
-  "generated_at_utc": "2026-10-03T15:49:04.157375+00:00",
+  "generated_at_utc": "2026-10-05T01:29:44.268281Z",
   "cases": {
     "acme_invoice": {
       "case_id": "acme_invoice",
       "report": "examples/acme_invoice/report.py",
       "pdf": {
         "path": "examples/acme_invoice/output/acme_sample_invoice.pdf",
-        "bytes": 133691,
-        "sha256": "f7f69432764aa811a53a3c83b9df08743fbf0ae5804d4686809f472b642690fb"
+        "bytes": 93250,
+        "sha256": "6199c7ec17f35f4592aa2eb972df169086b3974d25993417cdd40b8ef0d8c379"
       },
       "png": {
         "count": 1,
@@ -36,8 +36,8 @@
       "report": "examples/bank_statement/report.py",
       "pdf": {
         "path": "examples/bank_statement/output/bank_statement.pdf",
-        "bytes": 59765,
-        "sha256": "76b835ce61bc857feb807fdafadacab01a118e7e22abefd937091ae396f3f805"
+        "bytes": 19365,
+        "sha256": "2eb3c562674e5e0e7920e7bbb1ea306667c791904ebdcfabd3777e5db6cccb7a"
       },
       "png": {
         "count": 2,
