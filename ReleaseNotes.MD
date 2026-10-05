@@ -1,3 +1,23 @@
+# Fullbleed Release Notes - 2.5.7
+
+Release date: October 5, 2026
+
+## Smaller embedded TrueType subsets
+
+TrueType subsets now omit unused character-map entries, glyph names, and metrics
+while preserving the original glyph IDs, retained outlines and instructions,
+composite dependencies, advances, and font notices. Horizontal-header extrema
+are recalculated for the subset. Character-map formats other than 4 and 12 keep
+their original bytes; an unsupported or larger map rewrite uses the source map.
+
+The change adds no runtime dependency and does not change the rendering API.
+PDF bytes and hashes change. Review stored PDF baselines before updating them.
+Independent font, text, and pixel checks are described in the
+[2.5.7 release runbook](docs/release/2.5.7-runbook.md). Claims remain limited to the
+retained fixtures and validator reports.
+
+---
+
 # Fullbleed Release Notes - 2.5.6
 
 Release date: October 3, 2026

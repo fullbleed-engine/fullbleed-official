@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.6"
+  FULLBLEED_CI_VERSION: "2.5.7"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -155,6 +155,19 @@ jobs:
         with:
           name: text-extraction-${{ runner.os }}
           path: target/text-extraction
+          if-no-files-found: warn
+
+      - name: Verify compact font subsets with independent font and PDF readers
+        run: |
+          python -m pip install pypdf==6.19.0 pypdfium2==5.14.0 fonttools==4.65.0 pillow==12.3.0
+          python -I tools/smoke_font_subsets.py --out target/font-subsets
+
+      - name: Retain compact font subset PDFs and preview evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: font-subsets-${{ runner.os }}
+          path: target/font-subsets
           if-no-files-found: warn
 
       - name: Retain gradient PDFs and preview evidence

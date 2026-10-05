@@ -4,6 +4,11 @@ This directory is the release-operations layer for Fullbleed. It is separate
 from feature documentation so release decisions can be audited without reading
 engine internals.
 
+## 2.5.7 Documents
+
+- `docs/release/2.5.7-runbook.md`: compact TrueType metadata and retained output checks.
+- `tools/smoke_font_subsets.py`: independent font-program, text, and pixel comparisons.
+
 ## 2.5.6 Documents
 
 - `docs/release/2.5.6-runbook.md`: single-copy synthesized-bold text, affine glyph previews, and retained extraction checks.

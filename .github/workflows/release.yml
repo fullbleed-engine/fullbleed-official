@@ -182,6 +182,19 @@ jobs:
             crates/fullbleed_audit_contract/target/package/*.crate
           if-no-files-found: error
 
+      - name: Verify compact font subsets with independent font and PDF readers
+        run: |
+          python -m pip install pypdf==6.19.0 pypdfium2==5.14.0 fonttools==4.65.0 pillow==12.3.0
+          python -I tools/smoke_font_subsets.py --out target/font-subsets
+
+      - name: Retain compact font subset PDFs and preview evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-font-subsets
+          path: target/font-subsets
+          if-no-files-found: error
+
   build-wheels:
     name: Build wheel (${{ matrix.label }})
     needs: validate
