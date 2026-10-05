@@ -160,6 +160,7 @@ impl TextWidthCache {
 pub(crate) struct FontRegistry {
     fonts: Vec<RegisteredFont>,
     lookup: HashMap<String, usize>,
+    family_aliases: BTreeSet<String>,
     use_full_unicode_metrics: bool,
     text_width_cache: Mutex<TextWidthCache>,
     font_subset_cache: Mutex<FontSubsetCache>,
@@ -267,6 +268,7 @@ pub(crate) struct RegisteredFont {
     pub(crate) name: String,
     pub(crate) data: Vec<u8>,
     fingerprint: [u8; 32],
+    family_default_rank: (bool, u8, u16),
     pub(crate) metrics: FontMetrics,
     pub(crate) program_kind: FontProgramKind,
     #[cfg_attr(not(feature = "python"), allow(dead_code))]
@@ -337,6 +339,7 @@ impl FontRegistry {
         Self {
             fonts: Vec::new(),
             lookup: HashMap::new(),
+            family_aliases: BTreeSet::new(),
             use_full_unicode_metrics: true,
             text_width_cache: Mutex::new(TextWidthCache::new(20_000)),
             font_subset_cache: Mutex::new(FontSubsetCache::new()),
@@ -352,8 +355,9 @@ impl FontRegistry {
         let Ok(entries) = fs::read_dir(path) else {
             return;
         };
-        for entry in entries.flatten() {
-            let path = entry.path();
+        let mut paths: Vec<_> = entries.flatten().map(|entry| entry.path()).collect();
+        paths.sort();
+        for path in paths {
             if path.is_file() {
                 self.register_file_with_source(path.as_path(), RegisteredFontSourceKind::Directory);
             }
@@ -394,8 +398,9 @@ impl FontRegistry {
                 continue;
             };
 
-            let (name, aliases) = font_names(&face, path);
+            let names = font_names(&face, path);
             let (metrics, program_kind) = FontMetrics::from_face(&face);
+            let family_default_rank = family_default_rank(&face);
             let index = self.fonts.len();
             let identifier = if matches!(ext.as_str(), "ttc" | "otc") {
                 format!("{}#{}", path.to_string_lossy(), face_index)
@@ -403,8 +408,9 @@ impl FontRegistry {
                 path.to_string_lossy().to_string()
             };
             self.fonts.push(RegisteredFont {
-                name: name.clone(),
+                name: names.primary.clone(),
                 fingerprint: sfnt_cache_fingerprint(&face_data),
+                family_default_rank,
                 data: face_data,
                 metrics,
                 program_kind,
@@ -414,16 +420,7 @@ impl FontRegistry {
                 },
             });
 
-            let mut all_aliases = Vec::new();
-            all_aliases.push(name);
-            all_aliases.extend(aliases);
-            for alias in all_aliases {
-                let key = normalize_name(&alias);
-                if key.is_empty() || self.lookup.contains_key(&key) {
-                    continue;
-                }
-                self.lookup.insert(key, index);
-            }
+            self.register_names(index, names);
         }
     }
 
@@ -469,12 +466,15 @@ impl FontRegistry {
             )));
         };
 
-        let (name, aliases) = font_names(&face, Path::new(source));
+        let names = font_names(&face, Path::new(source));
+        let name = names.primary.clone();
         let (metrics, program_kind) = FontMetrics::from_face(&face);
+        let family_default_rank = family_default_rank(&face);
         let index = self.fonts.len();
         self.fonts.push(RegisteredFont {
             name: name.clone(),
             fingerprint: sfnt_cache_fingerprint(&data),
+            family_default_rank,
             data,
             metrics,
             program_kind,
@@ -486,18 +486,46 @@ impl FontRegistry {
             },
         });
 
-        let mut all_aliases = Vec::new();
-        all_aliases.push(name.clone());
-        all_aliases.extend(aliases);
-        for alias in all_aliases {
-            let key = normalize_name(&alias);
-            if key.is_empty() || self.lookup.contains_key(&key) {
-                continue;
-            }
-            self.lookup.insert(key, index);
-        }
+        self.register_names(index, names);
 
         Ok(name)
+    }
+
+    fn register_names(&mut self, index: usize, names: FontNames) {
+        let families: BTreeSet<_> = names
+            .families
+            .iter()
+            .map(|name| normalize_name(name))
+            .filter(|name| !name.is_empty())
+            .collect();
+        // Face-specific names and caller-provided aliases keep first-registration
+        // priority. They take precedence over an incidental family alias.
+        for alias in std::iter::once(names.primary).chain(names.aliases) {
+            let key = normalize_name(&alias);
+            if key.is_empty() || families.contains(&key) {
+                continue;
+            }
+            if self.family_aliases.remove(&key) {
+                self.lookup.insert(key, index);
+            } else {
+                self.lookup.entry(key).or_insert(index);
+            }
+        }
+        // A family without a CSS @font-face mapping starts at normal/400. Do
+        // not let directory order or an italic-first bundle choose that face.
+        // Equal-rank duplicates retain the caller's registration priority.
+        for key in families {
+            if let Some(&previous) = self.lookup.get(&key) {
+                if !self.family_aliases.contains(&key)
+                    || self.fonts[previous].family_default_rank
+                        <= self.fonts[index].family_default_rank
+                {
+                    continue;
+                }
+            }
+            self.lookup.insert(key.clone(), index);
+            self.family_aliases.insert(key);
+        }
     }
 
     pub(crate) fn resolve(&self, name: &str) -> Option<&RegisteredFont> {
@@ -1811,10 +1839,42 @@ fn scale_i16(value: i16, scale: f32) -> i16 {
     scaled.clamp(i16::MIN as i32, i16::MAX as i32) as i16
 }
 
-fn font_names(face: &SfntFace<'_>, path: &Path) -> (String, Vec<String>) {
+// Default (normal, weight 400) family matching. Explicit CSS @font-face
+// descriptors and styled variant selection remain responsible for other styles.
+fn family_default_rank(face: &SfntFace<'_>) -> (bool, u8, u16) {
+    let selection = face
+        .table(*b"OS/2")
+        .and_then(|table| font_be_u16(table, 62))
+        .unwrap_or(0);
+    let mac_style = face
+        .table(*b"head")
+        .and_then(|table| font_be_u16(table, 44))
+        .unwrap_or(0);
+    let slanted = selection & 0x201 != 0
+        || mac_style & 2 != 0
+        || face.italic_angle().is_some_and(|angle| angle != 0.0);
+    let weight = face.weight_class();
+    // CSS's 400 fallback order is 400..500, below 400, then above 500.
+    let (group, distance) = match weight {
+        400..=500 => (0, weight - 400),
+        0..=399 => (1, 400 - weight),
+        _ => (2, weight - 500),
+    };
+    (slanted, group, distance)
+}
+
+struct FontNames {
+    primary: String,
+    families: Vec<String>,
+    aliases: Vec<String>,
+}
+
+fn font_names(face: &SfntFace<'_>, path: &Path) -> FontNames {
     use sfnt::name_id;
 
     let mut family = None;
+    let mut legacy_family = None;
+    let mut typographic_family = None;
     let mut full = None;
     let mut post = None;
 
@@ -1825,7 +1885,15 @@ fn font_names(face: &SfntFace<'_>, path: &Path) -> (String, Vec<String>) {
         match entry.name_id {
             name_id::TYPOGRAPHIC_FAMILY | name_id::FAMILY => {
                 if family.is_none() {
-                    family = Some(name);
+                    family = Some(name.clone());
+                }
+                let target = if entry.name_id == name_id::TYPOGRAPHIC_FAMILY {
+                    &mut typographic_family
+                } else {
+                    &mut legacy_family
+                };
+                if target.is_none() {
+                    *target = Some(name);
                 }
             }
             name_id::FULL_NAME => {
@@ -1854,13 +1922,20 @@ fn font_names(face: &SfntFace<'_>, path: &Path) -> (String, Vec<String>) {
         .unwrap_or_else(|| "EmbeddedFont".to_string());
 
     let mut aliases = Vec::new();
-    for candidate in [family, full, post, stem].into_iter().flatten() {
+    for candidate in [full, post, stem].into_iter().flatten() {
         if candidate != primary {
             aliases.push(candidate);
         }
     }
 
-    (primary, aliases)
+    FontNames {
+        primary,
+        families: [legacy_family, typographic_family]
+            .into_iter()
+            .flatten()
+            .collect(),
+        aliases,
+    }
 }
 
 fn decode_font_name(entry: sfnt::NameRecord<'_>) -> Option<String> {
@@ -1877,8 +1952,7 @@ pub(crate) fn font_primary_name_from_bytes(
     let Ok(face) = SfntFace::parse(data, face_index) else {
         return None;
     };
-    let (primary, _) = font_names(&face, Path::new(source));
-    Some(primary)
+    Some(font_names(&face, Path::new(source)).primary)
 }
 
 #[cfg(test)]
@@ -1897,6 +1971,141 @@ mod tests {
     const NOTO_MATH: &[u8] =
         include_bytes!("../python/fullbleed_assets/fonts/NotoSansMath-Regular.ttf");
     const INTER: &[u8] = include_bytes!("../python/fullbleed_assets/fonts/Inter-Variable.ttf");
+    const DM_REGULAR: &[u8] =
+        include_bytes!("../examples/design_showcase/fonts/DMSerifDisplay-Regular.ttf");
+    const DM_ITALIC: &[u8] =
+        include_bytes!("../examples/design_showcase/fonts/DMSerifDisplay-Italic.ttf");
+
+    fn font_with_field(source: &[u8], tag: &[u8; 4], offset: usize, value: &[u8]) -> Vec<u8> {
+        let mut font = source.to_vec();
+        for index in 0..font_be_u16(source, 4).unwrap() as usize {
+            let record = 12 + index * 16;
+            if &source[record..record + 4] == tag {
+                let start = font_be_u32(source, record + 8).unwrap() as usize + offset;
+                font[start..start + value.len()].copy_from_slice(value);
+                return font;
+            }
+        }
+        panic!("test font is missing a required table");
+    }
+
+    #[test]
+    fn family_default_prefers_normal_weight_with_css_400_fallback_order() {
+        for (weights, expected) in [([700, 400], 400), ([300, 500], 500), ([600, 300], 300)] {
+            for order in [weights, [weights[1], weights[0]]] {
+                let mut registry = FontRegistry::new();
+                for weight in order {
+                    let font = font_with_field(DM_REGULAR, b"OS/2", 4, &u16::to_be_bytes(weight));
+                    registry.register_bytes(font, None).unwrap();
+                }
+                assert_eq!(
+                    registry
+                        .resolve("DM Serif Display")
+                        .unwrap()
+                        .metrics
+                        .weight_class,
+                    expected
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn family_default_honors_slanted_flags_even_with_zero_post_angle() {
+        let no_angle = font_with_field(DM_ITALIC, b"post", 4, &[0; 4]);
+        let os2_only = font_with_field(&no_angle, b"head", 44, &[0; 2]);
+        let head_only = font_with_field(&no_angle, b"OS/2", 62, &[0; 2]);
+        for italic in [os2_only, head_only] {
+            let mut registry = FontRegistry::new();
+            registry.register_bytes(italic, None).unwrap();
+            registry.register_bytes(DM_REGULAR.to_vec(), None).unwrap();
+            assert_eq!(
+                registry.resolve("DM Serif Display").unwrap().name,
+                "DMSerifDisplay-Regular"
+            );
+        }
+    }
+
+    #[test]
+    fn family_default_uses_regular_in_both_registration_orders() {
+        for fonts in [[DM_ITALIC, DM_REGULAR], [DM_REGULAR, DM_ITALIC]] {
+            let mut registry = FontRegistry::new();
+            for font in fonts {
+                registry.register_bytes(font.to_vec(), None).unwrap();
+            }
+            assert_eq!(
+                registry.resolve("'DM Serif Display'").unwrap().name,
+                "DMSerifDisplay-Regular"
+            );
+            assert_eq!(
+                registry.resolve("DM Serif Display Italic").unwrap().name,
+                "DMSerifDisplay-Italic"
+            );
+            assert_eq!(
+                registry.resolve("DMSerifDisplay-Regular").unwrap().name,
+                "DMSerifDisplay-Regular"
+            );
+        }
+    }
+
+    #[test]
+    fn family_defaults_do_not_replace_explicit_font_aliases() {
+        let mut registry = FontRegistry::new();
+        registry
+            .register_bytes(DM_ITALIC.to_vec(), Some("Brand.ttf"))
+            .unwrap();
+        registry
+            .register_bundle_font_bytes(DM_REGULAR.to_vec(), Some("Brand.ttf"))
+            .unwrap();
+        assert_eq!(
+            registry.resolve("Brand").unwrap().name,
+            "DMSerifDisplay-Italic"
+        );
+        assert_eq!(
+            registry.resolve("DM Serif Display").unwrap().name,
+            "DMSerifDisplay-Regular"
+        );
+        // A supplied alias can deliberately coincide with another font's family.
+        for fonts in [[DM_REGULAR, NOTO], [NOTO, DM_REGULAR]] {
+            let mut registry = FontRegistry::new();
+            for font in fonts {
+                let alias = if font == NOTO {
+                    Some("DM Serif Display.ttf")
+                } else {
+                    None
+                };
+                registry.register_bytes(font.to_vec(), alias).unwrap();
+            }
+            assert_eq!(
+                registry.resolve("DM Serif Display").unwrap().name,
+                "NotoSans-Regular"
+            );
+        }
+    }
+
+    #[test]
+    fn newly_registered_regular_face_uses_its_own_metrics_and_subset_cache() {
+        let mut registry = FontRegistry::new();
+        registry.register_bytes(DM_ITALIC.to_vec(), None).unwrap();
+        let size = Pt::from_f32(20.0);
+        let text = "Typography should follow style.";
+        let italic_width = registry.measure_text_width("DM Serif Display", size, text);
+        let glyphs = BTreeSet::from([0, 1, 2]);
+        let italic_subset = registry
+            .cached_truetype_subset("DM Serif Display", &glyphs)
+            .unwrap();
+        registry.register_bytes(DM_REGULAR.to_vec(), None).unwrap();
+        let regular_width = registry.measure_text_width("DM Serif Display", size, text);
+        assert_ne!(italic_width, regular_width);
+        assert_eq!(
+            regular_width,
+            registry.measure_text_width("DMSerifDisplay-Regular", size, text)
+        );
+        let regular_subset = registry
+            .cached_truetype_subset("DM Serif Display", &glyphs)
+            .unwrap();
+        assert!(!Arc::ptr_eq(&italic_subset, &regular_subset));
+    }
 
     fn name(platform_id: PlatformId, encoding_id: u16, bytes: &[u8]) -> NameRecord<'_> {
         NameRecord {

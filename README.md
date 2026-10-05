@@ -269,7 +269,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-2.5.7-cp310-abi3-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-2.5.8-cp310-abi3-win_amd64.whl
 ```
 
 From a source checkout with Rust installed, no Python build package is needed:
@@ -1092,6 +1092,9 @@ PdfEngine(
     perf_out=None,
 )
 ```
+
+For regular/italic family selection and exact face mappings, see
+[Registering fonts](docs/font-registration.md).
 
 Module exports:
 
