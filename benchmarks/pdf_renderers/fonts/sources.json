@@ -1,0 +1,21 @@
+{
+  "family": "Inter",
+  "file": "Inter-Variable.ttf",
+  "sha256": "29160a80ff49ddcab2c97711247e08b1fab27a484a329ce8b813d820dc559031",
+  "license": "SIL Open Font License 1.1",
+  "license_file": "Inter-OFL.txt",
+  "copied_from": "examples/pdf_regression/fonts/Inter-Variable.ttf",
+  "source_revision": "23df6864424d9ab494c88f9d0acc4b5b2f16925f",
+  "upstream": "https://github.com/rsms/inter",
+  "static_instance": {
+    "file": "Inter-Regular.ttf",
+    "sha256": "0b59f6b6fc9e8a9ad8032802d1797c4237d9288a3e7b7661517070627b577060",
+    "fonttools": "4.65.0",
+    "axes": {
+      "opsz": 14,
+      "wght": 400
+    },
+    "recalcTimestamp": false,
+    "builder": "../prepare_font.py"
+  }
+}

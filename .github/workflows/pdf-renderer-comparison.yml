@@ -1,0 +1,41 @@
+name: PDF renderer comparison qualification
+on:
+  pull_request:
+    paths:
+      - benchmarks/pdf_renderers/**
+      - .github/workflows/pdf-renderer-comparison.yml
+  push:
+    branches: [master, main]
+    paths:
+      - benchmarks/pdf_renderers/**
+      - .github/workflows/pdf-renderer-comparison.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: pdf-renderer-comparison-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  qualification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+      - name: Install optional comparison dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0
+          python -m pip install -r benchmarks/pdf_renderers/requirements.txt
+          python -m playwright install --with-deps chromium
+      - name: Qualify all outputs and exercise rejection controls
+        run: python benchmarks/pdf_renderers/compare.py --smoke --out target/pdf-comparison
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: pdf-renderer-comparison-qualification
+          path: target/pdf-comparison/
+          if-no-files-found: error
+          retention-days: 14
