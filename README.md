@@ -23,7 +23,8 @@ Actual Fullbleed output. Open either preview for its PDF, or [explore all four d
 | Node.js / TypeScript | `npm install fullbleed` | [Node quickstart](https://docs.fullbleed.dev/getting-started/node/) · [Next.js PDF download](https://docs.fullbleed.dev/guides/nextjs-pdf/) |
 | C# / .NET | `dotnet add package FullBleed.DotNet --version 0.1.4` | [C# quickstart and designed invoice](https://docs.fullbleed.dev/getting-started/dotnet/) |
 
-Node package 0.1.5 uses engine 2.5.8 and covers ordinary PDF generation.
+Node package 0.2.0 uses engine 2.5.8 and covers ordinary PDF generation, with
+optional process isolation for server rendering.
 FullBleed.DotNet 0.1.4 also uses engine 2.5.8. Its managed library targets .NET 8 and works with .NET 8, 9, and 10 applications, with native rendering, compiled bindings, and previews. Its separate CLI adapter requires the Python CLI.
 The Python package provides the complete CLI, including compiled variable-data jobs and print profiles; the Rust guide covers the native API.
 
