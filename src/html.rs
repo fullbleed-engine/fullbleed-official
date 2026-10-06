@@ -1802,6 +1802,7 @@ fn text_node_to_flowables(
             continue;
         }
         let paragraph = Paragraph::new(fragment)
+            .with_inline_word_measurement(word_fragments)
             .with_style(text_style.clone())
             .with_align(text_align_from_style(parent_style))
             .with_last_align(text_align_last_from_style(parent_style))

@@ -13,4 +13,4 @@ def test_mixed_inline_wrapping_with_independent_readers(tmp_path):
         pytest.importorskip(dependency)
     script = Path(__file__).resolve().parents[1] / "tools/smoke_inline_wrapping.py"
     report = runpy.run_path(str(script))["check"](tmp_path / "inline-wrapping")
-    assert report["ok"] and len(report["cases"]) == 40
+    assert report["ok"] and len(report["cases"]) == 48

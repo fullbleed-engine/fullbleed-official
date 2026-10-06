@@ -190,6 +190,17 @@ jobs:
       - name: Verify font family defaults and compiled previews
         run: python -I tools/smoke_font_families.py --out target/font-families
 
+      - name: Verify mixed inline wrapping with independent PDF readers
+        run: python -I tools/smoke_inline_wrapping.py --out target/inline-wrapping
+
+      - name: Retain inline wrapping PDFs and previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-inline-wrapping
+          path: target/inline-wrapping
+          if-no-files-found: error
+
       - name: Retain font family PDF and preview evidence
         if: always()
         uses: actions/upload-artifact@v7

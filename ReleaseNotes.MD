@@ -11,6 +11,9 @@ remaining line width, and collapsed spaces at wrapped line edges are discarded.
 Line-box and background wrappers preserve space semantics; letter and word
 spacing remain part of the advance.
 
+Built-in proportional fonts use their bundled PDF advances for inline word
+fragments, so separating a styled run does not introduce excessive word spacing.
+
 The change covers horizontal, left-to-right text with collapsed whitespace.
 Preserved whitespace, no-wrap, vertical writing, and bidi runs retain their
 paragraph path. It adds no runtime dependency or public API. Affected PDFs can

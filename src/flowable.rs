@@ -6114,6 +6114,7 @@ pub struct Paragraph {
     preserve_whitespace: bool,
     break_spaces: bool,
     no_wrap: bool,
+    measure_inline_word: bool,
     suppress_first_line_indent: bool,
     snap_each_line_baseline: bool,
     round_each_css_line_baseline: bool,
@@ -6141,6 +6142,7 @@ impl Paragraph {
             preserve_whitespace: false,
             break_spaces: false,
             no_wrap: false,
+            measure_inline_word: false,
             suppress_first_line_indent: false,
             snap_each_line_baseline: false,
             round_each_css_line_baseline: false,
@@ -6166,6 +6168,11 @@ impl Paragraph {
         self.round_each_css_line_baseline =
             style.css_pixel_snap_metrics && style.line_height.to_milli_i64().rem_euclid(750) != 0;
         self.style = style;
+        self
+    }
+
+    pub(crate) fn with_inline_word_measurement(mut self, enabled: bool) -> Self {
+        self.measure_inline_word = enabled;
         self
     }
 
@@ -6427,6 +6434,34 @@ impl Paragraph {
                 log_perf_counts("layout.text.width", &[("cache_miss", 1)]);
             }
             return value;
+        }
+        if self.measure_inline_word {
+            let (primary, _, _) =
+                resolve_font_stack_with_ranges(self.font_registry.as_deref(), &self.style);
+            let registered = self
+                .font_registry
+                .as_deref()
+                .is_some_and(|registry| registry.resolve(&primary).is_some());
+            if !registered {
+                // A whole built-in-font string paints with the PDF font's real
+                // advances even when legacy paragraph measurement is heuristic.
+                // Separate words must use those same advances, otherwise each
+                // heuristic surplus becomes a visibly oversized inter-word gap.
+                if let Some(font) = crate::base14_metrics::font(&primary) {
+                    let base = text.chars().try_fold(Pt::ZERO, |sum, ch| {
+                        font.glyph_by_unicode(ch).map(|glyph| {
+                            sum + self.style.font_size.mul_ratio(i32::from(glyph.width), 1000)
+                        })
+                    });
+                    if let Some(base) = base {
+                        let value = text_width_with_spacing(base, &self.style, text);
+                        if let Ok(mut cache) = self.width_cache.lock() {
+                            cache.insert(text, value);
+                        }
+                        return value;
+                    }
+                }
+            }
         }
         if let Some(registry) = &self.font_registry {
             let (primary, fallbacks, unicode_ranges) =
@@ -8584,6 +8619,7 @@ impl Flowable for Paragraph {
             preserve_whitespace: self.preserve_whitespace,
             break_spaces: self.break_spaces,
             no_wrap: self.no_wrap,
+            measure_inline_word: self.measure_inline_word,
             suppress_first_line_indent: self.suppress_first_line_indent,
             snap_each_line_baseline: self.snap_each_line_baseline,
             round_each_css_line_baseline: self.round_each_css_line_baseline,
@@ -8616,6 +8652,7 @@ impl Flowable for Paragraph {
             preserve_whitespace: self.preserve_whitespace,
             break_spaces: self.break_spaces,
             no_wrap: self.no_wrap,
+            measure_inline_word: self.measure_inline_word,
             suppress_first_line_indent: true,
             snap_each_line_baseline: self.snap_each_line_baseline,
             round_each_css_line_baseline: self.round_each_css_line_baseline,
@@ -10296,6 +10333,7 @@ impl CollapsibleSpaceFlowable {
     pub(crate) fn new(style: TextStyle, font_registry: Option<Arc<FontRegistry>>) -> Self {
         let letter_spacing = style.letter_spacing;
         let probe = Paragraph::new(" ")
+            .with_inline_word_measurement(true)
             .with_style(style)
             .with_font_registry(font_registry);
         let width = probe.measure_text_width(" ").max(Pt::ZERO);

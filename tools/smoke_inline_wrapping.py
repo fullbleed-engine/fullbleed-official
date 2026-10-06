@@ -34,6 +34,8 @@ CASES = [
     ("decorated", "<p>Edit <code>{{file}}</code> " + TAIL + "</p>", "code {font-family:'Noto Sans';font-size:9pt;padding:1pt 3pt;background:#eee9da}"),
     ("long-inline", "<p>Edit <span>{{file}} " + TAIL + "</span></p>", "span {color:#ab391c}"),
     ("collapsed-spaces", "<p>  Edit <span> {{file}} </span>  " + TAIL.replace(" ", "  ") + "  </p>", "span {background:#eee9da}"),
+    ("helvetica", "<p>Edit <span>{{file}}</span> " + TAIL + "</p>", "* {font-family:Helvetica} span {color:#ab391c}"),
+    ("times", "<p>Edit <span>{{file}}</span> " + TAIL + "</p>", "* {font-family:Times-Roman} span {color:#ab391c}"),
 ]
 
 
@@ -146,6 +148,20 @@ def check(out: Path):
                             assert b[3] < a[1], f"Lines overlap or move upwards: {previous['text']} / {current['text']}"
                             line_count += 1
                     assert line_count >= 4, "The fixture did not exercise wrapping"
+                    if name in ["helvetica", "times"]:
+                        # Compare actual word origins with a whole-string
+                        # control. This catches approximate monospace advances
+                        # becoming oversized gaps between proportional words.
+                        control = bytes(engine.render_pdf("<p>Edit print.css to change</p>", css))
+                        with pdfium.PdfDocument(control) as control_pdf:
+                            control_page = control_pdf[0]
+                            try:
+                                _, control_words = inspect_page(control_page)
+                            finally:
+                                control_page.close()
+                        if mode != "fixed":
+                            for observed, expected_word in zip(words[:4], control_words):
+                                assert abs(observed["box"][0] - expected_word["box"][0]) < .05, "Built-in-font word spacing differs from whole-string painting"
                     assert all(19 <= w["box"][0] < w["box"][2] <= 221 for w in words), "Text leaves the content box"
                     result["lines"] = line_count
                     result["ok"] = True
