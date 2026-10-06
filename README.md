@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Fullbleed PDF Engine
 
-**Create PDFs from HTML and CSS in Python, Rust, Node.js, and C#. MIT licensed.**
+**Create PDFs from HTML and CSS in Python, Rust, Node.js, C#, and browser JavaScript. MIT licensed.**
 
-Build invoices, reports, statements, and variable-data print jobs with a deterministic Rust engine. Use the native Rust API, the Python package, or the optional Node.js and .NET integrations. The Python wheel includes the engine, fonts, and CLI with no required third-party Python packages or system PDF stack. The Node package includes the WebAssembly engine and fonts; the .NET package includes native libraries for in-process rendering.
+Build invoices, reports, statements, and variable-data print jobs with a deterministic Rust engine. Use the native Rust API, the Python package, or the optional JavaScript and .NET integrations. The Python wheel includes the engine, fonts, and CLI with no required third-party Python packages or system PDF stack. The JavaScript package includes the WebAssembly engine and fonts for Node.js and browser workers; the .NET package includes native libraries for in-process rendering.
 
 [Try in your browser](https://docs.fullbleed.dev/playground/) · [Documentation](https://docs.fullbleed.dev/) · [Examples](https://docs.fullbleed.dev/examples/) · [PyPI](https://pypi.org/project/fullbleed/) · [crates.io](https://crates.io/crates/fullbleed) · [npm](https://www.npmjs.com/package/fullbleed) · [Release notes](https://github.com/fullbleed-engine/fullbleed-official/releases) · [MIT license](LICENSE)
 
@@ -12,7 +12,7 @@ Build invoices, reports, statements, and variable-data print jobs with a determi
   <a href="https://docs.fullbleed.dev/assets/showcase/report.pdf"><img src="https://docs.fullbleed.dev/assets/showcase/report-1.png" width="48%" alt="Common Ground community report rendered by Fullbleed, with a vector landscape illustration and editorial layout"></a>
 </p>
 
-Actual Fullbleed output. Open either preview for its PDF, or [explore all four designs with complete HTML/CSS, data, and licensed fonts](https://docs.fullbleed.dev/examples/).
+Actual Fullbleed output. Open either preview for its PDF, or [explore the designed examples with HTML/CSS, data, and font setup](https://docs.fullbleed.dev/examples/).
 
 ## Choose your language
 
@@ -21,10 +21,12 @@ Actual Fullbleed output. Open either preview for its PDF, or [explore all four d
 | Python | `python -m pip install fullbleed` | [Python quickstart](https://docs.fullbleed.dev/getting-started/quickstart/) |
 | Rust | `cargo add fullbleed` | [Native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/) |
 | Node.js / TypeScript | `npm install fullbleed` | [Node quickstart](https://docs.fullbleed.dev/getting-started/node/) · [Next.js PDF download](https://docs.fullbleed.dev/guides/nextjs-pdf/) |
+| Browser JavaScript | `npm install --save-exact fullbleed@0.3.0` | [Browser SDK and runnable starter](https://docs.fullbleed.dev/guides/browser-pdf/) · [Live editor](https://docs.fullbleed.dev/assets/browser-demo/index.html) |
 | C# / .NET | `dotnet add package FullBleed.DotNet --version 0.1.4` | [C# quickstart and designed invoice](https://docs.fullbleed.dev/getting-started/dotnet/) |
 
-Node package 0.2.0 uses engine 2.5.8 and covers ordinary PDF generation, with
-optional process isolation for server rendering.
+JavaScript package 0.3.0 uses engine 2.5.8 and covers ordinary PDFs and previews
+in Node.js and browser workers. Import `fullbleed` in Node or `fullbleed/browser`
+in a web app. Node rendering also supports optional process isolation.
 FullBleed.DotNet 0.1.4 also uses engine 2.5.8. Its managed library targets .NET 8 and works with .NET 8, 9, and 10 applications, with native rendering, compiled bindings, and previews. Its separate CLI adapter requires the Python CLI.
 The Python package provides the complete CLI, including compiled variable-data jobs and print profiles; the Rust guide covers the native API.
 
@@ -73,6 +75,27 @@ await writeFile('invoice.png', result.previews[0]);
 
 Open `invoice.pdf` or its PNG preview. The [Node.js quickstart](https://docs.fullbleed.dev/getting-started/node/) includes a downloadable designed invoice project. The separate [Node package](https://github.com/fullbleed-engine/fullbleed-node) supports ESM, CommonJS, and TypeScript. For an application route, use the [Next.js starter](https://docs.fullbleed.dev/guides/nextjs-pdf/).
 
+### Browser JavaScript
+
+[Try the editable browser app](https://docs.fullbleed.dev/assets/browser-demo/index.html)
+to generate an invoice or report, change its HTML/CSS, and download the PDF.
+Rendering runs locally in a Web Worker; the starter does not upload document
+inputs to a rendering service.
+
+To build on it, [download the complete project](https://docs.fullbleed.dev/assets/browser-starter/project.zip).
+Extract the ZIP, open a terminal in `fullbleed-browser-starter`, and use Node.js
+22.12 or newer for the development tools:
+
+```sh
+npm ci
+npm run dev
+```
+
+Open the localhost URL printed by Vite. The [browser guide](https://docs.fullbleed.dev/guides/browser-pdf/)
+explains adding `fullbleed/browser` to an existing app, serving its runtime
+assets over HTTPS or localhost, cancellation, custom fonts, and static deployment.
+This renders supplied static HTML/CSS; it does not capture a live browser page.
+
 ### Rust
 
 Start with the [native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/). The [`fullbleed` crate](https://crates.io/crates/fullbleed) exposes `FullBleed::builder()` and `render_to_buffer(...)`, with no Python requirement. The guide includes runnable invoice and report examples with explicit fonts and PNG previews, plus the [latest hosted Rust API reference](https://docs.rs/fullbleed/latest/fullbleed/).
@@ -88,6 +111,7 @@ Install [`FullBleed.DotNet`](https://www.nuget.org/packages/FullBleed.DotNet/0.1
 | Distinctive invoices, reports, notices, and statements | [Designed showcase with fonts and source](examples/design_showcase) |
 | A native Rust application | [Rust quickstart and runnable examples](https://docs.fullbleed.dev/getting-started/rust/) |
 | A Node.js or TypeScript application | [Node quickstart and designed invoice project](https://docs.fullbleed.dev/getting-started/node/) |
+| PDFs generated in your web application's browser | [Browser worker SDK, editable demo, and complete project](https://docs.fullbleed.dev/guides/browser-pdf/) |
 | A C# or .NET application | [NuGet quickstart and designed invoice](https://docs.fullbleed.dev/getting-started/dotnet/) |
 | An invoice from JSON | [Complete, checked example](examples/agent_workflows) |
 | Automatic rebuilds while editing HTML/CSS (2.5.0+) | [Watch-mode invoice example](examples/render_watch) |
@@ -95,6 +119,7 @@ Install [`FullBleed.DotNet`](https://www.nuget.org/packages/FullBleed.DotNet/0.1
 | A PDF download in FastAPI, Flask, or Django | [Runnable web app examples](examples/web_frameworks) |
 | A styled PDF report from a pandas DataFrame | [Paginated report with CSV data and verification](examples/pandas_report) |
 | A styled invoice from CSV | [Acme invoice project](examples/acme_invoice) |
+| Simplified Chinese and English in one PDF | [Bilingual invoice with explicit fonts and glyph checks](https://docs.fullbleed.dev/guides/chinese-pdf/) |
 | A report that flows across pages | [Business report example](examples/agent_workflows) |
 | Tagged output with accessibility checks | [Accessibility workflow](docs/ui-accessibility.md) |
 | Many documents from one template | [Fixed and reflowing variable-data examples](examples/agent_workflows) |
