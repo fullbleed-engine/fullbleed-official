@@ -702,11 +702,12 @@ def test_pdf_engine_font_resolution_trace_reports_missing_font_fallbacks() -> No
     missing_entry = next(
         font for font in trace["fonts"] if font["requested_name"] == "DefinitelyMissingFont"
     )
-    assert missing_entry["deterministic"] is False
+    assert missing_entry["deterministic"] is True
     assert missing_entry["fallback_reason"] == "unregistered_primary_fallback"
     assert missing_entry["pdf_target"]["outcome"] == "base14_fallback"
-    assert missing_entry["raster_target"]["outcome"] == "system_fallback"
-    assert trace["summary"]["raster_system_fallback_count"] >= 1
+    assert missing_entry["raster_target"]["outcome"] == "bundled_substitute"
+    assert missing_entry["raster_target"]["source"] == "bundled"
+    assert trace["summary"]["raster_system_fallback_count"] == 0
 
 
 def test_pdf_engine_pagination_trace_reports_page_transitions() -> None:

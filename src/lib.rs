@@ -2,6 +2,7 @@ mod assets;
 mod authoring;
 mod base14_metrics;
 mod base64;
+mod builtin_preview_fonts;
 mod canvas;
 mod chart;
 mod chart_document;

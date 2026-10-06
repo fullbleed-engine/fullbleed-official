@@ -477,6 +477,7 @@ fn build_features(py: Python<'_>) -> PyResult<PyObject> {
     out.set_item("compiled_reflow", true)?;
     out.set_item("explicit_table_headers", true)?;
     out.set_item("logical_table_pagination", true)?;
+    out.set_item("bundled_standard_font_previews", true)?;
     out.set_item(
         "compiled_flow_compression_modes",
         PyList::new(py, ["throughput", "compact"])?,
@@ -2884,6 +2885,18 @@ fn build_raster_font_target_py(
         let debug = PyDict::new(py);
         debug.set_item("source_identifier", trace.source_identifier)?;
         out.set_item("debug", debug)?;
+        return Ok((out.unbind().into_any(), true, false, false));
+    }
+    if let Some(font) = crate::builtin_preview_fonts::resolve(&normalized_resolved) {
+        out.set_item("target", "raster_preview")?;
+        out.set_item("outcome", "bundled_substitute")?;
+        out.set_item("source", "bundled")?;
+        out.set_item("deterministic", true)?;
+        out.set_item("requested_name", normalized_requested)?;
+        out.set_item("resolved_name", normalized_resolved)?;
+        out.set_item("resolved_file_name", font.file_name)?;
+        out.set_item("program_kind", "truetype")?;
+        out.set_item("license", "OFL-1.1")?;
         return Ok((out.unbind().into_any(), true, false, false));
     }
     if let Some(trace) = crate::raster::inspect_system_font_resolution(&normalized_resolved) {

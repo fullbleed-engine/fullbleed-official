@@ -1,0 +1,147 @@
+{
+  "schema": "fullbleed.preview_font_sources.v1",
+  "liberation_archive": {
+    "version": "2.1.5",
+    "url": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz",
+    "sha256": "7191c669bf38899f73a2094ed00f7b800553364f90e2637010a69c0e268f25d0",
+    "bytes": 2385008
+  },
+  "fonts": [
+    {
+      "file": "LiberationMono-Bold.ttf",
+      "bytes": 307996,
+      "sha256": "bd62a0672d0b9b6710b01df434c80ad54fa5f0835207eb7b17b7a761463067bb",
+      "archive_member": "liberation-fonts-ttf-2.1.5/LiberationMono-Bold.ttf"
+    },
+    {
+      "file": "LiberationMono-BoldItalic.ttf",
+      "bytes": 284068,
+      "sha256": "79451f3c09fe25116098853b7a2ca6e2436220ccc11af022979adbcf195be130",
+      "archive_member": "liberation-fonts-ttf-2.1.5/LiberationMono-BoldItalic.ttf"
+    },
+    {
+      "file": "LiberationMono-Italic.ttf",
+      "bytes": 281536,
+      "sha256": "605c01c711b44480a7508d349dfbf3264e81fa43d69e61cfa7d10b86e764c4d1",
+      "archive_member": "liberation-fonts-ttf-2.1.5/LiberationMono-Italic.ttf"
+    },
+    {
+      "file": "LiberationMono-Regular.ttf",
+      "bytes": 319508,
+      "sha256": "f2b83c763e8afd21709333370bed4774337fae82267937e2b5aea7e2fbd922c1",
+      "archive_member": "liberation-fonts-ttf-2.1.5/LiberationMono-Regular.ttf"
+    },
+    {
+      "file": "LiberationSans-Bold.ttf",
+      "bytes": 414456,
+      "sha256": "788abee4c806d660e8aee46689dd8540cd4bb98da03dcc9d171ce3efd99a9173",
+      "archive_member": "liberation-fonts-ttf-2.1.5/LiberationSans-Bold.ttf"
+    },
+    {
+      "file": "LiberationSans-BoldItalic.ttf",
+      "bytes": 408996,
+      "sha256": "698da70fc191cc5f33ad4d6d3fe830fe4624b898ea2e3169955928b7c491f1ee",
+      "archive_member": "liberation-fonts-ttf-2.1.5/LiberationSans-BoldItalic.ttf"
+    },
+    {
+      "file": "LiberationSans-Italic.ttf",
+      "bytes": 415816,
+      "sha256": "e5bae5c4cde31f22142753855f4f8fb86da6ff39955ed3c0a11248b0d16948b0",
+      "archive_member": "liberation-fonts-ttf-2.1.5/LiberationSans-Italic.ttf"
+    },
+    {
+      "file": "LiberationSans-Regular.ttf",
+      "bytes": 410712,
+      "sha256": "76d04c18ea243f426b7de1f3ad208e927008f961dc5945e5aad352d0dfde8ee8",
+      "archive_member": "liberation-fonts-ttf-2.1.5/LiberationSans-Regular.ttf"
+    },
+    {
+      "file": "LiberationSerif-Bold.ttf",
+      "bytes": 370096,
+      "sha256": "d754ba427cfe0bca54ae052384baa8f842da5bd6550ad4da024ac441e7a7d5ce",
+      "archive_member": "liberation-fonts-ttf-2.1.5/LiberationSerif-Bold.ttf"
+    },
+    {
+      "file": "LiberationSerif-BoldItalic.ttf",
+      "bytes": 376772,
+      "sha256": "f17db8af71e24d2066b587546021d4f0b296be389512b658dec3c09affeb11a7",
+      "archive_member": "liberation-fonts-ttf-2.1.5/LiberationSerif-BoldItalic.ttf"
+    },
+    {
+      "file": "LiberationSerif-Italic.ttf",
+      "bytes": 375632,
+      "sha256": "0e3dea9f8d613e006ccfa62201f33e265d19167bd0907725c3e145368b04fc2e",
+      "archive_member": "liberation-fonts-ttf-2.1.5/LiberationSerif-Italic.ttf"
+    },
+    {
+      "file": "LiberationSerif-Regular.ttf",
+      "bytes": 393576,
+      "sha256": "058ea80864aef09a23f45cbec2bb5400bc3dfbdea01c3f10538a21fcb497fb74",
+      "archive_member": "liberation-fonts-ttf-2.1.5/LiberationSerif-Regular.ttf"
+    },
+    {
+      "file": "NotoSans-Regular.ttf",
+      "path": "python/fullbleed_assets/fonts/NotoSans-Regular.ttf",
+      "bytes": 2049096,
+      "sha256": "bfb7bb691513f12e734dc346c03a03f784912432d7e3fa8e56efcf906fe86b3d",
+      "url": "https://github.com/fullbleed-engine/fullbleed-official/blob/e8d0785a191f98701456951ca416c189de92127c/python/fullbleed_assets/fonts/NotoSans-Regular.ttf"
+    },
+    {
+      "file": "NotoSansMath-Regular.ttf",
+      "path": "python/fullbleed_assets/fonts/NotoSansMath-Regular.ttf",
+      "bytes": 590904,
+      "sha256": "80b61fd613d3519197e64fff6f7e71fdc7f3e6526440ea4115b554ef7fd59af7",
+      "url": "https://github.com/fullbleed-engine/fullbleed-official/blob/e8d0785a191f98701456951ca416c189de92127c/python/fullbleed_assets/fonts/NotoSansMath-Regular.ttf"
+    },
+    {
+      "file": "NotoSansSymbols-Regular.ttf",
+      "path": "python/fullbleed_assets/fonts/NotoSansSymbols-Regular.ttf",
+      "bytes": 258156,
+      "sha256": "8f02f31959bbdf6061547a188248e13f84dc5fdd940326ec494675f453f072bb",
+      "url": "https://github.com/fullbleed-engine/fullbleed-official/blob/e8d0785a191f98701456951ca416c189de92127c/python/fullbleed_assets/fonts/NotoSansSymbols-Regular.ttf"
+    },
+    {
+      "file": "NotoSansSymbols2-Regular.ttf",
+      "path": "python/fullbleed_assets/fonts/NotoSansSymbols2-Regular.ttf",
+      "bytes": 656852,
+      "sha256": "630846d528dbe4c4981370a4d0a9475a1fd1491a129bb411f8e157cdb5de13c6",
+      "url": "https://github.com/fullbleed-engine/fullbleed-official/blob/e8d0785a191f98701456951ca416c189de92127c/python/fullbleed_assets/fonts/NotoSansSymbols2-Regular.ttf"
+    }
+  ],
+  "notices": [
+    {
+      "file": "LICENSE-NotoSans.txt",
+      "bytes": 4489,
+      "sha256": "f8a660d97cc1640e808490fdbb7f1c2b27ba7936146850a59e76ef4075ede435",
+      "url": "https://raw.githubusercontent.com/google/fonts/c92b209a838649c205a1565b5f28c1973e049659/ofl/notosans/OFL.txt",
+      "modification": "Prefixed the original copyright notice from the bundled source font name table."
+    },
+    {
+      "file": "LICENSE-NotoSansMath.txt",
+      "bytes": 4429,
+      "sha256": "0137f89fc92efb9a91c696149c5fb788fcc8966e851ee4a7e8c4b0ed977ba4c9",
+      "url": "https://raw.githubusercontent.com/google/fonts/5550c02f35bc4563ba213a221be017fdada4039e/ofl/notosansmath/OFL.txt",
+      "modification": "Prefixed the original copyright notice from the bundled source font name table."
+    },
+    {
+      "file": "LICENSE-NotoSansSymbols.txt",
+      "bytes": 4432,
+      "sha256": "8af1a4c296c9e133183283ae2cc44163485498d2c9b654db7207401832a65e01",
+      "url": "https://raw.githubusercontent.com/google/fonts/1bd2cbfd14e39ad228268880c7596c407f0eb992/ofl/notosanssymbols/OFL.txt",
+      "modification": "Prefixed the original copyright notice from the bundled source font name table."
+    },
+    {
+      "file": "LICENSE-NotoSansSymbols2.txt",
+      "bytes": 4432,
+      "sha256": "2ff0138bb7c3790336e62cbfa2447fff8f85e75fa715eafce2d14ae6685bf164",
+      "url": "https://raw.githubusercontent.com/google/fonts/c91a7a16c2859af17e19bd127a45c7aa2f7ab77a/ofl/notosanssymbols2/OFL.txt",
+      "modification": "Prefixed the original copyright notice from the bundled source font name table."
+    },
+    {
+      "file": "LICENSE-Liberation.txt",
+      "bytes": 4414,
+      "sha256": "93fed46019c38bbe566b479d22148e2e8a1e85ada614accb0211c37b2c61c19b",
+      "url": "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz"
+    }
+  ]
+}

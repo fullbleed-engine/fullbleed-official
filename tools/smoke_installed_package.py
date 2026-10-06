@@ -119,6 +119,15 @@ def run(expected_version: str) -> dict[str, Any]:
     compliance_report = json.loads(compliance.stdout)
     if compliance_report.get("license", {}).get("spdx_expression") != "MIT":
         raise AssertionError("installed-package compliance did not report MIT")
+    preview_font_license_count = 0
+    if fullbleed.build_features().get("bundled_standard_font_previews"):
+        license_dir = Path(compliance_report["files"]["license"]).parent / "src" / "preview_fonts"
+        for family in ["Liberation", "NotoSans", "NotoSansMath", "NotoSansSymbols", "NotoSansSymbols2"]:
+            notice = license_dir / f"LICENSE-{family}.txt"
+            text = notice.read_text(encoding="utf-8")
+            if "SIL OPEN FONT LICENSE Version 1.1" not in text or "Copyright" not in text:
+                raise AssertionError(f"Incomplete bundled preview font notice: {notice}")
+            preview_font_license_count += 1
     if runtime_contract_process.returncode != 0:
         raise AssertionError(
             "installed runtime agent contract failed outside the source tree:\n"
@@ -145,6 +154,7 @@ def run(expected_version: str) -> dict[str, Any]:
         "ok": True,
         "version": installed_version,
         "license": fullbleed.SPDX_LICENSE_EXPRESSION,
+        "preview_font_license_count": preview_font_license_count,
         "module": str(Path(fullbleed.__file__).resolve()),
         "pdf_bytes": len(pdf),
         "png_bytes": len(pages[0]),

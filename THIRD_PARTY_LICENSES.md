@@ -2,7 +2,7 @@
 # Third-Party Licenses
 
 Schema: `fullbleed.third_party_licenses.v1`  
-Last updated: 2026-10-02
+Last updated: 2026-10-06
 Scope: third-party artifacts directly redistributed by this repository and wheel package.
 
 ## Bundled Artifacts
@@ -18,6 +18,18 @@ Scope: third-party artifacts directly redistributed by this repository and wheel
 | Noto Sans Symbols2 Regular | `python/fullbleed_assets/fonts/NotoSansSymbols2-Regular.ttf` | `OFL-1.1` | `https://fonts.google.com/noto` | `https://raw.githubusercontent.com/google/fonts/main/ofl/notosanssymbols2/OFL.txt` |
 | Adobe Core 14 metrics | `src/base14_metrics_data.rs`; originals in `tools/data/base14/*.afm` | Adobe AFM permission below | Pinned Apache PDFBox mirror | `tools/data/base14/MustRead.html` |
 | Adobe Glyph List | `src/base14_metrics_data.rs`; originals in `tools/data/base14/agl-*.txt` | BSD-3-Clause | `https://github.com/adobe-type-tools/agl-aglfn` | `tools/data/base14/agl-LICENSE.md` and copyright notices below |
+| Fullbleed Preview Sans, Serif and Mono, derived from Liberation 2.1.5 | `src/preview_fonts/FullbleedPreview{Sans,Serif,Mono}-*.ttf`, compiled into the native preview renderer | OFL-1.1 | `https://github.com/liberationfonts/liberation-fonts/releases/tag/2.1.5` | `src/preview_fonts/LICENSE-Liberation.txt` |
+| Fullbleed Preview Symbol and Dingbats, derived from Noto and Liberation | `src/preview_fonts/FullbleedPreview{Symbol,Dingbats}-Regular.ttf`, compiled into the native preview renderer | OFL-1.1 | Existing bundled Noto assets above and Liberation 2.1.5 | `src/preview_fonts/LICENSE-*.txt` |
+
+The native renderer's Standard 14 preview substitutes are modified derivatives:
+subsets with renamed families, decomposed unhinted outlines, Adobe AFM advances,
+and preview-only aliases for legacy Adobe character mappings. Original copyright
+notices and complete license texts are retained in `src/preview_fonts/LICENSE-*.txt`
+and in the Python wheel's license directory. `tools/generate_preview_fonts.py`
+reproduces the fonts from the pinned inputs in `tools/data/preview_fonts/sources.json`;
+output hashes and the single unsupported vendor-private logo are recorded in
+`src/preview_fonts/sources.json`. These are substitute designs, not original
+Standard 14 font programs. They do not change a PDF's font resources or text.
 
 ## Remote-Installable Asset Registry
 

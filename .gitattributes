@@ -1,6 +1,11 @@
 # Retain the pinned upstream metrics and license bytes exactly.
 tools/data/base14/* -text -whitespace
 src/base14_metrics_data.rs text eol=lf
+# Preview font programs and pinned notices must retain their exact source bytes.
+src/preview_fonts/*.ttf binary
+src/preview_fonts/LICENSE-*.txt -text -whitespace
+src/preview_fonts/sources.json text eol=lf
+tools/data/preview_fonts/sources.json text eol=lf
 # Preserve PDF stream bytes and xref offsets; never normalize them as text.
 *.pdf binary
 # Keep published comparison source hashes portable across checkout platforms.

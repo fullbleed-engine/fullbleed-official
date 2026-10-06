@@ -1,3 +1,35 @@
+# Fullbleed Release Notes - 2.5.11
+
+Release date: October 6, 2026
+
+## Preview standard PDF fonts without system fonts
+
+An ordinary PDF using unembedded Helvetica, Times, Courier, Symbol, or Dingbats
+could produce blank native previews on a host without suitable fonts. The native
+renderer now uses compact, bundled OFL outline substitutes for these 14 faces.
+Registered and embedded font programs retain precedence. The PDF font resources,
+text and advances remain unchanged; default preview pixels intentionally change.
+
+The substitutes total 508,024 bytes and cover every glyph in the pinned AFMs'
+built-in encodings. The unencoded, vendor-private Symbol `/apple` logo is not
+available. These are substitute designs, not original Standard 14 outlines.
+Sources, reproducible generation, hashes and complete license notices are retained.
+
+Font-resolution traces report `bundled_substitute` with a deterministic bundled
+source, and runtime discovery adds `bundled_standard_font_previews`. Missing
+requested fonts still retain their existing fallback reason. No runtime package,
+browser, network download, or system-font installation is introduced.
+
+The installed-wheel regression checks 68 cases, including all encoded glyphs,
+named AFM glyphs, explicit-font overrides and embedded-font controls. CI retains
+the PDFs and previews and compares Linux output with system fonts present and
+hidden. Local Windows and isolated Linux results also match pixel-for-pixel.
+
+See the [2.5.11 release runbook](docs/release/2.5.11-runbook.md). Node and .NET
+packages have separate releases; their current versions still use engine 2.5.10.
+
+---
+
 # Fullbleed Release Notes - 2.5.10
 
 Release date: October 6, 2026
