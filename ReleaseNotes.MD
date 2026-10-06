@@ -1,3 +1,30 @@
+# Fullbleed Release Notes - 2.5.10
+
+Release date: October 6, 2026
+
+## Keep inline labels at their intended width
+
+The 2.5.9 inline wrapping correction exposed word fragments to the shared line
+builder. Intrinsic sizing did not include the spacing and layout-unit rounding
+between those fragments. A flex or inline-block label could consequently wrap
+inside its own max-content width even when the page had enough room.
+
+Intrinsic widths now reserve the same advances used by inline layout. Min-content
+sizing also recognizes collapsed-space word boundaries, while no-wrap runs keep
+their combined width. Leading and trailing collapsed spaces do not inflate it.
+This restores tracked labels and footers without reverting the styled-inline
+overlap correction. Affected PDFs can change line breaks and hashes; review saved
+baselines when upgrading.
+
+The installed-wheel checks retain independent word coordinates and previews for
+six flex/inline-block specimens, alongside the existing 48-case wrapping suite.
+This introduces no public API or runtime dependency and is not a claim of full
+CSS or PDF standards conformance. Node and .NET packages have separate releases.
+
+See the [2.5.10 release runbook](docs/release/2.5.10-runbook.md).
+
+---
+
 # Fullbleed Release Notes - 2.5.9
 
 Release date: October 6, 2026

@@ -17848,6 +17848,64 @@ impl InlineBlockLayoutFlowable {
         self
     }
 
+    fn intrinsic_inline_width(&self, min_content: bool, avail_width: Pt) -> Option<Pt> {
+        let min_content = min_content && !self.no_wrap;
+        let mut line_width = Pt::ZERO;
+        let mut content_width = Pt::ZERO;
+        let mut max_width = Pt::ZERO;
+        let mut previous: Option<&dyn Flowable> = None;
+        let mut last_positive_is_space = None;
+        for (child, _) in &self.children {
+            if child.out_of_flow() {
+                continue;
+            }
+            let space = child.is_collapsible_inline_space();
+            if child.forced_line_break_height().is_some() || (min_content && space) {
+                max_width = max_width.max(content_width);
+                line_width = Pt::ZERO;
+                content_width = Pt::ZERO;
+                previous = None;
+                last_positive_is_space = None;
+                continue;
+            }
+            if space && last_positive_is_space.is_none_or(|was_space| was_space) {
+                continue;
+            }
+            let mut width = if min_content {
+                child.flex_min_content_width(avail_width)?
+            } else {
+                child.intrinsic_width()?
+            }
+            .max(Pt::ZERO);
+            // Intrinsic sizing must reserve the advances the shared line
+            // builder will actually use, including fragment-edge spacing and
+            // its CSS layout-unit rounding. Otherwise an exact-fit flex item
+            // wraps again when drawn into its own max-content width.
+            if self.css_pixel_snap && child.inline_text_edge_letter_spacing().is_some() {
+                width = ceil_to_css_layout_unit(width);
+            }
+            if let Some(prior) = previous {
+                let boundary_spacing = prior
+                    .inline_text_edge_letter_spacing()
+                    .filter(|_| {
+                        child.inline_text_edge_letter_spacing().is_some()
+                            || child.is_monolithic_replaced()
+                    })
+                    .unwrap_or(Pt::ZERO);
+                line_width += self.gap + boundary_spacing;
+            }
+            line_width += width;
+            if !space {
+                content_width = line_width;
+            }
+            if width > Pt::ZERO {
+                last_positive_is_space = Some(space);
+            }
+            previous = Some(child.as_ref());
+        }
+        Some(max_width.max(content_width).max(Pt::ZERO))
+    }
+
     fn compute_layout(&self, avail_width: Pt) -> InlineLayoutCache {
         let forced = self.forced_line_height.unwrap_or(Pt::ZERO);
         let mut max_width = Pt::ZERO;
@@ -18443,27 +18501,7 @@ impl Flowable for InlineBlockLayoutFlowable {
     }
 
     fn intrinsic_width(&self) -> Option<Pt> {
-        let mut line_width = Pt::ZERO;
-        let mut max_width = Pt::ZERO;
-        let mut seen = false;
-        for (child, _) in &self.children {
-            if child.out_of_flow() {
-                continue;
-            }
-            if child.forced_line_break_height().is_some() {
-                max_width = max_width.max(line_width);
-                line_width = Pt::ZERO;
-                seen = false;
-                continue;
-            }
-            let child_width = child.intrinsic_width()?;
-            if seen {
-                line_width = line_width + self.gap.max(Pt::ZERO);
-            }
-            line_width = line_width + child_width.max(Pt::ZERO);
-            seen = true;
-        }
-        Some(max_width.max(line_width).max(Pt::ZERO))
+        self.intrinsic_inline_width(false, Pt::ZERO)
     }
 
     fn multicol_text_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
@@ -18492,27 +18530,7 @@ impl Flowable for InlineBlockLayoutFlowable {
     }
 
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
-        let mut line_width = Pt::ZERO;
-        let mut max_width = Pt::ZERO;
-        let mut seen = false;
-        for (child, _) in &self.children {
-            if child.out_of_flow() {
-                continue;
-            }
-            if child.forced_line_break_height().is_some() {
-                max_width = max_width.max(line_width);
-                line_width = Pt::ZERO;
-                seen = false;
-                continue;
-            }
-            let child_width = child.flex_min_content_width(avail_width)?;
-            if seen {
-                line_width = line_width + self.gap.max(Pt::ZERO);
-            }
-            line_width = line_width + child_width.max(Pt::ZERO);
-            seen = true;
-        }
-        Some(max_width.max(line_width).max(Pt::ZERO))
+        self.intrinsic_inline_width(true, avail_width)
     }
 
     fn flex_max_content_width(&self, _avail_width: Pt) -> Option<Pt> {
@@ -18917,6 +18935,93 @@ mod inline_baseline_tests {
         assert_eq!(
             ceil_to_css_layout_unit(Pt::from_milli_i64(104_406)),
             Pt::from_milli_i64(104_414)
+        );
+    }
+
+    #[test]
+    fn inline_intrinsic_width_includes_word_boundary_letter_spacing() {
+        let mut style = TextStyle::default();
+        style.font_name = std::sync::Arc::from("Courier");
+        style.font_size = Pt::from_f32(10.0);
+        style.line_height = Pt::from_f32(15.0);
+        style.line_height_is_auto = false;
+        style.letter_spacing = Pt::from_f32(1.0);
+        let word = || Box::new(Paragraph::new("AA").with_style(style.clone())) as Box<dyn Flowable>;
+        let space =
+            || Box::new(CollapsibleSpaceFlowable::new(style.clone(), None)) as Box<dyn Flowable>;
+        for edges in [false, true] {
+            let mut children = vec![word(), space(), word(), space(), word()];
+            if edges {
+                children.insert(0, space());
+                children.push(space());
+            }
+            let line = InlineBlockLayoutFlowable::new_pt(
+                children
+                    .into_iter()
+                    .map(|child| (child, VerticalAlign::Baseline))
+                    .collect(),
+                Pt::ZERO,
+                None,
+            );
+            // Three 13pt words, two 6pt spaces and four 1pt fragment boundaries.
+            assert_eq!(line.intrinsic_width(), Some(Pt::from_f32(55.0)));
+            assert_eq!(
+                line.flex_max_content_width(Pt::from_f32(100.0)),
+                Some(Pt::from_f32(55.0))
+            );
+            assert_eq!(
+                line.wrap(Pt::from_f32(55.0), Pt::from_f32(100.0)).height,
+                Pt::from_f32(15.0)
+            );
+            assert_eq!(
+                line.flex_min_content_width(Pt::from_f32(100.0)),
+                Some(Pt::from_f32(13.0))
+            );
+            assert_eq!(
+                line.with_no_wrap(true)
+                    .flex_min_content_width(Pt::from_f32(100.0)),
+                Some(Pt::from_f32(55.0))
+            );
+        }
+    }
+
+    #[test]
+    fn inline_intrinsic_width_fits_the_css_snapped_fragments() {
+        let mut style = TextStyle::default();
+        style.font_name = std::sync::Arc::from("Courier");
+        style.font_size = Pt::from_f32(11.3);
+        style.line_height = Pt::from_f32(16.0);
+        style.line_height_is_auto = false;
+        style.letter_spacing = Pt::from_f32(0.4);
+        style.css_pixel_snap_metrics = true;
+        let line = InlineBlockLayoutFlowable::new_pt(
+            vec![
+                (
+                    Box::new(Paragraph::new("A").with_style(style.clone())),
+                    VerticalAlign::Baseline,
+                ),
+                (
+                    Box::new(CollapsibleSpaceFlowable::new(style.clone(), None)),
+                    VerticalAlign::Baseline,
+                ),
+                (
+                    Box::new(Paragraph::new("B").with_style(style)),
+                    VerticalAlign::Baseline,
+                ),
+            ],
+            Pt::ZERO,
+            None,
+        )
+        .with_css_pixel_line_snap(true);
+        let intrinsic = line.intrinsic_width().unwrap();
+        let roomy = line.wrap(Pt::from_f32(100.0), Pt::from_f32(100.0));
+        assert!(
+            intrinsic >= roomy.width,
+            "intrinsic {intrinsic:?} < painted {roomy:?}"
+        );
+        assert_eq!(
+            line.wrap(intrinsic, Pt::from_f32(100.0)).height,
+            roomy.height
         );
     }
 

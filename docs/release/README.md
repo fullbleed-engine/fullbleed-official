@@ -4,6 +4,11 @@ This directory is the release-operations layer for Fullbleed. It is separate
 from feature documentation so release decisions can be audited without reading
 engine internals.
 
+## 2.5.10 Documents
+
+- `docs/release/2.5.10-runbook.md`: inline intrinsic-width correction and retained checks.
+- `tools/smoke_inline_sizing.py`: independent flex/inline-block text and position checks.
+
 ## 2.5.9 Documents
 
 - `docs/release/2.5.9-runbook.md`: mixed inline word wrapping and retained PDF checks.
