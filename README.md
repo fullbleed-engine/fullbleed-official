@@ -21,10 +21,10 @@ Actual Fullbleed output. Open either preview for its PDF, or [explore all four d
 | Python | `python -m pip install fullbleed` | [Python quickstart](https://docs.fullbleed.dev/getting-started/quickstart/) |
 | Rust | `cargo add fullbleed` | [Native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/) |
 | Node.js / TypeScript | `npm install fullbleed` | [Node quickstart](https://docs.fullbleed.dev/getting-started/node/) · [Next.js PDF download](https://docs.fullbleed.dev/guides/nextjs-pdf/) |
-| C# / .NET | `dotnet add package FullBleed.DotNet --version 0.1.3` | [C# quickstart and designed invoice](https://docs.fullbleed.dev/getting-started/dotnet/) |
+| C# / .NET | `dotnet add package FullBleed.DotNet --version 0.1.4` | [C# quickstart and designed invoice](https://docs.fullbleed.dev/getting-started/dotnet/) |
 
-The Node integration is independently versioned and covers ordinary PDF generation.
-The independently versioned .NET package targets .NET 8, with native rendering, compiled bindings, and previews. Its separate CLI adapter requires the Python CLI.
+Node package 0.1.5 uses engine 2.5.8 and covers ordinary PDF generation.
+FullBleed.DotNet 0.1.4 also uses engine 2.5.8. Its managed library targets .NET 8 and works with .NET 8, 9, and 10 applications, with native rendering, compiled bindings, and previews. Its separate CLI adapter requires the Python CLI.
 The Python package provides the complete CLI, including compiled variable-data jobs and print profiles; the Rust guide covers the native API.
 
 ## Your first PDF
@@ -78,7 +78,7 @@ Start with the [native Rust quickstart](https://docs.fullbleed.dev/getting-start
 
 ### C# and .NET
 
-Install [`FullBleed.DotNet`](https://www.nuget.org/packages/FullBleed.DotNet/0.1.3) in a .NET 8 project and follow the [C# quickstart](https://docs.fullbleed.dev/getting-started/dotnet/). The guide includes a runnable invoice with explicit fonts and HTML/CSS source. Native rendering runs inside the .NET process on Windows x64, Linux x64, Intel macOS, and Apple Silicon macOS, without a Python or browser runtime.
+Install [`FullBleed.DotNet`](https://www.nuget.org/packages/FullBleed.DotNet/0.1.4) in a .NET 8, 9, or 10 project and follow the [C# quickstart](https://docs.fullbleed.dev/getting-started/dotnet/). The guide includes a runnable invoice with explicit fonts and HTML/CSS source. Native rendering runs inside the .NET process on Windows x64, Linux x64, Intel macOS, and Apple Silicon macOS, without a Python or browser runtime.
 
 ## Choose your starting point
 
