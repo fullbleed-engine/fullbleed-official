@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Fullbleed PDF Engine
+[![PyPI Downloads](https://img.shields.io/pypi/dm/fullbleed)](https://pypistats.org/packages/fullbleed)
 
 **Create PDFs from HTML and CSS in Python, Rust, Node.js, C#, and browser JavaScript. MIT licensed.**
 
