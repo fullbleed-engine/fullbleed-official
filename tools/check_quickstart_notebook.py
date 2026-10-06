@@ -69,7 +69,7 @@ def main() -> int:
     pdf = out / "output" / "invoice.pdf"
     inspection = dict(fullbleed.inspect_pdf(str(pdf)))
     extracted = fullbleed.extract_pdf_page_texts(str(pdf))
-    text = "\n".join(page.get("text", "") for page in extracted["pages"])
+    text = " ".join("\n".join(page.get("text", "") for page in extracted["pages"]).split())
     for marker in ["INV-1042", "Maple & Finch", "Design workshop", "USD 1,870.00"]:
         if marker not in text:
             raise AssertionError(f"Missing default invoice text: {marker}")

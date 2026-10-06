@@ -19,6 +19,9 @@ Preserved whitespace, no-wrap, vertical writing, and bidi runs retain their
 paragraph path. It adds no runtime dependency or public API. Affected PDFs can
 change line breaks, pagination, and hashes; review saved baselines when upgrading.
 
+The internal PDF text extractor can return additional newlines between separately
+positioned words. Normalize whitespace when checking complete phrases.
+
 The installed-wheel regression checks direct PDFs, fixed bindings with an
 explicitly wide enough variable slot, and both compiled reflow compression modes.
 It retains native previews, independent PDFium previews, text extraction, and word

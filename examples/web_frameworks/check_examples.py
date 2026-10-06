@@ -24,6 +24,7 @@ def inspect(path: Path, markers: list[str]) -> dict:
     text = "\n".join(
         page.get("text", "") for page in fullbleed.extract_pdf_page_texts(str(path))["pages"]
     )
+    text = " ".join(text.split())
     for marker in markers:
         assert marker in text, (path.name, "missing PDF text", marker)
     assert report["page_count"] == 1, (path.name, "unexpected page count")
