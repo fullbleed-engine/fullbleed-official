@@ -1,6 +1,8 @@
 <!-- SPDX-License-Identifier: MIT -->
 # Fullbleed PDF Engine
+[![PyPI](https://img.shields.io/pypi/v/fullbleed)](https://pypi.org/project/fullbleed/)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/fullbleed)](https://pypistats.org/packages/fullbleed)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
 **Create PDFs from HTML and CSS in Python, Rust, Node.js, C#, and browser JavaScript. MIT licensed.**
 
