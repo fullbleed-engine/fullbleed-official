@@ -18,6 +18,7 @@ from urllib.request import urlopen
 import fontTools
 from fontTools.fontBuilder import FontBuilder
 from fontTools.misc.roundTools import otRound
+from fontTools.pens.boundsPen import BoundsPen
 from fontTools.pens.recordingPen import DecomposingRecordingPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
@@ -54,6 +55,12 @@ ALIASES = {
     "integralex": 0x23AE,
 }
 UNSUPPORTED = {("Symbol", "apple"): "Vendor-private logo U+F8FF; absent from the licensed source fonts and the built-in Symbol encoding."}
+COMPONENTS = {
+    "radicalex", "arrowvertex", "arrowhorizex", "parenlefttp", "parenleftex", "parenleftbt",
+    "parenrighttp", "parenrightex", "parenrightbt", "bracketlefttp", "bracketleftex", "bracketleftbt",
+    "bracketrighttp", "bracketrightex", "bracketrightbt", "bracelefttp", "braceleftmid", "braceleftbt",
+    "bracerighttp", "bracerightmid", "bracerightbt", "braceex", "integralex",
+}
 
 
 def verified(raw, entry, label):
@@ -129,6 +136,7 @@ def make_font(pdf_name, glyphs, fonts):
     family_name = f"Fullbleed Preview {family}"
     ps_name = f"FullbleedPreview{family}-{style}"
     cmap, outlines, metrics, used, substitutions, unsupported = {}, {}, {}, set(), [], []
+    aligned_components = []
     blank = TTGlyphPen(None).glyph()
     outlines[".notdef"] = blank
     metrics[".notdef"] = (upem // 2, 0)
@@ -150,14 +158,27 @@ def make_font(pdf_name, glyphs, fonts):
         glyph_set = source.getGlyphSet()
         recording = DecomposingRecordingPen(glyph_set)
         glyph_set[source_name].draw(recording)
-        scale = upem / source["head"].unitsPerEm
-        translate = 0
+        scale_x = scale_y = upem / source["head"].unitsPerEm
+        translate_x = translate_y = 0
         if name == "commaaccent":
             # Convert the combining mark's negative bearing into the spacing
             # Adobe accent's bearing, retaining the same outline.
-            translate = entry["bbox"][0] * upem / 1000 - source["glyf"][source_name].xMin * scale
+            translate_x = entry["bbox"][0] * upem / 1000 - source["glyf"][source_name].xMin * scale_x
+        elif pdf_name == "Symbol" and name in COMPONENTS:
+            # A modern Unicode extender's origin/bounds can differ markedly
+            # from its Adobe private-use counterpart (notably radicalex).
+            # Fit these assembly pieces to the AFM box so PDF positioning
+            # retains their intended baseline and extent.
+            bounds = BoundsPen(glyph_set)
+            recording.replay(bounds)
+            x0, y0, x1, y1 = bounds.bounds
+            left, bottom, right, top = [value * upem / 1000 for value in entry["bbox"]]
+            assert x1 > x0 and y1 > y0
+            scale_x, scale_y = (right-left)/(x1-x0), (top-bottom)/(y1-y0)
+            translate_x, translate_y = left-x0*scale_x, bottom-y0*scale_y
+            aligned_components.append(dict(glyph=name, afm_bbox=entry["bbox"]))
         pen = TTGlyphPen(None)
-        recording.replay(TransformPen(pen, (scale, 0, 0, scale, translate, 0)))
+        recording.replay(TransformPen(pen, (scale_x, 0, 0, scale_y, translate_x, translate_y)))
         glyph = pen.glyph()
         glyph.recalcBounds(None)
         outlines[name] = glyph
@@ -202,7 +223,8 @@ def make_font(pdf_name, glyphs, fonts):
     filename = ps_name + ".ttf"
     return filename, raw, dict(pdf_name=pdf_name, file=filename, bytes=len(raw), sha256=sha256(raw).hexdigest(),
                               modified=True, source_fonts=sorted(used), afm_glyphs=len(glyphs),
-                              covered_glyphs=len(outlines)-1, aliases=substitutions, unsupported=unsupported)
+                              covered_glyphs=len(outlines)-1, aliases=substitutions,
+                              aligned_components=aligned_components, unsupported=unsupported)
 
 
 def main():

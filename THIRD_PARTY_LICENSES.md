@@ -23,7 +23,8 @@ Scope: third-party artifacts directly redistributed by this repository and wheel
 
 The native renderer's Standard 14 preview substitutes are modified derivatives:
 subsets with renamed families, decomposed unhinted outlines, Adobe AFM advances,
-and preview-only aliases for legacy Adobe character mappings. Original copyright
+and preview-only aliases for legacy Adobe character mappings. Symbol assembly
+pieces are fitted to their AFM glyph bounds. Original copyright
 notices and complete license texts are retained in `src/preview_fonts/LICENSE-*.txt`
 and in the Python wheel's license directory. `tools/generate_preview_fonts.py`
 reproduces the fonts from the pinned inputs in `tools/data/preview_fonts/sources.json`;

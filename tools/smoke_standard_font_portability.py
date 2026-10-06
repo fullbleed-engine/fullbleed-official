@@ -30,6 +30,8 @@ FIXTURE = runpy.run_path(str(ROOT / "tools/smoke_base14_preview.py"))
 SPECIMEN = FIXTURE["specimen"]
 NAMES = [case[0] for case in FIXTURE["CASES"]]
 STAMP = "2026-10-06T00:00:00Z"
+# Independent placement fixtures: the Adobe AFMs supply the expected bounds.
+COMPONENT_BOUND_FIXTURES = {"radicalex", "arrowvertex", "arrowhorizex", "parenlefttp", "parenleftex", "parenleftbt"}
 
 
 def mask_system_fonts():
@@ -75,7 +77,7 @@ def glyph_grid(name, entries, differences):
         code = index + 1 if differences else entry["code"]
         x, y = 12 + index % columns * size, height - 12 - (index // columns + 1) * size
         commands.append(f"BT /F1 18 Tf 1 0 0 1 {x + 10} {y + 16} Tm <{code:02x}> Tj ET")
-        cells.append(dict(glyph=entry["name"], code=code, bounds=[x, height-y-size, x+size, height-y]))
+        cells.append(dict(glyph=entry["name"], code=code, afm_bbox=entry["bbox"], bounds=[x, height-y-size, x+size, height-y]))
     encoding = ""
     if differences:
         encoding = "/Encoding << /Differences [1 " + " ".join("/" + entry["name"] for entry in entries) + "] >>"
@@ -87,7 +89,7 @@ def afm_entries(name):
     for line in (ROOT / "tools/data/base14" / (name + ".afm")).read_text(encoding="latin-1").splitlines():
         if line.startswith("C "):
             fields = dict(part.strip().split(" ", 1) for part in line.split(";") if part.strip())
-            result.append(dict(name=fields["N"], code=int(fields["C"])))
+            result.append(dict(name=fields["N"], code=int(fields["C"]), bbox=[int(value) for value in fields["B"].split()]))
     return result
 
 
@@ -126,13 +128,20 @@ def check(out, masked):
                 label = name + "-" + mode
                 pdf, cells = glyph_grid(name, glyphs, differences)
                 image, details = render(engine, label, pdf)
-                missing = []
+                missing, checked_bounds = [], []
                 for cell in cells:
                     crop = image.crop(cell["bounds"])
-                    has_ink = ImageChops.difference(crop, Image.new("RGB", crop.size, "white")).getbbox() is not None
+                    ink_box = ImageChops.difference(crop, Image.new("RGB", crop.size, "white")).getbbox()
+                    has_ink = ink_box is not None
                     if has_ink != (cell["glyph"] != "space"):
                         missing.append(cell["glyph"])
-                record = dict(name=label, mode=mode, glyphs=len(cells), missing=missing, **details)
+                    if name == "Symbol" and cell["glyph"] in COMPONENT_BOUND_FIXTURES:
+                        left, bottom, right, top = cell["afm_bbox"]
+                        expected = [math.floor(10 + left*.018), math.floor(28 - top*.018),
+                                    math.ceil(10 + right*.018), math.ceil(28 - bottom*.018)]
+                        assert ink_box and all(abs(a-b) <= 1 for a,b in zip(ink_box, expected)), (label, cell["glyph"], ink_box, expected)
+                        checked_bounds.append(dict(glyph=cell["glyph"], actual=list(ink_box), expected=expected))
+                record = dict(name=label, mode=mode, glyphs=len(cells), missing=missing, checked_component_bounds=checked_bounds, **details)
                 report["cases"].append(record)
                 (out / (label + ".cells.json")).write_text(json.dumps(cells, indent=2) + "\n", encoding="utf-8")
                 assert not missing, (label, missing)

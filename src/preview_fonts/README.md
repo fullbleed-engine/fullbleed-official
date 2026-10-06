@@ -14,7 +14,9 @@ are fixed substitutes, not exact reproductions of the original type designs.
 The generator subsets and renames the fonts, decomposes outlines, omits hinting,
 uses Adobe AFM advances, and maps legacy Adobe private-use characters to matching
 Unicode outlines. The Latin spacing comma accent is positioned using its AFM
-bearing. The original PDF character mapping is never changed. Original notices
+bearing. Legacy Symbol assembly pieces are fitted to their AFM glyph bounds so
+radical bars and delimiter extenders retain their intended placement and extent.
+The original PDF character mapping is never changed. Original notices
 and OFL terms are in `LICENSE-*.txt`; Adobe metric and glyph-list notices are in
 the repository's `THIRD_PARTY_LICENSES.md`.
 

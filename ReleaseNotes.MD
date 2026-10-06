@@ -10,7 +10,7 @@ renderer now uses compact, bundled OFL outline substitutes for these 14 faces.
 Registered and embedded font programs retain precedence. The PDF font resources,
 text and advances remain unchanged; default preview pixels intentionally change.
 
-The substitutes total 508,024 bytes and cover every glyph in the pinned AFMs'
+The substitutes total 508,020 bytes and cover every glyph in the pinned AFMs'
 built-in encodings. The unencoded, vendor-private Symbol `/apple` logo is not
 available. These are substitute designs, not original Standard 14 outlines.
 Sources, reproducible generation, hashes and complete license notices are retained.

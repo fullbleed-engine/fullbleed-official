@@ -29,6 +29,7 @@
           "outline_unicode": "U+03BC"
         }
       ],
+      "aligned_components": [],
       "unsupported": []
     },
     {
@@ -54,6 +55,7 @@
           "outline_unicode": "U+03BC"
         }
       ],
+      "aligned_components": [],
       "unsupported": []
     },
     {
@@ -79,6 +81,7 @@
           "outline_unicode": "U+03BC"
         }
       ],
+      "aligned_components": [],
       "unsupported": []
     },
     {
@@ -104,6 +107,7 @@
           "outline_unicode": "U+03BC"
         }
       ],
+      "aligned_components": [],
       "unsupported": []
     },
     {
@@ -129,6 +133,7 @@
           "outline_unicode": "U+03BC"
         }
       ],
+      "aligned_components": [],
       "unsupported": []
     },
     {
@@ -154,6 +159,7 @@
           "outline_unicode": "U+03BC"
         }
       ],
+      "aligned_components": [],
       "unsupported": []
     },
     {
@@ -179,6 +185,7 @@
           "outline_unicode": "U+03BC"
         }
       ],
+      "aligned_components": [],
       "unsupported": []
     },
     {
@@ -204,13 +211,14 @@
           "outline_unicode": "U+03BC"
         }
       ],
+      "aligned_components": [],
       "unsupported": []
     },
     {
       "pdf_name": "Symbol",
       "file": "FullbleedPreviewSymbol-Regular.ttf",
-      "bytes": 21776,
-      "sha256": "d9c766f1dc31ce12f4afe0f3053e1722dfc2cbf123b253bd9237a077a5783e96",
+      "bytes": 21772,
+      "sha256": "cf2b48fa592e71ef361ba0598d2d447c3786a76df8693569ca849892c794d8c0",
       "modified": true,
       "source_fonts": [
         "LiberationSans-Regular.ttf",
@@ -379,6 +387,215 @@
           "outline_unicode": "U+2122"
         }
       ],
+      "aligned_components": [
+        {
+          "glyph": "arrowhorizex",
+          "afm_bbox": [
+            -60,
+            220,
+            1050,
+            276
+          ]
+        },
+        {
+          "glyph": "arrowvertex",
+          "afm_bbox": [
+            280,
+            -120,
+            336,
+            1010
+          ]
+        },
+        {
+          "glyph": "braceex",
+          "afm_bbox": [
+            209,
+            -85,
+            284,
+            935
+          ]
+        },
+        {
+          "glyph": "braceleftbt",
+          "afm_bbox": [
+            209,
+            -75,
+            445,
+            935
+          ]
+        },
+        {
+          "glyph": "braceleftmid",
+          "afm_bbox": [
+            20,
+            -85,
+            284,
+            935
+          ]
+        },
+        {
+          "glyph": "bracelefttp",
+          "afm_bbox": [
+            209,
+            -85,
+            445,
+            925
+          ]
+        },
+        {
+          "glyph": "bracerightbt",
+          "afm_bbox": [
+            48,
+            -75,
+            284,
+            935
+          ]
+        },
+        {
+          "glyph": "bracerightmid",
+          "afm_bbox": [
+            209,
+            -85,
+            473,
+            935
+          ]
+        },
+        {
+          "glyph": "bracerighttp",
+          "afm_bbox": [
+            48,
+            -85,
+            284,
+            925
+          ]
+        },
+        {
+          "glyph": "bracketleftbt",
+          "afm_bbox": [
+            0,
+            -80,
+            349,
+            926
+          ]
+        },
+        {
+          "glyph": "bracketleftex",
+          "afm_bbox": [
+            0,
+            -79,
+            77,
+            925
+          ]
+        },
+        {
+          "glyph": "bracketlefttp",
+          "afm_bbox": [
+            0,
+            -80,
+            349,
+            926
+          ]
+        },
+        {
+          "glyph": "bracketrightbt",
+          "afm_bbox": [
+            22,
+            -80,
+            371,
+            926
+          ]
+        },
+        {
+          "glyph": "bracketrightex",
+          "afm_bbox": [
+            294,
+            -79,
+            371,
+            925
+          ]
+        },
+        {
+          "glyph": "bracketrighttp",
+          "afm_bbox": [
+            22,
+            -80,
+            371,
+            926
+          ]
+        },
+        {
+          "glyph": "integralex",
+          "afm_bbox": [
+            308,
+            -88,
+            378,
+            975
+          ]
+        },
+        {
+          "glyph": "parenleftbt",
+          "afm_bbox": [
+            24,
+            -293,
+            436,
+            926
+          ]
+        },
+        {
+          "glyph": "parenleftex",
+          "afm_bbox": [
+            24,
+            -85,
+            108,
+            925
+          ]
+        },
+        {
+          "glyph": "parenlefttp",
+          "afm_bbox": [
+            24,
+            -293,
+            436,
+            926
+          ]
+        },
+        {
+          "glyph": "parenrightbt",
+          "afm_bbox": [
+            54,
+            -293,
+            466,
+            926
+          ]
+        },
+        {
+          "glyph": "parenrightex",
+          "afm_bbox": [
+            382,
+            -85,
+            466,
+            925
+          ]
+        },
+        {
+          "glyph": "parenrighttp",
+          "afm_bbox": [
+            54,
+            -293,
+            466,
+            926
+          ]
+        },
+        {
+          "glyph": "radicalex",
+          "afm_bbox": [
+            480,
+            881,
+            1090,
+            917
+          ]
+        }
+      ],
       "unsupported": [
         {
           "glyph": "apple",
@@ -410,6 +627,7 @@
           "outline_unicode": "U+03BC"
         }
       ],
+      "aligned_components": [],
       "unsupported": []
     },
     {
@@ -435,6 +653,7 @@
           "outline_unicode": "U+03BC"
         }
       ],
+      "aligned_components": [],
       "unsupported": []
     },
     {
@@ -460,6 +679,7 @@
           "outline_unicode": "U+03BC"
         }
       ],
+      "aligned_components": [],
       "unsupported": []
     },
     {
@@ -485,6 +705,7 @@
           "outline_unicode": "U+03BC"
         }
       ],
+      "aligned_components": [],
       "unsupported": []
     },
     {
@@ -500,6 +721,7 @@
       "afm_glyphs": 202,
       "covered_glyphs": 202,
       "aliases": [],
+      "aligned_components": [],
       "unsupported": []
     }
   ]
