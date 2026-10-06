@@ -9411,6 +9411,10 @@ impl CssLineBoxFlowable {
 }
 
 impl Flowable for CssLineBoxFlowable {
+    fn is_collapsible_inline_space(&self) -> bool {
+        self.child.is_collapsible_inline_space()
+    }
+
     fn page_footnotes(&self) -> Vec<PageFootnoteEntry> {
         self.child.page_footnotes()
     }
@@ -10280,6 +10284,7 @@ impl Flowable for ScreenReaderTextFlowable {
 #[derive(Debug, Clone)]
 pub(crate) struct CollapsibleSpaceFlowable {
     width: Pt,
+    letter_spacing: Pt,
     height: Pt,
     baseline: Pt,
     inline_ascent: Pt,
@@ -10289,6 +10294,7 @@ pub(crate) struct CollapsibleSpaceFlowable {
 
 impl CollapsibleSpaceFlowable {
     pub(crate) fn new(style: TextStyle, font_registry: Option<Arc<FontRegistry>>) -> Self {
+        let letter_spacing = style.letter_spacing;
         let probe = Paragraph::new(" ")
             .with_style(style)
             .with_font_registry(font_registry);
@@ -10302,6 +10308,7 @@ impl CollapsibleSpaceFlowable {
             .unwrap_or((baseline, (height - baseline).max(Pt::ZERO)));
         Self {
             width,
+            letter_spacing,
             height,
             baseline,
             inline_ascent,
@@ -10312,6 +10319,10 @@ impl CollapsibleSpaceFlowable {
 }
 
 impl Flowable for CollapsibleSpaceFlowable {
+    fn inline_text_edge_letter_spacing(&self) -> Option<Pt> {
+        Some(self.letter_spacing)
+    }
+
     fn wrap(&self, _avail_width: Pt, _avail_height: Pt) -> Size {
         Size {
             width: self.width,
@@ -17616,6 +17627,10 @@ impl InlineBackgroundFlowable {
 }
 
 impl Flowable for InlineBackgroundFlowable {
+    fn is_collapsible_inline_space(&self) -> bool {
+        self.child.is_collapsible_inline_space()
+    }
+
     fn fragment_block_end_inline_leading(&self, avail_width: Pt) -> Option<Pt> {
         self.child.fragment_block_end_inline_leading(avail_width)
     }
@@ -17813,8 +17828,17 @@ impl InlineBlockLayoutFlowable {
                           mut line_height: Pt,
                           max_width: &mut Pt,
                           total_height: &mut Pt| {
+            while line_items
+                .last()
+                .is_some_and(|item| self.children[item.idx].0.is_collapsible_inline_space())
+            {
+                line_items.pop();
+            }
             if line_items.is_empty() {
                 return;
+            }
+            if let Some(last) = line_items.last() {
+                line_width = last.x_off + last.size.width;
             }
             let fill_count = line_items
                 .iter()
@@ -18012,6 +18036,15 @@ impl InlineBlockLayoutFlowable {
         };
 
         for (idx, (child, valign)) in self.children.iter().enumerate() {
+            let collapsible_space = child.is_collapsible_inline_space();
+            if collapsible_space
+                && line_items
+                    .iter()
+                    .rfind(|item| item.size.width > Pt::ZERO)
+                    .is_none_or(|item| self.children[item.idx].0.is_collapsible_inline_space())
+            {
+                continue;
+            }
             if let Some(break_height) = child.forced_line_break_height() {
                 if line_items.is_empty() {
                     let mut empty_height = forced.max(break_height);
@@ -18076,7 +18109,11 @@ impl InlineBlockLayoutFlowable {
             } else {
                 raw_line_width + self.gap + text_boundary_spacing + raw_width
             };
-            if !self.no_wrap && raw_next_width > avail_width && !line_items.is_empty() {
+            if !self.no_wrap
+                && !collapsible_space
+                && raw_next_width > avail_width
+                && !line_items.is_empty()
+            {
                 flush_line(
                     &mut lines,
                     &mut line_items,

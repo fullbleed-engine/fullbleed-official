@@ -1,14 +1,14 @@
 {
   "schema": "fullbleed.golden_suite.v1",
-  "generated_at_utc": "2026-10-05T01:29:44.268281Z",
+  "generated_at_utc": "2026-10-06T09:05:52.918440+00:00",
   "cases": {
     "acme_invoice": {
       "case_id": "acme_invoice",
       "report": "examples/acme_invoice/report.py",
       "pdf": {
         "path": "examples/acme_invoice/output/acme_sample_invoice.pdf",
-        "bytes": 93250,
-        "sha256": "6199c7ec17f35f4592aa2eb972df169086b3974d25993417cdd40b8ef0d8c379"
+        "bytes": 93261,
+        "sha256": "8484a4ab1ccb7686dc19b6a4bc45a8c23f81724dbd4a9556b7d6c7482f1b7709"
       },
       "png": {
         "count": 1,
@@ -16,15 +16,15 @@
           {
             "name": "acme_sample_invoice_page1.png",
             "path": "examples/acme_invoice/output/acme_sample_invoice_page1.png",
-            "bytes": 161652,
-            "sha256": "358e016c5ba9a3cb9ea6a7a12cb37ebbfb3288e40d2e00c54b516f7f7a13c3b8"
+            "bytes": 161661,
+            "sha256": "3fb123f8a5cbd779b28ff3a372286738285327dca78705b23e4199c0aa2f3d66"
           }
         ]
       },
       "validation": {
         "path": "examples/acme_invoice/output/acme_sample_invoice_component_mount_validation.json",
         "kind": "component_mount",
-        "sha256": "20b3b9daf31cb17e9b81f21312032de550cbb5d1e785a3581a56b6be644bbbfb"
+        "sha256": "6c95ce6b2217e17bbf14dae2acbba2cf5bfb5381d451877edd6aa61f5f4bfba8"
       },
       "css_layers": {
         "path": "examples/acme_invoice/output/acme_sample_invoice_css_layers.json",

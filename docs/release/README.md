@@ -4,6 +4,11 @@ This directory is the release-operations layer for Fullbleed. It is separate
 from feature documentation so release decisions can be audited without reading
 engine internals.
 
+## 2.5.9 Documents
+
+- `docs/release/2.5.9-runbook.md`: mixed inline word wrapping and retained PDF checks.
+- `tools/smoke_inline_wrapping.py`: independent text and word-bound verification across rendering modes.
+
 ## 2.5.8 Documents
 
 - `docs/release/2.5.8-runbook.md`: normal-family face selection and retained checks.

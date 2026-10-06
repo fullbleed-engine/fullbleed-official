@@ -9656,10 +9656,18 @@ mod tests {
     }
 
     fn page_contains_text(page: &Page, needle: &str) -> bool {
-        page.commands.iter().any(|cmd| match cmd {
-            Command::DrawString { text, .. } => text.contains(needle),
-            _ => false,
-        })
+        // Rich inline content may emit one draw command per word. Page
+        // ownership should not depend on where paint commands are chunked.
+        page.commands
+            .iter()
+            .filter_map(|cmd| match cmd {
+                Command::DrawString { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .flat_map(str::split_whitespace)
+            .collect::<Vec<_>>()
+            .join(" ")
+            .contains(needle)
     }
 
     fn page_contains_fill_color(page: &Page, color: Color) -> bool {
@@ -12912,17 +12920,17 @@ mod tests {
             .commands
             .iter()
             .filter_map(|command| match command {
-                Command::DrawString { text, y, .. }
-                    if text == "alpha beta gamma" || text == "!" =>
-                {
-                    Some((text.as_str(), *y))
-                }
+                Command::DrawString { text, y, .. } => Some((text.as_str(), *y)),
                 _ => None,
             })
+            .flat_map(|(text, y)| text.split_whitespace().map(move |word| (word, y)))
             .collect::<Vec<_>>();
-        assert_eq!(text_y.len(), 2);
         assert_eq!(
-            text_y[0].1, text_y[1].1,
+            text_y.iter().map(|(text, _)| *text).collect::<Vec<_>>(),
+            ["alpha", "beta", "gamma", "!"]
+        );
+        assert!(
+            text_y.iter().all(|(_, y)| *y == text_y[0].1),
             "table-cell vertical-align positions the cell contents, not descendant text runs"
         );
     }
