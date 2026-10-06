@@ -1,6 +1,6 @@
 {
   "schema": "fullbleed.golden_suite.v1",
-  "generated_at_utc": "2026-10-06T11:25:59.641021+00:00",
+  "generated_at_utc": "2026-10-06T23:03:53.629988+00:00",
   "cases": {
     "acme_invoice": {
       "case_id": "acme_invoice",
@@ -16,8 +16,8 @@
           {
             "name": "acme_sample_invoice_page1.png",
             "path": "examples/acme_invoice/output/acme_sample_invoice_page1.png",
-            "bytes": 161693,
-            "sha256": "2d453723b6d0a003ff4271227c0b9ec7cba91f17010ee588b0fda80f3267b48f"
+            "bytes": 164587,
+            "sha256": "50db28d33b46f766d308860c9d9ffd15d2ace0d4c7eaf1b51803e2c71dd9618b"
           }
         ]
       },
@@ -45,14 +45,14 @@
           {
             "name": "bank_statement_page1.png",
             "path": "examples/bank_statement/output/bank_statement_page1.png",
-            "bytes": 198432,
-            "sha256": "19131407c3a75f95f1c914ae0e0ba71d0cd9daf9a1dad88ee7a47b03ac0a645f"
+            "bytes": 198336,
+            "sha256": "5c5973fb91eb36b0e027ce7184cc7f1b306e5b5d8e72a4bbe7025ed8f0e0a310"
           },
           {
             "name": "bank_statement_page2.png",
             "path": "examples/bank_statement/output/bank_statement_page2.png",
-            "bytes": 106598,
-            "sha256": "bdaeccaec9de51411564eb59adaf5e802d2464242eb5a3650b46646535f704b2"
+            "bytes": 106381,
+            "sha256": "7aba78c7aa652f6b0f1d930ff2735ed788e637b0c95c0e6cbaddab6b87b75749"
           }
         ]
       },
@@ -80,8 +80,8 @@
           {
             "name": "coastal_menu_page1.png",
             "path": "examples/coastal_menu/output/coastal_menu_page1.png",
-            "bytes": 247150,
-            "sha256": "06a564799a7d3239b625ab7e8f160bb0e22c6372731b6221fe722ab53d6eb072"
+            "bytes": 239695,
+            "sha256": "caf2cabac0c34db771d5a1725c7e0989aca0096e7f361e4f18047a628d4d6979"
           }
         ]
       },

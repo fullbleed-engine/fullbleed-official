@@ -317,6 +317,7 @@
     "engine": {
       "batch_render": true,
       "batch_render_parallel": true,
+      "bundled_standard_font_previews": true,
       "compiled_document": true,
       "compiled_flow_compression_modes": [
         "throughput",
@@ -4207,7 +4208,7 @@
     "license": "MIT",
     "name": "Fullbleed PDF Engine",
     "python_package": "fullbleed",
-    "version": "2.5.10"
+    "version": "2.5.11"
   },
   "profiles": {
     "pdf": {
@@ -4711,6 +4712,9 @@
                 "type": "boolean"
               },
               "batch_render_parallel": {
+                "type": "boolean"
+              },
+              "bundled_standard_font_previews": {
                 "type": "boolean"
               },
               "compiled_document": {

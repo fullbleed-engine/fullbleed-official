@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.10"
+  FULLBLEED_CI_VERSION: "2.5.11"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -164,6 +164,31 @@ jobs:
 
       - name: Verify font family defaults and compiled previews
         run: python -I tools/smoke_font_families.py --out target/font-families
+
+      - name: Reproduce bundled preview fonts from pinned inputs
+        run: python tools/generate_preview_fonts.py --check
+
+      - name: Verify default Standard 14 glyphs and explicit font precedence
+        run: python -I tools/smoke_standard_font_portability.py --out target/standard-font-preview
+
+      - name: Verify identical previews with system fonts hidden
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo unshare --mount --propagation private "$(command -v python)" -I \
+            tools/smoke_standard_font_portability.py --mask-system-fonts \
+            --out target/standard-font-preview-no-system \
+            --compare target/standard-font-preview/verification.json
+
+      - name: Retain default font portability evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: standard-font-portability-${{ runner.os }}
+          path: |
+            target/standard-font-preview
+            target/standard-font-preview-no-system
+          if-no-files-found: warn
 
       - name: Verify mixed inline wrapping with independent PDF readers
         run: python -I tools/smoke_inline_wrapping.py --out target/inline-wrapping
@@ -368,6 +393,28 @@ jobs:
           python tools/smoke_installed_package.py --expected-version "${FULLBLEED_CI_VERSION}" --json
           python -m fullbleed --version
           python -m fullbleed doctor --strict --json
+
+  standard-font-portability:
+    name: Standard font previews match across Windows and Linux
+    runs-on: ubuntu-latest
+    needs: python-wheel-smoke
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: standard-font-portability-*
+          path: target/standard-font-portability
+      - name: Compare all retained pixels and PDFs
+        run: python tools/compare_standard_font_previews.py target/standard-font-portability --out target/standard-font-comparison.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: standard-font-cross-platform-comparison
+          path: target/standard-font-comparison.json
+          if-no-files-found: warn
 
   goldens:
     name: Goldens (Windows, py3.11)

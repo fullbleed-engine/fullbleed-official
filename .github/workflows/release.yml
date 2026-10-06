@@ -106,6 +106,27 @@ jobs:
       - name: Verify native Standard 14 preview spacing
         run: python -I tools/smoke_base14_preview.py --out target/base14-preview
 
+      - name: Verify bundled preview fonts and defaults without system fonts
+        shell: bash
+        run: |
+          python -m pip install fonttools==4.65.0 pillow==12.3.0
+          python tools/generate_preview_fonts.py --check
+          python -I tools/smoke_standard_font_portability.py --out target/standard-font-preview
+          sudo unshare --mount --propagation private "$(command -v python)" -I \
+            tools/smoke_standard_font_portability.py --mask-system-fonts \
+            --out target/standard-font-preview-no-system \
+            --compare target/standard-font-preview/verification.json
+
+      - name: Retain default font portability evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-standard-font-portability
+          path: |
+            target/standard-font-preview
+            target/standard-font-preview-no-system
+          if-no-files-found: warn
+
       - name: Verify finalized PDF gradient previews
         run: python -I tools/smoke_gradient_preview.py --out target/gradient-preview
 

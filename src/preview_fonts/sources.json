@@ -1,0 +1,728 @@
+{
+  "schema": "fullbleed.preview_fonts.v1",
+  "license": "OFL-1.1",
+  "generator": "tools/generate_preview_fonts.py",
+  "generator_version": "4.65.0",
+  "inputs_sha256": "19e4f04df236f9dd38b5addf91785a8f1b0ec03116d76968f8caeee61875d349",
+  "scope": "Fixed outline substitutes, not original Standard 14 designs. All built-in encoded AFM glyphs covered. The unencoded vendor-private Symbol apple logo is unsupported.",
+  "fonts": [
+    {
+      "pdf_name": "Courier-Bold",
+      "file": "FullbleedPreviewMono-Bold.ttf",
+      "bytes": 34432,
+      "sha256": "94d1abef435027fa6db79e55fd391c68dd1e082e65c26314ffe42dc2efec0859",
+      "modified": true,
+      "source_fonts": [
+        "LiberationMono-Bold.ttf"
+      ],
+      "afm_glyphs": 315,
+      "covered_glyphs": 315,
+      "aliases": [
+        {
+          "glyph": "commaaccent",
+          "unicode": "U+F6C3",
+          "outline_unicode": "U+0326"
+        },
+        {
+          "glyph": "mu",
+          "unicode": "U+00B5",
+          "outline_unicode": "U+03BC"
+        }
+      ],
+      "aligned_components": [],
+      "unsupported": []
+    },
+    {
+      "pdf_name": "Courier-BoldOblique",
+      "file": "FullbleedPreviewMono-BoldItalic.ttf",
+      "bytes": 37048,
+      "sha256": "7e56e042efc306f2e3f632024de75aacd7b246669a13f35c0efdb51684c5b800",
+      "modified": true,
+      "source_fonts": [
+        "LiberationMono-BoldItalic.ttf"
+      ],
+      "afm_glyphs": 315,
+      "covered_glyphs": 315,
+      "aliases": [
+        {
+          "glyph": "commaaccent",
+          "unicode": "U+F6C3",
+          "outline_unicode": "U+0326"
+        },
+        {
+          "glyph": "mu",
+          "unicode": "U+00B5",
+          "outline_unicode": "U+03BC"
+        }
+      ],
+      "aligned_components": [],
+      "unsupported": []
+    },
+    {
+      "pdf_name": "Courier-Oblique",
+      "file": "FullbleedPreviewMono-Italic.ttf",
+      "bytes": 37084,
+      "sha256": "40cc1af67c955f071527ba1655018ca892baa312eaf15019d14808920334c47a",
+      "modified": true,
+      "source_fonts": [
+        "LiberationMono-Italic.ttf"
+      ],
+      "afm_glyphs": 315,
+      "covered_glyphs": 315,
+      "aliases": [
+        {
+          "glyph": "commaaccent",
+          "unicode": "U+F6C3",
+          "outline_unicode": "U+0326"
+        },
+        {
+          "glyph": "mu",
+          "unicode": "U+00B5",
+          "outline_unicode": "U+03BC"
+        }
+      ],
+      "aligned_components": [],
+      "unsupported": []
+    },
+    {
+      "pdf_name": "Courier",
+      "file": "FullbleedPreviewMono-Regular.ttf",
+      "bytes": 34244,
+      "sha256": "95f4c783894335f9ce20eb46398b31017a2d912ab2f6b0e2d234948fd9bdf793",
+      "modified": true,
+      "source_fonts": [
+        "LiberationMono-Regular.ttf"
+      ],
+      "afm_glyphs": 315,
+      "covered_glyphs": 315,
+      "aliases": [
+        {
+          "glyph": "commaaccent",
+          "unicode": "U+F6C3",
+          "outline_unicode": "U+0326"
+        },
+        {
+          "glyph": "mu",
+          "unicode": "U+00B5",
+          "outline_unicode": "U+03BC"
+        }
+      ],
+      "aligned_components": [],
+      "unsupported": []
+    },
+    {
+      "pdf_name": "Helvetica-Bold",
+      "file": "FullbleedPreviewSans-Bold.ttf",
+      "bytes": 35224,
+      "sha256": "b7fa784ab2baaf1f25b877ad32b368418ae4ca4c249c075df18d51848c573b1d",
+      "modified": true,
+      "source_fonts": [
+        "LiberationSans-Bold.ttf"
+      ],
+      "afm_glyphs": 315,
+      "covered_glyphs": 315,
+      "aliases": [
+        {
+          "glyph": "commaaccent",
+          "unicode": "U+F6C3",
+          "outline_unicode": "U+0326"
+        },
+        {
+          "glyph": "mu",
+          "unicode": "U+00B5",
+          "outline_unicode": "U+03BC"
+        }
+      ],
+      "aligned_components": [],
+      "unsupported": []
+    },
+    {
+      "pdf_name": "Helvetica-BoldOblique",
+      "file": "FullbleedPreviewSans-BoldItalic.ttf",
+      "bytes": 37360,
+      "sha256": "31a5b99722c9c20d40937f1786bb4643bfcd2869882b11c757c64115ecc987e8",
+      "modified": true,
+      "source_fonts": [
+        "LiberationSans-BoldItalic.ttf"
+      ],
+      "afm_glyphs": 315,
+      "covered_glyphs": 315,
+      "aliases": [
+        {
+          "glyph": "commaaccent",
+          "unicode": "U+F6C3",
+          "outline_unicode": "U+0326"
+        },
+        {
+          "glyph": "mu",
+          "unicode": "U+00B5",
+          "outline_unicode": "U+03BC"
+        }
+      ],
+      "aligned_components": [],
+      "unsupported": []
+    },
+    {
+      "pdf_name": "Helvetica-Oblique",
+      "file": "FullbleedPreviewSans-Italic.ttf",
+      "bytes": 36856,
+      "sha256": "4f6c4225644fc38a8aa2163bee1b809cc4b1190f8365081562ffa9b7c941c79d",
+      "modified": true,
+      "source_fonts": [
+        "LiberationSans-Italic.ttf"
+      ],
+      "afm_glyphs": 315,
+      "covered_glyphs": 315,
+      "aliases": [
+        {
+          "glyph": "commaaccent",
+          "unicode": "U+F6C3",
+          "outline_unicode": "U+0326"
+        },
+        {
+          "glyph": "mu",
+          "unicode": "U+00B5",
+          "outline_unicode": "U+03BC"
+        }
+      ],
+      "aligned_components": [],
+      "unsupported": []
+    },
+    {
+      "pdf_name": "Helvetica",
+      "file": "FullbleedPreviewSans-Regular.ttf",
+      "bytes": 35104,
+      "sha256": "98c60b12ed3bae5922126bc4c2137455eb2fbb1fdb12049dd89507ebb367c9c0",
+      "modified": true,
+      "source_fonts": [
+        "LiberationSans-Regular.ttf"
+      ],
+      "afm_glyphs": 315,
+      "covered_glyphs": 315,
+      "aliases": [
+        {
+          "glyph": "commaaccent",
+          "unicode": "U+F6C3",
+          "outline_unicode": "U+0326"
+        },
+        {
+          "glyph": "mu",
+          "unicode": "U+00B5",
+          "outline_unicode": "U+03BC"
+        }
+      ],
+      "aligned_components": [],
+      "unsupported": []
+    },
+    {
+      "pdf_name": "Symbol",
+      "file": "FullbleedPreviewSymbol-Regular.ttf",
+      "bytes": 21772,
+      "sha256": "cf2b48fa592e71ef361ba0598d2d447c3786a76df8693569ca849892c794d8c0",
+      "modified": true,
+      "source_fonts": [
+        "LiberationSans-Regular.ttf",
+        "LiberationSerif-Regular.ttf",
+        "NotoSans-Regular.ttf",
+        "NotoSansMath-Regular.ttf",
+        "NotoSansSymbols-Regular.ttf",
+        "NotoSansSymbols2-Regular.ttf"
+      ],
+      "afm_glyphs": 190,
+      "covered_glyphs": 189,
+      "aliases": [
+        {
+          "glyph": "Omega",
+          "unicode": "U+2126",
+          "outline_unicode": "U+03A9"
+        },
+        {
+          "glyph": "arrowhorizex",
+          "unicode": "U+F8E7",
+          "outline_unicode": "U+23AF"
+        },
+        {
+          "glyph": "arrowvertex",
+          "unicode": "U+F8E6",
+          "outline_unicode": "U+23D0"
+        },
+        {
+          "glyph": "braceex",
+          "unicode": "U+F8F4",
+          "outline_unicode": "U+23AA"
+        },
+        {
+          "glyph": "braceleftbt",
+          "unicode": "U+F8F3",
+          "outline_unicode": "U+23A9"
+        },
+        {
+          "glyph": "braceleftmid",
+          "unicode": "U+F8F2",
+          "outline_unicode": "U+23A8"
+        },
+        {
+          "glyph": "bracelefttp",
+          "unicode": "U+F8F1",
+          "outline_unicode": "U+23A7"
+        },
+        {
+          "glyph": "bracerightbt",
+          "unicode": "U+F8FE",
+          "outline_unicode": "U+23AD"
+        },
+        {
+          "glyph": "bracerightmid",
+          "unicode": "U+F8FD",
+          "outline_unicode": "U+23AC"
+        },
+        {
+          "glyph": "bracerighttp",
+          "unicode": "U+F8FC",
+          "outline_unicode": "U+23AB"
+        },
+        {
+          "glyph": "bracketleftbt",
+          "unicode": "U+F8F0",
+          "outline_unicode": "U+23A3"
+        },
+        {
+          "glyph": "bracketleftex",
+          "unicode": "U+F8EF",
+          "outline_unicode": "U+23A2"
+        },
+        {
+          "glyph": "bracketlefttp",
+          "unicode": "U+F8EE",
+          "outline_unicode": "U+23A1"
+        },
+        {
+          "glyph": "bracketrightbt",
+          "unicode": "U+F8FB",
+          "outline_unicode": "U+23A6"
+        },
+        {
+          "glyph": "bracketrightex",
+          "unicode": "U+F8FA",
+          "outline_unicode": "U+23A5"
+        },
+        {
+          "glyph": "bracketrighttp",
+          "unicode": "U+F8F9",
+          "outline_unicode": "U+23A4"
+        },
+        {
+          "glyph": "copyrightsans",
+          "unicode": "U+F8E9",
+          "outline_unicode": "U+00A9"
+        },
+        {
+          "glyph": "copyrightserif",
+          "unicode": "U+F6D9",
+          "outline_unicode": "U+00A9"
+        },
+        {
+          "glyph": "integralex",
+          "unicode": "U+F8F5",
+          "outline_unicode": "U+23AE"
+        },
+        {
+          "glyph": "mu",
+          "unicode": "U+00B5",
+          "outline_unicode": "U+03BC"
+        },
+        {
+          "glyph": "parenleftbt",
+          "unicode": "U+F8ED",
+          "outline_unicode": "U+239D"
+        },
+        {
+          "glyph": "parenleftex",
+          "unicode": "U+F8EC",
+          "outline_unicode": "U+239C"
+        },
+        {
+          "glyph": "parenlefttp",
+          "unicode": "U+F8EB",
+          "outline_unicode": "U+239B"
+        },
+        {
+          "glyph": "parenrightbt",
+          "unicode": "U+F8F8",
+          "outline_unicode": "U+23A0"
+        },
+        {
+          "glyph": "parenrightex",
+          "unicode": "U+F8F7",
+          "outline_unicode": "U+239F"
+        },
+        {
+          "glyph": "parenrighttp",
+          "unicode": "U+F8F6",
+          "outline_unicode": "U+239E"
+        },
+        {
+          "glyph": "radicalex",
+          "unicode": "U+F8E5",
+          "outline_unicode": "U+23AF"
+        },
+        {
+          "glyph": "registersans",
+          "unicode": "U+F8E8",
+          "outline_unicode": "U+00AE"
+        },
+        {
+          "glyph": "registerserif",
+          "unicode": "U+F6DA",
+          "outline_unicode": "U+00AE"
+        },
+        {
+          "glyph": "trademarksans",
+          "unicode": "U+F8EA",
+          "outline_unicode": "U+2122"
+        },
+        {
+          "glyph": "trademarkserif",
+          "unicode": "U+F6DB",
+          "outline_unicode": "U+2122"
+        }
+      ],
+      "aligned_components": [
+        {
+          "glyph": "arrowhorizex",
+          "afm_bbox": [
+            -60,
+            220,
+            1050,
+            276
+          ]
+        },
+        {
+          "glyph": "arrowvertex",
+          "afm_bbox": [
+            280,
+            -120,
+            336,
+            1010
+          ]
+        },
+        {
+          "glyph": "braceex",
+          "afm_bbox": [
+            209,
+            -85,
+            284,
+            935
+          ]
+        },
+        {
+          "glyph": "braceleftbt",
+          "afm_bbox": [
+            209,
+            -75,
+            445,
+            935
+          ]
+        },
+        {
+          "glyph": "braceleftmid",
+          "afm_bbox": [
+            20,
+            -85,
+            284,
+            935
+          ]
+        },
+        {
+          "glyph": "bracelefttp",
+          "afm_bbox": [
+            209,
+            -85,
+            445,
+            925
+          ]
+        },
+        {
+          "glyph": "bracerightbt",
+          "afm_bbox": [
+            48,
+            -75,
+            284,
+            935
+          ]
+        },
+        {
+          "glyph": "bracerightmid",
+          "afm_bbox": [
+            209,
+            -85,
+            473,
+            935
+          ]
+        },
+        {
+          "glyph": "bracerighttp",
+          "afm_bbox": [
+            48,
+            -85,
+            284,
+            925
+          ]
+        },
+        {
+          "glyph": "bracketleftbt",
+          "afm_bbox": [
+            0,
+            -80,
+            349,
+            926
+          ]
+        },
+        {
+          "glyph": "bracketleftex",
+          "afm_bbox": [
+            0,
+            -79,
+            77,
+            925
+          ]
+        },
+        {
+          "glyph": "bracketlefttp",
+          "afm_bbox": [
+            0,
+            -80,
+            349,
+            926
+          ]
+        },
+        {
+          "glyph": "bracketrightbt",
+          "afm_bbox": [
+            22,
+            -80,
+            371,
+            926
+          ]
+        },
+        {
+          "glyph": "bracketrightex",
+          "afm_bbox": [
+            294,
+            -79,
+            371,
+            925
+          ]
+        },
+        {
+          "glyph": "bracketrighttp",
+          "afm_bbox": [
+            22,
+            -80,
+            371,
+            926
+          ]
+        },
+        {
+          "glyph": "integralex",
+          "afm_bbox": [
+            308,
+            -88,
+            378,
+            975
+          ]
+        },
+        {
+          "glyph": "parenleftbt",
+          "afm_bbox": [
+            24,
+            -293,
+            436,
+            926
+          ]
+        },
+        {
+          "glyph": "parenleftex",
+          "afm_bbox": [
+            24,
+            -85,
+            108,
+            925
+          ]
+        },
+        {
+          "glyph": "parenlefttp",
+          "afm_bbox": [
+            24,
+            -293,
+            436,
+            926
+          ]
+        },
+        {
+          "glyph": "parenrightbt",
+          "afm_bbox": [
+            54,
+            -293,
+            466,
+            926
+          ]
+        },
+        {
+          "glyph": "parenrightex",
+          "afm_bbox": [
+            382,
+            -85,
+            466,
+            925
+          ]
+        },
+        {
+          "glyph": "parenrighttp",
+          "afm_bbox": [
+            54,
+            -293,
+            466,
+            926
+          ]
+        },
+        {
+          "glyph": "radicalex",
+          "afm_bbox": [
+            480,
+            881,
+            1090,
+            917
+          ]
+        }
+      ],
+      "unsupported": [
+        {
+          "glyph": "apple",
+          "unicode": "U+F8FF",
+          "reason": "Vendor-private logo U+F8FF; absent from the licensed source fonts and the built-in Symbol encoding."
+        }
+      ]
+    },
+    {
+      "pdf_name": "Times-Bold",
+      "file": "FullbleedPreviewSerif-Bold.ttf",
+      "bytes": 38816,
+      "sha256": "382487d79f05808b0e6e1b58dc12d4a43af5d3f270d9ea8782066bb6a6499b78",
+      "modified": true,
+      "source_fonts": [
+        "LiberationSerif-Bold.ttf"
+      ],
+      "afm_glyphs": 315,
+      "covered_glyphs": 315,
+      "aliases": [
+        {
+          "glyph": "commaaccent",
+          "unicode": "U+F6C3",
+          "outline_unicode": "U+0326"
+        },
+        {
+          "glyph": "mu",
+          "unicode": "U+00B5",
+          "outline_unicode": "U+03BC"
+        }
+      ],
+      "aligned_components": [],
+      "unsupported": []
+    },
+    {
+      "pdf_name": "Times-BoldItalic",
+      "file": "FullbleedPreviewSerif-BoldItalic.ttf",
+      "bytes": 40272,
+      "sha256": "f40148b07ed26a2142da61af23074d7a37ef44a23b720f8dc698cba39ac26b1b",
+      "modified": true,
+      "source_fonts": [
+        "LiberationSerif-BoldItalic.ttf"
+      ],
+      "afm_glyphs": 315,
+      "covered_glyphs": 315,
+      "aliases": [
+        {
+          "glyph": "commaaccent",
+          "unicode": "U+F6C3",
+          "outline_unicode": "U+0326"
+        },
+        {
+          "glyph": "mu",
+          "unicode": "U+00B5",
+          "outline_unicode": "U+03BC"
+        }
+      ],
+      "aligned_components": [],
+      "unsupported": []
+    },
+    {
+      "pdf_name": "Times-Italic",
+      "file": "FullbleedPreviewSerif-Italic.ttf",
+      "bytes": 40080,
+      "sha256": "0c274336d16f8d0d0de1fa273fa87317df57593b2ba0f8450e35ae24b7e0172f",
+      "modified": true,
+      "source_fonts": [
+        "LiberationSerif-Italic.ttf"
+      ],
+      "afm_glyphs": 315,
+      "covered_glyphs": 315,
+      "aliases": [
+        {
+          "glyph": "commaaccent",
+          "unicode": "U+F6C3",
+          "outline_unicode": "U+0326"
+        },
+        {
+          "glyph": "mu",
+          "unicode": "U+00B5",
+          "outline_unicode": "U+03BC"
+        }
+      ],
+      "aligned_components": [],
+      "unsupported": []
+    },
+    {
+      "pdf_name": "Times-Roman",
+      "file": "FullbleedPreviewSerif-Regular.ttf",
+      "bytes": 38712,
+      "sha256": "0297c3fc77591cd3c8584f132c3f45248a49ce71b9fb7404bd84f3a8c51d0930",
+      "modified": true,
+      "source_fonts": [
+        "LiberationSerif-Regular.ttf"
+      ],
+      "afm_glyphs": 315,
+      "covered_glyphs": 315,
+      "aliases": [
+        {
+          "glyph": "commaaccent",
+          "unicode": "U+F6C3",
+          "outline_unicode": "U+0326"
+        },
+        {
+          "glyph": "mu",
+          "unicode": "U+00B5",
+          "outline_unicode": "U+03BC"
+        }
+      ],
+      "aligned_components": [],
+      "unsupported": []
+    },
+    {
+      "pdf_name": "ZapfDingbats",
+      "file": "FullbleedPreviewDingbats-Regular.ttf",
+      "bytes": 41016,
+      "sha256": "684ff2fd4f5e12b2b24fcf07f7ef67dab92b113dba8675302a4ba773b510cf91",
+      "modified": true,
+      "source_fonts": [
+        "NotoSansSymbols-Regular.ttf",
+        "NotoSansSymbols2-Regular.ttf"
+      ],
+      "afm_glyphs": 202,
+      "covered_glyphs": 202,
+      "aliases": [],
+      "aligned_components": [],
+      "unsupported": []
+    }
+  ]
+}

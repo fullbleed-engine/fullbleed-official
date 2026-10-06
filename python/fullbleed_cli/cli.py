@@ -433,6 +433,7 @@ SCHEMA_DEFS = {
                     "compiled_document": {"type": "boolean"},
                     "explicit_table_headers": {"type": "boolean"},
                     "logical_table_pagination": {"type": "boolean"},
+                    "bundled_standard_font_previews": {"type": "boolean"},
                     "compiled_reflow_bindings": {"type": "boolean"},
                     "compiled_flow_compression_modes": {
                         "type": "array",
@@ -3185,6 +3186,9 @@ def _capabilities_payload(cli_surface=None):
             "compiled_document": bool(pdf_engine and hasattr(pdf_engine, "compile_pdf")),
             "explicit_table_headers": bool(build_features.get("explicit_table_headers", False)),
             "logical_table_pagination": bool(build_features.get("logical_table_pagination", False)),
+            "bundled_standard_font_previews": bool(
+                build_features.get("bundled_standard_font_previews", False)
+            ),
             "compiled_reflow_bindings": bool(
                 build_features.get("compiled_reflow", False)
                 and pdf_engine

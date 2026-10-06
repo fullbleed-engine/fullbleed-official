@@ -139,6 +139,13 @@ Install [`FullBleed.DotNet`](https://www.nuget.org/packages/FullBleed.DotNet/0.1
 - **Volume workflows:** compile a template once, then bind fixed or reflowing records. [Measured workloads and limits](docs/performance-pass-2026-08-04.md).
 - **Inspectable output:** PDF inspection, PNG previews, structured diagnostics, and profile verification tooling.
 
+Native previews of unembedded Standard 14 fonts use compact bundled outline
+substitutes, so basic Helvetica, Times, Courier, Symbol, and Dingbats text renders
+without system fonts. Registered and embedded font programs take precedence.
+The font-resolution trace identifies the `bundled_substitute` outcome; runtime
+discovery reports `bundled_standard_font_previews`. See the
+[font sources, licenses, and coverage limits](src/preview_fonts/README.md).
+
 Fullbleed uses static HTML/CSS as a document layout language. Check the [CSS coverage and remaining gaps](docs/css-coverage.md) for your templates. Use a browser when JavaScript or live website behavior is part of the required result.
 
 Profile selection alone does not establish standards conformance. The [release evidence](docs/release/2.4.0-validation-report.md) records the checks performed and their limits.
@@ -298,7 +305,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-2.5.10-cp310-abi3-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-2.5.11-cp310-abi3-win_amd64.whl
 ```
 
 From a source checkout with Rust installed, no Python build package is needed:

@@ -68,7 +68,15 @@ def test_python_310_toml_fallback_reads_complete_project_configuration(backend) 
     source = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     parsed = backend._fallback_toml_loads(source)
     assert parsed["project"]["name"] == "fullbleed"
-    assert parsed["project"]["license-files"][-1] == "FONT_LICENSE_AUDIT.json"
+    assert {
+        "LICENSE", "COPYRIGHT", "LICENSING.md", "THIRD_PARTY_LICENSES.md",
+        "FONT_LICENSE_AUDIT.md", "FONT_LICENSE_AUDIT.json",
+        "src/preview_fonts/LICENSE-Liberation.txt",
+        "src/preview_fonts/LICENSE-NotoSans.txt",
+        "src/preview_fonts/LICENSE-NotoSansMath.txt",
+        "src/preview_fonts/LICENSE-NotoSansSymbols.txt",
+        "src/preview_fonts/LICENSE-NotoSansSymbols2.txt",
+    } <= set(parsed["project"]["license-files"])
     assert parsed["project"]["optional-dependencies"]["api"] == []
     assert parsed["tool"]["fullbleed-build"]["strip"] is True
     assert (

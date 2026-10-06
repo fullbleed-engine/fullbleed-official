@@ -3385,8 +3385,8 @@ fn draw_string(
             match try_draw(font.data.as_slice(), false) {
                 Ok(()) => return,
                 Err(reason) => {
-                    if let Some(system_bytes) = resolve_system_font_bytes(&state.font_name) {
-                        if try_draw(system_bytes.as_slice(), true).is_ok() {
+                    if let Some(fallback) = resolve_fallback_font(&state.font_name) {
+                        if try_draw(fallback.as_slice(), fallback.is_system()).is_ok() {
                             return;
                         }
                     }
@@ -3404,7 +3404,7 @@ fn draw_string(
         }
     }
 
-    let Some(system_bytes) = resolve_system_font_bytes(&state.font_name) else {
+    let Some(fallback) = resolve_fallback_font(&state.font_name) else {
         if debug_text {
             eprintln!(
                 "[raster-text] skip: unresolved font='{}' text='{}'",
@@ -3415,7 +3415,7 @@ fn draw_string(
         return;
     };
 
-    if let Err(reason) = try_draw(system_bytes.as_slice(), true) {
+    if let Err(reason) = try_draw(fallback.as_slice(), fallback.is_system()) {
         if debug_text {
             eprintln!(
                 "[raster-text] skip: {} font='{}' text='{}'",
@@ -3498,8 +3498,8 @@ fn draw_string_transformed(
             }
         }
     }
-    if let Some(system_bytes) = resolve_system_font_bytes(&state.font_name) {
-        let _ = try_draw(system_bytes.as_slice());
+    if let Some(fallback) = resolve_fallback_font(&state.font_name) {
+        let _ = try_draw(fallback.as_slice());
     }
 }
 
@@ -3750,8 +3750,8 @@ fn draw_glyph_run_impl(
             match try_draw(font.data.as_slice(), false) {
                 Ok(()) => return,
                 Err(_reason) => {
-                    if let Some(system_bytes) = resolve_system_font_bytes(&state.font_name) {
-                        if try_draw(system_bytes.as_slice(), true).is_ok() {
+                    if let Some(fallback) = resolve_fallback_font(&state.font_name) {
+                        if try_draw(fallback.as_slice(), fallback.is_system()).is_ok() {
                             return;
                         }
                     }
@@ -3761,10 +3761,10 @@ fn draw_glyph_run_impl(
         }
     }
 
-    let Some(system_bytes) = resolve_system_font_bytes(&state.font_name) else {
+    let Some(fallback) = resolve_fallback_font(&state.font_name) else {
         return;
     };
-    let _ = try_draw(system_bytes.as_slice(), true);
+    let _ = try_draw(fallback.as_slice(), fallback.is_system());
 }
 
 fn truncate_debug_text(text: &str) -> String {
@@ -3904,8 +3904,29 @@ enum FontStyleVariant {
     BoldItalic,
 }
 
-fn resolve_system_font_bytes(font_name: &str) -> Option<Arc<Vec<u8>>> {
-    resolve_system_font_match(font_name).map(|entry| entry.bytes)
+enum FallbackFont {
+    Bundled(&'static [u8]),
+    System(Arc<Vec<u8>>),
+}
+
+impl FallbackFont {
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            Self::Bundled(data) => data,
+            Self::System(data) => data.as_slice(),
+        }
+    }
+
+    fn is_system(&self) -> bool {
+        matches!(self, Self::System(_))
+    }
+}
+
+fn resolve_fallback_font(font_name: &str) -> Option<FallbackFont> {
+    if let Some(font) = crate::builtin_preview_fonts::resolve(font_name) {
+        return Some(FallbackFont::Bundled(font.data));
+    }
+    resolve_system_font_match(font_name).map(|entry| FallbackFont::System(entry.bytes))
 }
 
 #[cfg(feature = "python")]
