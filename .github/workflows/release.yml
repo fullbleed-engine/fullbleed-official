@@ -193,6 +193,17 @@ jobs:
       - name: Verify mixed inline wrapping with independent PDF readers
         run: python -I tools/smoke_inline_wrapping.py --out target/inline-wrapping
 
+      - name: Verify inline intrinsic widths with independent PDF readers
+        run: python -I tools/smoke_inline_sizing.py --out target/inline-sizing
+
+      - name: Retain inline intrinsic sizing PDFs and previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-inline-sizing
+          path: target/inline-sizing
+          if-no-files-found: error
+
       - name: Retain inline wrapping PDFs and previews
         if: always()
         uses: actions/upload-artifact@v7
