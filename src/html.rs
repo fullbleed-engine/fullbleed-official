@@ -1419,6 +1419,7 @@ fn anonymous_table_cell_run_flowables(
                 perf,
                 doc_id,
                 true,
+                true,
             ));
             items.extend(after_items);
             let items = coerce_items_to_inline_run(
@@ -1621,6 +1622,13 @@ fn collect_children(
                 | DisplayMode::InlineGrid
         )
         && inline_or_replaced_children_only(node, resolver, parent_style, ancestors);
+    // A text-only block already has a paragraph that owns its line breaking.
+    // In a mixed inline run, expose word boundaries to the shared line builder
+    // so text after a styled sibling can use the remainder of the same line.
+    let fragment_inline_words = matches!(parent_style.display, DisplayMode::Inline)
+        || children
+            .iter()
+            .any(|child| matches!(child.data(), NodeData::Element(_)));
     for (index, child) in children.iter().enumerate() {
         if inline_context {
             if let NodeData::Text(text) = child.data() {
@@ -1638,6 +1646,7 @@ fn collect_children(
                     perf,
                     doc_id,
                     true,
+                    fragment_inline_words,
                 ));
                 continue;
             }
@@ -1679,6 +1688,7 @@ fn text_node_to_flowables(
     perf: Option<&crate::perf::PerfLogger>,
     doc_id: Option<usize>,
     inline_context: bool,
+    fragment_inline_words: bool,
 ) -> Vec<LayoutItem> {
     if let Some(perf_logger) = perf {
         perf_logger.log_counts("story.text_nodes", doc_id, &[("count", 1)]);
@@ -1750,8 +1760,49 @@ fn text_node_to_flowables(
             font_registry.clone(),
         ))));
     }
-    if has_text {
-        let paragraph = Paragraph::new(cleaned)
+    let word_fragments = inline_context
+        && fragment_inline_words
+        && split_boundary_spaces
+        && !no_wrap(parent_style)
+        && !cleaned.contains('\n')
+        && matches!(parent_style.direction, DirectionMode::Ltr)
+        && matches!(parent_style.writing_mode, WritingModeMode::HorizontalTb)
+        && matches!(parent_style.unicode_bidi, crate::style::UnicodeBidiMode::Normal)
+        // Bidi reordering needs the complete logical run, not separately
+        // positioned words. Keep those runs on the existing paragraph path.
+        && !cleaned.chars().any(|ch| {
+            matches!(
+                unicode_bidi::bidi_class(ch),
+                unicode_bidi::BidiClass::R
+                    | unicode_bidi::BidiClass::AL
+                    | unicode_bidi::BidiClass::LRE
+                    | unicode_bidi::BidiClass::RLE
+                    | unicode_bidi::BidiClass::LRO
+                    | unicode_bidi::BidiClass::RLO
+                    | unicode_bidi::BidiClass::PDF
+                    | unicode_bidi::BidiClass::LRI
+                    | unicode_bidi::BidiClass::RLI
+                    | unicode_bidi::BidiClass::FSI
+                    | unicode_bidi::BidiClass::PDI
+            )
+        });
+    let fragments: Vec<&str> = if word_fragments {
+        cleaned.split(' ').collect()
+    } else {
+        vec![cleaned.as_str()]
+    };
+    for (index, fragment) in fragments.into_iter().enumerate() {
+        if index > 0 {
+            items.push(inline_item(Box::new(CollapsibleSpaceFlowable::new(
+                text_style.clone(),
+                font_registry.clone(),
+            ))));
+        }
+        if fragment.is_empty() {
+            continue;
+        }
+        let paragraph = Paragraph::new(fragment)
+            .with_inline_word_measurement(word_fragments)
             .with_style(text_style.clone())
             .with_align(text_align_from_style(parent_style))
             .with_last_align(text_align_last_from_style(parent_style))
@@ -2147,6 +2198,7 @@ fn node_to_flowables(
             report.as_deref_mut(),
             perf,
             doc_id,
+            false,
             false,
         ),
         NodeData::Element(element) => {
@@ -7891,6 +7943,139 @@ mod tests {
     }
 
     #[test]
+    fn styled_inline_text_wraps_at_words_without_overlapping_the_prefix() {
+        let resolver = StyleResolver::new(
+            "* { margin: 0; padding: 0; font-family: Courier; font-size: 10pt; line-height: 15pt; } \
+             code { color: red; }",
+        );
+        let story = html_to_story_with_resolver_and_fonts_and_report(
+            "<p>Edit <code>print.css</code> to change the paper size and margins for the report.</p>",
+            &resolver,
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        );
+        let page = Size {
+            width: Pt::from_f32(120.0),
+            height: Pt::from_f32(400.0),
+        };
+        let mut canvas = Canvas::new(page);
+        let mut y = Pt::ZERO;
+        for flowable in story {
+            let size = flowable.wrap(page.width, page.height);
+            flowable.draw(&mut canvas, Pt::ZERO, y, page.width, size.height);
+            y += size.height;
+        }
+        let document = canvas.finish();
+        let text: Vec<_> = document.pages[0]
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::DrawString { text, x, y, .. } => Some((text.as_str(), *x, *y)),
+                _ => None,
+            })
+            .collect();
+        let prefix = text
+            .iter()
+            .find(|(text, ..)| text.trim() == "Edit")
+            .expect("prefix");
+        let code = text
+            .iter()
+            .find(|(text, ..)| *text == "print.css")
+            .expect("inline code");
+        let suffix = text
+            .iter()
+            .find(|(text, ..)| text.starts_with("to"))
+            .expect("following text");
+        assert_eq!(
+            prefix.2, code.2,
+            "the prefix and inline code share the first line"
+        );
+        assert_eq!(
+            code.2, suffix.2,
+            "the following word still fits on the first line"
+        );
+        assert!(
+            suffix.1 >= code.1 + Pt::from_f32(54.0),
+            "following text must advance past the code, not overlap it: {text:?}"
+        );
+        assert!(
+            text.iter().any(|(_, _, y)| *y > prefix.2),
+            "the paragraph must wrap"
+        );
+    }
+
+    #[test]
+    fn mixed_inline_wrapping_collapses_spaces_at_line_edges() {
+        for (width, spacing, expected_positions) in [
+            (61.0, "", [24.0, 36.0, 30.0]),
+            (
+                73.0,
+                "letter-spacing:1pt;word-spacing:2pt;",
+                [30.0, 44.0, 37.0],
+            ),
+        ] {
+            let resolver = StyleResolver::new(&format!(
+                "* {{ margin: 0; padding: 0; font-family: Courier; font-size: 10pt; line-height: 15pt; {spacing} }} \
+             span {{ background: yellow; }}",
+            ));
+            let story = html_to_story_with_resolver_and_fonts_and_report(
+                "<p>  one <span>  two   three </span>  four <span>five</span> six  </p>",
+                &resolver,
+                None,
+                None,
+                None,
+                false,
+                false,
+                None,
+                None,
+            );
+            let page = Size {
+                width: Pt::from_f32(width),
+                height: Pt::from_f32(400.0),
+            };
+            let mut canvas = Canvas::new(page);
+            let mut y = Pt::ZERO;
+            for flowable in story {
+                let size = flowable.wrap(page.width, page.height);
+                flowable.draw(&mut canvas, Pt::ZERO, y, page.width, size.height);
+                y += size.height;
+            }
+            let document = canvas.finish();
+            let text: Vec<_> = document.pages[0]
+                .commands
+                .iter()
+                .filter_map(|command| match command {
+                    Command::DrawString { text, x, y, .. } if !text.is_empty() => {
+                        Some((text.as_str(), *x, *y))
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                text.iter().map(|(text, ..)| *text).collect::<Vec<_>>(),
+                ["one", "two", "three", "four", "five", "six"]
+            );
+            for (pair, expected_x) in text.chunks_exact(2).zip(expected_positions) {
+                assert_eq!(pair[0].1, Pt::ZERO, "wrapped lines have no leading space");
+                // Independently snapped word/space boxes can accumulate one
+                // CSS layout unit of rounding, but not a second space.
+                assert!(
+                    (pair[1].1 - Pt::from_f32(expected_x)).abs() < Pt::from_f32(0.02),
+                    "adjacent DOM spaces collapse once: {text:?}"
+                );
+                assert_eq!(pair[0].2, pair[1].2, "two words fit on each line");
+            }
+            assert_eq!(text[2].2 - text[0].2, Pt::from_f32(15.0));
+            assert_eq!(text[4].2 - text[2].2, Pt::from_f32(15.0));
+        }
+    }
+
+    #[test]
     fn inline_children_only_rejects_styled_inline_descendants() {
         let document = parse_html(
             r##"
@@ -8329,7 +8514,7 @@ mod tests {
         )));
         let inline_before = inline_commands
             .iter()
-            .position(|command| matches!(command, Command::DrawString { text, .. } if text.contains("Visible before")))
+            .position(|command| matches!(command, Command::DrawString { text, .. } if text.contains("before")))
             .expect("inline visible predecessor paint");
         let inline_semantic = inline_commands
             .iter()
@@ -8337,9 +8522,22 @@ mod tests {
             .expect("inline semantic carrier");
         let inline_after = inline_commands
             .iter()
-            .position(|command| matches!(command, Command::DrawString { text, .. } if text.contains("visible after")))
+            .position(|command| matches!(command, Command::DrawString { text, .. } if text.contains("after")))
             .expect("inline visible successor paint");
         assert!(inline_before < inline_semantic && inline_semantic < inline_after);
+        let visible_words: Vec<_> = inline_commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::DrawString { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .flat_map(str::split_whitespace)
+            .collect();
+        assert_eq!(
+            visible_words,
+            ["Visible", "before", "visible", "after"],
+            "semantic-only words must not be painted, even as separate fragments"
+        );
     }
 
     #[test]

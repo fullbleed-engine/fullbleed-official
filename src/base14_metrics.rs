@@ -1,7 +1,7 @@
-//! Standard 14 font metrics for interpreting existing PDF text positions.
+//! Standard 14 font metrics for PDF text positions and inline word advances.
 //!
 //! This module supplies advances and character mappings, not font programs.
-//! It does not change authoring measurements or the emitted PDF.
+//! Inline word fragments also use these advances to match whole-string painting.
 
 #[path = "base14_metrics_data.rs"]
 mod data;

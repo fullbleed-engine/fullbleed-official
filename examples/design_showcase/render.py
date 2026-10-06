@@ -128,7 +128,9 @@ def ordinary(out, name, html, css, expected_pages, markers, *, profile='none', d
     inspection = fullbleed.inspect_pdf(str(pdf)) if pdf.exists() else {}
     (folder / 'inspection.json').write_text(json.dumps(inspection, indent=2)+'\n', encoding='utf-8')
     pages = fullbleed.extract_pdf_page_texts(str(pdf)).get('pages', []) if pdf.exists() else []
-    text = '\n'.join(page.get('text', '') for page in pages)
+    # The internal extractor separates positioned paint chunks with newlines;
+    # a rich inline phrase can therefore contain one chunk per word.
+    text = ' '.join('\n'.join(page.get('text', '') for page in pages).split())
     failures = [f'missing text: {marker}' for marker in markers if marker not in text]
     if '{{' in text or '}}' in text:
         failures.append('unresolved template placeholder')
@@ -172,8 +174,9 @@ def statements(out, dpi):
     if len(pages) != len(values):
         failures.append(f'expected {len(values)} record pages, got {len(pages)}')
     for page, value in zip(pages, values):
+        page_text = ' '.join(page.get('text', '').split())
         for key in ['member_name', 'account_id', 'closing_balance']:
-            if value[key] not in page.get('text', ''):
+            if value[key] not in page_text:
                 failures.append(f"record {value['account_id']} missing {key}")
         # Letter spacing may produce a separate extraction chunk per glyph.
         compact_text = ''.join(page.get('text', '').split())

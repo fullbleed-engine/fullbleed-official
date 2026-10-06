@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.8"
+  FULLBLEED_CI_VERSION: "2.5.9"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -164,6 +164,17 @@ jobs:
 
       - name: Verify font family defaults and compiled previews
         run: python -I tools/smoke_font_families.py --out target/font-families
+
+      - name: Verify mixed inline wrapping with independent PDF readers
+        run: python -I tools/smoke_inline_wrapping.py --out target/inline-wrapping
+
+      - name: Retain inline wrapping PDFs and previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: inline-wrapping-${{ runner.os }}
+          path: target/inline-wrapping
+          if-no-files-found: warn
 
       - name: Retain font family PDF and preview evidence
         if: always()

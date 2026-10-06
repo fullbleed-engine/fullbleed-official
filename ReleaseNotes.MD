@@ -1,3 +1,38 @@
+# Fullbleed Release Notes - 2.5.9
+
+Release date: October 6, 2026
+
+## Wrap ordinary text around styled inline content
+
+A paragraph such as `Edit <code>print.css</code> to change the paper size...`
+could place its wrapped text over the prefix. Mixed inline runs now expose
+ordinary word boundaries to the shared line builder. Following text uses the
+remaining line width, and collapsed spaces at wrapped line edges are discarded.
+Line-box and background wrappers preserve space semantics; letter and word
+spacing remain part of the advance.
+
+Built-in proportional fonts use their bundled PDF advances for inline word
+fragments, so separating a styled run does not introduce excessive word spacing.
+
+The change covers horizontal, left-to-right text with collapsed whitespace.
+Preserved whitespace, no-wrap, vertical writing, and bidi runs retain their
+paragraph path. It adds no runtime dependency or public API. Affected PDFs can
+change line breaks, pagination, and hashes; review saved baselines when upgrading.
+
+The internal PDF text extractor can return additional newlines between separately
+positioned words. Normalize whitespace when checking complete phrases.
+
+The installed-wheel regression checks direct PDFs, fixed bindings with an
+explicitly wide enough variable slot, and both compiled reflow compression modes.
+It retains native previews, independent PDFium previews, text extraction, and word
+bounds. Fixed-template replacement streams are checked by visual position and
+single-copy content, without claiming their stream order equals reading order.
+
+See the [2.5.9 release runbook](docs/release/2.5.9-runbook.md). Node and .NET
+packages have separate releases; this core release does not update them.
+
+---
+
 # Fullbleed Release Notes - 2.5.8
 
 Release date: October 5, 2026

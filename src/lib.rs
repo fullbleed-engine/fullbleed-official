@@ -9656,16 +9656,58 @@ mod tests {
     }
 
     fn page_contains_text(page: &Page, needle: &str) -> bool {
-        page.commands.iter().any(|cmd| match cmd {
-            Command::DrawString { text, .. } => text.contains(needle),
-            _ => false,
-        })
+        // Rich inline content may emit one draw command per word. Page
+        // ownership should not depend on where paint commands are chunked.
+        page.commands
+            .iter()
+            .filter_map(|cmd| match cmd {
+                Command::DrawString { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .flat_map(str::split_whitespace)
+            .collect::<Vec<_>>()
+            .join(" ")
+            .contains(needle)
     }
 
     fn page_contains_fill_color(page: &Page, color: Color) -> bool {
         page.commands
             .iter()
             .any(|command| matches!(command, Command::SetFillColor(value) if *value == color))
+    }
+
+    #[test]
+    fn built_in_font_inline_words_use_real_pdf_advances() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let document = engine.render_to_document(
+            "<p>WWW <span>iii</span> next words.</p>",
+            "@page {size:200pt 120pt;margin:0} * {margin:0;padding:0;font-family:Helvetica;font-size:10pt;line-height:15pt} span {color:red}",
+        ).expect("render");
+        let words: Vec<_> = document.pages[0]
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::DrawString { text, x, y, .. } if !text.is_empty() => {
+                    Some((text.as_str(), *x, *y))
+                }
+                _ => None,
+            })
+            .collect();
+        let prefix = words
+            .iter()
+            .find(|(text, ..)| *text == "WWW")
+            .expect("prefix");
+        let following = words
+            .iter()
+            .find(|(text, ..)| *text == "iii")
+            .expect("following inline word");
+        // Helvetica W=944 and space=278 units per 1000 em. A heuristic
+        // monospace advance would shift the following word by over 7 pt.
+        assert!(
+            (following.1 - prefix.1 - Pt::from_f32(31.1)).abs() < Pt::from_f32(0.02),
+            "{words:?}"
+        );
+        assert_eq!(prefix.2, following.2);
     }
 
     fn empty_document(page_count: usize) -> Document {
@@ -12912,17 +12954,17 @@ mod tests {
             .commands
             .iter()
             .filter_map(|command| match command {
-                Command::DrawString { text, y, .. }
-                    if text == "alpha beta gamma" || text == "!" =>
-                {
-                    Some((text.as_str(), *y))
-                }
+                Command::DrawString { text, y, .. } => Some((text.as_str(), *y)),
                 _ => None,
             })
+            .flat_map(|(text, y)| text.split_whitespace().map(move |word| (word, y)))
             .collect::<Vec<_>>();
-        assert_eq!(text_y.len(), 2);
         assert_eq!(
-            text_y[0].1, text_y[1].1,
+            text_y.iter().map(|(text, _)| *text).collect::<Vec<_>>(),
+            ["alpha", "beta", "gamma", "!"]
+        );
+        assert!(
+            text_y.iter().all(|(_, y)| *y == text_y[0].1),
             "table-cell vertical-align positions the cell contents, not descendant text runs"
         );
     }

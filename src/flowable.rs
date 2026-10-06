@@ -6114,6 +6114,7 @@ pub struct Paragraph {
     preserve_whitespace: bool,
     break_spaces: bool,
     no_wrap: bool,
+    measure_inline_word: bool,
     suppress_first_line_indent: bool,
     snap_each_line_baseline: bool,
     round_each_css_line_baseline: bool,
@@ -6141,6 +6142,7 @@ impl Paragraph {
             preserve_whitespace: false,
             break_spaces: false,
             no_wrap: false,
+            measure_inline_word: false,
             suppress_first_line_indent: false,
             snap_each_line_baseline: false,
             round_each_css_line_baseline: false,
@@ -6166,6 +6168,11 @@ impl Paragraph {
         self.round_each_css_line_baseline =
             style.css_pixel_snap_metrics && style.line_height.to_milli_i64().rem_euclid(750) != 0;
         self.style = style;
+        self
+    }
+
+    pub(crate) fn with_inline_word_measurement(mut self, enabled: bool) -> Self {
+        self.measure_inline_word = enabled;
         self
     }
 
@@ -6427,6 +6434,34 @@ impl Paragraph {
                 log_perf_counts("layout.text.width", &[("cache_miss", 1)]);
             }
             return value;
+        }
+        if self.measure_inline_word {
+            let (primary, _, _) =
+                resolve_font_stack_with_ranges(self.font_registry.as_deref(), &self.style);
+            let registered = self
+                .font_registry
+                .as_deref()
+                .is_some_and(|registry| registry.resolve(&primary).is_some());
+            if !registered {
+                // A whole built-in-font string paints with the PDF font's real
+                // advances even when legacy paragraph measurement is heuristic.
+                // Separate words must use those same advances, otherwise each
+                // heuristic surplus becomes a visibly oversized inter-word gap.
+                if let Some(font) = crate::base14_metrics::font(&primary) {
+                    let base = text.chars().try_fold(Pt::ZERO, |sum, ch| {
+                        font.glyph_by_unicode(ch).map(|glyph| {
+                            sum + self.style.font_size.mul_ratio(i32::from(glyph.width), 1000)
+                        })
+                    });
+                    if let Some(base) = base {
+                        let value = text_width_with_spacing(base, &self.style, text);
+                        if let Ok(mut cache) = self.width_cache.lock() {
+                            cache.insert(text, value);
+                        }
+                        return value;
+                    }
+                }
+            }
         }
         if let Some(registry) = &self.font_registry {
             let (primary, fallbacks, unicode_ranges) =
@@ -8584,6 +8619,7 @@ impl Flowable for Paragraph {
             preserve_whitespace: self.preserve_whitespace,
             break_spaces: self.break_spaces,
             no_wrap: self.no_wrap,
+            measure_inline_word: self.measure_inline_word,
             suppress_first_line_indent: self.suppress_first_line_indent,
             snap_each_line_baseline: self.snap_each_line_baseline,
             round_each_css_line_baseline: self.round_each_css_line_baseline,
@@ -8616,6 +8652,7 @@ impl Flowable for Paragraph {
             preserve_whitespace: self.preserve_whitespace,
             break_spaces: self.break_spaces,
             no_wrap: self.no_wrap,
+            measure_inline_word: self.measure_inline_word,
             suppress_first_line_indent: true,
             snap_each_line_baseline: self.snap_each_line_baseline,
             round_each_css_line_baseline: self.round_each_css_line_baseline,
@@ -9411,6 +9448,10 @@ impl CssLineBoxFlowable {
 }
 
 impl Flowable for CssLineBoxFlowable {
+    fn is_collapsible_inline_space(&self) -> bool {
+        self.child.is_collapsible_inline_space()
+    }
+
     fn page_footnotes(&self) -> Vec<PageFootnoteEntry> {
         self.child.page_footnotes()
     }
@@ -10280,6 +10321,7 @@ impl Flowable for ScreenReaderTextFlowable {
 #[derive(Debug, Clone)]
 pub(crate) struct CollapsibleSpaceFlowable {
     width: Pt,
+    letter_spacing: Pt,
     height: Pt,
     baseline: Pt,
     inline_ascent: Pt,
@@ -10289,7 +10331,9 @@ pub(crate) struct CollapsibleSpaceFlowable {
 
 impl CollapsibleSpaceFlowable {
     pub(crate) fn new(style: TextStyle, font_registry: Option<Arc<FontRegistry>>) -> Self {
+        let letter_spacing = style.letter_spacing;
         let probe = Paragraph::new(" ")
+            .with_inline_word_measurement(true)
             .with_style(style)
             .with_font_registry(font_registry);
         let width = probe.measure_text_width(" ").max(Pt::ZERO);
@@ -10302,6 +10346,7 @@ impl CollapsibleSpaceFlowable {
             .unwrap_or((baseline, (height - baseline).max(Pt::ZERO)));
         Self {
             width,
+            letter_spacing,
             height,
             baseline,
             inline_ascent,
@@ -10312,6 +10357,10 @@ impl CollapsibleSpaceFlowable {
 }
 
 impl Flowable for CollapsibleSpaceFlowable {
+    fn inline_text_edge_letter_spacing(&self) -> Option<Pt> {
+        Some(self.letter_spacing)
+    }
+
     fn wrap(&self, _avail_width: Pt, _avail_height: Pt) -> Size {
         Size {
             width: self.width,
@@ -17616,6 +17665,10 @@ impl InlineBackgroundFlowable {
 }
 
 impl Flowable for InlineBackgroundFlowable {
+    fn is_collapsible_inline_space(&self) -> bool {
+        self.child.is_collapsible_inline_space()
+    }
+
     fn fragment_block_end_inline_leading(&self, avail_width: Pt) -> Option<Pt> {
         self.child.fragment_block_end_inline_leading(avail_width)
     }
@@ -17813,8 +17866,17 @@ impl InlineBlockLayoutFlowable {
                           mut line_height: Pt,
                           max_width: &mut Pt,
                           total_height: &mut Pt| {
+            while line_items
+                .last()
+                .is_some_and(|item| self.children[item.idx].0.is_collapsible_inline_space())
+            {
+                line_items.pop();
+            }
             if line_items.is_empty() {
                 return;
+            }
+            if let Some(last) = line_items.last() {
+                line_width = last.x_off + last.size.width;
             }
             let fill_count = line_items
                 .iter()
@@ -18012,6 +18074,15 @@ impl InlineBlockLayoutFlowable {
         };
 
         for (idx, (child, valign)) in self.children.iter().enumerate() {
+            let collapsible_space = child.is_collapsible_inline_space();
+            if collapsible_space
+                && line_items
+                    .iter()
+                    .rfind(|item| item.size.width > Pt::ZERO)
+                    .is_none_or(|item| self.children[item.idx].0.is_collapsible_inline_space())
+            {
+                continue;
+            }
             if let Some(break_height) = child.forced_line_break_height() {
                 if line_items.is_empty() {
                     let mut empty_height = forced.max(break_height);
@@ -18076,7 +18147,11 @@ impl InlineBlockLayoutFlowable {
             } else {
                 raw_line_width + self.gap + text_boundary_spacing + raw_width
             };
-            if !self.no_wrap && raw_next_width > avail_width && !line_items.is_empty() {
+            if !self.no_wrap
+                && !collapsible_space
+                && raw_next_width > avail_width
+                && !line_items.is_empty()
+            {
                 flush_line(
                     &mut lines,
                     &mut line_items,

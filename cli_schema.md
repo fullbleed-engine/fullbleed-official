@@ -2,7 +2,7 @@
 <!-- GENERATED FILE: DO NOT EDIT. Run `python tools/generate_agent_contract.py`. -->
 # CLI and Agent JSON Contract
 
-Generated from the installed Fullbleed **2.5.8** runtime. The canonical machine artifact is `fullbleed-agent-contract.json`.
+Generated from the installed Fullbleed **2.5.9** runtime. The canonical machine artifact is `fullbleed-agent-contract.json`.
 
 ## Authority and invocation
 
