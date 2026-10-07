@@ -1,0 +1,73 @@
+name: Python Docker invoice
+
+on:
+  pull_request:
+    paths: ['examples/web_frameworks/**', '.github/workflows/python-docker-example.yml']
+  push:
+    branches: [master, main]
+    paths: ['examples/web_frameworks/**', '.github/workflows/python-docker-example.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  invoice:
+    name: Invoice (${{ matrix.os }}, ${{ matrix.base.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+        base:
+          - name: slim
+            image: python:3.14.8-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83
+          - name: alpine
+            image: python:3.14.8-alpine3.24@sha256:f6a589d43c42b9e7f7dc67a12d37132491f362859a5d750607710cc56da3bc72
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - run: python -m pip install --only-binary=:all: pypdf==6.19.0
+      - name: Build with public wheels and exercise the container
+        env:
+          PYTHON_IMAGE: ${{ matrix.base.image }}
+        run: python examples/web_frameworks/check_docker.py --base-image "$PYTHON_IMAGE" --out target/docker-invoice
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docker-invoice-${{ matrix.os }}-${{ matrix.base.name }}
+          path: target/docker-invoice
+          retention-days: 14
+  compare:
+    name: Matching PDFs across containers
+    needs: invoice
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: docker-invoice-*
+          path: evidence
+      - name: Compare all four runtime outputs
+        run: |
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          records = sorted(Path('evidence').glob('*/verification.json'))
+          assert len(records) == 4
+          for path in records:
+              report = json.loads(path.read_text())
+              assert report['ok']
+              assert report['pdf']['sha256'] == hashlib.sha256((path.parent / 'invoice.pdf').read_bytes()).hexdigest()
+              assert report['preview_sha256'] == hashlib.sha256((path.parent / 'invoice.png').read_bytes()).hexdigest()
+          for filename in ['invoice.pdf', 'invoice.png']:
+              hashes = {hashlib.sha256((path.parent / filename).read_bytes()).hexdigest() for path in records}
+              assert len(hashes) == 1, (filename, hashes)
+              print(filename, hashes.pop())
+          PY
