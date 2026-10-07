@@ -652,6 +652,36 @@ def replay_determinism(
     }
 
 
+def validate_tagged_structure_specimen(
+    profile: str, out_dir: Path, font_path: Path, icc_path: Path,
+    verapdf: list[str] | None,
+) -> dict[str, object]:
+    """Exercise semantics that a heading-and-paragraph smoke file cannot cover."""
+    if profile not in {"pdfua1", "pdfua2", "wtpdf1r", "wtpdf1a"}:
+        return {"status": "not_applicable"}
+    folder = out_dir / "tagged-structure" / profile
+    folder.mkdir(parents=True, exist_ok=True)
+    html = (REPO_ROOT / "tools/fixtures/tagged-structure.html").read_text(encoding="utf-8")
+    css = (REPO_ROOT / "tools/fixtures/tagged-structure.css").read_text(encoding="utf-8")
+    (folder / "source.html").write_text(html, encoding="utf-8")
+    (folder / "source.css").write_text(css, encoding="utf-8")
+    rendered = render_profile(profile, folder, font_path, icc_path,
+                              emit_observability=True, html=html, css=css)
+    result = {"status": "failed", "render": rendered,
+              "scope": "Machine-verifiable checks; source semantics and assistive-technology review remain separate."}
+    if rendered["exit"] != 0:
+        return result
+    path = Path(str(rendered["pdf"]))
+    inspection = inspect_profile(profile, path, folder)
+    validation = validate_with_verapdf(profile, path, folder, verapdf)
+    replay = replay_determinism(profile, str(rendered["sha256"]), folder / "replay",
+                                font_path, icc_path, html=html, css=css)
+    result.update(inspect=inspection, verapdf=validation, determinism=replay)
+    if inspection["ok"] and replay["deterministic"]:
+        result["status"] = validation["status"]
+    return result
+
+
 def validate_pdfvt_multipage(
     profile: str,
     out_dir: Path,
@@ -969,6 +999,9 @@ def main() -> int:
             and bool(jit and jit["ok"])
             and bool(determinism.get("deterministic"))
         )
+        tagged_structure = validate_tagged_structure_specimen(
+            profile, out_dir, font_path, icc_path, verapdf
+        )
         composition = ({"status": "not_applicable"} if profile != "pdfvt1" else
                        validate_pdfvt_composition(out_dir, font_path, icc_path, pdf_oxide, args.pdfvt_cmd))
         negative_controls = ({"status": "not_applicable"} if profile != "pdfvt1" or render["exit"] != 0 else
@@ -980,7 +1013,7 @@ def main() -> int:
                 profile_ok = False
         if composition["status"] == "failed" or negative_controls["status"] == "failed":
             profile_ok = False
-        for external in [verapdf_result, pdf_oxide_result]:
+        for external in [verapdf_result, pdf_oxide_result, tagged_structure]:
             status = external.get("status")
             if status == "failed":
                 profile_ok = False
@@ -1007,6 +1040,7 @@ def main() -> int:
             "inspect": inspect,
             "jit": jit,
             "verapdf": verapdf_result,
+            "tagged_structure": tagged_structure,
             "pdf_oxide_pdfx4": pdf_oxide_result,
             "dedicated_pdfvt": pdfvt_result,
             "pdfvt_multipage": pdfvt_multipage,

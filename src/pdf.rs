@@ -1,5 +1,6 @@
 use crate::canvas::{
-    Command, Document, ImageSourceClip, Page, PageGeometry, ResolvedImageSourceCrop,
+    Command, Document, ImageSourceClip, META_LIST_NUMBERING_KEY, Page, PageGeometry,
+    ResolvedImageSourceCrop,
 };
 use crate::debug::json_escape;
 use crate::font::{
@@ -254,6 +255,75 @@ struct TagRecord {
     table_semantics: Option<Arc<crate::TableSemanticNode>>,
     table_document: usize,
     structure_id: Option<String>,
+    list_numbering: Option<String>,
+}
+
+fn list_attributes(tag: &TagRecord, pdf20: bool) -> Option<String> {
+    if tag.role != "L" {
+        return None;
+    }
+    let numbering = match tag.list_numbering.as_deref()? {
+        name @ ("None" | "Disc" | "Circle" | "Square" | "Decimal" | "LowerRoman" | "UpperRoman"
+        | "LowerAlpha" | "UpperAlpha") => name,
+        // PDF 2.0 adds generic marker kinds. In PDF 1.7 the actual Lbl content
+        // represents arbitrary markers; do not mislabel them as decimal/disc.
+        name @ ("Ordered" | "Unordered" | "Description") if pdf20 => name,
+        "Ordered" | "Unordered" | "Description" => "None",
+        _ => return None,
+    };
+    Some(format!(" /A << /O /List /ListNumbering /{numbering} >>"))
+}
+
+fn apply_list_numbering(records: &mut [TagRecord], stack: &[usize], value: &str) {
+    if let Some(record) = stack.last().and_then(|index| records.get_mut(*index)) {
+        if record.role == "L" {
+            record.list_numbering = Some(value.to_owned());
+        }
+    }
+}
+
+fn normalize_figure_structure(mut records: Vec<TagRecord>) -> Vec<TagRecord> {
+    let mut children = vec![Vec::new(); records.len()];
+    for (index, record) in records.iter().enumerate() {
+        if let Some(parent) = record.parent.filter(|parent| *parent < records.len()) {
+            children[parent].push(index);
+        }
+    }
+    for index in 0..records.len() {
+        if records[index].role != "Figure"
+            || records[index].mcid.is_some()
+            || records[index].alt.is_some()
+            || records[index].actual_text.is_some()
+        {
+            continue;
+        }
+        let images = children[index]
+            .iter()
+            .copied()
+            .filter(|child| records[*child].role != "Caption")
+            .collect::<Vec<_>>();
+        if let [image] = images.as_slice() {
+            if records[*image].role == "Figure"
+                && records[*image].mcid.is_some()
+                && children[*image].is_empty()
+            {
+                // HTML's figure owns its caption. For a single-image figure,
+                // lift the authored image alternative to that group and keep
+                // the graphic's MCID as a Span child. Do not repeat its Alt or
+                // infer descriptions from nearby text or the caption.
+                records[index].alt = records[*image].alt.take();
+                records[index].actual_text = records[*image].actual_text.take();
+                records[*image].role = "Span".to_owned();
+                continue;
+            }
+        }
+        // HTML figure also accepts several independent illustrations, text,
+        // tables, and code. Preserve that self-contained section and its
+        // caption while keeping each illustration's own alternative. An Alt
+        // for the whole group cannot be invented from those descriptions.
+        records[index].role = "Sect".to_owned();
+    }
+    records
 }
 
 fn table_attributes(tag: &TagRecord) -> Option<String> {
@@ -323,6 +393,7 @@ fn normalize_definition_list_structure(records: Vec<TagRecord>) -> Vec<TagRecord
             table_semantics: None,
             table_document: 0,
             structure_id: None,
+            list_numbering: (role == "L").then(|| "Description".to_owned()),
         }
     }
 
@@ -2711,7 +2782,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             let uses_pdf20_structure_namespace =
                 self.options.pdf_profile.uses_pdf20_structure_namespace();
             let tag_records = normalize_definition_list_structure(table_structure::normalize(
-                std::mem::take(&mut self.tag_records),
+                normalize_figure_structure(std::mem::take(&mut self.tag_records)),
             ));
             let tag_count = tag_records.len();
             if let Some(debug) = &self.debug {
@@ -2788,6 +2859,9 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                         obj.push_str(&format!(" /ActualText {}", pdf_text_string(actual_text)));
                     }
                     if let Some(attributes) = table_attributes(tag) {
+                        obj.push_str(&attributes);
+                    }
+                    if let Some(attributes) = list_attributes(tag, uses_pdf20_structure_namespace) {
                         obj.push_str(&attributes);
                     }
                     if let Some(structure_id) = &tag.structure_id {
@@ -3743,6 +3817,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             let marked_content_boundary = matches!(
                 cmd,
                 Command::BeginTag { .. }
+                    | Command::BeginTagActualText { .. }
                     | Command::EndTag
                     | Command::BeginArtifact { .. }
                     | Command::BeginOptionalContent { .. }
@@ -3756,7 +3831,12 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
             }
             if tag_enabled
                 && !automatic_artifact_open
-                && tag_stack.is_empty()
+                // A grouping tag (BMC without an MCID) establishes hierarchy,
+                // but cannot classify painted content. An enclosing MCID can
+                // still cover a grouping child, for example inside a Figure.
+                && tag_stack
+                    .iter()
+                    .all(|&index| self.tag_records[index].mcid.is_none())
                 && explicit_artifact_depth == 0
                 && command_paints_nontext_content(cmd)
             {
@@ -3822,7 +3902,15 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                         fmt_pt(-*f)
                     ));
                 }
-                Command::Meta { .. } => {}
+                Command::Meta { key, value } => {
+                    if tag_enabled
+                        && explicit_artifact_depth == 0
+                        && suppressed_tag_depth == 0
+                        && key == META_LIST_NUMBERING_KEY
+                    {
+                        apply_list_numbering(&mut self.tag_records, &tag_stack, value);
+                    }
+                }
                 Command::BeginTag {
                     role,
                     mcid,
@@ -3861,6 +3949,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             table_semantics: table_semantics.clone(),
                             table_document: self.current_tag_document,
                             structure_id: None,
+                            list_numbering: None,
                         });
                         tag_stack.push(idx);
                     }
@@ -3896,6 +3985,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             table_semantics: None,
                             table_document: self.current_tag_document,
                             structure_id: None,
+                            list_numbering: None,
                         });
                         tag_stack.push(idx);
                     }
@@ -6821,6 +6911,7 @@ fn collect_tag_records(document: &Document) -> Vec<TagRecord> {
                         table_semantics: table_semantics.clone(),
                         table_document: 0,
                         structure_id: None,
+                        list_numbering: None,
                     });
                     stack.push(idx);
                 }
@@ -6848,6 +6939,7 @@ fn collect_tag_records(document: &Document) -> Vec<TagRecord> {
                         table_semantics: None,
                         table_document: 0,
                         structure_id: None,
+                        list_numbering: None,
                     });
                     stack.push(idx);
                 }
@@ -7697,6 +7789,7 @@ fn render_page(
                             table_semantics: table_semantics.clone(),
                             table_document: 0,
                             structure_id: None,
+                            list_numbering: None,
                         });
                         tag_stack.push(idx);
                     }
@@ -7734,6 +7827,7 @@ fn render_page(
                             table_semantics: None,
                             table_document: 0,
                             structure_id: None,
+                            list_numbering: None,
                         });
                         tag_stack.push(idx);
                     }
@@ -9990,6 +10084,7 @@ mod tests {
             table_semantics: None,
             table_document: 0,
             structure_id: None,
+            list_numbering: None,
         };
         let normalized = normalize_definition_list_structure(vec![
             record("P"),
@@ -10930,6 +11025,83 @@ mod tests {
         let content = String::from_utf8_lossy(&content);
         assert!(content.find("/Artifact BMC").unwrap() < content.find(" re\nf\n").unwrap());
         assert!(content.find("EMC\n/Figure").is_some());
+    }
+
+    #[test]
+    fn tagged_group_decorations_are_artifacts_without_hiding_nested_figure_paint() {
+        let tag = |role: &str, mcid, group_only| Command::BeginTag {
+            role: role.to_string(),
+            mcid,
+            alt: (role == "Figure").then(|| "Meaningful rectangle".to_string()),
+            scope: None,
+            table_id: None,
+            col_index: None,
+            group_only,
+            column_span: None,
+            row_span: None,
+            table_semantics: None,
+        };
+        let rectangle = Command::DrawRect {
+            x: Pt::from_f32(1.0),
+            y: Pt::from_f32(2.0),
+            width: Pt::from_f32(3.0),
+            height: Pt::from_f32(4.0),
+        };
+        let doc = one_page_document(vec![
+            tag("P", None, true),
+            rectangle.clone(),
+            Command::BeginTagActualText {
+                role: "Span".to_string(),
+                mcid: 0,
+                actual_text: "Readable content".to_string(),
+            },
+            Command::EndTag,
+            rectangle.clone(),
+            Command::EndTag,
+            tag("Figure", Some(1), false),
+            tag("Span", None, true),
+            rectangle,
+            Command::EndTag,
+            Command::EndTag,
+        ]);
+        let mut options = PdfOptions::default();
+        options.pdf_profile = PdfProfile::Tagged;
+        let bytes = document_to_pdf_with_metrics_and_registry(&doc, None, None, &options)
+            .expect("render grouping-tag decoration");
+        let content = String::from_utf8(page_content_bytes(&bytes)).unwrap();
+        assert_eq!(content.matches("/Artifact BMC").count(), 2);
+        assert!(content.contains("/P BMC\n/Artifact BMC\n"));
+        assert!(content.contains("EMC\n/Span <</MCID 0 /ActualText (Readable content)>> BDC"));
+        let figure = content.split("/Figure <</MCID 1>> BDC").nth(1).unwrap();
+        assert!(
+            !figure.contains("/Artifact"),
+            "A grouping child must retain its ancestor's MCID coverage"
+        );
+        assert!(figure.contains(" re\nf\n"));
+    }
+
+    #[test]
+    fn actual_text_starts_outside_automatic_decoration_artifacts() {
+        let doc = one_page_document(vec![
+            Command::DrawRect {
+                x: Pt::from_f32(1.0),
+                y: Pt::from_f32(2.0),
+                width: Pt::from_f32(3.0),
+                height: Pt::from_f32(4.0),
+            },
+            Command::BeginTagActualText {
+                role: "Span".to_string(),
+                mcid: 0,
+                actual_text: "Nonvisual content".to_string(),
+            },
+            Command::EndTag,
+        ]);
+        let mut options = PdfOptions::default();
+        options.pdf_profile = PdfProfile::Tagged;
+        let bytes = document_to_pdf_with_metrics_and_registry(&doc, None, None, &options)
+            .expect("render ActualText after decoration");
+        let content = String::from_utf8(page_content_bytes(&bytes)).unwrap();
+        assert!(content.contains("EMC\n/Span <</MCID 0 /ActualText (Nonvisual content)>> BDC"));
     }
 
     #[test]

@@ -3597,7 +3597,7 @@ fn node_to_flowables(
                         }]
                     })(),
                     "ul" | "ol" => (|| {
-                        let items = list_flowables(
+                        let (items, numbering) = list_flowables(
                             node,
                             resolver,
                             &style,
@@ -3612,7 +3612,15 @@ fn node_to_flowables(
                             doc_id,
                         );
                         let items = inject_pseudo_items(items, &before_items, &after_items);
-                        let containers = container_flowables_with_role(items, &style, Some("L"));
+                        let containers = container_flowables_with_role_options(
+                            items,
+                            &style,
+                            Some("L"),
+                            ContainerCompilationOptions {
+                                list_numbering: Some(numbering),
+                                ..ContainerCompilationOptions::default()
+                            },
+                        );
                         if ancestors.iter().any(|ancestor| ancestor.tag == "li") {
                             containers
                         } else {
@@ -3694,7 +3702,7 @@ fn node_to_flowables(
                     "body" | "div" | "span" | "i" | "section" | "article" | "header" | "footer"
                     | "aside" | "nav" | "main" | "blockquote" | "figure" | "figcaption" | "dl"
                     | "dt" | "dd" => (|| {
-                        let dl_container_role = definition_list_container_role(info.tag.as_str());
+                        let container_role = block_container_role(info.tag.as_str());
                         let direct_text_role = direct_text_structure_role(info.tag.as_str());
                         if is_table_container_display(style.display) {
                             table_container_flowables(
@@ -3769,13 +3777,14 @@ fn node_to_flowables(
                             }
                             let container_options = ContainerCompilationOptions {
                                 suppress_single_used_column_rule: suppress_unused_multicol_rule,
+                                ..ContainerCompilationOptions::default()
                             };
                             if text.is_empty() {
-                                if matches!(info.tag.as_str(), "dl") {
+                                if matches!(info.tag.as_str(), "dl" | "figure" | "figcaption") {
                                     container_flowables_with_role_options(
                                         Vec::new(),
                                         &style,
-                                        dl_container_role,
+                                        container_role,
                                         container_options,
                                     )
                                 } else {
@@ -3828,11 +3837,11 @@ fn node_to_flowables(
                                     width_spec: None,
                                     order: 0,
                                 }];
-                                if matches!(info.tag.as_str(), "dl") {
+                                if matches!(info.tag.as_str(), "dl" | "figure" | "figcaption") {
                                     container_flowables_with_role_options(
                                         items,
                                         &style,
-                                        dl_container_role,
+                                        container_role,
                                         container_options,
                                     )
                                 } else {
@@ -3893,14 +3902,15 @@ fn node_to_flowables(
                             } else {
                                 children
                             };
-                            if dl_container_role.is_some() {
+                            if container_role.is_some() {
                                 container_flowables_with_role_options(
                                     children,
                                     &style,
-                                    dl_container_role,
+                                    container_role,
                                     ContainerCompilationOptions {
                                         suppress_single_used_column_rule:
                                             suppress_unused_multicol_rule,
+                                        ..ContainerCompilationOptions::default()
                                     },
                                 )
                             } else {
@@ -3910,6 +3920,7 @@ fn node_to_flowables(
                                     ContainerCompilationOptions {
                                         suppress_single_used_column_rule:
                                             suppress_unused_multicol_rule,
+                                        ..ContainerCompilationOptions::default()
                                     },
                                 )
                             }
@@ -9238,8 +9249,9 @@ fn list_flowables(
     svg_raster_fallback: bool,
     perf: Option<&crate::perf::PerfLogger>,
     doc_id: Option<usize>,
-) -> Vec<LayoutItem> {
+) -> (Vec<LayoutItem>, &'static str) {
     let mut out = Vec::new();
+    let mut list_numbering = None;
     let mut report = report;
     let ordered = node
         .as_element()
@@ -9408,6 +9420,28 @@ fn list_flowables(
             } else {
                 None
             };
+            let numbering = if is_inline
+                || (marker_prefix.is_none() && marker_image.is_none() && marker_bullet.is_none())
+            {
+                "None"
+            } else if has_marker_content_override || marker_image.is_some() {
+                if ordered { "Ordered" } else { "Unordered" }
+            } else {
+                pdf_list_numbering(&style, ordered)
+            };
+            list_numbering = Some(match list_numbering {
+                None => numbering,
+                Some(previous) if previous == numbering => previous,
+                // Mixed marker styles retain their labels and the authored
+                // ordered/unordered relationship instead of claiming one style.
+                Some(_) => {
+                    if ordered {
+                        "Ordered"
+                    } else {
+                        "Unordered"
+                    }
+                }
+            });
             index = index.saturating_add(index_step);
 
             let mut li_ancestors = ancestors.to_vec();
@@ -9606,7 +9640,40 @@ fn list_flowables(
             }
         }
     }
-    out
+    (out, list_numbering.unwrap_or("None"))
+}
+
+fn pdf_list_numbering(style: &ComputedStyle, ordered: bool) -> &'static str {
+    match style.list_style_type {
+        ListStyleTypeMode::None => "None",
+        ListStyleTypeMode::Auto => {
+            if ordered {
+                "Decimal"
+            } else {
+                "Disc"
+            }
+        }
+        ListStyleTypeMode::Disc => "Disc",
+        ListStyleTypeMode::Circle => "Circle",
+        ListStyleTypeMode::Square => "Square",
+        ListStyleTypeMode::Decimal | ListStyleTypeMode::DecimalLeadingZero => "Decimal",
+        ListStyleTypeMode::LowerRoman => "LowerRoman",
+        ListStyleTypeMode::UpperRoman => "UpperRoman",
+        ListStyleTypeMode::LowerAlpha => "LowerAlpha",
+        ListStyleTypeMode::UpperAlpha => "UpperAlpha",
+        ListStyleTypeMode::DisclosureOpen | ListStyleTypeMode::DisclosureClosed => "Unordered",
+        ListStyleTypeMode::CustomString
+        | ListStyleTypeMode::CustomCounterStyleName
+        | ListStyleTypeMode::AnonymousSymbols => {
+            if ordered {
+                "Ordered"
+            } else {
+                "Unordered"
+            }
+        }
+        // Other numeric and alphabetic systems have no more specific PDF name.
+        _ => "Ordered",
+    }
 }
 
 fn list_start_index(node: &NodeRef, ordered: bool) -> i32 {
@@ -10989,12 +11056,14 @@ fn container_flowables(children: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<
 #[derive(Clone, Copy)]
 struct ContainerCompilationOptions {
     suppress_single_used_column_rule: bool,
+    list_numbering: Option<&'static str>,
 }
 
 impl Default for ContainerCompilationOptions {
     fn default() -> Self {
         Self {
             suppress_single_used_column_rule: false,
+            list_numbering: None,
         }
     }
 }
@@ -11221,6 +11290,10 @@ fn container_flowable_with_role_options(
                     .with_pagination(style.pagination);
             if let Some(role) = role {
                 container = container.with_tag_role(role);
+                if role == "L" {
+                    container = container
+                        .with_list_numbering(options.list_numbering.unwrap_or("Description"));
+                }
             }
             return Some(Box::new(container) as Box<dyn Flowable>);
         }
@@ -11353,6 +11426,10 @@ fn container_flowable_with_role_options(
         .with_pagination(style.pagination);
     if let Some(role) = role {
         container = container.with_tag_role(role);
+        if role == "L" {
+            container =
+                container.with_list_numbering(options.list_numbering.unwrap_or("Description"));
+        }
     }
     Some(Box::new(container) as Box<dyn Flowable>)
 }
@@ -11389,8 +11466,12 @@ fn container_flowables_with_role_options(
     }]
 }
 
-fn definition_list_container_role(tag: &str) -> Option<&'static str> {
+fn block_container_role(tag: &str) -> Option<&'static str> {
     match tag {
+        // A semantic Figure owns its caption; generic Div groups are
+        // transparent when PDF 2.0 parent/child relationships are checked.
+        "figure" => Some("Figure"),
+        "figcaption" => Some("Caption"),
         "dl" => Some("L"),
         "dt" => Some("Lbl"),
         "dd" => Some("LBody"),
@@ -11403,7 +11484,7 @@ fn direct_text_structure_role(tag: &str) -> &'static str {
         "dl" | "dd" => "LBody",
         "dt" => "Lbl",
         "blockquote" => "BlockQuote",
-        "figcaption" => "Caption",
+        "figcaption" => "P",
         "span" | "i" => "Span",
         _ => "P",
     }
@@ -12894,6 +12975,18 @@ fn flex_container_flowables(
             )
             .with_self_visible(style.visibility.paints())
             .with_pagination(style.pagination);
+
+    let container = if let Some(role) =
+        node.as_element()
+            .and_then(|element| match element.name.local.as_ref() {
+                "figure" => Some("Figure"),
+                "figcaption" => Some("Caption"),
+                _ => None,
+            }) {
+        container.with_tag_role(role)
+    } else {
+        container
+    };
 
     vec![LayoutItem::Block {
         flowable: Box::new(container) as Box<dyn Flowable>,
