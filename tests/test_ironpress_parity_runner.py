@@ -5,6 +5,8 @@ import importlib.util
 import json
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 from types import SimpleNamespace
 import zipfile
 
@@ -17,6 +19,16 @@ def load_runner():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_captured_command_failure_retains_its_diagnostic(capsys):
+    with pytest.raises(subprocess.CalledProcessError) as failed:
+        load_runner().run([
+            sys.executable, "-c",
+            "import sys; print('repository ownership diagnostic', file=sys.stderr); sys.exit(23)",
+        ], capture=True)
+    assert failed.value.returncode == 23
+    assert "repository ownership diagnostic" in capsys.readouterr().err
 
 
 def make_wheel(root, *, version="2.5.14", platform="manylinux_2_17_x86_64.manylinux2014_x86_64", name="fullbleed", metadata_version=None):

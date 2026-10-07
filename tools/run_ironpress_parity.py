@@ -45,14 +45,20 @@ def run(
 ) -> subprocess.CompletedProcess[str]:
     printable = subprocess.list2cmdline([str(part) for part in command])
     print(f"+ {printable}", file=sys.stderr, flush=True)
-    return subprocess.run(
-        [str(part) for part in command],
-        cwd=cwd,
-        check=check,
-        text=True,
-        stdout=subprocess.PIPE if capture else None,
-        stderr=subprocess.PIPE if capture else None,
-    )
+    try:
+        return subprocess.run(
+            [str(part) for part in command],
+            cwd=cwd,
+            check=check,
+            text=True,
+            stdout=subprocess.PIPE if capture else None,
+            stderr=subprocess.PIPE if capture else None,
+        )
+    except subprocess.CalledProcessError as error:
+        if capture:
+            print(error.stdout or "", end="", file=sys.stderr)
+            print(error.stderr or "", end="", file=sys.stderr)
+        raise
 
 
 def output(command: Sequence[str], *, cwd: Path | None = None) -> str:
@@ -181,6 +187,8 @@ def ensure_source_volume(checkout: Path, patch_hash: str) -> str:
             f"{volume}:/ironpress:ro",
             IMAGE_TAG,
             "git",
+            "-c",
+            "safe.directory=/ironpress",
             "-C",
             "/ironpress",
             "rev-parse",
@@ -196,7 +204,8 @@ def ensure_source_volume(checkout: Path, patch_hash: str) -> str:
     # allowed after a previous run.
     probe = ["docker", "run", "--rm", "--volume", f"{volume}:/ironpress:ro"]
     changed = output([
-        *probe, IMAGE_TAG, "git", "-C", "/ironpress", "diff", "HEAD", "--name-only",
+        *probe, IMAGE_TAG, "git", "-c", "safe.directory=/ironpress",
+        "-C", "/ironpress", "diff", "HEAD", "--name-only",
     ]).splitlines()
     generated = ("tests/parity/report.json", "tests/parity/REPORT.md")
     generated_dirs = tuple(f"tests/parity/{name}/" for name in ("reports", "refs", "out", "diffs", "pdfs"))
@@ -210,7 +219,8 @@ def ensure_source_volume(checkout: Path, patch_hash: str) -> str:
     patch = repository_root() / "tools" / "ironpress_fullbleed.patch"
     run([
         *probe, "--volume", f"{patch.resolve()}:/candidate.patch:ro",
-        IMAGE_TAG, "git", "-C", "/ironpress", "apply", "--check", "--reverse", "/candidate.patch",
+        IMAGE_TAG, "git", "-c", "safe.directory=/ironpress",
+        "-C", "/ironpress", "apply", "--check", "--reverse", "/candidate.patch",
     ])
     return volume
 
