@@ -16,7 +16,8 @@ from invoice import load_invoice, render_invoice
 ROOT = Path(__file__).resolve().parent
 REPOSITORY = ROOT.parents[1]
 FILES = ["README.md", "invoice.py", "demo.py", "fastapi_app.py", "flask_app.py", "django_app.py",
-         "check_examples.py", "check_http.py", "requirements-fastapi.txt", "requirements-flask.txt",
+         "check_examples.py", "check_http.py", "check_docker.py", "Dockerfile", ".dockerignore",
+         "requirements-docker.txt", "requirements-fastapi.txt", "requirements-flask.txt",
          "requirements-django.txt", "requirements-check.txt", "templates/invoice.html",
          "templates/invoice.css", "static/index.html", "static/invoice.png"]
 

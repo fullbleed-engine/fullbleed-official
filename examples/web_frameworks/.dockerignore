@@ -1,0 +1,22 @@
+# Send only the files used by this image to the Docker daemon.
+**
+!Dockerfile
+!requirements-fastapi.txt
+!requirements-docker.txt
+!invoice.py
+!demo.py
+!fastapi_app.py
+!LICENSE
+!templates/
+templates/**
+!templates/invoice.html
+!templates/invoice.css
+!static/
+static/**
+!static/index.html
+!static/invoice.png
+!fonts/
+fonts/**
+!fonts/*.ttf
+!fonts/*-OFL.txt
+!fonts/sources.json
