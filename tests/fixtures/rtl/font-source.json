@@ -1,0 +1,20 @@
+{
+  "upstream": "https://github.com/notofonts/noto-fonts",
+  "commit": "6cfca385c8757fadf537923d59a671116a865d48",
+  "license": "SIL OFL 1.1",
+  "purpose": "Regression fixture only; not a bundled runtime font.",
+  "files": [
+    {
+      "file": "NotoSansArabic-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/notofonts/noto-fonts/6cfca385c8757fadf537923d59a671116a865d48/hinted/ttf/NotoSansArabic/NotoSansArabic-Regular.ttf",
+      "bytes": 240456,
+      "sha256": "ceea25b464a656dc3b26849bab9356740401af62aedf1bfa8b7f0d9b75925b1b"
+    },
+    {
+      "file": "OFL.txt",
+      "url": "https://raw.githubusercontent.com/notofonts/noto-fonts/6cfca385c8757fadf537923d59a671116a865d48/LICENSE",
+      "bytes": 4377,
+      "sha256": "0dab92d0544f7b233403f14b84a663bdbfa746982eda629e7f4f9ffe1b036feb"
+    }
+  ]
+}

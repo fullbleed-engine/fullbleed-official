@@ -13,6 +13,7 @@ use crate::style::{
 };
 use crate::svg;
 use crate::types::{BoxSizingMode, Color, MixBlendMode, Pt, Rect, Shading, ShadingStop, Size};
+use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::Path as FsPath;
@@ -2179,6 +2180,23 @@ pub trait Flowable: FlowableClone + Send + Sync {
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)>;
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt);
 
+    /// Logical text represented by an inline formatting item. The enclosing
+    /// paragraph resolves bidi levels across style boundaries before placing
+    /// the items. Replaced objects use U+FFFC through the default `None`.
+    fn inline_bidi_text(&self) -> Option<Cow<'_, str>> {
+        None
+    }
+
+    /// Paint with the byte-indexed levels resolved by the enclosing line.
+    /// Resolving each styled span independently loses surrounding strong
+    /// characters (notably for numbers and neutral punctuation).
+    fn with_inline_bidi_levels(
+        &self,
+        _levels: &[unicode_bidi::Level],
+    ) -> Option<Box<dyn Flowable>> {
+        None
+    }
+
     /// Page-space bounds for authoring observability after paint-only positioning is applied.
     ///
     /// Normal-flow boxes paint in their layout slot. Wrappers such as `position: relative`
@@ -3607,11 +3625,11 @@ fn text_draw_y_for_line(
 #[cfg(test)]
 mod text_baseline_tests {
     use super::{
-        BoxShadowSpec, ContainerFlowable, Flowable, OutlineLineStyle, Paragraph, Pt,
-        ResolvedEdgeColors, ResolvedEdgeStyles, ResolvedEdges, TabSizeSpec, TextStyle,
-        advance_to_next_tab_stop, browser_registered_text_paint_x,
-        browser_synthetic_bold_outline_phase, browser_synthetic_bold_shader_paint,
-        css_direct_text_prefers_nearest_baseline_snap,
+        BoxShadowSpec, ContainerFlowable, Flowable, InlineBlockLayoutFlowable, OutlineLineStyle,
+        Paragraph, Pt, ResolvedEdgeColors, ResolvedEdgeStyles, ResolvedEdges, TabSizeSpec,
+        TextAlign, TextStyle, VerticalAlign, advance_to_next_tab_stop,
+        browser_registered_text_paint_x, browser_synthetic_bold_outline_phase,
+        browser_synthetic_bold_shader_paint, css_direct_text_prefers_nearest_baseline_snap,
         css_print_line_prefers_nearest_baseline_snap, draw_registered_text_run,
         draw_text_decorations_before_glyphs, is_cjk_outline_character,
         paragraph_break_allowed_between, resolve_font_stack, split_long_word_by_width,
@@ -3897,6 +3915,88 @@ mod text_baseline_tests {
                 "\u{5e9}\u{5dc}\u{5d5}\u{5dd}".to_string(),
                 " BBB".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn styled_inline_bidi_uses_surrounding_arabic_for_numeric_runs() {
+        let mut arabic = TextStyle::default();
+        arabic.direction = DirectionMode::Rtl;
+        let layout = InlineBlockLayoutFlowable::new_pt(
+            vec![
+                (
+                    Box::new(Paragraph::new("قبل ").with_style(arabic)),
+                    VerticalAlign::Baseline,
+                ),
+                (
+                    Box::new(Paragraph::new("2026-10-21")),
+                    VerticalAlign::Baseline,
+                ),
+            ],
+            Pt::ZERO,
+            None,
+        )
+        .with_inline_bidi(DirectionMode::Rtl, TextAlign::Right);
+        let page = Size {
+            width: Pt::from_f32(400.0),
+            height: Pt::from_f32(60.0),
+        };
+        let geometry = layout.cached_layout(page.width);
+        let items = &geometry.lines[0].items;
+        assert!(items[1].x_off < items[0].x_off);
+        let mut canvas = Canvas::new(page);
+        layout.draw(&mut canvas, Pt::ZERO, Pt::ZERO, page.width, page.height);
+        let mut runs: Vec<_> = canvas.finish().pages[0]
+            .commands
+            .iter()
+            .filter_map(|command| {
+                if let Command::DrawString { x, text, .. } = command {
+                    Some((
+                        *x,
+                        text.chars()
+                            .filter(|ch| !crate::native_shape::is_default_ignorable(*ch as u32))
+                            .collect::<String>(),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        runs.sort_by_key(|(x, _)| x.to_milli_i64());
+        assert_eq!(
+            runs.iter()
+                .map(|(_, text)| text.as_str())
+                .take(5)
+                .collect::<Vec<_>>(),
+            ["21", "-", "10", "-", "2026"]
+        );
+    }
+
+    #[test]
+    fn styled_inline_bidi_preserves_latin_sibling_order_and_atomic_boxes() {
+        let children: Vec<(Box<dyn Flowable>, VerticalAlign)> =
+            ["قبل ", "Acme", " ", "Studio", " بعد"]
+                .into_iter()
+                .map(|text| {
+                    (
+                        Box::new(Paragraph::new(text)) as Box<dyn Flowable>,
+                        VerticalAlign::Baseline,
+                    )
+                })
+                .collect();
+        let layout = InlineBlockLayoutFlowable::new_pt(children, Pt::ZERO, None)
+            .with_inline_bidi(DirectionMode::Rtl, TextAlign::Right);
+        let geometry = layout.cached_layout(Pt::from_f32(400.0));
+        let items = &geometry.lines[0].items;
+        assert!(
+            items[1].x_off < items[3].x_off,
+            "Latin siblings must remain Acme Studio"
+        );
+        assert!(items[4].x_off < items[1].x_off && items[3].x_off < items[0].x_off);
+        let atomic = ContainerFlowable::new(vec![Box::new(Paragraph::new("Acme"))], 12.0, 12.0);
+        assert!(
+            atomic.inline_bidi_text().is_none(),
+            "inline blocks participate as objects"
         );
     }
 
@@ -6105,6 +6205,7 @@ fn apply_first_line_text_transform(text: &str, mode: TextTransformMode) -> Strin
 #[derive(Debug, Clone)]
 pub struct Paragraph {
     text: String,
+    inline_bidi_levels: Option<Arc<[unicode_bidi::Level]>>,
     // Pagination retains line boxes using newlines in `text`. Keep their real
     // logical separators separately so those paint breaks do not alter words.
     reading_line_separators: Option<Vec<ReadingSeparator>>,
@@ -6135,6 +6236,7 @@ impl Paragraph {
     pub fn new(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
+            inline_bidi_levels: None,
             reading_line_separators: None,
             style: TextStyle::default(),
             align: TextAlign::Left,
@@ -6597,6 +6699,9 @@ impl Paragraph {
         suppress_first_line_indent: bool,
     ) -> Self {
         let mut variant = self.clone();
+        if text != self.text {
+            variant.inline_bidi_levels = None;
+        }
         variant.text = text;
         variant.reading_line_separators = None;
         variant.style = style;
@@ -6827,6 +6932,39 @@ impl Paragraph {
 
     fn draw_text_with_fallbacks(&self, canvas: &mut Canvas, x: Pt, y: Pt, text: &str) {
         use crate::style::{DirectionMode, UnicodeBidiMode};
+
+        if let Some(levels) = self.inline_bidi_levels.as_deref() {
+            if text == self.text && levels.len() == text.len() {
+                let mut runs: Vec<(std::ops::Range<usize>, unicode_bidi::Level)> = Vec::new();
+                for (offset, ch) in text.char_indices() {
+                    let level = levels[offset];
+                    if let Some((range, _)) = runs.last_mut().filter(|(_, l)| *l == level) {
+                        range.end = offset + ch.len_utf8();
+                    } else {
+                        runs.push((offset..offset + ch.len_utf8(), level));
+                    }
+                }
+                let run_levels: Vec<_> = runs.iter().map(|(_, level)| *level).collect();
+                let mut cursor_x = x;
+                for index in unicode_bidi::BidiInfo::reorder_visual(&run_levels) {
+                    let (range, level) = &runs[index];
+                    let run = &text[range.clone()];
+                    self.draw_logical_text_with_fallbacks(
+                        canvas,
+                        cursor_x,
+                        y,
+                        run,
+                        Some(if level.is_rtl() {
+                            DirectionMode::Rtl
+                        } else {
+                            DirectionMode::Ltr
+                        }),
+                    );
+                    cursor_x += self.measure_text_width(run);
+                }
+                return;
+            }
+        }
 
         let bidi_mode = self.style.unicode_bidi;
         let needs_bidi = !matches!(bidi_mode, UnicodeBidiMode::Normal)
@@ -8328,6 +8466,28 @@ fn split_word_by_hard_hyphen(
 }
 
 impl Flowable for Paragraph {
+    fn with_inline_bidi_levels(&self, levels: &[unicode_bidi::Level]) -> Option<Box<dyn Flowable>> {
+        let logical = self.inline_bidi_text()?;
+        if levels.len() != logical.len() {
+            return None;
+        }
+        let start = logical.find(self.text.as_str())?;
+        let mut resolved = self.clone();
+        resolved.inline_bidi_levels = Some(Arc::from(&levels[start..start + self.text.len()]));
+        Some(Box::new(resolved))
+    }
+
+    fn inline_bidi_text(&self) -> Option<Cow<'_, str>> {
+        let controls = self
+            .style
+            .unicode_bidi
+            .inline_controls(self.style.direction);
+        Some(match controls {
+            Some((open, close)) => Cow::Owned(format!("{open}{}{close}", self.text)),
+            None => Cow::Borrowed(self.text.as_ref()),
+        })
+    }
+
     fn inline_text_edge_letter_spacing(&self) -> Option<Pt> {
         (!self.text.is_empty() && !self.is_vertical_text())
             .then_some(self.style_for_line(0).letter_spacing)
@@ -8603,6 +8763,7 @@ impl Flowable for Paragraph {
             .join("\n");
         let first = Paragraph {
             text: first_text,
+            inline_bidi_levels: None,
             reading_line_separators: Some(
                 lines[..split_at]
                     .iter()
@@ -8637,6 +8798,7 @@ impl Flowable for Paragraph {
         };
         let second = Paragraph {
             text: second_text,
+            inline_bidi_levels: None,
             reading_line_separators: Some(
                 lines[split_at..]
                     .iter()
@@ -9449,6 +9611,16 @@ impl CssLineBoxFlowable {
 }
 
 impl Flowable for CssLineBoxFlowable {
+    fn with_inline_bidi_levels(&self, levels: &[unicode_bidi::Level]) -> Option<Box<dyn Flowable>> {
+        let mut resolved = self.clone();
+        resolved.child = self.child.with_inline_bidi_levels(levels)?;
+        Some(Box::new(resolved))
+    }
+
+    fn inline_bidi_text(&self) -> Option<Cow<'_, str>> {
+        self.child.inline_bidi_text()
+    }
+
     fn is_collapsible_inline_space(&self) -> bool {
         self.child.is_collapsible_inline_space()
     }
@@ -9740,6 +9912,16 @@ impl CssPixelHeightFlowable {
 }
 
 impl Flowable for CssPixelHeightFlowable {
+    fn with_inline_bidi_levels(&self, levels: &[unicode_bidi::Level]) -> Option<Box<dyn Flowable>> {
+        let mut resolved = self.clone();
+        resolved.child = self.child.with_inline_bidi_levels(levels)?;
+        Some(Box::new(resolved))
+    }
+
+    fn inline_bidi_text(&self) -> Option<Cow<'_, str>> {
+        self.child.inline_bidi_text()
+    }
+
     fn fragment_block_end_inline_leading(&self, avail_width: Pt) -> Option<Pt> {
         self.child.fragment_block_end_inline_leading(avail_width)
     }
@@ -10358,6 +10540,10 @@ impl CollapsibleSpaceFlowable {
 }
 
 impl Flowable for CollapsibleSpaceFlowable {
+    fn inline_bidi_text(&self) -> Option<Cow<'_, str>> {
+        Some(Cow::Borrowed(" "))
+    }
+
     fn inline_text_edge_letter_spacing(&self) -> Option<Pt> {
         Some(self.letter_spacing)
     }
@@ -17599,6 +17785,7 @@ impl TableLayoutCache {
 #[derive(Clone)]
 struct InlineItemLayout {
     idx: usize,
+    bidi_child: Option<Box<dyn Flowable>>,
     x_off: Pt,
     size: Size,
     valign: VerticalAlign,
@@ -17666,6 +17853,16 @@ impl InlineBackgroundFlowable {
 }
 
 impl Flowable for InlineBackgroundFlowable {
+    fn with_inline_bidi_levels(&self, levels: &[unicode_bidi::Level]) -> Option<Box<dyn Flowable>> {
+        let mut resolved = self.clone();
+        resolved.child = self.child.with_inline_bidi_levels(levels)?;
+        Some(Box::new(resolved))
+    }
+
+    fn inline_bidi_text(&self) -> Option<Cow<'_, str>> {
+        self.child.inline_bidi_text()
+    }
+
     fn is_collapsible_inline_space(&self) -> bool {
         self.child.is_collapsible_inline_space()
     }
@@ -17812,6 +18009,9 @@ pub struct InlineBlockLayoutFlowable {
     no_wrap: bool,
     css_pixel_snap: bool,
     anonymous_block_context: bool,
+    bidi_direction: DirectionMode,
+    bidi_align: TextAlign,
+    bidi_levels: Option<Arc<[unicode_bidi::Level]>>,
     pagination: Pagination,
     layout_cache: Arc<Mutex<Option<InlineLayoutCache>>>,
 }
@@ -17829,6 +18029,9 @@ impl InlineBlockLayoutFlowable {
             no_wrap: false,
             css_pixel_snap: false,
             anonymous_block_context: false,
+            bidi_direction: DirectionMode::Ltr,
+            bidi_align: TextAlign::Left,
+            bidi_levels: None,
             pagination: Pagination::default(),
             layout_cache: Arc::new(Mutex::new(None)),
         }
@@ -17841,6 +18044,13 @@ impl InlineBlockLayoutFlowable {
 
     pub fn with_no_wrap(mut self, enabled: bool) -> Self {
         self.no_wrap = enabled;
+        self
+    }
+
+    pub(crate) fn with_inline_bidi(mut self, direction: DirectionMode, align: TextAlign) -> Self {
+        self.bidi_direction = direction;
+        self.bidi_align = align;
+        self.layout_cache = Arc::new(Mutex::new(None));
         self
     }
 
@@ -17918,6 +18128,55 @@ impl InlineBlockLayoutFlowable {
         let mut raw_line_width = Pt::ZERO;
         let mut line_height = forced;
         let css_pixel_snap = self.css_pixel_snap;
+        let mut bidi_text = String::new();
+        let mut bidi_ranges = Vec::with_capacity(self.children.len());
+        for (child, _) in &self.children {
+            let start = bidi_text.len();
+            if child.out_of_flow() {
+                // Out-of-flow content does not participate in this paragraph.
+            } else if child.forced_line_break_height().is_some() {
+                bidi_text.push('\n');
+            } else if let Some(text) = child.inline_bidi_text() {
+                bidi_text.push_str(&text);
+            } else {
+                bidi_text.push('\u{fffc}');
+            }
+            bidi_ranges.push(start..bidi_text.len());
+        }
+        let needs_bidi = self.bidi_levels.is_some()
+            || matches!(self.bidi_direction, DirectionMode::Rtl)
+            || bidi_text.chars().any(|ch| {
+                matches!(
+                    unicode_bidi::bidi_class(ch),
+                    unicode_bidi::BidiClass::R
+                        | unicode_bidi::BidiClass::AL
+                        | unicode_bidi::BidiClass::LRE
+                        | unicode_bidi::BidiClass::RLE
+                        | unicode_bidi::BidiClass::LRO
+                        | unicode_bidi::BidiClass::RLO
+                        | unicode_bidi::BidiClass::LRI
+                        | unicode_bidi::BidiClass::RLI
+                        | unicode_bidi::BidiClass::FSI
+                )
+            });
+        let bidi = needs_bidi.then(|| {
+            let mut info = unicode_bidi::BidiInfo::new(
+                &bidi_text,
+                Some(if matches!(self.bidi_direction, DirectionMode::Rtl) {
+                    unicode_bidi::Level::rtl()
+                } else {
+                    unicode_bidi::Level::ltr()
+                }),
+            );
+            if let Some(levels) = self
+                .bidi_levels
+                .as_ref()
+                .filter(|levels| levels.len() == bidi_text.len())
+            {
+                info.levels.copy_from_slice(levels);
+            }
+            info
+        });
 
         let flush_line = |lines: &mut Vec<InlineLineLayout>,
                           line_items: &mut Vec<InlineItemLayout>,
@@ -18120,6 +18379,44 @@ impl InlineBlockLayoutFlowable {
             }
             *total_height = *total_height + line_height;
             *max_width = (*max_width).max(line_width);
+            if let Some(bidi) = &bidi {
+                let first = bidi_ranges[line_items[0].idx].start;
+                let end = bidi_ranges[line_items.last().unwrap().idx].end;
+                if let Some(paragraph) = bidi.paragraphs.iter().find(|p| p.range.contains(&first)) {
+                    let levels =
+                        bidi.reordered_levels(paragraph, first..end.min(paragraph.range.end));
+                    let item_levels: Vec<_> = line_items
+                        .iter()
+                        .map(|item| {
+                            let range = bidi_ranges[item.idx].clone();
+                            bidi_text[range.clone()].char_indices()
+                                .filter(|(_, ch)| !matches!(*ch, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'))
+                                .filter_map(|(offset, _)| levels.get(range.start + offset).copied())
+                                .min()
+                                .unwrap_or(paragraph.level)
+                        })
+                        .collect();
+                    for item in line_items.iter_mut() {
+                        if let Some(levels) = levels.get(bidi_ranges[item.idx].clone()) {
+                            item.bidi_child =
+                                self.children[item.idx].0.with_inline_bidi_levels(levels);
+                        }
+                    }
+                    let order = unicode_bidi::BidiInfo::reorder_visual(&item_levels);
+                    let gaps: Vec<_> = line_items
+                        .windows(2)
+                        .map(|items| items[1].x_off - items[0].x_off - items[0].size.width)
+                        .collect();
+                    let mut cursor = text_align_offset(self.bidi_align, avail_width, line_width);
+                    for (position, index) in order.iter().copied().enumerate() {
+                        line_items[index].x_off = cursor;
+                        cursor += line_items[index].size.width;
+                        if let Some(gap) = gaps.get(position) {
+                            cursor += *gap;
+                        }
+                    }
+                }
+            }
             let items = std::mem::take(line_items);
             lines.push(InlineLineLayout {
                 line_height,
@@ -18239,6 +18536,7 @@ impl InlineBlockLayoutFlowable {
             };
             line_items.push(InlineItemLayout {
                 idx,
+                bidi_child: None,
                 x_off,
                 size,
                 valign: *valign,
@@ -18369,6 +18667,27 @@ fn draw_inline_child_with_compiled_parent_width(
 }
 
 impl Flowable for InlineBlockLayoutFlowable {
+    fn with_inline_bidi_levels(&self, levels: &[unicode_bidi::Level]) -> Option<Box<dyn Flowable>> {
+        let mut resolved = self.clone();
+        resolved.bidi_levels = Some(Arc::from(levels));
+        resolved.layout_cache = Arc::new(Mutex::new(None));
+        Some(Box::new(resolved))
+    }
+
+    fn inline_bidi_text(&self) -> Option<Cow<'_, str>> {
+        Some(Cow::Owned(
+            self.children
+                .iter()
+                .filter(|(child, _)| !child.out_of_flow())
+                .map(|(child, _)| {
+                    child
+                        .inline_bidi_text()
+                        .unwrap_or(Cow::Borrowed("\u{fffc}"))
+                })
+                .collect(),
+        ))
+    }
+
     fn inline_text_edge_letter_spacing(&self) -> Option<Pt> {
         self.children.first()?.0.inline_text_edge_letter_spacing()?;
         self.children.last()?.0.inline_text_edge_letter_spacing()
@@ -18584,6 +18903,7 @@ impl Flowable for InlineBlockLayoutFlowable {
             for item in paint_items {
                 let y_off = Self::item_y_offset(line, item);
                 let (child, _) = &self.children[item.idx];
+                let child = item.bidi_child.as_deref().unwrap_or(child.as_ref());
                 let decoration_shift = line
                     .baseline
                     .zip(item.baseline)
@@ -18592,7 +18912,7 @@ impl Flowable for InlineBlockLayoutFlowable {
                 let rebased_decoration = (decoration_shift != Pt::ZERO
                     && child.has_propagated_text_decoration())
                 .then(|| child.with_propagated_text_decoration_baseline_shift(decoration_shift));
-                let child = rebased_decoration.as_deref().unwrap_or(child.as_ref());
+                let child = rebased_decoration.as_deref().unwrap_or(child);
                 let item_x = x + item.x_off;
                 let item_width = item.size.width.min(avail_width);
                 let item_height = if child.uses_parent_content_height() {
@@ -25252,6 +25572,7 @@ struct HoistedFilterTile {
 #[derive(Clone)]
 pub struct ContainerFlowable {
     children: Vec<Box<dyn Flowable>>,
+    inline_bidi_transparent: bool,
     margin: EdgeSizes,
     border_width: EdgeSizes,
     border_colors: ResolvedEdgeColors,
@@ -25336,6 +25657,11 @@ pub struct ContainerFlowable {
 }
 
 impl ContainerFlowable {
+    pub(crate) fn with_inline_bidi_transparency(mut self, transparent: bool) -> Self {
+        self.inline_bidi_transparent = transparent;
+        self
+    }
+
     pub fn new(children: Vec<Box<dyn Flowable>>, font_size: f32, root_font_size: f32) -> Self {
         Self::new_pt(
             children,
@@ -25347,6 +25673,7 @@ impl ContainerFlowable {
     pub fn new_pt(children: Vec<Box<dyn Flowable>>, font_size: Pt, root_font_size: Pt) -> Self {
         Self {
             children,
+            inline_bidi_transparent: false,
             margin: EdgeSizes::zero(),
             border_width: EdgeSizes::zero(),
             border_colors: ResolvedEdgeColors::uniform(Color::BLACK),
@@ -33166,6 +33493,44 @@ impl ContainerFlowable {
 }
 
 impl Flowable for ContainerFlowable {
+    fn with_inline_bidi_levels(&self, levels: &[unicode_bidi::Level]) -> Option<Box<dyn Flowable>> {
+        if !self.inline_bidi_transparent {
+            return None;
+        }
+        let mut resolved = self.clone();
+        let mut offset = 0;
+        for child in &mut resolved.children {
+            if child.out_of_flow() {
+                continue;
+            }
+            let length = child.inline_bidi_text().map_or(3, |text| text.len());
+            let slice = levels.get(offset..offset + length)?;
+            if let Some(replacement) = child.with_inline_bidi_levels(slice) {
+                *child = replacement;
+            }
+            offset += length;
+        }
+        resolved.layout_cache = Arc::new(Mutex::new(None));
+        Some(Box::new(resolved))
+    }
+
+    fn inline_bidi_text(&self) -> Option<Cow<'_, str>> {
+        if !self.inline_bidi_transparent {
+            return None;
+        }
+        Some(Cow::Owned(
+            self.children
+                .iter()
+                .filter(|child| !child.out_of_flow())
+                .map(|child| {
+                    child
+                        .inline_bidi_text()
+                        .unwrap_or(Cow::Borrowed("\u{fffc}"))
+                })
+                .collect(),
+        ))
+    }
+
     fn is_positioned(&self) -> bool {
         // A stacking context generated by transform, opacity, filters, etc. is
         // atomic at stack level zero even when its principal box remains in
@@ -34179,6 +34544,7 @@ impl Flowable for ContainerFlowable {
 
         let mut first = ContainerFlowable {
             children: placed,
+            inline_bidi_transparent: self.inline_bidi_transparent,
             margin: if clones_decoration {
                 self.margin
             } else {
@@ -34281,6 +34647,7 @@ impl Flowable for ContainerFlowable {
         };
         let mut second = ContainerFlowable {
             children: remaining,
+            inline_bidi_transparent: self.inline_bidi_transparent,
             margin: if clones_decoration {
                 self.margin
             } else {
@@ -37524,6 +37891,8 @@ impl Flowable for RunningElementFlowable {
 pub struct MetaFlowable {
     child: Box<dyn Flowable>,
     metadata: Arc<Vec<(String, String)>>,
+    bidi_prefix: &'static str,
+    bidi_suffix: &'static str,
 }
 
 impl MetaFlowable {
@@ -37531,7 +37900,25 @@ impl MetaFlowable {
         Self {
             child,
             metadata: Arc::new(metadata),
+            bidi_prefix: "",
+            bidi_suffix: "",
         }
+    }
+
+    pub(crate) fn with_inline_bidi_boundaries(
+        mut self,
+        prefix: &'static str,
+        suffix: &'static str,
+    ) -> Self {
+        self.bidi_prefix = prefix;
+        self.bidi_suffix = suffix;
+        self
+    }
+
+    fn rewrap(&self, child: Box<dyn Flowable>) -> Self {
+        let mut wrapped = self.clone();
+        wrapped.child = child;
+        wrapped
     }
 
     fn records_authored_bounds(&self) -> bool {
@@ -37568,6 +37955,28 @@ impl MetaFlowable {
 }
 
 impl Flowable for MetaFlowable {
+    fn with_inline_bidi_levels(&self, levels: &[unicode_bidi::Level]) -> Option<Box<dyn Flowable>> {
+        let end = levels.len().checked_sub(self.bidi_suffix.len())?;
+        let levels = levels.get(self.bidi_prefix.len()..end)?;
+        let mut resolved = self.clone();
+        resolved.child = self.child.with_inline_bidi_levels(levels)?;
+        Some(Box::new(resolved))
+    }
+
+    fn inline_bidi_text(&self) -> Option<Cow<'_, str>> {
+        let text = self.child.inline_bidi_text();
+        if self.bidi_prefix.is_empty() && self.bidi_suffix.is_empty() {
+            text
+        } else {
+            Some(Cow::Owned(format!(
+                "{}{}{}",
+                self.bidi_prefix,
+                text.as_deref().unwrap_or("\u{fffc}"),
+                self.bidi_suffix
+            )))
+        }
+    }
+
     fn freeze_replaced_fragmentation_size(
         &self,
         width: Pt,
@@ -37575,9 +37984,7 @@ impl Flowable for MetaFlowable {
     ) -> Option<Box<dyn Flowable>> {
         self.child
             .freeze_replaced_fragmentation_size(width, height)
-            .map(|child| {
-                Box::new(Self::new(child, self.metadata.as_ref().clone())) as Box<dyn Flowable>
-            })
+            .map(|child| Box::new(self.rewrap(child)) as Box<dyn Flowable>)
     }
 
     fn expands_inline_fill(&self) -> bool {
@@ -37659,11 +38066,7 @@ impl Flowable for MetaFlowable {
         avail_width: Pt,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
         let (first, second) = self.child.split_before_page_footnotes(avail_width)?;
-        let meta = self.metadata.as_ref().clone();
-        Some((
-            Box::new(Self::new(first, meta.clone())),
-            Box::new(Self::new(second, meta)),
-        ))
+        Some((Box::new(self.rewrap(first)), Box::new(self.rewrap(second))))
     }
 
     fn has_out_of_flow_descendant(&self) -> bool {
@@ -37698,13 +38101,11 @@ impl Flowable for MetaFlowable {
     fn extract_fragment_block_end_positioned(
         &self,
     ) -> (Option<Box<dyn Flowable>>, Vec<Box<dyn Flowable>>) {
-        let metadata = self.metadata.as_ref().clone();
         let (retained, extracted) = self.child.extract_fragment_block_end_positioned();
-        let retained =
-            retained.map(|child| Box::new(Self::new(child, metadata.clone())) as Box<dyn Flowable>);
+        let retained = retained.map(|child| Box::new(self.rewrap(child)) as Box<dyn Flowable>);
         let extracted = extracted
             .into_iter()
-            .map(|child| Box::new(Self::new(child, metadata.clone())) as Box<dyn Flowable>)
+            .map(|child| Box::new(self.rewrap(child)) as Box<dyn Flowable>)
             .collect();
         (retained, extracted)
     }
@@ -37759,10 +38160,9 @@ impl Flowable for MetaFlowable {
         avail_height: Pt,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
         let (first, second) = self.child.split(avail_width, avail_height)?;
-        let meta = self.metadata.as_ref().clone();
         Some((
-            Box::new(Self::new(first, meta.clone())) as Box<dyn Flowable>,
-            Box::new(Self::new(second, meta)) as Box<dyn Flowable>,
+            Box::new(self.rewrap(first)) as Box<dyn Flowable>,
+            Box::new(self.rewrap(second)) as Box<dyn Flowable>,
         ))
     }
 
@@ -38035,10 +38435,9 @@ impl Flowable for MetaFlowable {
         let (first, second, first_has_content) = self
             .child
             .split_grid_row_fragment(avail_width, avail_height)?;
-        let metadata = self.metadata.as_ref().clone();
         Some((
-            Box::new(Self::new(first, metadata.clone())),
-            Box::new(Self::new(second, metadata)),
+            Box::new(self.rewrap(first)),
+            Box::new(self.rewrap(second)),
             first_has_content,
         ))
     }
@@ -38049,11 +38448,7 @@ impl Flowable for MetaFlowable {
         avail_height: Pt,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
         let (first, second) = self.child.split_grid_row_span(avail_width, avail_height)?;
-        let metadata = self.metadata.as_ref().clone();
-        Some((
-            Box::new(Self::new(first, metadata.clone())),
-            Box::new(Self::new(second, metadata)),
-        ))
+        Some((Box::new(self.rewrap(first)), Box::new(self.rewrap(second))))
     }
 
     fn is_grid_placeholder(&self) -> bool {
@@ -38061,10 +38456,7 @@ impl Flowable for MetaFlowable {
     }
 
     fn establish_independent_formatting_context(&self) -> Box<dyn Flowable> {
-        Box::new(Self::new(
-            self.child.establish_independent_formatting_context(),
-            self.metadata.as_ref().clone(),
-        ))
+        Box::new(self.rewrap(self.child.establish_independent_formatting_context()))
     }
 
     fn has_propagated_text_decoration(&self) -> bool {
@@ -38072,60 +38464,40 @@ impl Flowable for MetaFlowable {
     }
 
     fn with_propagated_text_decoration_baseline_shift(&self, shift: Pt) -> Box<dyn Flowable> {
-        Box::new(Self::new(
-            self.child
-                .with_propagated_text_decoration_baseline_shift(shift),
-            self.metadata.as_ref().clone(),
-        ))
+        Box::new(
+            self.rewrap(
+                self.child
+                    .with_propagated_text_decoration_baseline_shift(shift),
+            ),
+        )
     }
 
     fn without_propagated_text_decoration(&self) -> Box<dyn Flowable> {
-        Box::new(Self::new(
-            self.child.without_propagated_text_decoration(),
-            self.metadata.as_ref().clone(),
-        ))
+        Box::new(self.rewrap(self.child.without_propagated_text_decoration()))
     }
 
     fn with_grid_item_baseline_rounding(&self) -> Box<dyn Flowable> {
-        Box::new(Self::new(
-            self.child.with_grid_item_baseline_rounding(),
-            self.metadata.as_ref().clone(),
-        ))
+        Box::new(self.rewrap(self.child.with_grid_item_baseline_rounding()))
     }
 
     fn with_grid_item_parent_positioned_top_overflow(&self) -> Box<dyn Flowable> {
-        Box::new(Self::new(
-            self.child.with_grid_item_parent_positioned_top_overflow(),
-            self.metadata.as_ref().clone(),
-        ))
+        Box::new(self.rewrap(self.child.with_grid_item_parent_positioned_top_overflow()))
     }
 
     fn with_css_terminal_baseline_rounding(&self) -> Box<dyn Flowable> {
-        Box::new(Self::new(
-            self.child.with_css_terminal_baseline_rounding(),
-            self.metadata.as_ref().clone(),
-        ))
+        Box::new(self.rewrap(self.child.with_css_terminal_baseline_rounding()))
     }
 
     fn with_grid_item_inline_paint_snap(&self) -> Box<dyn Flowable> {
-        Box::new(Self::new(
-            self.child.with_grid_item_inline_paint_snap(),
-            self.metadata.as_ref().clone(),
-        ))
+        Box::new(self.rewrap(self.child.with_grid_item_inline_paint_snap()))
     }
 
     fn with_grid_item_block_paint_snap(&self) -> Box<dyn Flowable> {
-        Box::new(Self::new(
-            self.child.with_grid_item_block_paint_snap(),
-            self.metadata.as_ref().clone(),
-        ))
+        Box::new(self.rewrap(self.child.with_grid_item_block_paint_snap()))
     }
 
     fn with_definite_parent_height(&self) -> Box<dyn Flowable> {
-        Box::new(Self::new(
-            self.child.with_definite_parent_height(),
-            self.metadata.as_ref().clone(),
-        ))
+        Box::new(self.rewrap(self.child.with_definite_parent_height()))
     }
 }
 
@@ -38546,6 +38918,16 @@ impl Flowable for AbsolutePositionedFlowable {
 }
 
 impl Flowable for RelativePositionedFlowable {
+    fn with_inline_bidi_levels(&self, levels: &[unicode_bidi::Level]) -> Option<Box<dyn Flowable>> {
+        let mut resolved = self.clone();
+        resolved.child = self.child.with_inline_bidi_levels(levels)?;
+        Some(Box::new(resolved))
+    }
+
+    fn inline_bidi_text(&self) -> Option<Cow<'_, str>> {
+        self.child.inline_bidi_text()
+    }
+
     fn inline_text_edge_letter_spacing(&self) -> Option<Pt> {
         self.child.inline_text_edge_letter_spacing()
     }

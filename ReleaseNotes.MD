@@ -1,3 +1,29 @@
+# Fullbleed Release Notes - 2.5.14
+
+Arabic text with combining marks could duplicate its base letters when copied
+from a PDF. Internal direction wrappers could also replace ordinary spaces in
+the PDF Unicode map. The map now distinguishes combining marks from their base
+cluster and omits internal direction-wrapper glyphs.
+
+Styled inline text now resolves bidirectional levels across its containing
+line. Arabic labels, Latin identifiers and dates retain the surrounding text
+context; explicit isolation keeps a field's contents together through nested
+styles. RTL inline words participate in line wrapping, and inline blocks remain
+atomic objects in the surrounding bidi paragraph.
+
+Standalone `unicode-bidi` rules are no longer discarded as empty declarations.
+HTML direction attributes and bidi elements receive default styling. Author
+rules take precedence over user-agent defaults, including within CSS layers.
+
+The installed-wheel regression uses a pinned OFL Arabic font and independent
+PDF readers to check marks, spaces, styled siblings, date isolation, nested
+styles and narrow paragraphs. CI retains its PDFs, extracted text and previews.
+PDF readers still differ in their reconstruction of mixed-direction lines;
+these checks do not assert identical copy/paste behavior in every reader or
+universal language support. See the [2.5.14 runbook](docs/release/2.5.14-runbook.md).
+
+---
+
 # Fullbleed Release Notes - 2.5.13
 
 This is the published release of the tagged decoration, list numbering and

@@ -11,3 +11,5 @@ tools/data/preview_fonts/sources.json text eol=lf
 # Keep published comparison source hashes portable across checkout platforms.
 benchmarks/pdf_renderers/** text eol=lf
 benchmarks/pdf_renderers/fonts/*.ttf binary
+tests/fixtures/rtl/*.ttf binary
+tests/fixtures/rtl/OFL.txt -text -whitespace
