@@ -1,0 +1,16 @@
+@page { size: letter; margin: 40pt; }
+body { font-family: Inter; font-size: 11pt; color: #183c38; }
+h1 { font-size: 28pt; margin: 16pt 0 8pt; }
+h2 { font-size: 15pt; margin: 12pt 0 4pt; }
+p { margin: 4pt 0; }
+.masthead { padding: 8pt; background: #eef2e5; border-top: 3pt solid #183c38; border-bottom: 2pt solid #183c38; }
+.small { font-size: 8pt; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 6pt; border-bottom: 1pt solid #8a9890; }
+ul, ol { margin: 4pt 0; padding-left: 20pt; }
+li { margin: 2pt 0; }
+dl { margin: 8pt 0; }
+dt { font-weight: bold; }
+figure { margin: 10pt 0; padding: 5pt; border: 1pt solid #8a9890; break-inside: avoid; }
+img { width: 60pt; height: 20pt; }
+figcaption { font-size: 9pt; }

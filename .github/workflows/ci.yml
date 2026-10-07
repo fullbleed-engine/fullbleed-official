@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.11"
+  FULLBLEED_CI_VERSION: "2.5.12"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -148,6 +148,11 @@ jobs:
         run: |
           python -m pip install pypdf==6.19.0
           python -I tools/smoke_text_extraction.py --out target/text-extraction
+
+      - name: Check tagged grouping decoration across installed rendering paths
+        env:
+          FULLBLEED_TEST_INSTALLED_NATIVE: "1"
+        run: python -m pytest tests/test_fullbleed_tagged_decorations.py tests/test_fullbleed_list_figure_semantics.py -q
 
       - name: Retain styled PDF text and preview evidence
         if: always()

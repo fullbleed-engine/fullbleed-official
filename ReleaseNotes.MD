@@ -1,3 +1,34 @@
+# Fullbleed Release Notes - 2.5.12
+
+Release date: October 7, 2026
+
+## Preserve decoration, list labels and figure captions in tagged output
+
+A paragraph with differently sized inline text can emit a grouping tag with
+tagged children. Its borders and backgrounds previously remained outside both
+an MCID and an Artifact sequence, causing PDF/UA validation failures. Decorative
+paint now receives artifact marking when no enclosing MCID covers it. Meaningful
+figure paint keeps its existing structure, including within a grouping child.
+
+Screen-reader-only ActualText also closes an automatic decorative artifact
+before its own marked-content sequence begins.
+
+Lists now emit ListNumbering attributes from their rendered marker styles,
+including item overrides, nested lists and paginated fragments. Generic marker
+kinds and description lists use PDF 2.0 attributes only in PDF 2.0 profiles.
+Single-image figures retain their caption within the semantic Figure; the
+image alternative describes that group without being announced twice.
+
+The regression checks inspect emitted PDF operators and structure trees across ordinary, compiled,
+repeated and reflow rendering with tagged, PDF/UA-1 and PDF/UA-2 profiles.
+The release gate also validates a richer specimen with decorated inline text,
+table headers, nested lists and captions before and after illustrations.
+The corrections change affected PDF structure; it is not a blanket accessibility
+or conformance claim. Keep reviewing each final document and its validation
+reports. See the [2.5.12 runbook](docs/release/2.5.12-runbook.md).
+
+---
+
 # Fullbleed Release Notes - 2.5.11
 
 Release date: October 6, 2026

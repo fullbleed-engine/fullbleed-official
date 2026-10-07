@@ -1,8 +1,9 @@
 use crate::canvas::{
     Canvas, Command, CompiledMaskLayer, ImageSourceClip, META_DIAGNOSTIC_SCOPE_BEGIN_KEY,
-    META_DIAGNOSTIC_SCOPE_END_KEY, META_NAMED_STRING_PREFIX, META_READING_LAYOUT_KEY,
-    META_READING_TEXT_BEGIN_KEY, META_READING_TEXT_END_KEY, META_READING_TEXT_KEY,
-    META_RUNNING_ELEMENT_PREFIX, PerspectiveContext, ProjectiveTransform,
+    META_DIAGNOSTIC_SCOPE_END_KEY, META_HTML_FIGURE_GROUP_KEY, META_LIST_NUMBERING_KEY,
+    META_NAMED_STRING_PREFIX, META_READING_LAYOUT_KEY, META_READING_TEXT_BEGIN_KEY,
+    META_READING_TEXT_END_KEY, META_READING_TEXT_KEY, META_RUNNING_ELEMENT_PREFIX,
+    PerspectiveContext, ProjectiveTransform,
 };
 use crate::font::{FontRegistry, GlyphOutlineCommand, RegisteredPositionedGlyphOutline};
 use crate::perf::PerfLogger;
@@ -25315,6 +25316,8 @@ pub struct ContainerFlowable {
     contain_floats: bool,
     self_visible: bool,
     tag_role: Option<Arc<str>>,
+    list_numbering: Option<&'static str>,
+    html_figure_group: bool,
     establishes_abs_containing_block: bool,
     establishes_stacking_context: bool,
     font_size: Pt,
@@ -25408,6 +25411,8 @@ impl ContainerFlowable {
             contain_floats: false,
             self_visible: true,
             tag_role: None,
+            list_numbering: None,
+            html_figure_group: false,
             establishes_abs_containing_block: false,
             establishes_stacking_context: false,
             font_size,
@@ -25824,6 +25829,16 @@ impl ContainerFlowable {
 
     pub fn with_tag_role(mut self, role: impl Into<Arc<str>>) -> Self {
         self.tag_role = Some(role.into());
+        self
+    }
+
+    pub(crate) fn with_list_numbering(mut self, numbering: &'static str) -> Self {
+        self.list_numbering = Some(numbering);
+        self
+    }
+
+    pub(crate) fn with_html_figure_group(mut self) -> Self {
+        self.html_figure_group = true;
         self
     }
 
@@ -34245,6 +34260,8 @@ impl Flowable for ContainerFlowable {
             contain_floats: self.contain_floats,
             self_visible: self.self_visible,
             tag_role: self.tag_role.clone(),
+            list_numbering: self.list_numbering,
+            html_figure_group: self.html_figure_group,
             establishes_abs_containing_block: self.establishes_abs_containing_block,
             establishes_stacking_context: self.establishes_stacking_context,
             font_size: self.font_size,
@@ -34345,6 +34362,8 @@ impl Flowable for ContainerFlowable {
             contain_floats: self.contain_floats,
             self_visible: self.self_visible,
             tag_role: self.tag_role.clone(),
+            list_numbering: self.list_numbering,
+            html_figure_group: self.html_figure_group,
             establishes_abs_containing_block: self.establishes_abs_containing_block,
             establishes_stacking_context: self.establishes_stacking_context,
             font_size: self.font_size,
@@ -35071,6 +35090,14 @@ impl Flowable for ContainerFlowable {
         canvas.begin_compositor_scope();
         let tagged = self.tag_role.as_ref().map(|role| {
             canvas.begin_tag(role.as_ref(), None, None, None, None, true);
+            if self.html_figure_group {
+                canvas.meta(META_HTML_FIGURE_GROUP_KEY, "true");
+            }
+            if role.as_ref() == "L" {
+                if let Some(numbering) = self.list_numbering {
+                    canvas.meta(META_LIST_NUMBERING_KEY, numbering);
+                }
+            }
         });
         let cache = self.cached_layout(avail_width, avail_height);
         let margin = cache.margin;
