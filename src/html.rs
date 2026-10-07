@@ -11293,6 +11293,8 @@ fn container_flowable_with_role_options(
                 if role == "L" {
                     container = container
                         .with_list_numbering(options.list_numbering.unwrap_or("Description"));
+                } else if role == "Figure" {
+                    container = container.with_html_figure_group();
                 }
             }
             return Some(Box::new(container) as Box<dyn Flowable>);
@@ -11429,6 +11431,8 @@ fn container_flowable_with_role_options(
         if role == "L" {
             container =
                 container.with_list_numbering(options.list_numbering.unwrap_or("Description"));
+        } else if role == "Figure" {
+            container = container.with_html_figure_group();
         }
     }
     Some(Box::new(container) as Box<dyn Flowable>)
@@ -12983,7 +12987,12 @@ fn flex_container_flowables(
                 "figcaption" => Some("Caption"),
                 _ => None,
             }) {
-        container.with_tag_role(role)
+        let container = container.with_tag_role(role);
+        if role == "Figure" {
+            container.with_html_figure_group()
+        } else {
+            container
+        }
     } else {
         container
     };

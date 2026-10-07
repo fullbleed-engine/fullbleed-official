@@ -1,6 +1,6 @@
 use crate::canvas::{
-    Command, Document, ImageSourceClip, META_LIST_NUMBERING_KEY, Page, PageGeometry,
-    ResolvedImageSourceCrop,
+    Command, Document, ImageSourceClip, META_HTML_FIGURE_GROUP_KEY, META_LIST_NUMBERING_KEY, Page,
+    PageGeometry, ResolvedImageSourceCrop,
 };
 use crate::debug::json_escape;
 use crate::font::{
@@ -256,6 +256,7 @@ struct TagRecord {
     table_document: usize,
     structure_id: Option<String>,
     list_numbering: Option<String>,
+    html_figure_group: bool,
 }
 
 fn list_attributes(tag: &TagRecord, pdf20: bool) -> Option<String> {
@@ -290,7 +291,8 @@ fn normalize_figure_structure(mut records: Vec<TagRecord>) -> Vec<TagRecord> {
         }
     }
     for index in 0..records.len() {
-        if records[index].role != "Figure"
+        if !records[index].html_figure_group
+            || records[index].role != "Figure"
             || records[index].mcid.is_some()
             || records[index].alt.is_some()
             || records[index].actual_text.is_some()
@@ -394,6 +396,7 @@ fn normalize_definition_list_structure(records: Vec<TagRecord>) -> Vec<TagRecord
             table_document: 0,
             structure_id: None,
             list_numbering: (role == "L").then(|| "Description".to_owned()),
+            html_figure_group: false,
         }
     }
 
@@ -3910,6 +3913,20 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                     {
                         apply_list_numbering(&mut self.tag_records, &tag_stack, value);
                     }
+                    if tag_enabled
+                        && explicit_artifact_depth == 0
+                        && suppressed_tag_depth == 0
+                        && key == META_HTML_FIGURE_GROUP_KEY
+                        && value == "true"
+                    {
+                        if let Some(record) = tag_stack
+                            .last()
+                            .and_then(|index| self.tag_records.get_mut(*index))
+                        {
+                            record.html_figure_group =
+                                record.role == "Figure" && record.mcid.is_none();
+                        }
+                    }
                 }
                 Command::BeginTag {
                     role,
@@ -3950,6 +3967,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             table_document: self.current_tag_document,
                             structure_id: None,
                             list_numbering: None,
+                            html_figure_group: false,
                         });
                         tag_stack.push(idx);
                     }
@@ -3986,6 +4004,7 @@ impl<'a, W: Write> PdfStreamWriter<'a, W> {
                             table_document: self.current_tag_document,
                             structure_id: None,
                             list_numbering: None,
+                            html_figure_group: false,
                         });
                         tag_stack.push(idx);
                     }
@@ -6912,6 +6931,7 @@ fn collect_tag_records(document: &Document) -> Vec<TagRecord> {
                         table_document: 0,
                         structure_id: None,
                         list_numbering: None,
+                        html_figure_group: false,
                     });
                     stack.push(idx);
                 }
@@ -6940,6 +6960,7 @@ fn collect_tag_records(document: &Document) -> Vec<TagRecord> {
                         table_document: 0,
                         structure_id: None,
                         list_numbering: None,
+                        html_figure_group: false,
                     });
                     stack.push(idx);
                 }
@@ -7790,6 +7811,7 @@ fn render_page(
                             table_document: 0,
                             structure_id: None,
                             list_numbering: None,
+                            html_figure_group: false,
                         });
                         tag_stack.push(idx);
                     }
@@ -7828,6 +7850,7 @@ fn render_page(
                             table_document: 0,
                             structure_id: None,
                             list_numbering: None,
+                            html_figure_group: false,
                         });
                         tag_stack.push(idx);
                     }
@@ -10085,6 +10108,7 @@ mod tests {
             table_document: 0,
             structure_id: None,
             list_numbering: None,
+            html_figure_group: false,
         };
         let normalized = normalize_definition_list_structure(vec![
             record("P"),
@@ -11025,6 +11049,36 @@ mod tests {
         let content = String::from_utf8_lossy(&content);
         assert!(content.find("/Artifact BMC").unwrap() < content.find(" re\nf\n").unwrap());
         assert!(content.find("EMC\n/Figure").is_some());
+    }
+
+    #[test]
+    fn tagged_manual_figure_group_keeps_author_supplied_structure() {
+        let tag = |group_only, mcid, alt: Option<&str>| Command::BeginTag {
+            role: "Figure".to_owned(),
+            mcid,
+            alt: alt.map(str::to_owned),
+            scope: None,
+            table_id: None,
+            col_index: None,
+            group_only,
+            column_span: None,
+            row_span: None,
+            table_semantics: None,
+        };
+        let doc = one_page_document(vec![
+            tag(true, None, None),
+            tag(false, Some(0), Some("Component description")),
+            Command::EndTag,
+            Command::EndTag,
+        ]);
+        let mut options = PdfOptions::default();
+        options.pdf_profile = PdfProfile::Tagged;
+        let bytes = document_to_pdf_with_metrics_and_registry(&doc, None, None, &options)
+            .expect("render manually tagged figures");
+        let text = String::from_utf8_lossy(&bytes);
+        assert_eq!(text.matches("/S /Figure ").count(), 2);
+        assert!(!text.contains("/S /Sect "));
+        assert!(!text.contains("/S /Span "));
     }
 
     #[test]

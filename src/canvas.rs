@@ -25,6 +25,7 @@ pub const META_READING_TEXT_END_KEY: &str = "fb.reading.text.end";
 // Semantic metadata travels through the same retained command stream as tags,
 // including compiled/reflow rendering, without changing BeginTag's public shape.
 pub(crate) const META_LIST_NUMBERING_KEY: &str = "__fb_list_numbering";
+pub(crate) const META_HTML_FIGURE_GROUP_KEY: &str = "__fb_html_figure_group";
 
 /// A compact projective vector transform retained only while the display list
 /// is being compiled. Geometry is lowered to ordinary PDF path commands at
