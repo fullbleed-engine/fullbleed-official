@@ -34,7 +34,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.14'
-      - run: python -m pip install --only-binary=:all: pypdf==6.19.0
+      - run: |
+          python -m pip install --only-binary=:all: pypdf==6.19.0
       - name: Build with public wheels and exercise the container
         env:
           PYTHON_IMAGE: ${{ matrix.base.image }}
