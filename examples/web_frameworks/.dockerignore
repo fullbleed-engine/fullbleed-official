@@ -8,12 +8,15 @@
 !fastapi_app.py
 !LICENSE
 !templates/
+templates/**
 !templates/invoice.html
 !templates/invoice.css
 !static/
+static/**
 !static/index.html
 !static/invoice.png
 !fonts/
+fonts/**
 !fonts/*.ttf
 !fonts/*-OFL.txt
 !fonts/sources.json

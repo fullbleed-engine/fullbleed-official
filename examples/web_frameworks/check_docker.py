@@ -15,7 +15,9 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import shutil
 import subprocess
+import tempfile
 import time
 from urllib.error import URLError
 from uuid import uuid4
@@ -101,6 +103,43 @@ def pdf_check(data: bytes) -> dict:
             "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
 
 
+def check_build_context(image: str, context_image: str, out: Path) -> dict:
+    """Exercise Docker's ignore rules using synthetic files, never real secrets."""
+    required = ["Dockerfile", "requirements-fastapi.txt", "requirements-docker.txt",
+                "invoice.py", "demo.py", "fastapi_app.py", "LICENSE",
+                "templates/invoice.html", "templates/invoice.css",
+                "static/index.html", "static/invoice.png", "fonts/sources.json"]
+    required += ["fonts/" + item["file"] for item in json.loads((ROOT / "fonts/sources.json").read_text())["files"]]
+    excluded = [".env", ".git/config", ".venv/secret.txt", "output/private.pdf",
+                "templates/.env", "templates/nested/private.html",
+                "static/.env", "static/nested/private.html", "fonts/.env", "fonts/nested/private.ttf"]
+    with tempfile.TemporaryDirectory(prefix="fullbleed-docker-context-") as directory:
+        context = Path(directory).resolve()
+        assert context.is_relative_to(Path(tempfile.gettempdir()).resolve())
+        for filename in [".dockerignore", *required]:
+            destination = (context / filename).resolve()
+            assert destination.is_relative_to(context)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / filename, destination)
+        for filename in excluded:
+            destination = context / filename
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text("synthetic exclusion probe; not a credential\n")
+        # COPY the whole filtered context, independent of the application's COPY
+        # allowlist, to check what would reach a remote builder.
+        code = ("from pathlib import Path; root=Path('/context'); "
+                + "assert all((root / p).is_file() for p in " + repr(required) + "); "
+                + "assert not any((root / p).exists() for p in " + repr(excluded) + ")")
+        dockerfile = "FROM " + image + "\nCOPY . /context/\nRUN " + json.dumps(["python", "-c", code]) + "\n"
+        with (out / "build-context.log").open("w", encoding="utf-8") as log:
+            result = subprocess.run(["docker", "build", "--progress", "plain", "--tag", context_image,
+                                     "--file", "-", str(context)], input=dockerfile, text=True,
+                                    stdout=log, stderr=subprocess.STDOUT, timeout=120)
+        if result.returncode:
+            raise RuntimeError(f"Build context exclusions failed; inspect {out / 'build-context.log'}")
+    return {"required_files_present": len(required), "synthetic_paths_excluded": excluded}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, required=True)
@@ -111,9 +150,11 @@ def main() -> None:
     name = "fullbleed-invoice-check-" + uuid4().hex
     offline_name = name + "-offline"
     image = name + ":test"
+    context_image = name + ":context"
     receipt = {"ok": False, "checked_at": datetime.now(timezone.utc).isoformat(),
                "base_image_override": args.base_image, "limits": LIMITS}
     built = False
+    context_built = False
     started = False
     try:
         receipt["docker_version"] = json.loads(docker("version", "--format", "{{json .}}"))
@@ -126,6 +167,8 @@ def main() -> None:
         if result.returncode:
             raise RuntimeError(f"Image build failed; inspect {out / 'build.log'}")
         built = True
+        receipt["build_context"] = check_build_context(image, context_image, out)
+        context_built = True
         details = json.loads(docker("image", "inspect", image))[0]
         receipt["image"] = {key: details[key] for key in ["Id", "Architecture", "Os", "Size"]}
         assert details["Config"]["User"] == "10001:10001"
@@ -194,9 +237,10 @@ def main() -> None:
         for target in [name, offline_name]:
             result = subprocess.run(["docker", "container", "rm", "--force", target], capture_output=True, text=True)
             cleanup.append({"container": target, "removed_or_absent": result.returncode == 0 or "No such container" in result.stderr})
-        if built:
-            result = subprocess.run(["docker", "image", "rm", image], capture_output=True, text=True)
-            cleanup.append({"image_tag": image, "removed": result.returncode == 0})
+        for tag, created in [(context_image, context_built), (image, built)]:
+            if created:
+                result = subprocess.run(["docker", "image", "rm", tag], capture_output=True, text=True)
+                cleanup.append({"image_tag": tag, "removed": result.returncode == 0})
         receipt["cleanup"] = cleanup
         receipt["scope"] = "Actual local-container HTTP, offline render, runtime restrictions, independent PDF text/fonts, and native preview. Not a hosted deployment, capacity benchmark, or conformance claim."
         (out / "verification.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")

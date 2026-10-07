@@ -115,7 +115,8 @@ docker build --build-arg PYTHON_IMAGE=python:3.14.8-alpine3.24@sha256:f6a589d43c
 checks both base images on native Linux x64 and ARM64 runners. It builds with
 published wheels and exercises real downloads, four simultaneous requests,
 404/405 responses, independent PDF text/font checks, a matching native preview,
-non-root/read-only operation, and normal shutdown. A separate container verifies
+non-root/read-only operation, normal shutdown, and build-context exclusions
+using synthetic secret files. A separate container verifies
 the same render with `--network none`. PDFs, previews, logs, resolved packages,
 wheel hashes, and runtime settings are retained as CI artifacts.
 
