@@ -8,24 +8,32 @@ browser PDF oracles, rasterization, comparison, and reporting remain upstream.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
+from datetime import datetime, timezone
+from email.parser import BytesParser
 import fnmatch
 import hashlib
-import os
+import json
+import re
+import shlex
 import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Sequence
+import uuid
+import zipfile
 
 
 IRONPRESS_REPOSITORY = "https://github.com/gastongouron/ironpress.git"
 IRONPRESS_COMMIT = "0d1e53b6d8174d0a5059a8696c24e62759381f6d"
 IMAGE_TAG = "fullbleed-ironpress-parity:0d1e53b6"
 LINUX_WHEEL_PATTERNS = (
-    "fullbleed-2.2.3-cp310-abi3-manylinux*_x86_64.whl",
-    "fullbleed-2.2.3-cp310-abi3-linux_x86_64.whl",
+    "fullbleed-*-cp310-abi3-manylinux*_x86_64.whl",
+    "fullbleed-*-cp310-abi3-linux_x86_64.whl",
 )
+CORPUS_FIXTURES = 1662
 
 
 def run(
@@ -90,7 +98,7 @@ def ensure_checkout(root: Path, patch: Path) -> Path:
     if head != IRONPRESS_COMMIT:
         raise RuntimeError(f"unexpected IronPress checkout HEAD: {head}")
     run(["git", "apply", "--check", "--reverse", str(patch)], cwd=checkout)
-    changed = output(["git", "diff", "--name-only"], cwd=checkout).splitlines()
+    changed = output(["git", "diff", "HEAD", "--name-only"], cwd=checkout).splitlines()
     if changed != ["tests/parity_support/render.rs"]:
         raise RuntimeError(f"unexpected IronPress checkout changes: {changed}")
     return checkout
@@ -183,6 +191,27 @@ def ensure_source_volume(checkout: Path, patch_hash: str) -> str:
         raise RuntimeError(
             f"source volume {volume} is not the pinned IronPress checkout: {head}"
         )
+    # A reused volume can outlive its source checkout. Verify its actual
+    # tracked inputs too; generated reports are the only additional changes
+    # allowed after a previous run.
+    probe = ["docker", "run", "--rm", "--volume", f"{volume}:/ironpress:ro"]
+    changed = output([
+        *probe, IMAGE_TAG, "git", "-C", "/ironpress", "diff", "HEAD", "--name-only",
+    ]).splitlines()
+    generated = ("tests/parity/report.json", "tests/parity/REPORT.md")
+    generated_dirs = tuple(f"tests/parity/{name}/" for name in ("reports", "refs", "out", "diffs", "pdfs"))
+    unexpected = [
+        name for name in changed
+        if name != "tests/parity_support/render.rs"
+        and name not in generated and not name.startswith(generated_dirs)
+    ]
+    if unexpected:
+        raise RuntimeError(f"source volume has modified upstream inputs: {unexpected}")
+    patch = repository_root() / "tools" / "ironpress_fullbleed.patch"
+    run([
+        *probe, "--volume", f"{patch.resolve()}:/candidate.patch:ro",
+        IMAGE_TAG, "git", "-C", "/ironpress", "apply", "--check", "--reverse", "/candidate.patch",
+    ])
     return volume
 
 
@@ -205,7 +234,103 @@ def discover_wheel(root: Path, requested: Path | None) -> Path:
         raise RuntimeError("--wheel must be inside the FullBleed repository") from error
     if not any(fnmatch.fnmatchcase(wheel.name, pattern) for pattern in LINUX_WHEEL_PATTERNS):
         raise RuntimeError(f"not a compatible Linux x86-64 FullBleed wheel: {wheel.name}")
+    wheel_identity(wheel)
     return wheel
+
+
+def wheel_identity(wheel: Path) -> dict[str, str]:
+    """Check package identity as well as the wheel's Linux/abi3 filename."""
+    match = re.fullmatch(
+        r"fullbleed-(?P<version>[A-Za-z0-9_.!+]+)-cp310-abi3-"
+        r"(?P<platforms>[^/\\]+)\.whl", wheel.name
+    )
+    if match is None or not all(
+        re.fullmatch(r"(?:linux|manylinux(?:\d+|_\d+_\d+))_x86_64", tag)
+        for tag in match["platforms"].split(".")
+    ):
+        raise RuntimeError(f"not a compatible Linux x86-64 FullBleed wheel: {wheel.name}")
+    with zipfile.ZipFile(wheel) as archive:
+        metadata = [name for name in archive.namelist() if name.endswith(".dist-info/METADATA")]
+        if len(metadata) != 1:
+            raise RuntimeError("wheel must contain exactly one package METADATA file")
+        package = BytesParser().parsebytes(archive.read(metadata[0]))
+    if package.get("Name", "").lower() != "fullbleed" or package.get("Version") != match["version"]:
+        raise RuntimeError("wheel filename and FullBleed package metadata disagree")
+    return {"filename": wheel.name, "version": match["version"], "sha256": sha256_file(wheel)}
+
+
+def check_full_report(destination: Path, invocation: str) -> dict[str, object]:
+    """Reject stale, incomplete, or inconsistent evidence, even after exit zero."""
+    problems: list[str] = []
+    try:
+        report_path = destination / "report.json"
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        if report.get("invocation_id") != invocation:
+            problems.append("report invocation does not match this run")
+        if report.get("run_complete") is not True:
+            problems.append("upstream run is incomplete")
+        fixtures = [
+            fixture
+            for category in report["categories"]
+            for feature in category["features"]
+            for fixture in feature["fixtures"]
+        ]
+        counts = Counter(fixture["status"] for fixture in fixtures)
+        identities = {(fixture["category"], fixture["id"]) for fixture in fixtures}
+        overall = report["overall"]
+        if len(fixtures) != CORPUS_FIXTURES or len(identities) != CORPUS_FIXTURES:
+            problems.append("report does not contain the complete unique pinned corpus")
+        expected = {
+            "pass": counts["PASS"], "fail": counts["FAIL"],
+            "reference_disputed": counts["REFERENCE-DISPUTED"], "total": len(fixtures),
+        }
+        if set(counts) - {"PASS", "FAIL", "REFERENCE-DISPUTED"} or any(
+            overall.get(key) != value for key, value in expected.items()
+        ):
+            problems.append("summary counts do not match fixture verdicts")
+        digest = sha256_file(report_path)
+        markers = {
+            "REPORT.md": (
+                f"<!-- parity-invocation-id: {invocation} -->",
+                f"<!-- parity-report-json-sha256: {digest} -->",
+            ),
+            "reports/index.html": (
+                f'<meta name="parity-invocation-id" content="{invocation}">',
+                f'<meta name="parity-report-json-sha256" content="{digest}">',
+            ),
+        }
+        for name, required in markers.items():
+            content = (destination / name).read_text(encoding="utf-8")
+            if not all(marker in content for marker in required):
+                problems.append(f"{name} is not bound to the same report")
+        return {
+            "verified_complete": not problems,
+            "overall": overall,
+            "gate_failure": report.get("gate_failure"),
+            "report_sha256": digest,
+            "problems": problems,
+        }
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        problems.append(f"cannot verify full report: {error}")
+        return {"verified_complete": False, "problems": problems}
+
+
+def write_run_manifest(destination: Path, provenance: dict[str, object]) -> None:
+    """Retain identities and an inventory without rewriting upstream reports."""
+    (destination / "fullbleed-run.json").write_text(
+        json.dumps(provenance, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    files = {
+        path.relative_to(destination).as_posix(): {
+            "bytes": path.stat().st_size, "sha256": sha256_file(path),
+        }
+        for path in sorted(destination.rglob("*"))
+        if path.is_file() and path != destination / "manifest.json"
+    }
+    (destination / "manifest.json").write_text(
+        json.dumps({"schema": "fullbleed.evidence_manifest.v1", "files": files}, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def latest_diagnostic_path(volume: str) -> str:
@@ -225,9 +350,11 @@ def latest_diagnostic_path(volume: str) -> str:
 
 
 def copy_evidence(
-    volume: str, destination: Path, *, diagnostic_path: str | None = None
-) -> None:
+    volume: str, destination: Path, *, diagnostic_path: str | None = None,
+    keep_pdfs: bool = False,
+) -> list[str]:
     destination.mkdir(parents=True, exist_ok=True)
+    problems: list[str] = []
     container = output(
         [
             "docker",
@@ -239,6 +366,12 @@ def copy_evidence(
         ]
     )
     try:
+        license_copy = run([
+            "docker", "cp", f"{container}:/ironpress/LICENSE",
+            str(destination / "IRONPRESS-LICENSE"),
+        ], check=False)
+        if license_copy.returncode:
+            problems.append("could not retain upstream LICENSE")
         if diagnostic_path:
             run(
                 [
@@ -249,21 +382,30 @@ def copy_evidence(
                 ],
             )
         else:
-            for relative in (
+            paths = [
                 "tests/parity/report.json",
                 "tests/parity/REPORT.md",
                 "tests/parity/reports",
-            ):
-                run(
+                "tests/parity/refs",
+                "tests/parity/out",
+                "tests/parity/diffs",
+            ]
+            if keep_pdfs:
+                paths.append("tests/parity/pdfs")
+            for relative in paths:
+                copied = run(
                     [
                         "docker",
                         "cp",
                         f"{container}:/ironpress/{relative}",
                         str(destination),
-                    ]
+                    ], check=False,
                 )
+                if copied.returncode:
+                    problems.append(f"could not retain {relative}")
     finally:
         run(["docker", "rm", container], capture=True, check=False)
+    return problems
 
 
 def parser() -> argparse.ArgumentParser:
@@ -285,15 +427,39 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit("git and docker are required")
 
     root = repository_root()
+    # Reject invalid inputs before building an image or populating caches.
+    wheel = discover_wheel(root, arguments.wheel)
+    invocation = f"fullbleed-{uuid.uuid4().hex}"
+    evidence = arguments.evidence_dir or root / "target" / "ironpress-evidence" / invocation
+    if evidence.exists() and (not evidence.is_dir() or any(evidence.iterdir())):
+        raise RuntimeError(f"evidence directory must be empty: {evidence}")
+    evidence.mkdir(parents=True, exist_ok=True)
     patch = root / "tools" / "ironpress_fullbleed.patch"
     patch_hash = sha256_file(patch)
+    provenance: dict[str, object] = {
+        "schema": "fullbleed.ironpress_run.v1",
+        "invocation_id": invocation,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "scope": "filtered_diagnostic" if arguments.only else "full_corpus",
+        "filter": arguments.only,
+        "threads_per_adapter": arguments.threads,
+        "wheel": wheel_identity(wheel),
+        "runner_commit": output(["git", "rev-parse", "HEAD"], cwd=root),
+        "runner_sha256": sha256_file(Path(__file__)),
+        "upstream_repository": IRONPRESS_REPOSITORY,
+        "upstream_commit": IRONPRESS_COMMIT,
+        "patch_sha256": patch_hash,
+        "adapter_sha256": sha256_file(root / "tools" / "ironpress_fullbleed_adapter.py"),
+        "dockerfile_sha256": sha256_file(root / "tools" / "ironpress_parity.Dockerfile"),
+        "gate_passed": False,
+    }
+    write_run_manifest(evidence, provenance)
     ensure_image(root, rebuild=arguments.rebuild_image)
+    provenance["image_id"] = output(["docker", "image", "inspect", "--format", "{{.Id}}", IMAGE_TAG])
     checkout = ensure_checkout(root, patch)
     source_volume = ensure_source_volume(checkout, patch_hash)
-    wheel = discover_wheel(root, arguments.wheel)
     wheel_in_container = "/fullbleed/" + wheel.relative_to(root).as_posix()
 
-    invocation = f"fullbleed-{int(time.time())}-{os.getpid()}"
     command = [
         "docker",
         "run",
@@ -335,27 +501,39 @@ def main(argv: Sequence[str] | None = None) -> int:
             "sh",
             "-lc",
             f"python -m pip install --disable-pip-version-check --no-index "
-            f"--force-reinstall {wheel_in_container} >/dev/null && "
-            "cargo test --test feature_parity -- --ignored --nocapture --exact feature_parity",
+            f"--force-reinstall {shlex.quote(wheel_in_container)} >/dev/null && "
+            "cargo test --locked --test feature_parity -- --ignored --nocapture --exact feature_parity",
         ]
     )
 
     started = time.perf_counter()
     result = run(command, check=False)
     elapsed = time.perf_counter() - started
-    evidence = arguments.evidence_dir or (
-        root
-        / "target"
-        / "ironpress-evidence"
-        / (arguments.only or invocation).replace("/", "-")
-    )
     diagnostic_path = latest_diagnostic_path(source_volume) if arguments.only else None
     if arguments.only and not diagnostic_path:
         raise RuntimeError("IronPress produced no filtered diagnostic evidence directory")
-    copy_evidence(source_volume, evidence, diagnostic_path=diagnostic_path)
+    copy_problems = copy_evidence(
+        source_volume, evidence, diagnostic_path=diagnostic_path, keep_pdfs=arguments.keep_pdfs,
+    )
+    checked = check_full_report(evidence, invocation) if not arguments.only else {
+        "verified_complete": False, "problems": ["filtered diagnostics cannot satisfy the full-corpus gate"],
+    }
+    provenance.update({
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "elapsed_seconds": elapsed,
+        "process_exit_code": result.returncode,
+        "report_check": checked,
+        "copy_problems": copy_problems,
+        "gate_passed": (
+            result.returncode == 0 and checked["verified_complete"]
+            and not checked.get("gate_failure") and not copy_problems
+            and checked.get("overall", {}).get("fail") == 0
+        ),
+    })
+    write_run_manifest(evidence, provenance)
     print(f"IronPress elapsed: {elapsed:.3f}s", file=sys.stderr)
     print(f"Evidence: {evidence.resolve()}", file=sys.stderr)
-    return result.returncode
+    return result.returncode or (0 if provenance["gate_passed"] else 1)
 
 
 if __name__ == "__main__":

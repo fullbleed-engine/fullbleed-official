@@ -1,0 +1,79 @@
+name: Independent CSS corpus
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_version:
+        description: "Published Fullbleed version to compare with the pinned corpus"
+        required: true
+        default: "2.5.14"
+        type: string
+  pull_request:
+    paths:
+      - .github/workflows/ironpress-parity.yml
+      - tools/run_ironpress_parity.py
+      - tools/ironpress_fullbleed_adapter.py
+      - tools/ironpress_fullbleed.patch
+      - tools/ironpress_parity.Dockerfile
+      - tests/test_ironpress_parity_runner.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ironpress-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  compare:
+    name: Published wheel against pinned IronPress corpus
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      FULLBLEED_PARITY_VERSION: ${{ inputs.package_version || '2.5.14' }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Check runner and adapter failure controls
+        run: |
+          python -m pip install pytest
+          python -m pytest tests/test_ironpress_parity_runner.py tests/test_ironpress_fullbleed_adapter.py -q
+      - name: Download the exact published Linux wheel
+        shell: python
+        run: |
+          import os, re, subprocess, sys
+          version = os.environ["FULLBLEED_PARITY_VERSION"]
+          if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:[a-z]+[0-9]+)?", version):
+              raise SystemExit("Use an exact published version, such as 2.5.14")
+          subprocess.run([
+              sys.executable, "-m", "pip", "--isolated", "download",
+              "--index-url", "https://pypi.org/simple", "--no-deps", "--only-binary=:all:",
+              "--platform", "manylinux2014_x86_64", "--implementation", "cp",
+              "--python-version", "310", "--abi", "abi3",
+              "--dest", "target/ironpress-wheel", f"fullbleed=={version}",
+          ], check=True)
+      - name: Run the unchanged upstream comparator and retain all verdicts
+        shell: bash
+        run: |
+          mkdir -p target/ironpress-logs
+          set -o pipefail
+          python tools/run_ironpress_parity.py \
+            --wheel target/ironpress-wheel/fullbleed-*.whl \
+            --keep-pdfs --evidence-dir target/ironpress-evidence/current \
+            2>&1 | tee target/ironpress-logs/run.log
+      - name: Retain report, images, PDFs, hashes, and failure logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ironpress-fullbleed-${{ env.FULLBLEED_PARITY_VERSION }}-${{ github.run_id }}
+          path: |
+            target/ironpress-evidence/
+            target/ironpress-logs/
+          if-no-files-found: error
+          compression-level: 9
+          retention-days: 7
