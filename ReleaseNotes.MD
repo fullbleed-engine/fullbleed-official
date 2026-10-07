@@ -1,3 +1,17 @@
+# Fullbleed Release Notes - 2.5.13
+
+This is the published release of the tagged decoration, list numbering and
+figure-caption corrections described below for 2.5.12. The 2.5.12 tag was
+retained, but its registry workflows stopped before uploading packages because
+the README's wheel example still named the previous version.
+
+The wheel example now matches the release. Pull-request CI also runs the
+release metadata check so future version mismatches are caught before tagging.
+The engine implementation is identical to the tested 2.5.12 source.
+See the [2.5.13 runbook](docs/release/2.5.13-runbook.md).
+
+---
+
 # Fullbleed Release Notes - 2.5.12
 
 Release date: October 7, 2026
