@@ -6186,10 +6186,72 @@ fn is_base14_font(name: &str) -> bool {
     )
 }
 
+fn is_pdf_direction_wrapper(codepoint: u32) -> bool {
+    matches!(codepoint, 0x202a..=0x202e | 0x2066..=0x2069)
+}
+
+fn shaped_glyph_unicode_map(
+    text: &str,
+    glyphs: &[crate::text_shape::ShapedGlyph],
+) -> BTreeMap<u16, String> {
+    let mut clusters: BTreeMap<usize, Vec<&crate::text_shape::ShapedGlyph>> = BTreeMap::new();
+    for glyph in glyphs {
+        if !is_pdf_direction_wrapper(glyph.codepoint) {
+            clusters
+                .entry(glyph.cluster as usize)
+                .or_default()
+                .push(glyph);
+        }
+    }
+    let boundaries: Vec<usize> = clusters.keys().copied().chain([text.len()]).collect();
+    let mut map = BTreeMap::new();
+    for (index, (start, cluster)) in clusters.iter().enumerate() {
+        let Some(source) = text.get(*start..boundaries[index + 1]) else {
+            continue;
+        };
+        let mut remaining: Vec<char> = source
+            .chars()
+            // Direction wrappers are paint implementation details. Preserve
+            // authored joiners and variation selectors in their source cluster.
+            .filter(|ch| !is_pdf_direction_wrapper(*ch as u32))
+            .collect();
+        // Marks share the base's cluster for shaping and positioning. Mapping
+        // every mark to that entire cluster duplicates the base on copy/paste.
+        // Reserve matching mark scalars for their own glyph before assigning
+        // the remaining source to the base or ligature.
+        let mut mark_sources = BTreeMap::new();
+        for glyph in cluster {
+            if crate::unicode_data::combining_class(glyph.codepoint) == 0 {
+                continue;
+            }
+            if let Some(position) = remaining
+                .iter()
+                .position(|ch| *ch as u32 == glyph.codepoint)
+            {
+                mark_sources.insert(glyph.glyph_id, remaining.remove(position).to_string());
+            }
+        }
+        let base_source: String = remaining.into_iter().collect();
+        for glyph in cluster {
+            if glyph.glyph_id == 0 {
+                continue;
+            }
+            let source = mark_sources.get(&glyph.glyph_id).unwrap_or(&base_source);
+            if !source.is_empty() {
+                map.entry(glyph.glyph_id).or_insert_with(|| source.clone());
+            }
+        }
+    }
+    map
+}
+
 fn shape_text_native(font_data: &[u8], text: &str) -> Option<ShapedText> {
     let (_, clean_text) = crate::text_shape::decode_shape_options(text);
     let face = SfntFace::parse(font_data, 0).ok()?;
-    let shaped = crate::text_shape::shape(font_data, text)?;
+    let mut shaped = crate::text_shape::shape(font_data, text)?;
+    shaped
+        .glyphs
+        .retain(|glyph| !is_pdf_direction_wrapper(glyph.codepoint));
     let units_per_em = shaped.units_per_em.max(1);
     if shaped.glyphs.is_empty() {
         return None;
@@ -6202,36 +6264,7 @@ fn shape_text_native(font_data: &[u8], text: &str) -> Option<ShapedText> {
         .collect::<Vec<_>>()
         .into();
 
-    // Build a map from glyph id -> source unicode string (cluster range).
-    let mut boundaries: Vec<usize> = shaped
-        .glyphs
-        .iter()
-        .map(|glyph| glyph.cluster as usize)
-        .collect();
-    boundaries.sort_unstable();
-    boundaries.dedup();
-    if boundaries.last().copied() != Some(clean_text.len()) {
-        boundaries.push(clean_text.len());
-    }
-
-    let mut glyph_map: BTreeMap<u16, String> = BTreeMap::new();
-    for glyph in &shaped.glyphs {
-        let start = (glyph.cluster as usize).min(clean_text.len());
-        let idx = match boundaries.binary_search(&start) {
-            Ok(i) => i,
-            Err(i) => i,
-        };
-        let end = boundaries
-            .get(idx + 1)
-            .copied()
-            .unwrap_or(clean_text.len())
-            .min(clean_text.len());
-        if start < end {
-            glyph_map
-                .entry(glyph.glyph_id)
-                .or_insert_with(|| clean_text[start..end].to_string());
-        }
-    }
+    let glyph_map = shaped_glyph_unicode_map(clean_text, &shaped.glyphs);
 
     // Build a TJ array.
     let mut parts: Vec<String> = Vec::new();
@@ -9492,35 +9525,7 @@ fn shape_text_to_glyph_map(font_data: &[u8], text: &str) -> Option<BTreeMap<u16,
     if shaped.glyphs.is_empty() {
         return None;
     }
-    let mut map: BTreeMap<u16, String> = BTreeMap::new();
-    let mut clusters: Vec<usize> = shaped
-        .glyphs
-        .iter()
-        .map(|glyph| glyph.cluster as usize)
-        .collect();
-    clusters.sort_unstable();
-    clusters.dedup();
-    if clusters.last().copied() != Some(clean_text.len()) {
-        clusters.push(clean_text.len());
-    }
-    for glyph in &shaped.glyphs {
-        let start = (glyph.cluster as usize).min(clean_text.len());
-        let boundary = clusters.binary_search(&start).unwrap_or_else(|index| index);
-        let end = clusters
-            .get(boundary + 1)
-            .copied()
-            .unwrap_or(clean_text.len())
-            .min(clean_text.len());
-        if start >= end {
-            continue;
-        }
-        let s = clean_text[start..end].to_string();
-        let gid = glyph.glyph_id;
-        if gid != 0 {
-            map.entry(gid).or_insert(s);
-        }
-    }
-    Some(map)
+    Some(shaped_glyph_unicode_map(clean_text, &shaped.glyphs))
 }
 
 #[allow(dead_code)]
@@ -9540,7 +9545,7 @@ fn shape_text_to_tj(
     let mut parts: Vec<String> = Vec::new();
     for glyph in &shaped.glyphs {
         let gid = glyph.glyph_id;
-        if gid == 0 {
+        if gid == 0 || is_pdf_direction_wrapper(glyph.codepoint) {
             continue;
         }
         if glyph.x_offset != 0 {
@@ -10071,6 +10076,48 @@ mod tests {
             )),
             "restoring the source graphics state must discard its virtual coordinate program"
         );
+    }
+
+    #[test]
+    fn shaped_unicode_map_does_not_turn_spaces_into_direction_controls() {
+        let font = include_bytes!("../python/fullbleed_assets/fonts/Inter-Variable.ttf");
+        let shaped = shape_text_native(font, "\u{202d}Invoice 2048\u{202c}").unwrap();
+        assert!(shaped.glyph_map.values().any(|source| source == " "));
+        assert!(shaped.glyph_map.values().all(|source| {
+            !source
+                .chars()
+                .any(|ch| crate::native_shape::is_default_ignorable(ch as u32))
+        }));
+        assert_eq!(shaped.glyphs.len(), "Invoice 2048".chars().count());
+        let legacy = shape_text_to_glyph_map(font, "\u{202d}Invoice 2048\u{202c}").unwrap();
+        assert_eq!(shaped.glyph_map.as_ref(), &legacy);
+    }
+
+    #[test]
+    fn shaped_unicode_map_does_not_absorb_a_missing_character_into_its_neighbor() {
+        let font = include_bytes!("../python/fullbleed_assets/fonts/Inter-Variable.ttf");
+        let shaped = shape_text_native(font, "A\u{10ffff}B").unwrap();
+        assert!(shaped.glyph_map.values().any(|source| source == "A"));
+        assert!(
+            shaped
+                .glyph_map
+                .values()
+                .all(|source| !source.contains('\u{10ffff}'))
+        );
+    }
+
+    #[test]
+    fn shaped_unicode_map_gives_combining_marks_only_their_own_text() {
+        let font = include_bytes!("../python/fullbleed_assets/fonts/Inter-Variable.ttf");
+        let shaped = shape_text_native(font, "q\u{0301}").unwrap();
+        assert_eq!(
+            shaped.glyphs.len(),
+            2,
+            "fixture must contain a base and separate mark"
+        );
+        let mut sources: Vec<_> = shaped.glyph_map.values().map(String::as_str).collect();
+        sources.sort();
+        assert_eq!(sources, ["q", "\u{0301}"]);
     }
 
     #[test]

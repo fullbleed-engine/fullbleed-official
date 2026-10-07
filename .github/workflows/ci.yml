@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.13"
+  FULLBLEED_CI_VERSION: "2.5.14"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -208,6 +208,17 @@ jobs:
 
       - name: Verify mixed inline wrapping with independent PDF readers
         run: python -I tools/smoke_inline_wrapping.py --out target/inline-wrapping
+
+      - name: Verify Arabic text extraction and styled bidirectional fields
+        run: python -I tools/smoke_rtl_text.py --out target/rtl-text
+
+      - name: Retain bidirectional PDFs and previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rtl-text-${{ runner.os }}
+          path: target/rtl-text
+          if-no-files-found: warn
 
       - name: Retain inline wrapping PDFs and previews
         if: always()

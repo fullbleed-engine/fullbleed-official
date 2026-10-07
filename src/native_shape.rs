@@ -230,6 +230,7 @@ pub(crate) fn shape(font_data: &[u8], text: &str, options: ShapeOptions) -> Opti
             .map(|glyph| ShapedGlyph {
                 glyph_id: glyph.id,
                 cluster: glyph.cluster,
+                codepoint: glyph.codepoint,
                 x_advance: glyph.x_advance,
                 y_advance: glyph.y_advance,
                 x_offset: glyph.x_offset,
@@ -489,7 +490,7 @@ fn hangul_decomposition(codepoint: u32) -> Option<[Option<u32>; 3]> {
     ])
 }
 
-fn is_default_ignorable(codepoint: u32) -> bool {
+pub(crate) fn is_default_ignorable(codepoint: u32) -> bool {
     matches!(
         codepoint,
         0x00ad

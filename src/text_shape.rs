@@ -61,6 +61,10 @@ pub(crate) enum TextDirection {
 pub(crate) struct ShapedGlyph {
     pub(crate) glyph_id: u16,
     pub(crate) cluster: u32,
+    // The normalized scalar retained by the shaper, including after glyph
+    // substitution. PDF Unicode maps need to distinguish a cluster's marks
+    // from its base glyph and must not expose internal direction controls.
+    pub(crate) codepoint: u32,
     pub(crate) x_advance: i32,
     pub(crate) y_advance: i32,
     pub(crate) x_offset: i32,
@@ -157,6 +161,7 @@ mod tests {
                 |ShapedGlyph {
                      glyph_id,
                      cluster,
+                     codepoint: _,
                      x_advance,
                      y_advance,
                      x_offset,

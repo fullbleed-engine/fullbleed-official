@@ -1718,7 +1718,12 @@ fn text_node_to_flowables(
         let ms = t_transform.elapsed().as_secs_f64() * 1000.0;
         perf_logger.log_span_ms("story.text.transform", doc_id, ms);
     }
-    let text_style = text_style_for_flow_text(parent_style);
+    let mut text_style = text_style_for_flow_text(parent_style);
+    if inline_context {
+        // Inline element scopes are represented around the whole child stream,
+        // including nested styles. Anonymous text does not start another scope.
+        text_style.unicode_bidi = crate::style::UnicodeBidiMode::Normal;
+    }
     let t_glyph = std::time::Instant::now();
     if !cleaned.is_empty() {
         report_missing_glyphs(
@@ -1765,17 +1770,14 @@ fn text_node_to_flowables(
         && split_boundary_spaces
         && !no_wrap(parent_style)
         && !cleaned.contains('\n')
-        && matches!(parent_style.direction, DirectionMode::Ltr)
         && matches!(parent_style.writing_mode, WritingModeMode::HorizontalTb)
-        && matches!(parent_style.unicode_bidi, crate::style::UnicodeBidiMode::Normal)
-        // Bidi reordering needs the complete logical run, not separately
-        // positioned words. Keep those runs on the existing paragraph path.
+        // The shared inline layout resolves bidi across words and styles.
+        // Authored explicit controls must still remain together so breaking
+        // the source into words cannot unbalance an embedding or isolate.
         && !cleaned.chars().any(|ch| {
             matches!(
                 unicode_bidi::bidi_class(ch),
-                unicode_bidi::BidiClass::R
-                    | unicode_bidi::BidiClass::AL
-                    | unicode_bidi::BidiClass::LRE
+                unicode_bidi::BidiClass::LRE
                     | unicode_bidi::BidiClass::RLE
                     | unicode_bidi::BidiClass::LRO
                     | unicode_bidi::BidiClass::RLO
@@ -2532,6 +2534,7 @@ fn node_to_flowables(
                         font_registry.clone(),
                     )
                 };
+                let out = wrap_inline_bidi_scope(out, &style);
                 let out = if matches!(
                     style.vertical_align,
                     VerticalAlignMode::Sub | VerticalAlignMode::Super
@@ -4861,6 +4864,28 @@ fn text_align_mode_to_flow(align: TextAlignMode, direction: DirectionMode) -> Te
         TextAlignMode::Left => TextAlign::Left,
         TextAlignMode::Justify | TextAlignMode::JustifyAll => TextAlign::Justify,
     }
+}
+
+fn wrap_inline_bidi_scope(mut items: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<LayoutItem> {
+    let Some((prefix, suffix)) = style.unicode_bidi.inline_controls(style.direction) else {
+        return items;
+    };
+    let last = items.len().saturating_sub(1);
+    for (index, item) in items.iter_mut().enumerate() {
+        if index != 0 && index != last {
+            continue;
+        }
+        let flowable = match item {
+            LayoutItem::Block { flowable, .. } | LayoutItem::Inline { flowable, .. } => flowable,
+        };
+        *flowable = Box::new(
+            MetaFlowable::new(flowable.clone(), Vec::new()).with_inline_bidi_boundaries(
+                if index == 0 { prefix } else { "" },
+                if index == last { suffix } else { "" },
+            ),
+        );
+    }
+    items
 }
 
 fn resolve_html_auto_direction(node: &NodeRef, style: &mut ComputedStyle) {
@@ -7950,6 +7975,60 @@ mod tests {
         assert!(
             !inline_children_only(h1.as_node(), &resolver, &h1_style, &ancestors),
             "h1 with span display:block children must not take inline flatten path"
+        );
+    }
+
+    #[test]
+    fn nested_bidi_scope_survives_styled_inline_lowering() {
+        let resolver = StyleResolver::new(
+            "* { margin:0; padding:0; font-family:Courier; font-size:10pt; line-height:15pt; } p { direction:rtl; text-align:right; }",
+        );
+        let story = html_to_story_with_resolver_and_fonts_and_report(
+            "<p>قبل <bdi dir='ltr'><span>2026-</span><span>10-21</span></bdi> بعد</p>",
+            &resolver,
+            None,
+            None,
+            None,
+            false,
+            false,
+            None,
+            None,
+        );
+        let page = Size {
+            width: Pt::from_f32(300.0),
+            height: Pt::from_f32(100.0),
+        };
+        let mut canvas = Canvas::new(page);
+        let mut y = Pt::ZERO;
+        for flowable in story {
+            let size = flowable.wrap(page.width, page.height);
+            flowable.draw(&mut canvas, Pt::ZERO, y, page.width, size.height);
+            y += size.height;
+        }
+        let document = canvas.finish();
+        let mut date: Vec<_> = document.pages[0]
+            .commands
+            .iter()
+            .filter_map(|command| {
+                if let Command::DrawString { text, x, .. } = command {
+                    let text: String = text
+                        .chars()
+                        .filter(|ch| !crate::native_shape::is_default_ignorable(*ch as u32))
+                        .collect();
+                    text.chars()
+                        .any(|ch| ch.is_ascii_digit())
+                        .then_some((x.to_milli_i64(), text))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        date.sort_by_key(|(x, _)| *x);
+        assert_eq!(
+            date.iter()
+                .map(|(_, text)| text.as_str())
+                .collect::<String>(),
+            "2026-10-21"
         );
     }
 
@@ -11311,6 +11390,8 @@ fn container_flowable_with_role_options(
         no_wrap(style),
         !anonymous_block_lines,
         anonymous_block_lines,
+        style.direction,
+        text_align_from_style(style),
     );
     let is_multicol_container = (style.column_count > 1
         || !matches!(style.column_width, LengthSpec::Auto))
@@ -11334,6 +11415,7 @@ fn container_flowable_with_role_options(
             .collect();
     }
     let mut container = ContainerFlowable::new_pt(flowables, style.font_size, style.root_font_size)
+        .with_inline_bidi_transparency(matches!(style.display, DisplayMode::Inline))
         .with_establishes_abs_containing_block(establishes_abs_containing_block(style))
         .with_establishes_stacking_context(establishes_stacking_context(style))
         .with_float_containment(
@@ -11584,7 +11666,15 @@ fn layout_children_to_flowables(
     items: Vec<LayoutItem>,
     forced_line_height: Option<Pt>,
 ) -> Vec<Box<dyn Flowable>> {
-    layout_children_to_flowables_with_options(items, forced_line_height, false, true, false)
+    layout_children_to_flowables_with_options(
+        items,
+        forced_line_height,
+        false,
+        true,
+        false,
+        DirectionMode::Ltr,
+        TextAlign::Left,
+    )
 }
 
 fn layout_children_to_flowables_with_options(
@@ -11593,6 +11683,8 @@ fn layout_children_to_flowables_with_options(
     prevent_soft_wrap: bool,
     snap_line_height_to_css_pixel: bool,
     anonymous_block_context: bool,
+    direction: DirectionMode,
+    align: TextAlign,
 ) -> Vec<Box<dyn Flowable>> {
     let mut out: Vec<Box<dyn Flowable>> = Vec::new();
     let mut inline_group: Vec<(Box<dyn Flowable>, VerticalAlign)> = Vec::new();
@@ -11612,6 +11704,7 @@ fn layout_children_to_flowables_with_options(
                         )
                         .with_css_pixel_line_snap(snap_line_height_to_css_pixel)
                         .with_anonymous_block_context(anonymous_block_context)
+                        .with_inline_bidi(direction, align)
                         .with_no_wrap(prevent_soft_wrap),
                     ));
                     inline_group = Vec::new();
@@ -11626,6 +11719,7 @@ fn layout_children_to_flowables_with_options(
             InlineBlockLayoutFlowable::new_pt(inline_group, Pt::ZERO, forced_line_height)
                 .with_css_pixel_line_snap(snap_line_height_to_css_pixel)
                 .with_anonymous_block_context(anonymous_block_context)
+                .with_inline_bidi(direction, align)
                 .with_no_wrap(prevent_soft_wrap),
         ));
     }

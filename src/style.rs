@@ -925,6 +925,30 @@ pub enum UnicodeBidiMode {
     Plaintext,
 }
 
+impl UnicodeBidiMode {
+    pub(crate) fn inline_controls(
+        self,
+        direction: DirectionMode,
+    ) -> Option<(&'static str, &'static str)> {
+        let rtl = matches!(direction, DirectionMode::Rtl);
+        match self {
+            Self::Normal => None,
+            Self::Embed => Some((if rtl { "\u{202b}" } else { "\u{202a}" }, "\u{202c}")),
+            Self::BidiOverride => Some((if rtl { "\u{202e}" } else { "\u{202d}" }, "\u{202c}")),
+            Self::Isolate => Some((if rtl { "\u{2067}" } else { "\u{2066}" }, "\u{2069}")),
+            Self::IsolateOverride => Some((
+                if rtl {
+                    "\u{2067}\u{202e}"
+                } else {
+                    "\u{2066}\u{202d}"
+                },
+                "\u{202c}\u{2069}",
+            )),
+            Self::Plaintext => Some(("\u{2068}", "\u{2069}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UnicodeBidiSpec {
     Value(UnicodeBidiMode),
@@ -2336,6 +2360,7 @@ impl RevertLayerDelta {
             && !self.z_index
             && !self.perspective
             && !self.direction
+            && !self.unicode_bidi
             && !self.writing_mode
             && !self.text_orientation
             && !self.opacity
@@ -5839,8 +5864,9 @@ impl StyleResolver {
             .filter(|rule| scope_conditions_match(&rule.scope_conditions, element, ancestors))
             .collect();
         matches.sort_by(|a, b| {
-            a.normal_layer_rank()
-                .cmp(&b.normal_layer_rank())
+            (a.order >= self.author_rule_order_start)
+                .cmp(&(b.order >= self.author_rule_order_start))
+                .then_with(|| a.normal_layer_rank().cmp(&b.normal_layer_rank()))
                 .then_with(|| {
                     a.specificity
                         .cmp(&b.specificity)
@@ -5867,7 +5893,10 @@ impl StyleResolver {
         let mut current_normal_layer_rank = None;
         let mut normal_layer_base = computed.clone();
         for rule in matches {
-            let layer_rank = rule.normal_layer_rank();
+            let layer_rank = (
+                rule.order >= self.author_rule_order_start,
+                rule.normal_layer_rank(),
+            );
             if current_normal_layer_rank != Some(layer_rank) {
                 current_normal_layer_rank = Some(layer_rank);
                 normal_layer_base = computed.clone();
@@ -6721,8 +6750,9 @@ impl StyleResolver {
             return None;
         }
         matches.sort_by(|a, b| {
-            a.normal_layer_rank()
-                .cmp(&b.normal_layer_rank())
+            (a.order >= self.author_rule_order_start)
+                .cmp(&(b.order >= self.author_rule_order_start))
+                .then_with(|| a.normal_layer_rank().cmp(&b.normal_layer_rank()))
                 .then_with(|| {
                     a.specificity
                         .cmp(&b.specificity)
@@ -6734,7 +6764,10 @@ impl StyleResolver {
         let mut normal_layer_base = computed.clone();
         let mut marker_content_overrides_marker = false;
         for rule in matches {
-            let layer_rank = rule.normal_layer_rank();
+            let layer_rank = (
+                rule.order >= self.author_rule_order_start,
+                rule.normal_layer_rank(),
+            );
             if current_normal_layer_rank != Some(layer_rank) {
                 current_normal_layer_rank = Some(layer_rank);
                 normal_layer_base = computed.clone();
@@ -33630,6 +33663,7 @@ impl StyleDelta {
             && self.text_wrap_style.is_none()
             && self.text_wrap_style_var.is_none()
             && self.direction.is_none()
+            && self.unicode_bidi.is_none()
             && self.writing_mode.is_none()
             && self.text_orientation.is_none()
             && self.vertical_align.is_none()
@@ -33934,7 +33968,11 @@ fn default_ua_css() -> &'static str {
     h1, h2, h3, h4, h5, h6 { font-weight: bold; }
     pre { white-space: pre; }
     code, kbd, samp, tt { white-space: pre; }
-    span, a, em, strong, i, b, u, small, label { display: inline; }
+    span, a, em, strong, i, b, u, small, label, bdi, bdo { display: inline; }
+    [dir=ltr i] { direction: ltr; }
+    [dir=rtl i] { direction: rtl; }
+    bdi, [dir=ltr i], [dir=rtl i], [dir=auto i] { unicode-bidi: isolate; }
+    bdo, bdo[dir] { unicode-bidi: isolate-override; }
     /* Treat <svg> like a replaced inline element so it participates in inline layout. */
     svg { display: inline-block; }
     /* Treat <img> like a replaced inline element so it is rendered as an atomic box. */
@@ -33987,6 +34025,48 @@ mod tests {
 
     fn rgb8(r: u8, g: u8, b: u8) -> Color {
         Color::rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
+    }
+
+    #[test]
+    fn html_bidi_defaults_and_author_overrides() {
+        let resolver = StyleResolver::new(".override { direction: ltr; unicode-bidi: normal; }");
+        let root = resolver.default_style();
+        let mut rtl = element("span", None, &[]);
+        rtl.attrs.insert("dir".into(), "RTL".into());
+        let style = resolver.compute_style(&rtl, &root, None, &[]);
+        assert_eq!(style.direction, DirectionMode::Rtl);
+        assert_eq!(style.unicode_bidi, UnicodeBidiMode::Isolate);
+        rtl.classes.push("override".into());
+        let style = resolver.compute_style(&rtl, &root, None, &[]);
+        assert_eq!(style.direction, DirectionMode::Ltr);
+        assert_eq!(style.unicode_bidi, UnicodeBidiMode::Normal);
+        for (tag, bidi) in [
+            ("bdi", UnicodeBidiMode::Isolate),
+            ("bdo", UnicodeBidiMode::IsolateOverride),
+        ] {
+            let info = element(tag, None, &[]);
+            let style = resolver.compute_style(&info, &root, None, &[]);
+            assert_eq!(style.display, DisplayMode::Inline);
+            assert_eq!(style.unicode_bidi, bidi);
+        }
+        let resolver = StyleResolver::new(
+            "@layer base { span { unicode-bidi: embed; } } @layer later { span { unicode-bidi: isolate; } .restore { unicode-bidi: revert-layer; } }",
+        );
+        let style = resolver.compute_style(
+            &element("span", None, &["restore"]),
+            &resolver.default_style(),
+            None,
+            &[],
+        );
+        assert_eq!(style.unicode_bidi, UnicodeBidiMode::Embed);
+        // User-agent attribute selectors must not beat a lower-specificity
+        // author rule, including an author rule within a cascade layer.
+        let resolver = StyleResolver::new(
+            "@layer authored { span { direction: ltr; unicode-bidi: normal; } }",
+        );
+        let style = resolver.compute_style(&rtl, &resolver.default_style(), None, &[]);
+        assert_eq!(style.direction, DirectionMode::Ltr);
+        assert_eq!(style.unicode_bidi, UnicodeBidiMode::Normal);
     }
 
     #[test]
