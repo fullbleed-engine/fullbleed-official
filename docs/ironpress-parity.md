@@ -44,8 +44,10 @@ python tools/run_ironpress_parity.py `
 
 Use a new or empty evidence directory for each invocation. Existing evidence
 is never overwritten. The container selects Rust 1.97, Ubuntu 24.04, and
-Poppler 24.08.0, including the `pdftoppm` binary checksum. Cargo uses the
-upstream lockfile. The runner verifies the upstream commit, patch hash, and
+Poppler 24.08.0, including the `pdftoppm` binary checksum. The upstream library
+revision does not commit a Cargo lockfile. `tools/ironpress.Cargo.lock` locks
+its unchanged dependency declarations, resolved with Cargo 1.97, and the
+comparator builds with `--locked`. The runner verifies the upstream commit, patch hash, and
 modified-file boundary before rendering. Image tags and operating-system
 packages are not a byte-identical environment lock; the actual image ID is
 retained for each run.
@@ -62,7 +64,9 @@ The reference PDFs are the committed upstream oracles.
 `fullbleed-run.json` records the tested wheel's version and SHA-256, upstream
 revision, adapter and patch hashes, image ID, invocation ID, scope, exit code,
 and report verification result. `manifest.json` inventories the exported
-files and their SHA-256 values. The runner rejects a mismatched invocation,
+files and their SHA-256 values. The exported `Cargo.lock` preserves the
+comparator's dependency resolution; `IRONPRESS-LICENSE` preserves attribution.
+The runner rejects a mismatched invocation,
 an incomplete or duplicate fixture inventory, inconsistent verdict counts,
 or Markdown/HTML belonging to a different JSON report. It preserves upstream
 failures and disputed references without changing their classifications.

@@ -147,6 +147,9 @@ def test_exported_gallery_retains_linked_images_and_requested_pdfs(tmp_path, mon
             if name == "LICENSE":
                 Path(command[3]).write_text("Upstream MIT license")
                 return SimpleNamespace(returncode=0)
+            if name == "Cargo.lock":
+                Path(command[3]).write_text("Retained comparator dependency lock")
+                return SimpleNamespace(returncode=0)
             destination = Path(command[3]) / name
             if (source / name).is_dir():
                 shutil.copytree(source / name, destination)

@@ -222,6 +222,15 @@ def ensure_source_volume(checkout: Path, patch_hash: str) -> str:
         IMAGE_TAG, "git", "-c", "safe.directory=/ironpress",
         "-C", "/ironpress", "apply", "--check", "--reverse", "/candidate.patch",
     ])
+    # This upstream library revision does not commit Cargo.lock. Resolve its
+    # unchanged manifest once with Rust 1.97 and retain that integration lock
+    # in Fullbleed so subsequent runs use the same comparator dependencies.
+    cargo_lock = repository_root() / "tools" / "ironpress.Cargo.lock"
+    run([
+        "docker", "run", "--rm", "--volume", f"{volume}:/ironpress",
+        "--volume", f"{cargo_lock.resolve()}:/pinned-Cargo.lock:ro",
+        IMAGE_TAG, "cp", "/pinned-Cargo.lock", "/ironpress/Cargo.lock",
+    ])
     return volume
 
 
@@ -382,6 +391,12 @@ def copy_evidence(
         ], check=False)
         if license_copy.returncode:
             problems.append("could not retain upstream LICENSE")
+        lock_copy = run([
+            "docker", "cp", f"{container}:/ironpress/Cargo.lock",
+            str(destination / "Cargo.lock"),
+        ], check=False)
+        if lock_copy.returncode:
+            problems.append("could not retain comparator Cargo.lock")
         if diagnostic_path:
             run(
                 [
@@ -461,6 +476,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "patch_sha256": patch_hash,
         "adapter_sha256": sha256_file(root / "tools" / "ironpress_fullbleed_adapter.py"),
         "dockerfile_sha256": sha256_file(root / "tools" / "ironpress_parity.Dockerfile"),
+        "cargo_lock_sha256": sha256_file(root / "tools" / "ironpress.Cargo.lock"),
         "gate_passed": False,
     }
     write_run_manifest(evidence, provenance)
@@ -525,6 +541,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     copy_problems = copy_evidence(
         source_volume, evidence, diagnostic_path=diagnostic_path, keep_pdfs=arguments.keep_pdfs,
     )
+    if (evidence / "Cargo.lock").is_file() and sha256_file(evidence / "Cargo.lock") != provenance["cargo_lock_sha256"]:
+        copy_problems.append("exported comparator Cargo.lock differs from the pinned input")
     checked = check_full_report(evidence, invocation) if not arguments.only else {
         "verified_complete": False, "problems": ["filtered diagnostics cannot satisfy the full-corpus gate"],
     }

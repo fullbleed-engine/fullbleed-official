@@ -15,6 +15,7 @@ on:
       - tools/ironpress_fullbleed_adapter.py
       - tools/ironpress_fullbleed.patch
       - tools/ironpress_parity.Dockerfile
+      - tools/ironpress.Cargo.lock
       - tests/test_ironpress_parity_runner.py
 
 permissions:
