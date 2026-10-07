@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.12"
+  FULLBLEED_CI_VERSION: "2.5.13"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -20,6 +20,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  release-metadata:
+    name: Release metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Check release versions and documentation
+        run: python tools/check_release_metadata.py --expected-version "${{ env.FULLBLEED_CI_VERSION }}" --json
+
   print-profile-preflight:
     uses: ./.github/workflows/pdfvt-release-gate.yml
     with:
