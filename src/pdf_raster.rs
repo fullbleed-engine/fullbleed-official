@@ -956,7 +956,17 @@ fn parse_xobject(
 
         let mut nested_state = state.clone();
         nested_state.ctm = nested_state.ctm.concat(form_matrix);
-        if is_transparency_group {
+        let masked_group = is_transparency_group && state.soft_mask.is_some();
+        if masked_group {
+            // Composite the group's mask and constant alpha once, after its
+            // members have painted. The native masked-form surface starts with
+            // unit alpha, matching PDF transparency-group initialization.
+            nested_state.soft_mask = None;
+            nested_state.active_fill_opacity = 1.0;
+            nested_state.active_stroke_opacity = 1.0;
+            nested_state.opacity_scale_fill = 1.0;
+            nested_state.opacity_scale_stroke = 1.0;
+        } else if is_transparency_group {
             nested_state.opacity_scale_fill =
                 (state.opacity_scale_fill * state.active_fill_opacity).clamp(0.0, 1.0);
             nested_state.opacity_scale_stroke =
@@ -1024,7 +1034,21 @@ fn parse_xobject(
             embedded_fonts,
         )?;
         visited_forms.remove(&obj_id);
-        forms::emit_form(form_commands, page_height, cache, commands);
+        if masked_group {
+            forms::emit_with_soft_mask(
+                doc,
+                form_commands,
+                parent_resources,
+                state,
+                page_height,
+                commands,
+                visited_forms,
+                cache,
+                embedded_fonts,
+            )?;
+        } else {
+            forms::emit_form(form_commands, page_height, cache, commands);
+        }
         return Ok(());
     }
 

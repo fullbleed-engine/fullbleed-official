@@ -219,6 +219,15 @@ fn finalized_hard_radial_gradient_retains_its_rings() {
 }
 
 fn masked(subtype: &str, mask_content: &str, content: &str) -> crate::image_native::RgbaImage {
+    masked_with_form(subtype, mask_content, "/G sh", content)
+}
+
+fn masked_with_form(
+    subtype: &str,
+    mask_content: &str,
+    paint_content: &str,
+    content: &str,
+) -> crate::image_native::RgbaImage {
     let mut doc = LoDocument::with_version("1.7");
     let gray = axial(
         exponential(vec![0.0, 0.0, 0.0], vec![1.0, 1.0, 1.0], 1.0),
@@ -230,8 +239,22 @@ fn masked(subtype: &str, mask_content: &str, content: &str) -> crate::image_nati
         "Group"=>dictionary! {"S"=>"Transparency","CS"=>"DeviceRGB","I"=>true},
         "Resources"=>dictionary! {"Shading"=>dictionary! {"M"=>gray},"ExtGState"=>dictionary! {"Half"=>dictionary! {"ca"=>0.5}}},
     },mask_content.as_bytes().to_vec()));
+    let blue = axial(
+        exponential(vec![0.0, 0.0, 1.0], vec![0.0, 0.0, 1.0], 1.0),
+        [0.0, 0.0, 100.0, 0.0],
+        [true, true],
+    );
+    let paint = doc.add_object(LoStream::new(
+        dictionary! {
+            "Type"=>"XObject","Subtype"=>"Form","BBox"=>vec![0.into(),0.into(),100.into(),100.into()],
+            "Group"=>dictionary! {"S"=>"Transparency","CS"=>"DeviceRGB","I"=>true},
+            "Resources"=>dictionary! {"Shading"=>dictionary! {"G"=>blue.clone()}},
+        },
+        paint_content.as_bytes().to_vec(),
+    ));
     let resources = dictionary! {
-        "Shading"=>dictionary! {"G"=>axial(exponential(vec![0.0,0.0,1.0],vec![0.0,0.0,1.0],1.0),[0.0,0.0,100.0,0.0],[true,true])},
+        "Shading"=>dictionary! {"G"=>blue},
+        "XObject"=>dictionary! {"Paint"=>paint},
         "ExtGState"=>dictionary! {
             "Half"=>dictionary! {"ca"=>0.5},
             "Mask"=>dictionary! {"SMask"=>dictionary! {"S"=>LoObject::Name(subtype.as_bytes().to_vec()),"G"=>form}},
@@ -239,6 +262,57 @@ fn masked(subtype: &str, mask_content: &str, content: &str) -> crate::image_nati
         },
     };
     image(&pdf(doc, resources, content))
+}
+
+#[test]
+fn finalized_masked_group_preserves_empty_regions_around_path_paint() {
+    let image = masked_with_form(
+        "Luminosity",
+        "1 1 1 rg 0 0 30 100 re f 70 0 30 100 re f",
+        "0 0 1 rg 0 0 100 100 re f",
+        "/Mask gs /Paint Do",
+    );
+    color(&image, 10, 50, [0, 0, 255], 0);
+    color(&image, 50, 50, [255, 255, 255], 0);
+    color(&image, 90, 50, [0, 0, 255], 0);
+}
+
+#[test]
+fn finalized_masked_group_does_not_apply_the_mask_twice_to_a_shading() {
+    let image = masked_with_form(
+        "Alpha",
+        "/Half gs 0 0 0 rg 0 0 100 100 re f",
+        "/G sh",
+        "/Mask gs /Paint Do",
+    );
+    color(&image, 50, 50, [127, 127, 255], 1);
+}
+
+#[test]
+fn finalized_masked_group_applies_parent_alpha_once_after_overlapping_members() {
+    let image = masked_with_form(
+        "Luminosity",
+        "1 1 1 rg 0 0 100 100 re f",
+        "0 0 1 rg 0 0 70 100 re f 30 0 70 100 re f",
+        "/Half gs /Mask gs /Paint Do",
+    );
+    for x in [10, 50, 90] {
+        color(&image, x, 50, [127, 127, 255], 1);
+    }
+}
+
+#[test]
+fn finalized_masked_group_preserves_the_mask_ctm_and_caller_clip() {
+    let image = masked_with_form(
+        "Luminosity",
+        "/M sh",
+        "0 0 1 rg 0 0 100 100 re f",
+        "0 0 70 100 re W n /Mask gs 1 0 0 1 20 0 cm /Paint Do",
+    );
+    color(&image, 10, 50, [255, 255, 255], 0);
+    color(&image, 25, 50, [190, 190, 255], 2);
+    color(&image, 60, 50, [100, 100, 255], 2);
+    color(&image, 80, 50, [255, 255, 255], 0);
 }
 
 #[test]

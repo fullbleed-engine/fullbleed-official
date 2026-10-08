@@ -181,6 +181,17 @@ jobs:
       - name: Verify font family defaults and compiled previews
         run: python -I tools/smoke_font_families.py --out target/font-families
 
+      - name: Verify border-image slices in native previews and independent PDF output
+        run: python -I tools/smoke_border_image_slices.py --pdfium --out target/border-image-slices
+
+      - name: Retain border-image PDFs and preview evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: border-image-slices-${{ runner.os }}
+          path: target/border-image-slices
+          if-no-files-found: warn
+
       - name: Reproduce bundled preview fonts from pinned inputs
         run: python tools/generate_preview_fonts.py --check
 

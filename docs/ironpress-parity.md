@@ -79,10 +79,18 @@ These results do not establish compatibility with every CSS feature or live
 browser behavior.
 
 The [Independent CSS corpus workflow](../.github/workflows/ironpress-parity.yml)
-can compare an exact published PyPI version without a local Cargo build. It
-also runs when the adapter or runner changes in a pull request. Download its
-artifact to inspect the report, candidate PDFs, and log, including failed
-runs. Workflow artifacts expire after seven days; retain a downloaded copy
+defaults to `package_source: published` and compares the exact `package_version`
+from PyPI. Select `package_source: source` to build an unpublished candidate
+from the chosen Git ref; `package_version` is ignored in that mode. Pull
+requests affecting the runner, adapter, or border renderer use source mode.
+Source mode uses Rust 1.97 on Ubuntu 24.04, matching the comparator container's
+operating-system release. The extra `ironpress-input.json` identifies the input
+kind, checked-out commit, and wheel hash; the exact wheel is also retained.
+A source wheel's unchanged version number is not evidence that it is the
+published package. Use its commit and hash to distinguish candidate results.
+
+Download the artifact to inspect the report, candidate PDFs, and log, including
+failed runs. Workflow artifacts expire after seven days; retain a downloaded copy
 and its manifest before using a result in a lasting compatibility claim.
 
 ## Adapter and compute model
