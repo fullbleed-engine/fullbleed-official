@@ -1,3 +1,29 @@
+# Fullbleed Release Notes - 2.5.15
+
+Overlapping `border-image-slice` values now preserve the corner image content.
+Each source slice is clamped independently; empty intervening regions leave
+gaps instead of shrinking every slice. Uniform-gradient shortcuts also respect
+those gaps. Proportional reduction of oversized destination widths is unchanged.
+
+Finalized-PDF previews now apply a transparency group's soft mask and parent
+alpha once at the group boundary. This corrects missing gaps in masked forms;
+the PDF writer already retained the mask. Four renderer regressions cover path
+gaps, shading, overlapping members, and the mask transform with caller clipping.
+
+The installed-wheel checks cover 21 gradient, PNG, SVG, overlap, clamp, fill,
+destination-width and mask-border cases in native previews, finalized-PDF
+previews and independent PDFium rendering. Release CI retains the PDFs and all
+three preview modes. See the [2.5.15 runbook](docs/release/2.5.15-runbook.md).
+
+The full corpus comparison of source commit `9ec4f71`, before this version bump,
+changed one case from FAIL to PASS. The other 1,661 PDFs were byte-identical to
+the published 2.5.14 baseline. That source run has 1,617 PASS, 26 FAIL and 19
+REFERENCE-DISPUTED results; its upstream gate remains failed. These are results
+for that retained source candidate, not a fresh registry-wheel corpus run or a
+claim of full CSS parity. The published 2.5.14 evidence remains unchanged.
+
+---
+
 # Fullbleed Release Notes - 2.5.14
 
 Arabic text with combining marks could duplicate its base letters when copied
