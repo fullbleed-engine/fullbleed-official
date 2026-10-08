@@ -922,17 +922,6 @@ fn flex_item_basis(style: &ComputedStyle) -> Option<LengthSpec> {
     }
 }
 
-#[inline(never)]
-fn compute_boxed_style(
-    resolver: &StyleResolver,
-    info: &ElementInfo,
-    parent_style: &ComputedStyle,
-    inline_style: Option<&str>,
-    ancestors: &[ElementInfo],
-) -> Box<ComputedStyle> {
-    Box::new(resolver.compute_style(info, parent_style, inline_style, ancestors))
-}
-
 /// Resolve only chart ancestors, not every cell of potentially very large
 /// semantic tables. This shares the final HTML compiler's cascade and selector
 /// context. Heap-owned styles avoid recursive native stack growth.
@@ -960,7 +949,7 @@ pub(crate) fn chart_marker_text_styles(
             .filter(|ancestor| ancestor.as_element().is_some())
             .collect::<Vec<_>>();
         chain.reverse();
-        let mut style = Box::new(resolver.default_style());
+        let mut style = resolver.default_style();
         let mut ancestors = Vec::new();
         for ancestor in chain {
             let mut info = element_info(&ancestor, resolver.has_sibling_selectors());
@@ -971,7 +960,7 @@ pub(crate) fn chart_marker_text_styles(
                 .borrow()
                 .get("style")
                 .map(str::to_owned);
-            style = compute_boxed_style(resolver, &info, &style, inline.as_deref(), &ancestors);
+            style = resolver.compute_style(&info, &style, inline.as_deref(), &ancestors);
             info.apply_computed_container_style(&style);
             ancestors.push(info);
         }
@@ -1063,11 +1052,9 @@ pub(crate) fn html_document_to_story_with_resolver_and_fonts_and_report_and_targ
     doc_id: Option<usize>,
     target_pages: Option<Arc<HashMap<String, usize>>>,
 ) -> Vec<Box<dyn Flowable>> {
-    // `ComputedStyle` intentionally carries the complete typed CSS state and is
-    // consequently a large value. Keep both document-level styles off the
-    // comparatively small Windows test/worker stacks before descending into
-    // the recursive DOM compiler.
-    let base_style = Box::new(resolver.default_style());
+    // ComputedStyle owns its wide CSS state on the heap, including these
+    // document-level styles retained during recursive DOM compilation.
+    let base_style = resolver.default_style();
     let mut ancestors: Vec<ElementInfo> = Vec::new();
     let mut report = report;
     let mut counters = CounterState::with_target_context(
@@ -1087,13 +1074,8 @@ pub(crate) fn html_document_to_story_with_resolver_and_fonts_and_report_and_targ
             .borrow()
             .get("style")
             .map(|s| s.to_string());
-        root_style = compute_boxed_style(
-            resolver,
-            &html_info,
-            &base_style,
-            inline_style.as_deref(),
-            &ancestors,
-        );
+        root_style =
+            resolver.compute_style(&html_info, &base_style, inline_style.as_deref(), &ancestors);
         html_info.apply_computed_container_style(&root_style);
         counters.select_node(html_node, false);
         apply_style_counters_for_node(
@@ -2333,13 +2315,8 @@ fn node_to_flowables_in_scope(
             // DOM compilation is recursive and `ComputedStyle` is deliberately
             // wide. Heap-own the per-element style so nesting depth does not
             // multiply that value across the native thread stack.
-            let mut style = compute_boxed_style(
-                resolver,
-                &info,
-                parent_style,
-                inline_style.as_deref(),
-                ancestors,
-            );
+            let mut style =
+                resolver.compute_style(&info, parent_style, inline_style.as_deref(), ancestors);
             resolve_html_auto_direction(node, &mut style);
             resolve_inline_svg_mask_sources(node, &mut style);
             resolve_inline_svg_clip_source(node, &mut style);
@@ -4241,7 +4218,8 @@ fn serialize_svg_node(node: &NodeRef) -> String {
 }
 
 fn resolve_inline_svg_mask_sources(node: &NodeRef, style: &mut ComputedStyle) {
-    if !style.mask.paints.iter().any(|paint| {
+    let mask = &mut style.mask;
+    if !mask.paints.iter().any(|paint| {
         matches!(paint, BackgroundPaint::Image { source } if source.trim().starts_with('#'))
     }) {
         return;
@@ -4249,14 +4227,11 @@ fn resolve_inline_svg_mask_sources(node: &NodeRef, style: &mut ComputedStyle) {
     let Some(root) = node.ancestors().last() else {
         return;
     };
-    if style.mask.modes.len() < style.mask.paints.len() {
-        style
-            .mask
-            .modes
-            .resize(style.mask.paints.len(), MaskMode::MatchSource);
+    if mask.modes.len() < mask.paints.len() {
+        mask.modes.resize(mask.paints.len(), MaskMode::MatchSource);
     }
 
-    for (index, paint) in style.mask.paints.iter_mut().enumerate() {
+    for (index, paint) in mask.paints.iter_mut().enumerate() {
         let BackgroundPaint::Image { source } = paint else {
             continue;
         };
@@ -4302,8 +4277,8 @@ fn resolve_inline_svg_mask_sources(node: &NodeRef, style: &mut ComputedStyle) {
             "data:image/svg+xml;base64,{}",
             crate::base64::encode_standard(xml.as_bytes())
         );
-        if style.mask.modes[index] == MaskMode::MatchSource {
-            style.mask.modes[index] = if mask_type == "alpha" {
+        if mask.modes[index] == MaskMode::MatchSource {
+            mask.modes[index] = if mask_type == "alpha" {
                 MaskMode::Alpha
             } else {
                 MaskMode::Luminance
@@ -6572,7 +6547,7 @@ mod tests {
         let info = element_info(&box_node, resolver.has_sibling_selectors());
         let mut style = resolver.compute_style(&info, &parent, None, &[]);
         resolve_inline_svg_clip_source(&box_node, &mut style);
-        style.clip_path.expect("resolved clip path")
+        style.clip_path.take().expect("resolved clip path")
     }
 
     fn resolved_filter_from_html(html: &str, css: &str) -> PaintFilterSpec {
@@ -6587,7 +6562,7 @@ mod tests {
         let info = element_info(&box_node, resolver.has_sibling_selectors());
         let mut style = resolver.compute_style(&info, &parent, None, &[]);
         resolve_inline_svg_filter_sources(&box_node, &mut style);
-        style.paint_filter.expect("resolved filter program")
+        style.paint_filter.take().expect("resolved filter program")
     }
 
     #[test]

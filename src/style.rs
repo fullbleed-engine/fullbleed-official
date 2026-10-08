@@ -2636,6 +2636,27 @@ pub struct ComputedBorderHiddenSides {
 
 #[derive(Debug, Clone)]
 pub struct ComputedStyle {
+    // Styles are wide and survive recursive DOM/table compilation. Keep their
+    // values in one owned allocation instead of copying them onto every frame.
+    data: Box<ComputedStyleData>,
+}
+
+impl std::ops::Deref for ComputedStyle {
+    type Target = ComputedStyleData;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl std::ops::DerefMut for ComputedStyle {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ComputedStyleData {
     pub font_size: Pt,
     pending_font_size_var: Option<String>,
     font_size_adjust: Option<I32F32>,
@@ -2936,6 +2957,12 @@ fn resolve_pagination_line_count(
 }
 
 impl ComputedStyle {
+    fn from_data(data: ComputedStyleData) -> Self {
+        Self {
+            data: Box::new(data),
+        }
+    }
+
     pub(crate) fn page_context_line_height(&self) -> Option<CssPageLineHeight> {
         match self.line_height {
             LineHeightSpec::Normal | LineHeightSpec::Inherit | LineHeightSpec::Initial => None,
@@ -5268,26 +5295,20 @@ impl StyleResolver {
             }
         }
 
-        let fallback_start = computed.font_face_source_count.max(1);
-        for (index, family) in computed
-            .font_stack
-            .iter_mut()
-            .enumerate()
-            .skip(fallback_start)
-        {
+        let data = &mut *computed.data;
+        let fallback_start = data.font_face_source_count.max(1);
+        for (index, family) in data.font_stack.iter_mut().enumerate().skip(fallback_start) {
             let key = normalized_font_face_name(family);
             if let Some(selected) = select_face(&key) {
                 *family = selected[0].font_name.clone();
-                if let Some(range) = computed.font_unicode_ranges.get_mut(index) {
+                if let Some(range) = data.font_unicode_ranges.get_mut(index) {
                     *range = selected[0].unicode_ranges.clone();
                 }
             }
         }
-        computed
-            .font_unicode_ranges
-            .resize(computed.font_stack.len(), None);
-        if let Some(primary) = computed.font_stack.first() {
-            computed.font_name = primary.clone();
+        data.font_unicode_ranges.resize(data.font_stack.len(), None);
+        if let Some(primary) = data.font_stack.first() {
+            data.font_name = primary.clone();
         }
     }
 
@@ -5352,7 +5373,7 @@ impl StyleResolver {
     }
 
     pub fn default_style(&self) -> ComputedStyle {
-        let mut style = ComputedStyle {
+        let mut style = ComputedStyle::from_data(ComputedStyleData {
             font_size: self.root_font_size,
             pending_font_size_var: None,
             font_size_adjust: None,
@@ -5628,7 +5649,7 @@ impl StyleResolver {
             custom_color_refs: HashMap::new(),
             custom_raw_values: HashMap::new(),
             custom_font_stacks: HashMap::new(),
-        };
+        });
         apply_custom_property_registrations(&mut style, &self.custom_property_registrations);
         style
     }
@@ -5648,7 +5669,7 @@ impl StyleResolver {
         let debug = self.debug.as_ref();
         let debug_node = debug.map(|_| format_element_path(element, ancestors));
         let propagates_text_decoration = !parent.text_decoration.is_none();
-        let mut computed = ComputedStyle {
+        let mut computed = ComputedStyle::from_data(ComputedStyleData {
             font_size: parent.font_size,
             pending_font_size_var: None,
             font_size_adjust: parent.font_size_adjust,
@@ -5940,7 +5961,7 @@ impl StyleResolver {
             custom_color_refs: parent.custom_color_refs.clone(),
             custom_raw_values: parent.custom_raw_values.clone(),
             custom_font_stacks: parent.custom_font_stacks.clone(),
-        };
+        });
         apply_custom_property_registrations(&mut computed, &self.custom_property_registrations);
         let unset_base = computed.clone();
         let parent_font_size = parent.font_size;
@@ -6544,7 +6565,7 @@ impl StyleResolver {
         }
 
         let propagates_text_decoration = !parent.text_decoration.is_none();
-        let mut computed = ComputedStyle {
+        let mut computed = ComputedStyle::from_data(ComputedStyleData {
             font_size: parent.font_size,
             pending_font_size_var: None,
             font_size_adjust: parent.font_size_adjust,
@@ -6836,7 +6857,7 @@ impl StyleResolver {
             custom_color_refs: parent.custom_color_refs.clone(),
             custom_raw_values: parent.custom_raw_values.clone(),
             custom_font_stacks: parent.custom_font_stacks.clone(),
-        };
+        });
         apply_custom_property_registrations(&mut computed, &self.custom_property_registrations);
         let unset_base = computed.clone();
 
@@ -16061,6 +16082,7 @@ fn format_element_segment(info: &ElementInfo) -> String {
 }
 
 fn recompose_transform_ops(style: &mut ComputedStyle) {
+    let style = &mut *style.data;
     style.transform.clear();
     style.transform.extend_from_slice(&style.translate);
     style.transform.extend_from_slice(&style.rotate);
@@ -17079,25 +17101,25 @@ fn apply_delta(
 
     apply_edge_delta(&mut computed.margin, &delta.margin, &parent.margin);
     apply_logical_box_edge_delta(
-        &mut computed.margin,
+        &mut computed.data.margin,
         &parent.margin,
         delta.margin_inline_start,
         delta.margin_inline_end,
         delta.margin_block_start,
         delta.margin_block_end,
-        computed.writing_mode,
-        computed.direction,
+        computed.data.writing_mode,
+        computed.data.direction,
     );
     apply_edge_delta(&mut computed.padding, &delta.padding, &parent.padding);
     apply_logical_box_edge_delta(
-        &mut computed.padding,
+        &mut computed.data.padding,
         &parent.padding,
         delta.padding_inline_start,
         delta.padding_inline_end,
         delta.padding_block_start,
         delta.padding_block_end,
-        computed.writing_mode,
-        computed.direction,
+        computed.data.writing_mode,
+        computed.data.direction,
     );
 
     if let Some(width) = delta.width {
@@ -17249,14 +17271,14 @@ fn apply_delta(
         computed.border_width.left = normalize_length_spec(spec, parent.border_width.left);
     }
     apply_logical_box_edge_delta(
-        &mut computed.border_width,
+        &mut computed.data.border_width,
         &parent.border_width,
         delta.border_inline_start_width,
         delta.border_inline_end_width,
         delta.border_block_start_width,
         delta.border_block_end_width,
-        computed.writing_mode,
-        computed.direction,
+        computed.data.writing_mode,
+        computed.data.direction,
     );
     if let Some(color) = &delta.border_color {
         let (resolved, alpha) = match color {
@@ -17398,13 +17420,13 @@ fn apply_delta(
         computed.border_style.left = style;
     }
     apply_logical_border_style_delta(
-        &mut computed.border_style,
+        &mut computed.data.border_style,
         delta.border_inline_start_style,
         delta.border_inline_end_style,
         delta.border_block_start_style,
         delta.border_block_end_style,
-        computed.writing_mode,
-        computed.direction,
+        computed.data.writing_mode,
+        computed.data.direction,
     );
     apply_border_cascade_ops(computed, &delta.border_cascade_ops, parent);
 
@@ -18048,61 +18070,61 @@ fn apply_delta(
     }
 
     apply_edge_var_delta(
-        &mut computed.margin,
+        &mut computed.data.margin,
         &delta.margin,
         &parent.margin,
-        &computed.custom_lengths,
-        &computed.custom_color_refs,
+        &computed.data.custom_lengths,
+        &computed.data.custom_color_refs,
     );
     apply_logical_box_edge_var_delta(
-        &mut computed.margin,
+        &mut computed.data.margin,
         &parent.margin,
         &delta.margin_inline_start_var,
         &delta.margin_inline_end_var,
         &delta.margin_block_start_var,
         &delta.margin_block_end_var,
-        computed.writing_mode,
-        computed.direction,
-        &computed.custom_lengths,
-        &computed.custom_color_refs,
+        computed.data.writing_mode,
+        computed.data.direction,
+        &computed.data.custom_lengths,
+        &computed.data.custom_color_refs,
     );
     apply_edge_var_delta(
-        &mut computed.padding,
+        &mut computed.data.padding,
         &delta.padding,
         &parent.padding,
-        &computed.custom_lengths,
-        &computed.custom_color_refs,
+        &computed.data.custom_lengths,
+        &computed.data.custom_color_refs,
     );
     apply_logical_box_edge_var_delta(
-        &mut computed.padding,
+        &mut computed.data.padding,
         &parent.padding,
         &delta.padding_inline_start_var,
         &delta.padding_inline_end_var,
         &delta.padding_block_start_var,
         &delta.padding_block_end_var,
-        computed.writing_mode,
-        computed.direction,
-        &computed.custom_lengths,
-        &computed.custom_color_refs,
+        computed.data.writing_mode,
+        computed.data.direction,
+        &computed.data.custom_lengths,
+        &computed.data.custom_color_refs,
     );
     apply_edge_var_delta(
-        &mut computed.border_width,
+        &mut computed.data.border_width,
         &delta.border_width,
         &parent.border_width,
-        &computed.custom_lengths,
-        &computed.custom_color_refs,
+        &computed.data.custom_lengths,
+        &computed.data.custom_color_refs,
     );
     apply_logical_box_edge_var_delta(
-        &mut computed.border_width,
+        &mut computed.data.border_width,
         &parent.border_width,
         &delta.border_inline_start_width_var,
         &delta.border_inline_end_width_var,
         &delta.border_block_start_width_var,
         &delta.border_block_end_width_var,
-        computed.writing_mode,
-        computed.direction,
-        &computed.custom_lengths,
-        &computed.custom_color_refs,
+        computed.data.writing_mode,
+        computed.data.direction,
+        &computed.data.custom_lengths,
+        &computed.data.custom_color_refs,
     );
 
     if computed.pagination.orphans == 0 {
@@ -18418,18 +18440,18 @@ fn apply_revert_layer_delta(
     apply_revert_layer_edges(&mut computed.margin, &delta.margin, &layer_base.margin);
     apply_revert_layer_edges(&mut computed.padding, &delta.padding, &layer_base.padding);
     apply_revert_layer_logical_edges(
-        &mut computed.margin,
+        &mut computed.data.margin,
         &delta.margin_logical,
         &layer_base.margin,
-        computed.writing_mode,
-        computed.direction,
+        computed.data.writing_mode,
+        computed.data.direction,
     );
     apply_revert_layer_logical_edges(
-        &mut computed.padding,
+        &mut computed.data.padding,
         &delta.padding_logical,
         &layer_base.padding,
-        computed.writing_mode,
-        computed.direction,
+        computed.data.writing_mode,
+        computed.data.direction,
     );
     apply_revert_layer_border_colors(computed, &delta.border_color, layer_base);
     apply_revert_layer_logical_border_colors(
@@ -18449,11 +18471,11 @@ fn apply_revert_layer_delta(
         &layer_base.border_width,
     );
     apply_revert_layer_logical_edges(
-        &mut computed.border_width,
+        &mut computed.data.border_width,
         &delta.border_width_logical,
         &layer_base.border_width,
-        computed.writing_mode,
-        computed.direction,
+        computed.data.writing_mode,
+        computed.data.direction,
     );
     apply_revert_layer_border_styles(
         &mut computed.border_style,
@@ -18461,11 +18483,11 @@ fn apply_revert_layer_delta(
         &layer_base.border_style,
     );
     apply_revert_layer_logical_border_styles(
-        &mut computed.border_style,
+        &mut computed.data.border_style,
         &delta.border_style_logical,
         &layer_base.border_style,
-        computed.writing_mode,
-        computed.direction,
+        computed.data.writing_mode,
+        computed.data.direction,
     );
     if border_width_reverted || border_style_reverted {
         apply_border_style_mask(computed);
@@ -32345,21 +32367,21 @@ fn apply_border_cascade_ops(
                 for side in border_target_sides(*target, style.writing_mode, style.direction) {
                     match component {
                         NativeLengthComponent::Spec(spec) => apply_edge_to_side(
-                            &mut style.border_width,
+                            &mut style.data.border_width,
                             side,
                             *spec,
                             &parent.border_width,
                         ),
                         NativeLengthComponent::Var(name) => apply_edge_var_to_side(
-                            &mut style.border_width,
+                            &mut style.data.border_width,
                             side,
                             &LengthVarExpr {
                                 name: name.clone(),
                                 scale: 1.0,
                             },
                             &parent.border_width,
-                            &style.custom_lengths,
-                            &style.custom_color_refs,
+                            &style.data.custom_lengths,
+                            &style.data.custom_color_refs,
                         ),
                     }
                 }
@@ -35417,13 +35439,19 @@ mod tests {
 
         let reverted =
             resolver.compute_style(&element("p", None, &["item", "revert"]), &root, None, &[]);
-        let reverted_filter = reverted.paint_filter.expect("expected reverted filter");
+        let reverted_filter = reverted
+            .data
+            .paint_filter
+            .expect("expected reverted filter");
         assert!((reverted_filter.sepia - 1.0).abs() < 0.0001);
         assert!((reverted_filter.invert - 0.0).abs() < 0.0001);
 
         let current_layer =
             resolver.compute_style(&element("p", None, &["item"]), &root, None, &[]);
-        let current_filter = current_layer.paint_filter.expect("expected current filter");
+        let current_filter = current_layer
+            .data
+            .paint_filter
+            .expect("expected current filter");
         assert!((current_filter.invert - 1.0).abs() < 0.0001);
         assert!((current_filter.sepia - 0.0).abs() < 0.0001);
 
@@ -35451,6 +35479,7 @@ mod tests {
         let reverted =
             resolver.compute_style(&element("p", None, &["item", "revert"]), &root, None, &[]);
         let reverted_filter = reverted
+            .data
             .backdrop_filter
             .expect("expected reverted backdrop filter");
         assert!((reverted_filter.sepia - 1.0).abs() < 0.0001);
@@ -35459,6 +35488,7 @@ mod tests {
         let current_layer =
             resolver.compute_style(&element("p", None, &["item"]), &root, None, &[]);
         let current_filter = current_layer
+            .data
             .backdrop_filter
             .expect("expected current backdrop filter");
         assert!((current_filter.invert - 1.0).abs() < 0.0001);
@@ -36314,7 +36344,7 @@ mod tests {
                 .unwrap_or_default()
                 .contains("linear-gradient")
         );
-        match gradient.list_style_image_paint {
+        match gradient.data.list_style_image_paint {
             Some(BackgroundPaint::LinearGradient { stops, .. }) => {
                 assert_eq!(stops.len(), 2);
             }
@@ -39014,7 +39044,7 @@ mod tests {
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
-        let filter = style.paint_filter.expect("expected filter spec");
+        let filter = style.data.paint_filter.expect("expected filter spec");
         assert!((filter.saturate - 1.25).abs() < 0.0001);
         assert_eq!(filter.blur_radius, Pt::ZERO);
     }
@@ -39025,7 +39055,7 @@ mod tests {
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
-        let filter = style.paint_filter.expect("expected filter spec");
+        let filter = style.data.paint_filter.expect("expected filter spec");
         assert!((filter.saturate - 0.2).abs() < 0.0001);
         assert!((filter.brightness - 1.0).abs() < 0.0001);
         assert_eq!(filter.blur_radius, Pt::ZERO);
@@ -39037,7 +39067,7 @@ mod tests {
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
-        let filter = style.paint_filter.expect("expected filter spec");
+        let filter = style.data.paint_filter.expect("expected filter spec");
         assert!((filter.brightness - 1.5).abs() < 0.0001);
         assert!((filter.contrast - 1.0).abs() < 0.0001);
         assert!((filter.saturate - 1.0).abs() < 0.0001);
@@ -39050,7 +39080,7 @@ mod tests {
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
-        let filter = style.paint_filter.expect("expected filter spec");
+        let filter = style.data.paint_filter.expect("expected filter spec");
         assert!((filter.contrast - 2.0).abs() < 0.0001);
         assert!((filter.brightness - 1.0).abs() < 0.0001);
         assert!((filter.saturate - 1.0).abs() < 0.0001);
@@ -39063,7 +39093,7 @@ mod tests {
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
-        let filter = style.paint_filter.expect("expected filter spec");
+        let filter = style.data.paint_filter.expect("expected filter spec");
         assert!((filter.invert - 0.6).abs() < 0.0001);
         assert!((filter.contrast - 1.0).abs() < 0.0001);
         assert!((filter.brightness - 1.0).abs() < 0.0001);
@@ -39077,7 +39107,7 @@ mod tests {
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
-        let filter = style.paint_filter.expect("expected filter spec");
+        let filter = style.data.paint_filter.expect("expected filter spec");
         assert!((filter.sepia - 0.7).abs() < 0.0001);
         assert!((filter.invert - 0.0).abs() < 0.0001);
         assert!((filter.contrast - 1.0).abs() < 0.0001);
@@ -39092,7 +39122,7 @@ mod tests {
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
-        let filter = style.paint_filter.expect("expected filter spec");
+        let filter = style.data.paint_filter.expect("expected filter spec");
         assert!((filter.hue_rotate - std::f32::consts::PI).abs() < 0.0001);
         assert!((filter.sepia - 0.0).abs() < 0.0001);
         assert!((filter.invert - 0.0).abs() < 0.0001);
@@ -39108,7 +39138,7 @@ mod tests {
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
-        let filter = style.paint_filter.expect("expected filter spec");
+        let filter = style.data.paint_filter.expect("expected filter spec");
         assert!((filter.opacity - 0.5).abs() < 0.0001);
         assert!((filter.hue_rotate - 0.0).abs() < 0.0001);
         assert!((filter.sepia - 0.0).abs() < 0.0001);
@@ -39125,7 +39155,7 @@ mod tests {
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
-        let filter = style.paint_filter.expect("expected filter spec");
+        let filter = style.data.paint_filter.expect("expected filter spec");
         assert!((filter.saturate - 1.0).abs() < 0.0001);
         assert!((filter.opacity - 1.0).abs() < 0.0001);
         assert!(filter.blur_radius > Pt::ZERO);
@@ -39139,10 +39169,12 @@ mod tests {
         let root = resolver.default_style();
         let first = resolver
             .compute_style(&element("div", None, &["a"]), &root, None, &[])
+            .data
             .paint_filter
             .expect("first filter program");
         let second = resolver
             .compute_style(&element("div", None, &["b"]), &root, None, &[])
+            .data
             .paint_filter
             .expect("second filter program");
 
@@ -39169,7 +39201,7 @@ mod tests {
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
-        let filter = style.paint_filter.expect("expected filter spec");
+        let filter = style.data.paint_filter.expect("expected filter spec");
         assert_eq!(filter.blur_radius, Pt::ZERO);
         assert!((filter.saturate - 1.0).abs() < 0.0001);
         assert!((filter.brightness - 1.0).abs() < 0.0001);
@@ -39185,7 +39217,7 @@ mod tests {
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
-        let filter = style.paint_filter.expect("expected filter spec");
+        let filter = style.data.paint_filter.expect("expected filter spec");
         assert_eq!(filter.drop_shadows.len(), 1);
         let shadow = filter.drop_shadows[0];
         assert_eq!(shadow.offset_x, px_to_pt(8.0));
@@ -39201,7 +39233,7 @@ mod tests {
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
-        let filter = style.paint_filter.expect("expected filter spec");
+        let filter = style.data.paint_filter.expect("expected filter spec");
         assert_eq!(filter.drop_shadows.len(), 1);
         let shadow = filter.drop_shadows[0];
         assert_eq!(shadow.offset_x, px_to_pt(8.0));
@@ -39219,7 +39251,7 @@ mod tests {
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
-        let filter = style.paint_filter.expect("expected filter spec");
+        let filter = style.data.paint_filter.expect("expected filter spec");
         assert_eq!(filter.drop_shadows.len(), 2);
         assert_eq!(filter.drop_shadows[0].offset_x, px_to_pt(8.0));
         assert_eq!(filter.drop_shadows[0].offset_y, Pt::ZERO);
@@ -39236,8 +39268,8 @@ mod tests {
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
-        let filter = style.paint_filter.expect("expected filter spec");
-        assert_eq!(style.font_size, px_to_pt(24.0));
+        let filter = style.data.paint_filter.expect("expected filter spec");
+        assert_eq!(style.data.font_size, px_to_pt(24.0));
         assert_eq!(filter.blur_radius, Pt::from_f32(9.0));
         assert_eq!(filter.drop_shadows.len(), 1);
         let shadow = filter.drop_shadows[0];
@@ -39254,7 +39286,7 @@ mod tests {
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
-        let filter = style.paint_filter.expect("expected filter spec");
+        let filter = style.data.paint_filter.expect("expected filter spec");
         assert_eq!(filter.drop_shadows.len(), 1);
         let shadow = filter.drop_shadows[0];
         assert_eq!(shadow.offset_x, px_to_pt(8.0));
@@ -39270,7 +39302,7 @@ mod tests {
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
-        let filter = style.paint_filter.expect("expected filter spec");
+        let filter = style.data.paint_filter.expect("expected filter spec");
         assert_eq!(filter.drop_shadows.len(), 1);
         let shadow = filter.drop_shadows[0];
         assert_eq!(shadow.offset_x, Pt::from_f32(6.0 * 72.0 / 25.4));
@@ -39306,6 +39338,7 @@ mod tests {
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
         let filter = style
+            .data
             .backdrop_filter
             .expect("expected backdrop filter spec");
         assert!((filter.saturate - 1.4).abs() < 0.0001);
@@ -39325,6 +39358,7 @@ mod tests {
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
         let filter = style
+            .data
             .backdrop_filter
             .expect("expected backdrop filter spec");
         assert_eq!(filter.drop_shadows.len(), 1);
@@ -39340,6 +39374,7 @@ mod tests {
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
         let filter = style
+            .data
             .backdrop_filter
             .expect("expected backdrop filter spec");
         assert_eq!(filter.drop_shadows.len(), 1);
@@ -40019,7 +40054,7 @@ mod tests {
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
-        let spec = match style.clip_path {
+        let spec = match style.data.clip_path {
             Some(ClipPathShapeSpec::ShapeFunction(spec)) => spec,
             other => panic!("expected shape() clip-path, got {other:?}"),
         };
@@ -40108,7 +40143,7 @@ mod tests {
         let resolver = StyleResolver::new(css);
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("div", None, &["x"]), &root, None, &[]);
-        let spec = match style.clip_path {
+        let spec = match style.data.clip_path {
             Some(ClipPathShapeSpec::ShapeFunction(spec)) => spec,
             other => panic!("expected shape() clip-path, got {other:?}"),
         };
@@ -40387,7 +40422,7 @@ mod tests {
         let root = resolver.default_style();
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
-        match style.background_paint {
+        match style.data.background_paint {
             Some(BackgroundPaint::ConicGradient {
                 start_angle_deg,
                 center_x: GradientPosition::Percent(center_x_pct),
@@ -40414,7 +40449,7 @@ mod tests {
         let root = resolver.default_style();
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
-        match style.background_paint {
+        match style.data.background_paint {
             Some(BackgroundPaint::ConicGradient { stops, .. }) => {
                 assert_eq!(stops.len(), 3);
                 assert!((stops[0].offset - 0.0).abs() < 0.001);
@@ -40435,7 +40470,7 @@ mod tests {
         let root_style = resolver.compute_style(&root_info, &root, None, &[]);
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root_style, None, &[root_info]);
-        match style.background_paint {
+        match style.data.background_paint {
             Some(BackgroundPaint::ConicGradient { stops, .. }) => {
                 assert!(
                     !stops.is_empty(),
@@ -40467,7 +40502,7 @@ mod tests {
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
         assert_eq!(style.background_color, Some(Color::rgb(0.0, 1.0, 0.0)));
-        match style.background_paint {
+        match style.data.background_paint {
             Some(BackgroundPaint::LinearGradient {
                 angle_deg, stops, ..
             }) => {
@@ -40488,7 +40523,7 @@ mod tests {
         let root = resolver.default_style();
         let style = resolver.compute_style(&element("section", None, &["x"]), &root, None, &[]);
 
-        match style.background_paint {
+        match style.data.background_paint {
             Some(BackgroundPaint::LinearGradient { stops, .. }) => {
                 assert_eq!(stops.len(), 2);
                 assert!((stops[0].color.r - 1.0).abs() < 0.002);
@@ -40909,7 +40944,7 @@ mod tests {
         let root = resolver.default_style();
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
-        match style.background_paint {
+        match style.data.background_paint {
             Some(BackgroundPaint::RadialGradient {
                 center_x: GradientPosition::Percent(center_x_pct),
                 center_y: GradientPosition::Percent(center_y_pct),
@@ -40943,7 +40978,7 @@ mod tests {
         let root_style = resolver.compute_style(&root_info, &root, None, &[]);
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root_style, None, &[root_info]);
-        match style.background_paint {
+        match style.data.background_paint {
             Some(BackgroundPaint::RadialGradient {
                 center_x: GradientPosition::Percent(center_x_pct),
                 center_y: GradientPosition::Percent(center_y_pct),
@@ -41129,14 +41164,14 @@ mod tests {
                 .map(|repeat| repeat.mode),
             Some(GridAutoRepeatMode::Fill)
         );
-        assert_eq!(fill.grid_column_auto_repeat.unwrap().tracks.len(), 1);
+        assert_eq!(fill.data.grid_column_auto_repeat.unwrap().tracks.len(), 1);
         assert_eq!(
             fit.grid_column_auto_repeat
                 .as_ref()
                 .map(|repeat| repeat.mode),
             Some(GridAutoRepeatMode::Fit)
         );
-        assert_eq!(fit.grid_column_auto_repeat.unwrap().tracks.len(), 1);
+        assert_eq!(fit.data.grid_column_auto_repeat.unwrap().tracks.len(), 1);
     }
 
     #[test]
@@ -45544,7 +45579,7 @@ mod tests {
         let root = resolver.default_style();
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
-        let shadow = style.box_shadow.expect("expected box-shadow to parse");
+        let shadow = style.data.box_shadow.expect("expected box-shadow to parse");
         assert!(shadow.inset);
         match shadow.spread {
             LengthSpec::Absolute(value) => assert!(value > Pt::from_f32(100.0)),
@@ -45588,7 +45623,7 @@ mod tests {
         let root = resolver.default_style();
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
-        let shadow = style.box_shadow.expect("expected box-shadow to parse");
+        let shadow = style.data.box_shadow.expect("expected box-shadow to parse");
         assert!((shadow.color.r - 0.0).abs() < 0.001);
         assert!((shadow.color.g - 0.0).abs() < 0.001);
         assert!((shadow.color.b - 1.0).abs() < 0.001);
@@ -45603,7 +45638,7 @@ mod tests {
         let root = resolver.default_style();
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
-        let shadow = style.box_shadow.expect("expected box-shadow to parse");
+        let shadow = style.data.box_shadow.expect("expected box-shadow to parse");
         assert!((shadow.color.r - 0.0).abs() < 0.001);
         assert!((shadow.color.g - (128.0 / 255.0)).abs() < 0.001);
         assert!((shadow.color.b - 0.0).abs() < 0.001);
@@ -45618,7 +45653,7 @@ mod tests {
         let root = resolver.default_style();
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
-        let shadow = style.box_shadow.expect("expected box-shadow to parse");
+        let shadow = style.data.box_shadow.expect("expected box-shadow to parse");
         assert_eq!(
             shadow.offset_x,
             LengthSpec::Absolute(Pt::from_f32(6.0 * 72.0 / 25.4))
@@ -45998,7 +46033,7 @@ mod tests {
         let root = resolver.default_style();
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
-        let shadow = style.box_shadow.expect("expected box-shadow to parse");
+        let shadow = style.data.box_shadow.expect("expected box-shadow to parse");
         assert!(shadow.inset);
         assert!(
             (shadow.color.r - 0.95).abs() < 0.01,
@@ -46022,7 +46057,7 @@ mod tests {
         let root = resolver.default_style();
         let info = element("div", None, &["x"]);
         let style = resolver.compute_style(&info, &root, None, &[]);
-        let shadow = style.box_shadow.expect("expected box-shadow to parse");
+        let shadow = style.data.box_shadow.expect("expected box-shadow to parse");
         assert!(shadow.inset);
         assert!(shadow.opacity <= 0.001);
     }
