@@ -49,6 +49,12 @@ CASES = [
     ("paginated-sections", "<div class='chapter'>Alpha</div><div class='section'>One</div><div class='chapter next'>Beta</div><div class='section'>Two</div>",
      "body { counter-reset: chapter; } .chapter { counter-increment: chapter; counter-reset: section; } .next { break-before: page; } .section { counter-increment: section; } .section::before { content: 'CNT' counter(chapter) '.' counter(section) 'END'; }",
      ["1.1", "2.1"]),
+    ("boxless-table-cell", "<table><tr><td style='display:contents;counter-increment:n 5'><span>Alpha</span></td></tr></table>",
+     "body { counter-reset: n; } span::before { content: 'CNT' counter(n) 'END'; }",
+     ["0"]),
+    ("boxless-table-group", "<table><tbody style='display:contents;counter-reset:n 8'><tr><td><span>Alpha</span></td></tr></tbody></table>",
+     "body { counter-reset: n; } td { counter-increment: n; } span::before { content: 'CNT' counter(n) 'END'; }",
+     ["1"]),
 ]
 
 

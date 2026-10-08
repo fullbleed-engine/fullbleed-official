@@ -15510,7 +15510,8 @@ fn table_flowable(
                 None
             };
         let row_parent_style: &ComputedStyle = section_style_owned.as_ref().unwrap_or(style);
-        if row_group_starts && in_explicit_row_group {
+        if row_group_starts && in_explicit_row_group && style_can_mutate_counters(row_parent_style)
+        {
             if let Some(group) = row.parent().filter(|parent| *parent != table_node) {
                 counters.select_node(&group, false);
                 apply_style_counters(row_parent_style, counters);
@@ -15629,7 +15630,7 @@ fn table_flowable(
         } else {
             row_style_tmp.as_ref().unwrap()
         };
-        if !anonymous_row {
+        if !anonymous_row && style_can_mutate_counters(row_style) {
             counters.select_node(&row, false);
             apply_style_counters(row_style, counters);
         }
@@ -15818,9 +15819,11 @@ fn table_flowable(
             }
             cell_info.apply_computed_container_style(cell_style);
             counters.select_node(cell_child, false);
-            apply_style_counters_for_node(
-                cell_child, resolver, cell_style, &cell_info, ancestors, counters,
-            );
+            if style_can_mutate_counters(cell_style) {
+                apply_style_counters_for_node(
+                    cell_child, resolver, cell_style, &cell_info, ancestors, counters,
+                );
+            }
 
             let has_element_children = cell_child
                 .children()

@@ -13884,6 +13884,16 @@ mod tests {
                 ".fn { float: footnote; } .fn::footnote-call { content: counter(footnote) '|'; }",
                 vec!["1|", "2|"],
             ),
+            (
+                "<table><tr><td style='display:contents;counter-increment:n 5'><span>Alpha</span></td></tr></table>",
+                "body { counter-reset: n; } span::before { content: counter(n) '|'; }",
+                vec!["0|"],
+            ),
+            (
+                "<table><tbody style='display:contents;counter-reset:n 8'><tr><td><span>Alpha</span></td></tr></tbody></table>",
+                "body { counter-reset: n; } td { counter-increment: n; } span::before { content: counter(n) '|'; }",
+                vec!["1|"],
+            ),
         ];
         let engine = FullBleed::builder().build().expect("engine");
         for (body, rules, expected) in cases {
