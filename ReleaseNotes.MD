@@ -1,3 +1,28 @@
+# Fullbleed Release Notes - 2.5.19
+
+Native Rust applications can render the table, flex, grid, and nested-layout
+regression cases on Windows' default 1 MiB main-thread stack in unoptimized
+builds. Previously, even a small table could terminate the process with a
+stack overflow.
+
+Container state and computed styles now own their wide values on the heap.
+This reduces large builder temporaries and values retained during recursive
+DOM and table compilation. Public container methods, style calculations,
+and clone behavior are preserved.
+
+Windows/Linux CI runs a standalone main-thread consumer in addition to the
+Rust test harness. It verifies nine document cases and retains 33 PDFs across
+direct, compiled, repeated, and reflow output. Windows checks the executable's
+actual stack reserve; the check does not use a larger worker or linker stack.
+The probes include 16 nested blocks, three nested tables, and styled,
+paginated containers. They do not promise arbitrary nesting depth.
+
+No new dependency or rendering capability is introduced. Existing CSS corpus
+failures and PDF conformance limitations remain. See the
+[2.5.19 runbook](docs/release/2.5.19-runbook.md).
+
+---
+
 # Fullbleed Release Notes - 2.5.18
 
 CSS counters created by a heading now remain in scope for its following
