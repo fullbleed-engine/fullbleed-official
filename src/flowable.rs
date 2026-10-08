@@ -31308,23 +31308,15 @@ impl ContainerFlowable {
             return false;
         }
 
-        let mut source_slices = [
+        // Source slices may overlap. Each value is capped at the corresponding
+        // image dimension by resolve_border_image_slice; overlapping slices
+        // leave the intervening source regions empty, without shrinking corners.
+        let source_slices = [
             Self::resolve_border_image_slice(self.border_image.slice[0], source_height),
             Self::resolve_border_image_slice(self.border_image.slice[1], source_width),
             Self::resolve_border_image_slice(self.border_image.slice[2], source_height),
             Self::resolve_border_image_slice(self.border_image.slice[3], source_width),
         ];
-        let horizontal_sum = source_slices[1] + source_slices[3];
-        let vertical_sum = source_slices[0] + source_slices[2];
-        let slice_scale = (source_width.to_f32() / horizontal_sum.to_f32().max(1.0e-6))
-            .min(source_height.to_f32() / vertical_sum.to_f32().max(1.0e-6))
-            .min(1.0);
-        if slice_scale < 1.0 {
-            for value in &mut source_slices {
-                *value = *value * slice_scale;
-            }
-        }
-
         let mut widths = [
             Self::resolve_border_image_width(
                 self.border_image.width[0],
@@ -31396,6 +31388,11 @@ impl ContainerFlowable {
         let dest_h = [width_top, dest_center_height, width_bottom];
         if self.border_image.repeat_x == BorderImageRepeatMode::Stretch
             && self.border_image.repeat_y == BorderImageRepeatMode::Stretch
+            // A solid source still has transparent gaps when a slice or middle
+            // region is empty. Only collapse a complete nine-slice source into
+            // one rectangle/ring; otherwise let the patch renderer skip gaps.
+            && source_w.iter().all(|width| *width > Pt::ZERO)
+            && source_h.iter().all(|height| *height > Pt::ZERO)
         {
             if let Some(color) = Self::uniform_opaque_gradient_color(source) {
                 canvas.set_fill_color(color);

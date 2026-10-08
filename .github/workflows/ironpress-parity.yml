@@ -3,8 +3,16 @@ name: Independent CSS corpus
 on:
   workflow_dispatch:
     inputs:
+      package_source:
+        description: "Compare a published wheel or build a candidate from the selected Git ref"
+        required: true
+        default: published
+        type: choice
+        options:
+          - published
+          - source
       package_version:
-        description: "Published Fullbleed version to compare with the pinned corpus"
+        description: "Exact version for published mode (ignored in source mode)"
         required: true
         default: "2.5.14"
         type: string
@@ -17,6 +25,9 @@ on:
       - tools/ironpress_parity.Dockerfile
       - tools/ironpress.Cargo.lock
       - tests/test_ironpress_parity_runner.py
+      - src/flowable.rs
+      - tools/smoke_border_image_slices.py
+      - tests/test_fullbleed_border_image_slices.py
 
 permissions:
   contents: read
@@ -27,11 +38,12 @@ concurrency:
 
 jobs:
   compare:
-    name: Published wheel against pinned IronPress corpus
+    name: Fullbleed wheel against pinned IronPress corpus
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
       FULLBLEED_PARITY_VERSION: ${{ inputs.package_version || '2.5.14' }}
+      FULLBLEED_PARITY_SOURCE: ${{ github.event_name == 'pull_request' && 'source' || inputs.package_source || 'published' }}
       PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v7
@@ -45,6 +57,7 @@ jobs:
           python -m pip install pytest
           python -m pytest tests/test_ironpress_parity_runner.py tests/test_ironpress_fullbleed_adapter.py -q
       - name: Download the exact published Linux wheel
+        if: env.FULLBLEED_PARITY_SOURCE == 'published'
         shell: python
         run: |
           import os, re, subprocess, sys
@@ -58,6 +71,26 @@ jobs:
               "--python-version", "310", "--abi", "abi3",
               "--dest", "target/ironpress-wheel", f"fullbleed=={version}",
           ], check=True)
+      - name: Install Rust for the source candidate
+        if: env.FULLBLEED_PARITY_SOURCE == 'source'
+        uses: dtolnay/rust-toolchain@1.97.0
+      - name: Build a source candidate without publishing it
+        if: env.FULLBLEED_PARITY_SOURCE == 'source'
+        run: python build_backend/fullbleed_build_backend.py wheel --out target/ironpress-wheel
+      - name: Record the input kind and exact wheel identity
+        shell: python
+        run: |
+          import hashlib, json, os, pathlib, subprocess
+          wheels = list(pathlib.Path("target/ironpress-wheel").glob("fullbleed-*.whl"))
+          assert len(wheels) == 1, wheels
+          wheel = wheels[0]
+          record = {
+              "package_source": os.environ["FULLBLEED_PARITY_SOURCE"],
+              "checkout_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+              "wheel": wheel.name,
+              "wheel_sha256": hashlib.sha256(wheel.read_bytes()).hexdigest(),
+          }
+          pathlib.Path("target/ironpress-input.json").write_text(json.dumps(record, indent=2) + "\n")
       - name: Run the unchanged upstream comparator and retain all verdicts
         shell: bash
         run: |
@@ -71,10 +104,12 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: ironpress-fullbleed-${{ env.FULLBLEED_PARITY_VERSION }}-${{ github.run_id }}
+          name: ironpress-fullbleed-${{ env.FULLBLEED_PARITY_SOURCE }}-${{ github.run_id }}
           path: |
             target/ironpress-evidence/
             target/ironpress-logs/
+            target/ironpress-input.json
+            target/ironpress-wheel/
           if-no-files-found: error
           compression-level: 9
           retention-days: 7
