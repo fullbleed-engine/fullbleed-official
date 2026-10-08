@@ -25573,6 +25573,13 @@ struct HoistedFilterTile {
 
 #[derive(Clone)]
 pub struct ContainerFlowable {
+    // Keep the wide layout and paint state off the caller's stack. Fluent
+    // configuration moves this handle instead of a full state value per call.
+    state: Box<ContainerState>,
+}
+
+#[derive(Clone)]
+struct ContainerState {
     children: Vec<Box<dyn Flowable>>,
     inline_bidi_transparent: bool,
     margin: EdgeSizes,
@@ -25659,8 +25666,14 @@ pub struct ContainerFlowable {
 }
 
 impl ContainerFlowable {
+    fn from_state(state: ContainerState) -> Self {
+        Self {
+            state: Box::new(state),
+        }
+    }
+
     pub(crate) fn with_inline_bidi_transparency(mut self, transparent: bool) -> Self {
-        self.inline_bidi_transparent = transparent;
+        self.state.inline_bidi_transparent = transparent;
         self
     }
 
@@ -25673,7 +25686,7 @@ impl ContainerFlowable {
     }
 
     pub fn new_pt(children: Vec<Box<dyn Flowable>>, font_size: Pt, root_font_size: Pt) -> Self {
-        Self {
+        Self::from_state(ContainerState {
             children,
             inline_bidi_transparent: false,
             margin: EdgeSizes::zero(),
@@ -25754,11 +25767,11 @@ impl ContainerFlowable {
             grid_inline_paint_snap: false,
             grid_block_paint_snap: false,
             layout_cache: Arc::new(Mutex::new(None)),
-        }
+        })
     }
 
     fn painted_inline_border_box(&self, x: Pt, width: Pt) -> (Pt, Pt) {
-        if !self.grid_inline_paint_snap {
+        if !self.state.grid_inline_paint_snap {
             return (x, width);
         }
         let left = round_to_css_pixel(x);
@@ -25767,7 +25780,7 @@ impl ContainerFlowable {
     }
 
     fn painted_block_border_box(&self, y: Pt, height: Pt) -> (Pt, Pt) {
-        if !self.grid_block_paint_snap {
+        if !self.state.grid_block_paint_snap {
             return (y, height);
         }
         let top = round_to_css_pixel(y);
@@ -25776,18 +25789,18 @@ impl ContainerFlowable {
     }
 
     pub fn with_margin(mut self, margin: EdgeSizes) -> Self {
-        self.margin = margin;
+        self.state.margin = margin;
         self
     }
 
     pub fn with_inline_paint_snapping(mut self, enabled: bool) -> Self {
-        self.grid_inline_paint_snap = enabled;
+        self.state.grid_inline_paint_snap = enabled;
         self
     }
 
     pub fn with_border(mut self, border_width: EdgeSizes, border_color: Color) -> Self {
-        self.border_width = border_width;
-        self.border_colors = ResolvedEdgeColors::uniform(border_color);
+        self.state.border_width = border_width;
+        self.state.border_colors = ResolvedEdgeColors::uniform(border_color);
         self
     }
 
@@ -25798,7 +25811,7 @@ impl ContainerFlowable {
         bottom: Color,
         left: Color,
     ) -> Self {
-        self.border_colors = ResolvedEdgeColors {
+        self.state.border_colors = ResolvedEdgeColors {
             top,
             right,
             bottom,
@@ -25808,7 +25821,7 @@ impl ContainerFlowable {
     }
 
     pub fn with_border_opacities(mut self, top: f32, right: f32, bottom: f32, left: f32) -> Self {
-        self.border_opacities = ResolvedEdgeOpacities {
+        self.state.border_opacities = ResolvedEdgeOpacities {
             top: top.clamp(0.0, 1.0),
             right: right.clamp(0.0, 1.0),
             bottom: bottom.clamp(0.0, 1.0),
@@ -25824,7 +25837,7 @@ impl ContainerFlowable {
         bottom: OutlineLineStyle,
         left: OutlineLineStyle,
     ) -> Self {
-        self.border_styles = ResolvedEdgeStyles {
+        self.state.border_styles = ResolvedEdgeStyles {
             top,
             right,
             bottom,
@@ -25834,17 +25847,17 @@ impl ContainerFlowable {
     }
 
     pub fn with_box_decoration_break(mut self, mode: BoxDecorationBreak) -> Self {
-        self.box_decoration_break = mode;
+        self.state.box_decoration_break = mode;
         self
     }
 
     pub fn with_border_radius(mut self, radius: BorderRadiiSpec) -> Self {
-        self.border_radius = radius;
+        self.state.border_radius = radius;
         self
     }
 
     pub fn with_border_image(mut self, border_image: BorderImageSpec) -> Self {
-        self.border_image = border_image;
+        self.state.border_image = border_image;
         self
     }
 
@@ -25856,72 +25869,72 @@ impl ContainerFlowable {
         color: Color,
         visible: bool,
     ) -> Self {
-        self.outline_width = width;
-        self.outline_offset = offset;
-        self.outline_style = style;
-        self.outline_color = color;
-        self.outline_visible = visible;
+        self.state.outline_width = width;
+        self.state.outline_offset = offset;
+        self.state.outline_style = style;
+        self.state.outline_color = color;
+        self.state.outline_visible = visible;
         self
     }
 
     pub fn with_padding(mut self, padding: EdgeSizes) -> Self {
-        self.padding = padding;
+        self.state.padding = padding;
         self
     }
 
     pub fn with_width(mut self, width: LengthSpec) -> Self {
-        self.width = width;
+        self.state.width = width;
         self
     }
 
     pub fn with_max_width(mut self, max_width: LengthSpec) -> Self {
-        self.max_width = max_width;
+        self.state.max_width = max_width;
         self
     }
 
     pub fn with_min_width(mut self, min_width: LengthSpec) -> Self {
-        self.min_width = min_width;
+        self.state.min_width = min_width;
         self
     }
 
     pub fn with_height(mut self, height: LengthSpec) -> Self {
-        self.height = height;
+        self.state.height = height;
         self
     }
 
     pub fn with_min_height(mut self, min_height: LengthSpec) -> Self {
-        self.min_height = min_height;
+        self.state.min_height = min_height;
         self
     }
 
     pub fn with_max_height(mut self, max_height: LengthSpec) -> Self {
-        self.max_height = max_height;
+        self.state.max_height = max_height;
         self
     }
 
     pub fn with_aspect_ratio(mut self, aspect_ratio: Option<f32>) -> Self {
-        self.aspect_ratio = aspect_ratio.filter(|ratio| ratio.is_finite() && *ratio > 0.0);
+        self.state.aspect_ratio = aspect_ratio.filter(|ratio| ratio.is_finite() && *ratio > 0.0);
         self
     }
 
     pub fn with_box_sizing(mut self, box_sizing: BoxSizingMode) -> Self {
-        self.box_sizing = box_sizing;
+        self.state.box_sizing = box_sizing;
         self
     }
 
     pub fn with_background(mut self, color: Option<Color>) -> Self {
-        self.background = color;
+        self.state.background = color;
         self
     }
 
     pub fn with_background_opacity(mut self, opacity: f32) -> Self {
-        self.background_opacity = opacity.clamp(0.0, 1.0);
+        self.state.background_opacity = opacity.clamp(0.0, 1.0);
         self
     }
 
     pub fn with_background_paint(mut self, paint: Option<BackgroundPaint>) -> Self {
-        self.background_paints = paint.iter().cloned().collect();
-        self.background_paint = paint;
+        self.state.background_paints = paint.iter().cloned().collect();
+        self.state.background_paint = paint;
         self
     }
 
@@ -25935,67 +25948,67 @@ impl ContainerFlowable {
         origins: Vec<BackgroundBox>,
         clips: Vec<BackgroundClipBox>,
     ) -> Self {
-        self.background_paint = paints.first().cloned();
-        self.background_paints = paints;
-        self.background_sizes = sizes;
-        self.background_positions = positions;
-        self.background_repeats = repeats;
-        self.background_attachments = attachments;
-        self.background_origins = origins;
-        self.background_clips = clips;
+        self.state.background_paint = paints.first().cloned();
+        self.state.background_paints = paints;
+        self.state.background_sizes = sizes;
+        self.state.background_positions = positions;
+        self.state.background_repeats = repeats;
+        self.state.background_attachments = attachments;
+        self.state.background_origins = origins;
+        self.state.background_clips = clips;
         self
     }
 
     pub fn with_background_blend_modes(mut self, modes: Vec<MixBlendMode>) -> Self {
-        self.background_blend_modes = modes;
+        self.state.background_blend_modes = modes;
         self
     }
 
     pub fn with_clip_path(mut self, clip_path: Option<ClipPathShapeSpec>) -> Self {
-        self.clip_path = clip_path;
+        self.state.clip_path = clip_path;
         self
     }
 
     pub fn with_clip_path_reference_box(mut self, reference_box: ClipPathReferenceBox) -> Self {
-        self.clip_path_reference_box = reference_box;
+        self.state.clip_path_reference_box = reference_box;
         self
     }
 
     pub fn with_legacy_clip(mut self, clip: Option<ClipPathRectSpec>) -> Self {
-        self.legacy_clip = clip;
+        self.state.legacy_clip = clip;
         self
     }
 
     pub fn with_will_change_backdrop_root(mut self, root: bool) -> Self {
-        self.will_change_backdrop_root = root;
+        self.state.will_change_backdrop_root = root;
         self
     }
 
     pub fn with_mask_backdrop_root(mut self, root: bool) -> Self {
-        self.mask_backdrop_root = root;
+        self.state.mask_backdrop_root = root;
         self
     }
 
     pub fn with_mask(mut self, mask: MaskSpec) -> Self {
-        self.mask_backdrop_root = mask.has_effective_source();
-        self.mask = mask;
+        self.state.mask_backdrop_root = mask.has_effective_source();
+        self.state.mask = mask;
         self
     }
 
     pub fn with_box_shadow(mut self, shadow: Option<BoxShadowSpec>) -> Self {
-        self.box_shadow = shadow.clone();
-        self.box_shadows = shadow.into_iter().collect();
+        self.state.box_shadow = shadow.clone();
+        self.state.box_shadows = shadow.into_iter().collect();
         self
     }
 
     pub fn with_box_shadows(mut self, shadows: Vec<BoxShadowSpec>) -> Self {
-        self.box_shadow = shadows.first().cloned();
-        self.box_shadows = shadows;
+        self.state.box_shadow = shadows.first().cloned();
+        self.state.box_shadows = shadows;
         self
     }
 
     pub fn with_paint_filter(mut self, filter: Option<PaintFilterSpec>) -> Self {
-        self.paint_filter = filter.and_then(|value| {
+        self.state.paint_filter = filter.and_then(|value| {
             if value.is_identity() {
                 None
             } else {
@@ -26006,7 +26019,7 @@ impl ContainerFlowable {
     }
 
     pub fn with_backdrop_filter(mut self, filter: Option<PaintFilterSpec>) -> Self {
-        self.backdrop_filter = filter.and_then(|value| {
+        self.state.backdrop_filter = filter.and_then(|value| {
             if value.is_identity() {
                 None
             } else {
@@ -26017,32 +26030,32 @@ impl ContainerFlowable {
     }
 
     pub fn with_mix_blend_mode(mut self, mode: MixBlendMode) -> Self {
-        self.mix_blend_mode = mode;
+        self.state.mix_blend_mode = mode;
         self
     }
 
     pub fn with_isolation(mut self, isolation: bool) -> Self {
-        self.isolation = isolation;
+        self.state.isolation = isolation;
         self
     }
 
     pub fn with_opacity(mut self, opacity: f32) -> Self {
-        self.opacity = opacity.clamp(0.0, 1.0);
+        self.state.opacity = opacity.clamp(0.0, 1.0);
         self
     }
 
     pub fn with_transforms(mut self, transforms: Vec<CssTransformOp>) -> Self {
-        self.transforms = transforms;
+        self.state.transforms = transforms;
         self
     }
 
     pub fn with_transform_origin(mut self, transform_origin: CssTransformOrigin) -> Self {
-        self.transform_origin = transform_origin;
+        self.state.transform_origin = transform_origin;
         self
     }
 
     pub fn with_transform_box(mut self, transform_box: TransformBoxMode) -> Self {
-        self.transform_box = transform_box;
+        self.state.transform_box = transform_box;
         self
     }
 
@@ -26051,13 +26064,13 @@ impl ContainerFlowable {
         perspective: Option<LengthSpec>,
         origin: CssTransformOrigin,
     ) -> Self {
-        self.perspective = perspective;
-        self.perspective_origin = origin;
+        self.state.perspective = perspective;
+        self.state.perspective_origin = origin;
         self
     }
 
     pub fn with_transform_style(mut self, transform_style: TransformStyleMode) -> Self {
-        self.transform_style = transform_style;
+        self.state.transform_style = transform_style;
         self
     }
 
@@ -26067,8 +26080,8 @@ impl ContainerFlowable {
         } else {
             OverflowMode::Visible
         };
-        self.overflow_x = mode;
-        self.overflow_y = mode;
+        self.state.overflow_x = mode;
+        self.state.overflow_y = mode;
         self
     }
 
@@ -26077,13 +26090,13 @@ impl ContainerFlowable {
         overflow_x: OverflowMode,
         overflow_y: OverflowMode,
     ) -> Self {
-        self.overflow_x = overflow_x;
-        self.overflow_y = overflow_y;
+        self.state.overflow_x = overflow_x;
+        self.state.overflow_y = overflow_y;
         self
     }
 
     pub(crate) fn with_overflow_clip_margin(mut self, margin: LengthSpec) -> Self {
-        self.overflow_clip_margin = margin;
+        self.state.overflow_clip_margin = margin;
         self
     }
 
@@ -26124,22 +26137,22 @@ impl ContainerFlowable {
                 }
             }
         }
-        self.scrollbar_gutter = edges;
+        self.state.scrollbar_gutter = edges;
         self
     }
 
     pub(crate) fn with_line_clamp(mut self, lines: Option<usize>, line_height: Pt) -> Self {
-        self.line_clamp = lines.filter(|lines| *lines > 0);
-        self.line_clamp_line_height = line_height.max(Pt::ZERO);
+        self.state.line_clamp = lines.filter(|lines| *lines > 0);
+        self.state.line_clamp_line_height = line_height.max(Pt::ZERO);
         self
     }
 
     fn clips_overflow_x(&self) -> bool {
-        !matches!(self.overflow_x, OverflowMode::Visible)
+        !matches!(self.state.overflow_x, OverflowMode::Visible)
     }
 
     fn clips_overflow_y(&self) -> bool {
-        !matches!(self.overflow_y, OverflowMode::Visible)
+        !matches!(self.state.overflow_y, OverflowMode::Visible)
     }
 
     fn clips_any_overflow(&self) -> bool {
@@ -26147,58 +26160,63 @@ impl ContainerFlowable {
     }
 
     pub fn with_float_containment(mut self, contain_floats: bool) -> Self {
-        self.contain_floats = contain_floats;
+        self.state.contain_floats = contain_floats;
         self
     }
 
     pub fn with_self_visible(mut self, visible: bool) -> Self {
-        self.self_visible = visible;
+        self.state.self_visible = visible;
         self
     }
 
     pub fn with_tag_role(mut self, role: impl Into<Arc<str>>) -> Self {
-        self.tag_role = Some(role.into());
+        self.state.tag_role = Some(role.into());
         self
     }
 
     pub(crate) fn with_list_numbering(mut self, numbering: &'static str) -> Self {
-        self.list_numbering = Some(numbering);
+        self.state.list_numbering = Some(numbering);
         self
     }
 
     pub(crate) fn with_html_figure_group(mut self) -> Self {
-        self.html_figure_group = true;
+        self.state.html_figure_group = true;
         self
     }
 
     pub fn with_establishes_abs_containing_block(mut self, enabled: bool) -> Self {
-        self.establishes_abs_containing_block = enabled;
+        self.state.establishes_abs_containing_block = enabled;
         self
     }
 
     pub fn with_establishes_stacking_context(mut self, enabled: bool) -> Self {
-        self.establishes_stacking_context = enabled;
+        self.state.establishes_stacking_context = enabled;
         self
     }
 
     pub fn with_pagination(mut self, pagination: Pagination) -> Self {
-        self.pagination = pagination;
+        self.state.pagination = pagination;
         self
     }
 
     pub fn with_column_span_all(mut self, enabled: bool) -> Self {
-        self.spans_all_columns = enabled;
+        self.state.spans_all_columns = enabled;
         self
     }
 
     fn resolve_fixed_height(&self, avail_height: Pt) -> Option<Pt> {
-        match self.height {
+        match self.state.height {
             LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => None,
             LengthSpec::Percent(_) if avail_height >= huge_pt() => None,
             LengthSpec::Calc(calc) if calc.percent != 0.0 && avail_height >= huge_pt() => None,
             _ => Some(
-                self.height
-                    .resolve_height(avail_height, self.font_size, self.root_font_size)
+                self.state
+                    .height
+                    .resolve_height(
+                        avail_height,
+                        self.state.font_size,
+                        self.state.root_font_size,
+                    )
                     .max(Pt::ZERO),
             ),
         }
@@ -26217,7 +26235,7 @@ impl ContainerFlowable {
                 Some(max_content.min(avail_width.max(min_content)))
             }
             _ => Some(
-                spec.resolve_width(avail_width, self.font_size, self.root_font_size)
+                spec.resolve_width(avail_width, self.state.font_size, self.state.root_font_size)
                     .max(Pt::ZERO),
             ),
         }
@@ -26229,15 +26247,19 @@ impl ContainerFlowable {
             LengthSpec::Percent(_) if avail_height >= huge_pt() => None,
             LengthSpec::Calc(calc) if calc.percent != 0.0 && avail_height >= huge_pt() => None,
             _ => Some(
-                spec.resolve_height(avail_height, self.font_size, self.root_font_size)
-                    .max(Pt::ZERO),
+                spec.resolve_height(
+                    avail_height,
+                    self.state.font_size,
+                    self.state.root_font_size,
+                )
+                .max(Pt::ZERO),
             ),
         }
     }
 
     fn intrinsic_child_content_width(&self, avail_width: Pt, maximum: bool) -> Option<Pt> {
         let mut width = Pt::ZERO;
-        for child in &self.children {
+        for child in &self.state.children {
             if child.out_of_flow() {
                 continue;
             }
@@ -26255,19 +26277,26 @@ impl ContainerFlowable {
         &self,
         avail_width: Pt,
     ) -> (ResolvedEdges, ResolvedEdges, ResolvedEdges, Pt, Pt) {
-        let margin_spec = self.margin;
-        let mut margin = margin_spec.resolve(avail_width, self.font_size, self.root_font_size);
+        let margin_spec = self.state.margin;
+        let mut margin =
+            margin_spec.resolve(avail_width, self.state.font_size, self.state.root_font_size);
         let auto_left = matches!(margin_spec.left, LengthSpec::Auto);
         let auto_right = matches!(margin_spec.right, LengthSpec::Auto);
-        let border = self
-            .border_width
-            .resolve(avail_width, self.font_size, self.root_font_size);
-        let mut padding = self
-            .padding
-            .resolve(avail_width, self.font_size, self.root_font_size);
-        let gutter =
-            self.scrollbar_gutter
-                .resolve(avail_width, self.font_size, self.root_font_size);
+        let border = self.state.border_width.resolve(
+            avail_width,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
+        let mut padding = self.state.padding.resolve(
+            avail_width,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
+        let gutter = self.state.scrollbar_gutter.resolve(
+            avail_width,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
         padding.top += gutter.top;
         padding.right += gutter.right;
         padding.bottom += gutter.bottom;
@@ -26281,7 +26310,7 @@ impl ContainerFlowable {
             - padding.left
             - padding.right)
             .max(Pt::ZERO);
-        let intrinsic_content_width = match self.width {
+        let intrinsic_content_width = match self.state.width {
             LengthSpec::MinContent => self.intrinsic_child_content_width(avail_width, false),
             LengthSpec::MaxContent => self.intrinsic_child_content_width(avail_width, true),
             LengthSpec::FitContent => {
@@ -26295,42 +26324,49 @@ impl ContainerFlowable {
             }
             _ => None,
         };
-        let transferred_aspect_width = if matches!(self.width, LengthSpec::Auto) {
-            self.aspect_ratio.and_then(|ratio| {
+        let transferred_aspect_width = if matches!(self.state.width, LengthSpec::Auto) {
+            self.state.aspect_ratio.and_then(|ratio| {
                 if !ratio.is_finite() || ratio <= 0.0 {
                     return None;
                 }
                 let height = self.resolve_fixed_height(huge_pt())?;
-                Some(if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
-                    (height * ratio - border.left - border.right - padding.left - padding.right)
-                        .max(Pt::ZERO)
-                } else {
-                    height * ratio
-                })
+                Some(
+                    if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
+                        (height * ratio - border.left - border.right - padding.left - padding.right)
+                            .max(Pt::ZERO)
+                    } else {
+                        height * ratio
+                    },
+                )
             })
         } else {
             None
         };
-        let mut content_width = match self.width {
+        let mut content_width = match self.state.width {
             LengthSpec::Auto => transferred_aspect_width.unwrap_or(available_content_width),
             LengthSpec::MinContent | LengthSpec::MaxContent | LengthSpec::FitContent => {
                 intrinsic_content_width.unwrap_or(available_content_width)
             }
-            _ => self
-                .width
-                .resolve_width(avail_width, self.font_size, self.root_font_size),
+            _ => self.state.width.resolve_width(
+                avail_width,
+                self.state.font_size,
+                self.state.root_font_size,
+            ),
         };
         let intrinsic_width = matches!(
-            self.width,
+            self.state.width,
             LengthSpec::MinContent | LengthSpec::MaxContent | LengthSpec::FitContent
         );
-        let mut border_box_width = if matches!(self.width, LengthSpec::Auto) || intrinsic_width {
+        let mut border_box_width = if matches!(self.state.width, LengthSpec::Auto)
+            || intrinsic_width
+        {
             border.left + padding.left + content_width + padding.right + border.right
-        } else if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+        } else if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
             let decorations = border.left + padding.left + padding.right + border.right;
             let resolved = self
+                .state
                 .width
-                .resolve_width(avail_width, self.font_size, self.root_font_size)
+                .resolve_width(avail_width, self.state.font_size, self.state.root_font_size)
                 .max(Pt::ZERO)
                 .max(decorations);
             content_width = (resolved - border.left - border.right - padding.left - padding.right)
@@ -26339,8 +26375,8 @@ impl ContainerFlowable {
         } else {
             border.left + padding.left + content_width + padding.right + border.right
         };
-        if let Some(max_width) = self.resolve_width_constraint(self.max_width, avail_width) {
-            if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+        if let Some(max_width) = self.resolve_width_constraint(self.state.max_width, avail_width) {
+            if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
                 if border_box_width > max_width {
                     border_box_width = max_width;
                     content_width = (border_box_width
@@ -26356,8 +26392,8 @@ impl ContainerFlowable {
                     border.left + padding.left + content_width + padding.right + border.right;
             }
         }
-        if let Some(min_width) = self.resolve_width_constraint(self.min_width, avail_width) {
-            if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+        if let Some(min_width) = self.resolve_width_constraint(self.state.min_width, avail_width) {
+            if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
                 if border_box_width < min_width {
                     border_box_width = min_width;
                     content_width = (border_box_width
@@ -26374,8 +26410,8 @@ impl ContainerFlowable {
             }
         }
         let content_width = content_width.max(Pt::ZERO);
-        if matches!(self.box_sizing, BoxSizingMode::ContentBox)
-            || matches!(self.width, LengthSpec::Auto)
+        if matches!(self.state.box_sizing, BoxSizingMode::ContentBox)
+            || matches!(self.state.width, LengthSpec::Auto)
             || intrinsic_width
         {
             border_box_width =
@@ -26408,12 +26444,13 @@ impl ContainerFlowable {
         border: ResolvedEdges,
         padding: ResolvedEdges,
     ) -> (Option<(usize, Pt)>, Option<(usize, Pt)>) {
-        if self.contain_floats || self.clips_any_overflow() {
+        if self.state.contain_floats || self.clips_any_overflow() {
             return (None, None);
         }
 
         let first = if border.top == Pt::ZERO && padding.top == Pt::ZERO {
-            self.children
+            self.state
+                .children
                 .iter()
                 .enumerate()
                 .find(|(_, child)| !child.out_of_flow())
@@ -26430,21 +26467,22 @@ impl ContainerFlowable {
         };
 
         let height_is_auto = matches!(
-            self.height,
+            self.state.height,
             LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
         );
         let min_height_allows_collapse = matches!(
-            self.min_height,
+            self.state.min_height,
             LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
         ) || self
-            .resolve_height_constraint(self.min_height, huge_pt())
+            .resolve_height_constraint(self.state.min_height, huge_pt())
             .is_some_and(|height| height == Pt::ZERO);
         let last = if height_is_auto
             && min_height_allows_collapse
             && border.bottom == Pt::ZERO
             && padding.bottom == Pt::ZERO
         {
-            self.children
+            self.state
+                .children
                 .iter()
                 .enumerate()
                 .rev()
@@ -26461,11 +26499,11 @@ impl ContainerFlowable {
     }
 
     fn has_transforms(&self) -> bool {
-        !self.transforms.is_empty()
+        !self.state.transforms.is_empty()
     }
 
     fn has_projective_transforms(&self) -> bool {
-        self.transforms.iter().any(|op| {
+        self.state.transforms.iter().any(|op| {
             matches!(
                 op,
                 CssTransformOp::Translate3d { .. }
@@ -26487,11 +26525,11 @@ impl ContainerFlowable {
         ref_height: Pt,
     ) -> ProjectiveTransform {
         let mut operations = ProjectiveTransform::identity();
-        for op in &self.transforms {
+        for op in &self.state.transforms {
             let matrix = match *op {
                 CssTransformOp::Translate { x, y } => ProjectiveTransform::translation(
-                    x.resolve_width(ref_width, self.font_size, self.root_font_size),
-                    y.resolve_height(ref_height, self.font_size, self.root_font_size),
+                    x.resolve_width(ref_width, self.state.font_size, self.state.root_font_size),
+                    y.resolve_height(ref_height, self.state.font_size, self.state.root_font_size),
                     Pt::ZERO,
                 ),
                 CssTransformOp::Scale { x, y } => ProjectiveTransform::scale(x, y, 1.0),
@@ -26516,17 +26554,21 @@ impl ContainerFlowable {
                     )
                 }
                 CssTransformOp::Translate3d { x, y, z } => ProjectiveTransform::translation(
-                    x.resolve_width(ref_width, self.font_size, self.root_font_size),
-                    y.resolve_height(ref_height, self.font_size, self.root_font_size),
-                    z.resolve_width(ref_width, self.font_size, self.root_font_size),
+                    x.resolve_width(ref_width, self.state.font_size, self.state.root_font_size),
+                    y.resolve_height(ref_height, self.state.font_size, self.state.root_font_size),
+                    z.resolve_width(ref_width, self.state.font_size, self.state.root_font_size),
                 ),
                 CssTransformOp::Scale3d { x, y, z } => ProjectiveTransform::scale(x, y, z),
                 CssTransformOp::Rotate3d { x, y, z, radians } => {
                     ProjectiveTransform::rotate_axis(x, y, z, radians)
                 }
-                CssTransformOp::Perspective { distance } => ProjectiveTransform::perspective(
-                    distance.resolve_width(ref_width, self.font_size, self.root_font_size),
-                ),
+                CssTransformOp::Perspective { distance } => {
+                    ProjectiveTransform::perspective(distance.resolve_width(
+                        ref_width,
+                        self.state.font_size,
+                        self.state.root_font_size,
+                    ))
+                }
                 CssTransformOp::Matrix3d { values } => {
                     ProjectiveTransform::from_css_matrix3d(values)
                 }
@@ -26634,11 +26676,16 @@ impl ContainerFlowable {
     }
 
     fn apply_transforms(&self, canvas: &mut Canvas, ref_width: Pt, ref_height: Pt) {
-        for op in &self.transforms {
+        for op in &self.state.transforms {
             match op {
                 CssTransformOp::Translate { x, y } => {
-                    let tx = x.resolve_width(ref_width, self.font_size, self.root_font_size);
-                    let ty = y.resolve_height(ref_height, self.font_size, self.root_font_size);
+                    let tx =
+                        x.resolve_width(ref_width, self.state.font_size, self.state.root_font_size);
+                    let ty = y.resolve_height(
+                        ref_height,
+                        self.state.font_size,
+                        self.state.root_font_size,
+                    );
                     canvas.translate(tx, ty);
                 }
                 CssTransformOp::Scale { x, y } => {
@@ -26681,9 +26728,9 @@ impl ContainerFlowable {
             self.resolve_box(avail_width);
 
         let fixed_height = self.resolve_fixed_height(avail_height).or_else(|| {
-            let ratio = self.aspect_ratio?;
+            let ratio = self.state.aspect_ratio?;
             if matches!(
-                self.width,
+                self.state.width,
                 LengthSpec::Auto
                     | LengthSpec::Inherit
                     | LengthSpec::Initial
@@ -26694,14 +26741,16 @@ impl ContainerFlowable {
             ) {
                 return None;
             }
-            Some(if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
-                border_box_width * (1.0 / ratio)
-            } else {
-                content_width * (1.0 / ratio)
-            })
+            Some(
+                if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
+                    border_box_width * (1.0 / ratio)
+                } else {
+                    content_width * (1.0 / ratio)
+                },
+            )
         });
         let (fixed_content_height, fixed_border_box_height) = if let Some(resolved) = fixed_height {
-            if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+            if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
                 let border_box_height = resolved.max(Pt::ZERO);
                 let content_height =
                     (border_box_height - border.top - border.bottom - padding.top - padding.bottom)
@@ -26721,9 +26770,9 @@ impl ContainerFlowable {
         // children should measure naturally (important for flex rows not ballooning to page height).
         let child_avail_height = fixed_content_height.unwrap_or(huge_pt());
         let mut content_height: Pt = Pt::ZERO;
-        let mut child_sizes: Vec<Option<Size>> = Vec::with_capacity(self.children.len());
-        let mut child_collapsed_top = vec![Pt::ZERO; self.children.len()];
-        let mut child_collapsed_bottom = vec![Pt::ZERO; self.children.len()];
+        let mut child_sizes: Vec<Option<Size>> = Vec::with_capacity(self.state.children.len());
+        let mut child_collapsed_top = vec![Pt::ZERO; self.state.children.len()];
+        let mut child_collapsed_bottom = vec![Pt::ZERO; self.state.children.len()];
         let (collapsed_top, collapsed_bottom) =
             self.collapsed_parent_child_margins(content_width, border, padding);
         if let Some((index, value)) = collapsed_top {
@@ -26736,7 +26785,7 @@ impl ContainerFlowable {
         let mut left_float_bottom = Pt::ZERO;
         let mut right_float_bottom = Pt::ZERO;
         let mut previous_block_margin_bottom: Option<Pt> = None;
-        for (child_index, child) in self.children.iter().enumerate() {
+        for (child_index, child) in self.state.children.iter().enumerate() {
             if let Some((side, size)) = child.float_layout_size(content_width, child_avail_height) {
                 let bottom = content_height + size.height.max(Pt::ZERO);
                 match side {
@@ -26775,7 +26824,7 @@ impl ContainerFlowable {
             previous_block_margin_bottom = block_margins.map(|(_, bottom)| bottom);
         }
 
-        if self.contain_floats {
+        if self.state.contain_floats {
             content_height = content_height.max(left_float_bottom.max(right_float_bottom));
         }
 
@@ -26807,8 +26856,8 @@ impl ContainerFlowable {
         let flow_content_height = content_height;
         let mut content_height = fixed_content_height.unwrap_or(content_height);
         if fixed_content_height.is_none() {
-            if let Some(lines) = self.line_clamp {
-                let clamp_height = self.line_clamp_line_height * lines as i32;
+            if let Some(lines) = self.state.line_clamp {
+                let clamp_height = self.state.line_clamp_line_height * lines as i32;
                 if clamp_height > Pt::ZERO {
                     content_height = content_height.min(clamp_height);
                 }
@@ -26817,8 +26866,10 @@ impl ContainerFlowable {
         let mut border_box_height = fixed_border_box_height.unwrap_or_else(|| {
             border.top + padding.top + content_height + padding.bottom + border.bottom
         });
-        if let Some(max_height) = self.resolve_height_constraint(self.max_height, avail_height) {
-            if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+        if let Some(max_height) =
+            self.resolve_height_constraint(self.state.max_height, avail_height)
+        {
+            if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
                 if border_box_height > max_height {
                     border_box_height = max_height;
                     content_height = (border_box_height
@@ -26834,8 +26885,10 @@ impl ContainerFlowable {
                     border.top + padding.top + content_height + padding.bottom + border.bottom;
             }
         }
-        if let Some(min_height) = self.resolve_height_constraint(self.min_height, avail_height) {
-            if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+        if let Some(min_height) =
+            self.resolve_height_constraint(self.state.min_height, avail_height)
+        {
+            if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
                 if border_box_height < min_height {
                     border_box_height = min_height;
                     content_height = (border_box_height
@@ -26851,7 +26904,7 @@ impl ContainerFlowable {
                     border.top + padding.top + content_height + padding.bottom + border.bottom;
             }
         }
-        if let Some(fragmentainer_height) = self.fragmentainer_fill_height {
+        if let Some(fragmentainer_height) = self.state.fragmentainer_fill_height {
             let target_border_box =
                 (fragmentainer_height - margin.top - margin.bottom).max(Pt::ZERO);
             if border_box_height < target_border_box {
@@ -26862,25 +26915,25 @@ impl ContainerFlowable {
             }
         }
         let height_is_auto = matches!(
-            self.height,
+            self.state.height,
             LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
         ) || fixed_height.is_none();
         let min_height_allows_empty_collapse = matches!(
-            self.min_height,
+            self.state.min_height,
             LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
         ) || self
-            .resolve_height_constraint(self.min_height, avail_height)
+            .resolve_height_constraint(self.state.min_height, avail_height)
             .is_some_and(|height| height == Pt::ZERO);
         let empty_self_margins_collapse = height_is_auto
             && min_height_allows_empty_collapse
-            && !self.contain_floats
+            && !self.state.contain_floats
             && !self.clips_any_overflow()
             && border.top == Pt::ZERO
             && border.bottom == Pt::ZERO
             && padding.top == Pt::ZERO
             && padding.bottom == Pt::ZERO
             && border_box_height == Pt::ZERO
-            && self.children.iter().all(|child| child.out_of_flow());
+            && self.state.children.iter().all(|child| child.out_of_flow());
         let total_height = if empty_self_margins_collapse {
             collapsed_adjacent_margin(margin.top, margin.bottom)
         } else {
@@ -26915,13 +26968,13 @@ impl ContainerFlowable {
     fn cached_layout(&self, avail_width: Pt, avail_height: Pt) -> ContainerLayoutCache {
         let key_w = avail_width.to_milli_i64();
         let key_h = avail_height.to_milli_i64();
-        if let Some(cache) = self.layout_cache.lock().unwrap().as_ref() {
+        if let Some(cache) = self.state.layout_cache.lock().unwrap().as_ref() {
             if cache.avail_width_milli == key_w && cache.avail_height_milli == key_h {
                 return cache.clone();
             }
         }
         let cache = self.compute_layout(avail_width, avail_height);
-        *self.layout_cache.lock().unwrap() = Some(cache.clone());
+        *self.state.layout_cache.lock().unwrap() = Some(cache.clone());
         cache
     }
 
@@ -26969,10 +27022,10 @@ impl ContainerFlowable {
             return false;
         }
 
-        self.children.is_empty()
-            || (!matches!(self.box_decoration_break, BoxDecorationBreak::Clone)
-                && !self.establishes_abs_containing_block
-                && !self.children.iter().any(|child| child.out_of_flow())
+        self.state.children.is_empty()
+            || (!matches!(self.state.box_decoration_break, BoxDecorationBreak::Clone)
+                && !self.state.establishes_abs_containing_block
+                && !self.state.children.iter().any(|child| child.out_of_flow())
                 && original.flow_content_height <= first_content)
     }
 
@@ -27005,22 +27058,22 @@ impl ContainerFlowable {
         if second_content <= Pt::ZERO {
             return None;
         }
-        let carries_content = !self.children.is_empty();
+        let carries_content = !self.state.children.is_empty();
         if carries_content
-            && (matches!(self.box_decoration_break, BoxDecorationBreak::Clone)
+            && (matches!(self.state.box_decoration_break, BoxDecorationBreak::Clone)
                 // Nested positioned descendants are anchored through this
                 // container even when its direct children remain in flow.
                 // Clearing the continuation's children would sever that
                 // containing-block relationship and can manufacture an
                 // epsilon-sized tail page for an otherwise page-height box.
-                || self.establishes_abs_containing_block
-                || self.children.iter().any(|child| child.out_of_flow())
+                || self.state.establishes_abs_containing_block
+                || self.state.children.iter().any(|child| child.out_of_flow())
                 || original.flow_content_height > first_content)
         {
             return None;
         }
 
-        let first_height = if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+        let first_height = if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
             original.border.top + original.padding.top + first_content
         } else {
             first_content
@@ -27032,60 +27085,63 @@ impl ContainerFlowable {
         if first_height <= Pt::ZERO || first_height > avail_height {
             return None;
         }
-        let second_height = if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+        let second_height = if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
             second_content + original.padding.bottom + original.border.bottom
         } else {
             second_content
         };
 
         let mut first = self.clone();
-        first.margin = Self::zero_bottom(self.margin);
-        first.border_width = Self::zero_bottom(self.border_width);
-        first.border_radius = Self::zero_bottom_radii(self.border_radius);
-        first.padding = Self::zero_bottom(self.padding);
-        first.height = LengthSpec::Absolute(first_height);
-        first.min_height = LengthSpec::Auto;
-        first.max_height = LengthSpec::Auto;
-        first.aspect_ratio = None;
-        first.pagination = Pagination {
+        first.state.margin = Self::zero_bottom(self.state.margin);
+        first.state.border_width = Self::zero_bottom(self.state.border_width);
+        first.state.border_radius = Self::zero_bottom_radii(self.state.border_radius);
+        first.state.padding = Self::zero_bottom(self.state.padding);
+        first.state.height = LengthSpec::Absolute(first_height);
+        first.state.min_height = LengthSpec::Auto;
+        first.state.max_height = LengthSpec::Auto;
+        first.state.aspect_ratio = None;
+        first.state.pagination = Pagination {
             break_before: BreakBefore::Auto,
             break_after: BreakAfter::Auto,
-            ..self.pagination
+            ..self.state.pagination
         };
-        first.fragmentainer_fill_height = None;
-        first.layout_cache = Arc::new(Mutex::new(None));
+        first.state.fragmentainer_fill_height = None;
+        first.state.layout_cache = Arc::new(Mutex::new(None));
 
         let mut second = self.clone();
         if carries_content {
-            second.children.clear();
+            second.state.children.clear();
         }
-        second.margin = Self::zero_top(self.margin);
-        second.border_width = Self::zero_top(self.border_width);
-        second.border_radius = Self::zero_top_radii(self.border_radius);
-        second.padding = Self::zero_top(self.padding);
-        second.height = LengthSpec::Absolute(second_height);
-        second.min_height = LengthSpec::Auto;
-        second.max_height = LengthSpec::Auto;
-        second.aspect_ratio = None;
-        second.pagination = Pagination {
+        second.state.margin = Self::zero_top(self.state.margin);
+        second.state.border_width = Self::zero_top(self.state.border_width);
+        second.state.border_radius = Self::zero_top_radii(self.state.border_radius);
+        second.state.padding = Self::zero_top(self.state.padding);
+        second.state.height = LengthSpec::Absolute(second_height);
+        second.state.min_height = LengthSpec::Auto;
+        second.state.max_height = LengthSpec::Auto;
+        second.state.aspect_ratio = None;
+        second.state.pagination = Pagination {
             break_before: BreakBefore::Auto,
-            ..self.pagination
+            ..self.state.pagination
         };
-        second.fragmentainer_fill_height = None;
-        second.layout_cache = Arc::new(Mutex::new(None));
+        second.state.fragmentainer_fill_height = None;
+        second.state.layout_cache = Arc::new(Mutex::new(None));
 
-        if matches!(self.box_decoration_break, BoxDecorationBreak::Slice) {
-            let geometry = self.slice_decoration.unwrap_or(SliceDecorationGeometry {
-                offset_y: Pt::ZERO,
-                total_border_box_height: original.border_box_height,
-                border: original.border,
-                padding: original.padding,
-                border_radius: self.border_radius,
-            });
+        if matches!(self.state.box_decoration_break, BoxDecorationBreak::Slice) {
+            let geometry = self
+                .state
+                .slice_decoration
+                .unwrap_or(SliceDecorationGeometry {
+                    offset_y: Pt::ZERO,
+                    total_border_box_height: original.border_box_height,
+                    border: original.border,
+                    padding: original.padding,
+                    border_radius: self.state.border_radius,
+                });
             let first_border_box_height =
                 original.border.top + original.padding.top + first_content;
-            first.slice_decoration = Some(geometry);
-            second.slice_decoration = Some(SliceDecorationGeometry {
+            first.state.slice_decoration = Some(geometry);
+            second.state.slice_decoration = Some(SliceDecorationGeometry {
                 offset_y: geometry.offset_y + first_border_box_height,
                 ..geometry
             });
@@ -29459,22 +29515,22 @@ impl ContainerFlowable {
     ) -> Option<(Pt, Pt, Pt, Pt)> {
         let top = spec
             .top
-            .resolve_height(height, self.font_size, self.root_font_size)
+            .resolve_height(height, self.state.font_size, self.state.root_font_size)
             .max(Pt::ZERO)
             .min(height);
         let right = spec
             .right
-            .resolve_width(width, self.font_size, self.root_font_size)
+            .resolve_width(width, self.state.font_size, self.state.root_font_size)
             .max(Pt::ZERO)
             .min(width);
         let bottom = spec
             .bottom
-            .resolve_height(height, self.font_size, self.root_font_size)
+            .resolve_height(height, self.state.font_size, self.state.root_font_size)
             .max(Pt::ZERO)
             .min(height);
         let left = spec
             .left
-            .resolve_width(width, self.font_size, self.root_font_size)
+            .resolve_width(width, self.state.font_size, self.state.root_font_size)
             .max(Pt::ZERO)
             .min(width);
 
@@ -29491,13 +29547,15 @@ impl ContainerFlowable {
         width: Pt,
         height: Pt,
     ) -> (Pt, Pt, Pt) {
-        let center_x = x + spec
-            .center_x
-            .resolve_width(width, self.font_size, self.root_font_size);
-        let center_y =
-            y + spec
-                .center_y
-                .resolve_height(height, self.font_size, self.root_font_size);
+        let center_x =
+            x + spec
+                .center_x
+                .resolve_width(width, self.state.font_size, self.state.root_font_size);
+        let center_y = y + spec.center_y.resolve_height(
+            height,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
         let radius = match spec.radius {
             ClipPathShapeRadius::Length(LengthSpec::Percent(value)) => {
                 let w = width.to_f32();
@@ -29505,7 +29563,7 @@ impl ContainerFlowable {
                 Pt::from_f32(((w * w + h * h).sqrt() / std::f32::consts::SQRT_2) * value)
             }
             ClipPathShapeRadius::Length(other) => {
-                other.resolve_width(width, self.font_size, self.root_font_size)
+                other.resolve_width(width, self.state.font_size, self.state.root_font_size)
             }
             ClipPathShapeRadius::ClosestSide => {
                 let left = (center_x - x).abs();
@@ -29569,13 +29627,15 @@ impl ContainerFlowable {
         width: Pt,
         height: Pt,
     ) -> (Pt, Pt, Pt, Pt) {
-        let center_x = x + spec
-            .center_x
-            .resolve_width(width, self.font_size, self.root_font_size);
-        let center_y =
-            y + spec
-                .center_y
-                .resolve_height(height, self.font_size, self.root_font_size);
+        let center_x =
+            x + spec
+                .center_x
+                .resolve_width(width, self.state.font_size, self.state.root_font_size);
+        let center_y = y + spec.center_y.resolve_height(
+            height,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
         let radius_x = self
             .resolve_clip_path_ellipse_radius(spec.radius_x, center_x, x, width, true)
             .max(Pt::ZERO);
@@ -29596,9 +29656,9 @@ impl ContainerFlowable {
         match radius {
             ClipPathShapeRadius::Length(length) => {
                 if horizontal {
-                    length.resolve_width(size, self.font_size, self.root_font_size)
+                    length.resolve_width(size, self.state.font_size, self.state.root_font_size)
                 } else {
-                    length.resolve_height(size, self.font_size, self.root_font_size)
+                    length.resolve_height(size, self.state.font_size, self.state.root_font_size)
                 }
             }
             ClipPathShapeRadius::ClosestSide | ClipPathShapeRadius::ClosestCorner => {
@@ -29622,19 +29682,21 @@ impl ContainerFlowable {
         width: Pt,
         height: Pt,
     ) -> (Pt, Pt, Pt, Pt) {
-        let clip_x = x + spec
-            .x
-            .resolve_width(width, self.font_size, self.root_font_size);
-        let clip_y = y + spec
-            .y
-            .resolve_height(height, self.font_size, self.root_font_size);
+        let clip_x =
+            x + spec
+                .x
+                .resolve_width(width, self.state.font_size, self.state.root_font_size);
+        let clip_y =
+            y + spec
+                .y
+                .resolve_height(height, self.state.font_size, self.state.root_font_size);
         let clip_w = spec
             .width
-            .resolve_width(width, self.font_size, self.root_font_size)
+            .resolve_width(width, self.state.font_size, self.state.root_font_size)
             .max(Pt::ZERO);
         let clip_h = spec
             .height
-            .resolve_height(height, self.font_size, self.root_font_size)
+            .resolve_height(height, self.state.font_size, self.state.root_font_size)
             .max(Pt::ZERO);
         (clip_x, clip_y, clip_w, clip_h)
     }
@@ -29650,13 +29712,17 @@ impl ContainerFlowable {
         let resolve_x = |value: LengthSpec, auto_value: Pt| -> Pt {
             match value {
                 LengthSpec::Auto => auto_value,
-                other => other.resolve_width(width, self.font_size, self.root_font_size),
+                other => {
+                    other.resolve_width(width, self.state.font_size, self.state.root_font_size)
+                }
             }
         };
         let resolve_y = |value: LengthSpec, auto_value: Pt| -> Pt {
             match value {
                 LengthSpec::Auto => auto_value,
-                other => other.resolve_height(height, self.font_size, self.root_font_size),
+                other => {
+                    other.resolve_height(height, self.state.font_size, self.state.root_font_size)
+                }
             }
         };
         let top = resolve_y(spec.top, Pt::ZERO);
@@ -30026,12 +30092,14 @@ impl ContainerFlowable {
         width: Pt,
         height: Pt,
     ) -> ResolvedClipPathRadii {
-        let horizontal = radius
-            .horizontal
-            .resolve(width, self.font_size, self.root_font_size);
-        let vertical = radius
-            .vertical
-            .resolve(height, self.font_size, self.root_font_size);
+        let horizontal =
+            radius
+                .horizontal
+                .resolve(width, self.state.font_size, self.state.root_font_size);
+        let vertical =
+            radius
+                .vertical
+                .resolve(height, self.state.font_size, self.state.root_font_size);
         ResolvedClipPathRadii {
             top_left_x: horizontal.top_left,
             top_left_y: vertical.top_left,
@@ -30090,10 +30158,10 @@ impl ContainerFlowable {
             (
                 x + point
                     .0
-                    .resolve_width(width, self.font_size, self.root_font_size),
+                    .resolve_width(width, self.state.font_size, self.state.root_font_size),
                 y + point
                     .1
-                    .resolve_height(height, self.font_size, self.root_font_size),
+                    .resolve_height(height, self.state.font_size, self.state.root_font_size),
             )
         };
         let (start_x, start_y) = resolve((first_x, first_y));
@@ -30140,10 +30208,12 @@ impl ContainerFlowable {
         if spec.commands.is_empty() {
             return false;
         }
-        let resolve_x =
-            |value: LengthSpec| value.resolve_width(width, self.font_size, self.root_font_size);
-        let resolve_y =
-            |value: LengthSpec| value.resolve_height(height, self.font_size, self.root_font_size);
+        let resolve_x = |value: LengthSpec| {
+            value.resolve_width(width, self.state.font_size, self.state.root_font_size)
+        };
+        let resolve_y = |value: LengthSpec| {
+            value.resolve_height(height, self.state.font_size, self.state.root_font_size)
+        };
         let resolve_control = |control_x: LengthSpec,
                                control_y: LengthSpec,
                                anchor: ClipPathShapeControlAnchor,
@@ -30444,15 +30514,15 @@ impl ContainerFlowable {
         let paint_content_width =
             (border_box_width - border.left - border.right - padding.left - padding.right)
                 .max(Pt::ZERO);
-        let local_border_clip_radii = self.border_radius.resolve(
+        let local_border_clip_radii = self.state.border_radius.resolve(
             border_box_width,
             border_box_height,
-            self.font_size,
-            self.root_font_size,
+            self.state.font_size,
+            self.state.root_font_size,
         );
 
         let mut applied = false;
-        if let Some(spec) = self.legacy_clip {
+        if let Some(spec) = self.state.legacy_clip {
             canvas.save_state();
             let (clip_x, clip_y, clip_w, clip_h) = self.resolve_clip_path_rect(
                 spec,
@@ -30464,7 +30534,7 @@ impl ContainerFlowable {
             self.apply_clip_rect_or_rounded(canvas, clip_x, clip_y, clip_w, clip_h, None);
             applied = true;
         }
-        if let Some(clip_path) = self.clip_path.as_ref() {
+        if let Some(clip_path) = self.state.clip_path.as_ref() {
             if !applied {
                 canvas.save_state();
             }
@@ -30476,8 +30546,9 @@ impl ContainerFlowable {
             // fragment's coordinate space. Rebuilding the height locally, on
             // the other hand, closes polygons at every page boundary.
             let slice_geometry = self
+                .state
                 .slice_decoration
-                .filter(|_| matches!(self.box_decoration_break, BoxDecorationBreak::Slice));
+                .filter(|_| matches!(self.state.box_decoration_break, BoxDecorationBreak::Slice));
             let (
                 clip_border_box_y,
                 clip_border_box_height,
@@ -30501,8 +30572,8 @@ impl ContainerFlowable {
                     geometry.border_radius.resolve(
                         border_box_width,
                         virtual_height,
-                        self.font_size,
-                        self.root_font_size,
+                        self.state.font_size,
+                        self.state.root_font_size,
                     ),
                 )
             } else {
@@ -30517,7 +30588,7 @@ impl ContainerFlowable {
             };
             let (clip_ref_x, clip_ref_y, clip_ref_w, clip_ref_h) =
                 Self::resolve_clip_path_reference_rect(
-                    self.clip_path_reference_box,
+                    self.state.clip_path_reference_box,
                     border_box_x - margin.left,
                     clip_border_box_y - margin.top,
                     margin,
@@ -30531,7 +30602,7 @@ impl ContainerFlowable {
                     clip_border_box_height,
                 );
             let clip_ref_radius = Self::resolve_clip_path_reference_radii(
-                self.clip_path_reference_box,
+                self.state.clip_path_reference_box,
                 clip_border_radii,
                 margin,
                 clip_border,
@@ -31261,40 +31332,40 @@ impl ContainerFlowable {
         border_box_height: Pt,
         border: ResolvedEdges,
     ) -> bool {
-        let Some(source) = self.border_image.source.as_ref() else {
+        let Some(source) = self.state.border_image.source.as_ref() else {
             return false;
         };
 
         let outset_top = Self::resolve_border_image_outset(
-            self.border_image.outset[0],
+            self.state.border_image.outset[0],
             border.top,
             border_box_height,
-            self.font_size,
-            self.root_font_size,
+            self.state.font_size,
+            self.state.root_font_size,
             true,
         );
         let outset_right = Self::resolve_border_image_outset(
-            self.border_image.outset[1],
+            self.state.border_image.outset[1],
             border.right,
             border_box_width,
-            self.font_size,
-            self.root_font_size,
+            self.state.font_size,
+            self.state.root_font_size,
             false,
         );
         let outset_bottom = Self::resolve_border_image_outset(
-            self.border_image.outset[2],
+            self.state.border_image.outset[2],
             border.bottom,
             border_box_height,
-            self.font_size,
-            self.root_font_size,
+            self.state.font_size,
+            self.state.root_font_size,
             true,
         );
         let outset_left = Self::resolve_border_image_outset(
-            self.border_image.outset[3],
+            self.state.border_image.outset[3],
             border.left,
             border_box_width,
-            self.font_size,
-            self.root_font_size,
+            self.state.font_size,
+            self.state.root_font_size,
             false,
         );
         let area_x = border_box_x - outset_left;
@@ -31314,46 +31385,46 @@ impl ContainerFlowable {
         // image dimension by resolve_border_image_slice; overlapping slices
         // leave the intervening source regions empty, without shrinking corners.
         let source_slices = [
-            Self::resolve_border_image_slice(self.border_image.slice[0], source_height),
-            Self::resolve_border_image_slice(self.border_image.slice[1], source_width),
-            Self::resolve_border_image_slice(self.border_image.slice[2], source_height),
-            Self::resolve_border_image_slice(self.border_image.slice[3], source_width),
+            Self::resolve_border_image_slice(self.state.border_image.slice[0], source_height),
+            Self::resolve_border_image_slice(self.state.border_image.slice[1], source_width),
+            Self::resolve_border_image_slice(self.state.border_image.slice[2], source_height),
+            Self::resolve_border_image_slice(self.state.border_image.slice[3], source_width),
         ];
         let mut widths = [
             Self::resolve_border_image_width(
-                self.border_image.width[0],
+                self.state.border_image.width[0],
                 border.top,
                 source_slices[0],
                 area_height,
-                self.font_size,
-                self.root_font_size,
+                self.state.font_size,
+                self.state.root_font_size,
                 true,
             ),
             Self::resolve_border_image_width(
-                self.border_image.width[1],
+                self.state.border_image.width[1],
                 border.right,
                 source_slices[1],
                 area_width,
-                self.font_size,
-                self.root_font_size,
+                self.state.font_size,
+                self.state.root_font_size,
                 false,
             ),
             Self::resolve_border_image_width(
-                self.border_image.width[2],
+                self.state.border_image.width[2],
                 border.bottom,
                 source_slices[2],
                 area_height,
-                self.font_size,
-                self.root_font_size,
+                self.state.font_size,
+                self.state.root_font_size,
                 true,
             ),
             Self::resolve_border_image_width(
-                self.border_image.width[3],
+                self.state.border_image.width[3],
                 border.left,
                 source_slices[3],
                 area_width,
-                self.font_size,
-                self.root_font_size,
+                self.state.font_size,
+                self.state.root_font_size,
                 false,
             ),
         ];
@@ -31388,8 +31459,8 @@ impl ContainerFlowable {
         ];
         let dest_w = [width_left, dest_center_width, width_right];
         let dest_h = [width_top, dest_center_height, width_bottom];
-        if self.border_image.repeat_x == BorderImageRepeatMode::Stretch
-            && self.border_image.repeat_y == BorderImageRepeatMode::Stretch
+        if self.state.border_image.repeat_x == BorderImageRepeatMode::Stretch
+            && self.state.border_image.repeat_y == BorderImageRepeatMode::Stretch
             // A solid source still has transparent gaps when a slice or middle
             // region is empty. Only collapse a complete nine-slice source into
             // one rectangle/ring; otherwise let the patch renderer skip gaps.
@@ -31398,7 +31469,7 @@ impl ContainerFlowable {
         {
             if let Some(color) = Self::uniform_opaque_gradient_color(source) {
                 canvas.set_fill_color(color);
-                if !self.border_image.fill
+                if !self.state.border_image.fill
                     && dest_center_width > Pt::ZERO
                     && dest_center_height > Pt::ZERO
                 {
@@ -31480,7 +31551,7 @@ impl ContainerFlowable {
             dest_y[0],
             dest_w[1],
             dest_h[0],
-            self.border_image.repeat_x,
+            self.state.border_image.repeat_x,
         );
         Self::draw_border_image_edge_x(
             canvas,
@@ -31496,7 +31567,7 @@ impl ContainerFlowable {
             dest_y[2],
             dest_w[1],
             dest_h[2],
-            self.border_image.repeat_x,
+            self.state.border_image.repeat_x,
         );
         Self::draw_border_image_edge_y(
             canvas,
@@ -31512,7 +31583,7 @@ impl ContainerFlowable {
             dest_y[1],
             dest_w[0],
             dest_h[1],
-            self.border_image.repeat_y,
+            self.state.border_image.repeat_y,
         );
         Self::draw_border_image_edge_y(
             canvas,
@@ -31528,10 +31599,10 @@ impl ContainerFlowable {
             dest_y[1],
             dest_w[2],
             dest_h[1],
-            self.border_image.repeat_y,
+            self.state.border_image.repeat_y,
         );
 
-        if self.border_image.fill {
+        if self.state.border_image.fill {
             // The center tile inherits the scale of the adjoining border-image
             // regions.  Scaling it from the entire destination center would make
             // the tile depend on the box size and collapse `space`/`repeat` into
@@ -31554,13 +31625,13 @@ impl ContainerFlowable {
                 dest_x[1],
                 dest_w[1],
                 natural_width,
-                self.border_image.repeat_x,
+                self.state.border_image.repeat_x,
             );
             let y_tiles = Self::border_image_axis_tiles(
                 dest_y[1],
                 dest_h[1],
                 natural_height,
-                self.border_image.repeat_y,
+                self.state.border_image.repeat_y,
             );
             canvas.save_state();
             canvas.clip_rect(dest_x[1], dest_y[1], dest_w[1], dest_h[1]);
@@ -32243,7 +32314,8 @@ impl ContainerFlowable {
     }
 
     fn apply_paint_filter_color(&self, color: Color) -> Color {
-        self.paint_filter
+        self.state
+            .paint_filter
             .as_ref()
             .map(|filter| Self::paint_filter_color(filter, color))
             .unwrap_or(color)
@@ -32433,14 +32505,14 @@ impl ContainerFlowable {
             || border.top != border.right
             || border.top != border.bottom
             || border.top != border.left
-            || !self.border_styles.is_uniform()
-            || self.border_styles.top != OutlineLineStyle::Double
-            || !self.border_opacities.is_uniform()
-            || self.border_opacities.top < 1.0 - 1.0e-6
-            || self.border_colors.top != self.border_colors.right
-            || self.border_colors.top != self.border_colors.bottom
-            || self.border_colors.top != self.border_colors.left
-            || self.border_colors.top.is_transparent()
+            || !self.state.border_styles.is_uniform()
+            || self.state.border_styles.top != OutlineLineStyle::Double
+            || !self.state.border_opacities.is_uniform()
+            || self.state.border_opacities.top < 1.0 - 1.0e-6
+            || self.state.border_colors.top != self.state.border_colors.right
+            || self.state.border_colors.top != self.state.border_colors.bottom
+            || self.state.border_colors.top != self.state.border_colors.left
+            || self.state.border_colors.top.is_transparent()
         {
             return None;
         }
@@ -32499,12 +32571,12 @@ impl ContainerFlowable {
 
         let explicit_width = (!width_auto).then(|| {
             size.width
-                .resolve_width(box_width, self.font_size, self.root_font_size)
+                .resolve_width(box_width, self.state.font_size, self.state.root_font_size)
                 .max(Pt::ZERO)
         });
         let explicit_height = (!height_auto).then(|| {
             size.height
-                .resolve_height(box_height, self.font_size, self.root_font_size)
+                .resolve_height(box_height, self.state.font_size, self.state.root_font_size)
                 .max(Pt::ZERO)
         });
 
@@ -32569,20 +32641,24 @@ impl ContainerFlowable {
             | LengthSpec::Initial => Pt::ZERO,
             LengthSpec::Absolute(value) => value,
             LengthSpec::Percent(value) => percent_basis * value,
-            LengthSpec::Em(value) => self.font_size * value,
-            LengthSpec::Rem(value) => self.root_font_size * value,
+            LengthSpec::Em(value) => self.state.font_size * value,
+            LengthSpec::Rem(value) => self.state.root_font_size * value,
             LengthSpec::Calc(calc) => {
                 calc.abs
                     + (percent_basis * calc.percent)
-                    + (self.font_size * calc.em)
-                    + (self.root_font_size * calc.rem)
+                    + (self.state.font_size * calc.em)
+                    + (self.state.root_font_size * calc.rem)
             }
-            LengthSpec::Clamped(calc) => {
-                calc.resolve(percent_basis, self.font_size, self.root_font_size)
-            }
-            LengthSpec::FontRelative(calc) => {
-                calc.resolve(percent_basis, self.font_size, self.root_font_size)
-            }
+            LengthSpec::Clamped(calc) => calc.resolve(
+                percent_basis,
+                self.state.font_size,
+                self.state.root_font_size,
+            ),
+            LengthSpec::FontRelative(calc) => calc.resolve(
+                percent_basis,
+                self.state.font_size,
+                self.state.root_font_size,
+            ),
         }
     }
 
@@ -33004,19 +33080,22 @@ impl ContainerFlowable {
         if shadow.inset {
             return;
         }
-        let offset_x = shadow
-            .offset_x
-            .resolve_width(width, self.font_size, self.root_font_size);
-        let offset_y = shadow
-            .offset_y
-            .resolve_height(height, self.font_size, self.root_font_size);
+        let offset_x =
+            shadow
+                .offset_x
+                .resolve_width(width, self.state.font_size, self.state.root_font_size);
+        let offset_y =
+            shadow
+                .offset_y
+                .resolve_height(height, self.state.font_size, self.state.root_font_size);
         let blur = shadow
             .blur
-            .resolve_width(width, self.font_size, self.root_font_size)
+            .resolve_width(width, self.state.font_size, self.state.root_font_size)
             .max(Pt::ZERO);
-        let spread = shadow
-            .spread
-            .resolve_width(width, self.font_size, self.root_font_size);
+        let spread =
+            shadow
+                .spread
+                .resolve_width(width, self.state.font_size, self.state.root_font_size);
 
         let base_x = x + offset_x - spread;
         let base_y = y + offset_y - spread;
@@ -33108,17 +33187,19 @@ impl ContainerFlowable {
         }
         let blur = shadow
             .blur
-            .resolve_width(width, self.font_size, self.root_font_size)
+            .resolve_width(width, self.state.font_size, self.state.root_font_size)
             .max(Pt::ZERO);
-        let offset_x = shadow
-            .offset_x
-            .resolve_width(width, self.font_size, self.root_font_size);
-        let offset_y = shadow
-            .offset_y
-            .resolve_height(height, self.font_size, self.root_font_size);
+        let offset_x =
+            shadow
+                .offset_x
+                .resolve_width(width, self.state.font_size, self.state.root_font_size);
+        let offset_y =
+            shadow
+                .offset_y
+                .resolve_height(height, self.state.font_size, self.state.root_font_size);
         let spread = shadow
             .spread
-            .resolve_width(width, self.font_size, self.root_font_size)
+            .resolve_width(width, self.state.font_size, self.state.root_font_size)
             .max(Pt::ZERO);
 
         let rounded_clip = Self::clip_radii_have_rounding(radii);
@@ -33493,12 +33574,12 @@ impl ContainerFlowable {
 
 impl Flowable for ContainerFlowable {
     fn with_inline_bidi_levels(&self, levels: &[unicode_bidi::Level]) -> Option<Box<dyn Flowable>> {
-        if !self.inline_bidi_transparent {
+        if !self.state.inline_bidi_transparent {
             return None;
         }
         let mut resolved = self.clone();
         let mut offset = 0;
-        for child in &mut resolved.children {
+        for child in &mut resolved.state.children {
             if child.out_of_flow() {
                 continue;
             }
@@ -33509,16 +33590,17 @@ impl Flowable for ContainerFlowable {
             }
             offset += length;
         }
-        resolved.layout_cache = Arc::new(Mutex::new(None));
+        resolved.state.layout_cache = Arc::new(Mutex::new(None));
         Some(Box::new(resolved))
     }
 
     fn inline_bidi_text(&self) -> Option<Cow<'_, str>> {
-        if !self.inline_bidi_transparent {
+        if !self.state.inline_bidi_transparent {
             return None;
         }
         Some(Cow::Owned(
-            self.children
+            self.state
+                .children
                 .iter()
                 .filter(|child| !child.out_of_flow())
                 .map(|child| {
@@ -33536,21 +33618,22 @@ impl Flowable for ContainerFlowable {
         // normal flow.  Classify it with positioned zero-level descendants for
         // paint ordering only; ContainerFlowable still computes and consumes
         // its ordinary in-flow slot above.
-        self.establishes_stacking_context
+        self.state.establishes_stacking_context
     }
 
     fn with_sliced_decoration_block_extension(&self, extra: Pt) -> Box<dyn Flowable> {
         let mut extended = self.clone();
-        if let Some(mut geometry) = extended.slice_decoration {
+        if let Some(mut geometry) = extended.state.slice_decoration {
             geometry.total_border_box_height =
                 geometry.total_border_box_height + extra.max(Pt::ZERO);
-            extended.slice_decoration = Some(geometry);
+            extended.state.slice_decoration = Some(geometry);
         }
         Box::new(extended)
     }
 
     fn inline_text_edge_letter_spacing(&self) -> Option<Pt> {
         let mut children = self
+            .state
             .children
             .iter()
             .filter(|child| !child.out_of_flow() && !child.is_layout_marker());
@@ -33562,7 +33645,8 @@ impl Flowable for ContainerFlowable {
     }
 
     fn page_footnotes(&self) -> Vec<PageFootnoteEntry> {
-        self.children
+        self.state
+            .children
             .iter()
             .flat_map(|child| child.page_footnotes())
             .collect()
@@ -33576,7 +33660,7 @@ impl Flowable for ContainerFlowable {
             return None;
         }
         let (_, _, _, content_width, _) = self.resolve_box(avail_width);
-        for (index, child) in self.children.iter().enumerate() {
+        for (index, child) in self.state.children.iter().enumerate() {
             let entries = child.page_footnotes();
             let Some(entry) = entries.first() else {
                 continue;
@@ -33585,42 +33669,43 @@ impl Flowable for ContainerFlowable {
                 return None;
             }
             let (first_child, second_child) = child.split_before_page_footnotes(content_width)?;
-            let mut first_children = self.children[..index].to_vec();
+            let mut first_children = self.state.children[..index].to_vec();
             first_children.push(first_child);
             let mut second_children = vec![second_child];
-            second_children.extend(self.children[index + 1..].iter().cloned());
+            second_children.extend(self.state.children[index + 1..].iter().cloned());
 
-            let clones_decoration = matches!(self.box_decoration_break, BoxDecorationBreak::Clone);
+            let clones_decoration =
+                matches!(self.state.box_decoration_break, BoxDecorationBreak::Clone);
             let mut first = self.clone();
-            first.children = first_children;
-            first.height = LengthSpec::Auto;
-            first.min_height = LengthSpec::Auto;
-            first.max_height = LengthSpec::Auto;
-            first.fragmentainer_fill_height = None;
-            first.slice_decoration = None;
-            first.layout_cache = Arc::new(Mutex::new(None));
-            first.pagination.break_after = BreakAfter::Auto;
+            first.state.children = first_children;
+            first.state.height = LengthSpec::Auto;
+            first.state.min_height = LengthSpec::Auto;
+            first.state.max_height = LengthSpec::Auto;
+            first.state.fragmentainer_fill_height = None;
+            first.state.slice_decoration = None;
+            first.state.layout_cache = Arc::new(Mutex::new(None));
+            first.state.pagination.break_after = BreakAfter::Auto;
             if !clones_decoration {
-                first.margin = Self::zero_bottom(first.margin);
-                first.border_width = Self::zero_bottom(first.border_width);
-                first.padding = Self::zero_bottom(first.padding);
-                first.border_radius = Self::zero_bottom_radii(first.border_radius);
+                first.state.margin = Self::zero_bottom(first.state.margin);
+                first.state.border_width = Self::zero_bottom(first.state.border_width);
+                first.state.padding = Self::zero_bottom(first.state.padding);
+                first.state.border_radius = Self::zero_bottom_radii(first.state.border_radius);
             }
 
             let mut second = self.clone();
-            second.children = second_children;
-            second.height = LengthSpec::Auto;
-            second.min_height = LengthSpec::Auto;
-            second.max_height = LengthSpec::Auto;
-            second.fragmentainer_fill_height = None;
-            second.slice_decoration = None;
-            second.layout_cache = Arc::new(Mutex::new(None));
-            second.pagination.break_before = BreakBefore::Auto;
+            second.state.children = second_children;
+            second.state.height = LengthSpec::Auto;
+            second.state.min_height = LengthSpec::Auto;
+            second.state.max_height = LengthSpec::Auto;
+            second.state.fragmentainer_fill_height = None;
+            second.state.slice_decoration = None;
+            second.state.layout_cache = Arc::new(Mutex::new(None));
+            second.state.pagination.break_before = BreakBefore::Auto;
             if !clones_decoration {
-                second.margin = Self::zero_top(second.margin);
-                second.border_width = Self::zero_top(second.border_width);
-                second.padding = Self::zero_top(second.padding);
-                second.border_radius = Self::zero_top_radii(second.border_radius);
+                second.state.margin = Self::zero_top(second.state.margin);
+                second.state.border_width = Self::zero_top(second.state.border_width);
+                second.state.padding = Self::zero_top(second.state.padding);
+                second.state.border_radius = Self::zero_top_radii(second.state.border_radius);
             }
             return Some((Box::new(first), Box::new(second)));
         }
@@ -33628,22 +33713,25 @@ impl Flowable for ContainerFlowable {
     }
 
     fn has_out_of_flow_descendant(&self) -> bool {
-        self.children
+        self.state
+            .children
             .iter()
             .any(|child| child.has_out_of_flow_descendant())
     }
 
     fn has_replaced_descendant(&self) -> bool {
-        self.children
+        self.state
+            .children
             .iter()
             .any(|child| child.has_replaced_descendant())
     }
 
     fn is_monolithic_fragmentation_box(&self) -> bool {
-        if self.children.is_empty() {
+        if self.state.children.is_empty() {
             return self.resolve_fixed_height(huge_pt()).is_some();
         }
         let mut in_flow = self
+            .state
             .children
             .iter()
             .filter(|child| !child.out_of_flow() && !child.is_layout_marker());
@@ -33662,13 +33750,13 @@ impl Flowable for ContainerFlowable {
     ) -> (Option<Box<dyn Flowable>>, Vec<Box<dyn Flowable>>) {
         // This container owns a different absolute-positioning context. Its
         // descendants must be fragmented with it, not hoisted to an ancestor.
-        if self.establishes_abs_containing_block {
+        if self.state.establishes_abs_containing_block {
             return (Some(Box::new(self.clone())), Vec::new());
         }
 
-        let mut retained = Vec::with_capacity(self.children.len());
+        let mut retained = Vec::with_capacity(self.state.children.len());
         let mut extracted = Vec::new();
-        for child in &self.children {
+        for child in &self.state.children {
             let (child, mut child_extracted) = child.extract_fragment_block_end_positioned();
             if let Some(child) = child {
                 retained.push(child);
@@ -33676,42 +33764,43 @@ impl Flowable for ContainerFlowable {
             extracted.append(&mut child_extracted);
         }
         let mut container = self.clone();
-        container.children = retained;
-        container.layout_cache = Arc::new(Mutex::new(None));
+        container.state.children = retained;
+        container.state.layout_cache = Arc::new(Mutex::new(None));
         (Some(Box::new(container)), extracted)
     }
 
     fn fragment_block_end_inline_leading(&self, avail_width: Pt) -> Option<Pt> {
-        if self.children.len() != 1
+        if self.state.children.len() != 1
             || !matches!(
-                self.height,
+                self.state.height,
                 LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
             )
             || !matches!(
-                self.min_height,
+                self.state.min_height,
                 LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
             )
             || !matches!(
-                self.max_height,
+                self.state.max_height,
                 LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
             )
-            || self.margin != EdgeSizes::zero()
-            || self.border_width != EdgeSizes::zero()
-            || self.padding != EdgeSizes::zero()
-            || self.background.is_some()
-            || self.background_paint.is_some()
-            || !self.background_paints.is_empty()
-            || self.box_shadow.is_some()
-            || !self.box_shadows.is_empty()
+            || self.state.margin != EdgeSizes::zero()
+            || self.state.border_width != EdgeSizes::zero()
+            || self.state.padding != EdgeSizes::zero()
+            || self.state.background.is_some()
+            || self.state.background_paint.is_some()
+            || !self.state.background_paints.is_empty()
+            || self.state.box_shadow.is_some()
+            || !self.state.box_shadows.is_empty()
         {
             return None;
         }
         let (_, _, _, content_width, _) = self.resolve_box(avail_width);
-        self.children[0].fragment_block_end_inline_leading(content_width)
+        self.state.children[0].fragment_block_end_inline_leading(content_width)
     }
 
     fn multicol_text_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
-        self.children
+        self.state
+            .children
             .iter()
             .filter(|child| !child.out_of_flow())
             .filter_map(|child| child.multicol_text_min_content_width(avail_width))
@@ -33719,7 +33808,7 @@ impl Flowable for ContainerFlowable {
     }
 
     fn intrinsic_width(&self) -> Option<Pt> {
-        let definite_width = match self.width {
+        let definite_width = match self.state.width {
             LengthSpec::Absolute(_)
             | LengthSpec::Em(_)
             | LengthSpec::Rem(_)
@@ -33732,8 +33821,9 @@ impl Flowable for ContainerFlowable {
                 base: CalcLength { percent: 0.0, .. },
                 ..
             }) => Some(
-                self.width
-                    .resolve_width(Pt::ZERO, self.font_size, self.root_font_size)
+                self.state
+                    .width
+                    .resolve_width(Pt::ZERO, self.state.font_size, self.state.root_font_size)
                     .max(Pt::ZERO),
             ),
             LengthSpec::Percent(_)
@@ -33749,17 +33839,21 @@ impl Flowable for ContainerFlowable {
             | LengthSpec::Initial => None,
         };
         if let Some(width) = definite_width {
-            let margin = self
-                .margin
-                .resolve(width, self.font_size, self.root_font_size);
-            let border = self
-                .border_width
-                .resolve(width, self.font_size, self.root_font_size);
-            let padding = self
-                .padding
-                .resolve(width, self.font_size, self.root_font_size);
+            let margin =
+                self.state
+                    .margin
+                    .resolve(width, self.state.font_size, self.state.root_font_size);
+            let border = self.state.border_width.resolve(
+                width,
+                self.state.font_size,
+                self.state.root_font_size,
+            );
+            let padding =
+                self.state
+                    .padding
+                    .resolve(width, self.state.font_size, self.state.root_font_size);
             let decorations = border.left + padding.left + padding.right + border.right;
-            let border_box_width = if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+            let border_box_width = if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
                 width.max(decorations)
             } else {
                 width + decorations
@@ -33767,29 +33861,37 @@ impl Flowable for ContainerFlowable {
             return Some((margin.left + border_box_width + margin.right).max(Pt::ZERO));
         }
 
-        if let Some(ratio) = self.aspect_ratio {
-            let definite_height = match self.height {
+        if let Some(ratio) = self.state.aspect_ratio {
+            let definite_height = match self.state.height {
                 LengthSpec::Absolute(_)
                 | LengthSpec::Em(_)
                 | LengthSpec::Rem(_)
                 | LengthSpec::Calc(CalcLength { percent: 0.0, .. }) => Some(
-                    self.height
-                        .resolve_height(huge_pt(), self.font_size, self.root_font_size)
+                    self.state
+                        .height
+                        .resolve_height(huge_pt(), self.state.font_size, self.state.root_font_size)
                         .max(Pt::ZERO),
                 ),
                 _ => None,
             };
             if let Some(height) = definite_height {
-                let margin = self
-                    .margin
-                    .resolve(Pt::ZERO, self.font_size, self.root_font_size);
-                let border =
-                    self.border_width
-                        .resolve(Pt::ZERO, self.font_size, self.root_font_size);
-                let padding = self
-                    .padding
-                    .resolve(Pt::ZERO, self.font_size, self.root_font_size);
-                let border_box_width = if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+                let margin = self.state.margin.resolve(
+                    Pt::ZERO,
+                    self.state.font_size,
+                    self.state.root_font_size,
+                );
+                let border = self.state.border_width.resolve(
+                    Pt::ZERO,
+                    self.state.font_size,
+                    self.state.root_font_size,
+                );
+                let padding = self.state.padding.resolve(
+                    Pt::ZERO,
+                    self.state.font_size,
+                    self.state.root_font_size,
+                );
+                let border_box_width = if matches!(self.state.box_sizing, BoxSizingMode::BorderBox)
+                {
                     height * ratio
                 } else {
                     border.left + padding.left + height * ratio + padding.right + border.right
@@ -33799,7 +33901,7 @@ impl Flowable for ContainerFlowable {
         }
 
         let mut max_child = Pt::ZERO;
-        for child in &self.children {
+        for child in &self.state.children {
             if child.out_of_flow() {
                 continue;
             }
@@ -33807,15 +33909,19 @@ impl Flowable for ContainerFlowable {
             max_child = max_child.max(child_width);
         }
 
-        let margin = self
-            .margin
-            .resolve(max_child, self.font_size, self.root_font_size);
-        let border = self
-            .border_width
-            .resolve(max_child, self.font_size, self.root_font_size);
-        let padding = self
-            .padding
-            .resolve(max_child, self.font_size, self.root_font_size);
+        let margin =
+            self.state
+                .margin
+                .resolve(max_child, self.state.font_size, self.state.root_font_size);
+        let border = self.state.border_width.resolve(
+            max_child,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
+        let padding =
+            self.state
+                .padding
+                .resolve(max_child, self.state.font_size, self.state.root_font_size);
 
         let content_width = max_child.max(Pt::ZERO);
         let border_box_width =
@@ -33826,21 +33932,26 @@ impl Flowable for ContainerFlowable {
 
     fn flex_min_content_width(&self, avail_width: Pt) -> Option<Pt> {
         let mut max_child = Pt::ZERO;
-        for child in &self.children {
+        for child in &self.state.children {
             if child.out_of_flow() {
                 continue;
             }
             max_child = max_child.max(child.flex_min_content_width(avail_width)?);
         }
-        let margin = self
-            .margin
-            .resolve(avail_width, self.font_size, self.root_font_size);
-        let border = self
-            .border_width
-            .resolve(avail_width, self.font_size, self.root_font_size);
-        let padding = self
-            .padding
-            .resolve(avail_width, self.font_size, self.root_font_size);
+        let margin =
+            self.state
+                .margin
+                .resolve(avail_width, self.state.font_size, self.state.root_font_size);
+        let border = self.state.border_width.resolve(
+            avail_width,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
+        let padding = self.state.padding.resolve(
+            avail_width,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
         Some(
             (margin.left
                 + border.left
@@ -33855,21 +33966,26 @@ impl Flowable for ContainerFlowable {
 
     fn flex_max_content_width(&self, avail_width: Pt) -> Option<Pt> {
         let mut max_child = Pt::ZERO;
-        for child in &self.children {
+        for child in &self.state.children {
             if child.out_of_flow() {
                 continue;
             }
             max_child = max_child.max(child.flex_max_content_width(avail_width)?);
         }
-        let margin = self
-            .margin
-            .resolve(avail_width, self.font_size, self.root_font_size);
-        let border = self
-            .border_width
-            .resolve(avail_width, self.font_size, self.root_font_size);
-        let padding = self
-            .padding
-            .resolve(avail_width, self.font_size, self.root_font_size);
+        let margin =
+            self.state
+                .margin
+                .resolve(avail_width, self.state.font_size, self.state.root_font_size);
+        let border = self.state.border_width.resolve(
+            avail_width,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
+        let padding = self.state.padding.resolve(
+            avail_width,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
         Some(
             (margin.left
                 + border.left
@@ -33889,27 +34005,32 @@ impl Flowable for ContainerFlowable {
         let fixed_margins = margins.left.unwrap_or(Pt::ZERO) + margins.right.unwrap_or(Pt::ZERO);
         let decorations = self.flex_outer_width_minimum(avail_width) - fixed_margins;
         let resolved_outer = |value: Pt| {
-            if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+            if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
                 value.max(decorations) + fixed_margins
             } else {
                 value + decorations + fixed_margins
             }
         };
 
-        match self.min_width {
+        match self.state.min_width {
             LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => {
                 if self.clips_overflow_x() {
                     return Some(decorations + fixed_margins);
                 }
                 let content_min = self.flex_min_content_width(avail_width)?;
-                let specified_suggestion = match self.width {
+                let specified_suggestion = match self.state.width {
                     LengthSpec::Absolute(_)
                     | LengthSpec::Percent(_)
                     | LengthSpec::Em(_)
                     | LengthSpec::Rem(_)
                     | LengthSpec::Calc(_) => Some(resolved_outer(
-                        self.width
-                            .resolve_width(avail_width, self.font_size, self.root_font_size)
+                        self.state
+                            .width
+                            .resolve_width(
+                                avail_width,
+                                self.state.font_size,
+                                self.state.root_font_size,
+                            )
                             .max(Pt::ZERO),
                     )),
                     _ => None,
@@ -33929,7 +34050,7 @@ impl Flowable for ContainerFlowable {
                 Some(max_content.min(avail_width.max(min_content)))
             }
             spec => Some(resolved_outer(
-                spec.resolve_width(avail_width, self.font_size, self.root_font_size)
+                spec.resolve_width(avail_width, self.state.font_size, self.state.root_font_size)
                     .max(Pt::ZERO),
             )),
         }
@@ -33942,14 +34063,14 @@ impl Flowable for ContainerFlowable {
         let fixed_margins = margins.left.unwrap_or(Pt::ZERO) + margins.right.unwrap_or(Pt::ZERO);
         let decorations = self.flex_outer_width_minimum(avail_width) - fixed_margins;
         let resolved_outer = |value: Pt| {
-            if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+            if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
                 value.max(decorations) + fixed_margins
             } else {
                 value + decorations + fixed_margins
             }
         };
 
-        match self.max_width {
+        match self.state.max_width {
             LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => None,
             LengthSpec::MinContent => self.flex_min_content_width(avail_width),
             LengthSpec::MaxContent | LengthSpec::Content => {
@@ -33961,7 +34082,7 @@ impl Flowable for ContainerFlowable {
                 Some(max_content.min(avail_width.max(min_content)))
             }
             spec => Some(resolved_outer(
-                spec.resolve_width(avail_width, self.font_size, self.root_font_size)
+                spec.resolve_width(avail_width, self.state.font_size, self.state.root_font_size)
                     .max(Pt::ZERO),
             )),
         }
@@ -33972,34 +34093,39 @@ impl Flowable for ContainerFlowable {
         let fixed_margins = margin.top + margin.bottom;
         let decorations = border.top + padding.top + padding.bottom + border.bottom;
         let resolved_outer = |value: Pt| {
-            if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+            if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
                 value.max(decorations) + fixed_margins
             } else {
                 value + decorations + fixed_margins
             }
         };
 
-        match self.min_height {
+        match self.state.min_height {
             LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => {
                 if self.clips_overflow_y() {
                     return Some(decorations + fixed_margins);
                 }
                 let mut content_min = Pt::ZERO;
-                for child in &self.children {
+                for child in &self.state.children {
                     if child.out_of_flow() {
                         continue;
                     }
                     content_min = content_min + child.wrap(content_width, huge_pt()).height;
                 }
                 let content_min = content_min + decorations + fixed_margins;
-                let specified_suggestion = match self.height {
+                let specified_suggestion = match self.state.height {
                     LengthSpec::Absolute(_)
                     | LengthSpec::Percent(_)
                     | LengthSpec::Em(_)
                     | LengthSpec::Rem(_)
                     | LengthSpec::Calc(_) => Some(resolved_outer(
-                        self.height
-                            .resolve_height(avail_height, self.font_size, self.root_font_size)
+                        self.state
+                            .height
+                            .resolve_height(
+                                avail_height,
+                                self.state.font_size,
+                                self.state.root_font_size,
+                            )
                             .max(Pt::ZERO),
                     )),
                     _ => None,
@@ -34010,8 +34136,12 @@ impl Flowable for ContainerFlowable {
                 )
             }
             spec => Some(resolved_outer(
-                spec.resolve_height(avail_height, self.font_size, self.root_font_size)
-                    .max(Pt::ZERO),
+                spec.resolve_height(
+                    avail_height,
+                    self.state.font_size,
+                    self.state.root_font_size,
+                )
+                .max(Pt::ZERO),
             )),
         }
     }
@@ -34021,18 +34151,22 @@ impl Flowable for ContainerFlowable {
         let fixed_margins = margin.top + margin.bottom;
         let decorations = border.top + padding.top + padding.bottom + border.bottom;
         let resolved_outer = |value: Pt| {
-            if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+            if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
                 value.max(decorations) + fixed_margins
             } else {
                 value + decorations + fixed_margins
             }
         };
 
-        match self.max_height {
+        match self.state.max_height {
             LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial => None,
             spec => Some(resolved_outer(
-                spec.resolve_height(avail_height, self.font_size, self.root_font_size)
-                    .max(Pt::ZERO),
+                spec.resolve_height(
+                    avail_height,
+                    self.state.font_size,
+                    self.state.root_font_size,
+                )
+                .max(Pt::ZERO),
             )),
         }
     }
@@ -34045,7 +34179,7 @@ impl Flowable for ContainerFlowable {
     fn first_baseline(&self, avail_width: Pt) -> Option<Pt> {
         let (margin, border, padding, content_width, _) = self.resolve_box(avail_width);
         let mut offset = margin.top + border.top + padding.top;
-        for child in &self.children {
+        for child in &self.state.children {
             if child.out_of_flow() {
                 continue;
             }
@@ -34061,7 +34195,7 @@ impl Flowable for ContainerFlowable {
         let (margin, border, padding, content_width, _) = self.resolve_box(avail_width);
         let mut offset = margin.top + border.top + padding.top;
         let mut baseline = None;
-        for child in &self.children {
+        for child in &self.state.children {
             if child.out_of_flow() {
                 continue;
             }
@@ -34101,7 +34235,8 @@ impl Flowable for ContainerFlowable {
         // margin, border, and padding are sliced away below. Let its contents
         // use that released fragmentainer space as well; otherwise nested
         // fragmented boxes stop short by the discarded block-end decoration.
-        let clones_decoration = matches!(self.box_decoration_break, BoxDecorationBreak::Clone);
+        let clones_decoration =
+            matches!(self.state.box_decoration_break, BoxDecorationBreak::Clone);
         let available_content_height = if clones_decoration {
             avail_height
                 - margin.top
@@ -34122,7 +34257,7 @@ impl Flowable for ContainerFlowable {
         if split_debug {
             eprintln!(
                 "container split enter children={} avail=({:?},{:?}) content=({:?},{:?})",
-                self.children.len(),
+                self.state.children.len(),
                 avail_width,
                 avail_height,
                 content_width,
@@ -34139,12 +34274,14 @@ impl Flowable for ContainerFlowable {
         let (collapsed_parent_top, _) =
             self.collapsed_parent_child_margins(content_width, border, padding);
         let out_of_flow: Vec<Box<dyn Flowable>> = self
+            .state
             .children
             .iter()
             .cloned()
             .filter(|child| child.out_of_flow())
             .collect();
         let flow_child_indices: Vec<usize> = self
+            .state
             .children
             .iter()
             .enumerate()
@@ -34156,7 +34293,7 @@ impl Flowable for ContainerFlowable {
         let flow_children: Vec<Box<dyn Flowable>> = flow_child_indices
             .iter()
             .map(|&index| {
-                let child = &self.children[index];
+                let child = &self.state.children[index];
                 fixed_layout
                     .as_ref()
                     .and_then(|layout| layout.child_sizes[index])
@@ -34173,7 +34310,7 @@ impl Flowable for ContainerFlowable {
             .count()
             > 1;
         let sibling_boundary_context =
-            self.starts_at_sibling_fragment_boundary || has_multiple_flow_boxes;
+            self.state.starts_at_sibling_fragment_boundary || has_multiple_flow_boxes;
 
         for (index, child) in flow_children.iter().cloned().enumerate() {
             let original_index = flow_child_indices[index];
@@ -34449,10 +34586,11 @@ impl Flowable for ContainerFlowable {
         // unconsumed minimum-height budget into the continuation. `clone` deliberately retains
         // the old per-fragment behavior because every fragment owns a complete decoration box.
         let (first_min_height, mut second_min_height) = if clones_decoration {
-            (self.min_height, self.min_height)
-        } else if let Some(minimum) = self.resolve_height_constraint(self.min_height, avail_height)
+            (self.state.min_height, self.state.min_height)
+        } else if let Some(minimum) =
+            self.resolve_height_constraint(self.state.min_height, avail_height)
         {
-            let consumed = if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+            let consumed = if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
                 (avail_height - margin.top).max(Pt::ZERO)
             } else {
                 available_content_height
@@ -34462,28 +34600,30 @@ impl Flowable for ContainerFlowable {
                 LengthSpec::Absolute((minimum - consumed).max(Pt::ZERO)),
             )
         } else {
-            (self.min_height, self.min_height)
+            (self.state.min_height, self.state.min_height)
         };
         let fragmented_fixed_height = self.resolve_fixed_height(huge_pt());
         let fragmented_aspect_ratio = if fragmented_fixed_height.is_some() {
             None
         } else {
-            self.aspect_ratio
+            self.state.aspect_ratio
         };
         let first_fragment_height = if placed_paint_only_edge_overhang {
-            LengthSpec::Absolute(if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
-                (avail_height - margin.top).max(Pt::ZERO)
-            } else {
-                available_content_height
-            })
+            LengthSpec::Absolute(
+                if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
+                    (avail_height - margin.top).max(Pt::ZERO)
+                } else {
+                    available_content_height
+                },
+            )
         } else if fragmented_fixed_height.is_some() {
             LengthSpec::Auto
         } else {
-            self.height
+            self.state.height
         };
-        let mut second_fragment_height = self.height;
+        let mut second_fragment_height = self.state.height;
         if let Some(fixed_height) = fragmented_fixed_height {
-            let consumed = if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+            let consumed = if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
                 (avail_height - margin.top).max(Pt::ZERO)
             } else {
                 available_content_height
@@ -34505,18 +34645,18 @@ impl Flowable for ContainerFlowable {
         let slice_decoration = if clones_decoration {
             None
         } else {
-            Some(self.slice_decoration.unwrap_or_else(|| {
+            Some(self.state.slice_decoration.unwrap_or_else(|| {
                 let natural = self.cached_layout(avail_width, avail_height);
                 SliceDecorationGeometry {
                     offset_y: Pt::ZERO,
                     total_border_box_height: natural.border_box_height,
                     border,
                     padding,
-                    border_radius: self.border_radius,
+                    border_radius: self.state.border_radius,
                 }
             }))
         };
-        if self.establishes_abs_containing_block {
+        if self.state.establishes_abs_containing_block {
             let mut retained = Vec::with_capacity(placed.len());
             let mut relocated = Vec::new();
             for child in placed {
@@ -34541,211 +34681,217 @@ impl Flowable for ContainerFlowable {
             }
         }
 
-        let mut first = ContainerFlowable {
+        let mut first = Self::from_state(ContainerState {
             children: placed,
-            inline_bidi_transparent: self.inline_bidi_transparent,
+            inline_bidi_transparent: self.state.inline_bidi_transparent,
             margin: if clones_decoration {
-                self.margin
+                self.state.margin
             } else {
-                Self::zero_bottom(self.margin)
+                Self::zero_bottom(self.state.margin)
             },
             border_width: if clones_decoration {
-                self.border_width
+                self.state.border_width
             } else {
-                Self::zero_bottom(self.border_width)
+                Self::zero_bottom(self.state.border_width)
             },
-            border_colors: self.border_colors,
-            border_opacities: self.border_opacities,
-            border_styles: self.border_styles,
+            border_colors: self.state.border_colors,
+            border_opacities: self.state.border_opacities,
+            border_styles: self.state.border_styles,
             border_radius: if clones_decoration {
-                self.border_radius
+                self.state.border_radius
             } else {
-                Self::zero_bottom_radii(self.border_radius)
+                Self::zero_bottom_radii(self.state.border_radius)
             },
-            box_decoration_break: self.box_decoration_break,
-            border_image: self.border_image.clone(),
-            outline_width: self.outline_width,
-            outline_offset: self.outline_offset,
-            outline_style: self.outline_style,
-            outline_color: self.outline_color,
-            outline_visible: self.outline_visible,
+            box_decoration_break: self.state.box_decoration_break,
+            border_image: self.state.border_image.clone(),
+            outline_width: self.state.outline_width,
+            outline_offset: self.state.outline_offset,
+            outline_style: self.state.outline_style,
+            outline_color: self.state.outline_color,
+            outline_visible: self.state.outline_visible,
             padding: if clones_decoration {
-                self.padding
+                self.state.padding
             } else {
-                Self::zero_bottom(self.padding)
+                Self::zero_bottom(self.state.padding)
             },
-            width: self.width,
-            max_width: self.max_width,
-            min_width: self.min_width,
+            width: self.state.width,
+            max_width: self.state.max_width,
+            min_width: self.state.min_width,
             height: first_fragment_height,
             min_height: first_min_height,
-            max_height: self.max_height,
+            max_height: self.state.max_height,
             aspect_ratio: fragmented_aspect_ratio,
-            box_sizing: self.box_sizing,
-            background: self.background,
-            background_opacity: self.background_opacity,
-            background_paint: self.background_paint.clone(),
-            background_paints: self.background_paints.clone(),
-            background_sizes: self.background_sizes.clone(),
-            background_positions: self.background_positions.clone(),
-            background_repeats: self.background_repeats.clone(),
-            background_attachments: self.background_attachments.clone(),
-            background_blend_modes: self.background_blend_modes.clone(),
-            background_origins: self.background_origins.clone(),
-            background_clips: self.background_clips.clone(),
-            mask: self.mask.clone(),
-            clip_path: self.clip_path.clone(),
-            clip_path_reference_box: self.clip_path_reference_box,
-            legacy_clip: self.legacy_clip,
-            clip_path_backdrop_root_group_suppressed: self.clip_path_backdrop_root_group_suppressed,
-            will_change_backdrop_root: self.will_change_backdrop_root,
+            box_sizing: self.state.box_sizing,
+            background: self.state.background,
+            background_opacity: self.state.background_opacity,
+            background_paint: self.state.background_paint.clone(),
+            background_paints: self.state.background_paints.clone(),
+            background_sizes: self.state.background_sizes.clone(),
+            background_positions: self.state.background_positions.clone(),
+            background_repeats: self.state.background_repeats.clone(),
+            background_attachments: self.state.background_attachments.clone(),
+            background_blend_modes: self.state.background_blend_modes.clone(),
+            background_origins: self.state.background_origins.clone(),
+            background_clips: self.state.background_clips.clone(),
+            mask: self.state.mask.clone(),
+            clip_path: self.state.clip_path.clone(),
+            clip_path_reference_box: self.state.clip_path_reference_box,
+            legacy_clip: self.state.legacy_clip,
+            clip_path_backdrop_root_group_suppressed: self
+                .state
+                .clip_path_backdrop_root_group_suppressed,
+            will_change_backdrop_root: self.state.will_change_backdrop_root,
             will_change_backdrop_root_group_suppressed: self
+                .state
                 .will_change_backdrop_root_group_suppressed,
-            mask_backdrop_root: self.mask_backdrop_root,
-            mask_backdrop_root_group_suppressed: self.mask_backdrop_root_group_suppressed,
-            box_shadow: self.box_shadow.clone(),
-            box_shadows: self.box_shadows.clone(),
-            paint_filter: self.paint_filter.clone(),
-            backdrop_filter: self.backdrop_filter.clone(),
-            mix_blend_mode: self.mix_blend_mode,
-            isolation: self.isolation,
-            opacity: self.opacity,
-            transforms: self.transforms.clone(),
-            transform_origin: self.transform_origin,
-            transform_box: self.transform_box,
-            perspective: self.perspective,
-            perspective_origin: self.perspective_origin,
-            transform_style: self.transform_style,
-            overflow_x: self.overflow_x,
-            overflow_y: self.overflow_y,
-            overflow_clip_margin: self.overflow_clip_margin,
-            scrollbar_gutter: self.scrollbar_gutter,
-            line_clamp: self.line_clamp,
-            line_clamp_line_height: self.line_clamp_line_height,
-            contain_floats: self.contain_floats,
-            self_visible: self.self_visible,
-            tag_role: self.tag_role.clone(),
-            list_numbering: self.list_numbering,
-            html_figure_group: self.html_figure_group,
-            establishes_abs_containing_block: self.establishes_abs_containing_block,
-            establishes_stacking_context: self.establishes_stacking_context,
-            font_size: self.font_size,
-            root_font_size: self.root_font_size,
+            mask_backdrop_root: self.state.mask_backdrop_root,
+            mask_backdrop_root_group_suppressed: self.state.mask_backdrop_root_group_suppressed,
+            box_shadow: self.state.box_shadow.clone(),
+            box_shadows: self.state.box_shadows.clone(),
+            paint_filter: self.state.paint_filter.clone(),
+            backdrop_filter: self.state.backdrop_filter.clone(),
+            mix_blend_mode: self.state.mix_blend_mode,
+            isolation: self.state.isolation,
+            opacity: self.state.opacity,
+            transforms: self.state.transforms.clone(),
+            transform_origin: self.state.transform_origin,
+            transform_box: self.state.transform_box,
+            perspective: self.state.perspective,
+            perspective_origin: self.state.perspective_origin,
+            transform_style: self.state.transform_style,
+            overflow_x: self.state.overflow_x,
+            overflow_y: self.state.overflow_y,
+            overflow_clip_margin: self.state.overflow_clip_margin,
+            scrollbar_gutter: self.state.scrollbar_gutter,
+            line_clamp: self.state.line_clamp,
+            line_clamp_line_height: self.state.line_clamp_line_height,
+            contain_floats: self.state.contain_floats,
+            self_visible: self.state.self_visible,
+            tag_role: self.state.tag_role.clone(),
+            list_numbering: self.state.list_numbering,
+            html_figure_group: self.state.html_figure_group,
+            establishes_abs_containing_block: self.state.establishes_abs_containing_block,
+            establishes_stacking_context: self.state.establishes_stacking_context,
+            font_size: self.state.font_size,
+            root_font_size: self.state.root_font_size,
             pagination: Pagination {
                 break_before: BreakBefore::Auto,
                 break_after: BreakAfter::Auto,
-                ..self.pagination
+                ..self.state.pagination
             },
-            spans_all_columns: self.spans_all_columns,
+            spans_all_columns: self.state.spans_all_columns,
             fragmentainer_fill_height: Some(avail_height),
-            starts_at_sibling_fragment_boundary: self.starts_at_sibling_fragment_boundary,
+            starts_at_sibling_fragment_boundary: self.state.starts_at_sibling_fragment_boundary,
             slice_decoration,
-            grid_inline_paint_snap: self.grid_inline_paint_snap,
-            grid_block_paint_snap: self.grid_block_paint_snap,
+            grid_inline_paint_snap: self.state.grid_inline_paint_snap,
+            grid_block_paint_snap: self.state.grid_block_paint_snap,
             layout_cache: Arc::new(Mutex::new(None)),
-        };
-        let mut second = ContainerFlowable {
+        });
+        let mut second = Self::from_state(ContainerState {
             children: remaining,
-            inline_bidi_transparent: self.inline_bidi_transparent,
+            inline_bidi_transparent: self.state.inline_bidi_transparent,
             margin: if clones_decoration {
-                self.margin
+                self.state.margin
             } else {
-                Self::zero_top(self.margin)
+                Self::zero_top(self.state.margin)
             },
             border_width: if clones_decoration {
-                self.border_width
+                self.state.border_width
             } else {
-                Self::zero_top(self.border_width)
+                Self::zero_top(self.state.border_width)
             },
-            border_colors: self.border_colors,
-            border_opacities: self.border_opacities,
-            border_styles: self.border_styles,
+            border_colors: self.state.border_colors,
+            border_opacities: self.state.border_opacities,
+            border_styles: self.state.border_styles,
             border_radius: if clones_decoration {
-                self.border_radius
+                self.state.border_radius
             } else {
-                Self::zero_top_radii(self.border_radius)
+                Self::zero_top_radii(self.state.border_radius)
             },
-            box_decoration_break: self.box_decoration_break,
-            border_image: self.border_image.clone(),
-            outline_width: self.outline_width,
-            outline_offset: self.outline_offset,
-            outline_style: self.outline_style,
-            outline_color: self.outline_color,
-            outline_visible: self.outline_visible,
+            box_decoration_break: self.state.box_decoration_break,
+            border_image: self.state.border_image.clone(),
+            outline_width: self.state.outline_width,
+            outline_offset: self.state.outline_offset,
+            outline_style: self.state.outline_style,
+            outline_color: self.state.outline_color,
+            outline_visible: self.state.outline_visible,
             padding: if clones_decoration || continuation_repeats_block_start_padding {
-                self.padding
+                self.state.padding
             } else {
-                Self::zero_top(self.padding)
+                Self::zero_top(self.state.padding)
             },
-            width: self.width,
-            max_width: self.max_width,
-            min_width: self.min_width,
+            width: self.state.width,
+            max_width: self.state.max_width,
+            min_width: self.state.min_width,
             height: second_fragment_height,
             min_height: second_min_height,
-            max_height: self.max_height,
+            max_height: self.state.max_height,
             aspect_ratio: fragmented_aspect_ratio,
-            box_sizing: self.box_sizing,
-            background: self.background,
-            background_opacity: self.background_opacity,
-            background_paint: self.background_paint.clone(),
-            background_paints: self.background_paints.clone(),
-            background_sizes: self.background_sizes.clone(),
-            background_positions: self.background_positions.clone(),
-            background_repeats: self.background_repeats.clone(),
-            background_attachments: self.background_attachments.clone(),
-            background_blend_modes: self.background_blend_modes.clone(),
-            background_origins: self.background_origins.clone(),
-            background_clips: self.background_clips.clone(),
-            mask: self.mask.clone(),
-            clip_path: self.clip_path.clone(),
-            clip_path_reference_box: self.clip_path_reference_box,
-            legacy_clip: self.legacy_clip,
-            clip_path_backdrop_root_group_suppressed: self.clip_path_backdrop_root_group_suppressed,
-            will_change_backdrop_root: self.will_change_backdrop_root,
+            box_sizing: self.state.box_sizing,
+            background: self.state.background,
+            background_opacity: self.state.background_opacity,
+            background_paint: self.state.background_paint.clone(),
+            background_paints: self.state.background_paints.clone(),
+            background_sizes: self.state.background_sizes.clone(),
+            background_positions: self.state.background_positions.clone(),
+            background_repeats: self.state.background_repeats.clone(),
+            background_attachments: self.state.background_attachments.clone(),
+            background_blend_modes: self.state.background_blend_modes.clone(),
+            background_origins: self.state.background_origins.clone(),
+            background_clips: self.state.background_clips.clone(),
+            mask: self.state.mask.clone(),
+            clip_path: self.state.clip_path.clone(),
+            clip_path_reference_box: self.state.clip_path_reference_box,
+            legacy_clip: self.state.legacy_clip,
+            clip_path_backdrop_root_group_suppressed: self
+                .state
+                .clip_path_backdrop_root_group_suppressed,
+            will_change_backdrop_root: self.state.will_change_backdrop_root,
             will_change_backdrop_root_group_suppressed: self
+                .state
                 .will_change_backdrop_root_group_suppressed,
-            mask_backdrop_root: self.mask_backdrop_root,
-            mask_backdrop_root_group_suppressed: self.mask_backdrop_root_group_suppressed,
-            box_shadow: self.box_shadow.clone(),
-            box_shadows: self.box_shadows.clone(),
-            paint_filter: self.paint_filter.clone(),
-            backdrop_filter: self.backdrop_filter.clone(),
-            mix_blend_mode: self.mix_blend_mode,
-            isolation: self.isolation,
-            opacity: self.opacity,
-            transforms: self.transforms.clone(),
-            transform_origin: self.transform_origin,
-            transform_box: self.transform_box,
-            perspective: self.perspective,
-            perspective_origin: self.perspective_origin,
-            transform_style: self.transform_style,
-            overflow_x: self.overflow_x,
-            overflow_y: self.overflow_y,
-            overflow_clip_margin: self.overflow_clip_margin,
-            scrollbar_gutter: self.scrollbar_gutter,
-            line_clamp: self.line_clamp,
-            line_clamp_line_height: self.line_clamp_line_height,
-            contain_floats: self.contain_floats,
-            self_visible: self.self_visible,
-            tag_role: self.tag_role.clone(),
-            list_numbering: self.list_numbering,
-            html_figure_group: self.html_figure_group,
-            establishes_abs_containing_block: self.establishes_abs_containing_block,
-            establishes_stacking_context: self.establishes_stacking_context,
-            font_size: self.font_size,
-            root_font_size: self.root_font_size,
+            mask_backdrop_root: self.state.mask_backdrop_root,
+            mask_backdrop_root_group_suppressed: self.state.mask_backdrop_root_group_suppressed,
+            box_shadow: self.state.box_shadow.clone(),
+            box_shadows: self.state.box_shadows.clone(),
+            paint_filter: self.state.paint_filter.clone(),
+            backdrop_filter: self.state.backdrop_filter.clone(),
+            mix_blend_mode: self.state.mix_blend_mode,
+            isolation: self.state.isolation,
+            opacity: self.state.opacity,
+            transforms: self.state.transforms.clone(),
+            transform_origin: self.state.transform_origin,
+            transform_box: self.state.transform_box,
+            perspective: self.state.perspective,
+            perspective_origin: self.state.perspective_origin,
+            transform_style: self.state.transform_style,
+            overflow_x: self.state.overflow_x,
+            overflow_y: self.state.overflow_y,
+            overflow_clip_margin: self.state.overflow_clip_margin,
+            scrollbar_gutter: self.state.scrollbar_gutter,
+            line_clamp: self.state.line_clamp,
+            line_clamp_line_height: self.state.line_clamp_line_height,
+            contain_floats: self.state.contain_floats,
+            self_visible: self.state.self_visible,
+            tag_role: self.state.tag_role.clone(),
+            list_numbering: self.state.list_numbering,
+            html_figure_group: self.state.html_figure_group,
+            establishes_abs_containing_block: self.state.establishes_abs_containing_block,
+            establishes_stacking_context: self.state.establishes_stacking_context,
+            font_size: self.state.font_size,
+            root_font_size: self.state.root_font_size,
             pagination: Pagination {
                 break_before: fragment_break_before,
-                ..self.pagination
+                ..self.state.pagination
             },
-            spans_all_columns: self.spans_all_columns,
+            spans_all_columns: self.state.spans_all_columns,
             fragmentainer_fill_height: None,
             starts_at_sibling_fragment_boundary: continuation_starts_at_sibling_boundary,
             slice_decoration,
-            grid_inline_paint_snap: self.grid_inline_paint_snap,
-            grid_block_paint_snap: self.grid_block_paint_snap,
+            grid_inline_paint_snap: self.state.grid_inline_paint_snap,
+            grid_block_paint_snap: self.state.grid_block_paint_snap,
             layout_cache: Arc::new(Mutex::new(None)),
-        };
+        });
 
         if let Some(mut geometry) = slice_decoration {
             // Build the virtual paint surface from the fragment boxes that will
@@ -34761,9 +34907,9 @@ impl Flowable for ContainerFlowable {
                 .border_box_height;
             geometry.total_border_box_height =
                 geometry.offset_y + painted_first_height + continuation_height;
-            first.slice_decoration = Some(geometry);
+            first.state.slice_decoration = Some(geometry);
             geometry.offset_y = geometry.offset_y + painted_first_height;
-            second.slice_decoration = Some(geometry);
+            second.state.slice_decoration = Some(geometry);
         }
 
         if split_debug {
@@ -34800,50 +34946,51 @@ impl Flowable for ContainerFlowable {
             return None;
         }
         let content_stays_first = natural.height <= avail_height;
-        let clones_decoration = matches!(self.box_decoration_break, BoxDecorationBreak::Clone);
+        let clones_decoration =
+            matches!(self.state.box_decoration_break, BoxDecorationBreak::Clone);
 
         let mut first = self.clone();
         if !clones_decoration {
-            first.margin = Self::zero_bottom(self.margin);
-            first.border_width = Self::zero_bottom(self.border_width);
-            first.border_radius = Self::zero_bottom_radii(self.border_radius);
-            first.padding = Self::zero_bottom(self.padding);
+            first.state.margin = Self::zero_bottom(self.state.margin);
+            first.state.border_width = Self::zero_bottom(self.state.border_width);
+            first.state.border_radius = Self::zero_bottom_radii(self.state.border_radius);
+            first.state.padding = Self::zero_bottom(self.state.padding);
         }
         if !content_stays_first {
-            first.children.clear();
+            first.state.children.clear();
         }
-        first.pagination = Pagination {
+        first.state.pagination = Pagination {
             break_before: BreakBefore::Auto,
             break_after: BreakAfter::Auto,
-            ..self.pagination
+            ..self.state.pagination
         };
-        first.fragmentainer_fill_height = Some(avail_height);
-        first.layout_cache = Arc::new(Mutex::new(None));
+        first.state.fragmentainer_fill_height = Some(avail_height);
+        first.state.layout_cache = Arc::new(Mutex::new(None));
 
         let mut second = self.clone();
         if !clones_decoration {
-            second.margin = Self::zero_top(self.margin);
-            second.border_width = Self::zero_top(self.border_width);
-            second.border_radius = Self::zero_top_radii(self.border_radius);
-            second.padding = Self::zero_top(self.padding);
+            second.state.margin = Self::zero_top(self.state.margin);
+            second.state.border_width = Self::zero_top(self.state.border_width);
+            second.state.border_radius = Self::zero_top_radii(self.state.border_radius);
+            second.state.padding = Self::zero_top(self.state.padding);
         }
         if content_stays_first {
-            second.children.clear();
+            second.state.children.clear();
         }
-        second.pagination = Pagination {
+        second.state.pagination = Pagination {
             break_before: BreakBefore::Auto,
-            ..self.pagination
+            ..self.state.pagination
         };
-        second.fragmentainer_fill_height = None;
-        second.layout_cache = Arc::new(Mutex::new(None));
+        second.state.fragmentainer_fill_height = None;
+        second.state.layout_cache = Arc::new(Mutex::new(None));
 
         Some((Box::new(first), Box::new(second), content_stays_first))
     }
 
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt) {
-        let group_opacity = self.opacity.clamp(0.0, 1.0);
+        let group_opacity = self.state.opacity.clamp(0.0, 1.0);
         let opacity_applied = group_opacity < 1.0 - 1.0e-6;
-        let blend_applied = self.mix_blend_mode != MixBlendMode::Normal;
+        let blend_applied = self.state.mix_blend_mode != MixBlendMode::Normal;
         if opacity_applied || blend_applied {
             let page_size = canvas.page_size();
             let form_id = format!(
@@ -34853,9 +35000,9 @@ impl Flowable for ContainerFlowable {
                 y.to_milli_i64()
             );
             let mut grouped = self.clone();
-            grouped.mix_blend_mode = MixBlendMode::Normal;
-            grouped.isolation = false;
-            grouped.opacity = 1.0;
+            grouped.state.mix_blend_mode = MixBlendMode::Normal;
+            grouped.state.isolation = false;
+            grouped.state.opacity = 1.0;
 
             let mut temp = Canvas::new(page_size);
             grouped.draw(&mut temp, x, y, avail_width, avail_height);
@@ -34877,7 +35024,7 @@ impl Flowable for ContainerFlowable {
                 canvas.set_opacity(group_opacity, group_opacity);
             }
             if blend_applied {
-                canvas.set_blend_mode(self.mix_blend_mode);
+                canvas.set_blend_mode(self.state.mix_blend_mode);
             }
             canvas.draw_form(
                 Pt::ZERO,
@@ -34890,7 +35037,7 @@ impl Flowable for ContainerFlowable {
             return;
         }
 
-        if self.isolation {
+        if self.state.isolation {
             let page_size = canvas.page_size();
             let form_id = format!(
                 "isolation:{}:{}:{}",
@@ -34899,7 +35046,7 @@ impl Flowable for ContainerFlowable {
                 y.to_milli_i64()
             );
             let mut grouped = self.clone();
-            grouped.isolation = false;
+            grouped.state.isolation = false;
 
             let mut temp = Canvas::new(page_size);
             grouped.draw(&mut temp, x, y, avail_width, avail_height);
@@ -34932,8 +35079,9 @@ impl Flowable for ContainerFlowable {
         // normally and produces filter -> mask ordering without duplicating the
         // filter bytecode or raster work.
         let filter_deferred_to_mask =
-            self.mask_backdrop_root && !self.mask_backdrop_root_group_suppressed;
+            self.state.mask_backdrop_root && !self.state.mask_backdrop_root_group_suppressed;
         if let Some(filter) = self
+            .state
             .paint_filter
             .as_ref()
             .filter(|_| !filter_deferred_to_mask)
@@ -34946,7 +35094,7 @@ impl Flowable for ContainerFlowable {
                 y.to_milli_i64()
             );
             let mut grouped = self.clone();
-            grouped.paint_filter = None;
+            grouped.state.paint_filter = None;
 
             // A CSS transform consumes the completed filter output; it is not
             // part of the filter's source image. Hoist it around the compiled
@@ -34961,16 +35109,16 @@ impl Flowable for ContainerFlowable {
                 let (border_box_y, border_box_height) =
                     self.painted_block_border_box(layout_border_box_y, cache.border_box_height);
                 let origin_x = border_box_x
-                    + self.transform_origin.x.resolve_width(
+                    + self.state.transform_origin.x.resolve_width(
                         border_box_width,
-                        self.font_size,
-                        self.root_font_size,
+                        self.state.font_size,
+                        self.state.root_font_size,
                     );
                 let origin_y = border_box_y
-                    + self.transform_origin.y.resolve_height(
+                    + self.state.transform_origin.y.resolve_height(
                         border_box_height,
-                        self.font_size,
-                        self.root_font_size,
+                        self.state.font_size,
+                        self.state.root_font_size,
                     );
                 let (tile_x, tile_y, tile_width, tile_height) =
                     Self::compiled_css_filter_outsets(filter)
@@ -34983,7 +35131,7 @@ impl Flowable for ContainerFlowable {
                             )
                         })
                         .unwrap_or((Pt::ZERO, Pt::ZERO, page_size.width, page_size.height));
-                grouped.transforms.clear();
+                grouped.state.transforms.clear();
                 Some(HoistedFilterTile {
                     origin_x,
                     origin_y,
@@ -35002,11 +35150,12 @@ impl Flowable for ContainerFlowable {
             // source surface, then emit the original clip as vector geometry
             // around the filtered form. Any hoisted transform wraps both the
             // clip and the completed filter output.
-            let post_filter_clip = self.clip_path.is_some() || self.legacy_clip.is_some();
+            let post_filter_clip =
+                self.state.clip_path.is_some() || self.state.legacy_clip.is_some();
             if post_filter_clip {
-                grouped.clip_path = None;
-                grouped.legacy_clip = None;
-                grouped.clip_path_backdrop_root_group_suppressed = true;
+                grouped.state.clip_path = None;
+                grouped.state.legacy_clip = None;
+                grouped.state.clip_path_backdrop_root_group_suppressed = true;
             }
 
             let (filter_form_size, source_x, source_y) = filter_transform
@@ -35082,8 +35231,8 @@ impl Flowable for ContainerFlowable {
             return;
         }
 
-        if (self.clip_path.is_some() || self.legacy_clip.is_some())
-            && !self.clip_path_backdrop_root_group_suppressed
+        if (self.state.clip_path.is_some() || self.state.legacy_clip.is_some())
+            && !self.state.clip_path_backdrop_root_group_suppressed
         {
             let page_size = canvas.page_size();
             let form_id = format!(
@@ -35093,7 +35242,7 @@ impl Flowable for ContainerFlowable {
                 y.to_milli_i64()
             );
             let mut grouped = self.clone();
-            grouped.clip_path_backdrop_root_group_suppressed = true;
+            grouped.state.clip_path_backdrop_root_group_suppressed = true;
 
             let mut temp = Canvas::new(page_size);
             grouped.draw(&mut temp, x, y, avail_width, avail_height);
@@ -35120,7 +35269,7 @@ impl Flowable for ContainerFlowable {
             return;
         }
 
-        if let Some(backdrop_filter) = self.backdrop_filter.as_ref() {
+        if let Some(backdrop_filter) = self.state.backdrop_filter.as_ref() {
             let page_size = canvas.page_size();
             let cache = self.cached_layout(avail_width, avail_height);
             let margin = cache.margin;
@@ -35131,26 +35280,26 @@ impl Flowable for ContainerFlowable {
             let layout_border_box_y = y + margin.top;
             let (border_box_y, border_box_height) =
                 self.painted_block_border_box(layout_border_box_y, cache.border_box_height);
-            let border_clip_radii = self.border_radius.resolve(
+            let border_clip_radii = self.state.border_radius.resolve(
                 border_box_width,
                 border_box_height,
-                self.font_size,
-                self.root_font_size,
+                self.state.font_size,
+                self.state.root_font_size,
             );
             let radius = Self::uniform_radius_from_clip_radii(border_clip_radii);
 
-            if self.self_visible {
+            if self.state.self_visible {
                 let transformed = self.has_transforms();
                 if transformed {
-                    let origin_dx = self.transform_origin.x.resolve_width(
+                    let origin_dx = self.state.transform_origin.x.resolve_width(
                         border_box_width,
-                        self.font_size,
-                        self.root_font_size,
+                        self.state.font_size,
+                        self.state.root_font_size,
                     );
-                    let origin_dy = self.transform_origin.y.resolve_height(
+                    let origin_dy = self.state.transform_origin.y.resolve_height(
                         border_box_height,
-                        self.font_size,
-                        self.root_font_size,
+                        self.state.font_size,
+                        self.state.root_font_size,
                     );
                     let origin_x = border_box_x + origin_dx;
                     let origin_y = border_box_y + origin_dy;
@@ -35179,7 +35328,7 @@ impl Flowable for ContainerFlowable {
                 y.to_milli_i64()
             );
             let mut grouped = self.clone();
-            grouped.backdrop_filter = None;
+            grouped.state.backdrop_filter = None;
 
             let mut temp = Canvas::new(page_size);
             grouped.draw(&mut temp, x, y, avail_width, avail_height);
@@ -35206,7 +35355,9 @@ impl Flowable for ContainerFlowable {
             return;
         }
 
-        if self.will_change_backdrop_root && !self.will_change_backdrop_root_group_suppressed {
+        if self.state.will_change_backdrop_root
+            && !self.state.will_change_backdrop_root_group_suppressed
+        {
             let page_size = canvas.page_size();
             let form_id = format!(
                 "will-change-root:{}:{}:{}",
@@ -35215,7 +35366,7 @@ impl Flowable for ContainerFlowable {
                 y.to_milli_i64()
             );
             let mut grouped = self.clone();
-            grouped.will_change_backdrop_root_group_suppressed = true;
+            grouped.state.will_change_backdrop_root_group_suppressed = true;
 
             let mut temp = Canvas::new(page_size);
             grouped.draw(&mut temp, x, y, avail_width, avail_height);
@@ -35242,8 +35393,8 @@ impl Flowable for ContainerFlowable {
             return;
         }
 
-        if self.mask_backdrop_root && !self.mask_backdrop_root_group_suppressed {
-            if self.mask.has_effective_source() {
+        if self.state.mask_backdrop_root && !self.state.mask_backdrop_root_group_suppressed {
+            if self.state.mask.has_effective_source() {
                 let cache = self.cached_layout(avail_width, avail_height);
                 let margin = cache.margin;
                 let border = cache.border;
@@ -35269,7 +35420,7 @@ impl Flowable for ContainerFlowable {
                     border_box_height.to_milli_i64(),
                 );
                 let mut grouped = self.clone();
-                grouped.mask_backdrop_root_group_suppressed = true;
+                grouped.state.mask_backdrop_root_group_suppressed = true;
 
                 // Compile the source in local border-box space. This bounds
                 // raster work to the affected element and makes the resulting
@@ -35300,36 +35451,36 @@ impl Flowable for ContainerFlowable {
                     source_commands,
                 );
 
-                let border_radii = self.border_radius.resolve(
+                let border_radii = self.state.border_radius.resolve(
                     border_box_width,
                     border_box_height,
-                    self.font_size,
-                    self.root_font_size,
+                    self.state.font_size,
+                    self.state.root_font_size,
                 );
-                let mut layers = Vec::with_capacity(self.mask.paints.len());
-                for (index, paint) in self.mask.paints.iter().enumerate() {
-                    let size = Self::background_layer_value(&self.mask.sizes, index);
-                    let position = Self::background_layer_value(&self.mask.positions, index);
-                    let repeat = Self::background_layer_value(&self.mask.repeats, index);
-                    let origin = if self.mask.origins.is_empty() {
+                let mut layers = Vec::with_capacity(self.state.mask.paints.len());
+                for (index, paint) in self.state.mask.paints.iter().enumerate() {
+                    let size = Self::background_layer_value(&self.state.mask.sizes, index);
+                    let position = Self::background_layer_value(&self.state.mask.positions, index);
+                    let repeat = Self::background_layer_value(&self.state.mask.repeats, index);
+                    let origin = if self.state.mask.origins.is_empty() {
                         BackgroundBox::Border
                     } else {
-                        self.mask.origins[index % self.mask.origins.len()]
+                        self.state.mask.origins[index % self.state.mask.origins.len()]
                     };
-                    let clip = if self.mask.clips.is_empty() {
+                    let clip = if self.state.mask.clips.is_empty() {
                         BackgroundClipBox::Border
                     } else {
-                        self.mask.clips[index % self.mask.clips.len()]
+                        self.state.mask.clips[index % self.state.mask.clips.len()]
                     };
-                    let mode = if self.mask.modes.is_empty() {
+                    let mode = if self.state.mask.modes.is_empty() {
                         MaskMode::MatchSource
                     } else {
-                        self.mask.modes[index % self.mask.modes.len()]
+                        self.state.mask.modes[index % self.state.mask.modes.len()]
                     };
-                    let composite = if self.mask.composites.is_empty() {
+                    let composite = if self.state.mask.composites.is_empty() {
                         MaskComposite::Add
                     } else {
-                        self.mask.composites[index % self.mask.composites.len()]
+                        self.state.mask.composites[index % self.state.mask.composites.len()]
                     };
 
                     let mut mask_canvas = Canvas::new(local_size);
@@ -35373,11 +35524,11 @@ impl Flowable for ContainerFlowable {
                         composite,
                     });
                 }
-                if self.mask.border.source.is_some() {
+                if self.state.mask.border.source.is_some() {
                     let mut mask_canvas = Canvas::new(local_size);
                     let mut border_painter = self.clone();
-                    border_painter.border_image = self.mask.border.clone();
-                    border_painter.paint_filter = None;
+                    border_painter.state.border_image = self.state.mask.border.clone();
+                    border_painter.state.paint_filter = None;
                     border_painter.draw_border_image(
                         &mut mask_canvas,
                         Pt::ZERO,
@@ -35426,7 +35577,7 @@ impl Flowable for ContainerFlowable {
                 y.to_milli_i64()
             );
             let mut grouped = self.clone();
-            grouped.mask_backdrop_root_group_suppressed = true;
+            grouped.state.mask_backdrop_root_group_suppressed = true;
 
             let mut temp = Canvas::new(page_size);
             grouped.draw(&mut temp, x, y, avail_width, avail_height);
@@ -35454,13 +35605,13 @@ impl Flowable for ContainerFlowable {
         }
 
         canvas.begin_compositor_scope();
-        let tagged = self.tag_role.as_ref().map(|role| {
+        let tagged = self.state.tag_role.as_ref().map(|role| {
             canvas.begin_tag(role.as_ref(), None, None, None, None, true);
-            if self.html_figure_group {
+            if self.state.html_figure_group {
                 canvas.meta(META_HTML_FIGURE_GROUP_KEY, "true");
             }
             if role.as_ref() == "L" {
-                if let Some(numbering) = self.list_numbering {
+                if let Some(numbering) = self.state.list_numbering {
                     canvas.meta(META_LIST_NUMBERING_KEY, numbering);
                 }
             }
@@ -35499,14 +35650,14 @@ impl Flowable for ContainerFlowable {
                 border_box_x,
                 border_box_width,
                 avail_width,
-                self.width,
-                self.children.len(),
-                self.background
+                self.state.width,
+                self.state.children.len(),
+                self.state.background
             );
         }
         let transformed = self.has_transforms();
         let (transform_ref_x, transform_ref_y, transform_ref_width, transform_ref_height) =
-            match self.transform_box {
+            match self.state.transform_box {
                 TransformBoxMode::ContentBox => (
                     border_box_x + border.left + padding.left,
                     border_box_y + border.top + padding.top,
@@ -35523,20 +35674,20 @@ impl Flowable for ContainerFlowable {
         if transformed {
             // CSS transforms apply around transform-origin (default: center center) and do
             // not participate in wrap/split geometry in this phase.
-            let origin_dx = self.transform_origin.x.resolve_width(
+            let origin_dx = self.state.transform_origin.x.resolve_width(
                 transform_ref_width,
-                self.font_size,
-                self.root_font_size,
+                self.state.font_size,
+                self.state.root_font_size,
             );
-            let origin_dy = self.transform_origin.y.resolve_height(
+            let origin_dy = self.state.transform_origin.y.resolve_height(
                 transform_ref_height,
-                self.font_size,
-                self.root_font_size,
+                self.state.font_size,
+                self.state.root_font_size,
             );
-            let origin_z = self.transform_origin.z.resolve_width(
+            let origin_z = self.state.transform_origin.z.resolve_width(
                 transform_ref_width,
-                self.font_size,
-                self.root_font_size,
+                self.state.font_size,
+                self.state.root_font_size,
             );
             let origin_x = transform_ref_x + origin_dx;
             let origin_y = transform_ref_y + origin_dy;
@@ -35590,16 +35741,17 @@ impl Flowable for ContainerFlowable {
                 canvas.translate_css_transform_origin(origin_x, origin_y, true);
             }
         }
-        let border_clip_radii = self.border_radius.resolve(
+        let border_clip_radii = self.state.border_radius.resolve(
             border_box_width,
             border_box_height,
-            self.font_size,
-            self.root_font_size,
+            self.state.font_size,
+            self.state.root_font_size,
         );
         let radius = Self::uniform_radius_from_clip_radii(border_clip_radii);
         let slice_decoration = self
+            .state
             .slice_decoration
-            .filter(|_| matches!(self.box_decoration_break, BoxDecorationBreak::Slice));
+            .filter(|_| matches!(self.state.box_decoration_break, BoxDecorationBreak::Slice));
         let decoration_border_box_y = slice_decoration
             .map(|geometry| border_box_y - geometry.offset_y)
             .unwrap_or(border_box_y);
@@ -35629,17 +35781,17 @@ impl Flowable for ContainerFlowable {
                 geometry.border_radius.resolve(
                     border_box_width,
                     decoration_border_box_height,
-                    self.font_size,
-                    self.root_font_size,
+                    self.state.font_size,
+                    self.state.root_font_size,
                 )
             })
             .unwrap_or(border_clip_radii);
         let clip_path_applied = self.apply_resolved_clip_path(canvas, x, y, &cache);
 
-        let paint_self = self.self_visible;
+        let paint_self = self.state.self_visible;
 
         if paint_self {
-            if let Some(backdrop_filter) = self.backdrop_filter.as_ref() {
+            if let Some(backdrop_filter) = self.state.backdrop_filter.as_ref() {
                 canvas.apply_backdrop_filter(
                     border_box_x,
                     border_box_y,
@@ -35652,6 +35804,7 @@ impl Flowable for ContainerFlowable {
         }
 
         let paint_opacity = self
+            .state
             .paint_filter
             .as_ref()
             .map(|filter| filter.opacity.clamp(0.0, 1.0))
@@ -35662,8 +35815,8 @@ impl Flowable for ContainerFlowable {
             canvas.set_opacity(paint_opacity, paint_opacity);
         }
 
-        if paint_self && !self.box_shadows.is_empty() {
-            for shadow in self.box_shadows.iter().rev() {
+        if paint_self && !self.state.box_shadows.is_empty() {
+            for shadow in self.state.box_shadows.iter().rev() {
                 self.draw_box_shadow(
                     canvas,
                     border_box_x,
@@ -35677,7 +35830,7 @@ impl Flowable for ContainerFlowable {
         }
 
         if paint_self {
-            if let Some(color) = self.background {
+            if let Some(color) = self.state.background {
                 let clips_virtual_background = slice_decoration.is_some();
                 if clips_virtual_background {
                     canvas.save_state();
@@ -35696,14 +35849,14 @@ impl Flowable for ContainerFlowable {
                 let paint_content_width = decoration_content_width;
                 let paint_content_height = decoration_content_height;
                 let border_clip_radii = decoration_border_radii;
-                let background_opacity = self.background_opacity.clamp(0.0, 1.0);
+                let background_opacity = self.state.background_opacity.clamp(0.0, 1.0);
                 let background_opacity_applied = background_opacity < 1.0 - 1.0e-6;
                 if background_opacity_applied {
                     canvas.save_state();
                     canvas.set_opacity(background_opacity, background_opacity);
                 }
                 canvas.set_fill_color(self.apply_paint_filter_color(color));
-                let color_clip = Self::background_layer_value(&self.background_clips, 0);
+                let color_clip = Self::background_layer_value(&self.state.background_clips, 0);
                 let (mut clip_x, mut clip_y, mut clip_width, mut clip_height) =
                     Self::background_clip_rect(
                         color_clip,
@@ -35758,20 +35911,20 @@ impl Flowable for ContainerFlowable {
 
         let background_paints: Vec<BackgroundPaint> = if !paint_self {
             Vec::new()
-        } else if !self.background_paints.is_empty() {
-            self.background_paints.clone()
+        } else if !self.state.background_paints.is_empty() {
+            self.state.background_paints.clone()
         } else {
-            self.background_paint.iter().cloned().collect()
+            self.state.background_paint.iter().cloned().collect()
         };
         for (idx, paint) in background_paints.iter().enumerate().rev() {
             let paint_filtered = self.filtered_background_paint(paint);
-            let size = Self::background_layer_value(&self.background_sizes, idx);
-            let position = Self::background_layer_value(&self.background_positions, idx);
-            let repeat = Self::background_layer_value(&self.background_repeats, idx);
-            let attachment = Self::background_layer_value(&self.background_attachments, idx);
-            let blend_mode = Self::background_layer_value(&self.background_blend_modes, idx);
-            let origin = Self::background_layer_value(&self.background_origins, idx);
-            let clip = Self::background_layer_value(&self.background_clips, idx);
+            let size = Self::background_layer_value(&self.state.background_sizes, idx);
+            let position = Self::background_layer_value(&self.state.background_positions, idx);
+            let repeat = Self::background_layer_value(&self.state.background_repeats, idx);
+            let attachment = Self::background_layer_value(&self.state.background_attachments, idx);
+            let blend_mode = Self::background_layer_value(&self.state.background_blend_modes, idx);
+            let origin = Self::background_layer_value(&self.state.background_origins, idx);
+            let clip = Self::background_layer_value(&self.state.background_clips, idx);
             if slice_decoration.is_some() {
                 canvas.save_state();
                 Self::clip_sliced_decoration_fragment(
@@ -35808,14 +35961,14 @@ impl Flowable for ContainerFlowable {
             }
         }
 
-        if paint_self && !self.box_shadows.is_empty() {
+        if paint_self && !self.state.box_shadows.is_empty() {
             let inset_shadow_x = border_box_x + border.left;
             let inset_shadow_y = border_box_y + border.top;
             let inset_shadow_width = (border_box_width - border.left - border.right).max(Pt::ZERO);
             let inset_shadow_height =
                 (border_box_height - border.top - border.bottom).max(Pt::ZERO);
             let inset_shadow_radii = Self::inset_clip_radii_edges(border_clip_radii, border);
-            for shadow in self.box_shadows.iter().rev() {
+            for shadow in self.state.box_shadows.iter().rev() {
                 self.draw_inset_box_shadow(
                     canvas,
                     inset_shadow_x,
@@ -35882,12 +36035,12 @@ impl Flowable for ContainerFlowable {
                 && border.top == border.bottom
                 && border.top == border.left;
             let border_colors = ResolvedEdgeColors {
-                top: self.apply_paint_filter_color(self.border_colors.top),
-                right: self.apply_paint_filter_color(self.border_colors.right),
-                bottom: self.apply_paint_filter_color(self.border_colors.bottom),
-                left: self.apply_paint_filter_color(self.border_colors.left),
+                top: self.apply_paint_filter_color(self.state.border_colors.top),
+                right: self.apply_paint_filter_color(self.state.border_colors.right),
+                bottom: self.apply_paint_filter_color(self.state.border_colors.bottom),
+                left: self.apply_paint_filter_color(self.state.border_colors.left),
             };
-            let border_opacities = self.border_opacities;
+            let border_opacities = self.state.border_opacities;
             let uniform_opacity = border_opacities.is_uniform();
             let shared_opacity = border_opacities.top.clamp(0.0, 1.0);
             let has_rounded_border = Self::clip_radii_have_rounding(border_clip_radii);
@@ -35906,8 +36059,8 @@ impl Flowable for ContainerFlowable {
             let uniform_color = border_colors.top == border_colors.right
                 && border_colors.top == border_colors.bottom
                 && border_colors.top == border_colors.left;
-            let rounded_uniform_style = if self.border_styles.is_uniform() {
-                Some(self.border_styles.top)
+            let rounded_uniform_style = if self.state.border_styles.is_uniform() {
+                Some(self.state.border_styles.top)
             } else {
                 None
             };
@@ -36032,7 +36185,7 @@ impl Flowable for ContainerFlowable {
                         border_box_height,
                         border,
                         border_colors,
-                        self.border_styles,
+                        self.state.border_styles,
                         Some(border_clip_radii),
                     );
                     let commands = group
@@ -36101,7 +36254,7 @@ impl Flowable for ContainerFlowable {
                             border_box_height,
                             border,
                             border_colors,
-                            self.border_styles,
+                            self.state.border_styles,
                             rounded.then_some(border_clip_radii),
                         );
                     } else {
@@ -36114,7 +36267,7 @@ impl Flowable for ContainerFlowable {
                             border,
                             border_colors,
                             border_opacities,
-                            self.border_styles,
+                            self.state.border_styles,
                             rounded.then_some(border_clip_radii),
                         );
                     }
@@ -36131,18 +36284,23 @@ impl Flowable for ContainerFlowable {
             }
         }
 
-        let outline_width = if paint_self && self.outline_visible {
-            self.outline_width
-                .resolve_width(border_box_width, self.font_size, self.root_font_size)
+        let outline_width = if paint_self && self.state.outline_visible {
+            self.state
+                .outline_width
+                .resolve_width(
+                    border_box_width,
+                    self.state.font_size,
+                    self.state.root_font_size,
+                )
                 .max(Pt::ZERO)
         } else {
             Pt::ZERO
         };
         if outline_width > Pt::ZERO {
-            let outline_offset = self.outline_offset.resolve_width(
+            let outline_offset = self.state.outline_offset.resolve_width(
                 border_box_width,
-                self.font_size,
-                self.root_font_size,
+                self.state.font_size,
+                self.state.root_font_size,
             );
             Self::draw_outline(
                 canvas,
@@ -36152,8 +36310,8 @@ impl Flowable for ContainerFlowable {
                 border_box_height,
                 outline_width,
                 outline_offset,
-                self.outline_style,
-                self.apply_paint_filter_color(self.outline_color),
+                self.state.outline_style,
+                self.apply_paint_filter_color(self.state.outline_color),
                 border_clip_radii,
             );
         }
@@ -36163,16 +36321,21 @@ impl Flowable for ContainerFlowable {
             // instead of collapsing overflow-x/y into one rectangle, and use
             // the true per-corner inner radii when both axes clip.
             let clip_margin = self
+                .state
                 .overflow_clip_margin
-                .resolve_width(border_box_width, self.font_size, self.root_font_size)
+                .resolve_width(
+                    border_box_width,
+                    self.state.font_size,
+                    self.state.root_font_size,
+                )
                 .max(Pt::ZERO);
-            let margin_left = if matches!(self.overflow_x, OverflowMode::Clip) {
+            let margin_left = if matches!(self.state.overflow_x, OverflowMode::Clip) {
                 clip_margin
             } else {
                 Pt::ZERO
             };
             let margin_right = margin_left;
-            let margin_top = if matches!(self.overflow_y, OverflowMode::Clip) {
+            let margin_top = if matches!(self.state.overflow_y, OverflowMode::Clip) {
                 clip_margin
             } else {
                 Pt::ZERO
@@ -36242,7 +36405,7 @@ impl Flowable for ContainerFlowable {
         let padding_box_w = (layout_border_box_width - border.left - border.right).max(Pt::ZERO);
         let padding_box_h = (layout_border_box_height - border.top - border.bottom).max(Pt::ZERO);
 
-        let pushed_abs_cb = if self.establishes_abs_containing_block {
+        let pushed_abs_cb = if self.state.establishes_abs_containing_block {
             canvas.push_abs_containing_block(Rect {
                 x: padding_box_x,
                 y: padding_box_y,
@@ -36254,23 +36417,26 @@ impl Flowable for ContainerFlowable {
             false
         };
 
-        let pushed_perspective = self.perspective.and_then(|perspective| {
-            let distance =
-                perspective.resolve_width(border_box_width, self.font_size, self.root_font_size);
+        let pushed_perspective = self.state.perspective.and_then(|perspective| {
+            let distance = perspective.resolve_width(
+                border_box_width,
+                self.state.font_size,
+                self.state.root_font_size,
+            );
             if distance <= Pt::ZERO {
                 return None;
             }
             let origin_x = border_box_x
-                + self.perspective_origin.x.resolve_width(
+                + self.state.perspective_origin.x.resolve_width(
                     border_box_width,
-                    self.font_size,
-                    self.root_font_size,
+                    self.state.font_size,
+                    self.state.root_font_size,
                 );
             let origin_y = border_box_y
-                + self.perspective_origin.y.resolve_height(
+                + self.state.perspective_origin.y.resolve_height(
                     border_box_height,
-                    self.font_size,
-                    self.root_font_size,
+                    self.state.font_size,
+                    self.state.root_font_size,
                 );
             canvas.push_perspective_context(PerspectiveContext {
                 origin_x,
@@ -36283,12 +36449,12 @@ impl Flowable for ContainerFlowable {
         let mut positioned_neg: Vec<(i32, usize, Pt, Pt, Pt, Pt, &Box<dyn Flowable>)> = Vec::new();
         let mut positioned_zero: Vec<(usize, Pt, Pt, Pt, Pt, &Box<dyn Flowable>)> = Vec::new();
         let mut positioned_pos: Vec<(i32, usize, Pt, Pt, Pt, Pt, &Box<dyn Flowable>)> = Vec::new();
-        let mut in_flow_static_y = vec![None; self.children.len()];
+        let mut in_flow_static_y = vec![None; self.state.children.len()];
         let mut static_cursor_y = inner_y;
         let mut left_float_bottom = inner_y;
         let mut right_float_bottom = inner_y;
         let mut previous_block_margin_bottom: Option<Pt> = None;
-        for (idx, child) in self.children.iter().enumerate() {
+        for (idx, child) in self.state.children.iter().enumerate() {
             let out_of_flow = child.out_of_flow();
             let float_layout = child.float_layout_size(content_width, child_avail_height);
             if !out_of_flow {
@@ -36384,7 +36550,7 @@ impl Flowable for ContainerFlowable {
             }
         }
 
-        for (idx, child) in self.children.iter().enumerate() {
+        for (idx, child) in self.state.children.iter().enumerate() {
             if child.out_of_flow() {
                 continue;
             }
@@ -36440,7 +36606,7 @@ impl Flowable for ContainerFlowable {
             canvas.pop_perspective_context();
         }
 
-        if self.establishes_stacking_context {
+        if self.state.establishes_stacking_context {
             canvas.end_compositor_scope();
         } else {
             canvas.end_compositor_scope_to_parent();
@@ -36472,7 +36638,7 @@ impl Flowable for ContainerFlowable {
 
     fn draw_stretched(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, avail_height: Pt) {
         if !matches!(
-            self.height,
+            self.state.height,
             LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
         ) {
             self.draw(canvas, x, y, avail_width, avail_height);
@@ -36481,26 +36647,27 @@ impl Flowable for ContainerFlowable {
 
         let (margin, border, padding, _, _) = self.resolve_box(avail_width);
         let border_box_height = (avail_height - margin.top - margin.bottom).max(Pt::ZERO);
-        let forced_height = if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+        let forced_height = if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
             border_box_height
         } else {
             (border_box_height - border.top - border.bottom - padding.top - padding.bottom)
                 .max(Pt::ZERO)
         };
         let mut stretched = self.clone();
-        stretched.height = LengthSpec::Absolute(forced_height);
-        stretched.children = stretched
+        stretched.state.height = LengthSpec::Absolute(forced_height);
+        stretched.state.children = stretched
+            .state
             .children
             .iter()
             .map(|child| child.with_definite_parent_height())
             .collect();
-        stretched.layout_cache = Arc::new(Mutex::new(None));
+        stretched.state.layout_cache = Arc::new(Mutex::new(None));
         stretched.draw(canvas, x, y, avail_width, avail_height);
     }
 
     fn accepts_stretched_height(&self) -> bool {
         matches!(
-            self.height,
+            self.state.height,
             LengthSpec::Auto | LengthSpec::Inherit | LengthSpec::Initial
         )
     }
@@ -36508,13 +36675,17 @@ impl Flowable for ContainerFlowable {
     fn flex_margins(&self, avail_width: Pt) -> Option<FlexMargins> {
         let resolve = |spec: LengthSpec| match spec {
             LengthSpec::Auto => None,
-            _ => Some(spec.resolve_width(avail_width, self.font_size, self.root_font_size)),
+            _ => Some(spec.resolve_width(
+                avail_width,
+                self.state.font_size,
+                self.state.root_font_size,
+            )),
         };
         Some(FlexMargins {
-            top: resolve(self.margin.top),
-            right: resolve(self.margin.right),
-            bottom: resolve(self.margin.bottom),
-            left: resolve(self.margin.left),
+            top: resolve(self.state.margin.top),
+            right: resolve(self.state.margin.right),
+            bottom: resolve(self.state.margin.bottom),
+            left: resolve(self.state.margin.left),
         })
     }
 
@@ -36522,12 +36693,16 @@ impl Flowable for ContainerFlowable {
         let margins = self
             .flex_margins(avail_width)
             .unwrap_or_else(FlexMargins::zero);
-        let border = self
-            .border_width
-            .resolve(avail_width, self.font_size, self.root_font_size);
-        let padding = self
-            .padding
-            .resolve(avail_width, self.font_size, self.root_font_size);
+        let border = self.state.border_width.resolve(
+            avail_width,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
+        let padding = self.state.padding.resolve(
+            avail_width,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
         margins.left.unwrap_or(Pt::ZERO)
             + border.left
             + padding.left
@@ -36541,14 +36716,18 @@ impl Flowable for ContainerFlowable {
             .flex_margins(avail_width)
             .unwrap_or_else(FlexMargins::zero);
         let fixed_margins = margins.left.unwrap_or(Pt::ZERO) + margins.right.unwrap_or(Pt::ZERO);
-        let border = self
-            .border_width
-            .resolve(avail_width, self.font_size, self.root_font_size);
-        let padding = self
-            .padding
-            .resolve(avail_width, self.font_size, self.root_font_size);
+        let border = self.state.border_width.resolve(
+            avail_width,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
+        let padding = self.state.padding.resolve(
+            avail_width,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
         let decorations = border.left + padding.left + padding.right + border.right;
-        if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+        if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
             basis.max(decorations) + fixed_margins
         } else {
             basis.max(Pt::ZERO) + decorations + fixed_margins
@@ -36560,14 +36739,18 @@ impl Flowable for ContainerFlowable {
             .flex_margins(avail_width)
             .unwrap_or_else(FlexMargins::zero);
         let fixed_margins = margins.top.unwrap_or(Pt::ZERO) + margins.bottom.unwrap_or(Pt::ZERO);
-        let border = self
-            .border_width
-            .resolve(avail_width, self.font_size, self.root_font_size);
-        let padding = self
-            .padding
-            .resolve(avail_width, self.font_size, self.root_font_size);
+        let border = self.state.border_width.resolve(
+            avail_width,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
+        let padding = self.state.padding.resolve(
+            avail_width,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
         let decorations = border.top + padding.top + padding.bottom + border.bottom;
-        if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+        if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
             basis.max(decorations) + fixed_margins
         } else {
             basis.max(Pt::ZERO) + decorations + fixed_margins
@@ -36575,17 +36758,22 @@ impl Flowable for ContainerFlowable {
     }
 
     fn wrap_flexed_width(&self, avail_width: Pt, avail_height: Pt) -> Size {
-        let margin = self
-            .margin
-            .resolve(avail_width, self.font_size, self.root_font_size);
-        let border = self
-            .border_width
-            .resolve(avail_width, self.font_size, self.root_font_size);
-        let padding = self
-            .padding
-            .resolve(avail_width, self.font_size, self.root_font_size);
+        let margin =
+            self.state
+                .margin
+                .resolve(avail_width, self.state.font_size, self.state.root_font_size);
+        let border = self.state.border_width.resolve(
+            avail_width,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
+        let padding = self.state.padding.resolve(
+            avail_width,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
         let border_box_width = (avail_width - margin.left - margin.right).max(Pt::ZERO);
-        let forced_width = if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+        let forced_width = if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
             border_box_width
         } else {
             (border_box_width - border.left - border.right - padding.left - padding.right)
@@ -36593,8 +36781,8 @@ impl Flowable for ContainerFlowable {
         };
 
         let mut flexed = self.clone();
-        flexed.width = LengthSpec::Absolute(forced_width);
-        flexed.layout_cache = Arc::new(Mutex::new(None));
+        flexed.state.width = LengthSpec::Absolute(forced_width);
+        flexed.state.layout_cache = Arc::new(Mutex::new(None));
         flexed.wrap(avail_width, avail_height)
     }
 
@@ -36605,27 +36793,27 @@ impl Flowable for ContainerFlowable {
         avail_height: Pt,
     ) -> Size {
         let mut based = self.clone();
-        based.margin = self.margin.resolve_inline_percentage_components(
+        based.state.margin = self.state.margin.resolve_inline_percentage_components(
             containing_block_width,
-            self.font_size,
-            self.root_font_size,
+            self.state.font_size,
+            self.state.root_font_size,
         );
-        based.padding = self.padding.resolve_inline_percentage_components(
+        based.state.padding = self.state.padding.resolve_inline_percentage_components(
             containing_block_width,
-            self.font_size,
-            self.root_font_size,
+            self.state.font_size,
+            self.state.root_font_size,
         );
-        based.min_width = self.min_width.resolve_inline_percentage_component(
+        based.state.min_width = self.state.min_width.resolve_inline_percentage_component(
             containing_block_width,
-            self.font_size,
-            self.root_font_size,
+            self.state.font_size,
+            self.state.root_font_size,
         );
-        based.max_width = self.max_width.resolve_inline_percentage_component(
+        based.state.max_width = self.state.max_width.resolve_inline_percentage_component(
             containing_block_width,
-            self.font_size,
-            self.root_font_size,
+            self.state.font_size,
+            self.state.root_font_size,
         );
-        based.layout_cache = Arc::new(Mutex::new(None));
+        based.state.layout_cache = Arc::new(Mutex::new(None));
         based.wrap_flexed_width(avail_width, avail_height)
     }
 
@@ -36638,17 +36826,22 @@ impl Flowable for ContainerFlowable {
         avail_height: Pt,
         stretch_cross_axis: bool,
     ) {
-        let margin = self
-            .margin
-            .resolve(avail_width, self.font_size, self.root_font_size);
-        let border = self
-            .border_width
-            .resolve(avail_width, self.font_size, self.root_font_size);
-        let padding = self
-            .padding
-            .resolve(avail_width, self.font_size, self.root_font_size);
+        let margin =
+            self.state
+                .margin
+                .resolve(avail_width, self.state.font_size, self.state.root_font_size);
+        let border = self.state.border_width.resolve(
+            avail_width,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
+        let padding = self.state.padding.resolve(
+            avail_width,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
         let border_box_width = (avail_width - margin.left - margin.right).max(Pt::ZERO);
-        let forced_width = if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+        let forced_width = if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
             border_box_width
         } else {
             (border_box_width - border.left - border.right - padding.left - padding.right)
@@ -36656,8 +36849,8 @@ impl Flowable for ContainerFlowable {
         };
 
         let mut flexed = self.clone();
-        flexed.width = LengthSpec::Absolute(forced_width);
-        flexed.layout_cache = Arc::new(Mutex::new(None));
+        flexed.state.width = LengthSpec::Absolute(forced_width);
+        flexed.state.layout_cache = Arc::new(Mutex::new(None));
         if stretch_cross_axis {
             flexed.draw_stretched(canvas, x, y, avail_width, avail_height);
         } else {
@@ -36676,27 +36869,27 @@ impl Flowable for ContainerFlowable {
         stretch_cross_axis: bool,
     ) {
         let mut based = self.clone();
-        based.margin = self.margin.resolve_inline_percentage_components(
+        based.state.margin = self.state.margin.resolve_inline_percentage_components(
             containing_block_width,
-            self.font_size,
-            self.root_font_size,
+            self.state.font_size,
+            self.state.root_font_size,
         );
-        based.padding = self.padding.resolve_inline_percentage_components(
+        based.state.padding = self.state.padding.resolve_inline_percentage_components(
             containing_block_width,
-            self.font_size,
-            self.root_font_size,
+            self.state.font_size,
+            self.state.root_font_size,
         );
-        based.min_width = self.min_width.resolve_inline_percentage_component(
+        based.state.min_width = self.state.min_width.resolve_inline_percentage_component(
             containing_block_width,
-            self.font_size,
-            self.root_font_size,
+            self.state.font_size,
+            self.state.root_font_size,
         );
-        based.max_width = self.max_width.resolve_inline_percentage_component(
+        based.state.max_width = self.state.max_width.resolve_inline_percentage_component(
             containing_block_width,
-            self.font_size,
-            self.root_font_size,
+            self.state.font_size,
+            self.state.root_font_size,
         );
-        based.layout_cache = Arc::new(Mutex::new(None));
+        based.state.layout_cache = Arc::new(Mutex::new(None));
         based.draw_flexed_width(canvas, x, y, avail_width, avail_height, stretch_cross_axis);
     }
 
@@ -36708,17 +36901,22 @@ impl Flowable for ContainerFlowable {
         avail_width: Pt,
         avail_height: Pt,
     ) {
-        let margin = self
-            .margin
-            .resolve(avail_width, self.font_size, self.root_font_size);
-        let border = self
-            .border_width
-            .resolve(avail_width, self.font_size, self.root_font_size);
-        let padding = self
-            .padding
-            .resolve(avail_width, self.font_size, self.root_font_size);
+        let margin =
+            self.state
+                .margin
+                .resolve(avail_width, self.state.font_size, self.state.root_font_size);
+        let border = self.state.border_width.resolve(
+            avail_width,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
+        let padding = self.state.padding.resolve(
+            avail_width,
+            self.state.font_size,
+            self.state.root_font_size,
+        );
         let border_box_height = (avail_height - margin.top - margin.bottom).max(Pt::ZERO);
-        let forced_height = if matches!(self.box_sizing, BoxSizingMode::BorderBox) {
+        let forced_height = if matches!(self.state.box_sizing, BoxSizingMode::BorderBox) {
             border_box_height
         } else {
             (border_box_height - border.top - border.bottom - padding.top - padding.bottom)
@@ -36726,30 +36924,41 @@ impl Flowable for ContainerFlowable {
         };
 
         let mut flexed = self.clone();
-        flexed.height = LengthSpec::Absolute(forced_height);
-        flexed.layout_cache = Arc::new(Mutex::new(None));
+        flexed.state.height = LengthSpec::Absolute(forced_height);
+        flexed.state.layout_cache = Arc::new(Mutex::new(None));
         flexed.draw(canvas, x, y, avail_width, avail_height);
     }
 
     fn prefers_containing_block_draw_space(&self) -> bool {
-        matches!(self.height, LengthSpec::Percent(_))
-            || matches!(self.height, LengthSpec::Calc(calc) if calc.percent != 0.0)
+        matches!(self.state.height, LengthSpec::Percent(_))
+            || matches!(self.state.height, LengthSpec::Calc(calc) if calc.percent != 0.0)
     }
 
     fn pagination(&self) -> Pagination {
-        let mut pagination = self.pagination;
+        let mut pagination = self.state.pagination;
         if pagination.page_name.is_none() {
-            if let Some(first) = self.children.iter().find(|child| !child.out_of_flow()) {
+            if let Some(first) = self
+                .state
+                .children
+                .iter()
+                .find(|child| !child.out_of_flow())
+            {
                 pagination.page_name = first.pagination().page_name;
             }
         }
         if matches!(pagination.break_before, BreakBefore::Auto) {
-            if let Some(first) = self.children.iter().find(|child| !child.out_of_flow()) {
+            if let Some(first) = self
+                .state
+                .children
+                .iter()
+                .find(|child| !child.out_of_flow())
+            {
                 pagination.break_before = first.pagination().break_before;
             }
         }
         if matches!(pagination.break_after, BreakAfter::Auto) {
             if let Some(last) = self
+                .state
                 .children
                 .iter()
                 .rev()
@@ -36767,12 +36976,12 @@ impl Flowable for ContainerFlowable {
     }
 
     fn is_table_caption(&self) -> bool {
-        self.tag_role.as_deref() == Some("Caption")
+        self.state.tag_role.as_deref() == Some("Caption")
     }
 
     fn fragmented_flow_height(&self, avail_width: Pt, avail_height: Pt) -> Option<Pt> {
         let fixed_height = self.resolve_fixed_height(huge_pt());
-        if self.slice_decoration.is_none() || fixed_height.is_none() {
+        if self.state.slice_decoration.is_none() || fixed_height.is_none() {
             return None;
         }
         let layout = self.cached_layout(avail_width, avail_height);
@@ -36793,11 +37002,12 @@ impl Flowable for ContainerFlowable {
     }
 
     fn spans_all_columns(&self) -> bool {
-        self.spans_all_columns
+        self.state.spans_all_columns
     }
 
     fn ends_with_vertical_fragmentainer(&self) -> bool {
-        self.children
+        self.state
+            .children
             .iter()
             .rev()
             .find(|child| !child.out_of_flow())
@@ -36806,81 +37016,87 @@ impl Flowable for ContainerFlowable {
 
     fn establish_independent_formatting_context(&self) -> Box<dyn Flowable> {
         let mut independent = self.clone();
-        independent.contain_floats = true;
-        independent.layout_cache = Arc::new(Mutex::new(None));
+        independent.state.contain_floats = true;
+        independent.state.layout_cache = Arc::new(Mutex::new(None));
         Box::new(independent)
     }
 
     fn has_propagated_text_decoration(&self) -> bool {
-        self.children
+        self.state
+            .children
             .iter()
             .any(|child| child.has_propagated_text_decoration())
     }
 
     fn with_propagated_text_decoration_baseline_shift(&self, shift: Pt) -> Box<dyn Flowable> {
         let mut rebased = self.clone();
-        rebased.children = rebased
+        rebased.state.children = rebased
+            .state
             .children
             .iter()
             .map(|child| child.with_propagated_text_decoration_baseline_shift(shift))
             .collect();
-        rebased.layout_cache = Arc::new(Mutex::new(None));
+        rebased.state.layout_cache = Arc::new(Mutex::new(None));
         Box::new(rebased)
     }
 
     fn without_propagated_text_decoration(&self) -> Box<dyn Flowable> {
         let mut isolated = self.clone();
-        isolated.children = isolated
+        isolated.state.children = isolated
+            .state
             .children
             .iter()
             .map(|child| child.without_propagated_text_decoration())
             .collect();
-        isolated.layout_cache = Arc::new(Mutex::new(None));
+        isolated.state.layout_cache = Arc::new(Mutex::new(None));
         Box::new(isolated)
     }
 
     fn with_grid_item_baseline_rounding(&self) -> Box<dyn Flowable> {
         let mut rounded = self.clone();
-        rounded.children = rounded
+        rounded.state.children = rounded
+            .state
             .children
             .iter()
             .map(|child| child.with_grid_item_baseline_rounding())
             .collect();
-        rounded.layout_cache = Arc::new(Mutex::new(None));
+        rounded.state.layout_cache = Arc::new(Mutex::new(None));
         Box::new(rounded)
     }
 
     fn with_grid_item_parent_positioned_top_overflow(&self) -> Box<dyn Flowable> {
         let mut positioned = self.clone();
-        positioned.children = positioned
+        positioned.state.children = positioned
+            .state
             .children
             .iter()
             .map(|child| child.with_grid_item_parent_positioned_top_overflow())
             .collect();
-        positioned.layout_cache = Arc::new(Mutex::new(None));
+        positioned.state.layout_cache = Arc::new(Mutex::new(None));
         Box::new(positioned)
     }
 
     fn with_css_terminal_baseline_rounding(&self) -> Box<dyn Flowable> {
         let mut shifted = self.clone();
-        shifted.children = shifted
+        shifted.state.children = shifted
+            .state
             .children
             .iter()
             .map(|child| child.with_css_terminal_baseline_rounding())
             .collect();
-        shifted.layout_cache = Arc::new(Mutex::new(None));
+        shifted.state.layout_cache = Arc::new(Mutex::new(None));
         Box::new(shifted)
     }
 
     fn with_grid_item_inline_paint_snap(&self) -> Box<dyn Flowable> {
         let mut snapped = self.clone();
-        snapped.grid_inline_paint_snap = true;
+        snapped.state.grid_inline_paint_snap = true;
         Box::new(snapped)
     }
 
     fn with_grid_item_block_paint_snap(&self) -> Box<dyn Flowable> {
         let mut snapped = self.clone();
-        snapped.grid_block_paint_snap = true;
+        snapped.state.grid_block_paint_snap = true;
         Box::new(snapped)
     }
 }
@@ -39213,7 +39429,7 @@ mod grid_and_transform_regression_tests {
                         (LengthSpec::Percent(0.0), LengthSpec::Percent(0.88)),
                     ],
                 })));
-        fragment.slice_decoration = Some(SliceDecorationGeometry {
+        fragment.state.slice_decoration = Some(SliceDecorationGeometry {
             offset_y: Pt::from_f32(100.0),
             total_border_box_height: Pt::from_f32(200.0),
             border: ResolvedEdges {
@@ -39230,7 +39446,7 @@ mod grid_and_transform_regression_tests {
             },
             border_radius: BorderRadiiSpec::zero(),
         });
-        fragment.clip_path_backdrop_root_group_suppressed = true;
+        fragment.state.clip_path_backdrop_root_group_suppressed = true;
 
         let mut canvas = Canvas::new(Size {
             width: Pt::from_f32(100.0),
@@ -40454,7 +40670,7 @@ mod grid_and_transform_regression_tests {
                     },
                 })
                 .with_box_decoration_break(BoxDecorationBreak::Slice);
-        fragment.slice_decoration = Some(SliceDecorationGeometry {
+        fragment.state.slice_decoration = Some(SliceDecorationGeometry {
             offset_y: Pt::from_f32(50.0),
             total_border_box_height: Pt::from_f32(100.0),
             border: original_border,

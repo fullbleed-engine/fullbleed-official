@@ -85,6 +85,17 @@ jobs:
       - name: Run rust test suite
         run: cargo test --locked -- --nocapture
 
+      - name: Render on the native main-thread stack
+        run: python tools/smoke_rust_stack.py --out target/rust-stack-smoke
+
+      - name: Retain native stack regression evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rust-default-stack-${{ matrix.os }}
+          path: target/rust-stack-smoke/
+          if-no-files-found: error
+
       - name: Build Rust API documentation with checked links
         env:
           RUSTDOCFLAGS: "-D rustdoc::broken_intra_doc_links -D rustdoc::invalid_codeblock_attributes"
