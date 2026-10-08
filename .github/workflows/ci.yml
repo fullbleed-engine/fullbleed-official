@@ -186,6 +186,17 @@ jobs:
       - name: Verify independent font synthesis in PDFs and previews
         run: python -I tools/smoke_font_synthesis.py --out target/font-synthesis
 
+      - name: Verify CSS counter scopes in installed PDF paths
+        run: python -I tools/smoke_counter_scopes.py --out target/counter-scopes
+
+      - name: Retain counter scope PDFs and extracted labels
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: counter-scopes-${{ runner.os }}
+          path: target/counter-scopes
+          if-no-files-found: warn
+
       - name: Retain font synthesis PDFs and previews
         if: always()
         uses: actions/upload-artifact@v7
