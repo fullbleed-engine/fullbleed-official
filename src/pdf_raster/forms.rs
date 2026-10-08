@@ -1,4 +1,4 @@
-//! PDF forms and gradient soft masks lowered to existing native form commands.
+//! PDF forms and soft masks lowered to existing native form commands.
 use super::*;
 use crate::canvas::CompiledMaskLayer;
 use crate::flowable::{MaskComposite, MaskMode};
@@ -99,8 +99,33 @@ pub(super) fn paint_shading(
         height,
         &mut source,
     )?;
+    emit_with_soft_mask(
+        doc,
+        source,
+        resources,
+        state,
+        height,
+        commands,
+        visited_forms,
+        cache,
+        embedded_fonts,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn emit_with_soft_mask(
+    doc: &LoDocument,
+    source: Vec<Command>,
+    resources: &PdfResources,
+    state: &ParseState,
+    height: f32,
+    commands: &mut Vec<Command>,
+    visited_forms: &mut HashSet<ObjectId>,
+    cache: &mut PdfRasterCache,
+    embedded_fonts: &mut HashMap<String, Arc<Vec<u8>>>,
+) -> Result<()> {
     let Some((mask, ctm)) = &state.soft_mask else {
-        // The `sh` operator leaves the current path and painting color intact.
+        // A form or shading invocation leaves the caller's path and color intact.
         emit_form(source, height, cache, commands);
         return Ok(());
     };
