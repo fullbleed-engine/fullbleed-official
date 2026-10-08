@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.18"
+  FULLBLEED_CI_VERSION: "2.5.19"
   RUST_MIN_STACK: "4194304"
 
 on:
