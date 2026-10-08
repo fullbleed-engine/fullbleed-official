@@ -178,6 +178,17 @@ jobs:
           python -m pip install pypdf==6.19.0 pypdfium2==5.14.0 fonttools==4.65.0 pillow==12.3.0
           python -I tools/smoke_font_subsets.py --out target/font-subsets
 
+      - name: Verify independent font synthesis in PDFs and previews
+        run: python -I tools/smoke_font_synthesis.py --out target/font-synthesis
+
+      - name: Retain font synthesis PDFs and previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: font-synthesis-${{ runner.os }}
+          path: target/font-synthesis
+          if-no-files-found: warn
+
       - name: Verify font family defaults and compiled previews
         run: python -I tools/smoke_font_families.py --out target/font-families
 
