@@ -1,3 +1,37 @@
+# Fullbleed Release Notes - 2.5.16
+
+With only a regular face registered, `font-synthesis: weight` now permits only
+synthetic bold, and `font-synthesis: style` permits only synthetic italics or
+oblique text. Previously both values could enable both approximations.
+
+The four synthesis controls now inherit independently. The shorthand resets
+omitted controls; longhands support `auto`/`none`, and the style longhand also
+supports `oblique-only`. CSS-wide values, layer rollback, declaration order and
+invalid-value rejection have focused regression coverage. HTML decoration
+geometry and SVG text use the independent style control. SVG stylesheet
+`!important` declarations take precedence over normal inline declarations.
+
+Small-cap controls gate the existing HTML fallback; position controls gate the
+default footnote-call superscript fallback. These controls do not add general
+OpenType small-cap or positional substitution, or suppress real selected faces.
+Rust `TextStyle.font_synthesis_weight` now controls weight alone; callers that
+also want to disable slant synthesis can set `font_synthesis_style` to
+`FontSynthesisStyle::None`.
+
+The installed regression checks cover 130 render cases and 221 pages, with
+deterministic replay, extracted text and independent PDFium comparisons. See
+[font controls](docs/font-registration.md#controlling-synthetic-styles) and the
+[2.5.16 runbook](docs/release/2.5.16-runbook.md).
+
+Two existing fixed-template limitations remain documented: synthetic small
+caps uppercases binding-slot names, and finalized native previews can omit
+synthetic-bold strokes even when the emitted PDF displays them correctly in
+PDFium. Use reflow for small-cap bindings and an independent PDF viewer for
+fixed-slot synthetic bold. No complete CSS Fonts or new standards-conformance
+claim is made.
+
+---
+
 # Fullbleed Release Notes - 2.5.15
 
 Overlapping `border-image-slice` values now preserve the corner image content.
