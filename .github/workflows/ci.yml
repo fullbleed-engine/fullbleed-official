@@ -233,6 +233,17 @@ jobs:
       - name: Reproduce bundled preview fonts from pinned inputs
         run: python tools/generate_preview_fonts.py --check
 
+      - name: Verify filtered descendants preserve ancestor clipping and stacking
+        run: python -I tools/smoke_filtered_overflow.py --pdfium --out target/filtered-overflow
+
+      - name: Retain filtered overflow PDFs and preview evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: filtered-overflow-${{ runner.os }}
+          path: target/filtered-overflow
+          if-no-files-found: warn
+
       - name: Verify default Standard 14 glyphs and explicit font precedence
         run: python -I tools/smoke_standard_font_portability.py --out target/standard-font-preview
 
@@ -521,6 +532,7 @@ jobs:
         shell: bash
         run: |
           python -I tools/smoke_border_image_slices.py --pdfium --out target/python-prerelease/border-image-slices
+          python -I tools/smoke_filtered_overflow.py --pdfium --out target/python-prerelease/filtered-overflow
           python -I tools/smoke_base14_preview.py --out target/python-prerelease/base14-preview
           python -I tools/smoke_gradient_preview.py --out target/python-prerelease/gradient-preview
       - name: Verify exact interpreter and identical output across Python versions
