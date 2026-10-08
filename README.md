@@ -333,6 +333,10 @@ Platform artifact policy:
   using native runners or QEMU as appropriate. The x86-64 manylinux wheel is
   additionally tested on every supported Python version before publication.
 
+Separate Windows and Linux jobs check Python 3.15.0rc3 with the standard GIL,
+including the Python suite and byte-for-byte PDF/preview comparisons against
+Python 3.10. See the [preview coverage and its limits](docs/python-compatibility.md).
+
 Verify command surface:
 
 ```bash
