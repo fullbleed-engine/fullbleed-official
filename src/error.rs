@@ -1,14 +1,26 @@
 use std::fmt;
 
+/// Failure to configure, lay out, or write a Fullbleed document.
+///
+/// Rendering and builder methods return this error. [`Self::Io`] retains its
+/// underlying [`std::io::Error`] as the standard error source.
 #[derive(Debug)]
 pub enum FullBleedError {
+    /// No page template was available for the requested layout.
     MissingPageTemplate,
+    /// A content item cannot fit in any available page frame.
     UnplaceableFlowable(String),
+    /// A batch or compiled-binding call received no documents or records.
     EmptyDocumentSet,
+    /// Documents being combined have incompatible page sizes.
     InconsistentPageSize,
+    /// Settings or binding columns do not satisfy the requested operation.
     InvalidConfiguration(String),
+    /// An asset could not be parsed or used; the string describes the failure.
     Asset(String),
+    /// A cancellable operation observed a cancellation request.
     Cancelled,
+    /// Reading or writing a resource failed.
     Io(std::io::Error),
 }
 

@@ -1,3 +1,106 @@
+//! Create PDF print documents from HTML and CSS in Rust.
+//!
+//! Start with [`FullBleed::builder`], configure explicit fonts and assets, then
+//! render to bytes, a writer, or a file. Rendering runs in process without Python,
+//! a browser, or a system PDF service. The engine lays out static document content;
+//! it does not execute JavaScript or implement every browser CSS feature. See the
+//! [CSS coverage guide](https://docs.fullbleed.dev/css-coverage/).
+//!
+//! # Create your first PDF
+//!
+//! Add the crate with `cargo add fullbleed`, then run this program with `cargo run`:
+//!
+//! ```no_run
+//! use fullbleed::FullBleed;
+//!
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let engine = FullBleed::builder().build()?;
+//!     let html = "<h1>Invoice INV-1042</h1><p>Consulting: USD 1,200.00</p>";
+//!     let css = "@page { size: A4; margin: 20mm; } h1 { color: #175c52; }";
+//!     let pdf = engine.render_to_buffer(html, css)?;
+//!     std::fs::write("invoice.pdf", pdf)?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! Open `invoice.pdf`. For an HTTP response or your own storage, use the returned
+//! `Vec<u8>` directly. The [Rust getting-started guide](https://docs.fullbleed.dev/getting-started/rust/)
+//! also has a downloadable project with designed invoice and report templates.
+//!
+//! # Choose a rendering method
+//!
+//! | Task | API | Result |
+//! | --- | --- | --- |
+//! | Render one HTML document | [`FullBleed::render_to_buffer`] | PDF bytes |
+//! | Write to your own destination | [`FullBleed::render_to_writer`] | Number of bytes written |
+//! | Save a PDF file | [`FullBleed::render_to_file`] | Number of bytes written |
+//! | Find missing characters | [`FullBleed::render_with_glyph_report`] | PDF bytes and a [`GlyphCoverageReport`] |
+//! | Preview the HTML/CSS layout | [`FullBleed::render_image_pages`] | PNG bytes for each page |
+//! | Preview a generated PDF file | [`FullBleed::render_finalized_pdf_image_pages`] | PNG bytes for each page |
+//! | Reuse a template for many records | [`FullBleed::compile_document`] | A [`CompiledDocument`] |
+//! | Combine several HTML documents | [`FullBleed::render_many_to_buffer`] | One PDF in input order |
+//!
+//! # Supply fonts explicitly
+//!
+//! The first example uses standard PDF fonts. The Rust crate does not include the
+//! Python wheel's font bundle and does not discover system fonts automatically.
+//! Supply the font families and styles your document needs, and keep their license
+//! notices with any redistributed files.
+//!
+//! [`FullBleedBuilder::register_font_file`] and [`FullBleedBuilder::register_font_dir`]
+//! provide convenient registration, but skip unreadable or invalid font files.
+//! To surface a missing file as an I/O error and invalid font bytes as a build
+//! error, read the file yourself and register an [`AssetBundle`]. This example
+//! expects a valid TrueType font at `fonts/InvoiceSans.ttf`:
+//!
+//! ```no_run
+//! use fullbleed::{Asset, AssetBundle, AssetKind, FullBleed};
+//!
+//! fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let mut assets = AssetBundle::default();
+//!     assets.add(Asset::new(
+//!         "InvoiceSans".into(),
+//!         AssetKind::Font,
+//!         std::fs::read("fonts/InvoiceSans.ttf")?,
+//!         None,
+//!         true,
+//!     ));
+//!     let engine = FullBleed::builder().register_bundle(assets).build()?;
+//!     let (pdf, glyphs) = engine.render_with_glyph_report(
+//!         "<h1>Invoice INV-1042</h1><p>Consulting: USD 1,200.00</p>",
+//!         "body { font-family: 'InvoiceSans'; font-size: 11pt; }",
+//!     )?;
+//!     if !glyphs.is_empty() {
+//!         return Err(format!("Missing characters: {:?}", glyphs.missing()).into());
+//!     }
+//!     std::fs::write("branded-invoice.pdf", pdf)?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! Font coverage is one check; it does not establish layout quality or PDF
+//! conformance. Inspect the actual PDF and its previews for your document inputs.
+//!
+//! # Reuse a template
+//!
+//! [`FullBleed::compile_document`] prepares a reusable document. Use
+//! [`CompiledDocument::render_bindings_to_buffer`] for short text values that fit
+//! an unchanged layout. Use [`CompiledDocument::render_reflow_bindings_to_buffer`]
+//! when values must wrap, move later content, or change pagination. Both methods
+//! accept named columns of strings and produce one PDF with records in row order;
+//! each method has an executable example and documents its column requirements.
+//!
+//! # Inspect output
+//!
+//! [`inspect_pdf_bytes`] reports structure such as page count and PDF version.
+//! [`FullBleed::render_image_pages`] previews the layout display list, while
+//! [`FullBleed::render_finalized_pdf_image_pages`] reads the saved PDF through the
+//! built-in PDF renderer. These are distinct preview paths with different feature
+//! coverage, not a promise of identical pixels or support for arbitrary PDF input.
+//! For a standards requirement, select the appropriate [`PdfProfile`] and retain
+//! the output-specific validation evidence; selecting a profile is not itself a
+//! conformance result.
+
 mod assets;
 mod authoring;
 mod base14_metrics;
@@ -152,6 +255,13 @@ fn render_to_buffered_file<T>(
     Ok(result)
 }
 
+/// Configured HTML/CSS document engine with explicit fonts, assets, and PDF options.
+///
+/// Create it with [`Self::builder`]. Reuse an engine for documents that share the
+/// same configuration; rendering methods borrow it. For repeated template data,
+/// use [`Self::compile_document`] and choose fixed bindings or content reflow.
+///
+/// See the [crate overview](crate) for a complete first-PDF program and font setup.
 pub struct FullBleed {
     default_page_size: Size,
     default_margins: Margins,
@@ -943,6 +1053,7 @@ fn collect_binding_slots(commands: &[Command], slots: &mut BTreeSet<String>) {
 }
 
 impl CompiledDocument {
+    /// Number of pages in the compiled template, before record expansion or reflow.
     pub fn page_count(&self) -> usize {
         self.document.pages.len()
     }
@@ -955,6 +1066,11 @@ impl CompiledDocument {
         self.compile_nanos as f64 / 1_000_000.0
     }
 
+    /// Sorted names of the page-local text slots used by fixed-geometry bindings.
+    ///
+    /// Inspect these names rather than assuming they match the original HTML:
+    /// text transformations can change the markers in the compiled display list.
+    /// Reflow uses the independently discovered [`Self::reflow_binding_slots`].
     pub fn binding_slots(&self) -> &[String] {
         &self.binding_slots
     }
@@ -973,6 +1089,10 @@ impl CompiledDocument {
             .map_or(0, |plan| plan.command_count())
     }
 
+    /// Names of the parsed template slots used by content reflow.
+    ///
+    /// An empty slice means no slots or no valid reflow program. Check
+    /// [`Self::reflow_program_ready`] and [`Self::reflow_program_error`] to distinguish them.
     pub fn reflow_binding_slots(&self) -> &[String] {
         self.reflow_plan
             .as_ref()
@@ -1001,10 +1121,15 @@ impl CompiledDocument {
             .map_or(0, |plan| plan.template.html_binding_node_count())
     }
 
+    /// Whether a reflow program with at least one slot was compiled successfully.
     pub fn reflow_program_ready(&self) -> bool {
         self.reflow_plan.as_ref().is_some_and(|plan| plan.is_ok())
     }
 
+    /// Serialize the compiled template into PDF bytes without substituting slots.
+    ///
+    /// Use [`Self::render_bindings_to_buffer`] or
+    /// [`Self::render_reflow_bindings_to_buffer`] to supply record values.
     pub fn render_to_buffer(&self) -> Result<Vec<u8>, FullBleedError> {
         Ok(pdf::document_to_pdf_with_metrics_and_registry_with_logs(
             &self.document,
@@ -1016,6 +1141,9 @@ impl CompiledDocument {
         )?)
     }
 
+    /// Serialize the template to a writer and return the number of bytes written.
+    ///
+    /// The caller owns and flushes the writer. An error can leave partial output.
     pub fn render_to_writer<W: std::io::Write>(
         &self,
         writer: &mut W,
@@ -1033,6 +1161,10 @@ impl CompiledDocument {
         )
     }
 
+    /// Save the template PDF, returning the number of bytes written.
+    ///
+    /// Creates or truncates the file and flushes it. Parent directories must
+    /// already exist; an error can leave an empty or partial file.
     pub fn render_to_file(
         &self,
         path: impl AsRef<std::path::Path>,
@@ -1136,6 +1268,33 @@ impl CompiledDocument {
     ///
     /// Static page paint is linked once. Each record receives a distinct, uncompressed text
     /// overlay stream, so values vary without reparsing HTML or rerunning layout.
+    /// Values do not cause wrapping, repositioning, or repagination. Use
+    /// [`Self::render_reflow_bindings_to_buffer`] when the layout must adapt.
+    ///
+    /// Keys must exactly match [`Self::binding_slots`]. Every column must have the
+    /// same nonzero number of values; row `i` uses value `i` from each column.
+    /// Each record contributes the template's pages to one PDF in row order.
+    /// Missing/extra columns or unequal lengths return
+    /// [`FullBleedError::InvalidConfiguration`]; zero rows return
+    /// [`FullBleedError::EmptyDocumentSet`].
+    ///
+    /// ```
+    /// use fullbleed::{FullBleed, inspect_pdf_bytes};
+    /// use std::collections::HashMap;
+    ///
+    /// let engine = FullBleed::builder().build()?;
+    /// let template = engine.compile_document(
+    ///     "<p>Account {{account}}</p>",
+    ///     "@page { size: 105mm 148mm; margin: 12mm; }",
+    /// )?;
+    /// assert_eq!(template.binding_slots(), &["account"]);
+    /// let columns = HashMap::from([
+    ///     ("account".into(), vec!["1042".into(), "1043".into()]),
+    /// ]);
+    /// let pdf = template.render_bindings_to_buffer(&columns)?;
+    /// assert_eq!(inspect_pdf_bytes(&pdf)?.page_count, 2);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn render_bindings_to_buffer(
         &self,
         bindings: &HashMap<String, Vec<String>>,
@@ -1227,6 +1386,10 @@ impl CompiledDocument {
         })
     }
 
+    /// Reflow compilation error, if one was retained during template compilation.
+    ///
+    /// `None` can also mean the template had no slots; check
+    /// [`Self::reflow_program_ready`] before submitting records.
     pub fn reflow_program_error(&self) -> Option<&str> {
         self.reflow_plan
             .as_ref()
@@ -1252,6 +1415,33 @@ impl CompiledDocument {
     /// HTML tokenization, tree recovery, binding discovery, CSS parsing, and selector compilation
     /// are compile-time work. Each worker materializes one private DOM, mutates its bound text
     /// nodes per record, and emits completed documents to the ordered streaming PDF linker.
+    ///
+    /// Keys must exactly match [`Self::reflow_binding_slots`]; all columns must
+    /// have the same nonzero length. Records appear in row order, each starting
+    /// its own document. Unlike fixed bindings, the final page count can change.
+    /// Check [`Self::reflow_program_ready`] and [`Self::reflow_program_error`]
+    /// after compilation if a template cannot be used for reflow.
+    ///
+    /// ```
+    /// use fullbleed::{FullBleed, inspect_pdf_bytes};
+    /// use std::collections::HashMap;
+    ///
+    /// let engine = FullBleed::builder().build()?;
+    /// let template = engine.compile_document(
+    ///     "<h1>Service notice</h1><p>{{message}}</p>",
+    ///     "@page { size: 105mm 148mm; margin: 12mm; } p { font-size: 12pt; }",
+    /// )?;
+    /// assert!(template.reflow_program_ready());
+    /// let columns = HashMap::from([
+    ///     ("message".into(), vec![
+    ///         "Your service is active.".into(),
+    ///         "This longer notice continues onto another page. ".repeat(80),
+    ///     ]),
+    /// ]);
+    /// let pdf = template.render_reflow_bindings_to_buffer(&columns)?;
+    /// assert!(inspect_pdf_bytes(&pdf)?.page_count > 2);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn render_reflow_bindings_to_buffer(
         &self,
         bindings: &HashMap<String, Vec<String>>,
@@ -1632,6 +1822,12 @@ impl CompiledDocument {
     }
 }
 
+/// Configure a [`FullBleed`] engine before rendering.
+///
+/// Defaults include A4 pages, 36-point margins, and PDF 1.7 output. CSS `@page`
+/// rules can choose size and margins unless the corresponding builder settings
+/// explicitly override them. Fonts are registered explicitly, not discovered from
+/// the operating system. Call [`Self::build`] to validate options and load assets.
 #[derive(Clone)]
 pub struct FullBleedBuilder {
     page_size: Size,
@@ -3399,6 +3595,7 @@ fn escape_html_text(input: &str) -> String {
 }
 
 impl FullBleed {
+    /// Start with default engine settings; call [`FullBleedBuilder::build`] to load them.
     pub fn builder() -> FullBleedBuilder {
         FullBleedBuilder::new()
     }
@@ -7294,6 +7491,10 @@ impl FullBleed {
             .map(|(doc, _page_data)| doc)
     }
 
+    /// Lay out HTML/CSS into a display document without serializing PDF bytes.
+    ///
+    /// Most applications should start with [`Self::render_to_buffer`]. Use this
+    /// lower-level output when you need the pages and display commands themselves.
     pub fn render_to_document(&self, html: &str, css: &str) -> Result<Document, FullBleedError> {
         let context = self.build_render_context(css, Some(0));
         self.render_to_document_with_resolver(html, &context.page_templates, &context.resolver)
@@ -7301,6 +7502,18 @@ impl FullBleed {
 
     /// Compile HTML/CSS into both the immutable fixed-point display document and, when text slots
     /// are present, a parsed-DOM reflow program with a reusable CSS context.
+    ///
+    /// Write text slots as `{{name}}`. A name is 1 to 64 ASCII letters, digits,
+    /// underscores, hyphens, or dots. Choose
+    /// [`CompiledDocument::render_bindings_to_buffer`] for an unchanged layout or
+    /// [`CompiledDocument::render_reflow_bindings_to_buffer`] for values that must
+    /// wrap and repaginate. Their slot lists are independent: inspect the list for
+    /// the method you intend to use.
+    ///
+    /// Successful template layout does not guarantee a usable binding program.
+    /// For reflow, inspect [`CompiledDocument::reflow_program_ready`] and
+    /// [`CompiledDocument::reflow_program_error`]. Without slots, the compiled
+    /// document can still be serialized or repeated unchanged.
     pub fn compile_document(
         &self,
         html: &str,
@@ -7377,6 +7590,23 @@ impl FullBleed {
         })
     }
 
+    /// Render one HTML/CSS document into PDF bytes.
+    ///
+    /// The bytes can be saved, returned as an HTTP response, or sent to storage.
+    /// This method performs layout on each call; see [`Self::compile_document`]
+    /// for reusable templates and record bindings.
+    ///
+    /// ```
+    /// use fullbleed::{FullBleed, inspect_pdf_bytes};
+    ///
+    /// let engine = FullBleed::builder().build()?;
+    /// let pdf = engine.render_to_buffer(
+    ///     "<h1>Monthly statement</h1><p>Balance: USD 42.00</p>",
+    ///     "@page { size: A4; margin: 20mm; } h1 { color: #175c52; }",
+    /// )?;
+    /// assert_eq!(inspect_pdf_bytes(&pdf)?.page_count, 1);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn render_to_buffer(&self, html: &str, css: &str) -> Result<Vec<u8>, FullBleedError> {
         let document = self.render_to_document(html, css)?;
         let bytes = pdf::document_to_pdf_with_metrics_and_registry_with_logs(
@@ -7391,6 +7621,7 @@ impl FullBleed {
         Ok(bytes)
     }
 
+    /// Render a PDF and return layout/page measurements alongside its bytes.
     pub fn render_with_metrics(
         &self,
         html: &str,
@@ -7582,6 +7813,15 @@ impl FullBleed {
         Ok((bytes, page_data, template_bindings, report))
     }
 
+    /// Render a PDF and report characters missing from the selected font fallbacks.
+    ///
+    /// Rendering can succeed with a nonempty report. Check
+    /// [`GlyphCoverageReport::is_empty`] before accepting the output if your
+    /// application requires every character to be covered. An empty report does
+    /// not prove that the intended family was selected or that the PDF conforms
+    /// to an accessibility or archival standard.
+    ///
+    /// See the [crate font example](crate#supply-fonts-explicitly) for asset setup.
     pub fn render_with_glyph_report(
         &self,
         html: &str,
@@ -7627,6 +7867,21 @@ impl FullBleed {
         Ok((bytes, report, document))
     }
 
+    /// Render to a caller-owned writer and return the number of PDF bytes written.
+    ///
+    /// The caller is responsible for flushing the writer. An error can leave
+    /// partial output; stage the result first when your destination must be atomic.
+    ///
+    /// ```
+    /// use fullbleed::FullBleed;
+    ///
+    /// let engine = FullBleed::builder().build()?;
+    /// let mut bytes = Vec::new();
+    /// let written = engine.render_to_writer("<p>Receipt 1042</p>", "", &mut bytes)?;
+    /// assert_eq!(written, bytes.len());
+    /// assert!(bytes.starts_with(b"%PDF-"));
+    /// # Ok::<(), fullbleed::FullBleedError>(())
+    /// ```
     pub fn render_to_writer<W: std::io::Write>(
         &self,
         html: &str,
@@ -7652,6 +7907,11 @@ impl FullBleed {
         Ok(bytes_written)
     }
 
+    /// Render a PDF file and return the number of bytes written.
+    ///
+    /// Creates or truncates the destination and flushes it. Parent directories
+    /// must already exist. An error can leave an empty or partial file; use your
+    /// own temporary-file/rename strategy when replacement must be atomic.
     pub fn render_to_file(
         &self,
         html: &str,
@@ -7661,6 +7921,23 @@ impl FullBleed {
         render_to_buffered_file(path, |writer| self.render_to_writer(html, css, writer))
     }
 
+    /// Render HTML/CSS to one PNG byte vector per page, in document order.
+    ///
+    /// `dpi` controls raster resolution. This previews the layout display list,
+    /// not a serialized PDF; use [`Self::render_finalized_pdf_image_pages`] to
+    /// inspect a generated PDF through the built-in PDF renderer.
+    ///
+    /// ```
+    /// use fullbleed::FullBleed;
+    ///
+    /// let engine = FullBleed::builder().build()?;
+    /// let pages = engine.render_image_pages(
+    ///     "<h1>Preview</h1>", "@page { size: 105mm 148mm; margin: 12mm; }", 96,
+    /// )?;
+    /// assert_eq!(pages.len(), 1);
+    /// assert!(pages[0].starts_with(b"\x89PNG\r\n\x1a\n"));
+    /// # Ok::<(), fullbleed::FullBleedError>(())
+    /// ```
     pub fn render_image_pages(
         &self,
         html: &str,
@@ -7689,6 +7966,12 @@ impl FullBleed {
         Ok(pages)
     }
 
+    /// Save layout previews as `{stem}_page1.png`, `{stem}_page2.png`, and so on.
+    ///
+    /// Creates the output directory and returns paths in page order. An empty or
+    /// whitespace-only stem becomes `render`. Matching files are overwritten;
+    /// old extra pages are not removed, so use a fresh directory for each render.
+    /// See [`Self::render_image_pages`] for preview semantics.
     pub fn render_image_pages_to_dir(
         &self,
         html: &str,
@@ -7715,6 +7998,30 @@ impl FullBleed {
         Ok(paths)
     }
 
+    /// Read a generated PDF file and return one PNG byte vector per page.
+    ///
+    /// Uses Fullbleed's built-in PDF renderer at `dpi` resolution. It has distinct
+    /// feature coverage from [`Self::render_image_pages`] and from external PDF
+    /// viewers; it is not a general-purpose PDF compatibility guarantee.
+    ///
+    /// ```no_run
+    /// use fullbleed::FullBleed;
+    ///
+    /// fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let engine = FullBleed::builder().build()?;
+    ///     engine.render_to_file(
+    ///         "<h1>Service notice</h1><p>Your service is active.</p>",
+    ///         "@page { size: 105mm 148mm; margin: 12mm; }",
+    ///         "notice.pdf",
+    ///     )?;
+    ///     for (index, png) in engine.render_finalized_pdf_image_pages("notice.pdf", 96)?
+    ///         .iter().enumerate()
+    ///     {
+    ///         std::fs::write(format!("notice-page-{}.png", index + 1), png)?;
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
     pub fn render_finalized_pdf_image_pages(
         &self,
         pdf_path: impl AsRef<std::path::Path>,
@@ -7740,6 +8047,11 @@ impl FullBleed {
         Ok(pages)
     }
 
+    /// Save finalized-PDF previews and return their paths in page order.
+    ///
+    /// Uses the directory and naming rules of [`Self::render_image_pages_to_dir`],
+    /// including overwriting matching files without deleting old extra pages.
+    /// See [`Self::render_finalized_pdf_image_pages`] for renderer scope.
     pub fn render_finalized_pdf_image_pages_to_dir(
         &self,
         pdf_path: impl AsRef<std::path::Path>,
@@ -7804,6 +8116,12 @@ impl FullBleed {
         )
     }
 
+    /// Render separate HTML documents with shared CSS into one PDF in input order.
+    ///
+    /// Each input starts a new document; this does not concatenate their HTML
+    /// into one continuous flow. An empty input returns
+    /// [`FullBleedError::EmptyDocumentSet`]. For repeated data in one template,
+    /// consider [`Self::compile_document`] instead.
     pub fn render_many_to_buffer(
         &self,
         html_list: &[String],
@@ -8450,6 +8768,7 @@ impl FullBleed {
 }
 
 impl FullBleedBuilder {
+    /// Create default settings. Equivalent to [`FullBleed::builder`].
     pub fn new() -> Self {
         Self {
             page_size: Size::a4(),
@@ -8481,18 +8800,35 @@ impl FullBleedBuilder {
         }
     }
 
+    /// Set the page size explicitly, overriding CSS `@page` size declarations.
+    ///
+    /// ```
+    /// use fullbleed::{FullBleed, Size};
+    ///
+    /// let engine = FullBleed::builder()
+    ///     .page_size(Size::letter())
+    ///     .margin_all(36.0) // PDF points: 72 points = one inch.
+    ///     .build()?;
+    /// let pdf = engine.render_to_buffer("<p>US Letter document</p>", "")?;
+    /// # assert!(pdf.starts_with(b"%PDF-"));
+    /// # Ok::<(), fullbleed::FullBleedError>(())
+    /// ```
     pub fn page_size(mut self, size: Size) -> Self {
         self.page_size = size;
         self.page_size_explicit = true;
         self
     }
 
+    /// Set all four margins explicitly, overriding CSS page margins.
+    ///
+    /// [`Margins`] uses PDF points, with 72 points per inch.
     pub fn margins(mut self, margins: Margins) -> Self {
         self.margins = margins;
         self.margins_explicit = true;
         self
     }
 
+    /// Set the same margin on all sides, in PDF points, overriding CSS page margins.
     pub fn margin_all(mut self, value: f32) -> Self {
         self.margins = Margins::all(value);
         self.margins_explicit = true;
@@ -8524,11 +8860,23 @@ impl FullBleedBuilder {
         self
     }
 
+    /// Register font files directly inside a directory when the engine is built.
+    ///
+    /// Scans one directory in sorted path order, without recursion. Supported
+    /// extensions are `.ttf`, `.otf`, `.ttc`, and `.otc`. Unreadable directories
+    /// and unreadable or invalid files are skipped. For strict font-loading
+    /// errors, read font bytes and use [`Self::register_bundle`] instead.
     pub fn register_font_dir(mut self, path: impl Into<std::path::PathBuf>) -> Self {
         self.font_dirs.push(path.into());
         self
     }
 
+    /// Register a `.ttf`, `.otf`, `.ttc`, or `.otc` font when the engine is built.
+    ///
+    /// Unreadable, unsupported, or invalid files are skipped. This helper does
+    /// not guarantee that a font was loaded. To require successful loading,
+    /// read the bytes yourself and use [`Self::register_bundle`], as shown in
+    /// the [crate font example](crate#supply-fonts-explicitly).
     pub fn register_font_file(mut self, path: impl Into<std::path::PathBuf>) -> Self {
         self.font_files.push(path.into());
         self
@@ -8808,11 +9156,34 @@ impl FullBleedBuilder {
         self
     }
 
+    /// Set the bundle of in-memory fonts, CSS, and other document assets.
+    ///
+    /// Replaces any previously registered bundle. Add all assets to one
+    /// [`AssetBundle`] before passing it here. [`Self::build`] parses bundled
+    /// font bytes and returns an error for invalid font data.
+    ///
+    /// ```
+    /// use fullbleed::{Asset, AssetBundle, AssetKind, FullBleed, FullBleedError};
+    ///
+    /// let mut assets = AssetBundle::default();
+    /// assets.add(Asset::new(
+    ///     "BrokenFont".into(), AssetKind::Font, b"not a font".to_vec(), None, true,
+    /// ));
+    /// assert!(matches!(
+    ///     FullBleed::builder().register_bundle(assets).build(),
+    ///     Err(FullBleedError::Asset(_)),
+    /// ));
+    /// ```
     pub fn register_bundle(mut self, bundle: AssetBundle) -> Self {
         self.asset_bundle = bundle;
         self
     }
 
+    /// Validate settings, load registered assets, and create the engine.
+    ///
+    /// Invalid configuration or bundled font data is returned as an error.
+    /// File-based font helpers have different failure behavior: see
+    /// [`Self::register_font_file`] and [`Self::register_font_dir`].
     pub fn build(self) -> Result<FullBleed, FullBleedError> {
         if self.layout_strategy == LayoutStrategy::Lazy && !self.accept_lazy_layout_cost {
             return Err(FullBleedError::InvalidConfiguration(

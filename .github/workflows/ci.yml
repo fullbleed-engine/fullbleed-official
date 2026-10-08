@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.16"
+  FULLBLEED_CI_VERSION: "2.5.17"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -84,6 +84,11 @@ jobs:
 
       - name: Run rust test suite
         run: cargo test --locked -- --nocapture
+
+      - name: Build Rust API documentation with checked links
+        env:
+          RUSTDOCFLAGS: "-D rustdoc::broken_intra_doc_links -D rustdoc::invalid_codeblock_attributes"
+        run: cargo doc --locked --no-deps
 
       - name: Install declared Rust MSRV
         run: rustup toolchain install 1.85.0 --profile minimal

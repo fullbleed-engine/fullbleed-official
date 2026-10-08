@@ -1,13 +1,13 @@
 [package]
 name = "fullbleed"
-version = "2.5.16"
+version = "2.5.17"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
 description = "Deterministic HTML/CSS-to-PDF engine in Rust for transactional document generation and AI agent workflows."
 repository = "https://github.com/fullbleed-engine/fullbleed-official"
 homepage = "https://fullbleed.dev"
-documentation = "https://github.com/fullbleed-engine/fullbleed-official#readme"
+documentation = "https://docs.rs/fullbleed"
 readme = "README.md"
 keywords = ["pdf", "html", "css", "document-generation", "printing"]
 categories = ["text-processing", "multimedia"]

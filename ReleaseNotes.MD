@@ -1,3 +1,24 @@
+# Fullbleed Release Notes - 2.5.17
+
+The native Rust API reference now starts with a complete first-PDF program,
+explicit font setup, and a guide to choosing buffers, writers, files, previews,
+and compiled templates. Core methods document their return values and failure
+behavior, including fixed-layout versus reflowing record bindings and the
+distinction between layout previews and previews of a saved PDF.
+
+The font example loads bytes into an asset bundle so missing files and invalid
+font data surface as errors. File-based font registration helpers retain their
+existing behavior of skipping unreadable or invalid files. Writer/file methods
+return byte counts, and file methods can leave partial output on failure.
+
+Cargo's documentation link now points to the hosted Rust API reference. CI builds
+that reference with broken internal links treated as errors, alongside the Rust
+suite's executable documentation examples. This release changes documentation,
+CI checks and release metadata; it does not change rendering algorithms or add
+new conformance claims. See the [2.5.17 runbook](docs/release/2.5.17-runbook.md).
+
+---
+
 # Fullbleed Release Notes - 2.5.16
 
 With only a regular face registered, `font-synthesis: weight` now permits only

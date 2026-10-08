@@ -61,6 +61,7 @@ pub(crate) fn read_asset_path(path: impl AsRef<Path>) -> std::io::Result<Vec<u8>
     std::fs::read(path)
 }
 
+/// How an [`Asset`]'s bytes are intended to be used in a document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssetKind {
     Css,
@@ -96,16 +97,27 @@ impl AssetKind {
     }
 }
 
+/// Named bytes supplied to an engine through an [`AssetBundle`].
+///
+/// Use [`AssetKind::Font`] for font registration and [`AssetKind::Css`] for shared
+/// CSS. Construction only stores the bytes; validation occurs when the asset is
+/// consumed, such as during [`crate::FullBleedBuilder::build`] for fonts.
 #[derive(Debug, Clone)]
 pub struct Asset {
+    /// Asset lookup name; font assets also register its filename stem as an alias.
     pub name: String,
+    /// Intended resource type.
     pub kind: AssetKind,
+    /// Resource contents owned by this asset.
     pub data: Vec<u8>,
+    /// Optional source label used for provenance and resource lookup.
     pub source: Option<String>,
+    /// Caller-supplied trust metadata; setting it does not sanitize the bytes.
     pub trusted: bool,
 }
 
 impl Asset {
+    /// Store a named resource. This constructor does not read or validate a file.
     pub fn new(
         name: String,
         kind: AssetKind,
@@ -127,12 +139,18 @@ impl Asset {
     }
 }
 
+/// In-memory assets shared by documents rendered with the same engine.
+///
+/// Build a bundle with [`Self::add`] and pass it to
+/// [`crate::FullBleedBuilder::register_bundle`]. Font bytes are parsed at engine
+/// construction, and CSS assets are combined in insertion order.
 #[derive(Debug, Clone, Default)]
 pub struct AssetBundle {
     pub assets: Vec<Asset>,
 }
 
 impl AssetBundle {
+    /// Append an asset without replacing or validating existing entries.
     pub fn add(&mut self, asset: Asset) {
         self.assets.push(asset);
     }
