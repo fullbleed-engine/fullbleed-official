@@ -1,3 +1,25 @@
+# Fullbleed Release Notes - 2.5.20
+
+Filtered and positive-z-index descendants now retain their ancestors' overflow
+clips when painting is deferred. This prevents a tall filtered child from
+escaping a rounded panel with `overflow: hidden`. Nested clips, one-axis
+clipping, `overflow-clip-margin`, and transforms retain their geometry without
+making overflow create a stacking context.
+
+Reusable drawing resources remain defined before deferred paint commands.
+This also fixes filtered positive-z-index children disappearing when their
+form definition was scheduled after its first use.
+
+The installed-output regression gate covers 16 browser-checked cases in native
+previews, finalized PDFs, and independent PDFium rendering, including compiled
+documents, repeated records, and fixed/reflow bindings. CI retains the 35 PDFs
+and their checks. No browser or PDF-reader dependency is added to the engine.
+
+These are targeted rendering fixes, not general CSS parity or PDF standards
+conformance. See the [2.5.20 runbook](docs/release/2.5.20-runbook.md).
+
+---
+
 # Fullbleed Release Notes - 2.5.19
 
 Native Rust applications can render the table, flex, grid, and nested-layout
