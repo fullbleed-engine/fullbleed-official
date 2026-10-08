@@ -10726,6 +10726,39 @@ mod tests {
     }
 
     #[test]
+    fn font_synthesis_position_controls_default_footnote_call_size() {
+        let html = r#"<p>Body<span class="fn">note body</span></p>"#;
+        let engine = FullBleed::builder().build().expect("engine");
+        for (declaration, expected) in [
+            ("", 12.0),
+            ("font-synthesis:none", 15.0),
+            ("font-synthesis:weight style", 15.0),
+            ("font-synthesis:position", 12.0),
+            ("font-synthesis-position:none", 15.0),
+            ("font-synthesis:none;font-synthesis-position:auto", 12.0),
+        ] {
+            let css = format!(
+                "@page {{size:200px 160px;margin:10px}} html {{font-family:Helvetica;font-size:20px;line-height:30px;{declaration}}} * {{margin:0}} .fn {{float:footnote}}"
+            );
+            let document = engine.render_to_document(html, &css).expect("render");
+            let mut size = Pt::ZERO;
+            let call_size = document.pages[0]
+                .commands
+                .iter()
+                .find_map(|command| {
+                    match command {
+                        Command::SetFontSize(value) => size = *value,
+                        Command::DrawString { text, .. } if text == "1" => return Some(size),
+                        _ => {}
+                    }
+                    None
+                })
+                .expect("footnote call");
+            assert_eq!(call_size, Pt::from_f32(expected), "{declaration}");
+        }
+    }
+
+    #[test]
     fn footnote_policy_block_moves_the_owning_paragraph() {
         let html = r#"<!doctype html><html><body>
             <div class="lead"></div><p>Body<span class="fn">note body</span></p>

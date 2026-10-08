@@ -2,7 +2,7 @@ use crate::Canvas;
 use crate::css_native::{self, AtRuleBlock, Declaration, DeclarationBlock, Rule as CssRule};
 use crate::flowable::{FilterDropShadowSpec, PaintFilterSpec, TextStyle, resolve_font_stack};
 use crate::font::FontRegistry;
-use crate::style::FontStyleMode;
+use crate::style::{FontStyleMode, FontSynthesisStyle, parse_font_synthesis};
 use crate::types::{Color, Pt};
 use crate::xml::{ContentNode as XmlContentNode, Document as XmlDocument, Node as XmlNode};
 use std::sync::Arc;
@@ -220,6 +220,7 @@ struct SvgStyle {
     font_weight: u16,
     font_style: FontStyleMode,
     font_synthesis_weight: bool,
+    font_synthesis_style: FontSynthesisStyle,
     font_face_satisfies_weight: bool,
     font_face_satisfies_style: bool,
     text_anchor: TextAnchor,
@@ -263,6 +264,7 @@ impl SvgStyle {
             font_weight: 400,
             font_style: FontStyleMode::Normal,
             font_synthesis_weight: true,
+            font_synthesis_style: FontSynthesisStyle::Auto,
             font_face_satisfies_weight: false,
             font_face_satisfies_style: false,
             text_anchor: TextAnchor::Start,
@@ -450,6 +452,7 @@ pub(crate) fn compile_svg_with_font_context(
         style.font_weight = font.style.font_weight;
         style.font_style = font.style.font_style;
         style.font_synthesis_weight = font.style.font_synthesis_weight;
+        style.font_synthesis_style = font.style.font_synthesis_style;
         style.font_face_satisfies_weight = font.style.font_face_satisfies_weight;
         style.font_face_satisfies_style = font.style.font_face_satisfies_style;
     }
@@ -1299,7 +1302,7 @@ fn compile_text_content(
                     && stylesheet.font_registry.as_ref().is_some_and(|registry| {
                         registry.requires_synthetic_bold(&font_name, style.font_weight)
                     });
-                let italic_shear = if style.font_synthesis_weight
+                let italic_shear = if style.font_synthesis_style.allows(style.font_style)
                     && !style.font_face_satisfies_style
                     && stylesheet
                         .font_registry
@@ -3085,7 +3088,13 @@ fn svg_selector_matches(node: XmlNode<'_>, selector: &SvgSelector) -> bool {
     true
 }
 
-fn apply_svg_stylesheet(node: XmlNode<'_>, stylesheet: &SvgStylesheet, style: &mut SvgStyle) {
+fn apply_svg_stylesheet(
+    node: XmlNode<'_>,
+    stylesheet: &SvgStylesheet,
+    style: &mut SvgStyle,
+    inherited_synthesis: (bool, FontSynthesisStyle),
+    important: bool,
+) {
     if stylesheet.rules.is_empty() {
         return;
     }
@@ -3107,10 +3116,11 @@ fn apply_svg_stylesheet(node: XmlNode<'_>, stylesheet: &SvgStylesheet, style: &m
     });
 
     for rule in &matched {
-        apply_svg_declarations(rule.declarations.normal(), style);
-    }
-    for rule in &matched {
-        apply_svg_declarations(rule.declarations.important(), style);
+        if important {
+            apply_svg_declarations(rule.declarations.important(), style, inherited_synthesis);
+        } else {
+            apply_svg_declarations(rule.declarations.normal(), style, inherited_synthesis);
+        }
     }
 }
 
@@ -3119,6 +3129,7 @@ fn apply_presentation_and_style(
     stylesheet: &SvgStylesheet,
     style: &mut SvgStyle,
 ) {
+    let inherited_synthesis = (style.font_synthesis_weight, style.font_synthesis_style);
     // Presentation attributes are the baseline.
     if let Some(fill) = node.attribute("fill") {
         if let Some(alpha) = apply_svg_paint_value(fill, &mut style.fill) {
@@ -3220,31 +3231,49 @@ fn apply_presentation_and_style(
     }
 
     // Inline/embedded stylesheet rules override presentation attributes.
-    apply_svg_stylesheet(node, stylesheet, style);
+    apply_svg_stylesheet(node, stylesheet, style, inherited_synthesis, false);
 
     // Inline style="" wins over presentation attributes.
     if let Some(s) = node.attribute("style") {
-        apply_style_string(s, style);
+        apply_style_string(s, style, inherited_synthesis, false);
+    }
+    // Important stylesheet declarations outrank normal inline declarations.
+    apply_svg_stylesheet(node, stylesheet, style, inherited_synthesis, true);
+    if let Some(s) = node.attribute("style") {
+        apply_style_string(s, style, inherited_synthesis, true);
     }
 }
 
-fn apply_style_string(input: &str, style: &mut SvgStyle) {
+fn apply_style_string(
+    input: &str,
+    style: &mut SvgStyle,
+    inherited_synthesis: (bool, FontSynthesisStyle),
+    important: bool,
+) {
     if let Ok(declarations) = css_native::parse_declaration_block(input) {
-        apply_svg_declarations(declarations.normal(), style);
-        apply_svg_declarations(declarations.important(), style);
+        if important {
+            apply_svg_declarations(declarations.important(), style, inherited_synthesis);
+        } else {
+            apply_svg_declarations(declarations.normal(), style, inherited_synthesis);
+        }
     }
 }
 
 fn apply_svg_declarations<'a>(
     declarations: impl IntoIterator<Item = &'a Declaration>,
     style: &mut SvgStyle,
+    inherited_synthesis: (bool, FontSynthesisStyle),
 ) {
     for declaration in declarations {
-        apply_svg_declaration(declaration, style);
+        apply_svg_declaration(declaration, style, inherited_synthesis);
     }
 }
 
-fn apply_svg_declaration(declaration: &Declaration, style: &mut SvgStyle) {
+fn apply_svg_declaration(
+    declaration: &Declaration,
+    style: &mut SvgStyle,
+    inherited_synthesis: (bool, FontSynthesisStyle),
+) {
     let value = declaration.value.trim();
     match declaration.name.to_ascii_lowercase().as_str() {
         "fill" => {
@@ -3327,6 +3356,19 @@ fn apply_svg_declaration(declaration: &Declaration, style: &mut SvgStyle) {
         }
         "font-weight" => apply_svg_font_weight(value, style),
         "font-style" => apply_svg_font_style(value, style),
+        "font-synthesis" | "font-synthesis-weight" | "font-synthesis-style" => {
+            if let Some(parsed) =
+                parse_font_synthesis(&declaration.name.to_ascii_lowercase(), value)
+            {
+                if let Some(value) = parsed.weight {
+                    style.font_synthesis_weight = value.resolve(inherited_synthesis.0, true);
+                }
+                if let Some(value) = parsed.style {
+                    style.font_synthesis_style =
+                        value.resolve(inherited_synthesis.1, FontSynthesisStyle::Auto);
+                }
+            }
+        }
         "text-anchor" => match value.to_ascii_lowercase().as_str() {
             "start" | "middle" | "end" => style.text_anchor = parse_text_anchor(value),
             _ => {}
@@ -4917,15 +4959,93 @@ mod tests {
                 < 0.0001
         );
         context.style.font_synthesis_weight = false;
+        let weight_opt_out = compile(&context);
+        assert!(!compiled_texts(&weight_opt_out)[0].synthetic_bold);
+        assert!(compiled_texts(&weight_opt_out)[0].italic_shear > 0.0);
+        context.style.font_synthesis_style = FontSynthesisStyle::None;
         let opted_out = compile(&context);
         assert!(!compiled_texts(&opted_out)[0].synthetic_bold);
         assert_eq!(compiled_texts(&opted_out)[0].italic_shear, 0.0);
         context.style.font_synthesis_weight = true;
+        context.style.font_synthesis_style = FontSynthesisStyle::Auto;
         context.style.font_face_satisfies_weight = true;
         context.style.font_face_satisfies_style = true;
         let selected_face = compile(&context);
         assert!(!compiled_texts(&selected_face)[0].synthetic_bold);
         assert_eq!(compiled_texts(&selected_face)[0].italic_shear, 0.0);
+    }
+
+    #[test]
+    fn svg_font_synthesis_css_uses_independent_controls_and_parent_inheritance() {
+        let mut context = noto_font_context();
+        context.style.font_weight = 700;
+        context.style.font_style = FontStyleMode::Italic;
+        for (css, inline, bold, italic) in [
+            ("", "font-synthesis:weight", true, false),
+            ("", "font-synthesis:style", false, true),
+            ("", "font-synthesis:small-caps", false, false),
+            (
+                "",
+                "font-synthesis:none; font-synthesis-style:auto",
+                false,
+                true,
+            ),
+            (
+                "",
+                "font-synthesis:weight style; font-synthesis-weight:none",
+                false,
+                true,
+            ),
+            (
+                "",
+                "font-synthesis:weight style; font-synthesis-style:none",
+                true,
+                false,
+            ),
+            ("", "font-synthesis-style:oblique-only", false, false),
+            (
+                "text {font-synthesis:weight}",
+                "font-synthesis:inherit",
+                false,
+                true,
+            ),
+            (
+                "text {font-synthesis:weight !important}",
+                "font-synthesis:style",
+                true,
+                false,
+            ),
+            (
+                "text {font-synthesis:weight !important}",
+                "font-synthesis:style !important",
+                false,
+                true,
+            ),
+        ] {
+            let xml = format!(
+                r#"<svg width="150" height="40"><style>{css}</style><g style="font-synthesis:style"><text y="25" style="{inline}">TEXT</text></g></svg>"#
+            );
+            let result = compile_svg_with_font_context(
+                &xml,
+                Pt::from_f32(150.0),
+                Pt::from_f32(40.0),
+                Some(&context),
+            );
+            let texts = compiled_texts(&result);
+            assert_eq!(texts.len(), 1);
+            assert_eq!(texts[0].synthetic_bold, bold, "{css} / {inline}");
+            assert_eq!(texts[0].italic_shear != 0.0, italic, "{css} / {inline}");
+        }
+        context.style.font_style = FontStyleMode::Oblique(1200);
+        let xml = r#"<svg width="150" height="40"><text y="25" style="font-synthesis:none; font-synthesis-style:oblique-only">TEXT</text></svg>"#;
+        let result = compile_svg_with_font_context(
+            xml,
+            Pt::from_f32(150.0),
+            Pt::from_f32(40.0),
+            Some(&context),
+        );
+        assert!(!compiled_texts(&result)[0].synthetic_bold);
+        assert!(compiled_texts(&result)[0].italic_shear > 0.0);
     }
 
     #[test]

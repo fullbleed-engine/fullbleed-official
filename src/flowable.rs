@@ -2958,6 +2958,9 @@ pub struct TextStyle {
     pub common_ligatures: bool,
     pub small_caps: bool,
     pub font_synthesis_weight: bool,
+    pub font_synthesis_style: crate::style::FontSynthesisStyle,
+    pub font_synthesis_small_caps: bool,
+    pub font_synthesis_position: bool,
     pub font_style: crate::style::FontStyleMode,
     pub font_face_satisfies_weight: bool,
     pub font_face_satisfies_style: bool,
@@ -3017,6 +3020,9 @@ impl Default for TextStyle {
             common_ligatures: true,
             small_caps: false,
             font_synthesis_weight: true,
+            font_synthesis_style: crate::style::FontSynthesisStyle::Auto,
+            font_synthesis_small_caps: true,
+            font_synthesis_position: true,
             font_style: crate::style::FontStyleMode::Normal,
             font_face_satisfies_weight: false,
             font_face_satisfies_style: false,
@@ -5196,13 +5202,8 @@ fn text_decoration_ink_skip_intervals(
         let synthetic_bold = style.font_synthesis_weight
             && !style.font_face_satisfies_weight
             && registry.requires_synthetic_bold(&run.font_name, style.font_weight);
-        let requests_italic = matches!(
-            style.font_style,
-            crate::style::FontStyleMode::Italic | crate::style::FontStyleMode::Oblique(_)
-        );
-        let synthetic_italic = style.font_synthesis_weight
+        let synthetic_italic = style.font_synthesis_style.allows(style.font_style)
             && !style.font_face_satisfies_style
-            && requests_italic
             && registry.requires_synthetic_italic(&run.font_name);
         let italic_shear = if synthetic_italic {
             synthetic_italic_shear(style.font_style)
@@ -5747,13 +5748,8 @@ fn draw_registered_text_run(
     let synthetic_bold = style.font_synthesis_weight
         && !style.font_face_satisfies_weight
         && registry.requires_synthetic_bold(font_name, style.font_weight);
-    let requests_italic = matches!(
-        style.font_style,
-        crate::style::FontStyleMode::Italic | crate::style::FontStyleMode::Oblique(_)
-    );
-    let synthetic_italic = style.font_synthesis_weight
+    let synthetic_italic = style.font_synthesis_style.allows(style.font_style)
         && !style.font_face_satisfies_style
-        && requests_italic
         && registry.requires_synthetic_italic(font_name);
     let strength = (style.font_size * (1.0 / 32.0)).max(Pt::from_f32(0.25));
     let italic_shear = synthetic_italic_shear(style.font_style);
@@ -6511,7 +6507,10 @@ impl Paragraph {
                 return value;
             }
         }
-        if self.style.small_caps && text.chars().any(char::is_lowercase) {
+        if self.style.small_caps
+            && self.style.font_synthesis_small_caps
+            && text.chars().any(char::is_lowercase)
+        {
             let mut total = Pt::ZERO;
             for (rendered, synthesized) in synthesized_small_caps_runs(text) {
                 let mut style = self.style.clone();
@@ -7085,7 +7084,10 @@ impl Paragraph {
             }
             return;
         }
-        if self.style.small_caps && text.chars().any(char::is_lowercase) {
+        if self.style.small_caps
+            && self.style.font_synthesis_small_caps
+            && text.chars().any(char::is_lowercase)
+        {
             let mut cursor_x = x;
             for (rendered, synthesized) in synthesized_small_caps_runs(text) {
                 let mut style = self.style.clone();

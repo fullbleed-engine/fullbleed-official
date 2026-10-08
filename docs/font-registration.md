@@ -54,3 +54,46 @@ compares embedded face names, extracted text, and native/PDFium previews against
 explicit-face controls for file, directory, bundle, fixed-template, and reflow
 rendering. This is a focused regression check, not a claim of complete CSS font
 matching conformance.
+
+## Controlling synthetic styles
+
+When the selected registered face lacks a requested bold or slanted style,
+`font-synthesis` controls which approximations Fullbleed may draw:
+
+```css
+/* Permit artificial italics, but keep the regular face's weight. */
+.label { font-weight: 700; font-style: italic; font-synthesis: style; }
+
+/* Keep bold synthesis while disabling artificial italics. */
+.total { font-weight: 700; font-style: italic; font-synthesis: weight; }
+
+/* Disable all synthetic variants, or override just one control. */
+.exact { font-synthesis: none; }
+.upright { font-synthesis-style: none; }
+```
+
+The shorthand independently sets `weight`, `style`, `small-caps`, and `position`;
+omitted controls become `none`. The longhands `font-synthesis-weight`,
+`font-synthesis-style`, `font-synthesis-small-caps`, and `font-synthesis-position`
+accept `auto` or `none`. The style longhand also accepts `oblique-only`, which
+permits a synthetic `font-style: oblique` but does not synthesize an italic
+request. These properties inherit. `initial` restores all synthesis controls;
+`auto` is a longhand value, not a valid shorthand value.
+
+The controls do not suppress a real bold or italic face already selected by
+font matching. SVG text inherits the document's weight/style controls and
+supports overrides in its own inline and embedded CSS. Small-cap controls govern
+HTML's existing synthetic small caps; position controls govern the default
+footnote-call superscript fallback. They do not add general OpenType small-cap
+or positional-substitution support. Synthetic small caps with fixed binding
+slots remain unsupported; use compiled reflow for those templates.
+The finalized-PDF preview reader can also omit the synthetic-bold stroke on
+fixed binding slots; inspect the emitted PDF in an independent viewer when
+using that combination.
+
+The [synthesis smoke check](../tools/smoke_font_synthesis.py) registers a known
+regular font and compares each combination with explicit style controls in
+ordinary, fixed, and reflow output. It retains PDFs, extracted text, and native,
+finalized, and PDFium previews; small-cap positive controls cover ordinary and
+reflow output. CI runs this check on Windows and Linux. The comparisons verify
+the named controls, not complete CSS Fonts conformance.

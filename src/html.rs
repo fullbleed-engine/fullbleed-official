@@ -2053,7 +2053,7 @@ fn footnote_node_to_layout_item(
         call_text,
         call_style,
         style.font_size,
-        call_pseudo.is_none(),
+        call_pseudo.is_none() && call_style.font_synthesis_position,
         font_registry.clone(),
         report.as_deref_mut(),
     );
@@ -2157,7 +2157,7 @@ fn footnote_node_to_layout_item(
         area: compiled_page_footnote_area(resolver),
     };
     let call = FootnoteCallFlowable::new(call_flowable, entry);
-    let call = if call_pseudo.is_none() {
+    let call = if call_pseudo.is_none() && call_style.font_synthesis_position {
         // GCPM's default `font-variant-position: super` keeps the call's
         // baseline-aligned inline metrics and translates only the synthesized
         // glyph paint by 0.38em.

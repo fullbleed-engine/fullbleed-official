@@ -992,6 +992,50 @@ pub enum FontStyleMode {
     Oblique(i16),
 }
 
+/// Whether a missing italic or oblique face may be synthesized.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontSynthesisStyle {
+    Auto,
+    None,
+    ObliqueOnly,
+}
+
+impl FontSynthesisStyle {
+    pub(crate) fn allows(self, requested: FontStyleMode) -> bool {
+        match requested {
+            FontStyleMode::Normal => false,
+            FontStyleMode::Italic => self == Self::Auto,
+            FontStyleMode::Oblique(_) => self != Self::None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FontSynthesisValue<T> {
+    Value(T),
+    Inherit,
+    Initial,
+    RevertLayer,
+}
+
+impl<T: Copy> FontSynthesisValue<T> {
+    pub(crate) fn resolve(self, inherited: T, initial: T) -> T {
+        match self {
+            Self::Value(value) => value,
+            Self::Inherit | Self::RevertLayer => inherited,
+            Self::Initial => initial,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct FontSynthesisDeclaration {
+    pub weight: Option<FontSynthesisValue<bool>>,
+    pub style: Option<FontSynthesisValue<FontSynthesisStyle>>,
+    pub small_caps: Option<FontSynthesisValue<bool>>,
+    pub position: Option<FontSynthesisValue<bool>>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextTransformMode {
     None,
@@ -1989,7 +2033,10 @@ struct StyleDelta {
     common_ligatures: Option<FontFeatureToggleSpec>,
     small_caps: Option<FontFeatureToggleSpec>,
     font_stretch: Option<FontStretchSpec>,
-    font_synthesis_weight: Option<bool>,
+    font_synthesis_weight: Option<FontSynthesisValue<bool>>,
+    font_synthesis_style: Option<FontSynthesisValue<FontSynthesisStyle>>,
+    font_synthesis_small_caps: Option<FontSynthesisValue<bool>>,
+    font_synthesis_position: Option<FontSynthesisValue<bool>>,
     font_style: Option<FontStyleMode>,
     font_style_var: Option<String>,
     text_transform: Option<TextTransformSpec>,
@@ -2261,6 +2308,10 @@ fn style_delta_authors_font_weight(delta: &StyleDelta) -> bool {
 
 #[derive(Debug, Clone, Default)]
 struct RevertLayerDelta {
+    font_synthesis_weight: bool,
+    font_synthesis_style: bool,
+    font_synthesis_small_caps: bool,
+    font_synthesis_position: bool,
     color: bool,
     background_color: bool,
     width: bool,
@@ -2345,7 +2396,11 @@ struct RevertLayerDelta {
 
 impl RevertLayerDelta {
     fn is_empty(&self) -> bool {
-        !self.color
+        !self.font_synthesis_weight
+            && !self.font_synthesis_style
+            && !self.font_synthesis_small_caps
+            && !self.font_synthesis_position
+            && !self.color
             && !self.background_color
             && !self.width
             && !self.height
@@ -2651,6 +2706,9 @@ pub struct ComputedStyle {
     pub small_caps: bool,
     pub font_stretch: u16,
     pub font_synthesis_weight: bool,
+    pub font_synthesis_style: FontSynthesisStyle,
+    pub font_synthesis_small_caps: bool,
+    pub font_synthesis_position: bool,
     pub font_style: FontStyleMode,
     pub text_transform: TextTransformMode,
     transform_list: Vec<CssTransformOp>,
@@ -2932,6 +2990,9 @@ impl ComputedStyle {
             common_ligatures: self.common_ligatures,
             small_caps: self.small_caps,
             font_synthesis_weight: self.font_synthesis_weight,
+            font_synthesis_style: self.font_synthesis_style,
+            font_synthesis_small_caps: self.font_synthesis_small_caps,
+            font_synthesis_position: self.font_synthesis_position,
             font_style: self.font_style,
             font_face_satisfies_weight: self.font_face_satisfies_weight,
             font_face_satisfies_style: self.font_face_satisfies_style,
@@ -5221,6 +5282,12 @@ impl StyleResolver {
         root_font_size: Pt,
         element: Option<&ElementInfo>,
     ) {
+        let synthesis_base = (
+            computed.font_synthesis_weight,
+            computed.font_synthesis_style,
+            computed.font_synthesis_small_caps,
+            computed.font_synthesis_position,
+        );
         if let Some(keyword) = delta.all {
             match keyword {
                 CascadeWideKeyword::Inherit => replace_computed_style_for_all(computed, parent),
@@ -5243,6 +5310,20 @@ impl StyleResolver {
             element,
             self.viewport,
         );
+        // An inline revert-layer exposes the surrounding stylesheet. Rule
+        // callers subsequently restore the earlier named-layer snapshot.
+        if delta.revert_layer.font_synthesis_weight {
+            computed.font_synthesis_weight = synthesis_base.0;
+        }
+        if delta.revert_layer.font_synthesis_style {
+            computed.font_synthesis_style = synthesis_base.1;
+        }
+        if delta.revert_layer.font_synthesis_small_caps {
+            computed.font_synthesis_small_caps = synthesis_base.2;
+        }
+        if delta.revert_layer.font_synthesis_position {
+            computed.font_synthesis_position = synthesis_base.3;
+        }
     }
 
     pub fn debug_logger(&self) -> Option<Arc<DebugLogger>> {
@@ -5330,6 +5411,9 @@ impl StyleResolver {
             small_caps: false,
             font_stretch: 1000,
             font_synthesis_weight: true,
+            font_synthesis_style: FontSynthesisStyle::Auto,
+            font_synthesis_small_caps: true,
+            font_synthesis_position: true,
             font_style: FontStyleMode::Normal,
             text_transform: TextTransformMode::None,
             transform_list: Vec::new(),
@@ -5623,6 +5707,9 @@ impl StyleResolver {
             small_caps: parent.small_caps,
             font_stretch: parent.font_stretch,
             font_synthesis_weight: parent.font_synthesis_weight,
+            font_synthesis_style: parent.font_synthesis_style,
+            font_synthesis_small_caps: parent.font_synthesis_small_caps,
+            font_synthesis_position: parent.font_synthesis_position,
             font_style: parent.font_style,
             text_transform: parent.text_transform,
             transform_list: Vec::new(),
@@ -6516,6 +6603,9 @@ impl StyleResolver {
             small_caps: parent.small_caps,
             font_stretch: parent.font_stretch,
             font_synthesis_weight: parent.font_synthesis_weight,
+            font_synthesis_style: parent.font_synthesis_style,
+            font_synthesis_small_caps: parent.font_synthesis_small_caps,
+            font_synthesis_position: parent.font_synthesis_position,
             font_style: parent.font_style,
             text_transform: parent.text_transform,
             transform_list: Vec::new(),
@@ -9186,7 +9276,11 @@ fn apply_native_raw_property(property_name: &str, raw: &str, delta: &mut StyleDe
         "font-stretch" => apply_font_stretch_from_raw(delta, raw),
         "line-height" => apply_line_height_from_raw(delta, raw),
         "font-weight" => apply_font_weight_from_raw(delta, raw),
-        "font-synthesis" => apply_font_synthesis_from_raw(delta, raw),
+        "font-synthesis"
+        | "font-synthesis-weight"
+        | "font-synthesis-style"
+        | "font-synthesis-small-caps"
+        | "font-synthesis-position" => apply_font_synthesis_from_raw(delta, property_name, raw),
         "font-style" => apply_font_style_from_raw(delta, raw),
         "vertical-align" => apply_vertical_align_from_raw(delta, raw),
         "opacity" => {
@@ -16540,8 +16634,18 @@ fn apply_delta(
             FontStretchSpec::Initial => 1000,
         };
     }
-    if let Some(enabled) = delta.font_synthesis_weight {
-        computed.font_synthesis_weight = enabled;
+    if let Some(value) = delta.font_synthesis_weight {
+        computed.font_synthesis_weight = value.resolve(parent.font_synthesis_weight, true);
+    }
+    if let Some(value) = delta.font_synthesis_style {
+        computed.font_synthesis_style =
+            value.resolve(parent.font_synthesis_style, FontSynthesisStyle::Auto);
+    }
+    if let Some(value) = delta.font_synthesis_small_caps {
+        computed.font_synthesis_small_caps = value.resolve(parent.font_synthesis_small_caps, true);
+    }
+    if let Some(value) = delta.font_synthesis_position {
+        computed.font_synthesis_position = value.resolve(parent.font_synthesis_position, true);
     }
     if let Some(style) = delta.font_style {
         computed.pending_font_style_var = None;
@@ -18000,6 +18104,18 @@ fn apply_revert_layer_delta(
     delta: &RevertLayerDelta,
     layer_base: &ComputedStyle,
 ) {
+    if delta.font_synthesis_weight {
+        computed.font_synthesis_weight = layer_base.font_synthesis_weight;
+    }
+    if delta.font_synthesis_style {
+        computed.font_synthesis_style = layer_base.font_synthesis_style;
+    }
+    if delta.font_synthesis_small_caps {
+        computed.font_synthesis_small_caps = layer_base.font_synthesis_small_caps;
+    }
+    if delta.font_synthesis_position {
+        computed.font_synthesis_position = layer_base.font_synthesis_position;
+    }
     if delta.is_empty() {
         return;
     }
@@ -33465,31 +33581,111 @@ fn apply_font_weight_from_raw(delta: &mut StyleDelta, raw: &str) -> bool {
     false
 }
 
-fn apply_font_synthesis_from_raw(delta: &mut StyleDelta, raw: &str) -> bool {
+pub(crate) fn parse_font_synthesis(property: &str, raw: &str) -> Option<FontSynthesisDeclaration> {
+    use FontSynthesisValue::{Inherit, Initial, RevertLayer, Value};
     let lowered = raw.trim().to_ascii_lowercase();
-    match lowered.as_str() {
-        "none" => {
-            delta.font_synthesis_weight = Some(false);
-            true
-        }
-        "auto" | "weight" | "style" | "small-caps" | "position" | "initial" => {
-            delta.font_synthesis_weight = Some(true);
-            true
-        }
-        "inherit" | "unset" | "revert" | "revert-layer" => true,
-        _ => {
-            let tokens: Vec<&str> = lowered.split_ascii_whitespace().collect();
-            if tokens
-                .iter()
-                .all(|token| matches!(*token, "weight" | "style" | "small-caps" | "position"))
-            {
-                delta.font_synthesis_weight = Some(tokens.contains(&"weight"));
-                true
-            } else {
-                false
+    let wide = match lowered.as_str() {
+        "inherit" | "unset" | "revert" => Some(Inherit),
+        "initial" => Some(Initial),
+        "revert-layer" => Some(RevertLayer),
+        _ => None,
+    };
+    let style_wide = wide.map(|value| match value {
+        Inherit => Inherit,
+        Initial => Initial,
+        RevertLayer => RevertLayer,
+        Value(_) => unreachable!(),
+    });
+    let mut declaration = FontSynthesisDeclaration::default();
+    if property == "font-synthesis" {
+        if let Some(value) = wide {
+            declaration.weight = Some(value);
+            declaration.style = style_wide;
+            declaration.small_caps = Some(value);
+            declaration.position = Some(value);
+        } else {
+            let mut seen = 0u8;
+            if lowered != "none" {
+                for token in lowered.split_ascii_whitespace() {
+                    let bit = match token {
+                        "weight" => 1,
+                        "style" => 2,
+                        "small-caps" => 4,
+                        "position" => 8,
+                        _ => return None,
+                    };
+                    if seen & bit != 0 {
+                        return None;
+                    }
+                    seen |= bit;
+                }
+                if seen == 0 {
+                    return None;
+                }
             }
+            declaration.weight = Some(Value(seen & 1 != 0));
+            declaration.style = Some(Value(if seen & 2 != 0 {
+                FontSynthesisStyle::Auto
+            } else {
+                FontSynthesisStyle::None
+            }));
+            declaration.small_caps = Some(Value(seen & 4 != 0));
+            declaration.position = Some(Value(seen & 8 != 0));
+        }
+    } else if property == "font-synthesis-style" {
+        declaration.style = Some(if let Some(value) = style_wide {
+            value
+        } else {
+            Value(match lowered.as_str() {
+                "auto" => FontSynthesisStyle::Auto,
+                "none" => FontSynthesisStyle::None,
+                "oblique-only" => FontSynthesisStyle::ObliqueOnly,
+                _ => return None,
+            })
+        });
+    } else {
+        let value = Some(if let Some(value) = wide {
+            value
+        } else {
+            Value(match lowered.as_str() {
+                "auto" => true,
+                "none" => false,
+                _ => return None,
+            })
+        });
+        match property {
+            "font-synthesis-weight" => declaration.weight = value,
+            "font-synthesis-small-caps" => declaration.small_caps = value,
+            "font-synthesis-position" => declaration.position = value,
+            _ => return None,
         }
     }
+    Some(declaration)
+}
+
+fn apply_font_synthesis_from_raw(delta: &mut StyleDelta, property: &str, raw: &str) -> bool {
+    let Some(declaration) = parse_font_synthesis(property, raw) else {
+        return false;
+    };
+    if let Some(value) = declaration.weight {
+        delta.font_synthesis_weight = Some(value);
+        delta.revert_layer.font_synthesis_weight = matches!(value, FontSynthesisValue::RevertLayer);
+    }
+    if let Some(value) = declaration.style {
+        delta.font_synthesis_style = Some(value);
+        delta.revert_layer.font_synthesis_style = matches!(value, FontSynthesisValue::RevertLayer);
+    }
+    if let Some(value) = declaration.small_caps {
+        delta.font_synthesis_small_caps = Some(value);
+        delta.revert_layer.font_synthesis_small_caps =
+            matches!(value, FontSynthesisValue::RevertLayer);
+    }
+    if let Some(value) = declaration.position {
+        delta.font_synthesis_position = Some(value);
+        delta.revert_layer.font_synthesis_position =
+            matches!(value, FontSynthesisValue::RevertLayer);
+    }
+    true
 }
 
 fn apply_font_style_from_raw(delta: &mut StyleDelta, raw: &str) -> bool {
@@ -33675,6 +33871,9 @@ impl StyleDelta {
             && self.small_caps.is_none()
             && self.font_stretch.is_none()
             && self.font_synthesis_weight.is_none()
+            && self.font_synthesis_style.is_none()
+            && self.font_synthesis_small_caps.is_none()
+            && self.font_synthesis_position.is_none()
             && self.font_style.is_none()
             && self.font_style_var.is_none()
             && self.text_transform.is_none()
@@ -45153,6 +45352,167 @@ mod tests {
         assert_eq!(style.font_weight, 700);
         assert!(!style.font_synthesis_weight);
         assert!(!style.to_text_style().font_synthesis_weight);
+        assert_eq!(style.font_synthesis_style, FontSynthesisStyle::None);
+        assert!(!style.font_synthesis_small_caps);
+        assert!(!style.font_synthesis_position);
+    }
+
+    #[test]
+    fn font_synthesis_shorthand_resets_each_independent_control() {
+        for mask in 0..16 {
+            let value = if mask == 0 {
+                "none".to_string()
+            } else {
+                ["weight", "style", "small-caps", "position"]
+                    .into_iter()
+                    .enumerate()
+                    .filter_map(|(bit, name)| (mask & (1 << bit) != 0).then_some(name))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
+            let resolver = StyleResolver::new(&format!("p {{ font-synthesis: {value}; }}"));
+            let style = resolver.compute_style(
+                &element("p", None, &[]),
+                &resolver.default_style(),
+                None,
+                &[],
+            );
+            let text = style.to_text_style();
+            assert_eq!(text.font_synthesis_weight, mask & 1 != 0, "{value}");
+            assert_eq!(
+                text.font_synthesis_style == FontSynthesisStyle::Auto,
+                mask & 2 != 0,
+                "{value}"
+            );
+            assert_eq!(text.font_synthesis_small_caps, mask & 4 != 0, "{value}");
+            assert_eq!(text.font_synthesis_position, mask & 8 != 0, "{value}");
+        }
+    }
+
+    #[test]
+    fn font_synthesis_invalid_values_leave_previous_declarations_intact() {
+        for invalid in [
+            "",
+            "auto",
+            "weight weight",
+            "style style",
+            "none style",
+            "weight,style",
+            "weight bogus",
+            "initial style",
+        ] {
+            assert!(
+                parse_font_synthesis("font-synthesis", invalid).is_none(),
+                "{invalid}"
+            );
+            let resolver = StyleResolver::new(&format!(
+                "p {{ font-synthesis: style; font-synthesis: {invalid}; }}"
+            ));
+            let style = resolver.compute_style(
+                &element("p", None, &[]),
+                &resolver.default_style(),
+                None,
+                &[],
+            );
+            assert!(!style.font_synthesis_weight, "{invalid}");
+            assert_eq!(
+                style.font_synthesis_style,
+                FontSynthesisStyle::Auto,
+                "{invalid}"
+            );
+        }
+        assert!(parse_font_synthesis("font-synthesis-weight", "oblique-only").is_none());
+        assert!(parse_font_synthesis("font-synthesis-style", "style").is_none());
+    }
+
+    #[test]
+    fn font_synthesis_longhands_inherit_from_parent_and_follow_cascade() {
+        let resolver = StyleResolver::new("div {font-synthesis:style} p {font-synthesis:weight}");
+        let parent = resolver.compute_style(
+            &element("div", None, &[]),
+            &resolver.default_style(),
+            None,
+            &[],
+        );
+        for value in ["inherit", "unset", "revert"] {
+            let inline = format!("font-synthesis:none; font-synthesis:{value}");
+            let style =
+                resolver.compute_style(&element("p", None, &[]), &parent, Some(&inline), &[]);
+            assert!(!style.font_synthesis_weight, "{value}");
+            assert_eq!(
+                style.font_synthesis_style,
+                FontSynthesisStyle::Auto,
+                "{value}"
+            );
+            assert!(!style.font_synthesis_small_caps);
+            assert!(!style.font_synthesis_position);
+        }
+        let style = resolver.compute_style(&element("p", None, &[]), &parent,
+            Some("font-synthesis:none; font-synthesis-weight:initial; font-synthesis-style:inherit; font-synthesis-small-caps:auto; font-synthesis-position:auto"), &[]);
+        assert!(
+            style.font_synthesis_weight
+                && style.font_synthesis_small_caps
+                && style.font_synthesis_position
+        );
+        assert_eq!(style.font_synthesis_style, FontSynthesisStyle::Auto);
+        let style = resolver.compute_style(&element("p", None, &[]), &parent,
+            Some("font-synthesis-weight:auto !important; font-synthesis:none; font-synthesis-style:oblique-only"), &[]);
+        assert!(style.font_synthesis_weight);
+        assert_eq!(style.font_synthesis_style, FontSynthesisStyle::ObliqueOnly);
+        assert!(!style.font_synthesis_small_caps && !style.font_synthesis_position);
+        let style = resolver.compute_style(
+            &element("p", None, &[]),
+            &parent,
+            Some("font-synthesis-style:none; font-synthesis:initial"),
+            &[],
+        );
+        assert!(
+            style.font_synthesis_weight
+                && style.font_synthesis_small_caps
+                && style.font_synthesis_position
+        );
+        assert_eq!(style.font_synthesis_style, FontSynthesisStyle::Auto);
+    }
+
+    #[test]
+    fn font_synthesis_revert_layer_restores_previous_layer_per_longhand() {
+        let resolver = StyleResolver::new(
+            "@layer base, later; @layer base {p {font-synthesis:style small-caps}} @layer later {p {font-synthesis:weight position} .restore {font-synthesis:revert-layer; font-synthesis-position:auto}} ",
+        );
+        let style = resolver.compute_style(
+            &element("p", None, &["restore"]),
+            &resolver.default_style(),
+            None,
+            &[],
+        );
+        assert!(!style.font_synthesis_weight);
+        assert_eq!(style.font_synthesis_style, FontSynthesisStyle::Auto);
+        assert!(style.font_synthesis_small_caps && style.font_synthesis_position);
+        let resolver = StyleResolver::new("div {font-synthesis:style} p {font-synthesis:weight}");
+        let parent = resolver.compute_style(
+            &element("div", None, &[]),
+            &resolver.default_style(),
+            None,
+            &[],
+        );
+        let style = resolver.compute_style(
+            &element("p", None, &[]),
+            &parent,
+            Some("all:initial; font-synthesis:revert-layer"),
+            &[],
+        );
+        assert!(style.font_synthesis_weight);
+        assert_eq!(style.font_synthesis_style, FontSynthesisStyle::None);
+        assert!(!style.font_synthesis_small_caps && !style.font_synthesis_position);
+    }
+
+    #[test]
+    fn font_synthesis_oblique_only_does_not_synthesize_an_italic_request() {
+        assert!(!FontSynthesisStyle::ObliqueOnly.allows(FontStyleMode::Italic));
+        assert!(!FontSynthesisStyle::ObliqueOnly.allows(FontStyleMode::Normal));
+        assert!(FontSynthesisStyle::ObliqueOnly.allows(FontStyleMode::Oblique(1200)));
+        assert!(!FontSynthesisStyle::None.allows(FontStyleMode::Oblique(-1400)));
+        assert!(FontSynthesisStyle::Auto.allows(FontStyleMode::Italic));
     }
 
     #[test]
