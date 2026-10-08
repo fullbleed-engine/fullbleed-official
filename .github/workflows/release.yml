@@ -130,6 +130,19 @@ jobs:
       - name: Verify finalized PDF gradient previews
         run: python -I tools/smoke_gradient_preview.py --out target/gradient-preview
 
+      - name: Verify border-image slices in previews and independent PDF rendering
+        run: |
+          python -m pip install pypdfium2==5.14.0
+          python -I tools/smoke_border_image_slices.py --pdfium --out target/border-image-slices
+
+      - name: Retain border-image PDFs and all three preview modes
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-border-image-slices
+          path: target/border-image-slices
+          if-no-files-found: warn
+
       - name: Verify single-copy styled PDF text with an independent reader
         run: |
           python -m pip install pypdf==6.19.0
