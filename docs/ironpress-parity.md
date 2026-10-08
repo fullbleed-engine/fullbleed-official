@@ -1,7 +1,7 @@
 # IronPress parity harness
 
 FullBleed uses the independent [IronPress](https://github.com/gastongouron/ironpress)
-CSS-to-PDF corpus as an exact, reproducible compatibility check. The harness is
+CSS-to-PDF corpus as a pinned compatibility check. The harness is
 pinned to IronPress commit
 `0d1e53b6d8174d0a5059a8696c24e62759381f6d` (MIT).
 
@@ -13,13 +13,17 @@ is `tools/ironpress_fullbleed_adapter.py`.
 
 ## Reproduce
 
-Build or select a CPython 3.10 stable-ABI Linux x86-64 wheel, then run the six
-substrate probes:
+Build or select a CPython 3.10 stable-ABI Linux x86-64 wheel inside this
+repository. Both local `linux_x86_64` and published `manylinux` wheels are
+accepted; the filename and package metadata must identify the same Fullbleed
+version. Substitute your actual wheel filename in these commands.
+
+Run the six substrate probes:
 
 ```powershell
 python tools/run_ironpress_parity.py `
   --only probes `
-  --wheel target/ironpress-wheel/fullbleed-2.2.5-cp310-abi3-linux_x86_64.whl `
+  --wheel target/ironpress-wheel/fullbleed-2.5.14-cp310-abi3-linux_x86_64.whl `
   --keep-pdfs `
   --evidence-dir target/ironpress-evidence/probes
 ```
@@ -33,13 +37,53 @@ Run the complete corpus by omitting `--only`:
 
 ```powershell
 python tools/run_ironpress_parity.py `
-  --wheel target/ironpress-wheel/fullbleed-2.2.5-cp310-abi3-linux_x86_64.whl `
+  --wheel target/ironpress-wheel/fullbleed-2.5.14-cp310-abi3-linux_x86_64.whl `
+  --keep-pdfs `
   --evidence-dir target/ironpress-evidence/full
 ```
 
-The container pins Rust 1.97, Ubuntu 24.04, and Poppler 24.08.0, including the
-`pdftoppm` binary checksum. The runner verifies the upstream commit, patch hash,
-and modified-file boundary before rendering.
+Use a new or empty evidence directory for each invocation. Existing evidence
+is never overwritten. The container selects Rust 1.97, Ubuntu 24.04, and
+Poppler 24.08.0, including the `pdftoppm` binary checksum. The upstream library
+revision does not commit a Cargo lockfile. `tools/ironpress.Cargo.lock` locks
+its unchanged dependency declarations, resolved with Cargo 1.97, and the
+comparator builds with `--locked`. The runner verifies the upstream commit, patch hash, and
+modified-file boundary before rendering. Image tags and operating-system
+packages are not a byte-identical environment lock; the actual image ID is
+retained for each run.
+
+## Inspect and retain the evidence
+
+Open `reports/index.html` inside the exported directory. The export includes
+`refs/`, `out/`, `diffs/`, and the report's own assets, preserving its image
+links. `--keep-pdfs` also exports candidate PDFs in `pdfs/`. The upstream
+report retains its IronPress headings and candidate labels; **the candidate
+renderer in this integration is Fullbleed**, identified by its wheel below.
+The reference PDFs are the committed upstream oracles.
+
+`fullbleed-run.json` records the tested wheel's version and SHA-256, upstream
+revision, adapter and patch hashes, image ID, invocation ID, scope, exit code,
+and report verification result. `manifest.json` inventories the exported
+files and their SHA-256 values. The exported `Cargo.lock` preserves the
+comparator's dependency resolution; `IRONPRESS-LICENSE` preserves attribution.
+The runner rejects a mismatched invocation,
+an incomplete or duplicate fixture inventory, inconsistent verdict counts,
+or Markdown/HTML belonging to a different JSON report. It preserves upstream
+failures and disputed references without changing their classifications.
+
+`gate_passed: true` requires an unfiltered, complete 1,662-fixture report,
+zero failing fixtures, an upstream gate exit of zero, and a successful export.
+A complete report can still contain failures; `verified_complete` describes
+the evidence, not a passing comparison. A filtered run cannot pass this gate.
+These results do not establish compatibility with every CSS feature or live
+browser behavior.
+
+The [Independent CSS corpus workflow](../.github/workflows/ironpress-parity.yml)
+can compare an exact published PyPI version without a local Cargo build. It
+also runs when the adapter or runner changes in a pull request. Download its
+artifact to inspect the report, candidate PDFs, and log, including failed
+runs. Workflow artifacts expire after seven days; retain a downloaded copy
+and its manifest before using a result in a lasting compatibility claim.
 
 ## Adapter and compute model
 
