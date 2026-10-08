@@ -432,6 +432,74 @@ jobs:
           python -m fullbleed --version
           python -m fullbleed doctor --strict --json
 
+  python-prerelease-compatibility:
+    name: Python Preview (${{ matrix.os }}, 3.15.0rc3)
+    runs-on: ${{ matrix.os }}
+    needs: python-wheel-smoke
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.15.0-rc.3"
+          allow-prereleases: true
+          architecture: x64
+      - uses: actions/download-artifact@v8
+        with:
+          name: abi3-wheel-${{ runner.os }}
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: border-image-slices-${{ runner.os }}
+          path: target/python-stable-reference/border-image-slices
+      - uses: actions/download-artifact@v8
+        with:
+          name: base14-preview-${{ runner.os }}
+          path: target/python-stable-reference/base14-preview
+      - uses: actions/download-artifact@v8
+        with:
+          name: gradient-preview-${{ runner.os }}
+          path: target/python-stable-reference/gradient-preview
+      - name: Install the same abi3 wheel built and tested on Python 3.10
+        shell: bash
+        run: |
+          python -m pip install --no-index --find-links dist "fullbleed==${FULLBLEED_CI_VERSION}"
+          python -m pip install --only-binary=:all: pytest==9.1.1 jsonschema==4.26.0 pypdf==6.19.0 pypdfium2==5.14.0 pillow==12.3.0 fonttools==4.65.0
+      - name: Exercise the installed API and CLI in isolation
+        shell: bash
+        run: |
+          mkdir -p target/python-prerelease
+          python -I tools/smoke_installed_package.py --expected-version "${FULLBLEED_CI_VERSION}" --json > target/python-prerelease/installed-package.json
+          python -I -m fullbleed doctor --strict --json > target/python-prerelease/doctor.json
+          python -I -m fullbleed agent-contract --format json > target/python-prerelease/agent-contract.json
+      - name: Run repository Python tests with the installed native extension
+        env:
+          FULLBLEED_TEST_INSTALLED_NATIVE: "1"
+        run: python -m pytest tests -q -ra --junitxml target/python-prerelease/python-tests.xml
+      - name: Generate and check PDFs and previews
+        shell: bash
+        run: |
+          python -I tools/smoke_border_image_slices.py --pdfium --out target/python-prerelease/border-image-slices
+          python -I tools/smoke_base14_preview.py --out target/python-prerelease/base14-preview
+          python -I tools/smoke_gradient_preview.py --out target/python-prerelease/gradient-preview
+      - name: Verify exact interpreter and identical output across Python versions
+        shell: bash
+        run: |
+          python -I tools/check_python_compatibility.py \
+            --expected-python 3.15.0rc3 --expected-version "${FULLBLEED_CI_VERSION}" \
+            --reference target/python-stable-reference --out target/python-prerelease \
+            --allow-skipped-test tests.test_fullbleed_python_abi.test_stable_abi_module_can_initialize_in_a_subinterpreter
+      - name: Retain interpreter, test, PDF, and preview evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-prerelease-${{ runner.os }}-3.15.0rc3
+          path: target/python-prerelease
+          if-no-files-found: error
+
   standard-font-portability:
     name: Standard font previews match across Windows and Linux
     runs-on: ubuntu-latest
