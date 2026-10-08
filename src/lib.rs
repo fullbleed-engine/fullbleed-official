@@ -129,6 +129,7 @@ use perf::PerfLogger;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::f32::consts::PI;
 use std::sync::{Arc, Condvar, Mutex};
+pub use style::FontSynthesisStyle;
 pub use table_semantics::TableSemanticNode;
 pub use types::{Color, ColorSpace, I32F32, Margins, Pt, Rect, Size};
 

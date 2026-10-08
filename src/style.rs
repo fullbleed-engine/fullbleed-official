@@ -993,6 +993,15 @@ pub enum FontStyleMode {
 }
 
 /// Whether a missing italic or oblique face may be synthesized.
+///
+/// Rust callers can opt out independently of synthetic weight:
+///
+/// ```
+/// use fullbleed::{FontSynthesisStyle, TextStyle};
+/// let mut text = TextStyle::default();
+/// text.font_synthesis_weight = false;
+/// text.font_synthesis_style = FontSynthesisStyle::None;
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FontSynthesisStyle {
     Auto,
