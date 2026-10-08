@@ -36350,6 +36350,7 @@ impl Flowable for ContainerFlowable {
                 (border_box_height - border.top - border.bottom + margin_top + margin_bottom)
                     .max(Pt::ZERO);
             canvas.save_state();
+            let overflow_clip_start = canvas.current_command_count();
             if self.clips_overflow_x() && self.clips_overflow_y() {
                 let clip_radii = Self::outset_clip_radii_edges(
                     Self::inset_clip_radii_edges(border_clip_radii, border),
@@ -36385,6 +36386,7 @@ impl Flowable for ContainerFlowable {
                     padding_box_h,
                 );
             }
+            canvas.set_compositor_clip_since(overflow_clip_start);
         }
 
         let suppresses_descendant_scrollable_right = self.clips_overflow_x();

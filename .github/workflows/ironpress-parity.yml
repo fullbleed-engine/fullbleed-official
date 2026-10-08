@@ -26,6 +26,9 @@ on:
       - tools/ironpress.Cargo.lock
       - tests/test_ironpress_parity_runner.py
       - src/flowable.rs
+      - src/canvas.rs
+      - tools/smoke_filtered_overflow.py
+      - tests/test_fullbleed_filtered_overflow.py
       - tools/smoke_border_image_slices.py
       - tests/test_fullbleed_border_image_slices.py
 

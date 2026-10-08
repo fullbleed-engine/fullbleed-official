@@ -616,6 +616,12 @@ struct GraphicsState {
     projective_transform: Option<ProjectiveTransform>,
 }
 
+#[derive(Default)]
+struct CompositorScope {
+    layers: Vec<(i32, Vec<Command>)>,
+    clip_commands: Vec<Command>,
+}
+
 pub struct Canvas {
     initial_page_size: Size,
     page_size: Size,
@@ -629,7 +635,7 @@ pub struct Canvas {
     // Raster effects are compositor layers. A normal container can defer a
     // child's completed layer until its vector content has been emitted while
     // keeping the layer inside the container's clip/opacity/transform state.
-    compositor_scopes: Vec<Vec<(i32, Vec<Command>)>>,
+    compositor_scopes: Vec<CompositorScope>,
     fragmentainer_stack: Vec<Rect>,
     perspective_context_stack: Vec<PerspectiveContext>,
     // Descendants of an inline-axis overflow clip do not contribute to the
@@ -770,7 +776,14 @@ impl Canvas {
     }
 
     pub(crate) fn begin_compositor_scope(&mut self) {
-        self.compositor_scopes.push(Vec::new());
+        self.compositor_scopes.push(CompositorScope::default());
+    }
+
+    pub(crate) fn set_compositor_clip_since(&mut self, command_index: usize) {
+        let Some(scope) = self.compositor_scopes.last_mut() else {
+            return;
+        };
+        scope.clip_commands = self.current.commands[command_index..].to_vec();
     }
 
     pub(crate) fn defer_compositor_commands_since(&mut self, command_index: usize) {
@@ -788,46 +801,75 @@ impl Canvas {
         if command_index >= self.current.commands.len() {
             return;
         }
-        scope.push((
-            z_index,
-            self.current.commands.drain(command_index..).collect(),
-        ));
+        let mut layer = Vec::new();
+        for command in self.current.commands.split_off(command_index) {
+            if matches!(
+                command,
+                Command::DefineForm { .. } | Command::DefineIsolatedForm { .. }
+            ) {
+                // Definitions do not paint. Keep them before every deferred
+                // use: a child filter can already be queued when its positive
+                // z-index parent defers the surrounding vector commands.
+                self.current.commands.push(command);
+            } else {
+                layer.push(command);
+            }
+        }
+        if !layer.is_empty() {
+            scope.layers.push((z_index, layer));
+        }
     }
 
     pub(crate) fn current_compositor_layer_count(&self) -> usize {
-        self.compositor_scopes.last().map_or(0, Vec::len)
+        self.compositor_scopes
+            .last()
+            .map_or(0, |scope| scope.layers.len())
     }
 
     pub(crate) fn retag_compositor_layers_since(&mut self, layer_index: usize, z_index: i32) {
         let Some(scope) = self.compositor_scopes.last_mut() else {
             return;
         };
-        for (layer_z, _) in scope.iter_mut().skip(layer_index) {
+        for (layer_z, _) in scope.layers.iter_mut().skip(layer_index) {
             *layer_z = z_index;
         }
     }
 
     pub(crate) fn end_compositor_scope(&mut self) {
-        let Some(mut layers) = self.compositor_scopes.pop() else {
+        let Some(mut scope) = self.compositor_scopes.pop() else {
             return;
         };
-        layers.sort_by_key(|(z_index, _)| *z_index);
-        for (_, commands) in layers {
+        scope.layers.sort_by_key(|(z_index, _)| *z_index);
+        for (_, commands) in scope.layers {
             self.current.commands.extend(commands);
         }
     }
 
     pub(crate) fn end_compositor_scope_to_parent(&mut self) {
-        let Some(layers) = self.compositor_scopes.pop() else {
+        let Some(mut scope) = self.compositor_scopes.pop() else {
             return;
         };
         if let Some(parent) = self.compositor_scopes.last_mut() {
-            parent.extend(layers);
+            for (z_index, commands) in scope.layers {
+                if scope.clip_commands.is_empty() {
+                    parent.layers.push((z_index, commands));
+                } else {
+                    // Overflow does not establish a stacking context. A child
+                    // layer must still join the ancestor's z-order, while its
+                    // container's clip survives the intervening RestoreState.
+                    let mut clipped =
+                        Vec::with_capacity(scope.clip_commands.len() + commands.len() + 2);
+                    clipped.push(Command::SaveState);
+                    clipped.extend(scope.clip_commands.iter().cloned());
+                    clipped.extend(commands);
+                    clipped.push(Command::RestoreState);
+                    parent.layers.push((z_index, clipped));
+                }
+            }
             return;
         }
-        let mut layers = layers;
-        layers.sort_by_key(|(z_index, _)| *z_index);
-        for (_, commands) in layers {
+        scope.layers.sort_by_key(|(z_index, _)| *z_index);
+        for (_, commands) in scope.layers {
             self.current.commands.extend(commands);
         }
     }

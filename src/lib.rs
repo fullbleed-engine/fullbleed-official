@@ -15775,6 +15775,94 @@ body { margin: 0; font-family: Helvetica, sans-serif; font-size: 16px; }
     }
 
     #[test]
+    fn filtered_descendants_preserve_ancestor_overflow_clips() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let html = "<div class='parent'><div class='child'></div></div>";
+        for (filter, overflow, radius) in [
+            ("none", "hidden", 0),
+            ("contrast(1.1)", "hidden", 0),
+            ("contrast(1.1)", "hidden", 12),
+            ("blur(2px)", "hidden", 12),
+            ("drop-shadow(4px 3px 0 #123456)", "hidden", 12),
+            ("contrast(1.1)", "visible", 0),
+        ] {
+            let css = format!(
+                "@page {{ size: 240px 160px; margin: 0; }}
+                 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                 html, body {{ background: white; }}
+                 .parent {{ position: absolute; left: 20px; top: 20px;
+                   width: 100px; height: 50px; overflow: {overflow};
+                   border: 4px solid #003366; border-radius: {radius}px;
+                   background: #ddeeff; }}
+                 .child {{ width: 60px; height: 70px; margin: 20px 10px 0;
+                   background: red; filter: {filter}; }}"
+            );
+            let pages = engine.render_image_pages(html, &css, 96).expect("render");
+            assert_eq!(pages.len(), 1);
+            let image = crate::image_native::load_from_memory(&pages[0])
+                .expect("decode preview")
+                .to_rgba8();
+            assert_eq!(image.get_pixel(50, 55).0, [255, 0, 0, 255]);
+            let expected = if overflow == "hidden" {
+                [255, 255, 255, 255]
+            } else {
+                [255, 0, 0, 255]
+            };
+            assert_eq!(
+                image.get_pixel(50, 85).0,
+                expected,
+                "filter={filter}, overflow={overflow}, radius={radius}"
+            );
+        }
+    }
+
+    #[test]
+    fn filtered_descendants_preserve_ancestor_z_order() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let html = "<div class='stage'><div class='parent'><div class='child'></div></div><div class='uncle'></div></div>";
+        let css = "@page { size: 240px 180px; margin: 0; }
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            html, body { background: white; }
+            .stage { position: relative; width: 240px; height: 180px; }
+            .parent { position: absolute; left: 20px; top: 20px; width: 100px;
+                height: 50px; overflow: hidden; border: 4px solid #003366;
+                border-radius: 12px; background: #ddeeff; }
+            .child { position: relative; z-index: 10; width: 60px; height: 70px;
+                margin: 20px 10px 0; background: red; filter: contrast(1.1); }
+            .uncle { position: absolute; left: 30px; top: 50px; width: 70px;
+                height: 45px; background: blue; z-index: 1; }";
+        let pages = engine.render_image_pages(html, css, 96).expect("render");
+        let image = crate::image_native::load_from_memory(&pages[0])
+            .expect("decode preview")
+            .to_rgba8();
+        assert_eq!(image.get_pixel(50, 55).0, [255, 0, 0, 255]);
+        assert_eq!(image.get_pixel(50, 85).0, [0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn filtered_descendants_intersect_nested_overflow_clips() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let html = "<div class='outer'><div class='inner'><div class='child'></div></div></div>";
+        let css = "@page { size: 160px 160px; margin: 0; }
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            html, body { background: white; }
+            .outer { position: absolute; left: 20px; top: 20px; width: 100px;
+                height: 60px; overflow: hidden; background: lime; }
+            .inner { width: 50px; height: 60px; margin: 20px;
+                overflow: hidden; background: blue; }
+            .child { width: 80px; height: 80px; margin: 10px;
+                background: red; filter: contrast(1.1); }";
+        let pages = engine.render_image_pages(html, css, 96).expect("render");
+        assert_eq!(pages.len(), 1);
+        let image = crate::image_native::load_from_memory(&pages[0])
+            .expect("decode preview")
+            .to_rgba8();
+        assert_eq!(image.get_pixel(60, 60).0, [255, 0, 0, 255]);
+        assert_eq!(image.get_pixel(100, 60).0, [0, 255, 0, 255]);
+        assert_eq!(image.get_pixel(60, 90).0, [255, 255, 255, 255]);
+    }
+
+    #[test]
     fn css_mask_program_affects_raster_and_pdf_output() {
         let engine = FullBleed::builder().build().expect("engine");
         let html = "<!doctype html><html><body><div class='masked'></div></body></html>";
