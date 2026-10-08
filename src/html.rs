@@ -106,11 +106,22 @@ pub struct HtmlAssetWarning {
 
 #[derive(Debug, Clone, Default)]
 struct CounterState {
-    values: HashMap<String, Vec<i32>>,
+    values: HashMap<String, Vec<CounterValue>>,
+    context: Option<NodeRef>,
+    pseudo_context: bool,
     quote_depth: usize,
     target_texts: Arc<HashMap<String, String>>,
     target_pages: Arc<HashMap<String, usize>>,
     table_semantics: Arc<crate::table_semantics::HtmlTableIndex>,
+}
+
+#[derive(Debug, Clone)]
+struct CounterValue {
+    value: i32,
+    // A counter includes its creator's following siblings and their descendants.
+    // Its parent therefore identifies the sibling scope; it is not a stack
+    // frame that can be popped when the creating element finishes rendering.
+    scope: Option<NodeRef>,
 }
 
 impl CounterState {
@@ -120,6 +131,15 @@ impl CounterState {
         target_pages: Arc<HashMap<String, usize>>,
     ) -> Self {
         Self {
+            // Footnote numbering is predefined for the document; implicit
+            // footnotes in separate paragraphs share this outer counter.
+            values: HashMap::from([(
+                "footnote".to_string(),
+                vec![CounterValue {
+                    value: 0,
+                    scope: Some(document.clone()),
+                }],
+            )]),
             target_texts: Arc::new(target_texts),
             target_pages,
             table_semantics: Arc::new(crate::table_semantics::HtmlTableIndex::build(document)),
@@ -144,31 +164,40 @@ impl CounterState {
     }
 
     fn reset(&mut self, name: &str, value: i32) {
-        self.values.entry(name.to_string()).or_default().push(value);
+        let scope = self.scope();
+        let values = self.values.entry(name.to_string()).or_default();
+        if scope.is_some() {
+            // A later sibling's reset replaces that sibling scope while a
+            // descendant reset nests inside counters created by its ancestors.
+            values.retain(|entry| entry.scope != scope);
+        }
+        values.push(CounterValue { value, scope });
     }
 
     fn set(&mut self, name: &str, value: i32) {
+        let scope = self.scope();
         let values = self.values.entry(name.to_string()).or_default();
         if let Some(current) = values.last_mut() {
-            *current = value;
+            current.value = value;
         } else {
-            values.push(value);
+            values.push(CounterValue { value, scope });
         }
     }
 
     fn increment(&mut self, name: &str, value: i32) {
+        let scope = self.scope();
         let values = self.values.entry(name.to_string()).or_default();
         if values.is_empty() {
-            values.push(0);
+            values.push(CounterValue { value: 0, scope });
         }
         let entry = values.last_mut().expect("counter stack has a value");
-        *entry += value;
+        entry.value = entry.value.saturating_add(value);
     }
 
     fn get(&self, name: &str) -> i32 {
         self.values
             .get(name)
-            .and_then(|values| values.last().copied())
+            .and_then(|values| values.last().map(|entry| entry.value))
             .unwrap_or(0)
     }
 
@@ -176,23 +205,41 @@ impl CounterState {
         self.values
             .get(name)
             .filter(|values| !values.is_empty())
-            .cloned()
+            .map(|values| values.iter().map(|entry| entry.value).collect())
             .unwrap_or_else(|| vec![0])
     }
 
-    fn pop_reset_scope(&mut self, name: &str) {
-        if let Some(values) = self.values.get_mut(name) {
-            values.pop();
-            if values.is_empty() {
-                self.values.remove(name);
+    fn scope(&self) -> Option<NodeRef> {
+        self.context.as_ref().and_then(|node| {
+            if self.pseudo_context {
+                Some(node.clone())
+            } else {
+                node.parent()
             }
-        }
+        })
     }
 
-    fn pop_reset_scopes(&mut self, names: &[String]) {
-        for name in names.iter().rev() {
-            self.pop_reset_scope(name);
+    fn select_node(&mut self, node: &NodeRef, pseudo: bool) {
+        let ancestors: Vec<_> = node.ancestors().skip(usize::from(!pseudo)).collect();
+        self.values.retain(|_, values| {
+            values.retain(|entry| {
+                entry
+                    .scope
+                    .as_ref()
+                    .is_none_or(|scope| ancestors.contains(scope))
+            });
+            !values.is_empty()
+        });
+        self.context = Some(node.clone());
+        self.pseudo_context = pseudo;
+    }
+
+    fn enter_pseudo(&mut self) -> bool {
+        let previous = self.pseudo_context;
+        if let Some(node) = self.context.clone() {
+            self.select_node(&node, true);
         }
+        previous
     }
 
     fn open_quote(&mut self, quotes: &[(String, String)], paint: bool) -> Option<String> {
@@ -1048,6 +1095,7 @@ pub(crate) fn html_document_to_story_with_resolver_and_fonts_and_report_and_targ
             &ancestors,
         );
         html_info.apply_computed_container_style(&root_style);
+        counters.select_node(html_node, false);
         apply_style_counters_for_node(
             html_node,
             resolver,
@@ -1361,6 +1409,7 @@ fn anonymous_table_cell_run_flowables(
 
     let mut cells = Vec::with_capacity(styled_cells.len());
     for (child, cell_info, cell_style) in styled_cells {
+        counters.select_node(&child, false);
         if style_can_mutate_counters(&cell_style) {
             apply_style_counters(&cell_style, counters);
         }
@@ -1587,7 +1636,8 @@ fn collect_children(
 ) -> Vec<LayoutItem> {
     let mut out = Vec::new();
     let mut report = report;
-    if let Some(anonymous_table) = anonymous_table_cell_run_flowables(
+    let previous_context = (counters.context.clone(), counters.pseudo_context);
+    let anonymous_table = anonymous_table_cell_run_flowables(
         node,
         resolver,
         parent_style,
@@ -1600,7 +1650,9 @@ fn collect_children(
         svg_raster_fallback,
         perf,
         doc_id,
-    ) {
+    );
+    (counters.context, counters.pseudo_context) = previous_context;
+    if let Some(anonymous_table) = anonymous_table {
         return anonymous_table;
     }
     let children: Vec<NodeRef> = node.children().collect();
@@ -2189,6 +2241,44 @@ fn node_to_flowables(
     perf: Option<&crate::perf::PerfLogger>,
     doc_id: Option<usize>,
 ) -> Vec<LayoutItem> {
+    let previous = (counters.context.clone(), counters.pseudo_context);
+    if node.as_element().is_some() {
+        counters.select_node(node, false);
+    }
+    let items = node_to_flowables_in_scope(
+        node,
+        resolver,
+        parent_style,
+        ancestors,
+        counters,
+        font_registry,
+        asset_bundle,
+        report,
+        svg_form,
+        svg_raster_fallback,
+        perf,
+        doc_id,
+    );
+    // Restoring the caller's context does not end a child's sibling scope.
+    // The next element (or ::after) selects the counters that it inherits.
+    (counters.context, counters.pseudo_context) = previous;
+    items
+}
+
+fn node_to_flowables_in_scope(
+    node: &NodeRef,
+    resolver: &StyleResolver,
+    parent_style: &ComputedStyle,
+    ancestors: &mut Vec<ElementInfo>,
+    counters: &mut CounterState,
+    font_registry: Option<Arc<FontRegistry>>,
+    asset_bundle: Option<Arc<AssetBundle>>,
+    report: Option<&mut GlyphCoverageReport>,
+    svg_form: bool,
+    svg_raster_fallback: bool,
+    perf: Option<&crate::perf::PerfLogger>,
+    doc_id: Option<usize>,
+) -> Vec<LayoutItem> {
     let mut report = report;
     match node.data() {
         NodeData::Text(text) => text_node_to_flowables(
@@ -2338,11 +2428,9 @@ fn node_to_flowables(
             if matches!(style.display, DisplayMode::None) && screen_reader_text.is_none() {
                 return Vec::new();
             }
-            let counter_reset_scopes = if style_can_mutate_counters(&style) {
-                apply_style_counters_for_node(node, resolver, &style, &info, ancestors, counters)
-            } else {
-                Vec::new()
-            };
+            if style_can_mutate_counters(&style) {
+                apply_style_counters_for_node(node, resolver, &style, &info, ancestors, counters);
+            }
             if style_is_css_list_item(&style) {
                 apply_implicit_list_item_counter(&style, counters);
             }
@@ -2363,7 +2451,6 @@ fn node_to_flowables(
                     perf,
                     doc_id,
                 );
-                counters.pop_reset_scopes(&counter_reset_scopes);
                 return vec![item];
             }
 
@@ -2435,7 +2522,6 @@ fn node_to_flowables(
                 );
                 let out = inject_pseudo_items(out, &before_items, &after_items);
                 ancestors.pop();
-                counters.pop_reset_scopes(&counter_reset_scopes);
                 return out;
             }
 
@@ -2614,7 +2700,6 @@ fn node_to_flowables(
                         })
                         .collect();
                     ancestors.pop();
-                    counters.pop_reset_scopes(&counter_reset_scopes);
                     return out;
                 }
                 if decorated_inline {
@@ -2637,11 +2722,9 @@ fn node_to_flowables(
                     let Some(flowable) = container_flowable_with_role(out, &inline_box_style, None)
                     else {
                         ancestors.pop();
-                        counters.pop_reset_scopes(&counter_reset_scopes);
                         return Vec::new();
                     };
                     ancestors.pop();
-                    counters.pop_reset_scopes(&counter_reset_scopes);
                     return vec![LayoutItem::Inline {
                         flowable,
                         valign: vertical_align_from_style_with_font_size(
@@ -2655,7 +2738,6 @@ fn node_to_flowables(
                     }];
                 }
                 ancestors.pop();
-                counters.pop_reset_scopes(&counter_reset_scopes);
                 return out;
             }
 
@@ -4144,7 +4226,6 @@ fn node_to_flowables(
             }
 
             ancestors.pop();
-            counters.pop_reset_scopes(&counter_reset_scopes);
             annotate_reading_layout(items)
         }
         _ => Vec::new(),
@@ -5705,6 +5786,7 @@ fn pseudo_items_for(
     let Some(pseudo_style) = resolver.compute_pseudo_style(info, style, ancestors, pseudo) else {
         return Vec::new();
     };
+    let previous_pseudo = counters.enter_pseudo();
     let items = pseudo_content_items(
         &pseudo_style,
         counters,
@@ -5715,6 +5797,7 @@ fn pseudo_items_for(
         svg_raster_fallback,
         pseudo,
     );
+    counters.pseudo_context = previous_pseudo;
     // Pseudo-elements generate real CSS boxes and participate in positioned
     // layout exactly like element-backed boxes. Their content used to be
     // injected before the ordinary element wrapper stage, which discarded
@@ -5749,8 +5832,11 @@ fn pseudo_text_for(
     if !style_can_mutate_counters(&pseudo_style) {
         return String::new();
     }
+    let previous_pseudo = counters.enter_pseudo();
     apply_style_counters(&pseudo_style, counters);
-    let Some(content) = generated_content_text(&pseudo_style, counters) else {
+    let content = generated_content_text(&pseudo_style, counters);
+    counters.pseudo_context = previous_pseudo;
+    let Some(content) = content else {
         return String::new();
     };
     let text = apply_text_transform(&content, pseudo_style.text_transform);
@@ -6708,6 +6794,17 @@ mod tests {
             pseudo_inline_text_paint_phase_y(crate::style::PseudoTarget::Before, &synthetic_bold,),
             Pt::ZERO
         );
+    }
+
+    #[test]
+    fn counter_increments_clamp_at_the_supported_integer_bounds() {
+        let mut counters = CounterState::default();
+        counters.set("high", i32::MAX);
+        counters.increment("high", 1);
+        assert_eq!(counters.get("high"), i32::MAX);
+        counters.set("low", i32::MIN);
+        counters.increment("low", -1);
+        assert_eq!(counters.get("low"), i32::MIN);
     }
 
     #[test]
@@ -9400,6 +9497,7 @@ fn list_flowables(
                 .counter_increment
                 .iter()
                 .any(|mutation| mutation.name == "list-item");
+            counters.select_node(&child, false);
             apply_style_counters(&style, counters);
             apply_implicit_list_item_counter(&style, counters);
             if ordered && !explicitly_increments_list_item {
@@ -13605,10 +13703,6 @@ fn table_container_flowables(
         if matches!(child_style.display, DisplayMode::None) {
             continue;
         }
-        if style_can_mutate_counters(&child_style) {
-            apply_style_counters(&child_style, counters);
-        }
-
         if matches!(child_style.display, DisplayMode::TableCell) {
             has_proper_table_child = true;
             anon_cells.push((child.clone(), child_style));
@@ -13631,6 +13725,19 @@ fn table_container_flowables(
             &collapsed_columns,
         ) {
             table_children.push(row_flowable);
+        }
+
+        counters.select_node(&child, false);
+        // Deferred cells and general children apply their mutations when their
+        // content is compiled, in source order, exactly once.
+        if is_table_column_display(child_style.display)
+            || matches!(
+                child_style.display,
+                DisplayMode::TableCaption | DisplayMode::TableRow
+            )
+            || is_table_row_group_display(child_style.display)
+        {
+            apply_style_counters(&child_style, counters);
         }
 
         if is_table_column_display(child_style.display) {
@@ -13706,6 +13813,7 @@ fn table_container_flowables(
                 if !matches!(row_style.display, DisplayMode::TableRow) {
                     continue;
                 }
+                counters.select_node(&row_node, false);
                 apply_style_counters(&row_style, counters);
                 if group_collapsed || matches!(row_style.visibility, VisibilityMode::Collapse) {
                     continue;
@@ -13960,9 +14068,6 @@ fn table_row_flowable_from_node(
         );
         if matches!(cell_style.display, DisplayMode::None) {
             continue;
-        }
-        if style_can_mutate_counters(&cell_style) {
-            apply_style_counters(&cell_style, counters);
         }
         cells.push((cell_node.clone(), cell_style));
     }
@@ -14714,6 +14819,7 @@ fn table_flowable(
     doc_id: Option<usize>,
 ) -> TableFlowable {
     let mut report = report;
+    let has_generated_pseudo_rules = resolver.has_generated_pseudo_rules();
     let legacy_cell_padding = legacy_table_length_attribute(node, "cellpadding");
     let legacy_border_width =
         legacy_table_length_attribute(node, "border").filter(|width| *width > Pt::ZERO);
@@ -15404,6 +15510,13 @@ fn table_flowable(
                 None
             };
         let row_parent_style: &ComputedStyle = section_style_owned.as_ref().unwrap_or(style);
+        if row_group_starts && in_explicit_row_group && style_can_mutate_counters(row_parent_style)
+        {
+            if let Some(group) = row.parent().filter(|parent| *parent != table_node) {
+                counters.select_node(&group, false);
+                apply_style_counters(row_parent_style, counters);
+            }
+        }
         if is_header {
             header_index += 1;
         } else {
@@ -15517,6 +15630,10 @@ fn table_flowable(
         } else {
             row_style_tmp.as_ref().unwrap()
         };
+        if !anonymous_row && style_can_mutate_counters(row_style) {
+            counters.select_node(&row, false);
+            apply_style_counters(row_style, counters);
+        }
         let row_min_height = resolve_non_auto_height(
             row_style.height,
             row_style.font_size,
@@ -15701,6 +15818,12 @@ fn table_flowable(
                 continue;
             }
             cell_info.apply_computed_container_style(cell_style);
+            counters.select_node(cell_child, false);
+            if style_can_mutate_counters(cell_style) {
+                apply_style_counters_for_node(
+                    cell_child, resolver, cell_style, &cell_info, ancestors, counters,
+                );
+            }
 
             let has_element_children = cell_child
                 .children()
@@ -15708,7 +15831,18 @@ fn table_flowable(
             let mut cell_content: Option<Box<dyn Flowable>> = None;
             let mut inline_content_phase = false;
             let mut cell_text = String::new();
-            if has_element_children {
+            let has_generated_box = has_generated_pseudo_rules
+                && [
+                    crate::style::PseudoTarget::Before,
+                    crate::style::PseudoTarget::After,
+                ]
+                .iter()
+                .any(|pseudo| {
+                    resolver
+                        .compute_pseudo_style(&cell_info, cell_style, ancestors, *pseudo)
+                        .is_some()
+                });
+            if has_element_children || has_generated_box {
                 let coerce_mixed_inline =
                     inline_or_replaced_children_only(cell_child, resolver, cell_style, ancestors);
                 inline_content_phase = coerce_mixed_inline;
@@ -15725,20 +15859,6 @@ fn table_flowable(
                     svg_raster_fallback,
                     crate::style::PseudoTarget::Before,
                 );
-                let after_items = pseudo_items_for(
-                    resolver,
-                    &cell_info,
-                    cell_style,
-                    ancestors,
-                    counters,
-                    font_registry.clone(),
-                    asset_bundle.as_deref(),
-                    report.as_deref_mut(),
-                    svg_form,
-                    svg_raster_fallback,
-                    crate::style::PseudoTarget::After,
-                );
-
                 ancestors.push(cell_info.clone());
                 let mut cell_items = before_items;
                 cell_items.extend(collect_children(
@@ -15756,6 +15876,19 @@ fn table_flowable(
                     doc_id,
                 ));
                 ancestors.pop();
+                let after_items = pseudo_items_for(
+                    resolver,
+                    &cell_info,
+                    cell_style,
+                    ancestors,
+                    counters,
+                    font_registry.clone(),
+                    asset_bundle.as_deref(),
+                    report.as_deref_mut(),
+                    svg_form,
+                    svg_raster_fallback,
+                    crate::style::PseudoTarget::After,
+                );
                 cell_items.extend(after_items);
 
                 let cell_items = if coerce_mixed_inline {

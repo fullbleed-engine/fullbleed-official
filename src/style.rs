@@ -5158,6 +5158,18 @@ impl StyleResolver {
         self.has_sibling_selectors
     }
 
+    pub(crate) fn has_generated_pseudo_rules(&self) -> bool {
+        self.normal_rules
+            .iter()
+            .chain(&self.important_rules)
+            .any(|rule| {
+                matches!(
+                    rule.selector.pseudo_target(),
+                    Some(PseudoTarget::Before | PseudoTarget::After)
+                )
+            })
+    }
+
     pub(crate) fn has_target_counter_content(&self) -> bool {
         self.has_target_counter_content
     }

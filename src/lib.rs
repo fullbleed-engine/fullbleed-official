@@ -13826,6 +13826,96 @@ mod tests {
     }
 
     #[test]
+    fn counter_resets_remain_in_scope_for_following_siblings() {
+        let html = "<html><body><div class='chapter'>Alpha</div><div class='section'>One</div><div class='section'>Two</div><div class='chapter'>Beta</div><div class='section'>Three</div></body></html>";
+        let css = r#"
+            @page { size: 360px 270px; margin: 16px; }
+            * { margin: 0; padding: 0; }
+            body { counter-reset: chapter; }
+            .chapter { counter-increment: chapter; counter-reset: section; }
+            .section { counter-increment: section; }
+            .chapter::before { content: counter(chapter) '|'; }
+            .section::before { content: counter(chapter) '.' counter(section) '|'; }
+        "#;
+        let engine = FullBleed::builder().build().expect("engine");
+        let doc = engine.render_to_document(html, css).expect("render");
+        let labels: Vec<_> = doc
+            .pages
+            .iter()
+            .flat_map(|page| &page.commands)
+            .filter_map(|command| match command {
+                Command::DrawString { text, .. } if text.contains('|') => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(labels, ["1|", "1.1|", "1.2|", "2|", "2.1|"]);
+    }
+
+    #[test]
+    fn counter_scopes_nest_without_leaking_between_branches() {
+        let cases = [
+            (
+                "<div class='scope'><div class='item'>A<div class='scope'><div class='item'>B</div><div class='item'>C</div></div></div><div class='item'>D</div></div><div class='scope'><div class='item'>E</div></div>",
+                ".scope { counter-reset: n; } .item { counter-increment: n; } .item::before { content: counters(n, '.') '|'; }",
+                vec!["1|", "1.1|", "1.2|", "2|", "1|"],
+            ),
+            (
+                "<section><div class='item'>A</div><div class='item'>B</div></section><section><div class='item'>C</div></section>",
+                ".item { counter-increment: n; } .item::before { content: counters(n, '.') '|'; }",
+                vec!["1|", "2|", "1|"],
+            ),
+            (
+                "<div class='reset'>A</div><div class='item'>B</div><div class='reset'>C</div><div class='item'>D</div>",
+                ".reset { counter-reset: n 3 n 8; } .item { counter-increment: n 2; } .item::before { content: counters(n, '.') '|'; }",
+                vec!["10|", "10|"],
+            ),
+            (
+                "<ol><li class='reset'>A</li><li class='item'>B</li><li class='reset'>C</li><li class='item'>D</li></ol>",
+                ".reset { counter-reset: n 10; } .item { counter-increment: n; } .item::before { content: counter(n) '|'; }",
+                vec!["11|", "11|"],
+            ),
+            (
+                "<div class='table'><div class='row'><div class='cell'>A</div><div class='cell'>B</div></div></div>",
+                "body { counter-reset: n; } .table { display: table; } .row { display: table-row; } .cell { display: table-cell; counter-increment: n; } .cell::before { content: counter(n) '|'; }",
+                vec!["1|", "2|"],
+            ),
+            (
+                "<p>Alpha<span class='fn'>First note</span></p><p>Beta<span class='fn'>Second note</span></p>",
+                ".fn { float: footnote; } .fn::footnote-call { content: counter(footnote) '|'; }",
+                vec!["1|", "2|"],
+            ),
+            (
+                "<table><tr><td style='display:contents;counter-increment:n 5'><span>Alpha</span></td></tr></table>",
+                "body { counter-reset: n; } span::before { content: counter(n) '|'; }",
+                vec!["0|"],
+            ),
+            (
+                "<table><tbody style='display:contents;counter-reset:n 8'><tr><td><span>Alpha</span></td></tr></tbody></table>",
+                "body { counter-reset: n; } td { counter-increment: n; } span::before { content: counter(n) '|'; }",
+                vec!["1|"],
+            ),
+        ];
+        let engine = FullBleed::builder().build().expect("engine");
+        for (body, rules, expected) in cases {
+            let html = format!("<html><body>{body}</body></html>");
+            let css = format!(
+                "@page {{ size: 480px 640px; margin: 16px; }} * {{ margin: 0; padding: 0; }} {rules}"
+            );
+            let doc = engine.render_to_document(&html, &css).expect("render");
+            let labels: Vec<_> = doc
+                .pages
+                .iter()
+                .flat_map(|page| &page.commands)
+                .filter_map(|command| match command {
+                    Command::DrawString { text, .. } if text.contains('|') => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(labels, expected, "counter scope in {html}");
+        }
+    }
+
+    #[test]
     fn generated_before_and_after_are_flex_items_in_source_order() {
         let html = "<html><body><div class='row'><span>M</span></div></body></html>";
         let css = r#"

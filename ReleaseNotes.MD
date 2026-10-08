@@ -1,3 +1,26 @@
+# Fullbleed Release Notes - 2.5.18
+
+CSS counters created by a heading now remain in scope for its following
+siblings. A chapter that resets its section counter produces `2.1` for the next
+section, instead of continuing the previous chapter at `2.3`. Nested branches
+retain their own counter scopes.
+
+Table groups, rows, and cells apply counter mutations once, in source order.
+Plain table cells preserve generated labels, and boxless table elements do not
+mutate counters. The predefined footnote counter continues across paragraphs;
+counter increments clamp at the supported integer bounds.
+
+The installed regression check covers twelve fixtures and 48 emitted PDFs across
+direct, compiled, repeated, and reflow rendering, including page breaks.
+Windows/Linux CI and the release workflow retain PDFs and extracted labels.
+
+The existing nested-counter corpus fixture has a separate visual mismatch;
+this release does not claim to fix that fixture or implement complete CSS
+counter support. Public APIs and dependencies are unchanged. See the
+[2.5.18 runbook](docs/release/2.5.18-runbook.md).
+
+---
+
 # Fullbleed Release Notes - 2.5.17
 
 The native Rust API reference now starts with a complete first-PDF program,
