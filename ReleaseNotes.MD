@@ -1,3 +1,24 @@
+# Fullbleed Release Notes - 2.5.21
+
+Border images using `space` now leave a region empty when no complete tile
+fits. Previously, a partial tile could appear inside a narrow border or center
+region. Complete tiles retain their existing spacing and centering.
+
+The center fill now skips a zero-width top or left edge when choosing its
+natural scale. It uses the opposite edge, or the unscaled source when neither
+edge supplies a scale. This preserves the intended repeat pattern instead of
+stretching it to the destination region.
+
+Installed-output regression coverage includes 18 raster and SVG cases, with
+native/finalized previews, independently rendered direct/compiled PDFs, and
+deterministic rerenders. Browser expectations and public-release negative
+controls are retained with the release evidence. No runtime dependency is added.
+
+These are targeted rendering fixes. They do not establish general CSS parity
+or PDF standards conformance. See the [2.5.21 runbook](docs/release/2.5.21-runbook.md).
+
+---
+
 # Fullbleed Release Notes - 2.5.20
 
 Filtered and positive-z-index descendants now retain their ancestors' overflow
