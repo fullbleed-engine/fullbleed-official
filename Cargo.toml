@@ -1,6 +1,6 @@
 [package]
 name = "fullbleed"
-version = "2.5.21"
+version = "2.5.22"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"

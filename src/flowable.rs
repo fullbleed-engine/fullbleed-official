@@ -306,6 +306,8 @@ struct LineLayout {
     indent: Pt,
     forced_start: bool,
     reading_separator: ReadingSeparator,
+    // Vertical space before a line that must move below a floating initial.
+    clearance_before: Pt,
 }
 
 #[derive(Debug, Clone)]
@@ -3631,13 +3633,14 @@ fn text_draw_y_for_line(
 #[cfg(test)]
 mod text_baseline_tests {
     use super::{
-        BoxShadowSpec, ContainerFlowable, Flowable, InlineBlockLayoutFlowable, OutlineLineStyle,
-        Paragraph, Pt, ResolvedEdgeColors, ResolvedEdgeStyles, ResolvedEdges, TabSizeSpec,
-        TextAlign, TextStyle, VerticalAlign, advance_to_next_tab_stop,
-        browser_registered_text_paint_x, browser_synthetic_bold_outline_phase,
-        browser_synthetic_bold_shader_paint, css_direct_text_prefers_nearest_baseline_snap,
+        BoxShadowSpec, CalcLength, ContainerFlowable, FloatSide, Flowable,
+        InlineBlockLayoutFlowable, OutlineLineStyle, Paragraph, Pt, ResolvedEdgeColors,
+        ResolvedEdgeStyles, ResolvedEdges, TabSizeSpec, TextAlign, TextStyle, VerticalAlign,
+        advance_to_next_tab_stop, browser_registered_text_paint_x,
+        browser_synthetic_bold_outline_phase, browser_synthetic_bold_shader_paint,
+        css_direct_text_prefers_nearest_baseline_snap,
         css_print_line_prefers_nearest_baseline_snap, draw_registered_text_run,
-        draw_text_decorations_before_glyphs, is_cjk_outline_character,
+        draw_text_decorations_before_glyphs, huge_pt, is_cjk_outline_character,
         paragraph_break_allowed_between, resolve_font_stack, split_long_word_by_width,
         tabbed_text_width, text_baseline_for_line, text_baseline_for_table_cell_line,
         text_decoration_ink_skip_intervals, text_draw_y_for_line, text_inline_box_top_overflow,
@@ -4096,6 +4099,142 @@ mod text_baseline_tests {
         assert!(document.pages[0].commands.iter().any(|command| {
             matches!(command, Command::DrawRect { width, .. } if *width == initial.exclusion_width)
         }));
+    }
+
+    fn floating_initial_paragraph(text: &str, side: FloatSide) -> Paragraph {
+        let mut style = TextStyle::default();
+        style.font_name = "Courier".into();
+        style.font_size = Pt::from_f32(10.0);
+        style.line_height = Pt::from_f32(12.0);
+        style.line_height_is_auto = false;
+        let initial_box = ContainerFlowable::new_pt(Vec::new(), style.font_size, style.font_size)
+            .with_width(LengthSpec::Absolute(Pt::from_f32(36.0)))
+            .with_height(LengthSpec::Absolute(Pt::from_f32(30.0)));
+        Paragraph::new(text)
+            .with_style(style.clone())
+            .with_first_letter("D", style, None, None, 1.0)
+            .with_floating_first_letter(Box::new(initial_box), side)
+    }
+
+    #[test]
+    fn floating_first_letter_excludes_three_lines_on_either_side() {
+        for side in [FloatSide::Left, FloatSide::Right] {
+            let paragraph = floating_initial_paragraph("aa bb cc dd ee ff gg hh ii jj kk ll", side);
+            let width = Pt::from_f32(90.0);
+            let lines = paragraph.layout_lines(width);
+            assert_eq!(
+                lines
+                    .iter()
+                    .map(|line| line.text.as_str())
+                    .collect::<Vec<_>>(),
+                ["aa bb cc", "dd ee ff", "gg hh ii", "jj kk ll"]
+            );
+            let mut canvas = Canvas::new(Size {
+                width,
+                height: Pt::from_f32(100.0),
+            });
+            paragraph.draw(
+                &mut canvas,
+                Pt::from_f32(3.0),
+                Pt::ZERO,
+                width,
+                Pt::from_f32(100.0),
+            );
+            let document = canvas.finish();
+            let origins = document.pages[0]
+                .commands
+                .iter()
+                .filter_map(|command| {
+                    if let Command::DrawString { x, .. } = command {
+                        Some(*x)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            let inset = if matches!(side, FloatSide::Left) {
+                39.0
+            } else {
+                3.0
+            };
+            assert_eq!(
+                origins,
+                [
+                    Pt::from_f32(inset),
+                    Pt::from_f32(inset),
+                    Pt::from_f32(inset),
+                    Pt::from_f32(3.0)
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn floating_first_letter_moves_unbreakable_word_below_margin_box() {
+        let paragraph = floating_initial_paragraph("abcdefghij aa bb cc", FloatSide::Left);
+        let width = Pt::from_f32(90.0);
+        let lines = paragraph.layout_lines(width);
+        assert_eq!(lines[0].text, "abcdefghij aa");
+        assert_eq!(lines[0].indent, Pt::ZERO);
+        assert_eq!(lines[0].clearance_before, Pt::from_f32(30.0));
+        assert_eq!(paragraph.wrap(width, huge_pt()).height, Pt::from_f32(54.0));
+        assert_eq!(paragraph.first_baseline(width), Some(Pt::from_f32(39.0)));
+    }
+
+    #[test]
+    fn floating_first_letter_stays_intact_at_page_boundary() {
+        let paragraph = floating_initial_paragraph(
+            "aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss tt uu vv ww xx",
+            FloatSide::Right,
+        );
+        let width = Pt::from_f32(90.0);
+        assert!(paragraph.split(width, Pt::from_f32(24.0)).is_none());
+        assert!(paragraph.split(width, Pt::from_f32(36.0)).is_some());
+    }
+
+    #[test]
+    fn floating_first_letter_intrinsic_indent_resolves_percentages_after_sizing() {
+        for (indent, width, origin) in [
+            (LengthSpec::Absolute(Pt::from_f32(3.0)), 9.0, 3.0),
+            (LengthSpec::Percent(0.25), 6.0, 1.5),
+            (
+                LengthSpec::Calc(CalcLength {
+                    abs: Pt::from_f32(3.0),
+                    percent: 0.25,
+                    em: 0.0,
+                    rem: 0.0,
+                }),
+                9.0,
+                5.25,
+            ),
+        ] {
+            let mut style = TextStyle::default();
+            style.font_name = "Courier".into();
+            style.font_size = Pt::from_f32(10.0);
+            style.text_indent = indent;
+            let glyph = Paragraph::new("D")
+                .with_style(style)
+                .with_whitespace(true, true)
+                .with_intrinsic_first_letter_indent();
+            assert_eq!(
+                glyph.flex_max_content_width(Pt::from_f32(90.0)),
+                Some(Pt::from_f32(width))
+            );
+            let mut canvas = Canvas::new(Size {
+                width: Pt::from_f32(90.0),
+                height: Pt::from_f32(30.0),
+            });
+            glyph.draw(
+                &mut canvas,
+                Pt::ZERO,
+                Pt::ZERO,
+                Pt::from_f32(width),
+                Pt::from_f32(30.0),
+            );
+            assert!(canvas.finish().pages[0].commands.iter().any(|command| {
+                matches!(command, Command::DrawString { x, .. } if *x == Pt::from_f32(origin))
+            }));
+        }
     }
 
     #[test]
@@ -6128,6 +6267,23 @@ struct InitialLetterLayout {
     exclusion_width: Pt,
     background_color: Option<Color>,
     background_opacity: f32,
+    floated: Option<FloatingFirstLetter>,
+}
+
+#[derive(Clone)]
+struct FloatingFirstLetter {
+    side: FloatSide,
+    flowable: Box<dyn Flowable>,
+    clear_at_line: Option<usize>,
+}
+
+impl std::fmt::Debug for FloatingFirstLetter {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("FloatingFirstLetter")
+            .field("side", &self.side)
+            .finish_non_exhaustive()
+    }
 }
 
 /// The computed style program for the first formatted line of a paragraph.
@@ -6213,6 +6369,7 @@ pub struct Paragraph {
     break_spaces: bool,
     no_wrap: bool,
     measure_inline_word: bool,
+    intrinsic_first_letter_indent: bool,
     suppress_first_line_indent: bool,
     snap_each_line_baseline: bool,
     round_each_css_line_baseline: bool,
@@ -6242,6 +6399,7 @@ impl Paragraph {
             break_spaces: false,
             no_wrap: false,
             measure_inline_word: false,
+            intrinsic_first_letter_indent: false,
             suppress_first_line_indent: false,
             snap_each_line_baseline: false,
             round_each_css_line_baseline: false,
@@ -6392,7 +6550,28 @@ impl Paragraph {
             exclusion_width,
             background_color,
             background_opacity: background_opacity.clamp(0.0, 1.0),
+            floated: None,
         });
+        self
+    }
+
+    pub(crate) fn with_floating_first_letter(
+        mut self,
+        flowable: Box<dyn Flowable>,
+        side: FloatSide,
+    ) -> Self {
+        if let Some(initial) = self.initial_letter.as_mut() {
+            initial.floated = Some(FloatingFirstLetter {
+                side,
+                flowable,
+                clear_at_line: None,
+            });
+        }
+        self
+    }
+
+    pub(crate) fn with_intrinsic_first_letter_indent(mut self) -> Self {
+        self.intrinsic_first_letter_indent = true;
         self
     }
 
@@ -6777,19 +6956,91 @@ impl Paragraph {
         }
     }
 
-    fn line_text_indent(&self, line_idx: usize, forced_start: bool, indent: Pt) -> Pt {
+    fn first_letter_exclusion(&self, line_idx: usize, avail_width: Pt) -> (FloatSide, Pt) {
+        let Some(initial) = self.initial_letter.as_ref() else {
+            return (FloatSide::Left, Pt::ZERO);
+        };
+        if let Some(floated) = initial.floated.as_ref() {
+            if floated.clear_at_line.is_some_and(|index| line_idx >= index) {
+                return (floated.side, Pt::ZERO);
+            }
+            let size = floated.flowable.wrap(avail_width, huge_pt());
+            let line_top = self.annotated_line_height() * line_idx as i32;
+            let width = if line_top < size.height {
+                size.width.max(Pt::ZERO)
+            } else {
+                Pt::ZERO
+            };
+            return (floated.side, width);
+        }
+        (
+            FloatSide::Left,
+            if line_idx < initial.sink {
+                initial.exclusion_width
+            } else {
+                Pt::ZERO
+            },
+        )
+    }
+
+    fn line_text_indent(
+        &self,
+        line_idx: usize,
+        forced_start: bool,
+        indent: Pt,
+        avail_width: Pt,
+    ) -> Pt {
         let text_indent = if self.line_receives_text_indent(line_idx, forced_start) {
             indent
         } else {
             Pt::ZERO
         };
-        let initial_indent = self
+        // Line layout reserves the same width for either physical float side.
+        // Painting moves a right-side reservation out of the text's left inset.
+        let (_, initial_indent) = self.first_letter_exclusion(line_idx, avail_width);
+        text_indent + initial_indent
+    }
+
+    fn clear_lines_below_floating_first_letter(
+        &self,
+        mut lines: Vec<LineLayout>,
+        avail_width: Pt,
+    ) -> Vec<LineLayout> {
+        let Some(floated) = self
             .initial_letter
             .as_ref()
-            .filter(|initial| line_idx < initial.sink)
-            .map(|initial| initial.exclusion_width)
-            .unwrap_or(Pt::ZERO);
-        text_indent + initial_indent
+            .and_then(|initial| initial.floated.as_ref())
+        else {
+            return lines;
+        };
+        if floated.clear_at_line.is_some() {
+            return lines;
+        }
+        // An unbreakable word that cannot fit beside the float starts below
+        // its margin box. Reflow once with that exclusion ended, preserving
+        // all of the ordinary word-breaking and whitespace rules.
+        let Some(index) = lines.iter().enumerate().position(|(index, line)| {
+            !line.text.is_empty()
+                && self.first_letter_exclusion(index, avail_width).1 > Pt::ZERO
+                && line.width > avail_width + Pt::from_f32(0.01)
+        }) else {
+            return lines;
+        };
+        let mut cleared = self.clone();
+        cleared
+            .initial_letter
+            .as_mut()
+            .and_then(|initial| initial.floated.as_mut())
+            .expect("floating initial")
+            .clear_at_line = Some(index);
+        cleared.layout_cache = Arc::new(Mutex::new(TextLayoutCache::default()));
+        lines = cleared.layout_lines(avail_width).as_ref().clone();
+        if let Some(line) = lines.get_mut(index) {
+            line.clearance_before = (floated.flowable.wrap(avail_width, huge_pt()).height
+                - self.annotated_line_height() * index as i32)
+                .max(Pt::ZERO);
+        }
+        lines
     }
 
     fn line_limit(&self, max_width: Pt, indent: Pt) -> Pt {
@@ -7599,7 +7850,7 @@ impl Paragraph {
             let mut line_layouts = Vec::new();
             for (idx, line) in self.text.split('\n').enumerate() {
                 let forced_start = idx > 0;
-                let line_indent = self.line_text_indent(idx, forced_start, indent_value);
+                let line_indent = self.line_text_indent(idx, forced_start, indent_value, max_width);
                 let line_limit = self.line_limit(max_width, line_indent);
                 let resolved = if line.is_empty() {
                     String::new()
@@ -7624,9 +7875,11 @@ impl Paragraph {
                     indent: line_indent,
                     forced_start,
                     reading_separator: self.reading_separator_for_segment(idx),
+                    clearance_before: Pt::ZERO,
                 });
             }
-            let lines = Arc::new(line_layouts);
+            let lines =
+                Arc::new(self.clear_lines_below_floating_first_letter(line_layouts, max_width));
             if let Ok(mut cache) = self.layout_cache.lock() {
                 cache.insert(key, lines.clone());
             }
@@ -7705,8 +7958,12 @@ impl Paragraph {
                     if word_index > 0 && current.is_empty() {
                         reading_prefixes.insert(lines.len(), ReadingSeparator::Space);
                     }
-                    let current_indent =
-                        self.line_text_indent(lines.len(), current_forced_start, indent_value);
+                    let current_indent = self.line_text_indent(
+                        lines.len(),
+                        current_forced_start,
+                        indent_value,
+                        max_width,
+                    );
                     let current_limit = self.line_limit(max_width, current_indent);
                     if current.is_empty() {
                         if word_width > current_limit {
@@ -7780,8 +8037,12 @@ impl Paragraph {
                                 });
                                 current = String::new();
                                 current_forced_start = false;
-                                let follow_indent =
-                                    self.line_text_indent(lines.len(), false, indent_value);
+                                let follow_indent = self.line_text_indent(
+                                    lines.len(),
+                                    false,
+                                    indent_value,
+                                    max_width,
+                                );
                                 let follow_limit = self.line_limit(max_width, follow_indent);
                                 let suffix_width = self.measure_text_width(&suffix);
                                 if suffix_width <= follow_limit {
@@ -7829,7 +8090,7 @@ impl Paragraph {
                             current = String::new();
                             current_forced_start = false;
                             let follow_indent =
-                                self.line_text_indent(lines.len(), false, indent_value);
+                                self.line_text_indent(lines.len(), false, indent_value, max_width);
                             let follow_limit = self.line_limit(max_width, follow_indent);
                             if word_width > follow_limit {
                                 if let Some(mut parts) =
@@ -7905,6 +8166,7 @@ impl Paragraph {
                         max_lines.saturating_sub(1),
                         last.forced_start,
                         indent_value,
+                        max_width,
                     );
                     let limit = self.line_limit(max_width, indent);
                     // A block ellipsis is mandatory when line clamping hides
@@ -7926,7 +8188,7 @@ impl Paragraph {
             } else {
                 self.measure_text_width(&line.text)
             };
-            let indent = self.line_text_indent(idx, line.forced_start, indent_value);
+            let indent = self.line_text_indent(idx, line.forced_start, indent_value, max_width);
             let width = line_width_with_indent(text_width, indent);
             line_layouts.push(LineLayout {
                 text: line.text,
@@ -7935,9 +8197,10 @@ impl Paragraph {
                 indent,
                 forced_start: line.forced_start,
                 reading_separator: reading_prefixes.get(&idx).copied().unwrap_or_default(),
+                clearance_before: Pt::ZERO,
             });
         }
-        let lines = Arc::new(line_layouts);
+        let lines = Arc::new(self.clear_lines_below_floating_first_letter(line_layouts, max_width));
         if let Ok(mut cache) = self.layout_cache.lock() {
             cache.insert(key, lines.clone());
         }
@@ -8279,7 +8542,8 @@ fn push_preserved_wrapped_segment(
     let mut last_break: Option<(usize, Pt)> = None;
     for ch in segment.chars() {
         let ch_width = paragraph.measure_text_width(&ch.to_string());
-        let indent = paragraph.line_text_indent(lines.len(), current_forced_start, indent_value);
+        let indent =
+            paragraph.line_text_indent(lines.len(), current_forced_start, indent_value, max_width);
         let limit = paragraph.line_limit(max_width, indent);
         if !paragraph.break_spaces
             && ch.is_whitespace()
@@ -8509,8 +8773,8 @@ impl Flowable for Paragraph {
         let height = lines
             .iter()
             .enumerate()
-            .fold(Pt::ZERO, |height, (index, _)| {
-                height + self.annotated_height_for_line(index)
+            .fold(Pt::ZERO, |height, (index, line)| {
+                height + line.clearance_before + self.annotated_height_for_line(index)
             });
         let width = lines
             .iter()
@@ -8614,18 +8878,40 @@ impl Flowable for Paragraph {
     }
 
     fn flex_max_content_width(&self, _avail_width: Pt) -> Option<Pt> {
-        self.intrinsic_width()
+        let width = self.intrinsic_width()?;
+        // A shrink-to-fit first-letter box includes definite text indentation.
+        // Cyclic percentages contribute zero to intrinsic sizing, then resolve
+        // against the glyph's used content width during line layout and paint.
+        let indent =
+            if self.intrinsic_first_letter_indent && self.line_receives_text_indent(0, false) {
+                self.resolved_text_indent(Pt::ZERO)
+            } else {
+                Pt::ZERO
+            };
+        Some((width + indent).max(Pt::ZERO))
     }
 
-    fn first_baseline(&self, _avail_width: Pt) -> Option<Pt> {
+    fn first_baseline(&self, avail_width: Pt) -> Option<Pt> {
         if self.is_vertical_text() {
             return None;
         }
         let style = self.style_for_line(0);
         let line_height = self.effective_line_height_for_style(style);
         let (emphasis_above, _) = self.text_emphasis_reserve_for_style(style);
+        let clearance = if self
+            .initial_letter
+            .as_ref()
+            .is_some_and(|initial| initial.floated.is_some())
+        {
+            self.layout_lines(avail_width)
+                .first()
+                .map_or(Pt::ZERO, |line| line.clearance_before)
+        } else {
+            Pt::ZERO
+        };
         Some(
-            emphasis_above
+            clearance
+                + emphasis_above
                 + text_baseline_for_line(style, self.font_registry.as_deref(), line_height),
         )
     }
@@ -8648,7 +8934,10 @@ impl Flowable for Paragraph {
         let base_baseline = base_emphasis_above
             + text_baseline_for_line(&self.style, self.font_registry.as_deref(), base_line_height);
         Some(
-            self.annotated_height_for_line(0)
+            lines
+                .iter()
+                .fold(Pt::ZERO, |sum, line| sum + line.clearance_before)
+                + self.annotated_height_for_line(0)
                 + self.annotated_line_height() * (lines.len().saturating_sub(2) as i32)
                 + base_baseline,
         )
@@ -8703,10 +8992,23 @@ impl Flowable for Paragraph {
         if ah <= 0 {
             return None;
         }
+        if self
+            .initial_letter
+            .as_ref()
+            .and_then(|initial| initial.floated.as_ref())
+            .is_some_and(|floated| {
+                floated.flowable.wrap(avail_width, huge_pt()).height > avail_height
+            })
+        {
+            // Retry the intact initial on the next page instead of painting
+            // part of its box across a fragment boundary.
+            return None;
+        }
         let mut consumed_height = 0i64;
         let mut max_lines = 0usize;
-        for (index, _) in lines.iter().enumerate() {
-            let line_height = self.annotated_height_for_line(index).to_milli_i64();
+        for (index, line) in lines.iter().enumerate() {
+            let line_height =
+                (line.clearance_before + self.annotated_height_for_line(index)).to_milli_i64();
             if line_height <= 0 || consumed_height.saturating_add(line_height) > ah {
                 break;
             }
@@ -8784,6 +9086,7 @@ impl Flowable for Paragraph {
             break_spaces: self.break_spaces,
             no_wrap: self.no_wrap,
             measure_inline_word: self.measure_inline_word,
+            intrinsic_first_letter_indent: self.intrinsic_first_letter_indent,
             suppress_first_line_indent: self.suppress_first_line_indent,
             snap_each_line_baseline: self.snap_each_line_baseline,
             round_each_css_line_baseline: self.round_each_css_line_baseline,
@@ -8818,6 +9121,7 @@ impl Flowable for Paragraph {
             break_spaces: self.break_spaces,
             no_wrap: self.no_wrap,
             measure_inline_word: self.measure_inline_word,
+            intrinsic_first_letter_indent: self.intrinsic_first_letter_indent,
             suppress_first_line_indent: true,
             snap_each_line_baseline: self.snap_each_line_baseline,
             round_each_css_line_baseline: self.round_each_css_line_baseline,
@@ -8873,37 +9177,52 @@ impl Flowable for Paragraph {
         }
 
         if let Some(initial) = &self.initial_letter {
-            let initial_paragraph = Paragraph::new(initial.text.clone())
-                .with_style(initial.style.clone())
-                .with_font_registry(self.font_registry.clone());
-            let line_height = self.effective_line_height();
-            let baseline =
-                text_baseline_for_line(&self.style, self.font_registry.as_deref(), line_height)
-                    + line_height * (initial.sink.saturating_sub(1) as i32);
-            let draw_y = y + baseline - initial.style.font_size;
-            canvas.save_state();
-            if let Some(background) = initial.background_color {
+            if let Some(floated) = initial.floated.as_ref() {
+                let size = floated.flowable.wrap(avail_width, huge_pt());
+                let float_x = match floated.side {
+                    FloatSide::Left => x,
+                    FloatSide::Right => x + avail_width - size.width,
+                };
+                // Keep the containing-block width for percentage box edges;
+                // the floated child's max-content width controls its box.
+                floated
+                    .flowable
+                    .draw(canvas, float_x, y, avail_width, size.height);
+            } else {
+                let initial_paragraph = Paragraph::new(initial.text.clone())
+                    .with_style(initial.style.clone())
+                    .with_font_registry(self.font_registry.clone());
+                let line_height = self.effective_line_height();
+                let baseline =
+                    text_baseline_for_line(&self.style, self.font_registry.as_deref(), line_height)
+                        + line_height * (initial.sink.saturating_sub(1) as i32);
+                let draw_y = y + baseline - initial.style.font_size;
                 canvas.save_state();
-                let (ascent, descent) =
-                    text_inline_background_extents(&initial.style, self.font_registry.as_deref());
-                let background_y = draw_y + initial.style.font_size - ascent;
-                canvas.set_fill_color(background);
-                if initial.background_opacity < 1.0 {
-                    canvas.set_opacity(initial.background_opacity, initial.background_opacity);
+                if let Some(background) = initial.background_color {
+                    canvas.save_state();
+                    let (ascent, descent) = text_inline_background_extents(
+                        &initial.style,
+                        self.font_registry.as_deref(),
+                    );
+                    let background_y = draw_y + initial.style.font_size - ascent;
+                    canvas.set_fill_color(background);
+                    if initial.background_opacity < 1.0 {
+                        canvas.set_opacity(initial.background_opacity, initial.background_opacity);
+                    }
+                    canvas.draw_rect(x, background_y, initial.exclusion_width, ascent + descent);
+                    canvas.fill();
+                    canvas.restore_state();
                 }
-                canvas.draw_rect(x, background_y, initial.exclusion_width, ascent + descent);
-                canvas.fill();
+                canvas.set_fill_color(initial.style.color);
+                canvas.set_font_size(initial.style.font_size);
+                initial_paragraph.draw_text_with_fallbacks(
+                    canvas,
+                    x + initial.origin_offset_x,
+                    draw_y,
+                    &initial.text,
+                );
                 canvas.restore_state();
             }
-            canvas.set_fill_color(initial.style.color);
-            canvas.set_font_size(initial.style.font_size);
-            initial_paragraph.draw_text_with_fallbacks(
-                canvas,
-                x + initial.origin_offset_x,
-                draw_y,
-                &initial.text,
-            );
-            canvas.restore_state();
             canvas.set_fill_color(self.style.color);
             canvas.set_font_size(self.style.font_size);
         }
@@ -8920,6 +9239,22 @@ impl Flowable for Paragraph {
             )
         });
         for (idx, line) in lines.iter().enumerate() {
+            cursor_y += line.clearance_before;
+            let right_float = self
+                .initial_letter
+                .as_ref()
+                .and_then(|initial| initial.floated.as_ref())
+                .is_some_and(|floated| matches!(floated.side, FloatSide::Right));
+            let x = if right_float {
+                let text_indent = if self.line_receives_text_indent(idx, line.forced_start) {
+                    self.resolved_text_indent(avail_width)
+                } else {
+                    Pt::ZERO
+                };
+                x - (line.indent - text_indent)
+            } else {
+                x
+            };
             let renderer = if idx == 0 {
                 first_line_renderer.as_ref().unwrap_or(self)
             } else {
@@ -12891,6 +13226,7 @@ impl TableCell {
                     indent: Pt::ZERO,
                     forced_start: false,
                     reading_separator: ReadingSeparator::None,
+                    clearance_before: Pt::ZERO,
                 });
             }
             let lines = Arc::new(line_layouts);
@@ -13028,6 +13364,7 @@ impl TableCell {
                 indent: Pt::ZERO,
                 forced_start: false,
                 reading_separator: ReadingSeparator::None,
+                clearance_before: Pt::ZERO,
             });
         }
         let lines = Arc::new(line_layouts);
