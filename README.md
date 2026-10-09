@@ -24,16 +24,15 @@ Actual Fullbleed output. Open either preview for its PDF, or [explore the design
 | Python | `python -m pip install fullbleed` | [Python quickstart](https://docs.fullbleed.dev/getting-started/quickstart/) |
 | Rust | `cargo add fullbleed` | [Native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/) |
 | Node.js / TypeScript | `npm install fullbleed` | [Node quickstart](https://docs.fullbleed.dev/getting-started/node/) · [Next.js PDF download](https://docs.fullbleed.dev/guides/nextjs-pdf/) |
-| Browser JavaScript | `npm install --save-exact fullbleed@0.3.2` | [Browser SDK and runnable starter](https://docs.fullbleed.dev/guides/browser-pdf/) · [Live editor](https://docs.fullbleed.dev/assets/browser-demo/index.html) |
+| Browser JavaScript | `npm install --save-exact fullbleed@0.4.1` | [Browser SDK and runnable starter](https://docs.fullbleed.dev/guides/browser-pdf/) · [Live editor](https://docs.fullbleed.dev/assets/browser-demo/index.html) |
 | C# / .NET | `dotnet add package FullBleed.DotNet --version 0.1.6` | [C# quickstart and designed invoice](https://docs.fullbleed.dev/getting-started/dotnet/) |
 
-The Node.js quickstart uses package 0.4.1 with engine 2.5.22. The downloadable
-browser starter retains package 0.3.2 with engine 2.5.11. Both generate ordinary
-PDFs and previews. Import
+The Node.js quickstart and the JavaScript, React, Vue, and Next.js starters use
+package 0.4.1 with engine 2.5.22. They generate ordinary PDFs and previews. Import
 `fullbleed` in Node or `fullbleed/browser` in a web app. Node applications can use
 a [bounded render queue](https://docs.fullbleed.dev/guides/node-render-queue/)
 and optional process isolation.
-FullBleed.DotNet 0.1.6 also uses engine 2.5.11. Its managed library targets .NET 8 and works with .NET 8, 9, and 10 applications, with native rendering, compiled bindings, and previews. Its separate CLI adapter requires the Python CLI.
+FullBleed.DotNet 0.1.6 uses engine 2.5.11. Its managed library targets .NET 8 and works with .NET 8, 9, and 10 applications, with native rendering, compiled bindings, and previews. Its separate CLI adapter requires the Python CLI.
 The Python package provides the complete CLI, including compiled variable-data jobs and print profiles; the Rust guide covers the native API.
 
 ## Your first PDF
