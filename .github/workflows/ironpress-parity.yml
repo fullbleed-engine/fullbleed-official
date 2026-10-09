@@ -31,6 +31,8 @@ on:
       - tests/test_fullbleed_filtered_overflow.py
       - tools/smoke_border_image_slices.py
       - tests/test_fullbleed_border_image_slices.py
+      - tools/smoke_border_image_tiling.py
+      - tests/test_fullbleed_border_image_tiling.py
 
 permissions:
   contents: read
