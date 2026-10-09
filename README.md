@@ -27,8 +27,9 @@ Actual Fullbleed output. Open either preview for its PDF, or [explore the design
 | Browser JavaScript | `npm install --save-exact fullbleed@0.3.2` | [Browser SDK and runnable starter](https://docs.fullbleed.dev/guides/browser-pdf/) · [Live editor](https://docs.fullbleed.dev/assets/browser-demo/index.html) |
 | C# / .NET | `dotnet add package FullBleed.DotNet --version 0.1.6` | [C# quickstart and designed invoice](https://docs.fullbleed.dev/getting-started/dotnet/) |
 
-The Node.js quickstart uses package 0.4.0; the downloadable browser starter uses
-package 0.3.2. Both use engine 2.5.11 for ordinary PDFs and previews. Import
+The Node.js quickstart uses package 0.4.1 with engine 2.5.22. The downloadable
+browser starter retains package 0.3.2 with engine 2.5.11. Both generate ordinary
+PDFs and previews. Import
 `fullbleed` in Node or `fullbleed/browser` in a web app. Node applications can use
 a [bounded render queue](https://docs.fullbleed.dev/guides/node-render-queue/)
 and optional process isolation.
