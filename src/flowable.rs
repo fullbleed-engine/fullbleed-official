@@ -31203,7 +31203,12 @@ impl ContainerFlowable {
                     .collect()
             }
             BorderImageRepeatMode::Space => {
-                let count = (extent / natural).floor().max(1.0) as usize;
+                // Only complete tiles are retained. A region narrower than one
+                // natural tile stays empty instead of clipping a centered tile.
+                let count = (extent / natural).floor() as usize;
+                if count == 0 {
+                    return Vec::new();
+                }
                 let tile = Pt::from_f32(natural);
                 if count == 1 {
                     return vec![(start + (length - tile) * 0.5, tile)];
@@ -31607,19 +31612,22 @@ impl ContainerFlowable {
             // regions.  Scaling it from the entire destination center would make
             // the tile depend on the box size and collapse `space`/`repeat` into
             // only one or two giant copies.
-            let natural_width = if source_h[0] > Pt::ZERO {
+            // Zero source or destination edges cannot supply the center's scale.
+            // CSS Backgrounds 3 falls back to the opposite edge, then to the
+            // source dimension without scaling if neither edge supplies one.
+            let natural_width = if source_h[0] > Pt::ZERO && dest_h[0] > Pt::ZERO {
                 source_w[1] * (dest_h[0].to_f32() / source_h[0].to_f32())
-            } else if source_h[2] > Pt::ZERO {
+            } else if source_h[2] > Pt::ZERO && dest_h[2] > Pt::ZERO {
                 source_w[1] * (dest_h[2].to_f32() / source_h[2].to_f32())
             } else {
-                dest_w[1]
+                source_w[1]
             };
-            let natural_height = if source_w[0] > Pt::ZERO {
+            let natural_height = if source_w[0] > Pt::ZERO && dest_w[0] > Pt::ZERO {
                 source_h[1] * (dest_w[0].to_f32() / source_w[0].to_f32())
-            } else if source_w[2] > Pt::ZERO {
+            } else if source_w[2] > Pt::ZERO && dest_w[2] > Pt::ZERO {
                 source_h[1] * (dest_w[2].to_f32() / source_w[2].to_f32())
             } else {
-                dest_h[1]
+                source_h[1]
             };
             let x_tiles = Self::border_image_axis_tiles(
                 dest_x[1],
@@ -39413,6 +39421,28 @@ mod grid_and_transform_regression_tests {
     use super::*;
     use crate::canvas::Command;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn border_image_space_discards_partial_tiles_and_centers_complete_tiles() {
+        let tiles = |length: f32| {
+            ContainerFlowable::border_image_axis_tiles(
+                Pt::from_f32(20.0),
+                Pt::from_f32(length),
+                Pt::from_f32(10.0),
+                BorderImageRepeatMode::Space,
+            )
+        };
+        assert!(tiles(6.0).is_empty());
+        assert_eq!(tiles(10.0), vec![(Pt::from_f32(20.0), Pt::from_f32(10.0))]);
+        assert_eq!(tiles(16.0), vec![(Pt::from_f32(23.0), Pt::from_f32(10.0))]);
+        assert_eq!(
+            tiles(26.0),
+            vec![
+                (Pt::from_f32(22.0), Pt::from_f32(10.0)),
+                (Pt::from_f32(34.0), Pt::from_f32(10.0)),
+            ]
+        );
+    }
 
     #[test]
     fn fragmented_clip_path_uses_virtual_size_with_a_local_fragment_origin() {
