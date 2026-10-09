@@ -27,9 +27,11 @@ Actual Fullbleed output. Open either preview for its PDF, or [explore the design
 | Browser JavaScript | `npm install --save-exact fullbleed@0.3.2` | [Browser SDK and runnable starter](https://docs.fullbleed.dev/guides/browser-pdf/) · [Live editor](https://docs.fullbleed.dev/assets/browser-demo/index.html) |
 | C# / .NET | `dotnet add package FullBleed.DotNet --version 0.1.6` | [C# quickstart and designed invoice](https://docs.fullbleed.dev/getting-started/dotnet/) |
 
-JavaScript package 0.3.2 uses engine 2.5.11 and covers ordinary PDFs and previews
-in Node.js and browser workers. Import `fullbleed` in Node or `fullbleed/browser`
-in a web app. Node rendering also supports optional process isolation.
+The Node.js quickstart uses package 0.4.0; the downloadable browser starter uses
+package 0.3.2. Both use engine 2.5.11 for ordinary PDFs and previews. Import
+`fullbleed` in Node or `fullbleed/browser` in a web app. Node applications can use
+a [bounded render queue](https://docs.fullbleed.dev/guides/node-render-queue/)
+and optional process isolation.
 FullBleed.DotNet 0.1.6 also uses engine 2.5.11. Its managed library targets .NET 8 and works with .NET 8, 9, and 10 applications, with native rendering, compiled bindings, and previews. Its separate CLI adapter requires the Python CLI.
 The Python package provides the complete CLI, including compiled variable-data jobs and print profiles; the Rust guide covers the native API.
 
