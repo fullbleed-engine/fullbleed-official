@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.21"
+  FULLBLEED_CI_VERSION: "2.5.22"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -224,6 +224,17 @@ jobs:
 
       - name: Verify border-image space tiling and center scale fallback
         run: python -I tools/smoke_border_image_tiling.py --pdfium --out target/border-image-tiling
+
+      - name: Verify floated initials in direct, compiled, reflow, and preview output
+        run: python -I tools/smoke_floating_first_letter.py --out target/floating-first-letter
+
+      - name: Retain floated-initial PDFs and preview evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: floating-first-letter-${{ runner.os }}
+          path: target/floating-first-letter
+          if-no-files-found: warn
 
       - name: Retain border-image tiling PDFs and preview evidence
         if: always()

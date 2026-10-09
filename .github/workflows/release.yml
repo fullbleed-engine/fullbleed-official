@@ -146,6 +146,17 @@ jobs:
       - name: Verify independent font synthesis in installed release output
         run: python -I tools/smoke_font_synthesis.py --out target/font-synthesis
 
+      - name: Verify floated initials in installed release output
+        run: python -I tools/smoke_floating_first_letter.py --out target/floating-first-letter
+
+      - name: Retain floated-initial release PDFs and previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-floating-first-letter
+          path: target/floating-first-letter
+          if-no-files-found: warn
+
       - name: Verify filtered descendants preserve ancestor clipping and stacking
         run: python -I tools/smoke_filtered_overflow.py --pdfium --out target/filtered-overflow
 

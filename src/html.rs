@@ -2813,6 +2813,10 @@ fn node_to_flowables_in_scope(
                                     first_letter_style.as_ref().and_then(|pseudo_style| {
                                         let first_style = text_style_for_flow_text(pseudo_style);
                                         let material = pseudo_style.initial_letter.is_some()
+                                            || matches!(
+                                                pseudo_style.float_mode,
+                                                FloatMode::Left | FloatMode::Right
+                                            )
                                             || first_style != text_style
                                             || pseudo_style.background_color.is_some()
                                             || pseudo_style.text_transform != style.text_transform;
@@ -2926,6 +2930,40 @@ fn node_to_flowables_in_scope(
                                     background_opacity,
                                 )) = initial_letter
                                 {
+                                    let floating_first_letter = first_letter_style
+                                        .as_ref()
+                                        .filter(|pseudo| pseudo.initial_letter.is_none())
+                                        .and_then(|pseudo| {
+                                            let side = match pseudo.float_mode {
+                                                FloatMode::Left => FloatSide::Left,
+                                                FloatMode::Right => FloatSide::Right,
+                                                _ => return None,
+                                            };
+                                            let mut box_style = pseudo.clone();
+                                            box_style.display = DisplayMode::Block;
+                                            box_style.width = LengthSpec::MaxContent;
+                                            let glyph = Paragraph::new(first.clone())
+                                                .with_style(first_style.clone())
+                                                .with_font_registry(font_registry.clone())
+                                                .with_whitespace(true, true)
+                                                .with_intrinsic_first_letter_indent();
+                                            let contents = vec![LayoutItem::Block {
+                                                flowable: Box::new(CssLineBoxFlowable::new(
+                                                    Box::new(glyph),
+                                                )),
+                                                flex_grow: 0.0,
+                                                flex_shrink: 1.0,
+                                                width_spec: None,
+                                                order: 0,
+                                            }];
+                                            container_flowable_with_role_options(
+                                                contents,
+                                                &box_style,
+                                                None,
+                                                ContainerCompilationOptions::default(),
+                                            )
+                                            .map(|flowable| (flowable, side))
+                                        });
                                     paragraph = paragraph.with_first_letter(
                                         first,
                                         first_style,
@@ -2933,6 +2971,10 @@ fn node_to_flowables_in_scope(
                                         background,
                                         background_opacity,
                                     );
+                                    if let Some((flowable, side)) = floating_first_letter {
+                                        paragraph =
+                                            paragraph.with_floating_first_letter(flowable, side);
+                                    }
                                 }
                                 let items = vec![LayoutItem::Block {
                                     flowable: Box::new(

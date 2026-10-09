@@ -1,3 +1,27 @@
+# Fullbleed Release Notes - 2.5.22
+
+Floated `::first-letter` initials in plain-text blocks now reserve their full
+margin-box width for the lines beside them. Left and right drop caps keep
+their padding, borders, backgrounds, and indentation, and sit in their own
+line box instead of protruding above the paragraph's normal text baseline.
+
+Words that cannot fit beside the initial move below it. Paragraph splitting
+keeps the initial intact when the remaining page space is too short. Existing
+inline first-letter and `initial-letter` behavior is preserved.
+
+The installed-output gate covers 20 browser-checked cases across direct,
+compiled, and reflow PDFs, with independent text/geometry and decoration
+checks, native previews, and deterministic replay. The public 2.5.21 negative
+control fails the 18 float cases while both controls pass. No runtime
+dependency is added.
+
+This fixes the existing horizontal plain-text block path; it does not expand
+first-letter selection into arbitrary nested inline content or general float
+layout. It does not establish complete CSS parity or PDF standards conformance.
+See the [2.5.22 runbook](docs/release/2.5.22-runbook.md).
+
+---
+
 # Fullbleed Release Notes - 2.5.21
 
 Border images using `space` now leave a region empty when no complete tile
