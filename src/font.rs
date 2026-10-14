@@ -326,6 +326,7 @@ pub(crate) struct FontMetrics {
     pub(crate) weight_class: u16,
     pub(crate) bbox: (i16, i16, i16, i16),
     pub(crate) underline_metrics: Option<DecorationMetrics>,
+    native_underline_thickness: Option<i16>,
     pub(crate) strikeout_metrics: Option<DecorationMetrics>,
     pub(crate) missing_width: u16,
     native_missing_width: u16,
@@ -913,6 +914,17 @@ impl FontRegistry {
         Some((ascent, descent))
     }
 
+    pub(crate) fn underline_thickness(&self, name: &str, font_size: Pt) -> Option<Pt> {
+        let font = self.resolve(name)?;
+        let thickness = font.metrics.native_underline_thickness?;
+        (thickness > 0).then(|| {
+            font_size.mul_ratio(
+                i32::from(thickness),
+                i32::from(font.metrics.units_per_em.max(1)),
+            )
+        })
+    }
+
     /// OpenType vertical advance and horizontal-baseline origin for one glyph.
     ///
     /// `vmtx` stores the advance along the vertical inline axis and a top side
@@ -1320,6 +1332,7 @@ impl FontMetrics {
             position: scale_i16(metrics.position, scale),
             thickness: scale_i16(metrics.thickness, scale),
         });
+        let native_underline_thickness = face.underline_metrics().map(|metrics| metrics.thickness);
         let strikeout_metrics = face.strikeout_metrics().map(|metrics| DecorationMetrics {
             position: scale_i16(metrics.position, scale),
             thickness: scale_i16(metrics.thickness, scale),
@@ -1363,6 +1376,7 @@ impl FontMetrics {
                 weight_class: face.weight_class(),
                 bbox,
                 underline_metrics,
+                native_underline_thickness,
                 strikeout_metrics,
                 missing_width,
                 native_missing_width,

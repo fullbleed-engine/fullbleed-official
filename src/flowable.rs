@@ -3635,16 +3635,16 @@ mod text_baseline_tests {
     use super::{
         BoxShadowSpec, CalcLength, ContainerFlowable, FloatSide, Flowable,
         InlineBlockLayoutFlowable, OutlineLineStyle, Paragraph, Pt, ResolvedEdgeColors,
-        ResolvedEdgeStyles, ResolvedEdges, TabSizeSpec, TextAlign, TextStyle, VerticalAlign,
-        advance_to_next_tab_stop, browser_registered_text_paint_x,
+        ResolvedEdgeStyles, ResolvedEdges, TabSizeSpec, TextAlign, TextDecorationPaintPhase,
+        TextStyle, VerticalAlign, advance_to_next_tab_stop, browser_registered_text_paint_x,
         browser_synthetic_bold_outline_phase, browser_synthetic_bold_shader_paint,
         css_direct_text_prefers_nearest_baseline_snap,
         css_print_line_prefers_nearest_baseline_snap, draw_registered_text_run,
-        draw_text_decorations_before_glyphs, huge_pt, is_cjk_outline_character,
-        paragraph_break_allowed_between, resolve_font_stack, split_long_word_by_width,
-        tabbed_text_width, text_baseline_for_line, text_baseline_for_table_cell_line,
-        text_decoration_ink_skip_intervals, text_draw_y_for_line, text_inline_box_top_overflow,
-        truncate_text_with_ellipsis,
+        draw_text_decorations_before_glyphs, draw_text_decorations_for_phase, huge_pt,
+        is_cjk_outline_character, paragraph_break_allowed_between, resolve_font_stack,
+        split_long_word_by_width, tabbed_text_width, text_baseline_for_line,
+        text_baseline_for_table_cell_line, text_decoration_ink_skip_intervals,
+        text_draw_y_for_line, text_inline_box_top_overflow, truncate_text_with_ellipsis,
     };
     use crate::canvas::Command;
     use crate::font::FontRegistry;
@@ -4727,6 +4727,87 @@ mod text_baseline_tests {
     }
 
     #[test]
+    fn from_font_uses_preferred_underline_thickness_for_every_decoration() {
+        let mut registry = FontRegistry::new();
+        registry
+            .register_bytes(
+                include_bytes!("../python/fullbleed_assets/fonts/NotoSans-Regular.ttf").to_vec(),
+                Some("noto"),
+            )
+            .unwrap();
+        registry
+            .register_bytes(
+                include_bytes!("../python/fullbleed_assets/fonts/Inter-Variable.ttf").to_vec(),
+                Some("inter"),
+            )
+            .unwrap();
+        registry
+            .register_bytes(
+                include_bytes!("preview_fonts/FullbleedPreviewSans-Regular.ttf").to_vec(),
+                Some("no-preference"),
+            )
+            .unwrap();
+        for (font, size, snap, expected) in [
+            ("noto", 30.0, true, Pt::from_f32(1.5)),
+            ("noto", 30.0, false, Pt::from_f32(1.5)),
+            // Inter's 140/2048em metric must not first round to 68/1000em.
+            ("inter", 30.0, true, Pt::from_f32(30.0).mul_ratio(140, 2048)),
+            ("noto", 9.0, true, Pt::from_f32(0.75)),
+            ("no-preference", 30.0, true, Pt::from_f32(3.0)),
+            ("Helvetica", 30.0, true, Pt::from_f32(3.0)),
+        ] {
+            let mut style = TextStyle::default();
+            style.font_name = Arc::<str>::from("unregistered");
+            style.font_fallbacks = vec![Arc::<str>::from(font)];
+            style.font_size = Pt::from_f32(size);
+            style.css_pixel_snap_metrics = snap;
+            style.text_decoration = TextDecorationMode {
+                underline: true,
+                overline: true,
+                line_through: true,
+            };
+            style.text_decoration_thickness = TextDecorationThicknessMode::FromFont;
+            let mut canvas = Canvas::new(Size {
+                width: Pt::from_f32(200.0),
+                height: Pt::from_f32(100.0),
+            });
+            for phase in [
+                TextDecorationPaintPhase::BeforeGlyphs,
+                TextDecorationPaintPhase::AfterGlyphs,
+            ] {
+                draw_text_decorations_for_phase(
+                    &mut canvas,
+                    &style,
+                    Some(&registry),
+                    Pt::from_f32(5.0),
+                    Pt::from_f32(10.0),
+                    Pt::from_f32(100.0),
+                    None,
+                    phase,
+                );
+            }
+            let mut current_width = Pt::ZERO;
+            let widths: Vec<_> = canvas.finish().pages[0]
+                .commands
+                .iter()
+                .filter_map(|command| match command {
+                    Command::SetLineWidth(width) => {
+                        current_width = *width;
+                        None
+                    }
+                    Command::Stroke => Some(current_width),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                widths,
+                vec![expected; 3],
+                "font={font} size={size} snap={snap}"
+            );
+        }
+    }
+
+    #[test]
     fn auto_skip_ink_compiles_a_vector_clip_around_descenders() {
         let mut registry = FontRegistry::new();
         registry
@@ -5548,7 +5629,7 @@ fn draw_text_decorations_for_phase(
     }
     let baseline = y + style.font_size;
     let default_thickness = if style.css_pixel_snap_metrics {
-        // Blink's authored CSS decoration geometry uses a stable 0.1em
+        // Blink's automatic CSS decoration geometry uses a stable 0.1em
         // stroke/placement grid for these font-backed lines. The OpenType
         // `post` underline values are substantially thinner and closer to the
         // alphabetic baseline than the browser result.
@@ -5600,7 +5681,19 @@ fn draw_text_decorations_for_phase(
     if style.text_underline_position.is_under() {
         underline_y = baseline + style.font_size.mul_ratio(7, 25);
     }
-    if let Some(thickness) = explicit_text_decoration_thickness(style) {
+    let requested_thickness = match style.text_decoration_thickness {
+        crate::style::TextDecorationThicknessMode::FromFont => {
+            // CSS Text Decoration 4 uses the first available font's preferred
+            // underline thickness for all three line decorations. Keep native
+            // design units until scaling, rather than rounding to 1000 units.
+            font_registry.and_then(|registry| {
+                let (primary, _) = resolve_font_stack(Some(registry), style);
+                registry.underline_thickness(&primary, style.font_size)
+            })
+        }
+        _ => explicit_text_decoration_thickness(style),
+    };
+    if let Some(thickness) = requested_thickness {
         overline_thickness = thickness;
         line_through_thickness = thickness;
         underline_thickness = thickness;
