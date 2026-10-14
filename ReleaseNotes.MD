@@ -1,3 +1,27 @@
+# Fullbleed Release Notes - 2.5.23
+
+HTML text using `text-decoration-thickness: from-font` now draws underlines,
+overlines, and strike-throughs at the first available font's preferred
+underline thickness. Previously, authored HTML used the automatic thickness
+even when a registered font supplied a different value.
+
+The font metric is scaled from its native design units to avoid intermediate
+rounding. Fonts without a positive preferred thickness retain the automatic
+fallback. Automatic-thickness and explicit-length behavior is unchanged. The
+existing placement and minimum-width rules still apply to the selected stroke.
+
+The installed-output gate covers Noto Sans, Inter, an unavailable first family,
+small text, and a font without a preferred thickness. It checks direct,
+compiled, fixed-binding, and reflow PDFs, independent PDF stroke widths,
+native/finalized previews, explicit-length controls, and deterministic replay.
+No runtime dependency is added.
+
+This is a targeted HTML text-rendering correction. It does not establish
+complete CSS parity or PDF standards conformance. See the
+[2.5.23 runbook](docs/release/2.5.23-runbook.md).
+
+---
+
 # Fullbleed Release Notes - 2.5.22
 
 Floated `::first-letter` initials in plain-text blocks now reserve their full

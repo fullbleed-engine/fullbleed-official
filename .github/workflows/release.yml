@@ -146,6 +146,17 @@ jobs:
       - name: Verify independent font synthesis in installed release output
         run: python -I tools/smoke_font_synthesis.py --out target/font-synthesis
 
+      - name: Verify font-selected decoration thickness in installed release output
+        run: python -I tools/smoke_text_decoration_thickness.py --out target/text-decoration-thickness
+
+      - name: Retain text decoration release PDFs and previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-text-decoration-thickness
+          path: target/text-decoration-thickness
+          if-no-files-found: warn
+
       - name: Verify floated initials in installed release output
         run: python -I tools/smoke_floating_first_letter.py --out target/floating-first-letter
 
