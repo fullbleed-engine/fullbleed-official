@@ -1,0 +1,13 @@
+{
+  "number": "NS-1042",
+  "customer": "Maple & Finch",
+  "period": "September 2026",
+  "issued": "01 October 2026",
+  "due": "15 October 2026",
+  "paid": false,
+  "items": [
+    {"name": "Discovery & direction", "detail": "Stakeholder workshops and a clear creative brief.", "quantity": 12, "rate_cents": 15000, "progress": 100},
+    {"name": "Identity system", "detail": "Typography, color, and the pieces that bring it together.", "quantity": 24, "rate_cents": 15000, "progress": 100},
+    {"name": "Digital experience", "detail": "A considered home for a growing brand.", "quantity": 18, "rate_cents": 15000, "progress": 75}
+  ]
+}

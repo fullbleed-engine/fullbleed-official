@@ -4039,6 +4039,12 @@
       "result_schema": "fullbleed.agent_contract.v1"
     },
     {
+      "code": "from fullbleed.ui import Document, Paragraph, Strong, Stack\ndef Line(label, amount):\n    return Paragraph(Strong(label), ': ', amount)\n@Document(title='Invoice', styles={'@page': {'size': 'A4', 'margin': '18mm'}})\ndef Invoice():\n    return Stack(Line('Design', '$120'), Line('Review', '$40'))\npdf = Invoice().render_pdf(fullbleed.PdfEngine())",
+      "id": "component_authoring_python",
+      "intent": "Compose a document from reusable Python functions, escaped data and ordered child collections.",
+      "interface": "python"
+    },
+    {
       "code": "engine = fullbleed.PdfEngine()\ncompiled = engine.compile_pdf(template_html, css)\ncompiled.render_pdf_bindings_to_file(bindings, 'out/vdp.pdf')",
       "id": "compiled_fixed_bindings_python",
       "intent": "Compile once and render distinct fixed-geometry records.",
@@ -4208,7 +4214,7 @@
     "license": "MIT",
     "name": "Fullbleed PDF Engine",
     "python_package": "fullbleed",
-    "version": "2.5.24"
+    "version": "2.5.25"
   },
   "profiles": {
     "pdf": {

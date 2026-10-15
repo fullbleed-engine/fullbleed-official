@@ -17,6 +17,38 @@ Build invoices, reports, statements, and variable-data print jobs with a determi
 
 Actual Fullbleed output. Open either preview for its PDF, or [explore the designed examples with HTML/CSS, data, and font setup](https://docs.fullbleed.dev/examples/).
 
+## Compose documents in Python
+
+Build reusable function components with props, nested children, lists and
+conditional content. Author with named elements and Python style mappings:
+
+```python
+from pathlib import Path
+import fullbleed
+from fullbleed.ui import Document, Heading, Paragraph, Stack, Strong, component
+
+@component
+def Line(label, amount):
+    return Paragraph(Strong(label), ": ", amount)
+
+@Document(title="Invoice", styles={"@page": {"size": "A4", "margin": "18mm"}})
+def Invoice(customer):
+    return Stack(
+        Heading("Invoice for ", customer, level=1),
+        Line("Design", "$120.00"),
+        Line("Review", "$40.00"),
+        gap="12pt",
+    )
+
+Path("invoice.pdf").write_bytes(Invoice("Maple & Finch").render_pdf(fullbleed.PdfEngine()))
+```
+
+This complete workflow is available in 2.5.25. Text is escaped and components
+compile to the same HTML/CSS print engine. Follow the
+[component authoring guide](docs/component-authoring.md) or run the
+[designed component invoice](examples/components) with explicit fonts, reusable
+rows, paid/unpaid states and PNG previews.
+
 ## Choose your language
 
 | Language | Install | Start building |
@@ -24,11 +56,11 @@ Actual Fullbleed output. Open either preview for its PDF, or [explore the design
 | Python | `python -m pip install fullbleed` | [Python quickstart](https://docs.fullbleed.dev/getting-started/quickstart/) |
 | Rust | `cargo add fullbleed` | [Native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/) |
 | Node.js / TypeScript | `npm install fullbleed` | [Node quickstart](https://docs.fullbleed.dev/getting-started/node/) · [Next.js PDF download](https://docs.fullbleed.dev/guides/nextjs-pdf/) |
-| Browser JavaScript | `npm install --save-exact fullbleed@0.4.1` | [Browser SDK and runnable starter](https://docs.fullbleed.dev/guides/browser-pdf/) · [Live editor](https://docs.fullbleed.dev/assets/browser-demo/index.html) |
+| Browser JavaScript | `npm install --save-exact fullbleed@0.5.1` | [Browser SDK and runnable starter](https://docs.fullbleed.dev/guides/browser-pdf/) · [Live editor](https://docs.fullbleed.dev/assets/browser-demo/index.html) |
 | C# / .NET | `dotnet add package FullBleed.DotNet --version 0.1.8` | [C# quickstart and designed invoice](https://docs.fullbleed.dev/getting-started/dotnet/) |
 
 The Node.js quickstart and the JavaScript, React, Vue, and Next.js starters use
-package 0.4.1 with engine 2.5.22. They generate ordinary PDFs and previews. Import
+package 0.5.1 with engine 2.5.24. They generate ordinary PDFs and previews. Import
 `fullbleed` in Node or `fullbleed/browser` in a web app. Node applications can use
 a [bounded render queue](https://docs.fullbleed.dev/guides/node-render-queue/)
 and optional process isolation.
@@ -311,7 +343,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-2.5.24-cp310-abi3-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-2.5.25-cp310-abi3-win_amd64.whl
 ```
 
 From a source checkout with Rust installed, no Python build package is needed:

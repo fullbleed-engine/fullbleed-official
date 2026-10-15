@@ -2,7 +2,7 @@
 <!-- GENERATED FILE: DO NOT EDIT. Run `python tools/generate_agent_contract.py`. -->
 # CLI and Agent JSON Contract
 
-Generated from the installed Fullbleed **2.5.24** runtime. The canonical machine artifact is `fullbleed-agent-contract.json`.
+Generated from the installed Fullbleed **2.5.25** runtime. The canonical machine artifact is `fullbleed-agent-contract.json`.
 
 ## Authority and invocation
 
@@ -1069,6 +1069,20 @@ Read the complete installed machine contract.
 
 ```text
 fullbleed agent-contract --format json
+```
+
+### component_authoring_python
+
+Compose a document from reusable Python functions, escaped data and ordered child collections.
+
+```python
+from fullbleed.ui import Document, Paragraph, Strong, Stack
+def Line(label, amount):
+    return Paragraph(Strong(label), ': ', amount)
+@Document(title='Invoice', styles={'@page': {'size': 'A4', 'margin': '18mm'}})
+def Invoice():
+    return Stack(Line('Design', '$120'), Line('Review', '$40'))
+pdf = Invoice().render_pdf(fullbleed.PdfEngine())
 ```
 
 ### compiled_fixed_bindings_python

@@ -1,5 +1,8 @@
 # `fullbleed.ui` Accessibility Authoring
 
+For general document creation, start with [Build PDFs with Python components](component-authoring.md).
+It covers named elements, props, children, rich text, Python styles and direct rendering.
+
 This guide covers the component-first HTML authoring helpers in `fullbleed.ui`,
 with a focus on `fullbleed.ui.accessibility` for remediation-oriented document
 workflows.

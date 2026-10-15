@@ -1,12 +1,27 @@
 from __future__ import annotations
 
 import json
+import re
+from collections.abc import Iterable, Mapping, Set
 from dataclasses import dataclass, field
+from functools import wraps
 from html import escape
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, ParamSpec, TypeVar
 
 from .style import style_to_css
+from .stylesheet import StyleSheet, component_styles
+
+
+_P = ParamSpec("_P")
+_F = TypeVar("_F", bound=Callable[..., Any])
+_TAG_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_.:-]*\Z")
+_ATTR_NAME = re.compile(r"[A-Za-z_:][A-Za-z0-9_.:-]*\Z")
+_BOOLEAN_ATTRIBUTES = frozenset(
+    "allowfullscreen async autofocus autoplay checked controls default defer disabled "
+    "formnovalidate hidden inert ismap itemscope loop multiple muted nomodule novalidate "
+    "open playsinline readonly required reversed selected".split()
+)
 
 
 _HTML_VOID_ELEMENTS = frozenset(
@@ -72,6 +87,15 @@ class Element:
     props: dict[str, Any] = field(default_factory=dict)
     children: list[Any] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        _validate_tag(self.tag)
+        # Consume generators once, so repeated renders and validation see the
+        # same tree. Copy nested child collections instead of retaining them.
+        self.children = _flatten_children(self.children)
+        self.props = dict(self.props)
+        if self.tag.casefold() in _HTML_VOID_ELEMENTS and self.children:
+            raise ValueError(f"Void element {self.tag!r} cannot have children")
+
     def to_html(self, *, a11y_mode: str | None = None) -> str:
         return to_html(self, a11y_mode=a11y_mode)
 
@@ -88,9 +112,33 @@ class DocumentArtifact:
     css_source_path: str | None = None
     css_media: str | None = "all"
     css_required: bool = False
+    styles: Any = None
+    include_component_styles: bool = True
 
     def to_html(self, *, a11y_mode: str | None = None) -> str:
         return compile_document(self, a11y_mode=a11y_mode)
+
+    def to_css(self, *overrides: Any) -> str:
+        """Compile layout defaults, document styles and final overrides in order."""
+        return StyleSheet(
+            component_styles() if self.include_component_styles else None,
+            self.styles,
+            *overrides,
+        ).to_css()
+
+    def render_pdf(self, engine: Any, *, styles: Any = None, a11y_mode: str | None = None) -> bytes:
+        """Render through an explicit engine with its fonts, assets and options.
+
+        Page geometry belongs in ``styles`` (for example an ``@page`` rule),
+        or in the engine configuration. No CSS href is fetched implicitly.
+        """
+        return engine.render_pdf(self.to_html(a11y_mode=a11y_mode), self.to_css(styles))
+
+    def render_image_pages(
+        self, engine: Any, *, dpi: int = 150, styles: Any = None, a11y_mode: str | None = None,
+    ) -> list[bytes]:
+        """Render PNG previews from exactly the same component and style path."""
+        return engine.render_image_pages(self.to_html(a11y_mode=a11y_mode), self.to_css(styles), dpi=dpi)
 
     def document_metadata(self) -> dict[str, Any]:
         return {
@@ -168,11 +216,12 @@ class DocumentArtifact:
 
         if css is None:
             source_path = _normalize_css_href(self.css_source_path)
-            if not source_path:
-                raise ValueError(
-                    "emit_css(css=None) requires document_css_source_path metadata to read source CSS."
-                )
-            css_text = Path(source_path).read_text(encoding=encoding)
+            if self.styles is not None:
+                css_text = self.to_css()
+            elif source_path:
+                css_text = Path(source_path).read_text(encoding=encoding)
+            else:
+                css_text = self.to_css()
         else:
             css_text = str(css)
 
@@ -221,27 +270,58 @@ class DocumentArtifact:
         }
 
 
-def component(fn: Callable) -> Callable:
+def component(fn: _F) -> _F:
     """Marker decorator for function components."""
     fn.__fullbleed_component__ = True
     return fn
 
 
-def el(tag: str, *children: Any, **props: Any) -> Element:
+def _validate_tag(tag: str) -> None:
+    if not isinstance(tag, str) or not _TAG_NAME.fullmatch(tag):
+        raise ValueError(f"Invalid HTML tag name: {tag!r}")
+
+
+def _flatten_children(children: Iterable[Any]) -> list[Any]:
     flat: list[Any] = []
-    for child in children:
-        if child is None:
-            continue
-        if isinstance(child, (list, tuple)):
-            flat.extend(x for x in child if x is not None)
+    active: set[int] = set()
+
+    def visit(child: Any) -> None:
+        if child is None or isinstance(child, bool):
+            return
+        if isinstance(child, (Mapping, Set, bytes, bytearray)) or callable(child):
+            raise TypeError(
+                f"Unsupported component child: {type(child).__name__}. "
+                "Call components and format data explicitly; use ordered children."
+            )
+        if isinstance(child, Iterable) and not isinstance(child, (str, Element)):
+            identity = id(child)
+            if identity in active:
+                raise ValueError("Cyclic component children")
+            active.add(identity)
+            try:
+                for item in child:
+                    visit(item)
+            finally:
+                active.remove(identity)
         else:
             flat.append(child)
-    return Element(tag=tag, props=props, children=flat)
+
+    visit(children)
+    return flat
+
+
+def el(tag: str, *children: Any, **props: Any) -> Element:
+    """Build an element, snapshotting ordered children and escaping text on emission."""
+    return Element(tag=tag, props=props, children=list(children))
 
 
 def _normalize_attr_name(name: str) -> str:
-    if name == "class_name":
+    if not isinstance(name, str):
+        raise ValueError(f"Invalid HTML attribute name: {name!r}")
+    if name in {"class_name", "class_"}:
         return "class"
+    if name == "for_":
+        return "for"
     if name.startswith("data_fb_"):
         return "data-fb-" + name[len("data_fb_") :].replace("_", "-")
     return name.replace("_", "-")
@@ -250,11 +330,21 @@ def _normalize_attr_name(name: str) -> str:
 def _render_attrs(props: dict[str, Any]) -> str:
     parts: list[str] = []
     for key, value in props.items():
-        if value is None or value is False:
+        if value is None:
             continue
         attr = _normalize_attr_name(key)
-        if value is True:
-            parts.append(attr)
+        if not _ATTR_NAME.fullmatch(attr):
+            raise ValueError(f"Invalid HTML attribute name: {key!r}")
+        if attr == "style":
+            rendered = _render_attr_value(attr, value)
+            if rendered:
+                parts.append(f'{attr}="{escape(rendered, quote=True)}"')
+        elif isinstance(value, bool):
+            if attr.casefold() in _BOOLEAN_ATTRIBUTES:
+                if value:
+                    parts.append(attr)
+            else:
+                parts.append(f'{attr}="{str(value).lower()}"')
         else:
             rendered = _render_attr_value(attr, value)
             if rendered is None:
@@ -271,15 +361,28 @@ def _render_attr_value(attr: str, value: Any) -> str | None:
 
 
 def render_node(node: Any) -> str:
-    if node is None:
-        return ""
-    if isinstance(node, Element):
-        attrs = _render_attrs(node.props)
-        if node.tag.casefold() in _HTML_VOID_ELEMENTS:
-            return f"<{node.tag}{attrs}>"
-        children_html = "".join(render_node(child) for child in node.children)
-        return f"<{node.tag}{attrs}>{children_html}</{node.tag}>"
-    return escape(str(node))
+    active: set[int] = set()
+
+    def render(item: Any) -> str:
+        if isinstance(item, Element):
+            _validate_tag(item.tag)
+            identity = id(item)
+            if identity in active:
+                raise ValueError("Cyclic component element tree")
+            active.add(identity)
+            try:
+                attrs = _render_attrs(item.props)
+                children = _flatten_children(item.children)
+                if item.tag.casefold() in _HTML_VOID_ELEMENTS:
+                    if children:
+                        raise ValueError(f"Void element {item.tag!r} cannot have children")
+                    return f"<{item.tag}{attrs}>"
+                return f"<{item.tag}{attrs}>" + "".join(render(child) for child in children) + f"</{item.tag}>"
+            finally:
+                active.remove(identity)
+        return escape(str(item))
+
+    return "".join(render(item) for item in _flatten_children([node]))
 
 
 def Document(
@@ -293,15 +396,18 @@ def Document(
     css_source_path: str | None = None,
     css_media: str | None = "all",
     css_required: bool = False,
-) -> Callable[[Callable[..., Any]], Callable[..., DocumentArtifact]]:
+    styles: Any = None,
+    include_component_styles: bool = True,
+) -> Callable[[Callable[_P, Any]], Callable[_P, DocumentArtifact]]:
     """Wrap an app component into a document artifact.
 
     Note:
     - `page`/`margin` here are document metadata and authoring hints.
     - Actual engine page geometry is configured in `create_engine()` in report.py.
     """
-    def decorator(fn: Callable[..., Any]) -> Callable[..., DocumentArtifact]:
-        def wrapped(*args: Any, **kwargs: Any) -> DocumentArtifact:
+    def decorator(fn: Callable[_P, Any]) -> Callable[_P, DocumentArtifact]:
+        @wraps(fn)
+        def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> DocumentArtifact:
             tree = fn(*args, **kwargs)
             root_class = "fb-document-root report-root"
             if bootstrap:
@@ -324,9 +430,10 @@ def Document(
                 css_source_path=css_source_path,
                 css_media=css_media,
                 css_required=css_required,
+                styles=styles,
+                include_component_styles=include_component_styles,
             )
 
-        wrapped.__name__ = fn.__name__
         return wrapped
 
     return decorator
@@ -374,10 +481,9 @@ def compile_document(artifact: DocumentArtifact, *, a11y_mode: str | None = None
 def to_html(node_or_document: Any, *, a11y_mode: str | None = None) -> str:
     if isinstance(node_or_document, DocumentArtifact):
         return compile_document(node_or_document, a11y_mode=a11y_mode)
-    _validate_a11y_if_requested(node_or_document, a11y_mode)
-    if isinstance(node_or_document, Element):
-        return render_node(node_or_document)
-    return render_node(node_or_document)
+    nodes = node_or_document if isinstance(node_or_document, Element) else _flatten_children([node_or_document])
+    _validate_a11y_if_requested(nodes, a11y_mode)
+    return render_node(nodes)
 
 
 def _mount_to_artifact(

@@ -185,6 +185,20 @@ EXAMPLES = [
         "result_schema": AGENT_CONTRACT_SCHEMA,
     },
     {
+        "id": "component_authoring_python",
+        "intent": "Compose a document from reusable Python functions, escaped data and ordered child collections.",
+        "interface": "python",
+        "code": (
+            "from fullbleed.ui import Document, Paragraph, Strong, Stack\n"
+            "def Line(label, amount):\n"
+            "    return Paragraph(Strong(label), ': ', amount)\n"
+            "@Document(title='Invoice', styles={'@page': {'size': 'A4', 'margin': '18mm'}})\n"
+            "def Invoice():\n"
+            "    return Stack(Line('Design', '$120'), Line('Review', '$40'))\n"
+            "pdf = Invoice().render_pdf(fullbleed.PdfEngine())"
+        ),
+    },
+    {
         "id": "compiled_fixed_bindings_python",
         "intent": "Compile once and render distinct fixed-geometry records.",
         "interface": "python",

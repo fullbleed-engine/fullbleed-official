@@ -110,7 +110,7 @@ def _clone_element(node: Element, **patch_props: Any) -> Element:
 
 
 def _text_content(node: Any) -> str:
-    if node is None:
+    if node is None or isinstance(node, bool):
         return ""
     if isinstance(node, str):
         return node
@@ -165,29 +165,38 @@ def _diagnostic(code: str, severity: str, message: str, path: str, **extra: Any)
 
 
 def _walk_elements(node_or_document: Any) -> tuple[list[tuple[Element, str]], dict[str, Any]]:
+    from .core import _flatten_children
+
     meta: dict[str, Any] = {"document_title": None}
     root: Any = node_or_document
     if isinstance(node_or_document, DocumentArtifact):
         meta["document_title"] = node_or_document.title
         root = node_or_document.root
     nodes: list[tuple[Element, str]] = []
+    active: set[int] = set()
 
     def visit(node: Any, path: str) -> None:
         if isinstance(node, Element):
+            if id(node) in active:
+                raise ValueError("Cyclic component element tree")
+            active.add(id(node))
             nodes.append((node, path))
             idx = 0
-            for child in node.children:
-                if isinstance(child, Element):
-                    idx += 1
-                    visit(child, f"{path}/{_normalize_tag(child.tag)}[{idx}]")
+            try:
+                for child in _flatten_children(node.children):
+                    if isinstance(child, Element):
+                        idx += 1
+                        visit(child, f"{path}/{_normalize_tag(child.tag)}[{idx}]")
+            finally:
+                active.remove(id(node))
         elif isinstance(node, (list, tuple)):
             for item in node:
                 visit(item, path)
 
     if isinstance(root, Element):
         visit(root, f"/{_normalize_tag(root.tag)}[1]")
-    elif isinstance(root, (list, tuple)):
-        visit(root, "/fragment")
+    else:
+        visit(_flatten_children([root]), "/fragment")
     return nodes, meta
 
 
@@ -618,15 +627,15 @@ def Region(
 @component
 def Heading(
     content: Any,
-    *,
+    *children: Any,
     level: int = 2,
     class_name: str | None = None,
     **props: Any,
 ) -> object:
-    if level < 1 or level > 6:
+    if isinstance(level, bool) or not isinstance(level, int) or level < 1 or level > 6:
         raise ValueError("Heading level must be between 1 and 6")
     _apply_class(props, "ui-heading", class_name)
-    return el(f"h{level}", content, **props)
+    return el(f"h{level}", content, *children, **props)
 
 
 @component
