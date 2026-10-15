@@ -1,3 +1,31 @@
+# Fullbleed Release Notes - 2.5.25
+
+Build complete PDF documents with React-inspired Python functions, props,
+children and conditionals. Named text and document elements support rich
+children. `StyleSheet` composes Python style mappings, while document artifacts
+render PDFs and PNGs through an explicitly configured engine. The new rendering
+path supplies overridable layout defaults for standalone rows, stacks and grids.
+
+Nested lists and ordered generators become real children instead of printed
+Python representations. Boolean children act as conditional placeholders; ARIA
+and data boolean attributes retain explicit string values. Invalid HTML names,
+cycles and content on void elements fail clearly. Inline style composition
+preserves quoted values, data URLs and nested CSS blocks. Decorated functions
+retain their signatures and documentation.
+
+The component guide and designed invoice demonstrate the workflow without
+authored HTML. Installed-package checks cover empty, paid, unpaid, escaped,
+credit and long-table data, plus layout geometry, glyphs, previews and repeat
+rendering. The explicit HTML/CSS API and Rust renderer remain unchanged. No
+runtime dependency is added. Node, Rust and .NET component ports are not part of
+this release.
+
+See the [component guide](docs/component-authoring.md) and
+[2.5.25 runbook](docs/release/2.5.25-runbook.md). Structural authoring validation
+does not establish PDF accessibility conformance.
+
+---
+
 # Fullbleed Release Notes - 2.5.24
 
 Scripts and style elements are now hidden by default in HTML output, including

@@ -48,6 +48,10 @@ def main() -> None:
     empty = deepcopy(original)
     empty["items"] = []
     variants.append(("empty", empty, ["$0.00"], ["False"]))
+    credit = deepcopy(original)
+    credit["items"] = [{"name": "Credit", "detail": "A prior payment applied to this invoice.",
+                        "quantity": 1, "rate_cents": -150, "progress": 100}]
+    variants.append(("credit", credit, ["-$1.50"], ["-$2.50"]))
     long = deepcopy(original)
     long["items"] = [{**original["items"][i % 3], "name": f"Deliverable {i:03d}",
                       "detail": "Carefully scoped work, reviewed together and delivered with supporting notes."} for i in range(1, 61)]

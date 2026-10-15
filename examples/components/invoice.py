@@ -20,7 +20,9 @@ ROOT = Path(__file__).resolve().parent
 
 
 def money(cents: int) -> str:
-    return f"${cents // 100:,}.{cents % 100:02d}"
+    sign = "-" if cents < 0 else ""
+    value = abs(cents)
+    return f"{sign}${value // 100:,}.{value % 100:02d}"
 
 
 @component

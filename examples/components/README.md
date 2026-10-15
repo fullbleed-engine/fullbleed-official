@@ -19,6 +19,6 @@ from the installed package. All business data is fictional.
 Set `paid` to true, add rows, or override the components. See the
 [component guide](../../docs/component-authoring.md) for composition and styles.
 The installed-package check in `tools/smoke_component_authoring.py` exercises
-default, escaped, paid, empty and long-table inputs plus standalone layouts.
+default, escaped, paid, empty, credit and long-table inputs plus standalone layouts.
 It checks PDF text, repeated bytes, missing glyphs, preview counts and basic
 geometry. Structural validation does not establish PDF accessibility conformance.
