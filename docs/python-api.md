@@ -13,6 +13,10 @@ a probe document.
 
 ## `fullbleed.ui` (component-first authoring)
 
+Start with [Build PDFs with Python components](component-authoring.md) for named
+elements, rich text, functions, Python styles and direct PDF/PNG rendering. The
+[designed invoice](../examples/components/README.md) needs no authored HTML.
+
 Secondary import surface for component/document authoring:
 
 ```python

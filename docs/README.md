@@ -19,6 +19,7 @@ These docs target the current repository source layout. For the published releas
 - `docs/performance-pass-2026-08-04.md`: subset/linker, fixed-copy, and distinct variable-data
   benchmark results and validation
 - `docs/python-api.md`: Python bindings, classes, methods, and usage patterns
+- `docs/component-authoring.md`: React-inspired Python functions, named elements, reusable styles, and document rendering
 - `docs/ui-accessibility.md`: `fullbleed.ui` authoring, accessibility primitives, validation, signatures
 - `docs/cli.md`: command reference, JSON/machine mode, reproducibility and validation flows
 - `docs/agent-discovery.md`: maintained package, Skill, MCP Registry, and ecosystem distribution strategy

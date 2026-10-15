@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from .core import component, el
-from .style import merge_style_attr_values
+from .core import Element, component, el
+from .style import merge_style_attr_values, style
 
 # Scaffold primitives intentionally restrict `tag=` overrides to the engine-safe
 # HTML subset implemented in `src/html.rs`.
@@ -151,56 +151,125 @@ def _require_tag(tag: str, *, allowed: set[str], primitive: str) -> str:
 
 
 @component
-def Text(content: Any, *, tag: str = "span", class_name: str | None = None, **props: Any) -> object:
+def Text(content: Any, *children: Any, tag: str = "span", class_name: str | None = None, **props: Any) -> Element:
     tag = _require_tag(tag, allowed=ENGINE_SAFE_TEXT_TAGS, primitive="Text")
     _apply_class(props, None, class_name)
-    return el(tag, content, **props)
+    return el(tag, content, *children, **props)
 
 
 @component
-def Box(*children: Any, tag: str = "div", class_name: str | None = None, **props: Any) -> object:
+def Paragraph(*children: Any, **props: Any) -> Element:
+    return el("p", children, **props)
+
+
+@component
+def Strong(*children: Any, **props: Any) -> Element:
+    return el("strong", children, **props)
+
+
+@component
+def Emphasis(*children: Any, **props: Any) -> Element:
+    return el("em", children, **props)
+
+
+@component
+def Link(*children: Any, href: str, **props: Any) -> Element:
+    return el("a", children, href=href, **props)
+
+
+@component
+def Image(*, src: str, alt: str, **props: Any) -> Element:
+    return el("img", src=src, alt=alt, **props)
+
+
+@component
+def Header(*children: Any, **props: Any) -> Element:
+    return el("header", children, **props)
+
+
+@component
+def Footer(*children: Any, **props: Any) -> Element:
+    return el("footer", children, **props)
+
+
+@component
+def LineBreak(**props: Any) -> Element:
+    return el("br", **props)
+
+
+@component
+def Fragment(*children: Any) -> list[Any]:
+    from .core import _flatten_children
+    return _flatten_children(children)
+
+
+def _layout_style(props: dict[str, Any], **defaults: Any) -> None:
+    props["style"] = style(defaults, props.get("style"))
+
+
+@component
+def Box(*children: Any, tag: str = "div", class_name: str | None = None, **props: Any) -> Element:
     tag = _require_tag(tag, allowed=ENGINE_SAFE_CONTAINER_TAGS, primitive="Box")
     _apply_class(props, "ui-box", class_name)
     return el(tag, list(children), **props)
 
 
 @component
-def Stack(*children: Any, tag: str = "div", class_name: str | None = None, **props: Any) -> object:
+def Stack(*children: Any, tag: str = "div", class_name: str | None = None,
+          gap: str | None = None, align: str | None = None, **props: Any) -> Element:
     tag = _require_tag(tag, allowed=ENGINE_SAFE_CONTAINER_TAGS, primitive="Stack")
     _apply_class(props, "ui-stack", class_name)
+    if gap is not None or align is not None:
+        _layout_style(props, display="flex", flex_direction="column", gap=gap, align_items=align)
     return el(tag, list(children), **props)
 
 
 @component
-def Row(*children: Any, tag: str = "div", class_name: str | None = None, **props: Any) -> object:
+def Row(*children: Any, tag: str = "div", class_name: str | None = None,
+        gap: str | None = None, align: str | None = None, justify: str | None = None,
+        wrap: bool | None = None, **props: Any) -> Element:
     tag = _require_tag(tag, allowed=ENGINE_SAFE_CONTAINER_TAGS, primitive="Row")
     _apply_class(props, "ui-row", class_name)
+    if wrap is not None and not isinstance(wrap, bool):
+        raise TypeError("Row wrap must be a boolean")
+    if any(value is not None for value in (gap, align, justify, wrap)):
+        _layout_style(props, display="flex", gap=gap, align_items=align, justify_content=justify,
+                      flex_wrap=None if wrap is None else ("wrap" if wrap else "nowrap"))
     return el(tag, list(children), **props)
 
 
 @component
-def LayoutGrid(*children: Any, tag: str = "div", class_name: str | None = None, **props: Any) -> object:
+def LayoutGrid(*children: Any, tag: str = "div", class_name: str | None = None,
+               columns: int | str | None = None, gap: str | None = None, **props: Any) -> Element:
     tag = _require_tag(tag, allowed=ENGINE_SAFE_CONTAINER_TAGS, primitive="LayoutGrid")
     _apply_class(props, "ui-layout-grid", class_name)
+    if columns is not None or gap is not None:
+        if columns is not None and not isinstance(columns, (int, str)):
+            raise TypeError("LayoutGrid columns must be a positive integer or CSS track string")
+        if isinstance(columns, bool) or (isinstance(columns, int) and columns < 1):
+            raise ValueError("LayoutGrid columns must be positive")
+        if isinstance(columns, int):
+            columns = " ".join(["1fr"] * columns)
+        _layout_style(props, display="grid", grid_template_columns=columns, gap=gap)
     return el(tag, list(children), **props)
 
 
 @component
-def Inline(*children: Any, tag: str = "span", class_name: str | None = None, **props: Any) -> object:
+def Inline(*children: Any, tag: str = "span", class_name: str | None = None, **props: Any) -> Element:
     tag = _require_tag(tag, allowed=ENGINE_SAFE_INLINE_TAGS, primitive="Inline")
     _apply_class(props, "ui-inline", class_name)
     return el(tag, list(children), **props)
 
 
 @component
-def Center(*children: Any, tag: str = "div", class_name: str | None = None, **props: Any) -> object:
+def Center(*children: Any, tag: str = "div", class_name: str | None = None, **props: Any) -> Element:
     tag = _require_tag(tag, allowed=ENGINE_SAFE_CONTAINER_TAGS, primitive="Center")
     _apply_class(props, "ui-center", class_name)
     return el(tag, list(children), **props)
 
 
 @component
-def Card(*children: Any, tag: str = "section", class_name: str | None = None, **props: Any) -> object:
+def Card(*children: Any, tag: str = "section", class_name: str | None = None, **props: Any) -> Element:
     tag = _require_tag(tag, allowed=ENGINE_SAFE_CONTAINER_TAGS, primitive="Card")
     _apply_class(props, "ui-card", class_name)
     return el(tag, list(children), **props)
@@ -213,7 +282,7 @@ def Spacer(
     inline: str | None = None,
     class_name: str | None = None,
     **props: Any,
-) -> object:
+) -> Element:
     _apply_class(props, "ui-spacer", class_name)
     _merge_style(props, f"height: {block};")
     if inline:
@@ -223,7 +292,7 @@ def Spacer(
 
 
 @component
-def Divider(*, tag: str = "hr", class_name: str | None = None, **props: Any) -> object:
+def Divider(*, tag: str = "hr", class_name: str | None = None, **props: Any) -> Element:
     tag = _require_tag(tag, allowed={"hr"}, primitive="Divider")
     _apply_class(props, "ui-divider", class_name)
     return el(tag, **props)
@@ -241,7 +310,7 @@ def SectionHeader(
     subtitle_tag: str = "p",
     kicker_tag: str = "p",
     **props: Any,
-) -> object:
+) -> Element:
     tag = _require_tag(tag, allowed=ENGINE_SAFE_SECTION_HEADER_TAGS, primitive="SectionHeader")
     title_tag = _require_tag(title_tag, allowed=ENGINE_SAFE_TITLE_TAGS, primitive="SectionHeader.title_tag")
     subtitle_tag = _require_tag(
@@ -265,7 +334,7 @@ def SectionHeader(
 
 
 @component
-def List(*items: Any, tag: str = "ul", class_name: str | None = None, **props: Any) -> object:
+def List(*items: Any, tag: str = "ul", class_name: str | None = None, **props: Any) -> Element:
     tag = _require_tag(tag, allowed=ENGINE_SAFE_LIST_TAGS, primitive="List")
     _apply_class(props, "ui-list", class_name)
     return el(tag, list(items), **props)
@@ -279,58 +348,58 @@ def ListItems(
     item_class: str | None = None,
     ordered: bool = False,
     **props: Any,
-) -> object:
+) -> Element:
     tag = "ol" if ordered else "ul"
     items = [ListItem(value, class_name=item_class) for value in values]
     return List(*items, tag=tag, class_name=class_name, **props)
 
 
 @component
-def ListItem(*children: Any, class_name: str | None = None, **props: Any) -> object:
+def ListItem(*children: Any, class_name: str | None = None, **props: Any) -> Element:
     _apply_class(props, "ui-list-item", class_name)
     return el("li", list(children), **props)
 
 
 @component
-def Table(*children: Any, class_name: str | None = None, **props: Any) -> object:
+def Table(*children: Any, class_name: str | None = None, **props: Any) -> Element:
     _apply_class(props, "ui-table", class_name)
     return el("table", list(children), **props)
 
 
 @component
-def THead(*rows: Any, class_name: str | None = None, **props: Any) -> object:
+def THead(*rows: Any, class_name: str | None = None, **props: Any) -> Element:
     _apply_class(props, "ui-thead", class_name)
     return el("thead", list(rows), **props)
 
 
 @component
-def TBody(*rows: Any, class_name: str | None = None, **props: Any) -> object:
+def TBody(*rows: Any, class_name: str | None = None, **props: Any) -> Element:
     _apply_class(props, "ui-tbody", class_name)
     return el("tbody", list(rows), **props)
 
 
 @component
-def Tr(*cells: Any, class_name: str | None = None, **props: Any) -> object:
+def Tr(*cells: Any, class_name: str | None = None, **props: Any) -> Element:
     _apply_class(props, "ui-tr", class_name)
     return el("tr", list(cells), **props)
 
 
 @component
-def Th(content: Any, *, class_name: str | None = None, scope: str | None = None, **props: Any) -> object:
+def Th(content: Any, *children: Any, class_name: str | None = None, scope: str | None = None, **props: Any) -> Element:
     if scope:
         props["scope"] = scope
     _apply_class(props, "ui-th", class_name)
-    return el("th", content, **props)
+    return el("th", content, *children, **props)
 
 
 @component
-def Td(content: Any, *, class_name: str | None = None, **props: Any) -> object:
+def Td(content: Any, *children: Any, class_name: str | None = None, **props: Any) -> Element:
     _apply_class(props, "ui-td", class_name)
-    return el("td", content, **props)
+    return el("td", content, *children, **props)
 
 
 @component
-def Badge(content: Any, *, tag: str = "span", class_name: str | None = None, **props: Any) -> object:
+def Badge(content: Any, *, tag: str = "span", class_name: str | None = None, **props: Any) -> Element:
     tag = _require_tag(tag, allowed=ENGINE_SAFE_BADGE_TAGS, primitive="Badge")
     _apply_class(props, "ui-badge", class_name)
     return el(tag, content, **props)
@@ -347,7 +416,7 @@ def KeyValueRow(
     label_tag: str = "span",
     value_tag: str = "span",
     **props: Any,
-) -> object:
+) -> Element:
     label_tag = _require_tag(label_tag, allowed=ENGINE_SAFE_VALUE_TAGS, primitive="KeyValueRow.label_tag")
     value_tag = _require_tag(value_tag, allowed=ENGINE_SAFE_VALUE_TAGS, primitive="KeyValueRow.value_tag")
     return Row(
@@ -369,7 +438,7 @@ def PriceRow(
     label_tag: str = "span",
     value_tag: str = "span",
     **props: Any,
-) -> object:
+) -> Element:
     label_tag = _require_tag(label_tag, allowed=ENGINE_SAFE_VALUE_TAGS, primitive="PriceRow.label_tag")
     value_tag = _require_tag(value_tag, allowed=ENGINE_SAFE_VALUE_TAGS, primitive="PriceRow.value_tag")
     return Row(
@@ -389,7 +458,7 @@ def IconLabel(
     icon_class: str | None = None,
     body_class: str | None = None,
     **props: Any,
-) -> object:
+) -> Element:
     return Row(
         Box(icon, class_name=_merge_classes("ui-icon", icon_class)),
         Box(body, class_name=_merge_classes("ui-label-body", body_class)),

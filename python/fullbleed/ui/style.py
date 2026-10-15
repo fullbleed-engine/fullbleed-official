@@ -46,9 +46,67 @@ def _coerce_style_value(prop: str, value: Any) -> str | None:
     return text
 
 
+def _declaration_chunks(fragment: str) -> Iterable[str]:
+    """Split declarations outside strings, comments and CSS component blocks.
+
+    Values remain authored CSS; this is a composition boundary scanner, not a
+    property validator. Semicolons in data URLs and quoted content are data.
+    """
+    chunk: list[str] = []
+    blocks: list[str] = []
+    quote: str | None = None
+    escaped = False
+    comment = False
+    i = 0
+    pairs = {"(": ")", "[": "]", "{": "}"}
+    while i < len(fragment):
+        char = fragment[i]
+        if comment:
+            if fragment.startswith("*/", i):
+                comment = False
+                i += 2
+            else:
+                i += 1
+            continue
+        if escaped:
+            chunk.append(char)
+            escaped = False
+        elif char == "\\":
+            chunk.append(char)
+            escaped = True
+        elif quote:
+            chunk.append(char)
+            if char == quote:
+                quote = None
+        elif fragment.startswith("/*", i):
+            chunk.append(" ")
+            comment = True
+            i += 2
+            continue
+        elif char in {'"', "'"}:
+            quote = char
+            chunk.append(char)
+        elif char in pairs:
+            blocks.append(pairs[char])
+            chunk.append(char)
+        elif blocks and char == blocks[-1]:
+            blocks.pop()
+            chunk.append(char)
+        elif char == ";" and not blocks:
+            yield "".join(chunk)
+            chunk.clear()
+        else:
+            chunk.append(char)
+        i += 1
+    if quote or blocks or comment or escaped:
+        _warn("Ignoring incomplete inline-style declaration (unclosed string, comment, block or escape)")
+    else:
+        yield "".join(chunk)
+
+
 def _parse_style_string(fragment: str) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
-    for part in str(fragment).split(";"):
+    for part in _declaration_chunks(str(fragment)):
         chunk = part.strip()
         if not chunk:
             continue
@@ -74,13 +132,14 @@ class Style:
     _props: dict[str, str] = field(default_factory=dict)
 
     def merge(self, *fragments: Any, **props: Any) -> "Style":
+        active: set[int] = set()
         for fragment in fragments:
-            self._merge_one(fragment)
+            self._merge_one(fragment, active)
         if props:
-            self._merge_one(props)
+            self._merge_one(props, active)
         return self
 
-    def _merge_one(self, fragment: Any) -> None:
+    def _merge_one(self, fragment: Any, active: set[int]) -> None:
         if fragment is None or fragment is False:
             return
         if isinstance(fragment, Style):
@@ -103,8 +162,17 @@ class Style:
                 self._set_prop(key, value)
             return
         if isinstance(fragment, Iterable) and not isinstance(fragment, (bytes, bytearray)):
-            for item in fragment:
-                self._merge_one(item)
+            if isinstance(fragment, (set, frozenset)):
+                raise TypeError("Style fragments must be ordered; sets are not supported")
+            identity = id(fragment)
+            if identity in active:
+                raise ValueError("Cyclic style fragments")
+            active.add(identity)
+            try:
+                for item in fragment:
+                    self._merge_one(item, active)
+            finally:
+                active.remove(identity)
             return
         _warn(f"Unsupported inline-style fragment type {type(fragment).__name__}; coercing to string")
         for key, value in _parse_style_string(str(fragment)):

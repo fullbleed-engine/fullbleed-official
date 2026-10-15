@@ -1,0 +1,25 @@
+{
+  "schema": "fullbleed.component-authoring.v1",
+  "cases": [
+    {"name": "escaped-content", "node": {"tag": "p", "children": ["<Alice & Bob> \"quoted\" 'text'"]}, "html": "<p>&lt;Alice &amp; Bob&gt; &quot;quoted&quot; &#x27;text&#x27;</p>"},
+    {"name": "nested-children", "node": {"tag": "section", "children": [[{"tag": "p", "children": ["One"]}], [null, [false, {"tag": "p", "children": ["Two"]}]]]}, "html": "<section><p>One</p><p>Two</p></section>"},
+    {"name": "conditional-and-zero", "node": {"tag": "p", "children": [false, null, true, 0, " / ", 12]}, "html": "<p>0 / 12</p>"},
+    {"name": "boolean-attributes", "node": {"tag": "input", "props": {"checked": true, "disabled": false, "aria_required": true, "aria_invalid": false, "data_ready": false}}, "html": "<input checked aria-required=\"true\" aria-invalid=\"false\" data-ready=\"false\">"},
+    {"name": "attribute-escaping", "node": {"tag": "label", "props": {"for_": "name", "title": "\"<&'", "class_name": "copy", "data_fb_role": "field"}, "children": ["Name"]}, "html": "<label for=\"name\" title=\"&quot;&lt;&amp;&#x27;\" class=\"copy\" data-fb-role=\"field\">Name</label>"},
+    {"name": "void-element", "node": {"tag": "img", "props": {"src": "assets/chart.svg", "alt": "Revenue & cost"}}, "html": "<img src=\"assets/chart.svg\" alt=\"Revenue &amp; cost\">"},
+    {"name": "fragment", "node": [{"tag": "h1", "children": ["Report"]}, {"tag": "p", "children": ["Summary"]}], "html": "<h1>Report</h1><p>Summary</p>"},
+    {"name": "style-map", "node": {"tag": "p", "props": {"style": {"font_weight": 600, "color": "#123"}}, "children": ["Ink"]}, "html": "<p style=\"font-weight: 600; color: #123;\">Ink</p>"},
+    {"name": "style-fragments", "node": {"tag": "p", "props": {"style": [{"color": "red"}, "font-weight: 600", {"color": "blue"}]}, "children": ["Ink"]}, "html": "<p style=\"font-weight: 600; color: blue;\">Ink</p>"},
+    {"name": "empty-style", "node": {"tag": "div", "props": {"style": false, "id": null}}, "html": "<div></div>"},
+    {"name": "unicode", "node": {"tag": "p", "props": {"lang": "fr"}, "children": ["Résumé — café"]}, "html": "<p lang=\"fr\">Résumé — café</p>"},
+    {"name": "custom-property", "node": {"tag": "p", "props": {"style": {"--Brand_Color": "#125", "color": "var(--Brand_Color)"}}}, "html": "<p style=\"--Brand_Color: #125; color: var(--Brand_Color);\"></p>"}
+  ],
+  "styles": [
+    {"name": "data-url", "input": ["background-image: url(\"data:image/svg+xml;base64,PHN2Zz4=\"); color: red"], "css": "background-image: url(\"data:image/svg+xml;base64,PHN2Zz4=\"); color: red;"},
+    {"name": "quoted-content", "input": ["content: 'a;b:c'; color: red"], "css": "content: 'a;b:c'; color: red;"},
+    {"name": "nested-blocks", "input": ["--theme: { a: [b;c]; d: func(x;y) }; color: blue"], "css": "--theme: { a: [b;c]; d: func(x;y) }; color: blue;"},
+    {"name": "comment", "input": ["color: red; /* note; : */ padding: 2px"], "css": "color: red; padding: 2px;"},
+    {"name": "escape", "input": ["content: \"a\\\";b\"; color: red"], "css": "content: \"a\\\";b\"; color: red;"},
+    {"name": "merge-order", "input": [{"color": "red", "padding": "2px"}, {"color": "blue"}], "css": "padding: 2px; color: blue;"}
+  ]
+}

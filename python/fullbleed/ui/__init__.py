@@ -39,11 +39,36 @@ from .primitives import (
     Text,
     Th,
     Tr,
+    Paragraph,
+    Strong,
+    Emphasis,
+    Link,
+    Image,
+    Header,
+    Footer,
+    LineBreak,
+    Fragment,
 )
 from .style import Style, StyleWarning, inch, pct, pt, px, rem, style
+from .stylesheet import StyleSheet, component_styles
+from .accessibility import Heading, Section, TableCaption
 
 __all__ = [
     "cav",
+    "StyleSheet",
+    "component_styles",
+    "Paragraph",
+    "Strong",
+    "Emphasis",
+    "Link",
+    "Image",
+    "Header",
+    "Footer",
+    "LineBreak",
+    "Fragment",
+    "Heading",
+    "Section",
+    "TableCaption",
     "Document",
     "DocumentArtifact",
     "Element",
