@@ -74,6 +74,15 @@ def test_document_preserves_component_signature_and_metadata():
     assert "Alice &amp; Bob" in Report("Alice & Bob").to_html()
 
 
+def test_nested_document_artifacts_do_not_print_python_representations():
+    @Document(title="Inner")
+    def Inner():
+        return el("p", "Content")
+    with pytest.raises(TypeError, match="outer component"):
+        Box(Inner())
+    assert "<p>Content</p>" in to_html(Inner())
+
+
 @pytest.mark.parametrize("child", [{"amount": 12}, {1, 2}, b"bytes", lambda: el("p", "Forgot call")])
 def test_ambiguous_children_fail_instead_of_printing_representations(child):
     with pytest.raises(TypeError, match="component child"):

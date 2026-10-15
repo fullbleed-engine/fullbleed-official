@@ -52,6 +52,8 @@ Path("invoice.png").write_bytes(invoice.render_image_pages(engine, dpi=96)[0])
 `@component` preserves the function and its signature. It is optional for your
 own components. `@Document` wraps a component in a document artifact and preserves
 its callable signature, annotations and docstring.
+Apply `@Document` to the outer component; use ordinary functions or `@component`
+for nested pieces. Nesting a document artifact raises a clear error.
 
 The [designed invoice](../examples/components/README.md) includes reusable fields,
 table rows, a total panel, paid/unpaid variants, and styling written in Python.

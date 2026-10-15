@@ -288,6 +288,8 @@ def _flatten_children(children: Iterable[Any]) -> list[Any]:
     def visit(child: Any) -> None:
         if child is None or isinstance(child, bool):
             return
+        if isinstance(child, DocumentArtifact):
+            raise TypeError("Document artifacts cannot be children; use @Document only on the outer component")
         if isinstance(child, (Mapping, Set, bytes, bytearray)) or callable(child):
             raise TypeError(
                 f"Unsupported component child: {type(child).__name__}. "
