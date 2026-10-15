@@ -27,6 +27,8 @@ on:
       - tests/test_ironpress_parity_runner.py
       - src/flowable.rs
       - src/canvas.rs
+      - src/html.rs
+      - src/style.rs
       - tools/smoke_filtered_overflow.py
       - tests/test_fullbleed_filtered_overflow.py
       - tools/smoke_border_image_slices.py

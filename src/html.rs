@@ -1663,13 +1663,19 @@ fn collect_children(
         || children
             .iter()
             .any(|child| matches!(child.data(), NodeData::Element(_)));
+    let inline_content: Vec<bool> = if inline_context {
+        children
+            .iter()
+            .map(|child| dom_child_has_inline_content(child, resolver, parent_style, ancestors))
+            .collect()
+    } else {
+        Vec::new()
+    };
     for (index, child) in children.iter().enumerate() {
         if inline_context {
             if let NodeData::Text(text) = child.data() {
-                let has_before = children[..index].iter().any(dom_child_has_inline_content);
-                let has_after = children[index + 1..]
-                    .iter()
-                    .any(dom_child_has_inline_content);
+                let has_before = inline_content[..index].iter().any(|&content| content);
+                let has_after = inline_content[index + 1..].iter().any(|&content| content);
                 out.extend(text_node_to_flowables(
                     &text.borrow(),
                     parent_style,
@@ -1703,10 +1709,30 @@ fn collect_children(
     out
 }
 
-fn dom_child_has_inline_content(node: &NodeRef) -> bool {
+fn dom_child_is_display_none(
+    node: &NodeRef,
+    resolver: &StyleResolver,
+    parent_style: &ComputedStyle,
+    ancestors: &[ElementInfo],
+) -> bool {
+    if node.as_element().is_none() {
+        return false;
+    }
+    let info = element_info(node, resolver.has_sibling_selectors());
+    let inline_style = node_inline_style_attr(node);
+    let style = resolver.compute_style(&info, parent_style, inline_style.as_deref(), ancestors);
+    matches!(style.display, DisplayMode::None)
+}
+
+fn dom_child_has_inline_content(
+    node: &NodeRef,
+    resolver: &StyleResolver,
+    parent_style: &ComputedStyle,
+    ancestors: &[ElementInfo],
+) -> bool {
     match node.data() {
         NodeData::Text(text) => !text.borrow().trim().is_empty(),
-        NodeData::Element(element) => !matches!(element.name.local.as_ref(), "script" | "style"),
+        NodeData::Element(_) => !dom_child_is_display_none(node, resolver, parent_style, ancestors),
         _ => false,
     }
 }
@@ -2571,6 +2597,8 @@ fn node_to_flowables_in_scope(
                         &ordered_after,
                         node,
                         &style,
+                        resolver,
+                        ancestors,
                         font_registry.clone(),
                     )
                 } else {
@@ -2594,6 +2622,8 @@ fn node_to_flowables_in_scope(
                         &after_items,
                         node,
                         &style,
+                        resolver,
+                        ancestors,
                         font_registry.clone(),
                     )
                 };
@@ -2775,7 +2805,13 @@ fn node_to_flowables_in_scope(
                                 crate::style::PseudoTarget::FirstLine,
                             );
                             let t_extract = std::time::Instant::now();
-                            let mut text = extract_text(node, style.white_space);
+                            let mut text = extract_rendered_text(
+                                node,
+                                resolver,
+                                &style,
+                                ancestors,
+                                style.white_space,
+                            );
                             if let Some(perf_logger) = perf {
                                 let ms = t_extract.elapsed().as_secs_f64() * 1000.0;
                                 perf_logger.log_span_ms("story.text.extract", doc_id, ms);
@@ -3030,7 +3066,13 @@ fn node_to_flowables_in_scope(
                     })(),
                     "pre" => (|| {
                         let t_extract = std::time::Instant::now();
-                        let mut text = extract_text(node, WhiteSpaceMode::Pre);
+                        let mut text = extract_rendered_text(
+                            node,
+                            resolver,
+                            &style,
+                            ancestors,
+                            WhiteSpaceMode::Pre,
+                        );
                         if let Some(perf_logger) = perf {
                             let ms = t_extract.elapsed().as_secs_f64() * 1000.0;
                             perf_logger.log_span_ms("story.text.extract", doc_id, ms);
@@ -3308,7 +3350,15 @@ fn node_to_flowables_in_scope(
                                 caption_inline_style.as_deref(),
                                 ancestors,
                             );
-                            let mut caption_text = extract_text(&child, caption_style.white_space);
+                            let mut caption_ancestors = ancestors.clone();
+                            caption_ancestors.push(caption_info.clone());
+                            let mut caption_text = extract_rendered_text(
+                                &child,
+                                resolver,
+                                &caption_style,
+                                &caption_ancestors,
+                                caption_style.white_space,
+                            );
                             if caption_text.trim().is_empty() {
                                 if let Some(flowable) = container_flowable_with_role(
                                     Vec::new(),
@@ -3766,7 +3816,13 @@ fn node_to_flowables_in_scope(
                         }
                     })(),
                     "li" => (|| {
-                        let text = extract_text(node, style.white_space);
+                        let text = extract_rendered_text(
+                            node,
+                            resolver,
+                            &style,
+                            ancestors,
+                            style.white_space,
+                        );
                         if text.is_empty() {
                             container_flowables_with_role(Vec::new(), &style, Some("LI"))
                         } else {
@@ -3855,7 +3911,13 @@ fn node_to_flowables_in_scope(
                             && !has_structured_pseudo
                         {
                             let ancestors_no_self = &ancestors[..ancestors.len().saturating_sub(1)];
-                            let mut text = extract_text(node, style.white_space);
+                            let mut text = extract_rendered_text(
+                                node,
+                                resolver,
+                                &style,
+                                ancestors,
+                                style.white_space,
+                            );
                             let before = pseudo_text_for(
                                 resolver,
                                 &info,
@@ -5052,7 +5114,12 @@ fn inject_pseudo_items(
     }
 }
 
-fn starts_with_collapsible_dom_space(node: &NodeRef) -> bool {
+fn starts_with_collapsible_dom_space(
+    node: &NodeRef,
+    resolver: &StyleResolver,
+    style: &ComputedStyle,
+    ancestors: &[ElementInfo],
+) -> bool {
     for child in node.children() {
         match child.data() {
             NodeData::Text(text) => {
@@ -5065,8 +5132,8 @@ fn starts_with_collapsible_dom_space(node: &NodeRef) -> bool {
                     .next()
                     .is_some_and(|ch| matches!(ch, ' ' | '\n' | '\r' | '\t' | '\u{000c}'));
             }
-            NodeData::Element(element)
-                if matches!(element.name.local.as_ref(), "script" | "style") =>
+            NodeData::Element(_)
+                if dom_child_is_display_none(&child, resolver, style, ancestors) =>
             {
                 continue;
             }
@@ -5077,7 +5144,12 @@ fn starts_with_collapsible_dom_space(node: &NodeRef) -> bool {
     false
 }
 
-fn ends_with_collapsible_dom_space(node: &NodeRef) -> bool {
+fn ends_with_collapsible_dom_space(
+    node: &NodeRef,
+    resolver: &StyleResolver,
+    style: &ComputedStyle,
+    ancestors: &[ElementInfo],
+) -> bool {
     let children = node.children().collect::<Vec<_>>();
     for child in children.iter().rev() {
         match child.data() {
@@ -5091,8 +5163,8 @@ fn ends_with_collapsible_dom_space(node: &NodeRef) -> bool {
                     .next_back()
                     .is_some_and(|ch| matches!(ch, ' ' | '\n' | '\r' | '\t' | '\u{000c}'));
             }
-            NodeData::Element(element)
-                if matches!(element.name.local.as_ref(), "script" | "style") =>
+            NodeData::Element(_)
+                if dom_child_is_display_none(child, resolver, style, ancestors) =>
             {
                 continue;
             }
@@ -5126,18 +5198,20 @@ fn inject_transparent_inline_pseudo_items(
     after_items: &[LayoutItem],
     node: &NodeRef,
     style: &ComputedStyle,
+    resolver: &StyleResolver,
+    ancestors: &[ElementInfo],
     font_registry: Option<Arc<FontRegistry>>,
 ) -> Vec<LayoutItem> {
     let preserve_before_space = !preserve_whitespace(style.white_space)
         && !before_items.is_empty()
-        && starts_with_collapsible_dom_space(node)
+        && starts_with_collapsible_dom_space(node, resolver, style, ancestors)
         && before_items.last().is_some_and(|item| match item {
             LayoutItem::Inline { flowable, .. } => !flowable.is_collapsible_inline_space(),
             LayoutItem::Block { .. } => false,
         });
     let preserve_after_space = !preserve_whitespace(style.white_space)
         && !after_items.is_empty()
-        && ends_with_collapsible_dom_space(node)
+        && ends_with_collapsible_dom_space(node, resolver, style, ancestors)
         && after_items.first().is_some_and(|item| match item {
             LayoutItem::Inline { flowable, .. } => !flowable.is_collapsible_inline_space(),
             LayoutItem::Block { .. } => false,
@@ -6418,7 +6492,7 @@ fn css_display_list_item_flowables(
         && (marker_prefix.is_some() || marker_bullet.is_some())
         && inline_children_only(node, resolver, style, child_ancestors)
     {
-        let text = extract_text(node, style.white_space);
+        let text = extract_rendered_text(node, resolver, style, child_ancestors, style.white_space);
         let text = if marker_bullet.is_some() {
             text
         } else {
@@ -9646,7 +9720,13 @@ fn list_flowables(
                 && !has_structured_pseudo
                 && inline_children_only(&child, resolver, &style, &li_ancestors)
             {
-                let text = extract_text(&child, style.white_space);
+                let text = extract_rendered_text(
+                    &child,
+                    resolver,
+                    &style,
+                    &li_ancestors,
+                    style.white_space,
+                );
                 let text = format!("{}{}", marker_prefix.as_deref().unwrap_or(""), text);
                 let text = apply_text_transform(&text, style.text_transform);
                 let text_style = text_style_for_flow_text(&style);
@@ -13254,10 +13334,20 @@ fn node_inline_style_attr(node: &NodeRef) -> Option<String> {
 fn table_caption_flowable_from_node(
     node: &NodeRef,
     caption_style: &ComputedStyle,
+    resolver: &StyleResolver,
+    ancestors: &[ElementInfo],
     mut report: Option<&mut GlyphCoverageReport>,
     font_registry: Option<Arc<FontRegistry>>,
 ) -> Option<Box<dyn Flowable>> {
-    let mut caption_text = extract_text(node, caption_style.white_space);
+    let mut caption_ancestors = ancestors.to_vec();
+    caption_ancestors.push(element_info(node, resolver.has_sibling_selectors()));
+    let mut caption_text = extract_rendered_text(
+        node,
+        resolver,
+        caption_style,
+        &caption_ancestors,
+        caption_style.white_space,
+    );
     if caption_text.trim().is_empty() {
         return container_flowable_with_role(Vec::new(), caption_style, Some("Caption"));
     }
@@ -13414,6 +13504,8 @@ fn native_css_table_container_flowables(
             if let Some(caption) = table_caption_flowable_from_node(
                 &child,
                 &child_style,
+                resolver,
+                ancestors,
                 report.as_deref_mut(),
                 font_registry.clone(),
             ) {
@@ -13767,6 +13859,8 @@ fn table_container_flowables(
             if let Some(caption_flowable) = table_caption_flowable_from_node(
                 &child,
                 &child_style,
+                resolver,
+                ancestors,
                 report.as_deref_mut(),
                 font_registry.clone(),
             ) {
@@ -15842,9 +15936,32 @@ fn table_flowable(
                 );
             }
 
-            let has_element_children = cell_child
+            let has_dom_elements = cell_child
                 .children()
                 .any(|child| child.as_element().is_some());
+            let cell_ancestors = if has_dom_elements {
+                let mut context = ancestors.clone();
+                context.push(cell_info.clone());
+                context
+            } else {
+                Vec::new()
+            };
+            let has_element_children = has_dom_elements
+                && cell_child.children().any(|child| {
+                    let Some(element) = child.as_element() else {
+                        return false;
+                    };
+                    // Hidden descendants must not select a different line-box path
+                    // from the equivalent plain-text cell. Explicit semantic text
+                    // carriers still need structural compilation, even when hidden.
+                    let semantic_text = element
+                        .attributes
+                        .borrow()
+                        .get("data-fb-a11y-only")
+                        .is_some_and(data_attribute_value_is_truthy);
+                    semantic_text
+                        || !dom_child_is_display_none(&child, resolver, cell_style, &cell_ancestors)
+                });
             let mut cell_content: Option<Box<dyn Flowable>> = None;
             let mut inline_content_phase = false;
             let mut cell_text = String::new();
@@ -15860,8 +15977,12 @@ fn table_flowable(
                         .is_some()
                 });
             if has_element_children || has_generated_box {
-                let coerce_mixed_inline =
-                    inline_or_replaced_children_only(cell_child, resolver, cell_style, ancestors);
+                let coerce_mixed_inline = inline_or_replaced_children_only(
+                    cell_child,
+                    resolver,
+                    cell_style,
+                    &cell_ancestors,
+                );
                 inline_content_phase = coerce_mixed_inline;
                 let before_items = pseudo_items_for(
                     resolver,
@@ -15944,7 +16065,11 @@ fn table_flowable(
 
             if cell_content.is_none() {
                 let t_cell_text = std::time::Instant::now();
-                let text = cell_child.text_contents();
+                let text = if has_dom_elements {
+                    rendered_text_contents(cell_child, resolver, cell_style, &cell_ancestors)
+                } else {
+                    cell_child.text_contents()
+                };
                 cell_text_ms += t_cell_text.elapsed().as_secs_f64() * 1000.0;
                 // HTML collapsible whitespace does not include NBSP.  Keeping
                 // it here is also what makes `empty-cells: hide` treat a cell
@@ -17218,6 +17343,75 @@ fn resolve_svg_dimensions(
         width.unwrap_or(default_width).max(Pt::from_f32(1.0)),
         height.unwrap_or(default_height).max(Pt::from_f32(1.0)),
     )
+}
+
+// Visual text extraction must follow the same computed display values as the
+// structural compiler. In particular, raw-text elements can be made visible by
+// author CSS, while hidden descendants must not leak through a flattened run.
+// `ancestors` includes `node`, matching the context used to style its children.
+fn extract_rendered_text(
+    node: &NodeRef,
+    resolver: &StyleResolver,
+    style: &ComputedStyle,
+    ancestors: &[ElementInfo],
+    mode: WhiteSpaceMode,
+) -> String {
+    normalize_text(
+        &rendered_text_contents(node, resolver, style, ancestors),
+        mode,
+        true,
+    )
+}
+
+// Keep raw whitespace for consumers such as table cells, which distinguish
+// NBSP from collapsible whitespace when implementing `empty-cells`.
+fn rendered_text_contents(
+    node: &NodeRef,
+    resolver: &StyleResolver,
+    style: &ComputedStyle,
+    ancestors: &[ElementInfo],
+) -> String {
+    fn collect(
+        node: &NodeRef,
+        resolver: &StyleResolver,
+        style: &ComputedStyle,
+        ancestors: &mut Vec<ElementInfo>,
+        out: &mut String,
+    ) {
+        for child in node.children() {
+            match child.data() {
+                NodeData::Text(text) => out.push_str(&text.borrow()),
+                NodeData::Element(element) => {
+                    let mut info = element_info(&child, resolver.has_sibling_selectors());
+                    let inline_style = node_inline_style_attr(&child);
+                    let child_style =
+                        resolver.compute_style(&info, style, inline_style.as_deref(), ancestors);
+                    if matches!(child_style.display, DisplayMode::None) {
+                        continue;
+                    }
+                    if element.name.local.as_ref() == "br" {
+                        out.push(FORCED_LINE_BREAK);
+                        continue;
+                    }
+                    info.apply_computed_container_style(&child_style);
+                    ancestors.push(info);
+                    collect(&child, resolver, &child_style, ancestors, out);
+                    ancestors.pop();
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = String::new();
+    if !matches!(style.display, DisplayMode::None) {
+        // Most paragraphs have only text. They need no descendant style context;
+        // cloning selector trees here adds work proportional to the whole DOM.
+        if node.children().all(|child| child.as_element().is_none()) {
+            return node.text_contents();
+        }
+        collect(node, resolver, style, &mut ancestors.to_vec(), &mut out);
+    }
+    out
 }
 
 fn extract_text(node: &NodeRef, mode: WhiteSpaceMode) -> String {

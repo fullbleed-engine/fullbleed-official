@@ -157,6 +157,17 @@ jobs:
           path: target/text-decoration-thickness
           if-no-files-found: warn
 
+      - name: Verify hidden HTML text and author display overrides
+        run: python -I tools/smoke_hidden_text.py --out target/hidden-text
+
+      - name: Retain hidden-text release PDFs and previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-hidden-text
+          path: target/hidden-text
+          if-no-files-found: error
+
       - name: Verify floated initials in installed release output
         run: python -I tools/smoke_floating_first_letter.py --out target/floating-first-letter
 
