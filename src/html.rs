@@ -15936,23 +15936,32 @@ fn table_flowable(
                 );
             }
 
-            let mut cell_ancestors = ancestors.clone();
-            cell_ancestors.push(cell_info.clone());
-            let has_element_children = cell_child.children().any(|child| {
-                let Some(element) = child.as_element() else {
-                    return false;
-                };
-                // Hidden descendants must not select a different line-box path
-                // from the equivalent plain-text cell. Explicit semantic text
-                // carriers still need structural compilation, even when hidden.
-                let semantic_text = element
-                    .attributes
-                    .borrow()
-                    .get("data-fb-a11y-only")
-                    .is_some_and(data_attribute_value_is_truthy);
-                semantic_text
-                    || !dom_child_is_display_none(&child, resolver, cell_style, &cell_ancestors)
-            });
+            let has_dom_elements = cell_child
+                .children()
+                .any(|child| child.as_element().is_some());
+            let cell_ancestors = if has_dom_elements {
+                let mut context = ancestors.clone();
+                context.push(cell_info.clone());
+                context
+            } else {
+                Vec::new()
+            };
+            let has_element_children = has_dom_elements
+                && cell_child.children().any(|child| {
+                    let Some(element) = child.as_element() else {
+                        return false;
+                    };
+                    // Hidden descendants must not select a different line-box path
+                    // from the equivalent plain-text cell. Explicit semantic text
+                    // carriers still need structural compilation, even when hidden.
+                    let semantic_text = element
+                        .attributes
+                        .borrow()
+                        .get("data-fb-a11y-only")
+                        .is_some_and(data_attribute_value_is_truthy);
+                    semantic_text
+                        || !dom_child_is_display_none(&child, resolver, cell_style, &cell_ancestors)
+                });
             let mut cell_content: Option<Box<dyn Flowable>> = None;
             let mut inline_content_phase = false;
             let mut cell_text = String::new();
@@ -16056,8 +16065,11 @@ fn table_flowable(
 
             if cell_content.is_none() {
                 let t_cell_text = std::time::Instant::now();
-                let text =
-                    rendered_text_contents(cell_child, resolver, cell_style, &cell_ancestors);
+                let text = if has_dom_elements {
+                    rendered_text_contents(cell_child, resolver, cell_style, &cell_ancestors)
+                } else {
+                    cell_child.text_contents()
+                };
                 cell_text_ms += t_cell_text.elapsed().as_secs_f64() * 1000.0;
                 // HTML collapsible whitespace does not include NBSP.  Keeping
                 // it here is also what makes `empty-cells: hide` treat a cell
@@ -17392,6 +17404,11 @@ fn rendered_text_contents(
     }
     let mut out = String::new();
     if !matches!(style.display, DisplayMode::None) {
+        // Most paragraphs have only text. They need no descendant style context;
+        // cloning selector trees here adds work proportional to the whole DOM.
+        if node.children().all(|child| child.as_element().is_none()) {
+            return node.text_contents();
+        }
         collect(node, resolver, style, &mut ancestors.to_vec(), &mut out);
     }
     out
