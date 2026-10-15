@@ -278,5 +278,7 @@ were previously intentional text.
 
 Python is the reference authoring experience. [JavaScript/TypeScript components](https://docs.fullbleed.dev/guides/javascript-components/)
 are published in npm package 0.6.0, with ordinary functions and optional JSX/TSX.
-Rust and .NET currently accept HTML/CSS. The JavaScript layer does not include
-Python's semantic validator or promise complete API parity.
+[C# components](https://docs.fullbleed.dev/guides/csharp-components/) are available
+in FullBleed.DotNet 0.2.0, with typed methods, LINQ children and immutable styles.
+Rust accepts HTML/CSS. The JavaScript and C# layers do not include Python's
+semantic validator or promise complete API parity.
