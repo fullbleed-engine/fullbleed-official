@@ -117,6 +117,95 @@ See [semantic authoring](ui-accessibility.md) for structural validation and
 accessibility workflows. `el(...)` remains a lower-level escape hatch; the
 complete invoice example does not need it.
 
+## Class names and styles
+
+`class_name` labels an element so stylesheet selectors can match it. It does
+not create or load a style. Put the declarations in a `StyleSheet`, then attach
+that sheet to the outer `@Document(styles=...)`.
+
+| Argument | What it accepts | Where it applies |
+| --- | --- | --- |
+| `class_name="notice is-paid"` | Space-separated class names, without dots | The element returned by a built-in component |
+| `style={"color": "#a64232"}` | Inline declarations, without a selector | That element |
+| `@Document(styles=sheet)` | A stylesheet containing selectors and declarations | Matching elements throughout this document |
+
+This example prints **Paid in full** in blue at 18 pt:
+
+```python
+from fullbleed.ui import Document, Paragraph, StyleSheet
+
+payment_styles = StyleSheet({
+    "@page": {"size": "A5", "margin": "15mm"},
+    "body": {"font_family": "Inter"},
+    ".notice": {"color": "#245541", "font_size": "18pt", "margin": 0},
+    ".notice.is-paid": {"color": "#315d9b"},
+})
+
+@Document(title="Payment", styles=payment_styles)
+def Payment():
+    return Paragraph("Paid in full", class_name="notice is-paid")
+```
+
+With the configured `engine` from the first example, render with
+`Payment().render_pdf(engine)`. This passes both the component markup and its
+attached stylesheet to the engine. `Payment().to_html()` on its own carries no
+stylesheet; if you call the engine directly, also pass `Payment().to_css()`.
+
+The dots belong in selectors: `.notice` matches `class_name="notice"`.
+`.notice.is-paid` matches one element with **both** classes; `.notice .notice-title`
+matches a descendant with `notice-title` inside a `notice`. Class order in the
+string does not set precedence. A function named `Notice` is not itself a CSS
+selector, and classes are not automatically scoped to a component or Python file.
+
+### Forward styling props in your own components
+
+Your function decides which element receives `class_name` and `style`. Accept
+and forward those arguments when callers should be able to customize its root:
+
+```python
+from fullbleed.ui import Card
+
+def Notice(*children, class_name="", style=None):
+    return Card(
+        *children,
+        class_name=f"notice {class_name}".strip(),
+        style=style,
+    )
+
+notice_styles = StyleSheet(payment_styles, {
+    ".notice": {"padding": "12pt", "border": "2pt solid #245541"},
+    ".notice .notice-title": {"font_size": "14pt", "font_weight": 700},
+})
+
+@Document(title="Styled notice", styles=notice_styles)
+def StyledNotice():
+    return Notice(
+        Paragraph("Payment", class_name="notice-title"),
+        Paragraph("Paid in full"),
+        class_name="is-paid",
+        style={"border_color": "#a64232"},
+    )
+```
+
+`Notice` keeps its base `notice` class and adds the caller's `is-paid` class.
+`Card` also retains its built-in `ui-card` class. The document combines shared
+and component rules through `StyleSheet(payment_styles, ...)`; defining a sheet
+beside a function does not attach it automatically. When splitting files, import
+both the component and its sheet, and compose the sheets on the document.
+
+The title's descendant rule sets 14 pt bold text. The inline `border_color`
+changes this one notice's border to rust red. Ordinary stylesheet rules follow
+selector specificity, then source order for ties. Inline declarations override
+ordinary stylesheet declarations on the same element; `!important` changes that
+priority. Text properties such as color can inherit into children, while padding
+and borders apply to the element itself. Layout props such as `Stack(gap="12pt")`
+produce inline styles too; use an explicit `style` prop to override those values.
+
+Use component-specific class names when combining designs to avoid unintended
+matches. Fullbleed does not generate CSS Modules names or import a framework's
+stylesheet from a class string. See the layout and composition options below.
+
+
 ## Layout and style composition
 
 `Stack(..., gap="12pt")`, `Row(..., justify="space-between", wrap=True)`, and
@@ -187,9 +276,7 @@ ARIA and data booleans emit `"true"` or `"false"`. Invalid names, cycles and
 children on void elements raise errors. Format these inputs explicitly if they
 were previously intentional text.
 
-Python is the reference authoring experience. JavaScript/TypeScript has a local
-prototype sharing serialization fixtures; it is not yet a published component
-API. Rust and .NET currently accept HTML/CSS. Subsequent ports should carry the
-proven components, style composition and rendering path with native function or
-builder conventions and the same output fixtures. Accessibility wrappers and
-validators require their own port and verification.
+Python is the reference authoring experience. [JavaScript/TypeScript components](https://docs.fullbleed.dev/guides/javascript-components/)
+are published in npm package 0.6.0, with ordinary functions and optional JSX/TSX.
+Rust and .NET currently accept HTML/CSS. The JavaScript layer does not include
+Python's semantic validator or promise complete API parity.
