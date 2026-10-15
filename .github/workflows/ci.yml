@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.23"
+  FULLBLEED_CI_VERSION: "2.5.24"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -207,6 +207,17 @@ jobs:
           name: text-decoration-thickness-${{ runner.os }}
           path: target/text-decoration-thickness
           if-no-files-found: warn
+
+      - name: Verify hidden HTML text and author display overrides
+        run: python -I tools/smoke_hidden_text.py --out target/hidden-text
+
+      - name: Retain hidden-text PDF and preview evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hidden-text-${{ runner.os }}
+          path: target/hidden-text
+          if-no-files-found: error
 
       - name: Verify CSS counter scopes in installed PDF paths
         run: python -I tools/smoke_counter_scopes.py --out target/counter-scopes

@@ -1,3 +1,26 @@
+# Fullbleed Release Notes - 2.5.24
+
+Scripts and style elements are now hidden by default in HTML output, including
+between block elements. Previously, their source text could appear in a PDF
+depending on the surrounding layout.
+
+Text extraction for visual paragraphs, lists, preformatted text, and captions
+now respects computed `display:none` on descendants. Authors can deliberately
+display script or style source using CSS. `display:revert` restores the
+element's user-agent display default, including through layers and important
+declarations. Whitespace around visible source follows the same display rules.
+
+The installed-output gate compares rendered PDFs, extracted text, native
+previews, and independent PDFium pixels with visible-content controls through
+direct, compiled, fixed-binding, and reflow rendering. No runtime dependency is
+added. Fullbleed still does not execute JavaScript or apply embedded stylesheets.
+
+See the [2.5.24 runbook](docs/release/2.5.24-runbook.md) for release evidence and
+validation requirements. These checks do not establish complete browser parity
+or PDF standards conformance.
+
+---
+
 # Fullbleed Release Notes - 2.5.23
 
 HTML text using `text-decoration-thickness: from-font` now draws underlines,

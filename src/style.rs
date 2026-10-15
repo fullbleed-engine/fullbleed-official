@@ -1609,6 +1609,7 @@ enum DisplaySpec {
     Value(DisplayMode),
     Inherit,
     Initial,
+    Revert,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -5323,6 +5324,7 @@ impl StyleResolver {
         parent_line_height: LineHeightSpec,
         root_font_size: Pt,
         element: Option<&ElementInfo>,
+        ua_display: DisplayMode,
     ) {
         let synthesis_base = (
             computed.font_synthesis_weight,
@@ -5351,6 +5353,7 @@ impl StyleResolver {
             root_font_size,
             element,
             self.viewport,
+            ua_display,
         );
         // An inline revert-layer exposes the surrounding stylesheet. Rule
         // callers subsequently restore the earlier named-layer snapshot.
@@ -5968,6 +5971,7 @@ impl StyleResolver {
         let parent_line_height = parent.line_height.clone();
         let root_font_size = parent.root_font_size;
 
+        let mut ua_display = DisplayMode::Inline;
         if element.is_root {
             for delta in &self.root_normal {
                 self.apply_style_delta(
@@ -5979,6 +5983,7 @@ impl StyleResolver {
                     parent_line_height.clone(),
                     root_font_size,
                     Some(element),
+                    ua_display,
                 );
             }
         }
@@ -6042,8 +6047,12 @@ impl StyleResolver {
                 parent_line_height.clone(),
                 root_font_size,
                 Some(element),
+                ua_display,
             );
             apply_revert_layer_delta(&mut computed, &rule.delta.revert_layer, &normal_layer_base);
+            if rule.order < self.author_rule_order_start && rule.delta.display.is_some() {
+                ua_display = computed.display;
+            }
         }
 
         let mut inline_normal = StyleDelta::default();
@@ -6076,6 +6085,7 @@ impl StyleResolver {
             parent_line_height.clone(),
             root_font_size,
             Some(element),
+            ua_display,
         );
 
         if element.is_root {
@@ -6089,6 +6099,7 @@ impl StyleResolver {
                     parent_line_height.clone(),
                     root_font_size,
                     Some(element),
+                    ua_display,
                 );
             }
         }
@@ -6132,6 +6143,7 @@ impl StyleResolver {
                 parent_line_height.clone(),
                 root_font_size,
                 Some(element),
+                ua_display,
             );
             apply_revert_layer_delta(
                 &mut computed,
@@ -6152,6 +6164,7 @@ impl StyleResolver {
             parent_line_height,
             root_font_size,
             Some(element),
+            ua_display,
         );
 
         resolve_pending_font_size_var(&mut computed, self.viewport);
@@ -6895,6 +6908,7 @@ impl StyleResolver {
         let mut current_normal_layer_rank = None;
         let mut normal_layer_base = computed.clone();
         let mut marker_content_overrides_marker = false;
+        let mut ua_display = DisplayMode::Inline;
         for rule in matches {
             let layer_rank = (
                 rule.order >= self.author_rule_order_start,
@@ -6922,8 +6936,12 @@ impl StyleResolver {
                 parent_line_height.clone(),
                 root_font_size,
                 Some(element),
+                ua_display,
             );
             apply_revert_layer_delta(&mut computed, &rule.delta.revert_layer, &normal_layer_base);
+            if rule.order < self.author_rule_order_start && rule.delta.display.is_some() {
+                ua_display = computed.display;
+            }
         }
         resolve_pending_font_size_var(&mut computed, self.viewport);
         resolve_pending_line_height_var(&mut computed, self.viewport);
@@ -16397,6 +16415,7 @@ fn apply_delta(
     root_font_size: Pt,
     element: Option<&ElementInfo>,
     viewport: Size,
+    ua_display: DisplayMode,
 ) {
     if let Some(font_size) = &delta.font_size {
         computed.pending_font_size_var = None;
@@ -17647,6 +17666,7 @@ fn apply_delta(
             DisplaySpec::Value(value) => value,
             DisplaySpec::Inherit => parent.display,
             DisplaySpec::Initial => DisplayMode::Inline,
+            DisplaySpec::Revert => ua_display,
         };
     }
     if let Some(visibility) = delta.visibility {
@@ -30400,7 +30420,8 @@ fn parse_display_mode_str(raw: &str) -> Option<DisplayMode> {
 fn parse_display_spec_str(raw: &str) -> Option<DisplaySpec> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "inherit" => Some(DisplaySpec::Inherit),
-        "initial" | "unset" | "revert" => Some(DisplaySpec::Initial),
+        "initial" | "unset" => Some(DisplaySpec::Initial),
+        "revert" => Some(DisplaySpec::Revert),
         "revert-layer" => None,
         value => parse_display_mode_str(value).map(DisplaySpec::Value),
     }
@@ -34201,6 +34222,7 @@ impl StyleDelta {
 
 fn default_ua_css() -> &'static str {
     r#"
+    script, style { display: none; }
     h1 { font-size: 2em; }
     h2 { font-size: 1.5em; }
     h3 { font-size: 1.17em; }
@@ -38366,6 +38388,68 @@ mod tests {
         let img_info = element("img", None, &[]);
         let img_style = resolver.compute_style(&img_info, &root, None, &[]);
         assert_eq!(img_style.display, DisplayMode::InlineBlock);
+    }
+
+    #[test]
+    fn raw_text_elements_are_hidden_by_default_and_honor_author_display() {
+        for tag in ["script", "style"] {
+            for (declarations, expected) in [
+                ("", DisplayMode::None),
+                ("display: block", DisplayMode::Block),
+                ("display: inline", DisplayMode::Inline),
+                ("display: contents", DisplayMode::Contents),
+                ("display: initial", DisplayMode::Inline),
+                ("display: unset", DisplayMode::Inline),
+                ("display: block; display: revert", DisplayMode::None),
+            ] {
+                let resolver = StyleResolver::new(&format!("{tag} {{ {declarations} }}"));
+                let root = resolver.default_style();
+                let style = resolver.compute_style(&element(tag, None, &[]), &root, None, &[]);
+                assert_eq!(style.display, expected, "{tag}: {declarations}");
+            }
+            let resolver = StyleResolver::new("");
+            let root = resolver.default_style();
+            let style = resolver.compute_style(
+                &element(tag, None, &[]),
+                &root,
+                Some("display: block"),
+                &[],
+            );
+            assert_eq!(style.display, DisplayMode::Block, "inline style on {tag}");
+        }
+    }
+
+    #[test]
+    fn display_revert_restores_ua_origin_across_layers_and_importance() {
+        for (tag, expected) in [
+            ("script", DisplayMode::None),
+            ("style", DisplayMode::None),
+            ("p", DisplayMode::Block),
+            ("img", DisplayMode::InlineBlock),
+            ("custom-element", DisplayMode::Inline),
+        ] {
+            for (css, inline) in [
+                (".x {display:grid} .x {display:revert}", None),
+                (
+                    "@layer base {.x {display:grid}} @layer theme {.x {display:revert}}",
+                    None,
+                ),
+                (
+                    ".x {display:grid!important} .x {display:revert!important}",
+                    None,
+                ),
+                (".x {display:grid}", Some("display:revert")),
+                (
+                    ".x {display:grid!important}",
+                    Some("display:revert!important"),
+                ),
+            ] {
+                let resolver = StyleResolver::new(css);
+                let root = resolver.default_style();
+                let style = resolver.compute_style(&element(tag, None, &["x"]), &root, inline, &[]);
+                assert_eq!(style.display, expected, "{tag}: {css}, {inline:?}");
+            }
+        }
     }
 
     #[test]
