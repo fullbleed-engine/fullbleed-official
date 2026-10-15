@@ -4,11 +4,11 @@
 [![PyPI Downloads](https://img.shields.io/pypi/dm/fullbleed)](https://pypistats.org/packages/fullbleed)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Create PDFs from HTML and CSS in Python, Rust, Node.js, C#, and browser JavaScript. MIT licensed.**
+**Build PDFs with reusable Python and JavaScript components, or HTML/CSS. MIT licensed.**
 
 Build invoices, reports, statements, and variable-data print jobs with a deterministic Rust engine. Use the native Rust API, the Python package, or the optional JavaScript and .NET integrations. The Python wheel includes the engine, fonts, and CLI with no required third-party Python packages or system PDF stack. The JavaScript package includes the WebAssembly engine and fonts for Node.js and browser workers; the .NET package includes native libraries for in-process rendering.
 
-[Try in your browser](https://docs.fullbleed.dev/playground/) · [Documentation](https://docs.fullbleed.dev/) · [Examples](https://docs.fullbleed.dev/examples/) · [PyPI](https://pypi.org/project/fullbleed/) · [crates.io](https://crates.io/crates/fullbleed) · [npm](https://www.npmjs.com/package/fullbleed) · [Release notes](https://github.com/fullbleed-engine/fullbleed-official/releases) · [MIT license](LICENSE)
+[Try PDF components](https://docs.fullbleed.dev/assets/react-demo/) · [Documentation](https://docs.fullbleed.dev/) · [Examples](https://docs.fullbleed.dev/examples/) · [PyPI](https://pypi.org/project/fullbleed/) · [crates.io](https://crates.io/crates/fullbleed) · [npm](https://www.npmjs.com/package/fullbleed) · [Release notes](https://github.com/fullbleed-engine/fullbleed-official/releases) · [MIT license](LICENSE)
 
 <p>
   <a href="https://docs.fullbleed.dev/assets/showcase/invoice.pdf"><img src="https://docs.fullbleed.dev/assets/showcase/invoice-1.png" width="48%" alt="Northstar Studio invoice rendered by Fullbleed, with serif typography and forest-green tables"></a>
@@ -49,6 +49,11 @@ compile to the same HTML/CSS print engine. Follow the
 [designed component invoice](examples/components) with explicit fonts, reusable
 rows, paid/unpaid states and PNG previews.
 
+For JavaScript, [compose documents with functions or JSX/TSX](https://docs.fullbleed.dev/guides/javascript-components/).
+The [React starter](https://docs.fullbleed.dev/guides/react-pdf/) connects typed
+document components to editable data, live PDF previews and downloads. It
+includes the complete component and style source for customization.
+
 ## Choose your language
 
 | Language | Install | Start building |
@@ -56,11 +61,12 @@ rows, paid/unpaid states and PNG previews.
 | Python | `python -m pip install fullbleed` | [Python quickstart](https://docs.fullbleed.dev/getting-started/quickstart/) |
 | Rust | `cargo add fullbleed` | [Native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/) |
 | Node.js / TypeScript | `npm install fullbleed` | [Node quickstart](https://docs.fullbleed.dev/getting-started/node/) · [Next.js PDF download](https://docs.fullbleed.dev/guides/nextjs-pdf/) |
-| Browser JavaScript | `npm install --save-exact fullbleed@0.5.1` | [Browser SDK and runnable starter](https://docs.fullbleed.dev/guides/browser-pdf/) · [Live editor](https://docs.fullbleed.dev/assets/browser-demo/index.html) |
+| Browser JavaScript | `npm install --save-exact fullbleed@0.6.0` | [PDF components and JSX](https://docs.fullbleed.dev/guides/javascript-components/) · [React starter](https://docs.fullbleed.dev/guides/react-pdf/) · [HTML/CSS starter](https://docs.fullbleed.dev/guides/browser-pdf/) |
 | C# / .NET | `dotnet add package FullBleed.DotNet --version 0.1.8` | [C# quickstart and designed invoice](https://docs.fullbleed.dev/getting-started/dotnet/) |
 
-The Node.js quickstart and the JavaScript, React, Vue, and Next.js starters use
-package 0.5.1 with engine 2.5.24. They generate ordinary PDFs and previews. Import
+The JavaScript component workflow and React starter use package 0.6.0. The
+pinned HTML/CSS Node.js quickstart and JavaScript, Vue and Next.js starters use
+0.5.1. Both package versions wrap engine 2.5.24 and generate ordinary PDFs and previews. Import
 `fullbleed` in Node or `fullbleed/browser` in a web app. Node applications can use
 a [bounded render queue](https://docs.fullbleed.dev/guides/node-render-queue/)
 and optional process isolation.
