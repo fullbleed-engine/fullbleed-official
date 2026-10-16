@@ -11,6 +11,11 @@ import fullbleed
 `compiled_flow_compression_modes` so long-lived services can inspect this surface without compiling
 a probe document.
 
+`build_features().get("embedded_stylesheets", False)` reports whether the installed
+engine applies static `<style>` elements in HTML. See
+[embedded stylesheets](embedded-stylesheets.md) for a complete-document example,
+stylesheet precedence, print media, and compiled rendering boundaries.
+
 ## `fullbleed.ui` (component-first authoring)
 
 Start with [Build PDFs with Python components](component-authoring.md) for named

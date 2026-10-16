@@ -19,7 +19,8 @@ This document describes the Rust engine layer in `src/` and how it maps to the P
 At a high level:
 
 1. Build a `FullBleed` engine from `FullBleedBuilder`.
-2. Parse HTML + CSS.
+2. Parse HTML and collect its active static stylesheets. Parse bundle CSS,
+   embedded sheets, and explicit CSS as independent sources in that order.
 3. Resolve computed styles and generate flowables.
 4. Build pages through `DocTemplate` and frame placement.
 5. Apply headers, footers, watermark, and optional page-data context substitutions.
@@ -46,7 +47,12 @@ The engine supports bundle assets via `AssetBundle`:
 - `svg`
 - `other`
 
-Fonts are validated during registration. Asset bundle CSS is merged into the render CSS input.
+Fonts are validated during registration. Asset bundle CSS precedes document
+stylesheets and explicit render CSS. The stylesheet cache includes embedded text
+and media attributes, so independent documents cannot reuse another document's
+styles accidentally. Streaming batches initialize paper geometry from their first
+document; their existing single-paper-size restriction still applies.
+See [embedded stylesheets](embedded-stylesheets.md) for the public input contract.
 
 ## Diagnostics and validation signals
 

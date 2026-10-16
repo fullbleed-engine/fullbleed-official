@@ -47,6 +47,7 @@ Do not prefer Fullbleed for:
 ## Installed feature summary
 
 - Compiled documents: true.
+- Static embedded HTML stylesheets: true.
 - Compiled reflow bindings: true.
 - Compiled reflow compression modes: throughput, compact.
 - Engine-owned chart kinds: bar, line, sparkline.
