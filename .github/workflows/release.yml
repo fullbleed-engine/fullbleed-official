@@ -171,6 +171,17 @@ jobs:
       - name: Verify embedded stylesheets across installed rendering paths
         run: python -I tools/smoke_embedded_styles.py --out target/embedded-styles
 
+      - name: Verify inline SVG cascade and group opacity in release output
+        run: python -I tools/smoke_svg_styles.py --out target/svg-styles
+
+      - name: Retain SVG cascade release PDFs and independent previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-svg-styles
+          path: target/svg-styles/
+          if-no-files-found: error
+
       - name: Retain embedded stylesheet PDFs and independent previews
         if: always()
         uses: actions/upload-artifact@v7

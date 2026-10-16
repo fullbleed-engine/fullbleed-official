@@ -211,6 +211,17 @@ jobs:
       - name: Verify static embedded stylesheets from the installed wheel
         run: python -I tools/smoke_embedded_styles.py --out target/embedded-stylesheets
 
+      - name: Verify inline SVG cascade and group opacity from the installed wheel
+        run: python -I tools/smoke_svg_styles.py --out target/svg-styles
+
+      - name: Retain SVG cascade PDFs and independent previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: svg-styles-${{ runner.os }}
+          path: target/svg-styles/
+          if-no-files-found: error
+
       - name: Retain embedded stylesheet PDFs and independent previews
         if: always()
         uses: actions/upload-artifact@v7
