@@ -1,3 +1,26 @@
+# Fullbleed Release Notes - 2.5.27
+
+Document CSS now reaches inline SVG shapes and text through the native cascade,
+including ancestor selectors, stylesheet selection, layers, custom properties
+and `currentColor`. SVG assets retain their own stylesheet context.
+
+SVG group opacity composites overlapping shapes once. Paint alpha, inherited
+fill/stroke opacity and group opacity remain separate; explicit root-opacity
+inheritance, translucent `currentColor`, transparent masks and form reuse are
+covered by installed-output fixtures. Masks keep the existing binary luminance
+subset. No runtime dependency is added.
+
+The feature checks cover 54 fixtures and 810 installed-output checks across
+Windows and Linux builds. The complete 1,662-case CSS comparator retains the
+baseline's 1,619 passes, 25 failures and 18 disputed references. One passing
+fixture has a reviewed antialiasing change at a translucent rectangle's perimeter;
+its slightly higher mismatch score is retained in the evidence.
+
+See the [inline SVG styling guide](docs/embedded-stylesheets.md) and
+[2.5.27 runbook](docs/release/2.5.27-runbook.md) for checks and limitations.
+
+---
+
 # Fullbleed Release Notes - 2.5.26
 
 Render a complete HTML document with its embedded `<style>` sheets. Supported
