@@ -137,7 +137,7 @@ class Document:
             attributes = dict(node.attributes)
             attributes["data-fb-id"] = node_id
             try:
-                declarations = node.style.resolve(self.theme)
+                declarations = node._effective_style().resolve(self.theme)
             except AuthoringError as error:
                 raise AuthoringError(error.message, code=error.code, path=location) from error
             if declarations:

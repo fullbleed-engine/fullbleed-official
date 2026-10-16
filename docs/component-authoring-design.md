@@ -71,6 +71,58 @@ if it makes a print measurement ambiguous. A small checked style vocabulary is
 useful editor support; it should not become a second CSS engine or a promise that
 every syntactically accepted declaration has identical layout behavior.
 
+## Composition contracts to settle before adding more API
+
+Initial installed-candidate probes found three places where the prototype asked
+authors to know its implementation. Fragment and spacing behavior remain open.
+The current candidate addresses argument forwarding with separate style layers;
+that improvement does not make the whole design ready to stabilize.
+
+| Operation | Observed behavior | Recommended contract |
+| --- | --- | --- |
+| Move a fragment-returning component later in a `Flow` | It works as the first child, but fails later with a root-styling error because spacing is applied through `with_style` | Moving a valid child must not change whether it is accepted. Define transparent fragment expansion at the flow boundary while retaining component provenance. Until that exists, reject the unsupported shape consistently. |
+| Place a child with `margin_top=pt(24)` into `Flow(..., gap=pt(8))` | The placed copy has an 8 pt top margin; the original node stays unchanged | Parent spacing and child styling need separate ownership. Specify whether gap and margin combine, collapse or conflict; do not implement that decision as an undocumented style replacement. Check the behavior at page boundaries too. |
+| Apply `styled` to a function with a required business argument named `style` | The initial wrapper consumed the argument and called the function without it; the current candidate forwards it unchanged | Preserve business arguments. Use per-instance appearance overrides on the returned node rather than injecting a new argument into arbitrary call signatures. |
+
+The position-dependent case is small enough to expose the problem directly:
+
+```python
+@component
+def Notes():
+    return Fragment(Paragraph("First note"), Paragraph("Second note"))
+
+Flow(Notes(), Paragraph("After"))   # Currently accepted.
+Flow(Paragraph("Before"), Notes())  # Currently raises a root-styling error.
+```
+
+Transparent composition and styling a root are separate contracts. A fragment
+can contribute siblings without having a single root to style. Do not introduce
+an implicit container just to make the second call work: that can change layout,
+semantics and pagination. A future implementation needs to carry diagnostic
+boundaries independently of the emitted element structure.
+
+`styled` cannot both transparently forward arbitrary function arguments and
+unconditionally reserve `style` for itself. The current candidate preserves
+arguments and teaches `StyledField(...).with_style(...)` for an explicit instance
+override. It retains default declarations separately from explicit node styles:
+primitive defaults come first, followed by styled defaults from inner to outer,
+then explicit styles authored by the function or supplied to its primitive.
+Finally, `.with_style(...)` overrides the result. A recipe supplies defaults; it
+does not defeat an explicit appearance chosen inside a custom component.
+
+This keeps `styled(Paragraph, ...)` compatible with the primitive's existing
+`style=` argument, while allowing a custom function's `style` to mean ordinary
+business data. A function without that argument no longer gains it implicitly.
+Such callers use `.with_style(...)` after the call. This changes the experimental
+shortcut, not established `fullbleed.ui` imports. The node's `style` stores authored
+declarations; compilation and the legacy adapter combine those with defaults.
+
+Before stabilizing, retain executable cases for moving a component among sibling
+positions, empty and multi-root returns, reusing a child under different parents,
+and a wrapped function with a `style` argument. Check accepted structure and
+actual pagination where layout is involved. These composition rules matter more
+than another shorthand or tag alias.
+
 ## Judge the API by edits, not by shorter markup
 
 The existing and candidate invoice examples are different designs, so their line
@@ -262,6 +314,7 @@ pagination behavior that the renderer has not demonstrated.
 
 | Work | Acceptance condition |
 | --- | --- |
+| Composition and spacing | Child acceptance is independent of sibling position; fragments retain provenance; parent spacing has an explicit relationship to child margins; generic wrappers preserve business arguments |
 | Oversized-row continuation (partial implementation) | Extend the tested top-aligned text cell behavior to rowspans, page-tall cell images, and other vertical alignments; qualify changing page geometry, complex decorations, and semantic continuity; unsupported cases fail explicitly |
 | Native diagnostics (partial implementation) | Unsplittable fragments resolve to authored root scopes; identify failing descendants and map missing glyphs/other layout diagnostics before claiming full component-level attribution |
 | Typing and completion (partial implementation) | Generated stubs and installed mypy/Pyright checks cover styles, primitive props, layout choices, page options, record types and component arguments; token/part-name completion remains open |
@@ -281,13 +334,15 @@ The prototype's small checked vocabulary is not a CSS capability declaration.
 Typing has a real boundary around `styled`: Python's parameter specifications
 cannot generally add arbitrary keyword parameters to an existing signature
 ([PEP 612](https://peps.python.org/pep-0612/#concatenating-keyword-parameters)).
-Normal calls preserve the factory's argument types. The extra `style=` convenience
-keyword needs a permissive fallback for other arguments; applying `.with_style`
-after a normal call keeps full checking. Runtime validation still handles token
-and part names, finite values, explicit units (including shorthand tuples), and
-CSS syntax. Recursive iterable constraints also need runtime checks: the installed
-Pyright consumer rejects unwrapped `Flow` text, while mypy accepts that recursive
-case. Do not confuse editor assistance with complete static validation.
+The candidate now preserves the wrapped signature exactly and removes the
+permissive fallback previously needed for an injected `style=` keyword. A business
+argument named `style` retains its own type; a primitive's declaration-valued
+`style` remains checked alongside its other arguments. Runtime validation still
+handles token and part names, finite values, explicit units (including shorthand
+tuples), and CSS syntax. Recursive iterable constraints also need runtime checks:
+the installed Pyright consumer rejects unwrapped `Flow` text, while mypy accepts
+that recursive case. Do not confuse editor assistance with complete static
+validation.
 
 Keep the first implementation in `fullbleed.ui.experimental`. Stabilize its
 contracts using the invoice, report, adversarial pagination cases, and actual
@@ -322,7 +377,8 @@ change real documents. A larger number of element wrappers is not that milestone
    component-owned styles, explicit overrides, table columns and page ownership
    are implemented in the draft. Use the shared kit and editing tasks above to
    decide which concepts deserve stable names. Keep the established API working
-   through the explicit adapter during that evaluation.
+   through the explicit adapter during that evaluation. Settle fragment, spacing
+   and wrapper-argument contracts before adding more authoring helpers.
 2. **Close the print and diagnostic contracts.** Extend continuation deliberately,
    retain semantic structure, and improve descendant attribution. Document
    unsupported content instead of making a component promise stronger than its

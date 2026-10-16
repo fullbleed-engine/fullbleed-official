@@ -19,7 +19,7 @@ import time
 import fullbleed
 from fullbleed.ui.experimental import (
     Column, DataTable, Document, Flow, Image as ComponentImage, Page, Paragraph, Renderer, Strong, Theme,
-    mm, pt, style,
+    component, mm, pt, style, styled,
 )
 from PIL import Image
 from pypdf import PdfReader
@@ -225,6 +225,37 @@ else:
         )
         assert table.parts == DataTable.parts
         check(name, Document(table, theme=studio_theme()), [expected], size=a4, pages=1, accent="#dce8f5")
+
+    # A generic style recipe must not consume business arguments or overwrite
+    # explicit component choices. Reusing the captured result does not call its
+    # factory again, and a final instance override affects only its own copy.
+    style_calls = []
+
+    @component
+    def Choice(label, *, style):
+        style_calls.append((label, style))
+        return Paragraph(label, ": ", style)
+
+    @component
+    def ExplicitChoice(label, *, style):
+        return Choice(label, style=style).with_style(background="#246b45")
+
+    defaults = dict(background="#315d9b", color="#ffffff", padding=pt(12), font_size=pt(14))
+    invitation = styled(Choice, **defaults)("Invitation", style="formal")
+    memo = styled(ExplicitChoice, **defaults)("Memo", style="notice")
+    _, style_text = check("styled-factory-arguments", Document(
+        Flow(invitation, invitation.with_style(background="#9a462e"), memo),
+        page=Page("A5", margin=mm(12)), theme=studio_theme(),
+    ), ["Invitation: formal", "Memo: notice"], size=a5, pages=1, accent="#315d9b")
+    assert style_calls == [("Invitation", "formal"), ("Memo", "notice")]
+    assert compact(style_text).count(compact("Invitation: formal")) == 2
+    with Image.open(args.out / "styled-factory-arguments/independent-page-1.png") as painted:
+        colors = {rgb: count for count, rgb in painted.convert("RGB").getcolors(1000000)}
+    for color in ("315d9b", "9a462e", "246b45"):
+        assert colors[tuple(bytes.fromhex(color))] > 1000, ("style layer", color)
+    cases[-1]["styled_arguments_forwarded"] = True
+    cases[-1]["factory_calls"] = style_calls
+    cases[-1]["independent_style_colors"] = ["#315d9b", "#9a462e", "#246b45"]
 
     snippets = re.findall(r"```python\n(.*?)```", (ROOT / "examples/component_recipes/README.md").read_text(encoding="utf-8"), re.S)
     previous = Path.cwd()

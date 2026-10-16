@@ -3,7 +3,7 @@
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Literal, ParamSpec, Protocol, TypeAlias, overload
+from typing import Literal, ParamSpec, Protocol, TypeAlias, overload
 from ._style import Style, _StyleInput, _StyleValue
 
 P = ParamSpec("P")
@@ -126,14 +126,6 @@ def component(fn: Callable[P, Node], *, parts: Iterable[str] | None = ...) -> Co
 @overload
 def component(fn: None = ..., *, parts: Iterable[str] | None = ...) -> Callable[[Callable[P, Node]], ComponentFactory[P]]: ...
 
-class _StyledFactory(Protocol[P]):
-    @property
-    def parts(self) -> tuple[str, ...] | None: ...
-    @overload
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> Node: ...
-    @overload
-    def __call__(self, *args: Any, style: _StyleInput, **kwargs: Any) -> Node: ...
-
 def styled(
     factory: Callable[P, Node], *fragments: _StyleInput,
     align_items: _StyleValue | None = ...,
@@ -203,7 +195,7 @@ def styled(
     white_space: _StyleValue | None = ...,
     widows: _StyleValue | None = ...,
     width: _StyleValue | None = ...,
-) -> _StyledFactory[P]: ...
+) -> ComponentFactory[P]: ...
 
 def _element(tag: str, children: Iterable[_Child], *, base: _StyleInput = ..., style: _StyleInput = ..., class_name: str | None = ..., attrs: _Attributes = ..., part: str | None = ...) -> Node: ...
 def _children(values: _Child) -> tuple[_Child, ...]: ...

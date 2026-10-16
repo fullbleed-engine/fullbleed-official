@@ -86,7 +86,7 @@ class Theme:
     tree = HEADER + '''from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Literal, ParamSpec, Protocol, TypeAlias, overload
+from typing import Literal, ParamSpec, Protocol, TypeAlias, overload
 from ._style import Style, _StyleInput, _StyleValue
 
 P = ParamSpec("P")
@@ -134,16 +134,8 @@ def component(fn: Callable[P, Node], *, parts: Iterable[str] | None = ...) -> Co
 @overload
 def component(fn: None = ..., *, parts: Iterable[str] | None = ...) -> Callable[[Callable[P, Node]], ComponentFactory[P]]: ...
 
-class _StyledFactory(Protocol[P]):
-    @property
-    def parts(self) -> tuple[str, ...] | None: ...
-    @overload
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> Node: ...
-    @overload
-    def __call__(self, *args: Any, style: _StyleInput, **kwargs: Any) -> Node: ...
-
 '''
-    tree += style_signature("styled", "factory: Callable[P, Node], *fragments: _StyleInput", "_StyledFactory[P]")
+    tree += style_signature("styled", "factory: Callable[P, Node], *fragments: _StyleInput", "ComponentFactory[P]")
     tree += f'''
 
 def _element(tag: str, children: Iterable[_Child], *, base: _StyleInput = ..., {props}) -> Node: ...

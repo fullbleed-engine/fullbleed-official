@@ -160,11 +160,62 @@ def test_invalid_part_declarations_fail_at_decoration(parts):
 def test_style_precedence_preserves_shorthand_order_and_caller_override():
     Notice = styled(Card, padding=pt(12), color="green")
     node = Notice("Paid", style=style(padding_left=pt(24), color="blue"))
-    declarations = node.style.resolve(Theme())
+    declarations = Document(node).to_css()
     assert declarations.index("padding: 12pt") < declarations.index("padding-left: 24pt")
     assert "color: blue;" in declarations and "color: green;" not in declarations
-    overridden = node.with_style(padding=pt(6)).style.resolve(Theme())
+    overridden = Document(node.with_style(padding=pt(6))).to_css()
     assert overridden.index("padding-left: 24pt") < overridden.index("padding: 6pt")
+
+
+def test_styled_preserves_business_arguments_and_invokes_the_factory_once():
+    calls = []
+
+    @component(parts=("value",))
+    def Choice(label: str, /, *, style: str) -> Node:
+        calls.append((label, style))
+        return Paragraph(label, ": ", style, part="value")
+
+    StyledChoice = styled(Choice, color="red")
+    node = StyledChoice("Invitation", style="formal")
+    assert calls == [("Invitation", "formal")]
+    assert inspect.signature(StyledChoice) == inspect.signature(Choice)
+    assert StyledChoice.parts == ("value",)
+    compiled = Document(node).compile()
+    assert "Invitation: formal" in compiled.html and "color: red;" in compiled.css
+    assert "color: blue;" in Document(node.with_style(color="blue")).to_css()
+    assert "color: red;" in Document(node).to_css()
+    assert calls == [("Invitation", "formal")]
+
+
+def test_styled_layers_preserve_explicit_styles_and_nested_recipe_precedence():
+    Base = styled(Card, padding=pt(18), color="green")
+    Outer = styled(Base, padding_left=pt(24), color="red")
+    node = Outer("Invoice", style=style(color="blue"))
+    compiled = Document(node).to_css()
+    assert compiled.index("padding: 18pt") < compiled.index("padding-left: 24pt")
+    assert "color: blue;" in compiled and "color: green;" not in compiled and "color: red;" not in compiled
+    assert "color: red;" in Document(Outer("Invoice")).to_css()
+
+    @component
+    def Explicit():
+        return Paragraph("Important").with_style(color="purple")
+
+    result = styled(Explicit, color="red", padding=pt(8))()
+    assert "color: purple;" in Document(result).to_css()
+    assert "padding: 8pt;" in Document(result).to_css()
+    assert "color: blue;" in Document(result.with_style(color="blue")).to_css()
+    legacy = to_legacy(result)
+    assert "color: purple;" in legacy[0].props["style"]
+    assert "padding: 8pt;" in legacy[0].props["style"]
+
+
+def test_styled_no_longer_injects_style_into_custom_function_arguments():
+    def Notice(message):
+        return Paragraph(message)
+
+    with pytest.raises(TypeError, match="unexpected keyword argument 'style'"):
+        styled(Notice, color="red")("Paid", style=style(color="blue"))
+    assert "color: blue;" in Document(styled(Notice, color="red")("Paid").with_style(color="blue")).to_css()
 
 
 def test_style_and_theme_inputs_are_snapshotted_at_construction():

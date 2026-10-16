@@ -31,8 +31,16 @@ parts: tuple[str, ...] | None = Notice.parts
 Label = styled(Paragraph, color=token("muted"), font_size=pt(8))
 QuietNotice = styled(Notice, color="#334455")
 typed: Node = QuietNotice("Paid").with_style(padding=pt(8))
-override: Node = QuietNotice("Paid", style=style(color="blue"))
+override: Node = QuietNotice("Paid").with_style(color="blue")
+primitive_override: Node = Label("Paid", style=style(color="blue"))
 styled_parts: tuple[str, ...] | None = QuietNotice.parts
+
+@component
+def Choice(*, style: str) -> Node:
+    return Paragraph(style)
+
+StyledChoice = styled(Choice, color="purple")
+business_style: Node = StyledChoice(style="formal")
 spacing = [pt(4), mm(2)]
 recipe = Style(style(color="black"), padding=spacing)
 root = Stack(Label("Invoice"), typed, gap=pt(6), align="start", style=recipe)
@@ -86,6 +94,9 @@ INVALID_CASES = [
     ("flow_text_requires_paragraph", 'Flow("raw text")'),
     ("styled_argument", "QuietNotice(123)"),
     ("styled_keyword", 'QuietNotice("Paid", unexpected=True)'),
+    ("styled_extra_style", 'QuietNotice("Paid", style=style(color="blue"))'),
+    ("styled_primitive_class_with_style", 'Label("Paid", class_name=10, style=style(color="blue"))'),
+    ("styled_business_style_type", 'StyledChoice(style=10)'),
     ("migration_node", 'to_legacy("<p>HTML</p>")'),
     ("migration_theme", 'to_legacy(valid, theme={"muted": "gray"})'),
 ]
@@ -150,7 +161,7 @@ def main():
               "expected_invalid_consumer": invalid.stdout, "invalid_cases": expected,
               "rejected_cases": len(expected) - len(missed), "runtime_only_cases": sorted(missed),
               "flow_runtime_guard": runtime_guard,
-              "scope": "Installed calls, style keywords and value shapes, page options, primitive props, layout choices, table record types and preserved component arguments. Finite values, units, CSS syntax, token names and dynamic part names still require runtime validation. The extra style keyword on a styled custom factory has a permissive argument fallback; use node.with_style for full argument checking."}
+              "scope": "Installed calls, style keywords and value shapes, page options, primitive props, layout choices, table record types and preserved component arguments. Styled factories retain exactly their wrapped argument types, including business arguments named style. Finite values, units, CSS syntax, token names and dynamic part names still require runtime validation."}
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"ok": True, "rejected_cases": len(expected) - len(missed), "runtime_only_cases": sorted(missed)}))

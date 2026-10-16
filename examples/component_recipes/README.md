@@ -103,10 +103,31 @@ present content; use an explicit declaration for a stable customization contract
 its optional declaration. Styled factories expose the same optional declaration;
 styling a primitive exposes `parts=None`.
 
-Styles compose in this order: primitive defaults, a styled factory's defaults,
-the call's `style`, then later `with_style` or `with_parts` changes. Overrides move
-to the end, preserving CSS shorthand/longhand ordering. Themes supply values and
-document text defaults; they do not silently override a component's own settings.
+Styles compose in this order: primitive defaults, styled defaults from inner to
+outer, explicit styles authored by a component or passed to its primitive, then
+later `with_style` or `with_parts` changes. Overrides move to the end, preserving
+CSS shorthand/longhand ordering. Themes supply values and document text defaults;
+they do not silently override a component's own settings.
+
+`styled` forwards the wrapped function's arguments unchanged. A primitive such
+as `Paragraph` accepts `style=` declarations; a custom function decides what its
+own arguments mean. A recipe supplies defaults without overriding explicit styles
+inside that function. Use `.with_style(...)` on its result to override them:
+
+```python
+@component
+def Invitation(*, style: str):
+    return Paragraph("Invitation: ", style)
+
+StyledInvitation = styled(Invitation, font_size=pt(12))
+invitation = StyledInvitation(style="formal").with_style(color="#315d9b")
+```
+
+A custom function without a `style` argument does not gain one through `styled`.
+Earlier prototype callers using that shortcut should move the declarations to
+`.with_style(...)` after the call. See the
+[implementation review](../../docs/component-authoring-design.md#composition-contracts-to-settle-before-adding-more-api)
+for the remaining fragment and spacing contracts.
 
 `class_name` still means a literal CSS class label. It does not load styles or
 refer to a Python variable. In this prototype, use style values for the normal
@@ -200,6 +221,12 @@ children; `Stack` uses column flex layout. They have different pagination
 behavior. `Heading` requests keeping following content with it by default. The
 engine remains responsible for final pagination; components do not estimate font
 metrics or pre-paginate rows in Python.
+
+`Flow` currently applies its gap by replacing the top margin of every child after
+the first. The original child remains unchanged, but its placed copy loses an
+authored top margin. Use rooted children: fragment-returning components can pass
+in the first position and fail later when spacing is applied. This inconsistency
+and the ownership of gap versus margin must be resolved before stabilization.
 
 `document.compile()` returns HTML, CSS, and a source map. Generated `data-fb-id`
 values use the engine's source-ID mechanism. Source filenames and line numbers

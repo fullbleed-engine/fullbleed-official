@@ -166,9 +166,10 @@ def main():
                 ("layout_values", 'Stack(Paragraph("Text"), align="§")', {"start", "center", "stretch"}),
                 ("table_columns", "DataTable([], col§)", {"columns"}),
                 ("heading_keep", 'Heading("Text", keep_§)', {"keep_with_next"}),
+                ("styled_business_argument", 'def Choice(*, style: str) -> Node:\n    return Paragraph(style)\nStyledChoice = styled(Choice, color="red")\nStyledChoice(sty§)', {"style"}),
             ]
             for index, (name, expression, required) in enumerate(cases):
-                prefix = "from fullbleed.ui.experimental import style, styled, Paragraph, Stack, DataTable, Heading\n"
+                prefix = "from fullbleed.ui.experimental import style, styled, Paragraph, Stack, DataTable, Heading, Node\n"
                 before, after = (prefix + expression).split("§")
                 path = folder / f"completion_{index}.py"
                 server.open(path, before + after)

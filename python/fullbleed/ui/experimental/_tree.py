@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Set
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from functools import wraps
 from typing import Callable, ClassVar, ParamSpec, Protocol, cast, overload
@@ -100,6 +100,7 @@ class Node:
     source: tuple[str, int] | None = None
     boundary: bool = False
     declared_parts: tuple[str, ...] | None = None
+    _defaults: Style = field(default=Style(), repr=False, kw_only=True)
 
     def __post_init__(self):
         if self.tag is not None and (not isinstance(self.tag, str) or not _TAG_NAME.fullmatch(self.tag)):
@@ -107,6 +108,7 @@ class Node:
         object.__setattr__(self, "children", _children(self.children))
         object.__setattr__(self, "attributes", _attrs(dict(self.attributes)))
         object.__setattr__(self, "style", Style(self.style))
+        object.__setattr__(self, "_defaults", Style(self._defaults))
         declared = _declared_parts(self.declared_parts)
         object.__setattr__(self, "declared_parts", declared)
         if declared is not None:
@@ -124,7 +126,7 @@ class Node:
             if len(self.source) != 2 or not isinstance(self.source[0], str) or not isinstance(self.source[1], int):
                 raise AuthoringError("Source locations require a filename and line number", code="component.source")
             object.__setattr__(self, "source", tuple(self.source))
-        if self.tag is None and (self.attributes or self.style.entries or self.part is not None):
+        if self.tag is None and (self.attributes or self.style.entries or self._defaults.entries or self.part is not None):
             raise AuthoringError("Virtual nodes cannot carry element styles or attributes", code="style.root")
         if self.tag is not None and self.tag.casefold() in _HTML_VOID_ELEMENTS and self.children:
             raise AuthoringError(f"Void element {self.tag!r} cannot have children", code="element.void")
@@ -149,13 +151,19 @@ class Node:
         return tuple(found)
 
     def with_style(self, *fragments, **properties) -> Node:
+        return self._with_root_styles(authored=Style(*fragments, **properties))
+
+    def _effective_style(self) -> Style:
+        return Style(self._defaults, self.style)
+
+    def _with_root_styles(self, *, defaults=None, authored=None) -> Node:
         node, wrappers = self, []
         while node.tag is None:
             if node.name is None or len(node.children) != 1 or not isinstance(node.children[0], Node):
                 raise AuthoringError("Root styling requires one element; give this fragment an explicit container", code="style.root")
             wrappers.append(node)
             node = node.children[0]
-        node = replace(node, style=Style(node.style, *fragments, **properties))
+        node = replace(node, _defaults=Style(node._defaults, defaults), style=Style(node.style, authored))
         for wrapper in reversed(wrappers):
             node = replace(wrapper, children=(node,))
         return node
@@ -201,7 +209,7 @@ def _element(tag, children, *, base=None, style=None, class_name=None, attrs=Non
         if "class" in attributes or "class_name" in attributes:
             raise AuthoringError("Supply class_name or attrs['class'], not both", code="attribute.duplicate")
         attributes["class"] = class_name
-    return Node(tag, _children(children), _attrs(attributes), Style(base, style), part)
+    return Node(tag, _children(children), _attrs(attributes), Style(style), part, _defaults=Style(base))
 
 
 def _primitive(name, base=None):
@@ -322,15 +330,19 @@ def component(
     return cast(ComponentFactory[P], wrapped)
 
 
-def styled(factory: Callable[..., Node], *fragments, **properties):
-    """A reusable root style. Call-site style overrides recipe declarations."""
+def styled(factory: Callable[P, Node], *fragments, **properties) -> ComponentFactory[P]:
+    """Supply root defaults while preserving the factory's arguments unchanged.
+
+    Primitive defaults come first, then styled defaults from inner to outer.
+    Explicit node styles win; with_style on the returned node overrides them.
+    """
     base = Style(*fragments, **properties)
 
     @wraps(factory)
-    def build(*args, style=None, **kwargs) -> Node:
+    def build(*args: P.args, **kwargs: P.kwargs) -> Node:
         node = factory(*args, **kwargs)
         if not isinstance(node, Node):
             raise AuthoringError("A styled factory must return a component node", code="style.root")
-        return node.with_style(base, style)
+        return node._with_root_styles(defaults=base)
     setattr(build, "parts", getattr(factory, "parts", None))
-    return build
+    return cast(ComponentFactory[P], build)

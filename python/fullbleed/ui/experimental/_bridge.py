@@ -35,7 +35,7 @@ def to_legacy(node: Node, *, theme: Theme | None = None) -> tuple[Element | str,
         if item.tag is not None:
             location = (*path, item.part or item.tag)
             try:
-                declarations = item.style.resolve(theme)
+                declarations = item._effective_style().resolve(theme)
             except AuthoringError as error:
                 raise AuthoringError(error.message, code=error.code, path=location) from error
             attributes = dict(item.attributes)
