@@ -3302,6 +3302,7 @@ fn node_to_flowables_in_scope(
                         let font_context = crate::svg::SvgFontContext {
                             style: style.to_text_style(),
                             registry: font_registry.clone(),
+                            root_opacity_in_wrapper: true,
                         };
                         let attrs = element.attributes.borrow();
                         let (inline_w, inline_h) = inline_dimensions(inline_style.as_deref());
@@ -4461,8 +4462,9 @@ fn serialize_styled_svg_node(
     {
         root_style.opacity = parent_style.opacity;
     }
-    // The replaced-element wrapper composites the outer SVG once.
-    root.insert("opacity".into(), "1".into());
+    // Keep the computed value for descendants using opacity:inherit. The
+    // compiler context delegates only its compositing to the HTML wrapper.
+    root.insert("opacity".into(), root_style.opacity.to_string());
     for (name, value) in root {
         if value.eq_ignore_ascii_case("inherit")
             || (value.eq_ignore_ascii_case("unset") && crate::svg::svg_property_inherits(&name))

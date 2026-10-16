@@ -81,6 +81,14 @@ def cases():
     yield ('svg-fill-initial', svg(attributes='fill="#d00000"', rect_attributes='style="fill:initial"'), '', BLACK)
     yield ('svg-fill-unset', svg(attributes='fill="#d00000"', rect_attributes='style="fill:unset"'), '', RED)
     yield ('svg-root-opacity-attribute', svg(attributes='opacity="0.5"', rect_attributes='fill="#d00000"'), '', '#e78080')
+    yield ('svg-child-inherits-root-opacity', svg(attributes='style="opacity:0.5"', rect_attributes='fill="#d00000" opacity="inherit"'), '', '#f3c0c0')
+    yield ('svg-child-inherits-root-and-html-opacity', '<main style="opacity:0.5">'+svg(attributes='opacity="inherit"', rect_attributes='fill="#d00000" opacity="inherit"')+'</main>', '', '#f9dfdf')
+    yield ('svg-currentcolor-alpha', svg(attributes='color="rgba(208,0,0,0.5)"', rect_attributes='fill="currentColor"'), '', '#e78080')
+    yield ('svg-currentcolor-stroke-alpha', svg(attributes='color="rgba(208,0,0,0.5)"', rect_attributes='fill="none" stroke="currentColor" stroke-width="100"'), '', '#e78080')
+    yield ('svg-currentcolor-alpha-child-override', svg(attributes='color="rgba(208,0,0,0.5)" fill="currentColor"', rect_attributes='color="#0060c0"'), '', BLUE)
+    yield ('svg-transparent-mask-color', svg('<defs><mask id="m"><rect width="100" height="100" fill="rgba(255,255,255,0)"/></mask></defs>', rect_attributes='fill="#d00000" mask="url(#m)"'), '', '#ffffff')
+    yield ('svg-transparent-mask-overlay', svg('<defs><mask id="m"><rect width="100" height="100" fill="white"/><rect width="100" height="100" fill="rgba(255,255,255,0)"/></mask></defs>', rect_attributes='fill="#d00000" mask="url(#m)"'), '', RED)
+    yield ('svg-transparent-mask-group', svg('<defs><mask id="m"><g opacity="0"><rect width="100" height="100" fill="white"/></g></mask></defs>', rect_attributes='fill="#d00000" mask="url(#m)"'), '', '#ffffff')
     yield ('svg-stroke-opacity-replacement', svg(rect_attributes='fill="none" stroke="#d00000" stroke-width="100" stroke-opacity="0.25" style="stroke-opacity:1"'), '', RED)
     yield ('svg-use-inheritance', '<svg width="100" height="100"><defs><rect id="shape" width="100" height="100"/></defs><use href="#shape"/></svg>', 'use {fill:#d00000}', RED)
     yield ('svg-sibling-selector', svg('<g/>'), 'svg > g + rect {fill:#d00000}', RED)
@@ -88,6 +96,9 @@ def cases():
     source=svg('<style>.mark {fill:#0060c0}</style>')
     encoded=b64encode(source.encode()).decode()
     yield ('external-svg-isolation', f'<img width="100" height="100" src="data:image/svg+xml;base64,{encoded}">', '.mark {fill:#d00000 !important}', BLUE)
+    source=svg(attributes='opacity="0.5"', rect_attributes='fill="#d00000" opacity="inherit"')
+    encoded=b64encode(source.encode()).decode()
+    yield ('external-svg-root-opacity-inheritance', f'<img width="100" height="100" src="data:image/svg+xml;base64,{encoded}">', '', '#f3c0c0')
 
 
 def sample(picture, expected):

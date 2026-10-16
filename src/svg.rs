@@ -177,6 +177,9 @@ const SVG_LONGHANDS: &[&str] = &[
 pub(crate) struct SvgFontContext {
     pub style: TextStyle,
     pub registry: Option<Arc<FontRegistry>>,
+    /// The HTML replaced-element wrapper applies the outer SVG's opacity.
+    /// Preserve that computed value inside SVG for explicit inheritance.
+    pub root_opacity_in_wrapper: bool,
 }
 
 // Lightweight detection for SVG features that our vector compiler does not support yet.
@@ -369,6 +372,7 @@ struct Paint {
 #[derive(Debug, Clone)]
 struct SvgStyle {
     color: Color,
+    color_alpha: f32,
     opacity: f32,
     fill: Paint,
     stroke: Paint,
@@ -409,6 +413,7 @@ impl SvgStyle {
         // SVG defaults: black fill, no stroke.
         Self {
             color: Color::BLACK,
+            color_alpha: 1.0,
             opacity: 1.0,
             fill: Paint {
                 color: Some(Color::BLACK),
@@ -643,6 +648,7 @@ pub(crate) fn compile_svg_with_font_context(
         &stylesheet,
         &mut resolving_ids,
         false,
+        !font.is_some_and(|context| context.root_opacity_in_wrapper),
     );
     out
 }
@@ -858,6 +864,7 @@ fn compile_element(
         stylesheet,
         resolving_ids,
         true,
+        true,
     );
 }
 
@@ -872,6 +879,7 @@ fn compile_element_with_source_capture(
     stylesheet: &SvgStylesheet,
     resolving_ids: &mut Vec<String>,
     capture_source_id: bool,
+    composite_opacity: bool,
 ) {
     let mut local_style = style.clone();
     apply_presentation_and_style(node, stylesheet, &mut local_style);
@@ -887,7 +895,12 @@ fn compile_element_with_source_capture(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_owned);
-    if filter.is_none() && mask.is_none() && source_id.is_none() && local_style.opacity >= 1.0 {
+    let opacity = if composite_opacity {
+        local_style.opacity
+    } else {
+        1.0
+    };
+    if filter.is_none() && mask.is_none() && source_id.is_none() && opacity >= 1.0 {
         compile_element_inner(
             out,
             node,
@@ -914,7 +927,7 @@ fn compile_element_with_source_capture(
     );
     if !items.is_empty() {
         out.push(CompiledItem::Group(CompiledGroup {
-            opacity: local_style.opacity,
+            opacity,
             items,
             filter,
             mask,
@@ -1282,6 +1295,7 @@ fn compile_mask_for_node(
         &mut positive,
         &mut negative,
         0,
+        1.0,
     );
     let paints_anything = !positive.is_empty();
     positive.extend(negative);
@@ -1302,12 +1316,17 @@ fn compile_mask_subtree(
     positive: &mut Vec<PathSeg>,
     negative: &mut Vec<PathSeg>,
     depth: usize,
+    ancestor_opacity: f32,
 ) {
     if depth > 32 {
         return;
     }
     let mut style = inherited_style.clone();
     apply_presentation_and_style(node, stylesheet, &mut style);
+    let opacity = ancestor_opacity * style.opacity;
+    if opacity <= 0.0 {
+        return;
+    }
     let mut local_ctm = ctm;
     if let Some(transform) = node.attribute("transform") {
         local_ctm = local_ctm.mul(parse_transform(transform));
@@ -1324,6 +1343,7 @@ fn compile_mask_subtree(
                 positive,
                 negative,
                 depth + 1,
+                opacity,
             );
         }
         return;
@@ -1342,6 +1362,7 @@ fn compile_mask_subtree(
                     positive,
                     negative,
                     depth + 1,
+                    opacity,
                 );
             }
         }
@@ -1359,6 +1380,12 @@ fn compile_mask_subtree(
         _ => None,
     };
     let Some(raw) = raw else { return };
+    let alpha = style.fill.alpha * style.fill_opacity * opacity;
+    // Transparent paint contributes nothing, including over an earlier white
+    // mask shape. It must not become a black cutout in the binary mask subset.
+    if alpha <= 0.0 {
+        return;
+    }
     let transformed = transform_path_segs(&raw, local_ctm);
     let luminance = style
         .fill
@@ -1371,7 +1398,7 @@ fn compile_mask_subtree(
                 0.0
             }
         })
-        * style.fill_opacity;
+        * alpha;
     if luminance >= 0.5 {
         positive.extend(transformed);
     } else {
@@ -3411,9 +3438,11 @@ fn apply_presentation_and_style(
     }
     if style.fill.current_color {
         style.fill.color = Some(style.color);
+        style.fill.alpha = style.color_alpha;
     }
     if style.stroke.current_color {
         style.stroke.color = Some(style.color);
+        style.stroke.alpha = style.color_alpha;
     }
 }
 
@@ -3425,8 +3454,9 @@ fn apply_svg_declaration(
     let value = declaration.value.trim();
     match declaration.name.to_ascii_lowercase().as_str() {
         "color" => {
-            if let Some(color) = parse_svg_color(value) {
+            if let Some((color, alpha)) = crate::style::parse_color_string(value) {
                 style.color = color;
+                style.color_alpha = alpha.clamp(0.0, 1.0);
             }
         }
         "fill" => {
@@ -4986,6 +5016,7 @@ mod tests {
                 ..TextStyle::default()
             },
             registry: Some(Arc::new(registry)),
+            root_opacity_in_wrapper: false,
         }
     }
 
@@ -5683,5 +5714,58 @@ mod tests {
         let xml = r##"<svg width="40" height="40"><style>@media screen {rect {fill:blue}} stop {stop-color:#d00000 !important}</style><defs><linearGradient id="paint"><stop offset="0" style="stop-color:blue"/><stop offset="1" style="stop-color:blue"/></linearGradient></defs><rect width="40" height="40" fill="url(#paint)"/></svg>"##;
         let image = rasterize_native_svg(xml, 40.0, 40.0);
         assert_eq!(&image.get_pixel(20, 20).0[..3], &[208, 0, 0]);
+    }
+
+    #[test]
+    fn svg_currentcolor_preserves_alpha_and_child_color_override() {
+        for (content, expected) in [
+            (
+                r#"<rect width="40" height="40" fill="currentColor"/>"#,
+                [231, 128, 128],
+            ),
+            (
+                r#"<rect width="40" height="40" fill="none" stroke="currentColor" stroke-width="40"/>"#,
+                [231, 128, 128],
+            ),
+            (
+                r##"<g fill="currentColor"><rect width="40" height="40" color="#0060c0"/></g>"##,
+                [0, 96, 192],
+            ),
+        ] {
+            let xml =
+                format!(r#"<svg width="40" height="40" color="rgba(208,0,0,0.5)">{content}</svg>"#);
+            let image = rasterize_native_svg(&xml, 40.0, 40.0);
+            let pixel = image.get_pixel(10, 10);
+            for channel in 0..3 {
+                assert!(
+                    (pixel[channel] as i32 - expected[channel]).abs() <= 2,
+                    "{content}: {pixel:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn svg_transparent_mask_paint_does_not_contribute() {
+        for (content, expected) in [
+            (
+                r#"<rect width="40" height="40" fill="rgba(255,255,255,0)"/>"#,
+                [255, 255, 255],
+            ),
+            (
+                r#"<rect width="40" height="40" fill="white"/><rect width="40" height="40" fill="rgba(255,255,255,0)"/>"#,
+                [208, 0, 0],
+            ),
+            (
+                r#"<g opacity="0"><rect width="40" height="40" fill="white"/></g>"#,
+                [255, 255, 255],
+            ),
+        ] {
+            let xml = format!(
+                r##"<svg width="40" height="40"><defs><mask id="m">{content}</mask></defs><rect width="40" height="40" fill="#d00000" mask="url(#m)"/></svg>"##
+            );
+            let image = rasterize_native_svg(&xml, 40.0, 40.0);
+            assert_eq!(&image.get_pixel(10, 10).0[..3], &expected, "{content}");
+        }
     }
 }

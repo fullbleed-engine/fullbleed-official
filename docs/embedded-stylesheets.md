@@ -108,6 +108,10 @@ font lookup or browser is introduced.
 color's own alpha remains separate. `opacity` composites the element or group
 once, so two overlapping shapes inside `<g opacity="0.5">` do not darken their
 overlap. The outer inline SVG's opacity is applied by its document wrapper once.
+Its computed value remains available to children using `opacity:inherit`.
+`currentColor` carries the color's alpha into fill and stroke paint. Fully
+transparent mask paint contributes nothing; the existing binary luminance-mask
+subset does not implement continuous soft-mask transparency.
 
 SVG assets loaded through `<img>` or an asset reference remain isolated from the
 containing document's selectors. Their supported local styles use print media
