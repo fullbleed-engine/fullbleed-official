@@ -89,6 +89,8 @@ class FixtureRenderer:
         self.engine = fullbleed.PdfEngine(
             font_files=parity_font_files(self.resource_root)
         )
+        features = getattr(fullbleed, "build_features", lambda: {})()
+        self.native_embedded_styles = bool(features.get("embedded_stylesheets", False))
 
     def render(self, html: str, *, base_path: Path) -> bytes:
         base_path = base_path.resolve(strict=True)
@@ -101,7 +103,11 @@ class FixtureRenderer:
             # directory. A persistent adapter is single-threaded, so changing its
             # process-local base between framed requests is deterministic.
             os.chdir(base_path)
-            pdf = bytes(self.engine.render_pdf(html, embedded_css(html)))
+            # Retain the fixture geometry check for both runtimes. Native style
+            # discovery must receive the original HTML exactly once; replaying
+            # its rules as explicit CSS would duplicate layers and source order.
+            extracted_css = embedded_css(html)
+            pdf = bytes(self.engine.render_pdf(html, "" if self.native_embedded_styles else extracted_css))
         finally:
             os.chdir(previous_directory)
 

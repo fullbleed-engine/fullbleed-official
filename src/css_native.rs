@@ -54,6 +54,20 @@ pub(crate) struct Stylesheet {
     pub(crate) rules: Vec<Rule>,
 }
 
+/// A stylesheet is a parsing boundary. A media attribute is metadata, never
+/// interpolated into CSS source, so a malformed sheet cannot consume its neighbor.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct StylesheetSource<'a> {
+    pub(crate) text: &'a str,
+    pub(crate) media: Option<&'a str>,
+}
+
+impl<'a> StylesheetSource<'a> {
+    pub(crate) fn new(text: &'a str) -> Self {
+        Self { text, media: None }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Rule {
     Style(StyleRule),
@@ -71,6 +85,9 @@ pub(crate) struct AtRule {
     pub(crate) name: String,
     pub(crate) prelude: String,
     pub(crate) block: Option<AtRuleBlock>,
+    /// Original source range, including the at-keyword and complete block.
+    /// Offsets are relative to the stylesheet, including for nested rules.
+    pub(crate) source_range: std::ops::Range<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -189,6 +206,16 @@ fn parse_rule_list(
         if position >= input.len() {
             break;
         }
+        // HTML's legacy style wrappers are CDO/CDC tokens. CSS Syntax ignores
+        // them at stylesheet level only; they are not HTML entity decoding.
+        if depth == 0 && input[position..].starts_with("<!--") {
+            position += 4;
+            continue;
+        }
+        if depth == 0 && input[position..].starts_with("-->") {
+            position += 3;
+            continue;
+        }
         if input.as_bytes()[position] == b'}' {
             return Err(Error::new(
                 base_offset + position,
@@ -282,6 +309,7 @@ fn parse_at_rule(
                 name,
                 prelude,
                 block: None,
+                source_range: base_offset + start..base_offset + input.len(),
             })),
             input.len(),
         ));
@@ -293,6 +321,7 @@ fn parse_at_rule(
                 name,
                 prelude,
                 block: None,
+                source_range: base_offset + start..base_offset + terminator + 1,
             })),
             terminator + 1,
         ));
@@ -312,6 +341,7 @@ fn parse_at_rule(
             name,
             prelude,
             block: Some(block),
+            source_range: base_offset + start..base_offset + next,
         })),
         next,
     ))
@@ -1181,6 +1211,27 @@ impl ScanState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn embedded_stylesheet_legacy_tokens_and_nested_source_ranges() {
+        let source = "<!-- p {color:red} --> @media print { @page {size:A5} }";
+        let sheet = parse_stylesheet(source).unwrap();
+        assert_eq!(sheet.rules.len(), 2);
+        let Rule::Style(style) = &sheet.rules[0] else {
+            panic!("style rule")
+        };
+        assert_eq!(style.selectors, "p");
+        let Rule::At(media) = &sheet.rules[1] else {
+            panic!("media rule")
+        };
+        let Some(AtRuleBlock::Rules(rules)) = &media.block else {
+            panic!("nested rules")
+        };
+        let Rule::At(page) = &rules[0] else {
+            panic!("page rule")
+        };
+        assert_eq!(&source[page.source_range.clone()], "@page {size:A5}");
+    }
 
     #[test]
     fn declarations_preserve_nested_delimiters_and_split_important() {

@@ -5,7 +5,8 @@
 HTML reference: https://html.spec.whatwg.org/multipage/rendering.html#hidden-elements
 Each input is compared with an independently authored visible-content control.
 PDF bytes, extracted text, native previews, and independent PDFium pixels must
-agree. No JavaScript is evaluated and embedded stylesheets remain unsupported.
+agree. No JavaScript is evaluated. Style-text visibility and applying an embedded
+stylesheet are separate behaviors; this suite checks visibility.
 Development-only dependencies: pypdf, pypdfium2, pillow.
 """
 from __future__ import annotations

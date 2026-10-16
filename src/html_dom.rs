@@ -49,6 +49,14 @@ impl Namespace {
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+
+    pub(crate) fn is_html_or_svg(&self) -> bool {
+        matches!(self.0.as_str(), HTML_NS | SVG_NS)
+    }
+
+    pub(crate) fn is_html(&self) -> bool {
+        self.0 == HTML_NS
+    }
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -1560,7 +1568,7 @@ impl<'a> HtmlParser<'a> {
     fn raw_text_context(&self) -> Option<(String, bool)> {
         let node = self.stack.last()?;
         let element = node.as_element()?;
-        if element.name.ns.0 != HTML_NS && element.name.ns.0 != SVG_NS {
+        if element.name.ns.0 != HTML_NS {
             return None;
         }
         let tag = element.name.local.as_ref();

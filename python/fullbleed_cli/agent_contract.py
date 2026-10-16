@@ -64,7 +64,11 @@ SUPPORTED_INPUTS = [
         "kind": "html",
         "media_types": ["text/html"],
         "forms": ["UTF-8 file", "inline string", "stdin"],
-        "notes": "Static document markup; JavaScript is not executed.",
+        "notes": (
+            "Static document markup; JavaScript is not executed. Consult "
+            "capabilities.engine.embedded_stylesheets before relying on style elements. "
+            "External stylesheet links and CSS imports are not fetched."
+        ),
     },
     {
         "kind": "css",
@@ -1265,6 +1269,7 @@ def render_llms_txt(contract: Mapping[str, Any]) -> str:
             "## Installed feature summary",
             "",
             f"- Compiled documents: {str(bool(engine.get('compiled_document'))).lower()}.",
+            f"- Static embedded HTML stylesheets: {str(bool(engine.get('embedded_stylesheets'))).lower()}.",
             f"- Compiled reflow bindings: {str(bool(engine.get('compiled_reflow_bindings'))).lower()}.",
             "- Compiled reflow compression modes: "
             + ", ".join(engine.get("compiled_flow_compression_modes", []))

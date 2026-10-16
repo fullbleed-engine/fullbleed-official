@@ -1862,6 +1862,7 @@ pub struct FullBleedBuilder {
 struct RenderContext {
     resolver: Arc<style::StyleResolver>,
     page_templates: Arc<[PageTemplate]>,
+    source_bytes: usize,
 }
 
 struct ResolvedCssPageContext {
@@ -1879,9 +1880,15 @@ struct PageRootTextContext {
 
 const RENDER_CONTEXT_CACHE_MAX_ENTRIES: usize = 32;
 
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct RenderContextKey {
+    css: String,
+    embedded: Vec<html::EmbeddedStylesheet>,
+}
+
 struct RenderContextCache {
-    map: HashMap<String, RenderContext>,
-    order: VecDeque<String>,
+    map: HashMap<RenderContextKey, RenderContext>,
+    order: VecDeque<RenderContextKey>,
 }
 
 impl RenderContextCache {
@@ -1892,11 +1899,11 @@ impl RenderContextCache {
         }
     }
 
-    fn get(&self, css: &str) -> Option<RenderContext> {
+    fn get(&self, css: &RenderContextKey) -> Option<RenderContext> {
         self.map.get(css).cloned()
     }
 
-    fn insert(&mut self, css: String, context: RenderContext) {
+    fn insert(&mut self, css: RenderContextKey, context: RenderContext) {
         if self.map.contains_key(&css) {
             return;
         }
@@ -1921,6 +1928,11 @@ struct LayoutBuildResult {
 enum HtmlLayoutInput<'a> {
     Source(&'a str),
     Parsed(&'a NodeRef),
+}
+
+struct PreparedHtmlInput {
+    document: NodeRef,
+    context: RenderContext,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3669,7 +3681,11 @@ impl FullBleed {
     }
 
     fn emit_html_asset_warnings(&self, doc_id: usize, html: &str) {
-        let warnings = html::scan_html_asset_warnings(html);
+        self.emit_html_asset_warnings_from_document(doc_id, &html_dom::parse_html(html));
+    }
+
+    fn emit_html_asset_warnings_from_document(&self, doc_id: usize, document: &NodeRef) {
+        let warnings = html::scan_html_asset_warnings_from_document(document);
         if warnings.is_empty() {
             return;
         }
@@ -3692,14 +3708,14 @@ impl FullBleed {
                 let details = warning
                     .details
                     .iter()
-                    .map(|d| format!("\"{}\"", d.replace('"', "\\\"")))
+                    .map(|d| format!("\"{}\"", debug::json_escape(d)))
                     .collect::<Vec<_>>()
                     .join(",");
                 let json = format!(
                     "{{\"type\":\"jit.html_asset_warning\",\"doc_id\":{},\"kind\":\"{}\",\"message\":\"{}\",\"details\":[{}]}}",
                     doc_id,
-                    warning.kind.replace('"', "\\\""),
-                    warning.message.replace('"', "\\\""),
+                    debug::json_escape(&warning.kind),
+                    debug::json_escape(&warning.message),
                     details
                 );
                 logger.log_json(&json);
@@ -6805,14 +6821,16 @@ impl FullBleed {
 
     fn resolve_css_page_context(
         &self,
-        merged_css: &str,
+        sources: &[css_native::StylesheetSource<'_>],
+        print_document: bool,
         doc_id: Option<usize>,
     ) -> ResolvedCssPageContext {
         let mut page_size = self.default_page_size;
         let mut base_margins = self.default_margins;
         let mut page_margins = self.page_margins.clone();
-        let mut page_styles = style::extract_css_page_styles(
-            merged_css,
+        let mut page_styles = style::extract_stylesheet_page_styles(
+            sources,
+            print_document,
             self.debug.as_deref(),
             Some(self.default_page_size),
         );
@@ -6923,12 +6941,26 @@ impl FullBleed {
         }
     }
 
+    #[cfg(test)]
     fn compile_css_render_parts(
         &self,
         merged_css: &str,
         doc_id: Option<usize>,
     ) -> (Vec<PageTemplate>, Arc<style::StyleResolver>) {
-        let resolved = self.resolve_css_page_context(merged_css, doc_id);
+        self.compile_stylesheet_render_parts(
+            &[css_native::StylesheetSource::new(merged_css)],
+            false,
+            doc_id,
+        )
+    }
+
+    fn compile_stylesheet_render_parts(
+        &self,
+        sources: &[css_native::StylesheetSource<'_>],
+        print_document: bool,
+        doc_id: Option<usize>,
+    ) -> (Vec<PageTemplate>, Arc<style::StyleResolver>) {
+        let resolved = self.resolve_css_page_context(sources, print_document, doc_id);
         let resolver_viewport =
             if resolved.page_margins.is_empty() && resolved.page_styles.has_pseudo_rules() {
                 resolved
@@ -6941,8 +6973,9 @@ impl FullBleed {
             } else {
                 resolved.page_size
             };
-        let resolver = Arc::new(style::StyleResolver::new_with_debug_viewport_and_fonts(
-            merged_css,
+        let resolver = Arc::new(style::StyleResolver::from_stylesheets(
+            sources,
+            print_document,
             self.debug.clone(),
             Some(resolver_viewport),
             Some(self.font_registry.clone()),
@@ -6973,12 +7006,52 @@ impl FullBleed {
     }
 
     fn build_render_context(&self, css: &str, doc_id: Option<usize>) -> RenderContext {
+        self.build_render_context_with_styles(css, Vec::new(), doc_id)
+    }
+
+    fn initial_batch_page_size(
+        &self,
+        first_html: Option<&str>,
+        css: &str,
+    ) -> Result<Size, FullBleedError> {
+        // A streaming PDF writer needs its paper size before the first page.
+        // Include the first document's sheets in this initial lookup; the
+        // subsequent render reuses the stylesheet context and emits diagnostics.
+        let embedded = first_html
+            .map(|html| html::embedded_stylesheets(&html_dom::parse_html(html)))
+            .unwrap_or_default();
+        let context = self.build_render_context_with_styles(css, embedded, None);
+        context
+            .page_templates
+            .first()
+            .map(|template| template.page_size)
+            .ok_or(FullBleedError::MissingPageTemplate)
+    }
+
+    fn prepare_html_input(&self, html: &str, css: &str, doc_id: usize) -> PreparedHtmlInput {
+        let document = html_dom::parse_html(html);
+        let embedded = html::embedded_stylesheets(&document);
+        self.emit_html_asset_warnings_from_document(doc_id, &document);
+        let context = self.build_render_context_with_styles(css, embedded, Some(doc_id));
+        PreparedHtmlInput { document, context }
+    }
+
+    fn build_render_context_with_styles(
+        &self,
+        css: &str,
+        embedded: Vec<html::EmbeddedStylesheet>,
+        doc_id: Option<usize>,
+    ) -> RenderContext {
         let t_css = std::time::Instant::now();
+        let key = RenderContextKey {
+            css: css.to_string(),
+            embedded,
+        };
         let cached_context = self
             .render_context_cache
             .lock()
             .ok()
-            .and_then(|cache| cache.get(css));
+            .and_then(|cache| cache.get(&key));
         if let Some(context) = cached_context {
             let lookup_ms = t_css.elapsed().as_secs_f64() * 1000.0;
             if let Some(logger) = self.debug.as_deref() {
@@ -6989,7 +7062,7 @@ impl FullBleed {
                     "{{\"type\":\"jit.css\",\"doc_id\":{},\"css_ms\":{:.3},\"bytes\":{},\"cache_hit\":true}}",
                     doc_id,
                     lookup_ms,
-                    css.len()
+                    context.source_bytes
                 ));
             }
             if let Some(logger) = self.perf.as_deref() {
@@ -6998,8 +7071,29 @@ impl FullBleed {
             }
             return context;
         }
-        let merged_css = self.merge_css(css);
-        let (page_templates, resolver) = self.compile_css_render_parts(&merged_css, doc_id);
+        let asset_texts: Vec<_> = self
+            .asset_bundle
+            .assets
+            .iter()
+            .filter(|asset| asset.kind == assets::AssetKind::Css)
+            .map(|asset| String::from_utf8_lossy(&asset.data))
+            .collect();
+        let mut sources: Vec<_> = asset_texts
+            .iter()
+            .map(|text| css_native::StylesheetSource::new(text))
+            .collect();
+        sources.extend(
+            key.embedded
+                .iter()
+                .map(|source| css_native::StylesheetSource {
+                    text: &source.text,
+                    media: (!source.media.trim().is_empty()).then_some(source.media.as_str()),
+                }),
+        );
+        sources.push(css_native::StylesheetSource::new(css));
+        let source_bytes: usize = sources.iter().map(|source| source.text.len()).sum();
+        let (page_templates, resolver) =
+            self.compile_stylesheet_render_parts(&sources, !key.embedded.is_empty(), doc_id);
         if let Some(logger) = self.debug.as_deref() {
             let css_ms = t_css.elapsed().as_secs_f64() * 1000.0;
             let doc_id = doc_id
@@ -7007,24 +7101,23 @@ impl FullBleed {
                 .unwrap_or_else(|| "null".to_string());
             let json = format!(
                 "{{\"type\":\"jit.css\",\"doc_id\":{},\"css_ms\":{:.3},\"bytes\":{}}}",
-                doc_id,
-                css_ms,
-                merged_css.len()
+                doc_id, css_ms, source_bytes
             );
             logger.log_json(&json);
         }
         if let Some(logger) = self.perf.as_deref() {
             let css_ms = t_css.elapsed().as_secs_f64() * 1000.0;
             logger.log_span_ms("css.parse", doc_id, css_ms);
-            logger.log_counts("css.parse", doc_id, &[("bytes", merged_css.len() as u64)]);
+            logger.log_counts("css.parse", doc_id, &[("bytes", source_bytes as u64)]);
             logger.log_counts("css.cache", doc_id, &[("hits", 0), ("misses", 1)]);
         }
         let context = RenderContext {
             resolver,
             page_templates: page_templates.into(),
+            source_bytes,
         };
         if let Ok(mut cache) = self.render_context_cache.lock() {
-            cache.insert(css.to_string(), context.clone());
+            cache.insert(key, context.clone());
         }
         context
     }
@@ -7206,19 +7299,19 @@ impl FullBleed {
         }
     }
 
-    fn render_to_document_and_page_data_with_resolver_and_report_at(
+    fn render_html_document_at(
         &self,
         doc_id: usize,
         html: &str,
-        page_templates: &[PageTemplate],
-        resolver: &style::StyleResolver,
+        css: &str,
         report: Option<&mut GlyphCoverageReport>,
     ) -> Result<(Document, Option<PageDataContext>), FullBleedError> {
-        self.render_to_document_and_page_data_with_resolver_and_report_input_at(
+        let prepared = self.prepare_html_input(html, css, doc_id);
+        self.render_to_document_and_page_data_with_parsed_resolver_and_report_at(
             doc_id,
-            HtmlLayoutInput::Source(html),
-            page_templates,
-            resolver,
+            &prepared.document,
+            &prepared.context.page_templates,
+            &prepared.context.resolver,
             report,
         )
     }
@@ -7374,15 +7467,17 @@ impl FullBleed {
         &self,
         doc_id: usize,
         html: &str,
-        page_templates: &[PageTemplate],
-        resolver: &style::StyleResolver,
+        css: &str,
         report: Option<&mut GlyphCoverageReport>,
     ) -> Result<plan::PlannedDoc, FullBleedError> {
+        let prepared = self.prepare_html_input(html, css, doc_id);
+        let page_templates = &prepared.context.page_templates;
+        let resolver = &prepared.context.resolver;
         let mut report = report;
         let perf = self.perf.as_deref();
-        let layout = self.build_document_with_layout_strategy(
+        let layout = self.build_document_with_layout_strategy_from_document(
             doc_id,
-            html,
+            &prepared.document,
             page_templates,
             resolver,
             report.as_deref_mut(),
@@ -7453,14 +7548,14 @@ impl FullBleed {
 
     fn render_to_document_and_page_data_with_resolver_and_report(
         &self,
-        html: &str,
+        document: &NodeRef,
         page_templates: &[PageTemplate],
         resolver: &style::StyleResolver,
         report: Option<&mut GlyphCoverageReport>,
     ) -> Result<(Document, Option<PageDataContext>), FullBleedError> {
-        self.render_to_document_and_page_data_with_resolver_and_report_at(
+        self.render_to_document_and_page_data_with_parsed_resolver_and_report_at(
             0,
-            html,
+            document,
             page_templates,
             resolver,
             report,
@@ -7469,12 +7564,12 @@ impl FullBleed {
 
     fn render_to_document_and_page_data_with_resolver(
         &self,
-        html: &str,
+        document: &NodeRef,
         page_templates: &[PageTemplate],
         resolver: &style::StyleResolver,
     ) -> Result<(Document, Option<PageDataContext>), FullBleedError> {
         self.render_to_document_and_page_data_with_resolver_and_report(
-            html,
+            document,
             page_templates,
             resolver,
             None,
@@ -7483,11 +7578,11 @@ impl FullBleed {
 
     fn render_to_document_with_resolver(
         &self,
-        html: &str,
+        document: &NodeRef,
         page_templates: &[PageTemplate],
         resolver: &style::StyleResolver,
     ) -> Result<Document, FullBleedError> {
-        self.render_to_document_and_page_data_with_resolver(html, page_templates, resolver)
+        self.render_to_document_and_page_data_with_resolver(document, page_templates, resolver)
             .map(|(doc, _page_data)| doc)
     }
 
@@ -7496,8 +7591,13 @@ impl FullBleed {
     /// Most applications should start with [`Self::render_to_buffer`]. Use this
     /// lower-level output when you need the pages and display commands themselves.
     pub fn render_to_document(&self, html: &str, css: &str) -> Result<Document, FullBleedError> {
-        let context = self.build_render_context(css, Some(0));
-        self.render_to_document_with_resolver(html, &context.page_templates, &context.resolver)
+        let prepared = self.prepare_html_input(html, css, 0);
+        let context = &prepared.context;
+        self.render_to_document_with_resolver(
+            &prepared.document,
+            &context.page_templates,
+            &context.resolver,
+        )
     }
 
     /// Compile HTML/CSS into both the immutable fixed-point display document and, when text slots
@@ -7520,9 +7620,10 @@ impl FullBleed {
         css: &str,
     ) -> Result<CompiledDocument, FullBleedError> {
         let started = std::time::Instant::now();
-        let context = self.build_render_context(css, Some(0));
-        let parsed_template = html_dom::parse_html(html);
-        self.emit_html_asset_warnings(0, html);
+        let PreparedHtmlInput {
+            document: parsed_template,
+            context,
+        } = self.prepare_html_input(html, css, 0);
         let document = Arc::new(
             self.render_to_document_and_page_data_with_parsed_resolver_and_report_at(
                 0,
@@ -7627,11 +7728,12 @@ impl FullBleed {
         html: &str,
         css: &str,
     ) -> Result<(Vec<u8>, DocumentMetrics), FullBleedError> {
-        let context = self.build_render_context(css, Some(0));
+        let prepared = self.prepare_html_input(html, css, 0);
+        let context = &prepared.context;
         let mut metrics = DocumentMetrics::default();
-        let layout = self.build_document_with_layout_strategy(
+        let layout = self.build_document_with_layout_strategy_from_document(
             0,
-            html,
+            &prepared.document,
             &context.page_templates,
             &context.resolver,
             None,
@@ -7697,9 +7799,10 @@ impl FullBleed {
         html: &str,
         css: &str,
     ) -> Result<(Vec<u8>, Option<PageDataContext>), FullBleedError> {
-        let context = self.build_render_context(css, Some(0));
+        let prepared = self.prepare_html_input(html, css, 0);
+        let context = &prepared.context;
         let (document, page_data) = self.render_to_document_and_page_data_with_resolver(
-            html,
+            &prepared.document,
             &context.page_templates,
             &context.resolver,
         )?;
@@ -7720,11 +7823,12 @@ impl FullBleed {
         html: &str,
         css: &str,
     ) -> Result<(Vec<u8>, Option<PageDataContext>, GlyphCoverageReport), FullBleedError> {
-        let context = self.build_render_context(css, Some(0));
+        let prepared = self.prepare_html_input(html, css, 0);
+        let context = &prepared.context;
         let mut report = GlyphCoverageReport::default();
         let (document, page_data) = self
             .render_to_document_and_page_data_with_resolver_and_report(
-                html,
+                &prepared.document,
                 &context.page_templates,
                 &context.resolver,
                 Some(&mut report),
@@ -7753,9 +7857,10 @@ impl FullBleed {
         ),
         FullBleedError,
     > {
-        let context = self.build_render_context(css, Some(0));
+        let prepared = self.prepare_html_input(html, css, 0);
+        let context = &prepared.context;
         let (document, page_data) = self.render_to_document_and_page_data_with_resolver(
-            html,
+            &prepared.document,
             &context.page_templates,
             &context.resolver,
         )?;
@@ -7788,11 +7893,12 @@ impl FullBleed {
         ),
         FullBleedError,
     > {
-        let context = self.build_render_context(css, Some(0));
+        let prepared = self.prepare_html_input(html, css, 0);
+        let context = &prepared.context;
         let mut report = GlyphCoverageReport::default();
         let (document, page_data) = self
             .render_to_document_and_page_data_with_resolver_and_report(
-                html,
+                &prepared.document,
                 &context.page_templates,
                 &context.resolver,
                 Some(&mut report),
@@ -7836,11 +7942,12 @@ impl FullBleed {
         html: &str,
         css: &str,
     ) -> Result<(Document, GlyphCoverageReport), FullBleedError> {
-        let context = self.build_render_context(css, Some(0));
+        let prepared = self.prepare_html_input(html, css, 0);
+        let context = &prepared.context;
         let mut report = GlyphCoverageReport::default();
         let (document, _page_data) = self
             .render_to_document_and_page_data_with_resolver_and_report(
-                html,
+                &prepared.document,
                 &context.page_templates,
                 &context.resolver,
                 Some(&mut report),
@@ -7888,9 +7995,10 @@ impl FullBleed {
         css: &str,
         writer: &mut W,
     ) -> Result<usize, FullBleedError> {
-        let context = self.build_render_context(css, Some(0));
+        let prepared = self.prepare_html_input(html, css, 0);
+        let context = &prepared.context;
         let document = self.render_to_document_with_resolver(
-            html,
+            &prepared.document,
             &context.page_templates,
             &context.resolver,
         )?;
@@ -7944,9 +8052,10 @@ impl FullBleed {
         css: &str,
         dpi: u32,
     ) -> Result<Vec<Vec<u8>>, FullBleedError> {
-        let context = self.build_render_context(css, Some(0));
+        let prepared = self.prepare_html_input(html, css, 0);
+        let context = &prepared.context;
         let document = self.render_to_document_with_resolver(
-            html,
+            &prepared.document,
             &context.page_templates,
             &context.resolver,
         )?;
@@ -8127,17 +8236,9 @@ impl FullBleed {
         html_list: &[String],
         css: &str,
     ) -> Result<Vec<u8>, FullBleedError> {
-        let context = self.build_render_context(css, None);
         let mut documents = Vec::with_capacity(html_list.len());
         for (idx, html) in html_list.iter().enumerate() {
-            let (doc, _page_data) = self
-                .render_to_document_and_page_data_with_resolver_and_report_at(
-                    idx,
-                    html,
-                    &context.page_templates,
-                    &context.resolver,
-                    None,
-                )?;
+            let (doc, _page_data) = self.render_html_document_at(idx, html, css, None)?;
             documents.push(doc);
         }
         let mut bytes = Vec::new();
@@ -8152,12 +8253,7 @@ impl FullBleed {
         css: &str,
         writer: &mut W,
     ) -> Result<usize, FullBleedError> {
-        let context = self.build_render_context(css, None);
-        let page_size = context
-            .page_templates
-            .get(0)
-            .ok_or(FullBleedError::MissingPageTemplate)?
-            .page_size;
+        let page_size = self.initial_batch_page_size(html_list.first().map(String::as_str), css)?;
 
         let mut pdf_stream = pdf::PdfStreamWriter::new(
             writer,
@@ -8169,14 +8265,7 @@ impl FullBleed {
         )?;
 
         for (idx, html) in html_list.iter().enumerate() {
-            let (doc, _page_data) = self
-                .render_to_document_and_page_data_with_resolver_and_report_at(
-                    idx,
-                    html,
-                    &context.page_templates,
-                    &context.resolver,
-                    None,
-                )?;
+            let (doc, _page_data) = self.render_html_document_at(idx, html, css, None)?;
             pdf_stream.add_document(idx, &doc)?;
         }
         let bytes_written = pdf_stream.finish()?;
@@ -8201,15 +8290,7 @@ impl FullBleed {
     ) -> Result<Vec<u8>, FullBleedError> {
         let mut documents = Vec::with_capacity(jobs.len());
         for (idx, (html, css)) in jobs.iter().enumerate() {
-            let context = self.build_render_context(css, Some(idx));
-            let (doc, _page_data) = self
-                .render_to_document_and_page_data_with_resolver_and_report_at(
-                    idx,
-                    html,
-                    &context.page_templates,
-                    &context.resolver,
-                    None,
-                )?;
+            let (doc, _page_data) = self.render_html_document_at(idx, html, css, None)?;
             documents.push(doc);
         }
         let mut bytes = Vec::new();
@@ -8222,13 +8303,10 @@ impl FullBleed {
         jobs: &[(String, String)],
         writer: &mut W,
     ) -> Result<usize, FullBleedError> {
-        let page_size = jobs
-            .get(0)
-            .and_then(|(_, css)| {
-                let context = self.build_render_context(css, Some(0));
-                context.page_templates.get(0).map(|t| t.page_size)
-            })
-            .unwrap_or(self.default_page_size);
+        let page_size = match jobs.first() {
+            Some((html, css)) => self.initial_batch_page_size(Some(html), css)?,
+            None => self.default_page_size,
+        };
 
         let mut pdf_stream = pdf::PdfStreamWriter::new(
             writer,
@@ -8240,15 +8318,7 @@ impl FullBleed {
         )?;
 
         for (idx, (html, css)) in jobs.iter().enumerate() {
-            let context = self.build_render_context(css, Some(idx));
-            let (doc, _page_data) = self
-                .render_to_document_and_page_data_with_resolver_and_report_at(
-                    idx,
-                    html,
-                    &context.page_templates,
-                    &context.resolver,
-                    None,
-                )?;
+            let (doc, _page_data) = self.render_html_document_at(idx, html, css, None)?;
             pdf_stream.add_document(idx, &doc)?;
         }
 
@@ -8296,20 +8366,13 @@ impl FullBleed {
         if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
             return Err(FullBleedError::Cancelled);
         }
-        let context = self.build_render_context(css, None);
         let mut results: Vec<(usize, Result<Document, FullBleedError>)> =
             crate::parallel::map_indexed_ordered(html_list, |idx, html| {
                 if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
                     return (idx, Err(FullBleedError::Cancelled));
                 }
                 let res = self
-                    .render_to_document_and_page_data_with_resolver_and_report_at(
-                        idx,
-                        html,
-                        &context.page_templates,
-                        &context.resolver,
-                        None,
-                    )
+                    .render_html_document_at(idx, html, css, None)
                     .map(|(doc, _page_data)| doc)
                     .and_then(|document| {
                         if cancellation.is_some_and(AuthoringCancellationToken::is_cancelled) {
@@ -8343,18 +8406,11 @@ impl FullBleed {
         html_list: &[String],
         css: &str,
     ) -> Result<(Vec<u8>, Vec<Option<PageDataContext>>), FullBleedError> {
-        let context = self.build_render_context(css, None);
         let mut results: Vec<(
             usize,
             Result<(Document, Option<PageDataContext>), FullBleedError>,
         )> = crate::parallel::map_indexed_ordered(html_list, |idx, html| {
-            let res = self.render_to_document_and_page_data_with_resolver_and_report_at(
-                idx,
-                html,
-                &context.page_templates,
-                &context.resolver,
-                None,
-            );
+            let res = self.render_html_document_at(idx, html, css, None);
             (idx, res)
         });
         results.sort_by_key(|(idx, _)| *idx);
@@ -8380,12 +8436,7 @@ impl FullBleed {
     ) -> Result<usize, FullBleedError> {
         let perf = self.perf.as_deref();
         let t_total = std::time::Instant::now();
-        let context = self.build_render_context(css, None);
-        let page_size = context
-            .page_templates
-            .get(0)
-            .ok_or(FullBleedError::MissingPageTemplate)?
-            .page_size;
+        let page_size = self.initial_batch_page_size(html_list.first().map(String::as_str), css)?;
 
         // Streaming writer: avoids holding a merged mega-Document or a Vec<String> of PDF objects.
         let mut pdf_stream = pdf::PdfStreamWriter::new(
@@ -8445,11 +8496,7 @@ impl FullBleed {
                         crate::parallel::for_each_indexed(html_list, |idx, html| {
                             let res = self
                                 .render_to_planned_doc_with_resolver_and_report_at(
-                                    idx,
-                                    html,
-                                    &context.page_templates,
-                                    &context.resolver,
-                                    None,
+                                    idx, html, css, None,
                                 )
                                 .and_then(|planned| {
                                     let plan = planned.plan.ok_or_else(|| {
@@ -8605,13 +8652,7 @@ impl FullBleed {
                 crate::parallel::with_thread_count(parallelism, || {
                     crate::parallel::for_each_indexed(html_list, |idx, html| {
                         let res = self
-                            .render_to_document_and_page_data_with_resolver_and_report_at(
-                                idx,
-                                html,
-                                &context.page_templates,
-                                &context.resolver,
-                                None,
-                            )
+                            .render_html_document_at(idx, html, css, None)
                             .map(|(doc, _page_data)| doc);
                         // If the receiver is gone (error), stop pushing.
                         let t_send = Instant::now();
@@ -8716,18 +8757,11 @@ impl FullBleed {
         css: &str,
         writer: &mut W,
     ) -> Result<(usize, Vec<Option<PageDataContext>>), FullBleedError> {
-        let context = self.build_render_context(css, None);
         let mut results: Vec<(
             usize,
             Result<(Document, Option<PageDataContext>), FullBleedError>,
         )> = crate::parallel::map_indexed_ordered(html_list, |idx, html| {
-            let res = self.render_to_document_and_page_data_with_resolver_and_report_at(
-                idx,
-                html,
-                &context.page_templates,
-                &context.resolver,
-                None,
-            );
+            let res = self.render_html_document_at(idx, html, css, None);
             (idx, res)
         });
         results.sort_by_key(|(idx, _)| *idx);
@@ -10821,6 +10855,79 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn embedded_stylesheets_are_part_of_context_identity_not_body_content() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let red = engine.prepare_html_input("<style>p {color:red}</style><p>One</p>", "", 0);
+        let same = engine.prepare_html_input("<style>p {color:red}</style><p>Two</p>", "", 1);
+        let blue = engine.prepare_html_input("<style>p {color:blue}</style><p>One</p>", "", 2);
+        let screen = engine.prepare_html_input(
+            "<style media='screen'>p {color:red}</style><p>One</p>",
+            "",
+            3,
+        );
+        let plain = engine.prepare_html_input("<p>One</p>", "", 4);
+        assert!(Arc::ptr_eq(&red.context.resolver, &same.context.resolver));
+        assert!(!Arc::ptr_eq(&red.context.resolver, &blue.context.resolver));
+        assert!(!Arc::ptr_eq(
+            &red.context.resolver,
+            &screen.context.resolver
+        ));
+        assert!(!Arc::ptr_eq(&red.context.resolver, &plain.context.resolver));
+        assert_eq!(engine.render_context_cache.lock().unwrap().map.len(), 4);
+    }
+
+    #[test]
+    fn embedded_stylesheets_reach_direct_compiled_and_native_preview_output() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let css = "@page {size:200pt 160pt;margin:12pt} body{font-family:Helvetica} p {color:blue;font-size:16pt}";
+        let plain = "<p>Styled document</p>";
+        let embedded = format!("<style>{css}</style>{plain}");
+        let expected = engine.render_to_buffer(plain, css).unwrap();
+        assert_eq!(engine.render_to_buffer(&embedded, "").unwrap(), expected);
+        assert_eq!(
+            engine
+                .compile_document(&embedded, "")
+                .unwrap()
+                .render_to_buffer()
+                .unwrap(),
+            expected
+        );
+        assert_eq!(
+            engine.render_image_pages(&embedded, "", 72).unwrap(),
+            engine.render_image_pages(plain, css, 72).unwrap()
+        );
+    }
+
+    #[test]
+    fn embedded_stylesheets_set_streaming_batch_paper() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let css = "@page {size:200pt 160pt;margin:12pt} body{font-family:Helvetica}";
+        let html = format!("<style>{css}</style><p>Styled document</p>");
+        let documents = vec![html.clone(), html.clone()];
+        let expected = engine.render_to_document(&html, "").unwrap().page_size;
+        assert_eq!(
+            engine.initial_batch_page_size(Some(&html), "").unwrap(),
+            expected
+        );
+        let mut sequential = Vec::new();
+        engine
+            .render_many_to_writer(&documents, "", &mut sequential)
+            .unwrap();
+        let mut parallel = Vec::new();
+        engine
+            .render_many_to_writer_parallel(&documents, "", &mut parallel)
+            .unwrap();
+        let jobs = vec![(html.clone(), String::new()), (html, String::new())];
+        let mut per_job = Vec::new();
+        engine
+            .render_many_to_writer_with_css(&jobs, &mut per_job)
+            .unwrap();
+        for bytes in [sequential, parallel, per_job] {
+            assert_eq!(inspect_pdf_bytes(&bytes).unwrap().page_count, 2);
+        }
     }
 
     #[test]

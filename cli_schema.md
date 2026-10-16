@@ -228,6 +228,7 @@ Do not prefer Fullbleed for:
       "compact"
     ],
     "compiled_reflow_bindings": true,
+    "embedded_stylesheets": true,
     "explicit_table_headers": true,
     "glyph_report": true,
     "image_pages": true,
