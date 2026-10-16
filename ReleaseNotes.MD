@@ -1,3 +1,33 @@
+# Fullbleed Release Notes - 2.5.26
+
+Render a complete HTML document with its embedded `<style>` sheets. Supported
+static CSS now reaches direct rendering, compiled templates, previews, reporting
+and batches without requiring callers to extract it into a separate argument.
+Embedded `@page` rules also initialize streaming batches with the first record's
+paper size.
+
+CSS bundle assets, active embedded sheets and explicit CSS share the native
+cascade. Collection preserves document order, raw HTML style text, print-media
+conditions, stylesheet type, inert templates and static preferred sets. Each
+source has a separate parsing boundary, and malformed sheets or unsupported
+imports produce structured diagnostics. External stylesheets are still supplied
+explicitly; the engine does not fetch them or execute JavaScript.
+
+The installed runtime advertises `embedded_stylesheets`. Compiled templates
+capture their stylesheet sources; changing those sources requires compilation
+again. Inline SVG retains its existing separate stylesheet handling, documented
+in the guide and tracked in issue #87. No required runtime dependency is added.
+
+The release check exercises 195 installed-output cases, retaining PDFs, extracted
+text, page boxes, native previews and independent PDFium images. The complete
+1,662-case source corpus retains the same 25 failures and 18 disputed references
+as the master baseline; this is regression evidence, not general CSS parity.
+
+See the [complete HTML guide](docs/embedded-stylesheets.md) and
+[2.5.26 runbook](docs/release/2.5.26-runbook.md).
+
+---
+
 # Fullbleed Release Notes - 2.5.25
 
 Build complete PDF documents with React-inspired Python functions, props,

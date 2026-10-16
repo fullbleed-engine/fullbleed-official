@@ -1,6 +1,6 @@
 # Render a complete HTML document
 
-The source candidate applies supported static CSS from HTML `<style>` elements.
+The 2.5.26 release adds supported static CSS from HTML `<style>` elements.
 Check the installed engine before relying on this behavior:
 
 ```python
