@@ -17,7 +17,7 @@ import fullbleed.ui.experimental as components
 
 VALID = '''from dataclasses import dataclass
 from fullbleed.ui.experimental import (
-    Column, DataTable, Document, Flow, Grid, Heading, Image, LayoutError, Node, Page, Paragraph,
+    Column, DataTable, Document, DocumentSource, Flow, Grid, Heading, Image, LayoutError, Node, Page, Paragraph,
     Renderer, Row, Source, Stack, Style, Theme, component, css, mm, pt, style, styled, to_legacy, token,
 )
 
@@ -78,9 +78,11 @@ document_requirements: tuple[str, ...] = document.required_tokens
 brand_theme: Theme = document.theme.with_values({"muted": "#112233"}, accent="#315d9b")
 compiled_html: str = document.to_html()
 assert "Design" in compiled_html
+compiled_source: DocumentSource = document.compile(a11y_mode="raise")
+assert compiled_source.a11y_report is not None
 
 def prepare_outputs(document: Document, renderer: Renderer) -> tuple[bytes, list[bytes]]:
-    prepared = document.prepare(renderer)
+    prepared = document.prepare(renderer, a11y_mode="raise")
     pdf: bytes = prepared.render_pdf()
     previews: list[bytes] = prepared.render_image_pages(dpi=96)
     return pdf, previews
@@ -96,6 +98,8 @@ custom_variables = style({"--brand": "#315d9b"}, color="var(--brand)")
 '''
 
 INVALID_CASES = [
+    ("source_is_not_layout", "compiled_source.render_pdf()"),
+    ("semantic_policy", 'document.compile(a11y_mode="strict")'),
     ("component_argument", "Notice(10)"),
     ("component_keyword", 'Notice("Paid", unexpected=True)'),
     ("style_keyword", "style(paddding=pt(8))"),

@@ -1,6 +1,6 @@
 # Component authoring: implementation review
 
-Status: working proposal with a source-branch Python prototype, 2026-10-15. This is not
+Status: working proposal with a source-branch Python prototype, reviewed 2026-10-16. This is not
 the published API or a promise of cross-language parity. The stable authoring
 guide remains [component-authoring.md](component-authoring.md).
 
@@ -30,6 +30,13 @@ The source review found these concrete causes:
 
 The existing escaping, ordinary Python functions, explicit renderer/font choice,
 semantic elements, and static output model are good foundations. Preserve them.
+
+The next milestone should be a small, coherent document-authoring API. Its value
+is the number of responsibilities a component takes off its caller: stylesheet
+assembly, repeated table structure, page setup, and finding the source of a
+failure. Concise markup alone is a weak criterion. The current experiment has
+enough mechanisms to evaluate this; the priority is making their contracts fit
+together before carrying them into the other bindings.
 
 ## The prototype also needs an ergonomics pass
 
@@ -262,6 +269,107 @@ also cautions against habitual prop forwarding. React-pdf's
 useful comparison for a styling workflow that does not require selector wiring.
 These are design references, not compatibility targets.
 
+## Keep the first document small
+
+Use progressive disclosure in both the API and its examples:
+
+| Author's immediate job | Concepts needed | Introduce later when needed |
+| --- | --- | --- |
+| Write a document | Ordinary functions, children, semantic/layout components, local styles, document and page | Theme tokens, named parts, generated classes, source maps |
+| Reuse a design across documents | An application kit with its own styles; a theme when shared values vary | A variant registry or automatic global styling |
+| Customize someone else's component | Its ordinary arguments; `.with_style(...)` for its root | `.with_parts(...)` for deliberately exposed internal appearance |
+| Produce PDF and previews from one layout | `prepare(renderer)` and the returned layout | Native binding batches, diagnostics and source exports |
+
+All appearance operations should use the same immutable declaration values.
+`style=` supplies those values to a primitive; `.with_style(...)` derives one
+instance; `styled(...)` supplies reusable defaults. Teach one operation for each
+job. Do not add competing `sx`, `css` prop, style-keyword forwarding, or utility
+class conventions to the common path. The existing `css(...)` declaration escape
+hatch is a separate advanced operation, not another component prop.
+
+Content customization deserves equal attention. Use children and ordinary named
+arguments when consumers want to replace content. A named style part should not
+become a mechanism for replacing the component tree. This works in the installed
+source candidate without a slot registry:
+
+```python
+from fullbleed.ui.experimental import Flow, Heading, Paragraph, component, pt
+
+@component
+def Summary(*children, title: str, footer=None):
+    return Flow(
+        Heading(title, level=2),
+        *children,
+        footer,
+        gap=pt(6),
+    ).with_style(padding=pt(12), background="#f2f5f8")
+
+summary = Summary(
+    Paragraph("Design and review completed."),
+    title="Project summary",
+    footer=Paragraph("Thank you."),
+)
+```
+
+The caller can replace the footer with a richer block, omit it, or insert a table
+without editing the component. The component owns the layout and appearance.
+Ordinary `paid`, `compact`, or `tone` arguments can select styles and content;
+keep application calculations outside generic presentation primitives. QuestPDF's
+[reusable address component](https://www.questpdf.com/concepts/code-patterns/components.html)
+is another example of a useful boundary: callers supply meaningful data and the
+component handles its presentation. This is a design reference, not a parity claim.
+
+## Close these contracts before stabilization
+
+Installed-candidate checks against source commit `d686153` identified the
+following gaps. The current source implements the naming, content-boundary and
+semantic-policy changes described below; the selector-styles input remains
+pending. The candidate's version metadata alone cannot distinguish it from the
+published 2.5.25 wheel.
+
+| Gap | Recommended contract | Acceptance evidence |
+| --- | --- | --- |
+| `class_name` is accepted, but experimental `Document` has no stylesheet input | Keep literal CSS labels. Add an explicit document `styles=` escape hatch, consistent with the established surface; keep ordinary component styles automatic. | A named class actually changes a rendered PDF through the public API. Source order, specificity, `!important`, and page-geometry conflicts have explicit tests. |
+| Both source translation and prepared native layout were named `CompiledDocument` | The source value is now `DocumentSource`; the object owning a native layout keeps the existing native name. One-shot rendering remains the starting point. | Installed signatures, examples and editor checks distinguish pure translation from native preparation. A source value is not a renderable layout. |
+| The experimental render methods omitted the established `a11y_mode` option | Compilation and rendering now accept the existing semantic policy and reuse `A11yContract`, with added component locations. | Duplicate IDs fail in strict mode through the public experimental path. Warning mode retains diagnostics in `DocumentSource.a11y_report`; delivery-profile verification remains separate. |
+| `Paragraph("Outer", Paragraph("Inner"))` compiled without rejecting nested paragraphs | The compiler now checks inline/block boundaries, table/list structure and nested links before serialization. | An invalid composition reports the authored component and expected child kind. Valid rich text, fragments and conditional children keep working. These bounded checks are not a complete HTML validator. |
+
+The nesting case matters to the product promise: avoiding HTML syntax should
+also remove the need to know when an HTML parser will repair the authored tree.
+The runtime checks run during the existing compiler traversal. Add editor types
+where they stay understandable; do not require authors to understand a hierarchy
+of generic node types to write a paragraph. The checks validate component
+boundaries; HTML parsing and layout remain engine responsibilities.
+
+The original semantic gap was concrete: the candidate returned a PDF with two
+authored elements sharing an ID, while the existing `A11yContract` rejected the
+same nodes after explicit conversion. Strict mode now connects that validator to
+the experimental authoring path before native preparation. The shared rules and
+warning/error policy remain in the existing validator. Its tree walk now also
+handles deeply nested components without Python recursion. Added source fields
+identify the authored definitions while preserving diagnostic codes and DOM paths.
+Built-in semantic names and a required image `alt` argument do not replace validation.
+Neither structural checks nor successful rendering establishes PDF accessibility
+conformance.
+
+Selector interoperability needs a deliberate boundary. Generated classes avoid
+manual naming collisions; they do not create CSS isolation. The native cascade
+still controls competing declarations. The authored precedence described above
+orders a node's style values before that cascade. A final `.with_style(...)`
+cannot be advertised as defeating arbitrary external `!important` rules.
+Reserve document page size and margins for `Page`; reject conflicting raw page
+geometry using parsed rules rather than searching CSS strings. Qualify this
+before introducing the stylesheet input. The existing legacy adapter remains
+the documented selector-based migration path meanwhile.
+
+There is no need to replace the working eager evaluation model with a reactive
+runtime. Component calls and table callbacks run during construction; compilation
+uses the captured tree. New records require new component values. Preparation
+owns one native layout, fonts and output settings. Previewing that layout does
+not re-run application callbacks. Keep batch bindings as an explicit engine
+workflow rather than making ordinary component functions execute unpredictably
+during pagination.
+
 ## Architecture and ownership
 
 ```mermaid
@@ -394,6 +502,8 @@ pagination behavior that the renderer has not demonstrated.
 
 | Work | Acceptance condition |
 | --- | --- |
+| Public contract cleanup (partial implementation) | Source/layout names and semantic policy are now distinct and connected; the explicit selector-styles input still needs defined cascade/page ownership |
+| Authored content model (bounded implementation) | Invalid inline/block, table/list and nested-link compositions fail before serialization with component paths; extend coverage deliberately while preserving valid rich text and transparent fragments |
 | Composition and spacing (implemented in the prototype) | Qualify fragment provenance, additive margins, independent parent gaps, page breaks and wrapper arguments in rendered fixtures; obtain author feedback on the explicit native layout contract |
 | Explicit layout-prop precedence (implemented in the prototype) | Explicit choices outrank recipes; omitted/None choices allow defaults. Check zero/false, optional forwarding, final style overrides, editor types and actual printed geometry/pagination. |
 | Oversized-row continuation (partial implementation) | Extend the tested top-aligned text cell behavior to rowspans, page-tall cell images, and other vertical alignments; qualify changing page geometry, complex decorations, and semantic continuity; unsupported cases fail explicitly |
@@ -454,12 +564,16 @@ change real documents. A larger number of element wrappers is not that milestone
 
 ## Implementation order and language expansion
 
-1. **Keep the Python experiment small enough to evaluate.** The immutable tree,
+1. **Close the public contract gaps and keep the experiment small.** Resolve the
+   source/layout naming, stylesheet input, semantic-validation policy and content
+   model above. The immutable tree,
    component-owned styles, explicit overrides, table columns and page ownership
    are implemented in the draft. Use the shared kit and editing tasks above to
    decide which concepts deserve stable names. Keep the established API working
    through the explicit adapter during that evaluation. Evaluate the fragment,
    spacing and wrapper-argument contracts before adding more authoring helpers.
+   A first document should need functions, children, local styles and document
+   settings; advanced kit customization should remain optional.
 2. **Close the print and diagnostic contracts.** Extend continuation deliberately,
    retain semantic structure, and improve descendant attribution. Document
    unsupported content instead of making a component promise stronger than its

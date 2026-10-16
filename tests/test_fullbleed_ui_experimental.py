@@ -7,10 +7,137 @@ import inspect
 import pytest
 
 from fullbleed.ui.experimental import (
-    AuthoringError, Box, Card, Column, DataTable, Document, Flow, Fragment, Grid,
+    AuthoringError, Box, Card, Column, DataTable, Document, DocumentSource, Flow, Fragment, Grid,
     Heading, LayoutError, Node, Page, Paragraph, Renderer, Row, Stack, Style, Theme, component,
     css, mm, pct, pt, style, styled, to_legacy, token,
 )
+
+
+def test_document_source_distinguishes_serialized_input_from_native_layout():
+    document = Document(Paragraph("Hello"))
+    source = document.compile(a11y_mode="raise")
+    assert isinstance(source, DocumentSource)
+    assert type(source).__name__ == "DocumentSource"
+    assert not hasattr(source, "render_pdf")
+    assert source.a11y_report["ok"] is True
+    assert source.html == document.to_html()
+    assert source.css == document.to_css()
+    assert document.compile().a11y_report is None
+
+
+@component
+def _DuplicateIds():
+    return Flow(Paragraph("One", attrs={"id": "same"}, part="first"),
+                Paragraph("Two", attrs={"id": "same"}, part="second"))
+
+
+def test_semantic_report_preserves_shared_rules_and_attaches_authored_locations():
+    from fullbleed.ui.accessibility import A11yContract, A11yWarning
+
+    node = _DuplicateIds()
+    legacy = A11yContract().validate(to_legacy(node), mode=None)
+    with pytest.warns(A11yWarning, match="_DuplicateIds -> second"):
+        source = Document(node).compile(a11y_mode="warn")
+    report = source.a11y_report
+    assert report["error_count"] == legacy["error_count"] == 1
+    assert report["warning_count"] == legacy["warning_count"] == 0
+    diagnostic = report["diagnostics"][0]
+    assert diagnostic["code"] == legacy["diagnostics"][0]["code"] == "ID_DUPLICATE"
+    assert diagnostic["source"]["path"] == ["_DuplicateIds", "second"]
+    assert diagnostic["source"]["file"].endswith("test_fullbleed_ui_experimental.py")
+    assert diagnostic["source"]["line"] > 0
+    assert diagnostic["related_sources"][0]["path"] == ["_DuplicateIds", "first"]
+    report["diagnostics"].clear()
+    assert len(source.a11y_report["diagnostics"]) == 1
+    assert "test_fullbleed_ui_experimental.py" not in source.html
+
+
+@pytest.mark.parametrize("operation", ["compile", "to_html", "to_css", "prepare", "render_pdf", "render_image_pages", "emit_artifacts"])
+def test_strict_semantics_reject_before_rendering_or_writing(operation, tmp_path):
+    from fullbleed.ui.accessibility import A11yValidationError
+
+    class NoRender:
+        def engine_for(self, document):
+            pytest.fail("Semantic failures must be reported before creating a renderer")
+
+    document = Document(_DuplicateIds())
+    method = getattr(document, operation)
+    with pytest.raises(A11yValidationError) as caught:
+        if operation in {"prepare", "render_pdf", "render_image_pages"}:
+            method(NoRender(), a11y_mode="raise")
+        elif operation == "emit_artifacts":
+            method(html_path=tmp_path / "invalid.html", css_path=tmp_path / "invalid.css", a11y_mode="raise")
+        else:
+            method(a11y_mode="raise")
+    assert caught.value.report["diagnostics"][0]["source"]["path"] == ["_DuplicateIds", "second"]
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("mode", [None, "", "none"])
+def test_semantics_are_explicitly_optional(mode):
+    source = Document(_DuplicateIds()).compile(a11y_mode=mode)
+    assert source.a11y_report is None
+
+
+def test_invalid_semantic_mode_is_not_silently_ignored():
+    with pytest.raises(ValueError, match="Unsupported a11y_mode"):
+        Document(Paragraph("Hello")).compile(a11y_mode="strict")
+
+
+def test_content_model_rejects_nested_blocks_across_components_and_fragments():
+    @component
+    def Inner():
+        return Paragraph("Inner")
+
+    @component
+    def Outer():
+        return Paragraph("Outer", Fragment(Inner()))
+
+    with pytest.raises(AuthoringError, match="inline content") as caught:
+        Document(Outer()).compile()
+    assert caught.value.code == "structure.child"
+    assert caught.value.path == ("Outer", "Inner", "p")
+    with pytest.raises(AuthoringError, match="inline content"):
+        Document(Paragraph(Node("span", (Box("Wrong"),)))).to_html()
+
+
+@pytest.mark.parametrize("node,code", [
+    (Node("table", (Paragraph("Wrong"),)), "structure.child"),
+    (Node("table", (Fragment("Wrong"),)), "structure.child"),
+    (Node("tr", (Node("td", ("Wrong",)),)), "structure.parent"),
+    (Node("td", ("Wrong",)), "structure.parent"),
+    (Node("ul", (Paragraph("Wrong"),)), "structure.child"),
+    (Node("a", (Fragment(Node("a", ("Wrong",))),)), "structure.link"),
+])
+def test_content_model_checks_table_list_and_link_boundaries(node, code):
+    with pytest.raises(AuthoringError) as caught:
+        Document(node).compile()
+    assert caught.value.code == code
+
+
+def test_content_model_accepts_rich_text_transparent_links_tables_and_svg():
+    from fullbleed.ui.experimental import Strong, Text
+
+    document = Document(
+        Paragraph("Hello ", Fragment(Text("there"), None), Strong("!")),
+        Node("a", (Paragraph("A whole linked block"),), attributes=(("href", "#target"),)),
+        Node("table", ("\n", Fragment(Node("tbody", (Node("tr", (Node("td", ("Cell",)),)),))))),
+        Node("ul", (Fragment(Node("li", ("Item",))),)),
+        Paragraph(Node("svg", (Node("g", (Node("path"),)),), attributes=(("alt", "Mark"),))),
+    )
+    source = document.compile(a11y_mode="raise")
+    assert source.a11y_report["ok"]
+    assert "Cell" in source.html and "Item" in source.html and "<svg" in source.html
+
+
+def test_strict_semantics_handle_deep_component_trees():
+    from fullbleed.ui.experimental import Text
+
+    node = Text("Deep heading")
+    for _ in range(1500):
+        node = Text(node)
+    source = Document(Heading(node, level=1)).compile(a11y_mode="raise")
+    assert source.a11y_report["ok"]
 
 
 def test_styled_component_moves_between_documents_without_registering_css():

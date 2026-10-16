@@ -10,7 +10,7 @@ from ._tree import (
     Box, Card, Emphasis, Flow, Footer, Fragment, Grid, Header, Heading, Image,
     ComponentFactory, Node, PageBreak, Paragraph, Row, Stack, Strong, Text, Section, component, styled,
 )
-from ._document import CompiledDocument, Document, LayoutError, Page, Renderer, Source
+from ._document import DocumentSource, Document, LayoutError, Page, Renderer, Source
 from ._table import Column, DataTable
 from ._bridge import to_legacy
 
@@ -18,5 +18,5 @@ __all__ = [
     "AuthoringError", "Length", "Style", "Theme", "Token", "css", "mm", "pct", "pt", "style", "token",
     "Box", "Card", "Emphasis", "Flow", "Footer", "Fragment", "Grid", "Header", "Heading", "Image",
     "ComponentFactory", "Node", "PageBreak", "Paragraph", "Row", "Stack", "Strong", "Text", "Section", "component", "styled",
-    "CompiledDocument", "Document", "LayoutError", "Page", "Renderer", "Source", "Column", "DataTable", "to_legacy",
+    "DocumentSource", "Document", "LayoutError", "Page", "Renderer", "Source", "Column", "DataTable", "to_legacy",
 ]

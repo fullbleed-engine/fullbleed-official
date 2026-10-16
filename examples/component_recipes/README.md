@@ -317,9 +317,47 @@ so use the generated PDF or Fullbleed preview to judge it. Unmarked HTML retains
 the engine's ordinary margin-collapse behavior. The legacy adapter preserves
 the annotation when embedding a new `Flow` in an existing Fullbleed document.
 
-`document.compile()` returns HTML, CSS, and a source map. Generated `data-fb-id`
-values use the engine's source-ID mechanism. Source filenames and line numbers
-identify component definitions in the sidecar, not in the generated PDF.
+`document.compile()` returns a `DocumentSource` containing HTML, CSS, and a source
+map. It performs no native layout or font loading. Earlier prototype code that
+imported `CompiledDocument` from `fullbleed.ui.experimental` should import
+`DocumentSource` instead. The native `fullbleed.CompiledDocument` returned by
+`prepare` keeps its existing name and behavior. Generated `data-fb-id` values
+use the engine's source-ID mechanism. Source filenames and line numbers identify
+component definitions in the sidecar, not in the generated PDF.
+
+Compilation checks paragraph/inline content, table and list parent-child
+boundaries, and nested links before serialization. Fragments and component
+boundaries stay transparent to these checks. For example, a paragraph containing
+another paragraph raises `AuthoringError` with code `structure.child` and the
+authored component path. Place those paragraphs beside each other in a `Flow`.
+These checks cover the component content boundaries, not every HTML constraint.
+Inline SVG descendants stay under the engine's SVG handling.
+
+Request the established accessibility semantics checks explicitly:
+
+```python
+source = document.compile(a11y_mode="raise")
+report = source.a11y_report
+assert report is not None and report["ok"]
+prepared = document.prepare(renderer, a11y_mode="raise")
+Path("customer.pdf").write_bytes(prepared.render_pdf())
+```
+
+`a11y_mode="raise"` stops on semantic errors before creating an engine or writing
+artifacts. `"warn"` emits `A11yWarning`; `None` omits the optional semantic checks.
+The argument is available on `compile`, `to_html`, `to_css`, `prepare`, both
+`render_*` methods, and `emit_artifacts`. Structural content checks always run.
+The two calls above demonstrate source inspection and native preparation; use
+just `prepare` when source inspection is unnecessary.
+
+The existing `A11yContract` supplies the rules and `A11yValidationError` exception.
+Its report remains available as `error.report`; `DocumentSource.a11y_report`
+returns an independent report value when checks were requested. Diagnostics keep
+their existing codes and DOM paths and add `source` with the component path,
+definition file and line when available. Duplicate IDs also identify the first
+occurrence in `related_sources`. The installed smoke checks that valid output
+matches unchecked output; these authoring checks do not establish PDF/UA
+conformance or replace delivery-profile verification.
 
 An unsplittable native fragment raises `LayoutError`, a subclass of
 `AuthoringError`. Its `page` and `sources` retain the page and affected authored
@@ -410,6 +448,7 @@ the test-only readers `pypdf`, `pypdfium2`, and `pillow`:
 python -m pytest tests/test_fullbleed_ui_experimental.py
 python -I tools/smoke_component_recipes.py --out target/recipe-verification
 python -I tools/smoke_component_preparation.py --out target/recipe-verification/preparation
+python -I tools/smoke_component_semantics.py --out target/recipe-verification/semantics
 python -I tools/smoke_component_themes.py --out target/recipe-verification/themes
 python -I tools/smoke_component_migration.py --out target/recipe-verification/migration
 ```
@@ -442,8 +481,10 @@ names. For example, `padding=(pt(4), 8)` needs a unit on its second value, inclu
 when that value comes from a theme token. Recursive iterable child types are
 checked differently by type checkers; `Flow` always rejects unwrapped text at
 runtime. For full argument checking on a styled custom function, call it normally
-and apply `.with_style(...)` to the resulting node. The convenience call with an
-extra `style=` keyword needs a permissive typing fallback for its other arguments.
+and apply `.with_style(...)` to the resulting node. `styled` preserves the
+wrapped function's signature: it does not add a `style=` argument. If that
+function already accepts `style`, the argument keeps the function's original
+meaning and type.
 
 The typing marker applies to the experimental subpackage. Automatic token/part
 name completion and broader native-package typing remain separate work.

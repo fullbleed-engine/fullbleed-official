@@ -1,16 +1,18 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
 from html import escape
+import json
 from pathlib import Path
 from types import MappingProxyType
 from copy import deepcopy
 
-from ..core import _render_attrs, _HTML_VOID_ELEMENTS
+from ..core import Element, _render_attrs, _HTML_VOID_ELEMENTS
 from ._style import AuthoringError, Length, Style, Theme, mm
 from ._tree import Node, _children, _required_tokens
+from ._semantics import ContentContext, normalize_mode, semantic_report
 
 
 @dataclass(frozen=True)
@@ -95,10 +97,18 @@ class LayoutError(AuthoringError):
 
 
 @dataclass(frozen=True)
-class CompiledDocument:
+class DocumentSource:
+    """Pure authoring output; use Document.prepare for an owned native layout."""
+
     html: str
     css: str
     sources: tuple[Source, ...]
+    _a11y_json: str | None = field(default=None, repr=False)
+
+    @property
+    def a11y_report(self) -> dict | None:
+        """Independent report values, or None when semantic checks were omitted."""
+        return json.loads(self._a11y_json) if self._a11y_json is not None else None
 
 
 @dataclass(frozen=True, init=False)
@@ -120,26 +130,32 @@ class Document:
                             "page": page or Page(), "theme": theme or Theme()}.items():
             object.__setattr__(self, name, value)
 
-    def compile(self) -> CompiledDocument:
+    def compile(self, *, a11y_mode: str | None = None) -> DocumentSource:
+        mode = normalize_mode(a11y_mode)
         rules, sources, output = {}, [], []
+        semantic_root = Element("main") if mode else None
         # Explicit traversal avoids Python recursion limits for nested documents.
-        pending = [(child, (), None) for child in reversed(self.children)]
+        pending = [(child, (), None, ContentContext(), semantic_root) for child in reversed(self.children)]
         while pending:
-            node, path, source = pending.pop()
+            node, path, source, context, semantic_parent = pending.pop()
             if isinstance(node, _Closing):
                 output.append(node.html)
                 continue
             if isinstance(node, str):
+                context.text(node, path)
                 output.append(escape(node))
+                if semantic_parent is not None:
+                    semantic_parent.children.append(node)
                 continue
             if node.name is not None:
                 path = (*path, node.name)
                 source = node.source or source
             if node.tag is None:
-                pending.extend((child, path, source) for child in reversed(node.children))
+                pending.extend((child, path, source, context, semantic_parent) for child in reversed(node.children))
                 continue
             node_id = f"n{len(sources) + 1}"
             location = (*path, node.part or node.tag)
+            child_context = context.element(node.tag, location)
             sources.append(Source(node_id, location, source[0] if source else None, source[1] if source else None))
             attributes = dict(node.attributes)
             attributes["data-fb-id"] = node_id
@@ -154,9 +170,14 @@ class Document:
                 rules[class_name] = declarations
                 attributes["class"] = " ".join(filter(None, (attributes.get("class"), class_name)))
             output.append(f"<{node.tag}{_render_attrs(attributes)}>")
+            if semantic_parent is not None:
+                semantic_node = Element(node.tag, props=attributes)
+                semantic_parent.children.append(semantic_node)
+            else:
+                semantic_node = None
             if node.tag.casefold() not in _HTML_VOID_ELEMENTS:
-                pending.append((_Closing(f"</{node.tag}>"), path, source))
-                pending.extend((child, path, source) for child in reversed(node.children))
+                pending.append((_Closing(f"</{node.tag}>"), path, source, context, semantic_parent))
+                pending.extend((child, path, source, child_context, semantic_node) for child in reversed(node.children))
         body = Style(margin=0, box_sizing="border-box")
         text = Style(body, self.theme.text).resolve(self.theme)
         css = "\n".join((self.page.to_css(), f"body {{ {text} }}",
@@ -165,39 +186,40 @@ class Document:
         html = (f'<!doctype html><html lang="{escape(self.lang, quote=True)}"><head>'
                 f'<meta charset="utf-8"><title>{escape(self.title)}</title></head><body><main>'
                 + "".join(output) + "</main></body></html>")
-        return CompiledDocument(html, css, tuple(sources))
+        report = semantic_report(semantic_root, self, sources, mode) if mode else None
+        return DocumentSource(html, css, tuple(sources), json.dumps(report, sort_keys=True) if report is not None else None)
 
     @property
     def required_tokens(self) -> tuple[str, ...]:
         """Sorted explicit token names used by content and the theme's text style."""
         return tuple(sorted(set(_required_tokens(self.children)) | set(self.theme.text._token_names())))
 
-    def to_html(self) -> str:
-        return self.compile().html
+    def to_html(self, *, a11y_mode: str | None = None) -> str:
+        return self.compile(a11y_mode=a11y_mode).html
 
-    def to_css(self) -> str:
-        return self.compile().css
+    def to_css(self, *, a11y_mode: str | None = None) -> str:
+        return self.compile(a11y_mode=a11y_mode).css
 
-    def prepare(self, renderer: Renderer):
+    def prepare(self, renderer: Renderer, *, a11y_mode: str | None = None):
         """Lay out and check once, returning the engine's owned CompiledDocument.
 
         Reuse the result for PDF bytes, layout previews and pagination diagnostics.
         A changed document or renderer needs a new preparation. No global cache
         or mutable engine is shared between documents.
         """
-        plan = self.compile()
+        plan = self.compile(a11y_mode=a11y_mode)
         prepared = renderer.engine_for(self).compile_pdf(plan.html, plan.css)
         renderer._check_layout(self, plan, prepared.export_render_time_pagination_trace())
         return prepared
 
-    def render_pdf(self, renderer: Renderer) -> bytes:
-        return self.prepare(renderer).render_pdf()
+    def render_pdf(self, renderer: Renderer, *, a11y_mode: str | None = None) -> bytes:
+        return self.prepare(renderer, a11y_mode=a11y_mode).render_pdf()
 
-    def render_image_pages(self, renderer: Renderer, *, dpi=150) -> list[bytes]:
-        return self.prepare(renderer).render_image_pages(dpi=dpi)
+    def render_image_pages(self, renderer: Renderer, *, dpi=150, a11y_mode: str | None = None) -> list[bytes]:
+        return self.prepare(renderer, a11y_mode=a11y_mode).render_image_pages(dpi=dpi)
 
-    def emit_artifacts(self, *, html_path, css_path):
-        plan = self.compile()
+    def emit_artifacts(self, *, html_path, css_path, a11y_mode: str | None = None):
+        plan = self.compile(a11y_mode=a11y_mode)
         html_path, css_path = Path(html_path), Path(css_path)
         html_path.parent.mkdir(parents=True, exist_ok=True)
         css_path.parent.mkdir(parents=True, exist_ok=True)
@@ -230,7 +252,7 @@ class Renderer:
         import fullbleed
         return fullbleed.PdfEngine(**deepcopy(dict(self._options)), document_title=document.title, document_lang=document.lang)
 
-    def checked_engine_for(self, document: Document, plan: CompiledDocument):
+    def checked_engine_for(self, document: Document, plan: DocumentSource):
         """Compatibility helper; use Document.prepare to reuse the checked layout."""
         engine = self.engine_for(document)
         trace = engine.export_render_time_pagination_trace(plan.html, plan.css)
@@ -238,7 +260,7 @@ class Renderer:
         return engine
 
     @staticmethod
-    def _check_layout(document: Document, plan: CompiledDocument, trace):
+    def _check_layout(document: Document, plan: DocumentSource, trace):
         for event in trace["events"]:
             if event.get("reason") == "forced_unsplittable_full_frame":
                 by_id = {source.node_id: source for source in plan.sources}
