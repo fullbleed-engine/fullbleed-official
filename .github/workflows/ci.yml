@@ -192,6 +192,7 @@ jobs:
           python -I tools/smoke_component_layout_props.py --out target/component-recipes/layout-props
           python -I tools/smoke_component_diagnostics.py --out target/component-recipes/diagnostics
           python -I tools/smoke_component_preparation.py --out target/component-recipes/preparation
+          python -I tools/smoke_component_themes.py --out target/component-recipes/themes
           python -I tools/smoke_component_migration.py --out target/component-recipes/migration
           python -I tools/smoke_component_typing.py --out target/component-recipes/typing.json
 

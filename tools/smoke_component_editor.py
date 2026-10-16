@@ -172,6 +172,9 @@ def main():
                 ("styled_heading_keep", 'Title = styled(Heading, break_after="auto")\nTitle("Text", keep_§)', {"keep_with_next"}),
                 ("prepared_outputs", 'Document(Paragraph("Text")).prepare(Renderer()).§', {"render_pdf", "render_image_pages", "export_render_time_pagination_trace"}),
                 ("prepared_preview_dpi", 'Document(Paragraph("Text")).prepare(Renderer()).render_image_pages(d§)', {"dpi"}),
+                ("node_theme_requirements", 'Paragraph("Text").required_§', {"required_tokens"}),
+                ("document_theme_requirements", 'Document(Paragraph("Text")).required_§', {"required_tokens"}),
+                ("theme_derivation", 'Document(Paragraph("Text")).theme.with_§', {"with_values"}),
             ]
             for index, (name, expression, required) in enumerate(cases):
                 prefix = "from fullbleed.ui.experimental import style, styled, Paragraph, Stack, Row, Grid, DataTable, Heading, Node, Document, Renderer\n"

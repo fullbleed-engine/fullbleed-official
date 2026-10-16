@@ -86,6 +86,19 @@ def _attrs(values):
     return tuple(output.items())
 
 
+def _required_tokens(children):
+    names, visited = set(), set()
+    pending = list(children)
+    while pending:
+        node = pending.pop()
+        if not isinstance(node, Node) or id(node) in visited:
+            continue
+        visited.add(id(node))
+        names.update(node._effective_style()._token_names())
+        pending.extend(node.children)
+    return tuple(sorted(names))
+
+
 @dataclass(frozen=True)
 class Node:
     """An immutable authoring node; component and fragment nodes emit no wrapper."""
@@ -130,6 +143,15 @@ class Node:
             raise AuthoringError("Virtual nodes cannot carry element styles or attributes", code="style.root")
         if self.tag is not None and self.tag.casefold() in _HTML_VOID_ELEMENTS and self.children:
             raise AuthoringError(f"Void element {self.tag!r} cannot have children", code="element.void")
+
+    @property
+    def required_tokens(self) -> tuple[str, ...]:
+        """Sorted explicit theme tokens in this subtree's effective style layers.
+
+        Includes nested components and present optional parts. It does not
+        resolve values, run callbacks or infer tokens from CSS var() strings.
+        """
+        return _required_tokens((self,))
 
     @property
     def parts(self) -> tuple[str, ...]:

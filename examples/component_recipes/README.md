@@ -174,6 +174,41 @@ The standalone experimental `Document` collects node styles; it has no external
 stylesheet argument. A `class_name` alone therefore supplies a label, not an
 appearance. Do not pass a `StyleSheet` or a style value as a class name.
 
+## Rebrand a shared theme
+
+Derive a theme with `with_values(...)`; its text style travels with it. The
+original theme and documents using it remain unchanged:
+
+```python
+from fullbleed.ui.experimental import Document, Paragraph, Theme, style, token
+
+note = Paragraph("A portable note", style=style(color=token("accent")))
+base_theme = Theme({"accent": "#315d9b", "ink": "#263b46"},
+                   text=style(font_family="Inter", color=token("ink")))
+warm_theme = base_theme.with_values(accent="#9a462e")
+warm_document = Document(note, theme=warm_theme)
+
+assert note.required_tokens == ("accent",)
+assert warm_document.required_tokens == ("accent", "ink")
+```
+
+`with_values` also accepts mappings, such as `base_theme.with_values(brand_values)`.
+Later mappings win, then keyword values win. Updates are captured immediately
+and use the same name/value validation as theme construction. Update or add token
+values here; create a `Theme(..., text=...)` when changing the text-style definition.
+
+`required_tokens` lists sorted, unique explicit `token(...)` references in the
+constructed component or document. It crosses nested component boundaries, uses
+the final style layers, and includes document-wide text styles. An overridden
+default or absent optional part adds no requirement. Extra values supplied by a
+theme are not requirements. Discovery does not resolve a theme or rerun component
+functions; missing values still report their component path during compilation.
+
+Requirements depend on actual arguments and content, so inspect the returned node,
+not the component factory. CSS `var(...)` references are a separate CSS mechanism
+and are not inferred as theme tokens. This property exposes the names at runtime;
+automatic completion of arbitrary kit-specific token names remains future work.
+
 ## Describe table columns once
 
 ```python
@@ -375,6 +410,7 @@ the test-only readers `pypdf`, `pypdfium2`, and `pillow`:
 python -m pytest tests/test_fullbleed_ui_experimental.py
 python -I tools/smoke_component_recipes.py --out target/recipe-verification
 python -I tools/smoke_component_preparation.py --out target/recipe-verification/preparation
+python -I tools/smoke_component_themes.py --out target/recipe-verification/themes
 python -I tools/smoke_component_migration.py --out target/recipe-verification/migration
 ```
 

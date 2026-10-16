@@ -73,6 +73,9 @@ explicit_grid = SplitGrid(Paragraph("Choice"), columns=3, gap=pt(3))
 optional_heading = KeptHeading("Choice", keep_with_next=None)
 explicit_heading = KeptHeading("Choice", keep_with_next=False)
 document = Document(heading, brand, root, flow, table, theme=Theme({"muted": "#667580"}), page=Page("A5", margin=mm(12)))
+requirements: tuple[str, ...] = root.required_tokens
+document_requirements: tuple[str, ...] = document.required_tokens
+brand_theme: Theme = document.theme.with_values({"muted": "#112233"}, accent="#315d9b")
 compiled_html: str = document.to_html()
 assert "Design" in compiled_html
 
@@ -126,6 +129,10 @@ INVALID_CASES = [
     ("preparation_renderer", 'document.prepare("default")'),
     ("prepared_preview_dpi", 'document.prepare(Renderer()).render_image_pages(dpi="96")'),
     ("prepared_pdf_input", 'document.prepare(Renderer()).render_pdf(html="<p>New</p>")'),
+    ("theme_update_mapping", 'document.theme.with_values([("muted", "red")])'),
+    ("theme_update_value", 'document.theme.with_values(accent=object())'),
+    ("node_tokens_readonly", 'root.required_tokens = ("invented",)'),
+    ("document_tokens_readonly", 'document.required_tokens = ("invented",)'),
 ]
 
 # Recursive Iterable types also admit strings. Preserve valid custom iterables

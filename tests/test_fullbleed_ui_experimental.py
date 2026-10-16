@@ -31,6 +31,84 @@ def test_styled_component_moves_between_documents_without_registering_css():
     assert any(source.path == ("Field", "label") for source in blue.compile().sources)
 
 
+def test_theme_updates_preserve_text_and_snapshot_values_without_changing_shared_documents():
+    base = Theme({"accent": "blue", "spacing": pt(6)}, text=style(color=token("accent"), font_size=pt(10)))
+    content = Paragraph("Shared", style=style(padding=token("spacing")))
+    original = Document(content, theme=base)
+    before = original.compile()
+    updates = {"accent": "green", "spacing": pt(8)}
+    warm = base.with_values(updates, accent="red", **{"brand.note": "Warm"})
+    updates["spacing"] = pt(99)
+    assert warm.text == base.text
+    assert dict(warm.values) == {"accent": "red", "spacing": pt(8), "brand.note": "Warm"}
+    assert dict(base.values) == {"accent": "blue", "spacing": pt(6)}
+    assert original.compile() == before
+    changed = Document(content, theme=warm).to_css()
+    assert "color: red;" in changed and "padding: 8pt;" in changed and "font-size: 10pt;" in changed
+    assert "padding: 99pt;" not in changed
+    assert base.with_values() == base
+    assert dict(base.with_values({"accent": "green"}, {"accent": "orange"}).values)["accent"] == "orange"
+
+
+@pytest.mark.parametrize("value", [[], "", (), 0, False])
+def test_theme_requires_mappings_for_construction_and_updates(value):
+    with pytest.raises(AuthoringError) as constructor:
+        Theme(value)
+    with pytest.raises(AuthoringError) as update:
+        Theme().with_values(value)
+    assert constructor.value.code == update.value.code == "theme.values"
+
+
+@pytest.mark.parametrize("updates,code", [
+    ({"bad token": "red"}, "theme.name"),
+    ({"accent": token("other")}, "theme.value"),
+    ({"gap": [pt(1), pt(2)]}, "theme.value"),
+    ({"gap": float("inf")}, "value.finite"),
+    ({"accent": None}, "style.value"),
+])
+def test_theme_updates_use_constructor_validation(updates, code):
+    with pytest.raises(AuthoringError) as caught:
+        Theme().with_values(updates)
+    assert caught.value.code == code
+
+
+def test_token_discovery_uses_effective_styles_and_crosses_component_boundaries():
+    calls = []
+    Label = styled(Paragraph, color=token("discarded"), padding=(token("space"), pt(2)))
+
+    @component(parts=("label", "note"))
+    def Notice(message, note=None):
+        calls.append(message)
+        return Flow(Label(message, part="label", style=style(color=token("ink"))),
+                    Paragraph(note, part="note", style=style(color=token("muted"))) if note else None,
+                    gap=0)
+
+    shared = Notice("Hello")
+    updated = shared.with_parts(label=style(color=token("accent")), note=style(color=token("optional")))
+    assert shared.required_tokens == ("ink", "space")
+    assert updated.required_tokens == ("accent", "space")
+    assert Notice("With note", "Optional").required_tokens == ("ink", "muted", "space")
+    themed = Theme({"unused": "green"}, text=style(color=token("body_ink")))
+    doc = Document(Box(shared, updated, shared), theme=themed)
+    assert doc.required_tokens == ("accent", "body_ink", "ink", "space")
+    assert doc.required_tokens == doc.required_tokens
+    assert calls == ["Hello", "With note"]
+    # Discovery does not require a complete theme or suppress contextual errors.
+    with pytest.raises(AuthoringError) as caught:
+        doc.compile()
+    assert caught.value.code == "theme.missing"
+    assert caught.value.path == ("Notice", "label")
+    complete = themed.with_values(ink="black", accent="red", body_ink="gray", space=pt(4))
+    assert "color: red;" in Document(*doc.children, theme=complete).to_css()
+
+
+def test_token_discovery_is_explicit_and_does_not_parse_css_variable_strings():
+    node = Paragraph("Text", style=style(css("color: var(--brand)"), **{"--brand": token("accent")}))
+    assert node.required_tokens == ("accent",)
+    assert Document("Plain text").required_tokens == ()
+    assert Fragment().required_tokens == ()
+
+
 def test_named_parts_do_not_require_selectors_or_leak_into_nested_components():
     @component
     def Inner():

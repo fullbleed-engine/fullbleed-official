@@ -6,9 +6,12 @@ from fullbleed.ui.experimental import (
 )
 
 
+STUDIO_THEME = Theme({"accent": "#315d9b", "ink": "#263b46", "muted": "#667580", "paper": "#f2f5f8"},
+                     text=style(font_family="Inter", font_size=pt(9), line_height=1.45, color=token("ink")))
+
+
 def studio_theme(accent="#315d9b"):
-    return Theme({"accent": accent, "ink": "#263b46", "muted": "#667580", "paper": "#f2f5f8"},
-                 text=style(font_family="Inter", font_size=pt(9), line_height=1.45, color=token("ink")))
+    return STUDIO_THEME.with_values(accent=accent)
 
 
 Label = styled(Paragraph, font_size=pt(7), font_weight=700, letter_spacing=pt(0.8), text_transform="uppercase")

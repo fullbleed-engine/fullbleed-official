@@ -145,6 +145,15 @@ class Style:
                 result[normalized] = frozen
         object.__setattr__(self, "entries", tuple(result.items()))
 
+    def _token_names(self):
+        pending = [value for _, value in self.entries]
+        while pending:
+            value = pending.pop()
+            if isinstance(value, Token):
+                yield value.name
+            elif isinstance(value, tuple):
+                pending.extend(value)
+
     def resolve(self, theme: Theme) -> str:
         def resolve(value, name):
             if isinstance(value, Token):
@@ -192,6 +201,8 @@ class Theme:
     text: Style
 
     def __init__(self, values: Mapping | None = None, *, text: Style | Mapping | None = None):
+        if values is not None and not isinstance(values, Mapping):
+            raise AuthoringError("Theme values must be a mapping of token names to values", code="theme.values")
         entries = []
         for name, value in (values or {}).items():
             Token(name)
@@ -201,3 +212,17 @@ class Theme:
             entries.append((name, captured))
         object.__setattr__(self, "values", tuple(entries))
         object.__setattr__(self, "text", Style(text))
+
+    def with_values(self, /, *mappings, **values) -> Theme:
+        """Derive a theme without changing this theme or its text style.
+
+        Later mappings override earlier values; keyword values apply last.
+        Names and values use the same validation as Theme construction.
+        """
+        merged = dict(self.values)
+        for mapping in mappings:
+            if not isinstance(mapping, Mapping):
+                raise AuthoringError("Theme updates must be mappings", code="theme.values")
+            merged.update(mapping)
+        merged.update(values)
+        return Theme(merged, text=self.text)

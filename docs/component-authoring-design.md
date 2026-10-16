@@ -163,6 +163,8 @@ number of decisions an author must coordinate for a specific change:
 | Author task | Established surface | Experimental direction and current limit |
 | --- | --- | --- |
 | Reuse a field in a report | Import its function and attach the relevant selector rules to the new document | Import the styled function; provide its documented theme values. The shared invoice/report kit demonstrates this. |
+| Rebrand an imported theme | In the initial prototype, unpack `Theme.values` and manually carry its text style into another constructor | `theme.with_values(accent=...)` derives an immutable theme while retaining typography; mappings support externally supplied palettes. |
+| Learn a component's theme requirements | Read implementation details or fix missing-token errors one at a time | Inspect `node.required_tokens`, or `document.required_tokens` to include document text styles. This reports actual constructed content, not all potential variants. |
 | Change one component's background | Its function must accept and forward a styling prop to a chosen root | Call `.with_style(background=...)` on the result. A fragment still needs an explicit root. |
 | Restyle a label inside a third-party component | Learn its classes and selector structure | Use a documented `label` part. Internal structure may change while that contract remains; automatic part-name completion is unfinished. |
 | Add a formatted table column | Coordinate the header, each row's cell and column styling | Add one `Column` containing label, callback, width and alignment. Calculations and formatting stay in application code. |
@@ -216,6 +218,20 @@ Style precedence must be teachable: primitive defaults, reusable styled defaults
 explicit layout arguments, call-site `style=`, then instance overrides. Preserve
 declaration order for CSS shorthand/longhand interactions. Resolve theme tokens per document; a theme
 supplies values rather than silently defeating local component choices.
+
+Themes also need a small, predictable derivation operation. `with_values` copies
+an imported theme's token values and retains its text style; mappings apply in
+order and keyword values apply last. It does not mutate documents using the old
+theme. Rebuilding a dictionary and remembering to carry typography should not be
+required for a brand-color change.
+
+Constructed nodes expose `required_tokens`; documents include their theme's text
+style too. Discovery walks the effective style layers, including nested components,
+so overridden defaults and absent optional parts do not report false requirements.
+It does not execute callbacks, resolve missing values or guess from CSS variable
+strings. This makes the dependency visible without introducing a global token
+registry, schema class or editor plugin. Kit-specific static completion remains
+separate work; runtime discovery is not presented as its replacement.
 
 Parts need an actual boundary rule. In the prototype, root delegation preserves
 the delegated component's exposed parts, while a nested component starts a new

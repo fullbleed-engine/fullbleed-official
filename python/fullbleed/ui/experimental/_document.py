@@ -10,7 +10,7 @@ from copy import deepcopy
 
 from ..core import _render_attrs, _HTML_VOID_ELEMENTS
 from ._style import AuthoringError, Length, Style, Theme, mm
-from ._tree import Node, _children
+from ._tree import Node, _children, _required_tokens
 
 
 @dataclass(frozen=True)
@@ -166,6 +166,11 @@ class Document:
                 f'<meta charset="utf-8"><title>{escape(self.title)}</title></head><body><main>'
                 + "".join(output) + "</main></body></html>")
         return CompiledDocument(html, css, tuple(sources))
+
+    @property
+    def required_tokens(self) -> tuple[str, ...]:
+        """Sorted explicit token names used by content and the theme's text style."""
+        return tuple(sorted(set(_required_tokens(self.children)) | set(self.theme.text._token_names())))
 
     def to_html(self) -> str:
         return self.compile().html
