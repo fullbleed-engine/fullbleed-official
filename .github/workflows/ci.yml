@@ -179,6 +179,23 @@ jobs:
       - name: Verify component authoring from the installed wheel
         run: python -I tools/smoke_component_authoring.py --out target/component-authoring
 
+      - name: Verify experimental component contracts and rendered examples
+        env:
+          FULLBLEED_TEST_INSTALLED_NATIVE: "1"
+        run: |
+          python -m pip install pypdfium2==5.14.0 pillow==12.3.0 mypy==2.4.0
+          python -m pytest tests/test_fullbleed_ui_experimental.py -q --junitxml target/component-recipes/unit-tests.xml
+          python -I tools/smoke_component_recipes.py --out target/component-recipes
+          python -I tools/smoke_component_typing.py --out target/component-recipes/typing.json
+
+      - name: Retain experimental component evidence
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: component-recipes-${{ runner.os }}
+          path: target/component-recipes/
+          if-no-files-found: error
+
       - name: Retain component documents and previews
         uses: actions/upload-artifact@v7
         if: always()

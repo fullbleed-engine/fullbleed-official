@@ -173,6 +173,17 @@ else:
     check("headers-disabled", Document(table, page=Page("A5", margin=mm(12)), theme=studio_theme()),
           ["ITEM_000", "ITEM_069", "$10"], size=a5, repeated_header=False)
 
+    # One reusable override must work before and after records arrive. The unused
+    # optional part has no paint, while the visible part keeps its supplied style.
+    for name, rows, expected in (("optional-parts-empty", [], "NO_ROWS"),
+                                 ("optional-parts-filled", ["ONE_ROW"], "ONE_ROW")):
+        table = DataTable(rows, columns=[Column("Item", str)], empty="NO_ROWS").with_parts(
+            cell=style(background="#dce8f5"), empty=style(background="#dce8f5"),
+            caption=style(color="#315d9b"),
+        )
+        assert table.parts == DataTable.parts
+        check(name, Document(table, theme=studio_theme()), [expected], size=a4, pages=1, accent="#dce8f5")
+
     snippets = re.findall(r"```python\n(.*?)```", (ROOT / "examples/component_recipes/README.md").read_text(encoding="utf-8"), re.S)
     previous = Path.cwd()
     namespace = {}

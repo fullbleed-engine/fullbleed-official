@@ -17,7 +17,7 @@ Title = styled(Heading, font_size=pt(36), line_height=1.05, letter_spacing=pt(-1
 Panel = styled(Card, border="none", border_radius=pt(0), padding=pt(16), background=token("paper"))
 
 
-@component
+@component(parts=("label", "value"))
 def Field(label, *value):
     return Stack(Label(label, part="label"), Paragraph(*value, part="value"), gap=pt(4))
 
@@ -45,7 +45,7 @@ def WorkTable(items):
     )
 
 
-@component
+@component(parts=("label", "amount", "note"))
 def Total(items, *, paid=False):
     cents = sum(item["quantity"] * item["rate_cents"] for item in items)
     return Panel(

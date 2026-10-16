@@ -22,7 +22,7 @@ from fullbleed.ui.experimental import (
 
 Label = styled(Paragraph, font_size=pt(8), color=token("muted"))
 
-@component
+@component(parts=("label", "value"))
 def Field(label: str, value: str):
     return Stack(
         Label(label, part="label"),
@@ -56,8 +56,22 @@ The function does not need to forward styling arguments. Both operations return
 new nodes. A function delegating its root to another component retains that root's
 exposed parts. Named parts stop at components nested inside the root, so an outer component's
 `title` does not inadvertently change a nested component's `title`. Unknown part
-names raise an error. Root styling requires a single rooted element; fragments
+names raise an error listing the available names. Root styling requires a single rooted element; fragments
 need an explicit container.
+
+Declare a reusable component's public parts with `@component(parts=(...))`.
+Declared parts can be absent in an instance: an optional note or an empty table's
+cells can receive overrides without making callers branch on the content.
+Authored `part=` markers must match the declaration; misspellings fail when the
+component is constructed. Nested components validate their own declarations.
+An explicit declaration on a delegating wrapper can expose a subset of its root's
+parts. An undeclared wrapper retains root delegation.
+
+`Field.parts` exposes its declaration, and `field.parts` exposes the instance's
+public names. Plain `@component` remains supported and discovers names from
+present content; use an explicit declaration for a stable customization contract.
+`ComponentFactory` preserves a decorated function's argument types while exposing
+its optional declaration. Style-property and part-name completion remain future work.
 
 Styles compose in this order: primitive defaults, a styled factory's defaults,
 the call's `style`, then later `with_style` or `with_parts` changes. Overrides move
@@ -92,8 +106,8 @@ state spanning. With `repeat_header=False`, scoped column-header cells stay in
 the first body row because the native engine always repeats a `thead` group.
 Application code owns monetary calculations and formatting.
 
-Table parts are `header`, `cell`, `row`, `caption`, and `empty`; only parts present
-in the constructed table can be overridden. Each body cell retains its table,
+Table parts are `header`, `cell`, `row`, `caption`, and `empty`, whether or not the
+current data produces cells, a caption, or an empty-state row. Each body cell retains its table,
 row, and column path in the compiled source map.
 
 **Outstanding pagination work:** a single body row taller than the available
@@ -159,6 +173,17 @@ the test-only readers `pypdf`, `pypdfium2`, and `pillow`:
 python -m pytest tests/test_fullbleed_ui_experimental.py
 python -I tools/smoke_component_recipes.py --out target/recipe-verification
 ```
+
+To verify the decorated function's argument types from the installed wheel,
+install the test-only `mypy` package and run:
+
+```console
+python -I tools/smoke_component_typing.py --out target/recipe-verification/typing.json
+```
+
+This checks both a valid consumer and intentional argument errors. The typing
+marker applies to the experimental subpackage; it does not claim that the full
+native package or every style/part name has complete static typing.
 
 Before stabilization, this prototype still needs oversized-row continuation,
 broader layout-diagnostic translation, static typing and completion refinement,

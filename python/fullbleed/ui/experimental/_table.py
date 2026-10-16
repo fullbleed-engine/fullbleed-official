@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Generic, TypeVar
 
 from ._style import AuthoringError, Length, Style, pt
-from ._tree import Node, _element
+from ._tree import Node, _element, component
 
 T = TypeVar("T")
 
@@ -27,6 +27,7 @@ class Column(Generic[T]):
             raise AuthoringError("Column width requires a positive length", code="table.width")
 
 
+@component(parts=("header", "cell", "row", "caption", "empty"))
 def DataTable(rows, *, columns, caption=None, empty="No records.", repeat_header=True,
               row_break="avoid", style=None, class_name=None, attrs=None) -> Node:
     """Capture rows and cell callbacks once, with repeated semantic column headers.
@@ -51,7 +52,7 @@ def DataTable(rows, *, columns, caption=None, empty="No records.", repeat_header
     for index, row in enumerate(rows, 1):
         cells = []
         for column in columns:
-            path = ("DataTable", f"row {index}", column.label)
+            path = (f"row {index}", column.label)
             try:
                 cell = _element("td", (column.cell(row),), part="cell",
                                       style=Style(text_align=column.align, width=column.width, vertical_align="top",
@@ -78,4 +79,4 @@ def DataTable(rows, *, columns, caption=None, empty="No records.", repeat_header
         children.append(_element("tbody", (header, *rendered)))
     table = _element("table", children, base=Style(width="100%", border_collapse="collapse", table_layout="fixed"),
                      style=style, class_name=class_name, attrs=attrs)
-    return Node(None, (table,), name="DataTable", boundary=True)
+    return table

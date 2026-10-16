@@ -42,7 +42,7 @@ The [executable prototype guide](../examples/component_recipes/README.md) uses:
 ```python
 Label = styled(Paragraph, font_size=pt(8), color=token("muted"))
 
-@component
+@component(parts=("label", "value"))
 def Field(label: str, value: str):
     return Stack(
         Label(label, part="label"),
@@ -78,13 +78,14 @@ identity; an ordinary function still composes but introduces no boundary.
 Fragment components have no implicit styling root and require a real container
 when root styling is requested.
 
-One prototype limitation needs a design change: it discovers parts from the
-constructed tree. For example, an empty table has no `cell` part to customize.
-Before stabilization, components should declare their part contract independently
-of current content. A declared optional part can accept an override even when
-absent, while an undeclared name still raises a useful typo error. This contract
-can also supply completion and tooling; do not make callers branch on row count
-just to apply a reusable style.
+The initial prototype discovered parts from the constructed tree, so an empty
+table had no `cell` part to customize. It now supports `@component(parts=(...))`
+to declare a contract independently of current content. A declared optional part
+accepts an override even when absent; an undeclared name still raises a useful
+error. Authored markers are checked against the declaration. The factory and
+instance expose the names for tools, and the decorator preserves argument types.
+Automatic part-name completion still needs work. Callers should not branch on row
+count just to apply a reusable style.
 
 Ordinary conditionals should handle variants initially: `paid=True` or
 `tone="warning"` is a function argument. A variant registry, implicit prop
@@ -185,7 +186,7 @@ pagination behavior that the renderer has not demonstrated.
 | Oversized-row continuation | Long text cells, images, mixed content, repeated headers, and multi-column rows preserve content and terminate; unsupported cases fail explicitly |
 | Native diagnostics | Overflow, missing glyphs, and invalid layout report the responsible component/part where source IDs exist |
 | Typing and completion | Editors suggest valid props, styles, token names, and parts; misspellings fail before rendering where practical |
-| Declared parts | Styling a documented optional part works for empty and conditional states; nested component boundaries remain intact |
+| Declared parts (implemented in the prototype) | Empty/conditional states accept documented parts; boundaries, root delegation, schema validation, and callable argument types have focused coverage; author feedback remains needed |
 | Semantics and accessibility | Reuse the existing semantic validation contract; test generated structure and final delivery profiles separately |
 | Rendering reuse | Measure authoring, compilation, layout, and output costs independently; verify metadata/configuration isolation |
 | Migration | Provide an explicit adapter for legacy elements/styles, keep existing imports working, and avoid two permanent incompatible component systems |

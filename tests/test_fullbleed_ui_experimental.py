@@ -69,6 +69,94 @@ def test_a_component_delegating_its_root_keeps_the_roots_exposed_parts():
     assert "color: blue;" in Document(table).to_css()
 
 
+def test_declared_parts_are_stable_across_conditional_content():
+    @component(parts=("label", "note"))
+    def Notice(message: str, note: str | None = None) -> Node:
+        return Card(Paragraph(message, part="label"), note and Paragraph(note, part="note"))
+
+    assert Notice.parts == ("label", "note")
+    assert inspect.signature(Notice).parameters["message"].annotation == "str"
+    empty, full = Notice("Paid"), Notice("Paid", "Thank you")
+    assert empty.parts == full.parts == Notice.parts
+    override = style(color="purple")
+    assert "color: purple;" not in Document(empty.with_parts(note=override)).to_css()
+    assert "color: purple;" in Document(full.with_parts(note=override)).to_css()
+    assert "color: purple;" not in Document(full).to_css()
+    with pytest.raises(AuthoringError, match="Available parts: label, note") as caught:
+        empty.with_parts(notte=override)
+    assert caught.value.path == ("Notice",)
+
+
+def test_table_customization_does_not_depend_on_whether_rows_or_caption_exist():
+    overrides = dict(cell=style(color="blue"), empty=style(color="gray"), caption=style(font_weight=700))
+    empty = DataTable([], columns=[Column("Item", str)]).with_parts(**overrides)
+    populated = DataTable(["One"], columns=[Column("Item", str)], caption="Items").with_parts(**overrides)
+    assert empty.parts == populated.parts == DataTable.parts == ("header", "cell", "row", "caption", "empty")
+    assert "color: gray;" in Document(empty).to_css()
+    assert "color: blue;" in Document(populated).to_css()
+
+
+def test_declared_parts_do_not_leak_through_nested_component_boundaries():
+    @component(parts=("title", "note"))
+    def Inner():
+        return Card(Paragraph("Inner", part="title", style=style(color="green")))
+
+    @component(parts=("title", "note"))
+    def Outer():
+        return Card(Paragraph("Outer", part="title"), Inner())
+
+    result = Outer().with_parts(title=style(color="red"), note=style(color="purple"))
+    css_text = Document(result).to_css()
+    assert "color: red;" in css_text and "color: green;" in css_text
+    assert "color: purple;" not in css_text
+
+
+def test_root_delegation_preserves_optional_parts_and_can_expose_a_subset():
+    @component
+    def WorkTable(rows):
+        return DataTable(rows, columns=[Column("Work", str)])
+
+    @component(parts=("header",))
+    def HeaderOnly(rows):
+        return WorkTable(rows)
+
+    assert WorkTable([]).parts == DataTable.parts
+    WorkTable([]).with_parts(cell=style(color="blue"))
+    restricted = HeaderOnly(["One"])
+    assert restricted.parts == ("header",)
+    assert "color: blue;" in Document(restricted.with_parts(header=style(color="blue"))).to_css()
+    with pytest.raises(AuthoringError):
+        restricted.with_parts(cell=style(color="blue"))
+
+
+def test_part_declarations_are_captured_once_and_check_authored_markers():
+    names = ["label", "note"]
+
+    @component(parts=iter(names))
+    def Notice(typo=False):
+        return Paragraph("Paid", part="lable" if typo else "label")
+
+    names.clear()
+    assert Notice.parts == Notice().parts == ("label", "note")
+    with pytest.raises(AuthoringError, match="missing from the component declaration: lable") as caught:
+        Notice(typo=True)
+    assert caught.value.path == ("Notice",)
+
+    @component(parts=())
+    def NoParts():
+        return Paragraph("Paid")
+
+    assert NoParts().parts == ()
+    with pytest.raises(AuthoringError):
+        NoParts().with_parts(label=style(color="blue"))
+
+
+@pytest.mark.parametrize("parts", ["label", {"label"}, {"label": None}, ["label", "label"], [""], [1], ["bad name"]])
+def test_invalid_part_declarations_fail_at_decoration(parts):
+    with pytest.raises(AuthoringError):
+        component(parts=parts)
+
+
 def test_style_precedence_preserves_shorthand_order_and_caller_override():
     Notice = styled(Card, padding=pt(12), color="green")
     node = Notice("Paid", style=style(padding_left=pt(24), color="blue"))
@@ -221,7 +309,10 @@ def test_table_callback_error_has_row_and_column_context():
     with pytest.raises(AuthoringError) as caught:
         DataTable([{"value": 1}, {}], columns=[Column("Amount", lambda row: row["value"])])
     assert caught.value.path == ("DataTable", "row 2", "Amount")
-    assert isinstance(caught.value.__cause__, KeyError)
+    cause = caught.value
+    while cause.__cause__ is not None:
+        cause = cause.__cause__
+    assert isinstance(cause, KeyError)
 
 
 @pytest.mark.parametrize("kwargs", [
