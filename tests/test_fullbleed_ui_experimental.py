@@ -7,8 +7,8 @@ import inspect
 import pytest
 
 from fullbleed.ui.experimental import (
-    AuthoringError, Box, Card, Column, DataTable, Document, Flow, Fragment,
-    Heading, LayoutError, Node, Page, Paragraph, Renderer, Stack, Style, Theme, component,
+    AuthoringError, Box, Card, Column, DataTable, Document, Flow, Fragment, Grid,
+    Heading, LayoutError, Node, Page, Paragraph, Renderer, Row, Stack, Style, Theme, component,
     css, mm, pct, pt, style, styled, to_legacy, token,
 )
 
@@ -216,6 +216,68 @@ def test_styled_no_longer_injects_style_into_custom_function_arguments():
     with pytest.raises(TypeError, match="unexpected keyword argument 'style'"):
         styled(Notice, color="red")("Paid", style=style(color="blue"))
     assert "color: blue;" in Document(styled(Notice, color="red")("Paid").with_style(color="blue")).to_css()
+
+
+@pytest.mark.parametrize("factory,argument,property_name,builtin,builtin_css,recipe,given,given_css", [
+    (Flow, "gap", "row-gap", pt(8), "8pt", pt(12), pt(3), "3pt"),
+    (Stack, "gap", "gap", pt(8), "8pt", pt(12), 0, "0"),
+    (Stack, "align", "align-items", "stretch", "stretch", "end", "start", "start"),
+    (Row, "gap", "gap", pt(8), "8pt", pt(12), pt(3), "3pt"),
+    (Row, "align", "align-items", "center", "center", "end", "start", "start"),
+    (Row, "justify", "justify-content", "space-between", "space-between", "end", "start", "start"),
+    (Grid, "gap", "gap", pt(8), "8pt", pt(12), pt(3), "3pt"),
+    (Grid, "columns", "grid-template-columns", 2, "1fr 1fr", "3fr 1fr", 3, "1fr 1fr 1fr"),
+    (Heading, "keep_with_next", "break-after", True, "avoid", "auto", True, "avoid"),
+    (Heading, "keep_with_next", "break-after", True, "avoid", "avoid", False, "auto"),
+])
+def test_explicit_layout_choices_override_recipes_while_omitted_choices_do_not(
+    factory, argument, property_name, builtin, builtin_css, recipe, given, given_css,
+):
+    child = Paragraph("Content") if factory is not Heading else "Content"
+    recipe_factory = styled(factory, {property_name: recipe})
+
+    def declaration(node, expected):
+        assert f"{property_name}: {expected};" in Document(node).to_css()
+
+    declaration(factory(child), builtin_css)
+    declaration(factory(child, **{argument: None}), builtin_css)
+    declaration(recipe_factory(child), str(recipe))
+    declaration(recipe_factory(child, **{argument: None}), str(recipe))
+    # Explicitly choosing the built-in value is different from omitting it.
+    declaration(recipe_factory(child, **{argument: builtin}), builtin_css)
+    chosen = recipe_factory(child, **{argument: given})
+    declaration(chosen, given_css)
+    declaration(styled(recipe_factory, {property_name: builtin_css})(child, **{argument: given}), given_css)
+    declaration(recipe_factory(child, **{argument: given}, style={property_name: builtin_css}), builtin_css)
+    declaration(chosen.with_style({property_name: recipe}), str(recipe))
+    declaration(chosen, given_css)
+    assert f"{property_name}: {given_css};" in to_legacy(chosen)[0].props["style"]
+
+
+def test_component_authored_layout_choices_survive_outer_styling_and_optional_forwarding():
+    @component
+    def ChosenFlow():
+        return Flow(Paragraph("Chosen"), gap=pt(3))
+
+    @component
+    def OptionalFlow(*, gap=None):
+        return Flow(Paragraph("Optional"), gap=gap)
+
+    for factory in (ChosenFlow, OptionalFlow):
+        decorated = styled(factory, row_gap=pt(12))
+        expected = "3pt" if factory is ChosenFlow else "12pt"
+        assert f"row-gap: {expected};" in Document(decorated()).to_css()
+    assert "row-gap: 0;" in Document(styled(OptionalFlow, row_gap=pt(12))(gap=0)).to_css()
+
+
+@pytest.mark.parametrize("factory,kwargs", [
+    (Flow, {"gap": False}), (Stack, {"align": "around"}),
+    (Row, {"justify": False}), (Grid, {"columns": False}),
+    (Grid, {"columns": 0}), (Heading, {"keep_with_next": 0}),
+])
+def test_optional_layout_choices_still_reject_invalid_explicit_values(factory, kwargs):
+    with pytest.raises(AuthoringError):
+        factory(Paragraph("Content"), **kwargs)
 
 
 def test_style_and_theme_inputs_are_snapshotted_at_construction():

@@ -104,8 +104,8 @@ its optional declaration. Styled factories expose the same optional declaration;
 styling a primitive exposes `parts=None`.
 
 Styles compose in this order: primitive defaults, styled defaults from inner to
-outer, explicit styles authored by a component or passed to its primitive, then
-later `with_style` or `with_parts` changes. Overrides move to the end, preserving
+outer, explicit layout arguments, `style=` declarations, then later `with_style`
+or `with_parts` changes. Overrides move to the end, preserving
 CSS shorthand/longhand ordering. Themes supply values and document text defaults;
 they do not silently override a component's own settings.
 
@@ -129,11 +129,29 @@ Earlier prototype callers using that shortcut should move the declarations to
 [implementation review](../../docs/component-authoring-design.md#composition-contracts-to-settle-before-adding-more-api)
 for the fragment, spacing and argument-forwarding contracts.
 
-One prototype limitation remains: layout keywords such as `Flow(gap=...)` are
-stored as primitive defaults. A recipe's `row_gap` can therefore override even
-an explicitly supplied `gap`. Use `.with_style(row_gap=pt(3))` for a definite
-instance override today. Explicit layout-argument precedence needs a consistent
-contract before this API is stabilized.
+Layout arguments follow the same ownership rule. Omit an argument, or pass
+`None`, to use a reusable default. Supplying a value makes an explicit choice,
+including zero spacing and `keep_with_next=False`:
+
+```python
+from fullbleed.ui.experimental import Flow, Paragraph, pt, styled
+
+Spaced = styled(Flow, row_gap=pt(12))
+default_spacing = Spaced(Paragraph("One"), Paragraph("Two"))            # 12 pt
+inherited_spacing = Spaced(Paragraph("One"), Paragraph("Two"), gap=None)  # 12 pt
+compact_spacing = Spaced(Paragraph("One"), Paragraph("Two"), gap=pt(3))   # 3 pt
+touching = Spaced(Paragraph("One"), Paragraph("Two"), gap=0)               # 0
+```
+
+`style=` can override an explicit layout argument, and `.with_style(...)` can
+override the result. The rule also applies when a custom function forwards an
+optional argument, such as `gap=None`, to a primitive. A function that explicitly
+chooses a gap keeps that choice when another module adds reusable styling.
+
+The built-in visual defaults remain: 8 pt spacing; stretch alignment for `Stack`;
+center alignment and space-between justification for `Row`; two equal columns for
+`Grid`; and keeping `Heading` with following content. `None` is the public default
+for those optional layout arguments so reusable defaults can take effect.
 
 `class_name` still means a literal CSS class label. It does not load styles or
 refer to a Python variable. In this prototype, use style values for the normal

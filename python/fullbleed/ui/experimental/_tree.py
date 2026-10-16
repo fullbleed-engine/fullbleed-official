@@ -237,36 +237,52 @@ def Fragment(*children) -> Node:
     return Node(None, _children(children))
 
 
-def Heading(*children, level: int = 2, keep_with_next: bool = True, style=None, class_name=None, attrs=None, part=None) -> Node:
+def Heading(*children, level: int = 2, keep_with_next: bool | None = None, style=None, class_name=None, attrs=None, part=None) -> Node:
+    """A semantic heading, kept with following content by default.
+
+    None leaves the keep policy to reusable styles or the built-in default.
+    An explicit boolean overrides reusable defaults; style= overrides it.
+    """
     if isinstance(level, bool) or not isinstance(level, int) or not 1 <= level <= 6:
         raise AuthoringError("Heading level must be an integer from 1 to 6", code="heading.level")
-    if not isinstance(keep_with_next, bool):
-        raise AuthoringError("keep_with_next must be a boolean", code="heading.keep")
-    return _element(f"h{level}", children, base=Style(margin=0, break_after="avoid" if keep_with_next else "auto"),
-                    style=style, class_name=class_name, attrs=attrs, part=part)
+    if keep_with_next is not None and not isinstance(keep_with_next, bool):
+        raise AuthoringError("keep_with_next must be a boolean or None", code="heading.keep")
+    keep_style = None if keep_with_next is None else {"break_after": "avoid" if keep_with_next else "auto"}
+    return _element(f"h{level}", children, base=Style(margin=0, break_after="avoid"),
+                    style=Style(keep_style, style), class_name=class_name, attrs=attrs, part=part)
 
 
-def Stack(*children, gap=pt(8), align="stretch", style=None, class_name=None, attrs=None, part=None) -> Node:
-    if align not in ALIGNMENTS:
+def Stack(*children, gap=None, align=None, style=None, class_name=None, attrs=None, part=None) -> Node:
+    """A local flex column; default gap is 8 pt and alignment is stretch.
+
+    None leaves a layout choice to reusable styles or the built-in default.
+    """
+    if align is not None and align not in ALIGNMENTS:
         raise AuthoringError(f"Unknown alignment {align!r}", code="layout.align")
-    return _element("div", children, base=Style(display="flex", flex_direction="column", gap=gap, align_items=align),
-                    style=style, class_name=class_name, attrs=attrs, part=part)
+    return _element("div", children, base=Style(display="flex", flex_direction="column", gap=pt(8), align_items="stretch"),
+                    style=Style({"gap": gap, "align_items": align}, style), class_name=class_name, attrs=attrs, part=part)
 
 
-def Row(*children, gap=pt(8), align="center", justify="space-between", style=None, class_name=None, attrs=None, part=None) -> Node:
-    if align not in ALIGNMENTS:
+def Row(*children, gap=None, align=None, justify=None, style=None, class_name=None, attrs=None, part=None) -> Node:
+    """A flex row; defaults are 8 pt gap, centered alignment and space-between.
+
+    None leaves a layout choice to reusable styles or the built-in default.
+    """
+    if align is not None and align not in ALIGNMENTS:
         raise AuthoringError(f"Unknown alignment {align!r}", code="layout.align")
-    if justify not in JUSTIFICATIONS:
+    if justify is not None and justify not in JUSTIFICATIONS:
         raise AuthoringError(f"Unknown justification {justify!r}", code="layout.justify")
-    return _element("div", children, base=Style(display="flex", gap=gap, align_items=align, justify_content=justify),
-                    style=style, class_name=class_name, attrs=attrs, part=part)
+    return _element("div", children, base=Style(display="flex", gap=pt(8), align_items="center", justify_content="space-between"),
+                    style=Style({"gap": gap, "align_items": align, "justify_content": justify}, style),
+                    class_name=class_name, attrs=attrs, part=part)
 
 
-def Flow(*children, gap=pt(8), style=None, class_name=None, attrs=None, part=None) -> Node:
+def Flow(*children, gap=None, style=None, class_name=None, attrs=None, part=None) -> Node:
     """Native paginated block flow with independent gaps and child margins.
 
     Fragments contribute siblings while retaining their diagnostic boundaries.
     No gap is inserted at the beginning or end of a page fragment.
+    None leaves the gap to reusable styles or the built-in 8 pt default.
     """
     captured = _children(children)
     pending = [(child, ()) for child in reversed(captured)]
@@ -281,16 +297,21 @@ def Flow(*children, gap=pt(8), style=None, class_name=None, attrs=None, part=Non
     if "data-fb-flow" in attributes:
         raise AuthoringError("Flow owns the data-fb-flow layout annotation", code="attribute.duplicate")
     attributes["data-fb-flow"] = "true"
-    return _element("div", captured, base=Style(display="block", row_gap=gap),
-                    style=style, class_name=class_name, attrs=attributes, part=part)
+    return _element("div", captured, base=Style(display="block", row_gap=pt(8)),
+                    style=Style({"row_gap": gap}, style), class_name=class_name, attrs=attributes, part=part)
 
 
-def Grid(*children, columns: int | str = 2, gap=pt(8), style=None, class_name=None, attrs=None, part=None) -> Node:
-    if isinstance(columns, bool) or not isinstance(columns, (int, str)) or isinstance(columns, int) and columns < 1:
-        raise AuthoringError("Grid columns must be a positive integer or explicit CSS tracks", code="grid.columns")
+def Grid(*children, columns: int | str | None = None, gap=None, style=None, class_name=None, attrs=None, part=None) -> Node:
+    """A grid with two equal columns and an 8 pt gap by default.
+
+    None leaves a layout choice to reusable styles or the built-in default.
+    """
+    if columns is not None and (isinstance(columns, bool) or not isinstance(columns, (int, str)) or isinstance(columns, int) and columns < 1):
+        raise AuthoringError("Grid columns must be a positive integer, explicit CSS tracks, or None", code="grid.columns")
     tracks = " ".join(["1fr"] * columns) if isinstance(columns, int) else columns
-    return _element("div", children, base=Style(display="grid", grid_template_columns=tracks, gap=gap),
-                    style=style, class_name=class_name, attrs=attrs, part=part)
+    return _element("div", children, base=Style(display="grid", grid_template_columns="1fr 1fr", gap=pt(8)),
+                    style=Style({"grid_template_columns": tracks, "gap": gap}, style),
+                    class_name=class_name, attrs=attrs, part=part)
 
 
 def Image(*, src: str, alt: str, style=None, class_name=None, attrs=None, part=None) -> Node:

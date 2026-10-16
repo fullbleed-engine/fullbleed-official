@@ -17,7 +17,7 @@ import fullbleed.ui.experimental as components
 
 VALID = '''from dataclasses import dataclass
 from fullbleed.ui.experimental import (
-    Column, DataTable, Document, Flow, Heading, Image, LayoutError, Node, Page, Paragraph,
+    Column, DataTable, Document, Flow, Grid, Heading, Image, LayoutError, Node, Page, Paragraph,
     Row, Source, Stack, Style, Theme, component, css, mm, pt, style, styled, to_legacy, token,
 )
 
@@ -60,6 +60,18 @@ table = DataTable(rows, columns=[Column("Item", description)], row_break="avoid"
 table = table.with_parts(cell=style(padding=(pt(4), pt(6))))
 heading = Heading("Invoice", level=1, keep_with_next=True)
 brand = Row(Paragraph("Fullbleed"), Image(src="mark.png", alt="Company mark"), justify="start")
+SpacedFlow = styled(Flow, row_gap=pt(12))
+AlignedRow = styled(Row, align_items="end", justify_content="end")
+SplitGrid = styled(Grid, grid_template_columns="2fr 1fr")
+KeptHeading = styled(Heading, break_after="avoid")
+optional_flow = SpacedFlow(Paragraph("Choice"), gap=None)
+explicit_flow = SpacedFlow(Paragraph("Choice"), gap=0)
+optional_stack = Stack(Paragraph("Choice"), gap=None, align=None)
+explicit_row = AlignedRow(Paragraph("Choice"), gap=None, align="start", justify=None)
+optional_grid = SplitGrid(Paragraph("Choice"), columns=None, gap=None)
+explicit_grid = SplitGrid(Paragraph("Choice"), columns=3, gap=pt(3))
+optional_heading = KeptHeading("Choice", keep_with_next=None)
+explicit_heading = KeptHeading("Choice", keep_with_next=False)
 document = Document(heading, brand, root, flow, table, theme=Theme({"muted": "#667580"}), page=Page("A5", margin=mm(12)))
 compiled_html: str = document.to_html()
 assert "Design" in compiled_html
@@ -85,6 +97,10 @@ INVALID_CASES = [
     ("primitive_class_type", 'Paragraph("x", class_name=10)'),
     ("layout_alignment", 'Stack(Paragraph("x"), align="around")'),
     ("layout_justification", 'Row(Paragraph("x"), justify="between")'),
+    ("heading_keep_type", 'Heading("x", keep_with_next="yes")'),
+    ("grid_columns_type", 'Grid(Paragraph("x"), columns=object())'),
+    ("styled_layout_alignment", 'AlignedRow(Paragraph("x"), align="around")'),
+    ("styled_heading_keep_type", 'KeptHeading("x", keep_with_next="yes")'),
     ("image_alt_required", 'Image(src="mark.png")'),
     ("document_page_type", 'Document(Paragraph("x"), page="A4")'),
     ("page_margin_type", "Page(margin=12)"),

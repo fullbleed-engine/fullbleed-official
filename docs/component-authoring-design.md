@@ -118,7 +118,8 @@ unconditionally reserve `style` for itself. The current candidate preserves
 arguments and teaches `StyledField(...).with_style(...)` for an explicit instance
 override. It retains default declarations separately from explicit node styles:
 primitive defaults come first, followed by styled defaults from inner to outer,
-then explicit styles authored by the function or supplied to its primitive.
+then explicit layout arguments and `style=` declarations authored by the function
+or supplied to its primitive.
 Finally, `.with_style(...)` overrides the result. A recipe supplies defaults; it
 does not defeat an explicit appearance chosen inside a custom component.
 
@@ -129,15 +130,23 @@ Such callers use `.with_style(...)` after the call. This changes the experimenta
 shortcut, not established `fullbleed.ui` imports. The node's `style` stores authored
 declarations; compilation and the legacy adapter combine those with defaults.
 
-One precedence question remains: layout arguments such as `Flow(gap=...)` are
-currently translated into primitive defaults. Consequently,
-`styled(Flow, row_gap=pt(12))(..., gap=pt(3))` still produces a 12 pt gap even
-though the function received `gap=pt(3)`. The result's
-`.with_style(row_gap=pt(3))` is an explicit override today. Before stabilization,
-distinguish an omitted layout argument from an explicitly supplied value, and
-make explicit constructor choices outrank recipe defaults. Apply that rule
-consistently to gap, alignment, tracks and keep-with-next; fixing only one spelling
-would leave authors guessing. Do not add new variant or prop systems to hide it.
+The first implementation translated layout arguments into primitive defaults,
+so `styled(Flow, row_gap=pt(12))(..., gap=pt(3))` incorrectly retained a 12 pt gap.
+The current candidate separates omitted choices from authored choices. Omitting
+a layout argument, or supplying `None`, allows the recipe and then the built-in
+default to supply it. An explicit value wins over recipes, including zero,
+`keep_with_next=False`, or a value equal to the built-in default. `style=` wins
+over the constructor's layout arguments; `.with_style(...)` overrides the result.
+
+This rule applies to `Flow` spacing, `Stack`/`Row` spacing and alignment, row
+justification, grid spacing/tracks, and heading keep-with-next. Their public
+defaults are now `None`, with unchanged built-in visual defaults documented in
+their docstrings and the guide. Optional forwarding works naturally:
+`def Panel(*children, gap=None): return Flow(*children, gap=gap)`. A component
+that explicitly chooses `gap=pt(3)` retains that choice when styled from outside.
+The node's authored `style` includes these explicit layout choices, and the
+legacy adapter preserves them. No sentinel object, implicit prop injection or
+additional variant API is required.
 
 Before stabilizing, retain executable cases for moving a component among sibling
 positions, empty and multi-root returns, reusing a child under different parents,
@@ -204,8 +213,8 @@ for authors choosing selector-based CSS. The primary component workflow should
 not require class names. Existing selector-based documents remain supported.
 
 Style precedence must be teachable: primitive defaults, reusable styled defaults,
-call-site style, then explicit overrides. Preserve declaration order for CSS
-shorthand/longhand interactions. Resolve theme tokens per document; a theme
+explicit layout arguments, call-site `style=`, then instance overrides. Preserve
+declaration order for CSS shorthand/longhand interactions. Resolve theme tokens per document; a theme
 supplies values rather than silently defeating local component choices.
 
 Parts need an actual boundary rule. In the prototype, root delegation preserves
@@ -338,7 +347,7 @@ pagination behavior that the renderer has not demonstrated.
 | Work | Acceptance condition |
 | --- | --- |
 | Composition and spacing (implemented in the prototype) | Qualify fragment provenance, additive margins, independent parent gaps, page breaks and wrapper arguments in rendered fixtures; obtain author feedback on the explicit native layout contract |
-| Explicit layout-prop precedence (open) | An explicit `gap`, alignment, column-track or keep-with-next argument outranks a recipe default; omitted arguments still allow recipe defaults. Keep runtime behavior and callable typing aligned. |
+| Explicit layout-prop precedence (implemented in the prototype) | Explicit choices outrank recipes; omitted/None choices allow defaults. Check zero/false, optional forwarding, final style overrides, editor types and actual printed geometry/pagination. |
 | Oversized-row continuation (partial implementation) | Extend the tested top-aligned text cell behavior to rowspans, page-tall cell images, and other vertical alignments; qualify changing page geometry, complex decorations, and semantic continuity; unsupported cases fail explicitly |
 | Native diagnostics (partial implementation) | Unsplittable fragments resolve to authored root scopes; identify failing descendants and map missing glyphs/other layout diagnostics before claiming full component-level attribution |
 | Typing and completion (partial implementation) | Generated stubs and installed mypy/Pyright checks cover styles, primitive props, layout choices, page options, record types and component arguments; token/part-name completion remains open |

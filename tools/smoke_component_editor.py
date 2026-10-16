@@ -167,9 +167,12 @@ def main():
                 ("table_columns", "DataTable([], col§)", {"columns"}),
                 ("heading_keep", 'Heading("Text", keep_§)', {"keep_with_next"}),
                 ("styled_business_argument", 'def Choice(*, style: str) -> Node:\n    return Paragraph(style)\nStyledChoice = styled(Choice, color="red")\nStyledChoice(sty§)', {"style"}),
+                ("styled_layout_values", 'Aligned = styled(Row, align_items="end")\nAligned(Paragraph("Text"), align="§")', {"start", "center", "stretch"}),
+                ("styled_grid_columns", 'Columns = styled(Grid, grid_template_columns="2fr 1fr")\nColumns(Paragraph("Text"), col§)', {"columns"}),
+                ("styled_heading_keep", 'Title = styled(Heading, break_after="auto")\nTitle("Text", keep_§)', {"keep_with_next"}),
             ]
             for index, (name, expression, required) in enumerate(cases):
-                prefix = "from fullbleed.ui.experimental import style, styled, Paragraph, Stack, DataTable, Heading, Node\n"
+                prefix = "from fullbleed.ui.experimental import style, styled, Paragraph, Stack, Row, Grid, DataTable, Heading, Node\n"
                 before, after = (prefix + expression).split("§")
                 path = folder / f"completion_{index}.py"
                 server.open(path, before + after)

@@ -189,6 +189,7 @@ jobs:
           python -m pytest tests/test_fullbleed_ui_experimental.py -q --junitxml target/component-recipes/unit-tests.xml
           python -I tools/smoke_component_recipes.py --out target/component-recipes
           python -I tools/smoke_component_flow.py --out target/component-recipes/flow
+          python -I tools/smoke_component_layout_props.py --out target/component-recipes/layout-props
           python -I tools/smoke_component_migration.py --out target/component-recipes/migration
           python -I tools/smoke_component_typing.py --out target/component-recipes/typing.json
 
