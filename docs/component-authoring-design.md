@@ -64,7 +64,7 @@ make an impure callback deterministic.
 | `Flow` and `Stack` both sound like vertical layout | Teach `Flow` for a flowing document body and `Stack` for a local flex group. Their different pagination behavior must remain visible; do not silently alias them. |
 | Tokens and public parts are strings checked at runtime | Show them as explicit contracts and surface their available names in tools. Do not imply editor completion is complete. |
 | Page size, fonts, theme text and rendering appear together in starter code | Give page geometry to the document and font/renderer configuration to the application. A future convenience preset must select a bundled font explicitly, without depending on system fonts. |
-| Layout failures can still describe an entire table | Keep source scopes, but improve the failing row/cell location. Authors should not have to inspect generated HTML to diagnose ordinary document mistakes. |
+| Some layout failures still describe only an outer scope | Native table and block split rejections now identify cell constraints or the responsible container. Extend that explicit result through other layout models; avoid guessing descendants from size or selectors. |
 
 Keep explicit physical units. Saving the characters in `pt(12)` is a poor trade
 if it makes a print measurement ambiguous. A small checked style vocabulary is
@@ -167,7 +167,7 @@ number of decisions an author must coordinate for a specific change:
 | Restyle a label inside a third-party component | Learn its classes and selector structure | Use a documented `label` part. Internal structure may change while that contract remains; automatic part-name completion is unfinished. |
 | Add a formatted table column | Coordinate the header, each row's cell and column styling | Add one `Column` containing label, callback, width and alignment. Calculations and formatting stay in application code. |
 | Change paper size | Ensure the effective CSS or engine setting changes, rather than only decorator metadata | Change `Page`; verify the resulting PDF's page box. The installed-wheel examples do this. |
-| Diagnose content that cannot paginate | Interpret native layout output and the generated document | Resolve the trace to the authored component scope. Identifying the exact failing descendant remains open. |
+| Diagnose content that cannot paginate | Interpret native layout output and the generated document | Resolve a rejected native split to the authored row/cell or container constraint. Layout models without precise rejection data retain their scope; broader diagnostics remain open. |
 
 Automated examples establish these behaviors for their fixtures. They do not
 establish that an independent author finds the API easier. Before stabilization,
@@ -305,15 +305,28 @@ outside the primitive authoring layer.
 Diagnostics are part of ergonomics. The desired error is
 `Invoice → WorkTable → row 17 → Amount`, with the authored source and actionable
 reason. The prototype retains that path for authoring errors and table callbacks.
-Native pagination events now retain the authored roots associated with each
-layout fragment. Anonymous containers forward those roots, and splits retain
-only the roots belonging to each fragment. The experimental `LayoutError`
-resolves those IDs through the document's source map and exposes page, component
-paths, and definition locations. A failing table can identify `DataTable → table`.
-This is scope attribution, not a claim that the engine has identified the failing
-row or cell. Multiple roots remain separate; unknown IDs do not cause a guessed
-selector match. Other native diagnostics and descendant-level failure locations
-still need work.
+Native pagination also retains authored fragment roots. A split attempt now
+returns either the same layout fragments or a structured rejection. The table
+splitter can report unsupported alignment, rowspans, fixed-row space, or cells
+whose remaining content makes no progress. Block and authored wrappers carry
+that rejection outward. Successful partial splits discard rejected alternatives;
+the next attempt uses the remaining cells and their original source IDs.
+
+The experimental `LayoutError` keeps its original `sources` scope and adds
+`reason` and `failure_sources`. A single known failure source becomes the error
+path, such as `WorkTable → DataTable → row 2 → Description → cell`. Multiple causes
+remain separate. A clipped container or oversized parent padding names the
+container, rather than attributing its constraint to innocent child text. A tall
+header can identify the table without blaming a body cell. Unknown IDs do not
+cause a guessed selector match, and unsupported layout wrappers retain their
+available scope. Source files and lines identify component definitions, not
+author call sites.
+
+This keeps the diagnostic decision beside the actual native split decision.
+There is no Python pagination estimator or search for the largest descendant.
+The installed examples check errors and render repaired documents. General
+overflow detection, other native diagnostic families, and precise rejection
+propagation through every layout model still need work.
 
 ## Findings from the prototype
 
@@ -349,7 +362,7 @@ pagination behavior that the renderer has not demonstrated.
 | Composition and spacing (implemented in the prototype) | Qualify fragment provenance, additive margins, independent parent gaps, page breaks and wrapper arguments in rendered fixtures; obtain author feedback on the explicit native layout contract |
 | Explicit layout-prop precedence (implemented in the prototype) | Explicit choices outrank recipes; omitted/None choices allow defaults. Check zero/false, optional forwarding, final style overrides, editor types and actual printed geometry/pagination. |
 | Oversized-row continuation (partial implementation) | Extend the tested top-aligned text cell behavior to rowspans, page-tall cell images, and other vertical alignments; qualify changing page geometry, complex decorations, and semantic continuity; unsupported cases fail explicitly |
-| Native diagnostics (partial implementation) | Unsplittable fragments resolve to authored root scopes; identify failing descendants and map missing glyphs/other layout diagnostics before claiming full component-level attribution |
+| Native diagnostics (partial implementation) | Native table/block split rejections identify cell constraints or container owners while retaining fragment scopes; extend precise causes through other layout models and map missing glyphs/other diagnostic families before claiming full attribution |
 | Typing and completion (partial implementation) | Generated stubs and installed mypy/Pyright checks cover styles, primitive props, layout choices, page options, record types and component arguments; token/part-name completion remains open |
 | Declared parts (implemented in the prototype) | Empty/conditional states accept documented parts; boundaries, root delegation, schema validation, and callable argument types have focused coverage; author feedback remains needed |
 | Semantics and accessibility | Reuse the existing semantic validation contract; test generated structure and final delivery profiles separately |

@@ -748,6 +748,24 @@ def test_pdf_engine_pagination_trace_preserves_authored_source_ids() -> None:
     assert all(event['source_ids'] == [] for event in plain['events'])
 
 
+def test_pdf_engine_pagination_split_failure_preserves_scope_and_encoded_ids() -> None:
+    from html import escape
+    _require_pdf_engine()
+    source = 'clipped,|="\né'
+    engine = fullbleed.PdfEngine()
+    trace = engine.export_render_time_pagination_trace(
+        f'<main data-fb-id="outer"><div data-fb-id="{escape(source, quote=True)}" '
+        'style="height:500pt;overflow:hidden"><p data-fb-id="child">Content</p></div></main>',
+        '@page {size:240pt 180pt;margin:12pt;} body {margin:0;}',
+    )
+    failed = [event for event in trace['events'] if event.get('reason') == 'forced_unsplittable_full_frame']
+    assert len(failed) == 1
+    assert failed[0]['source_ids'] == ['outer']
+    assert failed[0]['split_failure'] == {'reason': 'clipped_container', 'source_ids': [source]}
+    fitted = engine.export_render_time_pagination_trace('<p>Fits</p>', '')
+    assert all('split_failure' not in event for event in fitted['events'])
+
+
 def test_pdf_engine_asset_resolution_trace_resolves_file_uri_sources(
     tmp_path: Path,
 ) -> None:

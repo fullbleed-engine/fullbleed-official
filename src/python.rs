@@ -3187,9 +3187,9 @@ fn owner_from_trace_fields(fields: &HashMap<&str, &str>) -> TraceOwnerContext {
     }
 }
 
-fn source_ids_from_trace_fields(fields: &HashMap<&str, &str>) -> Vec<String> {
+fn source_ids_from_trace_fields(fields: &HashMap<&str, &str>, key: &str) -> Vec<String> {
     fields
-        .get("source_ids_b64")
+        .get(key)
         .into_iter()
         .flat_map(|value| value.split(','))
         .filter_map(|value| crate::base64::decode_url_safe_no_pad(value).ok())
@@ -3385,7 +3385,10 @@ fn build_render_time_pagination_trace_py(
                     row.set_item("page", page_index + 1)?;
                     row.set_item("owner", trace_owner_to_py(py, &owner)?)?;
                     row.set_item("owner_label", owner.label())?;
-                    row.set_item("source_ids", source_ids_from_trace_fields(&fields))?;
+                    row.set_item(
+                        "source_ids",
+                        source_ids_from_trace_fields(&fields, "source_ids_b64"),
+                    )?;
 
                     if event_type == "layout" {
                         layout_event_count = layout_event_count.saturating_add(1);
@@ -3413,6 +3416,16 @@ fn build_render_time_pagination_trace_py(
                         row.set_item("result", result)?;
                         row.set_item("reason", reason)?;
                         row.set_item("overflow_severity", overflow_severity)?;
+                        if let Some(reason) = trace_b64_string(&fields, "split_failure_reason_b64")
+                        {
+                            let failure = PyDict::new(py);
+                            failure.set_item("reason", reason)?;
+                            failure.set_item(
+                                "source_ids",
+                                source_ids_from_trace_fields(&fields, "split_failure_sources_b64"),
+                            )?;
+                            row.set_item("split_failure", failure)?;
+                        }
 
                         let available_before = PyDict::new(py);
                         available_before

@@ -254,6 +254,7 @@ fn emit_pagination_layout_event(
     placed_on_page_before: bool,
     trace: AddTrace,
     overflow_severity: Option<&str>,
+    split_failure: Option<&crate::flowable::SplitFailure>,
 ) {
     let placed = trace.placed_rect.unwrap_or(crate::types::Rect {
         x: Pt::ZERO,
@@ -287,6 +288,23 @@ fn emit_pagination_layout_event(
         placed.height.to_milli_i64(),
         owner_trace_fields(owner_meta),
     );
+    let value = if let Some(failure) = split_failure {
+        let mut seen = BTreeSet::new();
+        let sources = failure
+            .source_ids
+            .iter()
+            .filter(|source| !source.is_empty() && seen.insert(source.as_str()))
+            .map(|source| trace_b64(source))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{value}|split_failure_reason_b64={}|split_failure_sources_b64={}",
+            trace_b64(failure.reason),
+            sources
+        )
+    } else {
+        value
+    };
     canvas.meta(META_PAGINATION_EVENT_KEY, value);
 }
 
@@ -748,6 +766,7 @@ impl DocTemplate {
 
                 let frame = &mut frames[frame_index];
                 let add_result = frame.add(current, &mut canvas);
+                let split_failure = frame.take_split_failure();
                 let deferred_footnotes = frame.take_deferred_footnotes();
                 match add_result {
                     AddResult::Placed(trace) => {
@@ -762,6 +781,7 @@ impl DocTemplate {
                             placed_on_page,
                             trace,
                             None,
+                            split_failure.as_ref(),
                         );
                         placed_on_page = true;
                         page_flowables += 1;
@@ -826,6 +846,7 @@ impl DocTemplate {
                             placed_on_page,
                             trace,
                             None,
+                            split_failure.as_ref(),
                         );
                         emit_pagination_transition_event(
                             &mut canvas,
@@ -875,6 +896,7 @@ impl DocTemplate {
                             placed_on_page,
                             trace,
                             Some(overflow_severity),
+                            split_failure.as_ref(),
                         );
                         emit_pagination_transition_event(
                             &mut canvas,

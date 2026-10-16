@@ -1,6 +1,6 @@
 use crate::canvas::Canvas;
 use crate::flowable::{
-    BreakInside, Flowable, PageFootnoteEntry, SplitContext, draw_page_footnotes,
+    BreakInside, Flowable, PageFootnoteEntry, SplitContext, SplitFailure, draw_page_footnotes,
     page_footnote_height, partition_page_footnotes_for_max_height,
 };
 use crate::types::{Pt, Rect, Size};
@@ -45,6 +45,7 @@ pub struct Frame {
     cursor_y: Pt,
     footnote_reserved: Pt,
     deferred_footnotes: Vec<PageFootnoteEntry>,
+    split_failure: Option<SplitFailure>,
 }
 
 impl Frame {
@@ -54,6 +55,7 @@ impl Frame {
             cursor_y: Pt::ZERO,
             footnote_reserved: Pt::ZERO,
             deferred_footnotes: Vec::new(),
+            split_failure: None,
         }
     }
 
@@ -71,6 +73,10 @@ impl Frame {
 
     pub(crate) fn take_deferred_footnotes(&mut self) -> Vec<PageFootnoteEntry> {
         std::mem::take(&mut self.deferred_footnotes)
+    }
+
+    pub(crate) fn take_split_failure(&mut self) -> Option<SplitFailure> {
+        self.split_failure.take()
     }
 
     fn place_footnotes(&mut self, entries: &[PageFootnoteEntry], height: Pt, canvas: &mut Canvas) {
@@ -101,6 +107,7 @@ impl Frame {
     }
 
     pub fn add(&mut self, flowable: Box<dyn Flowable>, canvas: &mut Canvas) -> AddResult {
+        self.split_failure = None;
         debug_assert!(
             self.deferred_footnotes.is_empty(),
             "deferred footnotes must be consumed after every frame placement"
@@ -212,53 +219,60 @@ impl Frame {
         } else {
             SplitContext::default()
         };
-        if let Some((first, second)) =
-            flowable.split_with_context(avail_width, avail_height, split_context)
-        {
-            let all_first_footnotes = first.page_footnotes();
-            let (first_footnotes, first_deferred_footnotes) =
-                partition_page_footnotes_for_max_height(&all_first_footnotes, avail_width);
-            let first_footnote_height = page_footnote_height(&first_footnotes, avail_width);
-            let first_avail_height = (avail_height - first_footnote_height).max(Pt::ZERO);
-            let first_size = first.wrap(avail_width, first_avail_height);
-            if first_size.height > Pt::ZERO && first_size.height <= first_avail_height {
-                let rect = Rect {
-                    x: self.rect.x,
-                    y: self.rect.y + self.cursor_y,
-                    width: first_size.width,
-                    height: first_size.height,
-                };
-                self.draw_in_fragmentainer(
-                    first.as_ref(),
-                    canvas,
-                    self.rect.y + self.cursor_y,
-                    avail_width,
-                    first_avail_height,
-                );
-                canvas.record_flowable_bounds(rect);
-                self.cursor_y = self.cursor_y + first_size.height;
-                self.place_footnotes(&first_footnotes, first_footnote_height, canvas);
-                self.deferred_footnotes.extend(first_deferred_footnotes);
-                return AddResult::Split(
-                    second,
-                    AddTrace {
-                        disposition: AddDisposition::Split,
-                        reason: "split_to_fit",
-                        avail_width,
-                        avail_height,
-                        frame_rect: self.rect,
-                        cursor_y_before,
-                        wrapped_size: size,
-                        placed_rect: Some(rect),
-                    },
-                );
-            }
-        }
+        let split_failure =
+            match flowable.split_with_diagnostics(avail_width, avail_height, split_context) {
+                Ok((first, second)) => {
+                    let all_first_footnotes = first.page_footnotes();
+                    let (first_footnotes, first_deferred_footnotes) =
+                        partition_page_footnotes_for_max_height(&all_first_footnotes, avail_width);
+                    let first_footnote_height = page_footnote_height(&first_footnotes, avail_width);
+                    let first_avail_height = (avail_height - first_footnote_height).max(Pt::ZERO);
+                    let first_size = first.wrap(avail_width, first_avail_height);
+                    if first_size.height > Pt::ZERO && first_size.height <= first_avail_height {
+                        let rect = Rect {
+                            x: self.rect.x,
+                            y: self.rect.y + self.cursor_y,
+                            width: first_size.width,
+                            height: first_size.height,
+                        };
+                        self.draw_in_fragmentainer(
+                            first.as_ref(),
+                            canvas,
+                            self.rect.y + self.cursor_y,
+                            avail_width,
+                            first_avail_height,
+                        );
+                        canvas.record_flowable_bounds(rect);
+                        self.cursor_y = self.cursor_y + first_size.height;
+                        self.place_footnotes(&first_footnotes, first_footnote_height, canvas);
+                        self.deferred_footnotes.extend(first_deferred_footnotes);
+                        return AddResult::Split(
+                            second,
+                            AddTrace {
+                                disposition: AddDisposition::Split,
+                                reason: "split_to_fit",
+                                avail_width,
+                                avail_height,
+                                frame_rect: self.rect,
+                                cursor_y_before,
+                                wrapped_size: size,
+                                placed_rect: Some(rect),
+                            },
+                        );
+                    }
+                    SplitFailure {
+                        reason: "invalid_split_fragment",
+                        source_ids: first.diagnostic_source_ids(),
+                    }
+                }
+                Err(failure) => failure,
+            };
 
         // Fallback: if this flowable is taller than a full page and cannot be split,
         // place it on the current page to avoid a hard failure. This mirrors browser
         // behavior for overfull blocks and keeps pagination moving forward.
         if self.is_empty() {
+            self.split_failure = Some(split_failure);
             let rect = Rect {
                 x: self.rect.x,
                 y: self.rect.y + self.cursor_y,

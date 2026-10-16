@@ -271,18 +271,26 @@ values use the engine's source-ID mechanism. Source filenames and line numbers
 identify component definitions in the sidecar, not in the generated PDF.
 
 An unsplittable native fragment raises `LayoutError`, a subclass of
-`AuthoringError`. Its `page` and `sources` identify the page and affected authored
-component roots. For a failing table, the path includes `DataTable → table`, and
-`error.to_dict()` includes the source IDs, component paths, definition files and
-line numbers. Anonymous containers forward their roots through page splits;
-completed siblings do not remain in a continuation's scope.
+`AuthoringError`. Its `page` and `sources` retain the page and affected authored
+component roots. Its `reason` and `failure_sources` report the constraint rejected
+by the native splitter when it can identify one. For example, an oversized,
+bottom-aligned cell reports `table_cell_alignment` with a path such as
+`WorkTable → DataTable → row 2 → Description → cell` and advice to use top alignment.
+A cell whose content cannot fit or continue reports `table_cell_content`.
 
-These locations describe the failing fragment's scope. They do not identify a
-particular overflowing cell or image inside it. Multiple roots remain separate
-entries in `sources`; an unknown native ID is not guessed from a CSS class or
-selector. Traces without source associations retain the document/page error.
-Mapping other native diagnostics and locating individual failing descendants
-remain future work.
+These details come from the actual split attempt. A completed companion cell is
+not blamed for a later continuation failure. A container that clips overflow is
+identified as the constraint; the renderer does not blame its child text.
+An oversized header or parent padding can instead identify the owning table or
+container. `error.to_dict()` includes both the original scope and these failure
+sources, with component-definition files and lines. They are not call-site locations.
+
+Multiple sources remain separate; the message does not arbitrarily select one.
+Some layout wrappers still provide only their scope, and an unknown native ID is
+not guessed from a selector. Other native diagnostics, general overflow detection,
+and precise causes through every layout model remain future work. The installed
+[diagnostic examples](../../tools/smoke_component_diagnostics.py) check six failures
+and render corrected documents after changing alignment, clipping and padding.
 
 ## Adopt components in an existing document
 

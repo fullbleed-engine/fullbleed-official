@@ -78,6 +78,8 @@ assert "Design" in compiled_html
 diagnostic = LayoutError("Cannot fit", page=2, sources=document.compile().sources)
 error_page: int = diagnostic.at("Batch").page
 error_sources: tuple[Source, ...] = diagnostic.sources
+failure_reason: str | None = diagnostic.reason
+failure_sources: tuple[Source, ...] = diagnostic.at("Batch").failure_sources
 legacy_children = to_legacy(root, theme=Theme({"muted": "#667580"}))
 assert len(legacy_children) == 1
 escaped = css("transform: rotate(2deg)")

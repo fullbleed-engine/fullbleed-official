@@ -579,6 +579,39 @@ def test_export_links_actual_relative_stylesheet(tmp_path):
     assert (tmp_path / "styles/report.css").read_text() == document.to_css()
 
 
+@pytest.mark.parametrize("selection", ["one", "multiple", "unknown"])
+def test_native_split_rejection_retains_scope_and_resolves_exact_cell_sources(monkeypatch, selection):
+    import fullbleed
+    document = Document(DataTable(["A"], columns=[Column("Item", str), Column("Amount", str)]), title="Invoice")
+    plan = document.compile()
+    cells = [source for source in plan.sources if source.path[-1] == "cell"]
+    ids = {"one": [cells[0].node_id] * 2, "multiple": [source.node_id for source in cells], "unknown": ["unknown"]}[selection]
+
+    class Engine:
+        def __init__(self, **options):
+            pass
+        def export_render_time_pagination_trace(self, html, css):
+            return {"events": [{"reason": "forced_unsplittable_full_frame", "page": 2, "source_ids": ["n1"],
+                                "split_failure": {"reason": "table_cell_alignment", "source_ids": ids}}]}
+        def render_pdf(self, *args):
+            pytest.fail("A failed split must not return a PDF")
+
+    monkeypatch.setattr(fullbleed, "PdfEngine", Engine)
+    with pytest.raises(LayoutError) as caught:
+        document.render_pdf(Renderer())
+    error = caught.value
+    assert error.reason == "table_cell_alignment"
+    assert error.sources == (plan.sources[0],)
+    assert error.failure_sources == (tuple(cells[:1]) if selection == "one" else tuple(cells) if selection == "multiple" else ())
+    location = cells[0].path if selection == "one" else plan.sources[0].path if selection == "unknown" else ()
+    assert error.path == ("Invoice", "page 2", *location)
+    assert "top alignment" in error.message
+    assert error.at("Batch").failure_sources == error.failure_sources
+    assert error.at("Batch").reason == error.reason
+    assert error.to_dict()["failure_sources"] == [{"node_id": source.node_id, "path": list(source.path),
+                                                  "file": source.file, "line": source.line} for source in error.failure_sources]
+
+
 @pytest.mark.parametrize("property_name", ["margin", "padding", "border_width", "gap"])
 @pytest.mark.parametrize("value", [(pt(2), 4), [0, Decimal("1.5")]])
 def test_length_shorthand_numbers_need_units(property_name, value):

@@ -157,6 +157,8 @@ mod sfnt;
 mod sfnt_cff;
 mod sfnt_outline;
 mod spill;
+#[cfg(test)]
+mod split_diagnostic_tests;
 mod style;
 mod svg;
 #[cfg(test)]
@@ -201,8 +203,8 @@ pub use finalize::{
 };
 pub use flowable::{
     AbsolutePositionedFlowable, BreakAfter, BreakBefore, BreakInside, ContainerFlowable, EdgeSizes,
-    Flowable, ImageFlowable, LengthSpec, Pagination, Paragraph, Spacer, SplitContext, SvgFlowable,
-    TableFlowable, TextStyle,
+    Flowable, ImageFlowable, LengthSpec, Pagination, Paragraph, Spacer, SplitContext, SplitFailure,
+    SvgFlowable, TableFlowable, TextStyle,
 };
 use font::FontRegistry;
 #[cfg(feature = "python")]

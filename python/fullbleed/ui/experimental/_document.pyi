@@ -24,7 +24,10 @@ class Source:
 class LayoutError(AuthoringError):
     page: int
     sources: tuple[Source, ...]
+    reason: str | None
+    failure_sources: tuple[Source, ...]
     def __init__(self, message: str, *, page: int, sources: Iterable[Source] = ...,
+                 reason: str | None = ..., failure_sources: Iterable[Source] = ...,
                  code: str = ..., path: Iterable[str] = ...) -> None: ...
     def at(self, name: str) -> LayoutError: ...
     def to_dict(self) -> dict[str, Any]: ...

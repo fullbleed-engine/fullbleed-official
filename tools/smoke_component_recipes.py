@@ -178,7 +178,9 @@ else:
         result = json.loads(bounded.stdout)
         if kind in {"unsupported-alignment", "tall-image"}:
             assert result["error"]["code"] == "layout.unsplittable", result
-            assert result["error"]["path"][-2:] == ["DataTable", "table"], result
+            assert result["error"]["path"][-4:] == ["DataTable", "row 1", "Segments", "cell"], result
+            assert result["error"]["reason"] == ("table_cell_alignment" if kind == "unsupported-alignment" else "table_cell_content"), result
+            assert [source["path"] for source in result["error"]["failure_sources"]] == [["DataTable", "row 1", "Segments", "cell"]], result
             assert [source["node_id"] for source in result["error"]["sources"]] == ["n1"], result
             assert result["error"]["sources"][0]["path"] == ["DataTable", "table"], result
             assert result["error"]["sources"][0]["file"].endswith("_table.py"), result
@@ -272,7 +274,7 @@ else:
 
     result = {"ok": True, "version": metadata.version("fullbleed"), "runtime": str(fullbleed.__file__),
               "cases": cases, "readme_blocks": len(snippets), "ready_for_stabilization": False, "unsupported_cases": unsupported,
-              "scope": "Experimental authoring, metadata, geometry, ordinary and oversized top-aligned text cell continuation, data edits, theme colors, source maps, glyphs and deterministic fixture bytes. Native unsplittable failures resolve to the affected authored component roots, not a guessed descendant. Rowspans, page-tall images in cells, and non-top-aligned oversized cells remain unsupported. Not a conformance or performance claim."}
+              "scope": "Experimental authoring, metadata, geometry, ordinary and oversized top-aligned text cell continuation, data edits, theme colors, source maps, glyphs and deterministic fixture bytes. Native split failures retain fragment scopes and identify rejected cell constraints when available. Rowspans, page-tall images in cells, and non-top-aligned oversized cells remain unsupported. Not a conformance or performance claim."}
     (args.out / "verification.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"ok": True, "cases": len(cases), "pages": sum(case["pages"] for case in cases)}))
 

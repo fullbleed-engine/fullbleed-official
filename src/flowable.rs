@@ -2198,6 +2198,24 @@ impl SplitContext {
     }
 }
 
+/// A rejected fragmentation attempt. Sources describe the constraint that
+/// actually prevented this attempt, when the splitter can identify it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SplitFailure {
+    pub reason: &'static str,
+    pub source_ids: Vec<String>,
+}
+
+impl SplitFailure {
+    fn new(reason: &'static str, source_ids: Vec<String>) -> Self {
+        Self { reason, source_ids }
+    }
+
+    fn unknown() -> Self {
+        Self::new("unsplittable", Vec::new())
+    }
+}
+
 pub trait Flowable: FlowableClone + Send + Sync {
     fn wrap(&self, avail_width: Pt, avail_height: Pt) -> Size;
     fn split(
@@ -2216,6 +2234,18 @@ pub trait Flowable: FlowableClone + Send + Sync {
         _context: SplitContext,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
         self.split(avail_width, avail_height)
+    }
+
+    /// The same fragmentation operation with an optional precise rejection.
+    /// Existing flowables retain their behavior through this default method.
+    fn split_with_diagnostics(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+        context: SplitContext,
+    ) -> Result<(Box<dyn Flowable>, Box<dyn Flowable>), SplitFailure> {
+        self.split_with_context(avail_width, avail_height, context)
+            .ok_or_else(|| SplitFailure::new("unsplittable", self.diagnostic_source_ids()))
     }
 
     /// Logical text represented by an inline formatting item. The enclosing
@@ -14374,18 +14404,45 @@ impl TableFlowable {
         avail_width: Pt,
         avail_height: Pt,
         start: usize,
-    ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
-        if avail_height <= Pt::ZERO || self.data.has_row_spans() {
-            return None;
+    ) -> Result<(Box<dyn Flowable>, Box<dyn Flowable>), SplitFailure> {
+        if avail_height <= Pt::ZERO {
+            return Err(SplitFailure::unknown());
         }
-        let row = self.data.body_rows.get(start)?;
-        if Self::row_is_collapsed(row)
-            || row.iter().any(|cell| {
+        if self.data.has_row_spans() {
+            let sources = self
+                .data
+                .header_rows
+                .iter()
+                .chain(&self.data.body_rows)
+                .flatten()
+                .filter(|cell| cell.row_span > 1)
+                .filter_map(|cell| cell.authoring_source_id.as_deref().map(str::to_owned))
+                .collect();
+            return Err(SplitFailure::new("table_rowspan", sources));
+        }
+        let row = self
+            .data
+            .body_rows
+            .get(start)
+            .ok_or_else(SplitFailure::unknown)?;
+        if Self::row_is_collapsed(row) {
+            return Err(SplitFailure::unknown());
+        }
+        let incompatible: Vec<_> = row
+            .iter()
+            .filter(|cell| {
                 !matches!(cell.valign, VerticalAlign::Top)
                     && (!cell.text.is_empty() || cell.content.is_some())
             })
-        {
-            return None;
+            .collect();
+        if !incompatible.is_empty() {
+            return Err(SplitFailure::new(
+                "table_cell_alignment",
+                incompatible
+                    .iter()
+                    .filter_map(|cell| cell.authoring_source_id.as_deref().map(str::to_owned))
+                    .collect(),
+            ));
         }
         let columns = self.max_columns();
         let (col_gap, _) = self.resolve_spacing(avail_width);
@@ -14452,14 +14509,15 @@ impl TableFlowable {
         let fixed_height = first.wrap(avail_width, huge_pt()).height - empty_row_height;
         let row_height = avail_height - fixed_height;
         if row_height <= Pt::ZERO {
-            return None;
+            return Err(SplitFailure::new("table_fixed_height", Vec::new()));
         }
         if self.row_height_for_draw_index(draw_index, row, &widths) <= row_height {
             // A keep-group may have moved the candidate boundary backwards.
             // Never manufacture an empty continuation of a row that already fits.
-            return None;
+            return Err(SplitFailure::new("table_keep_group", Vec::new()));
         }
         let mut consumed = false;
+        let mut blocked_sources = Vec::new();
         let mut column = 0usize;
         for ((cell, head), tail) in row.iter().zip(heads.iter_mut()).zip(tails.iter_mut()) {
             let span = Self::cell_span_for_start(cell, column, columns);
@@ -14492,6 +14550,11 @@ impl TableFlowable {
             }
             if let Some(content) = &cell.content {
                 let natural = content.wrap(content_width, huge_pt()).height;
+                if natural > content_height {
+                    if let Some(source) = &cell.authoring_source_id {
+                        blocked_sources.push(source.to_string());
+                    }
+                }
                 if natural <= content_height {
                     head.content = Some(content.clone());
                     tail.content = None;
@@ -14523,6 +14586,11 @@ impl TableFlowable {
                     0
                 }
                 .min(lines.len());
+                if count == 0 && !cell.text.is_empty() {
+                    if let Some(source) = &cell.authoring_source_id {
+                        blocked_sources.push(source.to_string());
+                    }
+                }
                 if count > 0 && !cell.text.is_empty() {
                     head.text = lines[..count]
                         .iter()
@@ -14542,7 +14610,7 @@ impl TableFlowable {
             column += span;
         }
         if !consumed {
-            return None;
+            return Err(SplitFailure::new("table_cell_content", blocked_sources));
         }
         let first_data = Arc::make_mut(&mut first.data);
         first_data.body_rows[start] = heads;
@@ -14552,9 +14620,9 @@ impl TableFlowable {
         // Use the final geometry as the acceptance test, including collapsed
         // border winners, repeated headers/footers, and cell decorations.
         if first.wrap(avail_width, avail_height).height > avail_height {
-            return None;
+            return Err(SplitFailure::new("table_fragment_height", Vec::new()));
         }
-        Some((Box::new(first), Box::new(second)))
+        Ok((Box::new(first), Box::new(second)))
     }
 
     fn cell_span_for_start(cell: &TableCell, col_start: usize, total_columns: usize) -> usize {
@@ -16859,6 +16927,16 @@ impl Flowable for TableFlowable {
         avail_height: Pt,
         context: SplitContext,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        self.split_with_diagnostics(avail_width, avail_height, context)
+            .ok()
+    }
+
+    fn split_with_diagnostics(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+        context: SplitContext,
+    ) -> Result<(Box<dyn Flowable>, Box<dyn Flowable>), SplitFailure> {
         let columns = self.max_columns();
         let (col_gap, row_gap) = self.resolve_spacing(avail_width);
         let visible_columns = self.visible_column_count(columns);
@@ -16878,7 +16956,7 @@ impl Flowable for TableFlowable {
         let start = self.body_range.start;
         let end = self.body_range.end;
         if start >= end {
-            return None;
+            return Err(SplitFailure::unknown());
         }
         let header_visible_count = self.visible_header_row_count();
         let footer_visible_count = self.visible_footer_row_count();
@@ -16997,18 +17075,20 @@ impl Flowable for TableFlowable {
         let first_has_fixed_rows =
             header_visible_count > 0 || (self.repeat_footer && footer_visible_count > 0);
         if split_at >= end {
-            return None;
+            return Err(SplitFailure::unknown());
         }
         let next_row_exceeds_fresh_page = body_row_heights
             .get(split_at.saturating_sub(start))
             .is_some_and(|height| *height > avail_height);
+        let mut oversized_failure = None;
         if context.at_fragment_start && (split_at == start || next_row_exceeds_fresh_page) {
-            if let Some(fragments) = self.split_oversized_row(avail_width, avail_height, split_at) {
-                return Some(fragments);
+            match self.split_oversized_row(avail_width, avail_height, split_at) {
+                Ok(fragments) => return Ok(fragments),
+                Err(failure) => oversized_failure = Some(failure),
             }
         }
         if split_at == start && !first_has_fixed_rows {
-            return None;
+            return Err(oversized_failure.unwrap_or_else(SplitFailure::unknown));
         }
 
         let first_include_footer = self.include_footer && self.repeat_footer;
@@ -17020,7 +17100,7 @@ impl Flowable for TableFlowable {
         // Defer the whole table to the caller's frame/overflow policy instead.
         // Returning None alone does not reject an oversized row.
         if split_at == start && second_include_header == self.include_header {
-            return None;
+            return Err(oversized_failure.unwrap_or_else(SplitFailure::unknown));
         }
 
         let first = TableFlowable {
@@ -17084,7 +17164,7 @@ impl Flowable for TableFlowable {
                 ..self.pagination
             },
         };
-        Some((Box::new(first), Box::new(second)))
+        Ok((Box::new(first), Box::new(second)))
     }
 
     fn draw(&self, canvas: &mut Canvas, x: Pt, y: Pt, avail_width: Pt, _avail_height: Pt) {
@@ -34953,14 +35033,24 @@ impl Flowable for ContainerFlowable {
         avail_height: Pt,
         context: SplitContext,
     ) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+        self.split_with_diagnostics(avail_width, avail_height, context)
+            .ok()
+    }
+
+    fn split_with_diagnostics(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+        context: SplitContext,
+    ) -> Result<(Box<dyn Flowable>, Box<dyn Flowable>), SplitFailure> {
         // CSS overflow clipping establishes a monolithic box for page
         // fragmentation. Descendant forced breaks stay inside the clipped
         // formatting context instead of splitting the outer box into pages.
         if self.clips_any_overflow() {
-            return None;
+            return Err(SplitFailure::new("clipped_container", Vec::new()));
         }
         if let Some(fragments) = self.split_fixed_height(avail_width, avail_height) {
-            return Some(fragments);
+            return Ok(fragments);
         }
         let (margin, border, padding, content_width, _border_box_width) =
             self.resolve_box(avail_width);
@@ -34982,9 +35072,10 @@ impl Flowable for ContainerFlowable {
             avail_height - margin.top - border.top - padding.top
         };
         if available_content_height <= Pt::ZERO {
-            return None;
+            return Err(SplitFailure::new("container_decoration_height", Vec::new()));
         }
 
+        let mut rejected_child = None;
         let mut remaining_height = available_content_height;
         let flow_gap = if self.state.flow_gap.is_some() {
             self.cached_layout(avail_width, avail_height).flow_gap
@@ -35052,6 +35143,9 @@ impl Flowable for ContainerFlowable {
             self.state.starts_at_sibling_fragment_boundary || has_multiple_flow_boxes;
 
         for (index, child) in flow_children.iter().cloned().enumerate() {
+            // A failed speculative split of a fitting earlier sibling is not
+            // evidence about this child's placement or keep constraints.
+            rejected_child = None;
             let original_index = flow_child_indices[index];
             let collapsed_top = collapsed_parent_top
                 .filter(|(child_index, _)| *child_index == original_index)
@@ -35266,11 +35360,17 @@ impl Flowable for ContainerFlowable {
             {
                 None
             } else {
-                child.split_with_context(
+                match child.split_with_diagnostics(
                     content_width,
                     child_available_height,
                     context.after_content(!placed.is_empty() && !follows_only_table_captions),
-                )
+                ) {
+                    Ok(fragments) => Some(fragments),
+                    Err(failure) => {
+                        rejected_child = Some(failure);
+                        None
+                    }
+                }
             };
             if split_debug {
                 eprintln!(
@@ -35338,7 +35438,11 @@ impl Flowable for ContainerFlowable {
                     remaining.len()
                 );
             }
-            return None;
+            return Err(if placed.is_empty() {
+                rejected_child.unwrap_or_else(SplitFailure::unknown)
+            } else {
+                SplitFailure::unknown()
+            });
         }
 
         // A minimum height constrains the fragmented box as a whole. Reapplying the authored
@@ -35684,7 +35788,7 @@ impl Flowable for ContainerFlowable {
             );
         }
 
-        Some((Box::new(first), Box::new(second)))
+        Ok((Box::new(first), Box::new(second)))
     }
 
     fn split_grid_row_fragment(
@@ -39250,6 +39354,31 @@ impl Flowable for MetaFlowable {
         } else {
             self.child.diagnostic_source_ids()
         }
+    }
+
+    fn split_with_diagnostics(
+        &self,
+        avail_width: Pt,
+        avail_height: Pt,
+        context: SplitContext,
+    ) -> Result<(Box<dyn Flowable>, Box<dyn Flowable>), SplitFailure> {
+        let (first, second) = self
+            .child
+            .split_with_diagnostics(avail_width, avail_height, context)
+            .map_err(|mut failure| {
+                if failure.source_ids.is_empty() {
+                    // Only this wrapper's own boundary can identify its
+                    // rejected constraint. Descendant roots are still retained
+                    // separately as fragment scope; do not guess among them.
+                    if let Some(source) = self.metadata.iter().find_map(|(key, value)| {
+                        (key == "fb.owner.source_id" && !value.is_empty()).then_some(value)
+                    }) {
+                        failure.source_ids.push(source.clone());
+                    }
+                }
+                failure
+            })?;
+        Ok((Box::new(self.rewrap(first)), Box::new(self.rewrap(second))))
     }
 
     fn with_inline_bidi_levels(&self, levels: &[unicode_bidi::Level]) -> Option<Box<dyn Flowable>> {

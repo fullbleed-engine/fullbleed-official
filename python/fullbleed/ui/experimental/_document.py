@@ -65,18 +65,22 @@ class Source:
 
 
 class LayoutError(AuthoringError):
-    """A native pagination failure with the authored roots of its fragment.
+    """A native pagination failure with fragment scopes and split rejection.
 
-    Sources identify the affected scope, not a guessed failing descendant.
-    Their file/line fields identify component definitions in the source sidecar.
+    sources retains the fragment's authored roots. failure_sources identifies
+    constraints reported by the splitter, when available; it is not a heuristic
+    search through descendants. File/line identifies component definitions.
     """
 
-    def __init__(self, message, *, page, sources=(), code="layout.unsplittable", path=()):
+    def __init__(self, message, *, page, sources=(), reason=None, failure_sources=(),
+                 code="layout.unsplittable", path=()):
         self.page, self.sources = page, tuple(sources)
+        self.reason, self.failure_sources = reason, tuple(failure_sources)
         super().__init__(message, code=code, path=path)
 
     def at(self, name: str) -> LayoutError:
         return LayoutError(self.message, page=self.page, sources=self.sources,
+                           reason=self.reason, failure_sources=self.failure_sources,
                            code=self.code, path=(name, *self.path))
 
     def to_dict(self) -> dict:
@@ -84,6 +88,9 @@ class LayoutError(AuthoringError):
             **super().to_dict(), "page": self.page,
             "sources": [{"node_id": source.node_id, "path": list(source.path),
                          "file": source.file, "line": source.line} for source in self.sources],
+            "reason": self.reason,
+            "failure_sources": [{"node_id": source.node_id, "path": list(source.path),
+                                 "file": source.file, "line": source.line} for source in self.failure_sources],
         }
 
 
@@ -216,12 +223,25 @@ class Renderer:
                 by_id = {source.node_id: source for source in plan.sources}
                 sources = tuple(by_id[node_id] for node_id in dict.fromkeys(event.get("source_ids", ()))
                                 if node_id in by_id)
+                failure = event.get("split_failure") or {}
+                reason = failure.get("reason")
+                failure_sources = tuple(by_id[node_id] for node_id in dict.fromkeys(failure.get("source_ids", ()))
+                                        if node_id in by_id)
                 path = (document.title, f"page {event['page']}")
-                if len(sources) == 1:
-                    path += sources[0].path
+                location = failure_sources or sources
+                if len(location) == 1:
+                    path += location[0].path
+                advice = {
+                    "clipped_container": "The container clips overflow and cannot paginate. Reduce its content or remove overflow clipping.",
+                    "container_decoration_height": "Container margins, borders and padding leave no room for content. Reduce them or use a larger page.",
+                    "table_rowspan": "Continuing an oversized table row with rowspans is unsupported. Restructure the spanning cells or make the table fit.",
+                    "table_cell_alignment": "Oversized table cells require top alignment to continue. Set the affected cells' vertical alignment to top.",
+                    "table_fixed_height": "The table's fixed rows and decorations leave no room for a body row. Reduce them or use a larger page.",
+                    "table_cell_content": "The affected table cells cannot fit or make progress on this page. Resize unsplittable content or use content that can continue.",
+                }.get(reason, "Restructure the block or use a larger page.")
                 raise LayoutError(
                     "Content cannot fit or continue within the page. The engine would place an unsplittable "
-                    "block beyond the page edge; no PDF was returned. Restructure the block or use a larger page.",
-                    page=event["page"], sources=sources, path=path,
+                    "block beyond the page edge; no PDF was returned. " + advice,
+                    page=event["page"], sources=sources, reason=reason, failure_sources=failure_sources, path=path,
                 )
         return engine
