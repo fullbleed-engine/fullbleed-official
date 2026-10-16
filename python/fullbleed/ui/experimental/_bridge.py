@@ -31,6 +31,10 @@ def to_legacy(node: Node, *, theme: Theme | None = None) -> tuple[Element | str,
             continue
         if item.name is not None:
             path = (*path, item.name)
+        if item._resources:
+            raise AuthoringError("This component carries stylesheet dependencies; export it with "
+                                 "to_html(include_styles=True) or use an experimental Document",
+                                 code="migration.resources", path=path)
         target = parent
         if item.tag is not None:
             location = (*path, item.part or item.tag)

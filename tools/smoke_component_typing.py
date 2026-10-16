@@ -102,9 +102,30 @@ legacy_children = to_legacy(root, theme=Theme({"muted": "#667580"}))
 assert len(legacy_children) == 1
 escaped = css("transform: rotate(2deg)")
 custom_variables = style({"--brand": "#315d9b"}, color="var(--brand)")
+
+from fullbleed.ui.experimental import bootstrap as bs, to_html
+kit_card: Node = bs.Card(bs.Paragraph("Ready"), title="Shipment", footer=bs.Badge("Approved", variant="success"),
+                         class_name=["custom", {"selected": True}], style=style(padding=pt(8)))
+kit_grid: Node = bs.Row(bs.Col(kit_card, span={"xs": 12, "md": 8}), gutter=3)
+kit_tabs: Node = bs.Tabs(bs.Tab("Summary", kit_grid, key="summary"), bs.Tab("History", "Previous orders"), id="orders", active="summary")
+kit_table: Node = bs.DataTable(rows, columns=[bs.Column("Item", description)], striped=True)
+kit_field: Node = bs.FloatingLabel(bs.Input(value="Northstar"), "Company", id="company")
+kit_classes: str = bs.utilities(p=3, d={"print": "none"}, text=("primary", "center"))
+kit_fragment: str = to_html(kit_card, include_styles=True)
+kit_plain: str = kit_card.to_html(include_styles=False)
+kit_source: DocumentSource = Document(kit_field).compile(target="pdf")
 '''
 
 INVALID_CASES = [
+    ("bootstrap_variant", 'bs.Badge("Ready", variant="brand")'),
+    ("bootstrap_missing_group_id", 'bs.Tabs(bs.Tab("Summary", "Text"))'),
+    ("bootstrap_unknown_prop", 'bs.Card("Text", paddding=3)'),
+    ("bootstrap_class_type", 'bs.Card("Text", class_name=3)'),
+    ("bootstrap_column_record", 'bs.DataTable(rows, columns=[bs.Column[int]("Value", str)])'),
+    ("bootstrap_state_type", 'bs.Collapse("Text", open="yes")'),
+    ("bootstrap_item_type", 'bs.Tabs(bs.Card("Text"), id="tabs")'),
+    ("html_export_flag", 'kit_card.to_html(include_styles="yes")'),
+    ("compile_target", 'Document(kit_field).compile(target="browser")'),
     ("document_styles_type", 'Document(Paragraph("x"), styles=123)'),
     ("document_styles_readonly", 'selector_document.styles = ""'),
     ("conditional_style_true", 'style(True)'),

@@ -1,16 +1,28 @@
 # Component authoring: the next iteration
 
 Design review, 2026-10-16. Reviewed the released surface at `e1ce0e9` and
-the experimental candidate at `ecc52c6`. This document recommends changes;
-it does not announce a release. The candidate uses version metadata 2.5.26,
-but its experimental API is absent from the published 2.5.26 wheel.
+the installed experimental preview at `f88cced`. This document recommends
+changes; it does not announce a stable API. The
+[GitHub preview](https://github.com/fullbleed-engine/fullbleed-official/releases/tag/component-preview-f88cced)
+uses version metadata 2.5.26, but its experimental API is absent from the
+PyPI 2.5.26 wheel.
 The [detailed implementation review](component-authoring-design.md) records
 the existing prototype and its validation limits.
 
-The source follow-up now implements consistent table defaults, column positions
-in diagnostics, and a complete first-PDF example. These changes remain in the
-experimental branch. The baseline findings below explain why they were needed;
-independent author feedback and language expansion are still pending.
+The next implementation now uses [Bootstrap 5.0.0 as the baseline kit](component-bootstrap.md),
+following the requested scope. It adds owned stylesheet dependencies, static
+component families, content slots, generated group IDs, checked utilities, and
+HTML export with or without styles. Explicit print representations handle
+browser controls and navigation without adding a browser to the engine. This
+addresses everyday composition; the deeper part-forwarding and independent-author
+questions below remain open. Other language APIs should follow the settled
+content/style/print contract, rather than copying Python syntax prematurely.
+
+The preview already implements component-owned styles, immutable overrides,
+data tables, page ownership and component diagnostics. Table defaults and the
+first-PDF guide have also been improved. The next problem is making those
+mechanisms form a small, dependable authoring contract. Independent author
+feedback and language expansion are still pending.
 
 ## Decision
 
@@ -30,6 +42,13 @@ The next milestone should be **one coherent authoring path, demonstrated by the
 same design kit in an invoice and a report**. Keep the experiment in Python
 until its contracts and editing experience are settled.
 
+Evaluate a change by the decisions it removes from the caller. A reusable
+component should survive a change to its internal markup, move into another
+document with its appearance intact, and explain a failed layout in the author's
+terms. A shorter spelling of the same HTML tree is useful syntax, but does not
+establish those benefits. Low-level primitives can remain explicit; the common
+document workflow should operate through meaningful components built from them.
+
 ## What a component should buy its caller
 
 There are two audiences: someone designing a reusable kit, and someone assembling
@@ -46,7 +65,7 @@ decisions. The document author should not have to repeat them.
 | Fonts, assets and output profiles | Application renderer configuration | Configure once outside business components |
 | Measurement, pagination and PDF emission | The existing native engine | No second layout engine in the Python layer |
 
-The following is **working candidate syntax**, using the repository's existing
+The following is **working preview syntax**, using the repository's existing
 [kit](../examples/component_recipes/kit.py). `Field`, `WorkTable`, `Total` and
 `studio_theme` are application code, not proposed built-ins. Run this in that
 example's module context; this snippet constructs a document, while its
@@ -121,6 +140,12 @@ or register global state. Generated classes are an implementation detail and do
 not isolate components from document CSS. Keep selector-based CSS available for
 existing designs without requiring it in the component-first path.
 
+For the common path, teach function arguments for content and variants,
+`.with_style(...)` for one root, and `styled(...)` when defaults repeat. Introduce
+themes and parts only when a concrete reuse task needs them. A caller changing
+the content of a footer should pass a `footer=` argument; a style part should
+not become a second component-composition language.
+
 There are two stages of precedence. First, authoring composes reusable defaults
 and explicit declarations. The candidate compiles defaults into class rules and
 explicit values into inline declarations. Then the native CSS cascade resolves
@@ -128,75 +153,121 @@ selectors, inheritance and `!important`. Do not advertise `.with_style(...)` as
 an unconditional override of arbitrary external important rules, or promise
 that tag selectors always beat generated classes.
 
-## Findings in the reviewed baseline and their follow-up
+## Contracts the preview has not settled
 
-### 1. Apply the default-style contract consistently
+### 1. A public part needs an explicit target
 
-**Observed in the installed candidate:** a styled paragraph's padding is emitted
-in a generated class, but `DataTable` emits its built-in header/cell padding,
-borders and alignment inline. A normal `.ledger td` rule therefore cannot replace
-that padding, even though the user did not explicitly choose it. Parts can
-override it, but that makes the styling route depend on the component.
+**Observed in the installed preview:** a component that directly returns another
+component delegates its parts. Adding a real container makes the child a nested
+boundary and hides those parts. Declaring the same names on the parent makes
+them available again, but does not forward their styles into that boundary.
 
-The cause is concrete: [`_table.py`](../python/fullbleed/ui/experimental/_table.py)
-passes both library defaults and column choices through `style=`, whereas the
-[node/compiler](../python/fullbleed/ui/experimental/_tree.py) distinguish defaults
-from authored values. `Column.align` also eagerly defaults to `"left"`, losing
-the distinction between an omitted choice and an explicit one.
+This small example runs in the preview:
 
-**Recommendation:** put built-in table appearance in the existing default layer.
-Retain explicitly supplied column widths/alignment and part overrides as authored
-choices. Represent an omitted column choice separately, as the layout primitives
-already do. This is a consistency change, not another styling API. Qualify normal
-selectors, explicit column choices, named parts, shorthand/longhand order and
-empty tables with actual rendered controls before changing the candidate.
+```python
+from fullbleed.ui.experimental import Box, Document, Paragraph, component, style
 
-The follow-up uses that existing default layer for all table parts. Alignment
-and row-break arguments distinguish omitted/None values from explicit choices.
-Installed rendered controls cover ordinary selectors, explicit column choices,
-part overrides, captions and empty states. They preserve the native preference
-for moving ordinary rows intact; `row_break="auto"` does not force a partial row.
+@component(parts=("label",))
+def Label(text):
+    return Paragraph(text, part="label").with_style(color="#315d9b")
 
-Do not silently change generated defaults to zero specificity as part of this
-fix. Whether ordinary tag selectors should override component defaults is a
-separate compatibility decision; the current draft deliberately uses class
-specificity.
+@component(parts=("label",))
+def Summary(text):
+    return Box(Label(text))
 
-### 2. Treat table identity separately from its printed label
+before = Summary("Ready")
+after = before.with_parts(label=style(color="#245541"))
+assert before.parts == ("label",)
+assert Document(before).compile() == Document(after).compile()
+```
 
-**Observed in the installed candidate:** two columns named `"Value"` are accepted
-and produce distinct internal source IDs, but both human-readable cell paths are
-`DataTable -> row 1 -> Value -> cell`. The label is also restricted to a nonempty
-string. A label is doing the jobs of display content and diagnostic identity.
+The override succeeds without changing the output. Allowing an absent declared
+part is intentional for conditional and empty states; it also conceals missing
+forwarding. A list of names establishes spelling, not a binding contract.
 
-**Recommendation:** include the column ordinal in diagnostic paths now. Consider
-an optional application key only if stable column targeting is needed. Do not
-require React-style keys on every static component. Rich header content and
-column-specific customization should be designed together later, preserving
-semantic header associations; adding a dozen unrelated table props is premature.
+**Recommendation:** settle explicit part forwarding before stabilizing parts.
+The contract must identify the owning component and exposed target, preserve
+nested privacy, and distinguish an optional absent target from broken wiring.
+It must survive adding an internal container without adding a container solely
+for styling. Do not invent the final helper spelling yet. Use ordinary content
+arguments and explicit component options for common customizations while this
+advanced contract is designed. The implementation belongs in
+[`_tree.py`](../python/fullbleed/ui/experimental/_tree.py), independently of HTML
+wrapper emission; a spelling-only check cannot qualify it.
 
-The follow-up adds a `column N` scope while preserving the printed label,
-native source ID and diagnostic code. Header, cell, callback and native layout
-failures all carry the position. No application key is required.
+A candidate implementation should resolve public bindings when the component
+boundary is constructed. A binding can target an owned element or explicitly
+forward to a child's advertised part. It should not search through private
+descendants. Repeated targets, such as table cells, must remain ordered; zero
+targets are valid only for a declared optional case. Validate required targets
+before applying styles, then use the existing immutable tree/style operations.
+Keep bindings virtual so this adds no layout boxes. Qualification must include
+the same public override before and after inserting an internal container,
+nested components that reuse the same part name, and both empty and populated
+tables. This is an implementation direction, not an implemented new API.
 
-### 3. Make the first working PDF the beginning of the guide
+### 2. Defaults and decisions need a kit-author convention
 
-**Observed in the candidate guide:** the opening example constructs a document;
-the rendering section follows styling, parts, selectors, themes and tables.
-The first example therefore does not yet give a new author a complete result.
+**Observed in the installed preview:** wrapping a function with
+`styled(Function, color=...)` cannot replace a color that the function explicitly
+sets with `style=` or `.with_style(...)`. Applying `.with_style(...)` to the
+returned node can replace its root color. Neither operation automatically
+restyles a descendant with its own explicit color.
 
-**Recommendation:** lead with a complete, copyable function-to-PDF example that
-selects a bundled font explicitly. Then show three edits: change one instance,
-reuse the component in another document, and change a shared design value. Move
-part contracts, cascade details and layout preparation into linked reference
-sections. Keep one recommended spelling for each operation; do not teach every
-available escape hatch at once.
+These are consistent rules, but the difference is easy to lose when every
+example calls all declarations "styles." A kit author needs to know whether a
+value is a reusable default, a deliberate component decision or an instance
+customization.
 
-The guide now begins with an independently executable program that writes
-`summary.pdf`. Its installed-package check runs the exact first code block alone,
-then checks text, title and paper dimensions and retains an independent preview.
+**Recommendation:** keep one immutable style value and document those three
+roles together. Put reusable appearance on styled primitives; use function
+arguments for meaningful choices such as `paid` or `tone`; use instance overrides
+for local changes. Avoid a second `sx` prop, automatic keyword injection or a
+variant registry. Keep the native cascade explicit, including inheritance and
+important declarations. An internal style is not necessarily a public theming
+point just because it can be expressed in CSS.
 
-### 4. Expose print intent without promising unsupported behavior
+The preview's table-default inconsistency is already fixed: built-in appearance
+uses the default layer, while explicit column choices remain authored styles.
+Preserve that distinction across components. Changing generated defaults from
+class specificity to zero specificity would require a separate compatibility
+decision and rendered qualification.
+
+### 3. Importing a component can still import a hidden theme requirement
+
+**Observed in the installed preview:** a component using `token("accent")`
+cannot compile without a document binding for that name. Two independent kits
+using `accent` share the same document value. `required_tokens` makes that
+dependency inspectable, but does not provide defaults, semantic types or scopes.
+
+**Recommendation:** starter components should work with concrete defaults.
+When a kit needs a configurable palette, an ordinary immutable application
+configuration passed to a kit factory is sufficient. If a kit opts into document
+tokens, ship its complete theme and document the dependency. Use explicit kit
+prefixes such as `invoice.accent` when independent meanings must coexist; the
+preview already accepts these names. Do not describe a component as completely
+self-contained when it requires an unspecified theme.
+
+Evaluate typed token handles or theme scopes only after composing two independent
+kits demonstrates the missing contract. A global theme registry would introduce
+implicit state without solving ownership. Likewise, copying a kit into another
+document should not require unpacking its implementation to discover required
+values.
+
+### 4. Component execution is eager; layout is a later phase
+
+**Observed in the installed preview:** `DataTable` consumes rows and calls cell
+functions during construction. Compiling the resulting document again does not
+rerun those callbacks. Component functions likewise run as ordinary Python calls.
+
+**Recommendation:** make this timing part of the contract. Application code owns
+I/O and calculations; construction captures their results; compilation resolves
+styles; the native engine lays out the document. Immutable nodes do not make an
+impure function deterministic. A table is currently a captured tree, not a
+streaming interface. Future page-number or page-dependent content needs a
+separately specified native mechanism, not hidden re-execution of user functions.
+
+### 5. Print behavior must remove decisions, too
 
 Keep `Flow` as the recommended document-body layout and distinguish local flex
 groups (`Stack`/`Row`) and grids. A name should tell an author how the content
@@ -214,21 +285,34 @@ This can save more work than a shorter constructor call. Source provenance shoul
 remain independent of extra HTML wrappers and should not leak local paths into
 delivered PDFs.
 
+The preview already distinguishes duplicate column labels by position and starts
+its guide with a complete `summary.pdf` program. Those are useful improvements.
+The next print work should close bounded behaviors such as oversized rows and
+repeated page furniture, with actionable errors for unsupported cases. Adding
+another generic container name would not close those gaps. `row_break="auto"`
+permits splitting; it does not force an otherwise fitting row to split.
+
 ## Implementation order and acceptance
 
 | Order | Work | Evidence required |
 | --- | --- | --- |
-| 1 | Unify built-in/default versus explicit styling, starting with tables | Matching rendered controls across primitives and table parts; explicit choices still win under the documented cascade |
-| 2 | Shorten the path to a first PDF and provide one complete editing exercise | Run the documented example from an installed candidate; inspect its PDF, then verify the edits without undocumented setup |
-| 3 | Improve table/source identity and close bounded print contracts | Ambiguous labels remain distinguishable; empty, long and unbreakable content either renders correctly or reports an actionable limitation |
-| 4 | Evaluate the same tasks with independent authors | Record successful edits, internal knowledge required and points of confusion; automated checks alone do not establish ergonomics |
-| 5 | Carry settled semantics to other languages | Shared fixtures for children, units, style precedence, part boundaries, page ownership and error paths; language-appropriate syntax |
+| 1 | Specify and implement public part binding/forwarding | A wrapper refactor preserves advertised customization; nested private parts remain private; an absent optional target is distinguishable from broken wiring |
+| 2 | Consolidate the recommended authoring path and one default kit | First PDF, reuse, content replacement and local restyling need no selectors or token/part machinery; advanced recipes explain their dependencies |
+| 3 | Close bounded print contracts in the native engine | Empty, long and unbreakable content renders correctly or reports an actionable limitation; repeated page elements have explicit semantics |
+| 4 | Evaluate the same tasks with independent authors and two independent kits | Record successful edits, internal knowledge and integration failures; use that evidence to decide token/part typing and discovery work |
+| 5 | Carry settled semantics to other languages | Shared fixtures for children, execution timing, units, style precedence, part boundaries, page ownership and error paths; language-appropriate syntax |
 
 Use the same fixture and five edits for the released and proposed APIs: reuse a
 field in a report, rebrand, add a calculated column, change paper size, and repair
 a pagination failure. Compare the places that must change and the undocumented
 knowledge required. Preserve the same content, design and output requirements;
 line counts from different invoice designs are not a fair comparison.
+
+Also refactor the internals of one customized component without editing its
+callers, and compose two kits with different palettes. These expose whether the
+API has actually established reusable boundaries. Record edits to component
+code, selectors, document configuration and renderer configuration separately.
+Moving boilerplate into a hidden helper is not the same as eliminating it.
 
 Keep the established API and its explicit migration adapter working. Stabilize
 one replacement contract before deciding namespace migration or deprecation.
@@ -263,3 +347,11 @@ control; the candidate passes it. Eighteen retained invoice/report and edge-case
 fixtures keep identical PDF bytes. These are bounded fixtures, not a claim about
 every document. Broader qualification remains in the
 [implementation review](component-authoring-design.md).
+
+This pass also repeated eight construction/compilation probes against the
+installed `f88cced` preview, checking its four relevant Python modules against that
+commit. They cover default versus explicit styling, part delegation and the
+accepted no-op above, theme dependencies and namespaced values, and eager table
+callbacks. They establish those API behaviors; they add no new rendering,
+performance or usability claim. The next implementation should qualify the
+proposed contracts rather than merely preserve these observations.

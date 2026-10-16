@@ -4,7 +4,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Literal, ParamSpec, Protocol, TypeAlias, overload
-from ._style import Style, _StyleInput, _StyleValue
+from ._style import Style, Theme, _StyleInput, _StyleValue
 
 P = ParamSpec("P")
 _Child: TypeAlias = Node | str | int | float | Decimal | None | Iterable[_Child]
@@ -98,6 +98,8 @@ class Node:
         width: _StyleValue | None = ...,
     ) -> Node: ...
     def with_parts(self, **overrides: _StyleInput) -> Node: ...
+    def to_html(self, *, include_styles: bool | None = ...,
+                theme: Theme | None = ..., a11y_mode: Literal["warn", "raise"] | None = ...) -> str: ...
 
 def Box(*children: _Child, style: _StyleInput = ..., class_name: str | None = ..., attrs: _Attributes = ..., part: str | None = ...) -> Node: ...
 def Paragraph(*children: _Child, style: _StyleInput = ..., class_name: str | None = ..., attrs: _Attributes = ..., part: str | None = ...) -> Node: ...

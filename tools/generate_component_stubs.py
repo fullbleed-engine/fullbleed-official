@@ -7,6 +7,7 @@ read fonts, or import the Fullbleed package. Run with --check in CI.
 from __future__ import annotations
 
 import argparse
+import ast
 from pathlib import Path
 import runpy
 import sys
@@ -27,6 +28,123 @@ def style_signature(name, prefix, result, indent=""):
     lines.extend(f"{indent}    {prop}: _StyleValue | None = ...," for prop in properties)
     lines.append(f"{indent}) -> {result}: ...")
     return "\n".join(lines)
+
+
+def bootstrap_stub():
+    """Derive constructor names/options from runtime signatures and checked choices.
+
+    No engine import: the same choice(...) tuples used at runtime supply editor
+    literals. Common element props are expanded instead of an untyped **props.
+    """
+    schema = runpy.run_path(str(PACKAGE / "bootstrap/_schema.py"))
+    output = HEADER + '''from collections.abc import Iterable, Mapping
+from decimal import Decimal
+from typing import Literal, TypeAlias, TypeVar
+from .._tree import Node, _Child, _Attributes
+from .._style import _StyleInput
+from .._table import Column as Column
+
+T = TypeVar("T")
+_Classes: TypeAlias = str | Mapping[str, bool] | Iterable[_Classes] | Literal[False] | None
+_Scalar: TypeAlias = str | int | float | Decimal | None
+_UtilityScalar: TypeAlias = str | int | bool | None
+_Utility: TypeAlias = _UtilityScalar | Iterable[_UtilityScalar] | Mapping[str, _UtilityScalar | Iterable[_UtilityScalar]]
+_Span: TypeAlias = int | Literal["auto"]
+VERSION: str
+COMPONENT_FAMILIES: dict[str, tuple[str, ...]]
+def classes(*values: _Classes) -> str: ...
+def class_names() -> frozenset[str]: ...
+def stylesheet() -> str: ...
+def utilities(**values: _Utility) -> str: ...
+'''
+    common = {"style": "_StyleInput", "class_name": "_Classes", "attrs": "_Attributes", "id": "str | None"}
+    def choices(expression):
+        if isinstance(expression, ast.Name):
+            return schema[expression.id]
+        if isinstance(expression, (ast.Tuple, ast.List)):
+            values = []
+            for element in expression.elts:
+                values.extend(choices(element.value) if isinstance(element, ast.Starred) else [ast.literal_eval(element)])
+            return tuple(values)
+        raise ValueError("Unrecognized checked choice in Bootstrap signature")
+
+    def signature(fn, owner=None):
+        name = owner or fn.name
+        options = {}
+        for item in ast.walk(fn):
+            if isinstance(item, ast.Call) and isinstance(item.func, ast.Name) and item.func.id == "choice" and isinstance(item.args[0], ast.Name):
+                argument = item.args[0].id
+                if argument not in {a.arg for a in (*fn.args.args, *fn.args.kwonlyargs)}:
+                    continue
+                values = choices(item.args[1])
+                options[argument] = "Literal[" + ", ".join(repr(value) for value in values) + "]"
+        def typed(argument, default):
+            arg = argument.arg
+            base = common.get(arg)
+            if arg == "variant" and name in {"Table", "DataTable"}:
+                options[arg] = "Literal[" + ", ".join(repr(value) for value in schema["COLORS"]) + "]"
+            if base is None:
+                if arg == "label" and name in {"ButtonGroup", "CloseButton", "Breadcrumb", "Pagination", "Spinner"}:
+                    base = "str"
+                elif arg == "value" and name in {"Range", "ProgressBar"}:
+                    base = "int | float | Decimal"
+                elif arg in options:
+                    base = options[arg]
+                    if arg in {"fluid", "responsive", "horizontal", "expand"}:
+                        base += " | bool"
+                elif isinstance(default, ast.Constant) and isinstance(default.value, bool):
+                    base = "bool"
+                else:
+                    base = {
+                        "rows": "Iterable[T]" if name == "DataTable" else "int",
+                        "columns": "Iterable[Column[T]]" if name == "DataTable" else "_Utility",
+                        "gutter": "_Utility", "gutter_x": "_Utility", "gutter_y": "_Utility",
+                        "offset": "_Utility", "order": "_Utility", "span": "_Span | Mapping[str, _Span]",
+                        "level": "Literal[1, 2, 3, 4, 5, 6]", "heading_level": "Literal[1, 2, 3, 4, 5, 6]",
+                        "display": "Literal[1, 2, 3, 4, 5, 6]", "valid": "bool", "active": "int | str",
+                        "type": "str", "key": "str", "href": "str", "src": "str", "alt": "str",
+                        "name": "str", "placeholder": "str", "value": "_Scalar",
+                        "min": "int | float | Decimal", "max": "int | float | Decimal", "step": "int | float | Decimal | Literal['any']",
+                        "row_break": "Literal['auto', 'avoid']", "control": "Node",
+                    }.get(arg, "_Child")
+                if isinstance(default, ast.Constant) and default.value is None and "None" not in base and base not in {"_Child", "_Scalar", "_Utility"}:
+                    base += " | None"
+            if arg == "id" and default is None:
+                base = "str"
+            return f"{arg}: {base}" + (" = ..." if default is not None else "")
+
+        arguments = fn.args
+        defaults = [None] * (len(arguments.args) - len(arguments.defaults)) + arguments.defaults
+        params = [typed(arg, default) if arg.arg != "self" else "self" for arg, default in zip(arguments.args, defaults)]
+        if arguments.vararg:
+            arg = arguments.vararg.arg
+            item_type = {"Accordion": "AccordionItem", "Tabs": "Tab", "Carousel": "CarouselItem"}.get(name)
+            params.append(f"*{arg}: {item_type} | Iterable[{item_type}]" if item_type else f"*{arg}: _Child")
+        elif arguments.kwonlyargs or arguments.kwarg:
+            params.append("*")
+        params.extend(typed(arg, default) for arg, default in zip(arguments.kwonlyargs, arguments.kw_defaults))
+        if arguments.kwarg:
+            used = {arg.arg for arg in (*arguments.args, *arguments.kwonlyargs)}
+            params.extend(f"{arg}: {kind} = ..." for arg, kind in common.items() if arg not in used)
+        if owner:
+            return f"class {owner}:\n    def __init__({', '.join(params)}) -> None: ...\n"
+        return f"def {name}({', '.join(params)}) -> Node: ...\n"
+
+    for filename in ("_layout.py", "_forms.py", "_components.py"):
+        tree = ast.parse((PACKAGE / "bootstrap" / filename).read_text(encoding="utf-8"))
+        for item in tree.body:
+            if isinstance(item, ast.FunctionDef) and any(
+                isinstance(dec, ast.Name) and dec.id == "component"
+                or isinstance(dec, ast.Call) and isinstance(dec.func, ast.Name) and dec.func.id == "component"
+                for dec in item.decorator_list
+            ):
+                output += signature(item)
+            elif isinstance(item, ast.ClassDef) and not item.name.startswith("_"):
+                initializer = next(child for child in item.body if isinstance(child, ast.FunctionDef) and child.name == "__init__")
+                output += signature(initializer, item.name)
+    for name in schema["PRIMITIVES"]:
+        output += f"def {name}(*children: _Child, " + ", ".join(f"{arg}: {kind} = ..." for arg, kind in common.items()) + ") -> Node: ...\n"
+    return output
 
 
 def generated_files():
@@ -88,7 +206,7 @@ class Theme:
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Literal, ParamSpec, Protocol, TypeAlias, overload
-from ._style import Style, _StyleInput, _StyleValue
+from ._style import Style, Theme, _StyleInput, _StyleValue
 
 P = ParamSpec("P")
 _Child: TypeAlias = Node | str | int | float | Decimal | None | Iterable[_Child]
@@ -113,7 +231,12 @@ class Node:
     def parts(self) -> tuple[str, ...]: ...
 '''
     tree += style_signature("with_style", "self, *fragments: _StyleInput", "Node", "    ")
-    tree += "\n    def with_parts(self, **overrides: _StyleInput) -> Node: ...\n\n"
+    tree += '''
+    def with_parts(self, **overrides: _StyleInput) -> Node: ...
+    def to_html(self, *, include_styles: bool | None = ...,
+                theme: Theme | None = ..., a11y_mode: Literal["warn", "raise"] | None = ...) -> str: ...
+
+'''
     props = "style: _StyleInput = ..., class_name: str | None = ..., attrs: _Attributes = ..., part: str | None = ..."
     for name in SCHEMA["PRIMITIVE_TAGS"]:
         tree += f"def {name}(*children: _Child, {props}) -> Node: ...\n"
@@ -233,21 +356,26 @@ class Document:
                  styles: str | Mapping[str, Any] | _SelectorStyles | None = ...) -> None: ...
     @property
     def styles(self) -> str: ...
-    def compile(self, *, a11y_mode: Literal["warn", "raise"] | None = ...) -> DocumentSource: ...
+    def compile(self, *, a11y_mode: Literal["warn", "raise"] | None = ..., target: Literal["html", "pdf"] = ...) -> DocumentSource: ...
     @property
     def required_tokens(self) -> tuple[str, ...]: ...
-    def to_html(self, *, a11y_mode: Literal["warn", "raise"] | None = ...) -> str: ...
+    def to_html(self, *, include_styles: bool | None = ...,
+                a11y_mode: Literal["warn", "raise"] | None = ...) -> str: ...
     def to_css(self, *, a11y_mode: Literal["warn", "raise"] | None = ...) -> str: ...
     def prepare(self, renderer: Renderer, *, a11y_mode: Literal["warn", "raise"] | None = ...) -> _PreparedDocument: ...
     def render_pdf(self, renderer: Renderer, *, a11y_mode: Literal["warn", "raise"] | None = ...) -> bytes: ...
     def render_image_pages(self, renderer: Renderer, *, dpi: int = ..., a11y_mode: Literal["warn", "raise"] | None = ...) -> list[bytes]: ...
     def emit_artifacts(self, *, html_path: str | PathLike[str], css_path: str | PathLike[str],
-                       a11y_mode: Literal["warn", "raise"] | None = ...) -> None: ...
+                       a11y_mode: Literal["warn", "raise"] | None = ..., target: Literal["html", "pdf"] = ...) -> None: ...
 
 class Renderer:
     def __init__(self, **engine_options: Any) -> None: ...
     def engine_for(self, document: Document) -> Any: ...
     def checked_engine_for(self, document: Document, plan: DocumentSource) -> Any: ...
+
+def to_html(node_or_document: _Child | Document, *, include_styles: bool | None = ...,
+            theme: Theme | None = ...,
+            a11y_mode: Literal["warn", "raise"] | None = ...) -> str: ...
 '''
     bridge = HEADER + '''from ..core import Element
 from ._style import Theme
@@ -256,7 +384,7 @@ from ._tree import Node
 def to_legacy(node: Node, *, theme: Theme | None = ...) -> tuple[Element | str, ...]: ...
 '''
     return {"_style.pyi": style, "_tree.pyi": tree, "_table.pyi": table,
-            "_document.pyi": document, "_bridge.pyi": bridge}
+            "_document.pyi": document, "_bridge.pyi": bridge, "bootstrap/__init__.pyi": bootstrap_stub()}
 
 
 def main():

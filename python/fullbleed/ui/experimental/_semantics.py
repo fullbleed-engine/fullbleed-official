@@ -36,7 +36,7 @@ _PARENTS = {
 
 @dataclass(frozen=True)
 class ContentContext:
-    parent: str = "main"
+    parent: str | None = "main"
     inline_owner: str | None = None
     inside_link: bool = False
     foreign: bool = False
@@ -61,7 +61,7 @@ class ContentContext:
             choices = ", ".join(sorted(_CHILDREN[self.parent]))
             raise AuthoringError(f"<{self.parent}> needs {choices} children, but found <{tag}>",
                                  code="structure.child", path=path)
-        if tag in _PARENTS and self.parent not in _PARENTS[tag]:
+        if tag in _PARENTS and self.parent is not None and self.parent not in _PARENTS[tag]:
             choices = ", ".join(sorted(_PARENTS[tag]))
             raise AuthoringError(f"<{tag}> requires a {choices} parent, not <{self.parent}>",
                                  code="structure.parent", path=path)

@@ -17,6 +17,7 @@ from ..style import StyleWarning
 from ._style import AuthoringError, Length, Style, Theme, mm
 from ._tree import Node, _children, _required_tokens
 from ._semantics import ContentContext, normalize_mode, semantic_report
+from ._resources import style_element
 
 
 def _capture_document_styles(value) -> tuple:
@@ -168,6 +169,8 @@ class DocumentSource:
     css: str
     sources: tuple[Source, ...]
     _a11y_json: str | None = field(default=None, repr=False)
+    _fragment: str = field(default="", repr=False, kw_only=True)
+    _component_css: str = field(default="", repr=False, kw_only=True)
 
     @property
     def a11y_report(self) -> dict | None:
@@ -201,13 +204,19 @@ class Document:
         """Resolved selector CSS; source inputs were captured at construction."""
         return _document_styles(self._styles, self.theme)
 
-    def compile(self, *, a11y_mode: str | None = None) -> DocumentSource:
+    def compile(self, *, a11y_mode: str | None = None, target: str = "html") -> DocumentSource:
+        return self._compile(a11y_mode=a11y_mode, target=target)
+
+    def _compile(self, *, a11y_mode=None, include_styles=True, fragment_only=False, target="html") -> DocumentSource:
+        if not isinstance(target, str) or target not in {"html", "pdf"}:
+            raise AuthoringError("Compilation target must be 'html' or 'pdf'", code="document.target")
         mode = normalize_mode(a11y_mode)
-        selector_styles = self.styles
-        rules, sources, output = {}, [], []
+        selector_styles = self.styles if include_styles else ""
+        rules, sources, output, resources = {}, [], [], {}
         semantic_root = Element("main") if mode else None
         # Explicit traversal avoids Python recursion limits for nested documents.
-        pending = [(child, (), None, ContentContext(), semantic_root) for child in reversed(self.children)]
+        root_context = ContentContext(parent=None if fragment_only else "main")
+        pending = [(child, (), None, root_context, semantic_root) for child in reversed(self.children)]
         while pending:
             node, path, source, context, semantic_parent = pending.pop()
             if isinstance(node, _Closing):
@@ -219,9 +228,17 @@ class Document:
                 if semantic_parent is not None:
                     semantic_parent.children.append(node)
                 continue
+            if target == "pdf":
+                node = node._for_print()
             if node.name is not None:
                 path = (*path, node.name)
                 source = node.source or source
+            for resource in node._resources if include_styles else ():
+                key = (resource.kind, resource.name)
+                if key in resources and resources[key] != resource:
+                    raise AuthoringError(f"Conflicting component resource {resource.name!r}",
+                                         code="resource.conflict", path=path)
+                resources[key] = resource
             if node.tag is None:
                 pending.extend((child, path, source, context, semantic_parent) for child in reversed(node.children))
                 continue
@@ -235,8 +252,8 @@ class Document:
             attributes = dict(node.attributes)
             attributes["data-fb-id"] = node_id
             try:
-                declarations = node._remaining_defaults().resolve(self.theme)
-                explicit = node.style.resolve(self.theme)
+                declarations = node._remaining_defaults().resolve(self.theme) if include_styles else ""
+                explicit = node.style.resolve(self.theme) if include_styles else ""
             except AuthoringError as error:
                 raise AuthoringError(error.message, code=error.code, path=location) from error
             if declarations:
@@ -257,16 +274,24 @@ class Document:
                 pending.append((_Closing(f"</{node.tag}>"), path, source, context, semantic_parent))
                 pending.extend((child, path, source, child_context, semantic_node) for child in reversed(node.children))
         body = Style(margin=0, box_sizing="border-box")
-        text = Style(body, self.theme.text).resolve(self.theme)
-        css = "\n".join((self.page.to_css(), f"body {{ {text} }}",
-                          "* { box-sizing: border-box; }",
-                          *(f".{name} {{ {value} }}" for name, value in rules.items()),
-                          selector_styles))
+        text = Style(body, self.theme.text).resolve(self.theme) if include_styles and not fragment_only else ""
+        dependency_css = tuple(resource.text for resource in resources.values() if resource.kind == "css")
+        component_rules = tuple(f".{name} {{ {value} }}" for name, value in rules.items())
+        component_css = "\n".join((*dependency_css, *component_rules)) if include_styles else ""
+        css = ""
+        if include_styles:
+            css = component_css if fragment_only else "\n".join((
+                *dependency_css, self.page.to_css(), f"body {{ {text} }}",
+                "* { box-sizing: border-box; }", *component_rules, selector_styles,
+            ))
+        fragment = "".join(output)
         html = (f'<!doctype html><html lang="{escape(self.lang, quote=True)}"><head>'
                 f'<meta charset="utf-8"><title>{escape(self.title)}</title></head><body><main>'
-                + "".join(output) + "</main></body></html>")
+                + fragment + "</main></body></html>")
         report = semantic_report(semantic_root, self, sources, mode) if mode else None
-        return DocumentSource(html, css, tuple(sources), json.dumps(report, sort_keys=True) if report is not None else None)
+        return DocumentSource(html, css, tuple(sources), json.dumps(report, sort_keys=True) if report is not None else None,
+                              _fragment=fragment,
+                              _component_css=component_css)
 
     @property
     def required_tokens(self) -> tuple[str, ...]:
@@ -277,8 +302,22 @@ class Document:
                 names.update(fragment[1]._token_names())
         return tuple(sorted(names))
 
-    def to_html(self, *, a11y_mode: str | None = None) -> str:
-        return self.compile(a11y_mode=a11y_mode).html
+    def to_html(self, *, include_styles: bool | None = None,
+                a11y_mode: str | None = None) -> str:
+        """Export HTML with embedded CSS, no styles, or the legacy separate-CSS form.
+
+        True embeds collected CSS and retains inline declarations. False omits
+        both, retaining authored class names. None preserves the existing output
+        used with to_css(). Exports are static and do not add JavaScript.
+        """
+        _export_options(include_styles)
+        source = self._compile(a11y_mode=a11y_mode, include_styles=include_styles is not False)
+        html = source.html
+        if include_styles is True:
+            html = html.replace("</head>",
+                                '<meta name="viewport" content="width=device-width, initial-scale=1">'
+                                + style_element(source.css) + "</head>", 1)
+        return html
 
     def to_css(self, *, a11y_mode: str | None = None) -> str:
         return self.compile(a11y_mode=a11y_mode).css
@@ -290,7 +329,7 @@ class Document:
         A changed document or renderer needs a new preparation. No global cache
         or mutable engine is shared between documents.
         """
-        plan = self.compile(a11y_mode=a11y_mode)
+        plan = self.compile(a11y_mode=a11y_mode, target="pdf")
         prepared = renderer.engine_for(self).compile_pdf(plan.html, plan.css)
         renderer._check_layout(self, plan, prepared.export_render_time_pagination_trace())
         return prepared
@@ -301,8 +340,8 @@ class Document:
     def render_image_pages(self, renderer: Renderer, *, dpi=150, a11y_mode: str | None = None) -> list[bytes]:
         return self.prepare(renderer, a11y_mode=a11y_mode).render_image_pages(dpi=dpi)
 
-    def emit_artifacts(self, *, html_path, css_path, a11y_mode: str | None = None):
-        plan = self.compile(a11y_mode=a11y_mode)
+    def emit_artifacts(self, *, html_path, css_path, a11y_mode: str | None = None, target="html"):
+        plan = self.compile(a11y_mode=a11y_mode, target=target)
         html_path, css_path = Path(html_path), Path(css_path)
         html_path.parent.mkdir(parents=True, exist_ok=True)
         css_path.parent.mkdir(parents=True, exist_ok=True)
@@ -316,6 +355,29 @@ class Document:
 @dataclass(frozen=True)
 class _Closing:
     html: str
+
+
+def _export_options(include_styles):
+    if include_styles is not None and not isinstance(include_styles, bool):
+        raise TypeError("include_styles must be True, False, or None")
+
+
+def to_html(node_or_document, *, include_styles: bool | None = None,
+            theme: Theme | None = None, a11y_mode: str | None = None) -> str:
+    """Export a document or component fragment without creating a renderer.
+
+    A fragment includes only its collected component CSS, not page geometry or
+    document-wide text styles. Supply a theme to resolve the fragment's tokens.
+    """
+    _export_options(include_styles)
+    if isinstance(node_or_document, Document):
+        if theme is not None:
+            raise AuthoringError("The document already owns its theme", code="document.theme")
+        return node_or_document.to_html(include_styles=include_styles,
+                                        a11y_mode=a11y_mode)
+    source = Document(node_or_document, theme=theme)._compile(
+        include_styles=include_styles is not False, a11y_mode=a11y_mode, fragment_only=True)
+    return (style_element(source._component_css) if include_styles else "") + source._fragment
 
 
 class Renderer:

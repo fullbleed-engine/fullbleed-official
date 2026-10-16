@@ -159,6 +159,10 @@ def main():
         server = LanguageServer([node, str(package / metadata["bin"]["pyright-langserver"]), "--stdio"], folder, environment)
         try:
             cases = [
+                ("bootstrap_card_slots", 'bs.Card("Text", tit§)', {"title"}),
+                ("bootstrap_variants", 'bs.Badge("Paid", variant="§")', {"primary", "success", "warning"}),
+                ("bootstrap_class_name", 'bs.Card("Text", cla§)', {"class_name"}),
+                ("html_export_styles", 'bs.Card("Text").to_html(inc§)', {"include_styles"}),
                 ("style_properties", "style(§)", {name.replace("-", "_") for name in STYLE_PROPERTIES}),
                 ("primitive_props", 'Paragraph("Text", cla§)', {"class_name"}),
                 ("root_style", 'Paragraph("Text").with_style(font_§)', {"font_size", "font_family", "font_weight"}),
@@ -178,7 +182,7 @@ def main():
                 ("theme_derivation", 'Document(Paragraph("Text")).theme.with_§', {"with_values"}),
             ]
             for index, (name, expression, required) in enumerate(cases):
-                prefix = "from fullbleed.ui.experimental import style, styled, Paragraph, Stack, Row, Grid, DataTable, Heading, Node, Document, Renderer\n"
+                prefix = "from fullbleed.ui.experimental import style, styled, Paragraph, Stack, Row, Grid, DataTable, Heading, Node, Document, Renderer, bootstrap as bs\n"
                 before, after = (prefix + expression).split("§")
                 path = folder / f"completion_{index}.py"
                 server.open(path, before + after)

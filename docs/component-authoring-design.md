@@ -1,8 +1,9 @@
 # Component authoring: implementation review
 
-Status: working proposal with a source-branch Python prototype, reviewed 2026-10-16. This is not
-the published API or a promise of cross-language parity. The stable authoring
-guide remains [component-authoring.md](component-authoring.md).
+Status: working proposal with an experimental Python preview, reviewed
+2026-10-16. The preview is available separately on GitHub; it is not the stable
+PyPI API or a promise of cross-language parity. The stable authoring guide remains
+[component-authoring.md](component-authoring.md).
 
 Start with the [next-iteration decision brief](component-authoring-next-iteration.md)
 for the recommended public mental model, newly observed consistency gaps, and
@@ -260,6 +261,14 @@ error. Authored markers are checked against the declaration. The factory and
 instance expose the names for tools, and the decorator preserves argument types.
 Automatic part-name completion still needs work. Callers should not branch on row
 count just to apply a reusable style.
+
+Declaring names does not establish forwarding into nested components. The
+[current design pass](component-authoring-next-iteration.md#1-a-public-part-needs-an-explicit-target)
+demonstrates an accepted override that changes nothing: a parent declares a
+child's part but places that child behind a nested component boundary. The same
+permission that supports absent optional parts can conceal missing forwarding.
+Explicit binding and re-export semantics remain unresolved; declarations alone
+are not a stable customization contract.
 
 Ordinary conditionals should handle variants initially: `paid=True` or
 `tone="warning"` is a function argument. A variant registry, implicit prop
@@ -542,7 +551,8 @@ pagination behavior that the renderer has not demonstrated.
 | Oversized-row continuation (partial implementation) | Extend the tested top-aligned text cell behavior to rowspans, page-tall cell images, and other vertical alignments; qualify changing page geometry, complex decorations, and semantic continuity; unsupported cases fail explicitly |
 | Native diagnostics (partial implementation) | Native table/block split rejections identify cell constraints or container owners while retaining fragment scopes; extend precise causes through other layout models and map missing glyphs/other diagnostic families before claiming full attribution |
 | Typing and completion (partial implementation) | Generated stubs and installed mypy/Pyright checks cover styles, primitive props, layout choices, page options, record types and component arguments; token/part-name completion remains open |
-| Declared parts (implemented in the prototype) | Empty/conditional states accept documented parts; boundaries, root delegation, schema validation, and callable argument types have focused coverage; author feedback remains needed |
+| Declared parts (partial contract) | Empty/conditional states and root delegation have focused coverage; specify explicit forwarding and distinguish optional absence from broken bindings before stabilization |
+| Kit dependencies | Two independent kits compose with separate palettes and documented defaults; token inspection alone does not supply values, semantic types or isolation |
 | Semantics and accessibility | Reuse the existing semantic validation contract; test generated structure and final delivery profiles separately |
 | Rendering reuse | Measure authoring, compilation, layout, and output costs independently; verify metadata/configuration isolation |
 | Migration (incremental bridge implemented) | `to_legacy` embeds new styled nodes in existing documents; whole-document migration still needs an explicit page/theme/renderer audit and a decision on the stable namespace |
@@ -598,8 +608,10 @@ change real documents. A larger number of element wrappers is not that milestone
 ## Implementation order and language expansion
 
 1. **Close the public contract gaps and keep the experiment small.** Resolve the
-   source/layout naming, stylesheet input, semantic-validation policy and content
-   model above. The immutable tree,
+   remaining part-binding and theme-dependency questions in the
+   [decision brief](component-authoring-next-iteration.md). Source/layout naming,
+   stylesheet input and bounded semantic validation are already connected.
+   The immutable tree,
    component-owned styles, explicit overrides, table columns and page ownership
    are implemented in the draft. Use the shared kit and editing tasks above to
    decide which concepts deserve stable names. Keep the established API working

@@ -10,6 +10,12 @@ evaluates these functions directly to produce static print documents. There is
 no browser, virtual DOM, hook lifecycle, or JavaScript runtime involved.
 The complete workflow below is available in Fullbleed 2.5.25.
 
+For the next authoring iteration, see the experimental
+[Bootstrap kit and HTML export guide](component-bootstrap.md). That work adds
+component-owned Bootstrap CSS, content slots, checked utilities and explicit
+styled/unstyled HTML export in `fullbleed.ui.experimental`; the guide below
+documents the stable API.
+
 ## A component is a function
 
 ```python

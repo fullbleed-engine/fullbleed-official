@@ -9,6 +9,7 @@ from typing import Callable, ClassVar, ParamSpec, Protocol, cast, overload
 
 from ..core import _normalize_attr_name, _ATTR_NAME, _TAG_NAME, _HTML_VOID_ELEMENTS
 from ._style import AuthoringError, Style, _number, pt, style
+from ._resources import Resource
 from ._schema import ALIGNMENTS, JUSTIFICATIONS, PRIMITIVE_TAGS
 
 P = ParamSpec("P")
@@ -96,6 +97,8 @@ def _required_tokens(children):
         visited.add(id(node))
         names.update(node._effective_style()._token_names())
         pending.extend(node.children)
+        if node._print is not None:
+            pending.append(node._print)
     return tuple(sorted(names))
 
 
@@ -114,6 +117,8 @@ class Node:
     boundary: bool = False
     declared_parts: tuple[str, ...] | None = None
     _defaults: Style = field(default=Style(), repr=False, kw_only=True)
+    _resources: tuple[Resource, ...] = field(default=(), repr=False, kw_only=True)
+    _print: Node | None = field(default=None, repr=False, kw_only=True)
 
     def __post_init__(self):
         if self.tag is not None and (not isinstance(self.tag, str) or not _TAG_NAME.fullmatch(self.tag)):
@@ -122,6 +127,13 @@ class Node:
         object.__setattr__(self, "attributes", _attrs(dict(self.attributes)))
         object.__setattr__(self, "style", Style(self.style))
         object.__setattr__(self, "_defaults", Style(self._defaults))
+        resources = tuple(self._resources)
+        if any(not isinstance(resource, Resource) for resource in resources):
+            raise AuthoringError("Invalid component resource", code="resource.type")
+        object.__setattr__(self, "_resources", resources)
+        if self._print is not None and (not isinstance(self._print, Node) or self.tag is None
+                                       or self._print.tag is None or self._print._print is not None):
+            raise AuthoringError("A print representation requires a concrete element snapshot", code="print.node")
         declared = _declared_parts(self.declared_parts)
         object.__setattr__(self, "declared_parts", declared)
         if declared is not None:
@@ -175,8 +187,32 @@ class Node:
     def with_style(self, *fragments, **properties) -> Node:
         return self._with_root_styles(authored=Style(*fragments, **properties))
 
+    def to_html(self, *, include_styles: bool | None = None,
+                theme=None, a11y_mode: str | None = None) -> str:
+        """Export a fragment; True embeds CSS, False omits all style declarations."""
+        from ._document import to_html
+        return to_html(self, include_styles=include_styles,
+                       theme=theme, a11y_mode=a11y_mode)
+
     def _effective_style(self) -> Style:
         return Style(self._defaults, self.style)
+
+    def _for_print(self) -> Node:
+        if self._print is None:
+            return self
+        alternative = self._print
+        # Keep authored identity, selectors, ARIA and subsequent root styling.
+        # Browser-only form state is already captured in the alternative content.
+        omit = {"type", "value", "name", "placeholder", "checked", "disabled", "readonly", "multiple",
+                "rows", "min", "max", "step", "autocomplete", "required", "for", "role", "href"}
+        attributes = {key: value for key, value in self.attributes if key not in omit}
+        extras = dict(alternative.attributes)
+        if "class" in extras:
+            extras["class"] = " ".join(dict.fromkeys((str(attributes.get("class", "")) + " " + extras["class"]).split()))
+        attributes.update(extras)
+        return replace(alternative, attributes=tuple(attributes.items()), style=Style(alternative.style, self.style),
+                       _defaults=Style(alternative._defaults, self._defaults), name=self.name, source=self.source,
+                       part=self.part, _resources=(*self._resources, *alternative._resources))
 
     def _remaining_defaults(self) -> Style:
         # An explicit property replaces a recipe property before token resolution.
