@@ -1,6 +1,6 @@
 # Component authoring: implementation review
 
-Status: working proposal with a local Python prototype, 2026-10-15. This is not
+Status: working proposal with a source-branch Python prototype, 2026-10-15. This is not
 the published API or a promise of cross-language parity. The stable authoring
 guide remains [component-authoring.md](component-authoring.md).
 
@@ -30,6 +30,69 @@ The source review found these concrete causes:
 
 The existing escaping, ordinary Python functions, explicit renderer/font choice,
 semantic elements, and static output model are good foundations. Preserve them.
+
+## The prototype also needs an ergonomics pass
+
+The experimental implementation fixes important ownership problems, but that
+does not by itself make it easy to learn. Its first example previously introduced
+`styled`, theme tokens, declared parts and overrides while teaching a two-line
+field. Those are useful library-author tools; they should not be prerequisites
+for writing a document. The guide now starts with an ordinary function, a layout
+and a local style, then adds reusable styling and customization as separate steps.
+
+There are two authoring jobs:
+
+- **Writing a document:** compose an imported kit, supply records, choose the
+  theme and paper, and render. `Field`, `WorkTable` and `Total` in the example kit
+  have application meaning. Their consumers should not need internal selectors,
+  table tags or font setup in each component.
+- **Building the kit:** define structure, typography, defaults, variants and any
+  public customization points. This still requires design decisions. Moving those
+  decisions into a function is valuable when other documents can reuse it without
+  repeating them; hiding a one-off HTML tree behind a new name proves little.
+
+This distinction should guide both API design and documentation. The kit remains
+ordinary application code, not a required framework or a built-in invoice model.
+Renderer/font setup belongs once at the application boundary. Business functions
+can do arbitrary Python work; immutability snapshots their output, it does not
+make an impure callback deterministic.
+
+| Remaining cost in the prototype | Recommendation |
+| --- | --- |
+| Several spellings for a style change (`style=`, `styled`, `.with_style`, `.with_parts`) | Teach `.with_style(...)` for one instance, `styled(...)` for repeated defaults, and parts only when customizing another component's advertised internals. Preserve `style=` for composing existing style values. |
+| `style=style(...)` adds visual noise in deeply nested calls | Prefer a reusable styled primitive or a normal call followed by `.with_style(...)` in teaching examples. Do not inject arbitrary style keywords into every business function. |
+| `Flow` and `Stack` both sound like vertical layout | Teach `Flow` for a flowing document body and `Stack` for a local flex group. Their different pagination behavior must remain visible; do not silently alias them. |
+| Tokens and public parts are strings checked at runtime | Show them as explicit contracts and surface their available names in tools. Do not imply editor completion is complete. |
+| Page size, fonts, theme text and rendering appear together in starter code | Give page geometry to the document and font/renderer configuration to the application. A future convenience preset must select a bundled font explicitly, without depending on system fonts. |
+| Layout failures can still describe an entire table | Keep source scopes, but improve the failing row/cell location. Authors should not have to inspect generated HTML to diagnose ordinary document mistakes. |
+
+Keep explicit physical units. Saving the characters in `pt(12)` is a poor trade
+if it makes a print measurement ambiguous. A small checked style vocabulary is
+useful editor support; it should not become a second CSS engine or a promise that
+every syntactically accepted declaration has identical layout behavior.
+
+## Judge the API by edits, not by shorter markup
+
+The existing and candidate invoice examples are different designs, so their line
+counts are not a controlled ergonomics comparison. The useful comparison is the
+number of decisions an author must coordinate for a specific change:
+
+| Author task | Established surface | Experimental direction and current limit |
+| --- | --- | --- |
+| Reuse a field in a report | Import its function and attach the relevant selector rules to the new document | Import the styled function; provide its documented theme values. The shared invoice/report kit demonstrates this. |
+| Change one component's background | Its function must accept and forward a styling prop to a chosen root | Call `.with_style(background=...)` on the result. A fragment still needs an explicit root. |
+| Restyle a label inside a third-party component | Learn its classes and selector structure | Use a documented `label` part. Internal structure may change while that contract remains; automatic part-name completion is unfinished. |
+| Add a formatted table column | Coordinate the header, each row's cell and column styling | Add one `Column` containing label, callback, width and alignment. Calculations and formatting stay in application code. |
+| Change paper size | Ensure the effective CSS or engine setting changes, rather than only decorator metadata | Change `Page`; verify the resulting PDF's page box. The installed-wheel examples do this. |
+| Diagnose content that cannot paginate | Interpret native layout output and the generated document | Resolve the trace to the authored component scope. Identifying the exact failing descendant remains open. |
+
+Automated examples establish these behaviors for their fixtures. They do not
+establish that an independent author finds the API easier. Before stabilization,
+give authors the same five tasks: reuse a field, rebrand the document, add a
+column, switch paper size, and fix an overflowing component. Record where they
+need undocumented knowledge, how many places they edit, and whether they reach
+for generated HTML. Repeat after revising the API. Do not turn this into an
+unmeasured productivity claim.
 
 ## The intended authoring model
 
@@ -252,3 +315,30 @@ without declaring the old imports deprecated or committing to two permanent APIs
 
 The next useful milestone is a reusable design kit whose authors can confidently
 change real documents. A larger number of element wrappers is not that milestone.
+
+## Implementation order and language expansion
+
+1. **Keep the Python experiment small enough to evaluate.** The immutable tree,
+   component-owned styles, explicit overrides, table columns and page ownership
+   are implemented in the draft. Use the shared kit and editing tasks above to
+   decide which concepts deserve stable names. Keep the established API working
+   through the explicit adapter during that evaluation.
+2. **Close the print and diagnostic contracts.** Extend continuation deliberately,
+   retain semantic structure, and improve descendant attribution. Document
+   unsupported content instead of making a component promise stronger than its
+   engine. Correct HTML serialization alone is insufficient evidence.
+3. **Make the common path pleasant in an editor and at runtime.** Finish token/part
+   discoverability and measure compilation, source collection and the extra
+   preflight layout pass. Prefer a native result containing output and diagnostics
+   from one layout operation before committing to a stable rendering interface.
+4. **Stabilize semantics, then adapt syntax to each language.** Specify style
+   precedence, children, units, theme resolution, part boundaries and error paths
+   with shared fixtures. JavaScript/TypeScript can use functions and JSX; C# can
+   keep idiomatic immutable builders. Compare authored intent and rendered output,
+   rather than requiring identical generated class names or Python-like syntax.
+
+A new variant registry, hooks, reactive state, implicit global theme context, or
+more tag aliases does not currently remove a demonstrated authoring problem.
+The immediate design work is reducing the concepts needed for a common edit and
+making print behavior trustworthy. Cross-language expansion should carry those
+settled contracts, rather than freezing this prototype's accidental complexity.

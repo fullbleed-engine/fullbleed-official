@@ -13,7 +13,36 @@ document imports a stylesheet or coordinates selectors. The kit contains the
 styles and the components that use them. The example data is the existing
 fictional [Northstar invoice data](../components/data.json).
 
-## Reuse a component with its styles
+## Start with a function
+
+A component takes ordinary arguments and returns a tree. Start with a local style;
+themes and named parts are optional tools for reuse and customization:
+
+```python
+from fullbleed.ui.experimental import Document, Paragraph, Stack, component, pt
+
+@component
+def Field(label: str, value: str):
+    return Stack(
+        Paragraph(label).with_style(font_size=pt(8), color="#667580"),
+        Paragraph(value),
+        gap=pt(4),
+    )
+
+field = Field("Prepared for", "Maple & Finch")
+document = Document(field)
+```
+
+The label's appearance travels with `Field`; the document does not attach a
+stylesheet. The [rendering step](#configure-the-page-and-render) below selects
+the paper and font and writes a PDF. `@component` adds a diagnostic boundary;
+ordinary undecorated functions can also compose nodes.
+
+## Reuse styles and expose customization
+
+When labels repeat across components, give their shared appearance a name.
+When consumers need to restyle an internal label, expose it as a public part.
+This version of the same field adds those two contracts:
 
 ```python
 from fullbleed.ui.experimental import (
@@ -85,6 +114,21 @@ authoring path. `css("transform: rotate(2deg)")` is an explicit declaration esca
 hatch for CSS beyond the checked property vocabulary. Full selector stylesheets
 remain available through the established `fullbleed.ui` and engine APIs.
 
+Choose the control that matches the change:
+
+| Change | Use |
+| --- | --- |
+| Business meaning, such as a paid invoice | An ordinary function argument, such as `Total(items, paid=True)` in the example kit |
+| Appearance of one component root | `field.with_style(background="#f2f5f8")` |
+| Defaults reused by many elements | A `styled(...)` factory, such as `Label` above |
+| A public internal label or cell | `.with_parts(label=style(...))`, using the component's advertised parts |
+| Shared brand values or document typography | `Theme` tokens and `Theme.text` |
+| Existing selector-based CSS | `class_name` with the established document's stylesheet; use the [adapter](#adopt-components-in-an-existing-document) when mixing APIs |
+
+The standalone experimental `Document` collects node styles; it has no external
+stylesheet argument. A `class_name` alone therefore supplies a label, not an
+appearance. Do not pass a `StyleSheet` or a style value as a class name.
+
 ## Describe table columns once
 
 ```python
@@ -126,7 +170,7 @@ more complex cell decorations need further qualification.
 ```python
 from importlib.resources import files
 from pathlib import Path
-from fullbleed.ui.experimental import Page, Renderer
+from fullbleed.ui.experimental import Page, Renderer, Theme, mm, style
 
 document = Document(
     field,
@@ -150,10 +194,12 @@ native pagination trace before producing output. This adds a layout pass. Engine
 pooling and performance qualification remain future work. The check catches forced
 unsplittable overflow; it is not a general overflow or accessibility validator.
 
-`Flow` uses ordinary block flow with space between rooted children. `Stack` uses
-column flex layout. `Heading` requests keeping following content with it by
-default. The engine remains responsible for final pagination; components do not
-estimate font metrics or pre-paginate rows in Python.
+Choose `Flow` for a flowing document body and `Stack` for a local flex group such
+as the field above. `Flow` uses ordinary block flow with space between rooted
+children; `Stack` uses column flex layout. They have different pagination
+behavior. `Heading` requests keeping following content with it by default. The
+engine remains responsible for final pagination; components do not estimate font
+metrics or pre-paginate rows in Python.
 
 `document.compile()` returns HTML, CSS, and a source map. Generated `data-fb-id`
 values use the engine's source-ID mechanism. Source filenames and line numbers
