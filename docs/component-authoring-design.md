@@ -165,10 +165,17 @@ Actual installed-wheel rendering uncovered gaps that serialization tests missed:
 
 - A repeated table header could split without consuming a body row, creating an
   unbounded sequence of header-only pages. A native progress guard now stops
-  that cycle. The engine's permissive fallback still places an oversized
-  unsplittable block beyond the page edge. The experimental renderer detects
-  that trace event and raises `layout.unsplittable` instead of returning the PDF.
-  **Content-preserving continuation of oversized rows is not implemented.**
+  that cycle. The candidate also continues top-aligned oversized cells through
+  their logical content splitters, retaining column widths and repeated headers.
+  A short companion cell finishes independently instead of repeating on every
+  page. An explicit fresh-page signal lets ordinary rows move intact first.
+  Tables containing rowspans, page-tall images inside cells, and oversized
+  non-top-aligned cells remain outside this implementation. The engine's
+  permissive overflow fallback still exists;
+  the experimental renderer detects its trace event and raises
+  `layout.unsplittable` instead of returning that PDF. This check is not a general
+  overflow validator. Varying page widths, complex cell decorations, and semantic
+  associations across continued cells still need dedicated qualification.
 - Changing a literal `thead` to `display: table-row-group` does not disable
   repetition in the current native parser. The prototype emits scoped `th`
   cells in the first body row when `repeat_header=False`.
@@ -183,7 +190,7 @@ pagination behavior that the renderer has not demonstrated.
 
 | Work | Acceptance condition |
 | --- | --- |
-| Oversized-row continuation | Long text cells, images, mixed content, repeated headers, and multi-column rows preserve content and terminate; unsupported cases fail explicitly |
+| Oversized-row continuation (partial implementation) | Extend the tested top-aligned text cell behavior to rowspans, page-tall cell images, and other vertical alignments; qualify changing page geometry, complex decorations, and semantic continuity; unsupported cases fail explicitly |
 | Native diagnostics | Overflow, missing glyphs, and invalid layout report the responsible component/part where source IDs exist |
 | Typing and completion | Editors suggest valid props, styles, token names, and parts; misspellings fail before rendering where practical |
 | Declared parts (implemented in the prototype) | Empty/conditional states accept documented parts; boundaries, root delegation, schema validation, and callable argument types have focused coverage; author feedback remains needed |

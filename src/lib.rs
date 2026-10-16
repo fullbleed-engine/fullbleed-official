@@ -201,8 +201,8 @@ pub use finalize::{
 };
 pub use flowable::{
     AbsolutePositionedFlowable, BreakAfter, BreakBefore, BreakInside, ContainerFlowable, EdgeSizes,
-    Flowable, ImageFlowable, LengthSpec, Pagination, Paragraph, Spacer, SvgFlowable, TableFlowable,
-    TextStyle,
+    Flowable, ImageFlowable, LengthSpec, Pagination, Paragraph, Spacer, SplitContext, SvgFlowable,
+    TableFlowable, TextStyle,
 };
 use font::FontRegistry;
 #[cfg(feature = "python")]
@@ -11579,7 +11579,7 @@ mod tests {
     }
 
     #[test]
-    fn oversized_single_table_row_reuses_one_compiled_surface_across_pages() {
+    fn oversized_empty_table_row_preserves_background_extent_across_pages() {
         let engine = FullBleed::builder().build().expect("engine");
         let document = engine
             .render_to_document(
@@ -11599,26 +11599,20 @@ mod tests {
                 page.commands
                     .iter()
                     .find_map(|command| match command {
-                        Command::DrawForm {
-                            y,
-                            width,
-                            height,
-                            resource_id,
-                            ..
-                        } if resource_id.starts_with("table-row-fragment:") => {
-                            Some((*y, *width, *height, resource_id.clone()))
-                        }
+                        Command::DrawRect {
+                            y, width, height, ..
+                        } if *width == Pt::from_f32(192.0) => Some((*y, *width, *height)),
                         _ => None,
                     })
-                    .expect("each page should draw the compiled row surface")
+                    .expect("each page should paint its portion of the cell background")
             })
             .collect();
-        assert_eq!(draws[0].0, Pt::from_f32(24.0));
-        assert_eq!(draws[1].0, Pt::from_f32(-78.0));
-        assert_eq!(draws[2].0, Pt::from_f32(-180.0));
-        assert!(draws.iter().all(|draw| {
-            draw.1 == Pt::from_f32(192.0) && draw.2 == Pt::from_f32(270.0) && draw.3 == draws[0].3
-        }));
+        assert!(draws.iter().all(|draw| draw.0 == Pt::from_f32(24.0)));
+        assert_eq!(
+            draws.iter().map(|draw| draw.2).fold(Pt::ZERO, |a, b| a + b),
+            Pt::from_f32(270.0)
+        );
+        assert!(draws.iter().all(|draw| draw.2 <= Pt::from_f32(102.0)));
     }
 
     #[test]
@@ -14535,19 +14529,147 @@ mod tests {
     }
 
     #[test]
-    fn repeated_table_header_cannot_split_without_consuming_a_body_row() {
+    fn oversized_table_row_continues_cell_content_with_repeated_headers() {
         let header = vec![vec![table_cell("HEADER")]];
-        let body = vec![vec![table_cell(&"oversized line\n".repeat(100))]];
+        let markers: Vec<_> = (0..30).map(|i| format!("SEGMENT_{i:03}")).collect();
+        let body = vec![vec![table_cell(&markers.join("\n"))]];
         let table = TableFlowable::new(body)
             .with_header(header)
             .repeat_header(true);
         let width = Pt::from_f32(300.0);
         let height = Pt::from_f32(72.0);
         assert!(table.wrap(width, height).height > height);
+        let rect = Rect {
+            x: Pt::ZERO,
+            y: Pt::ZERO,
+            width,
+            height,
+        };
+        let mut canvas = Canvas::new(Size { width, height });
+        let mut remainder: Option<Box<dyn Flowable>> = Some(Box::new(table));
+        for _ in 0..20 {
+            let Some(next) = remainder.take() else {
+                break;
+            };
+            let mut frame = Frame::new(rect);
+            match frame.add(next, &mut canvas) {
+                AddResult::Placed(_) => {}
+                AddResult::Split(rest, _) => {
+                    remainder = Some(rest);
+                    canvas.show_page();
+                }
+                _ => panic!("oversized text row must make progress on a fresh page"),
+            }
+        }
+        assert!(remainder.is_none(), "row continuation did not terminate");
+        let document = canvas.finish();
+        assert!(document.pages.len() > 1);
+        for page in &document.pages {
+            assert!(page_contains_text(page, "HEADER"));
+            assert!(page_contains_text(page, "SEGMENT_"), "header-only page");
+        }
+        for marker in &markers {
+            let count = document
+                .pages
+                .iter()
+                .flat_map(|page| &page.commands)
+                .filter(
+                    |command| matches!(command, Command::DrawString { text, .. } if text == marker),
+                )
+                .count();
+            assert_eq!(count, 1, "content duplicated or missing: {marker}");
+        }
+    }
+
+    #[test]
+    fn table_row_moves_intact_from_a_partly_used_frame() {
+        let table = TableFlowable::new(vec![vec![table_cell("FIRST\nSECOND\nTHIRD")]])
+            .with_header(vec![vec![table_cell("HEADER")]])
+            .repeat_header(true);
+        let width = Pt::from_f32(300.0);
+        let height = Pt::from_f32(100.0);
+        let rect = Rect {
+            x: Pt::ZERO,
+            y: Pt::ZERO,
+            width,
+            height,
+        };
+        let mut canvas = Canvas::new(Size { width, height });
+        let mut used = Frame::new(rect);
+        assert!(matches!(
+            used.add(Box::new(Spacer::new_pt(Pt::from_f32(60.0))), &mut canvas),
+            AddResult::Placed(_)
+        ));
+        let remaining = match used.add(Box::new(table), &mut canvas) {
+            AddResult::Overflow(rest, _) => rest,
+            _ => panic!("a row that fits a fresh page should move intact"),
+        };
+        canvas.show_page();
+        assert!(matches!(
+            Frame::new(rect).add(remaining, &mut canvas),
+            AddResult::Placed(_)
+        ));
+        let document = canvas.finish();
+        assert!(!page_contains_text(&document.pages[0], "FIRST"));
+        assert!(page_contains_text(&document.pages[1], "FIRST SECOND THIRD"));
+    }
+
+    #[test]
+    fn table_header_without_room_for_any_cell_content_does_not_loop() {
+        let table = TableFlowable::new(vec![vec![table_cell("BODY")]])
+            .with_header(vec![vec![table_cell("HEADER")]])
+            .repeat_header(true);
         assert!(
-            table.split(width, height).is_none(),
-            "a repeated-header-only fragment would leave the same body for every page"
+            table
+                .split(Pt::from_f32(300.0), Pt::from_f32(12.0))
+                .is_none()
         );
+    }
+
+    #[test]
+    fn empty_companion_cell_does_not_fake_row_continuation_progress() {
+        let table = TableFlowable::new(vec![vec![
+            table_cell(""),
+            table_cell("").with_content(Box::new(Spacer::new_pt(Pt::from_f32(500.0)))),
+        ]])
+        .with_header(vec![vec![table_cell("HEADER"), table_cell("VALUE")]])
+        .repeat_header(true);
+        assert!(
+            table
+                .split(Pt::from_f32(300.0), Pt::from_f32(72.0))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn nonrepeating_column_labels_stay_with_oversized_row_content() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let content = (0..40)
+            .map(|i| format!("<p>SEGMENT_{i:03}</p>"))
+            .collect::<String>();
+        let html = format!(
+            "<table><tbody><tr style='break-after:avoid'><th scope='col'>LABEL</th></tr><tr><td>{content}</td></tr><tr><td>AFTER</td></tr></tbody></table>"
+        );
+        let document = engine.render_to_document(&html,
+            "@page {size:300pt 100pt;margin:10pt} * {margin:0;padding:0;font-family:Helvetica;font-size:10pt;line-height:12pt} table {width:100%;border-collapse:collapse} td {vertical-align:top}").expect("render");
+        assert!(document.pages.len() > 1);
+        assert!(page_contains_text(&document.pages[0], "LABEL SEGMENT_000"));
+        for page in &document.pages[1..] {
+            assert!(!page_contains_text(page, "LABEL"));
+        }
+        for i in 0..40 {
+            let marker = format!("SEGMENT_{i:03}");
+            assert_eq!(
+                document
+                    .pages
+                    .iter()
+                    .filter(|page| page_contains_text(page, &marker))
+                    .count(),
+                1,
+                "{marker}"
+            );
+        }
+        assert!(page_contains_text(document.pages.last().unwrap(), "AFTER"));
     }
 
     #[test]

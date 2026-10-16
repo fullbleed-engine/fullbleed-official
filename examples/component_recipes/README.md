@@ -110,12 +110,15 @@ Table parts are `header`, `cell`, `row`, `caption`, and `empty`, whether or not 
 current data produces cells, a caption, or an empty-state row. Each body cell retains its table,
 row, and column path in the compiled source map.
 
-**Outstanding pagination work:** a single body row taller than the available
-page, with repeated headers enabled, currently fails with the experimental
-renderer's `layout.unsplittable` error. A native progress guard prevents the previous
-unbounded header-only pagination loop; a rendering preflight rejects the engine's
-permissive fallback that would otherwise paint beyond the page. Actual content-preserving continuation
-of such rows is still a stabilization requirement, not a completed capability.
+**Pagination:** ordinary rows move intact when they fit on a fresh page.
+Top-aligned oversized cells continue independently through the native layout
+engine, with repeated headers and stable column widths on equal-width pages.
+The examples check long text, uneven cells, borders, and mixed content.
+Tables containing rowspans, page-tall images inside cells, and oversized
+non-top-aligned cells still need work.
+When the engine reports forced unsplittable overflow, the experimental renderer
+raises `layout.unsplittable` before returning a PDF. Changing page widths and
+more complex cell decorations need further qualification.
 
 ## Configure the page and render
 
@@ -185,7 +188,7 @@ This checks both a valid consumer and intentional argument errors. The typing
 marker applies to the experimental subpackage; it does not claim that the full
 native package or every style/part name has complete static typing.
 
-Before stabilization, this prototype still needs oversized-row continuation,
+Before stabilization, this prototype still needs broader row-continuation coverage,
 broader layout-diagnostic translation, static typing and completion refinement,
 an evaluated rendering reuse policy, and independent author usability feedback.
 The legacy authoring surface is unchanged. No language parity, PDF conformance,

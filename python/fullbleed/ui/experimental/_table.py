@@ -32,8 +32,9 @@ def DataTable(rows, *, columns, caption=None, empty="No records.", repeat_header
               row_break="avoid", style=None, class_name=None, attrs=None) -> Node:
     """Capture rows and cell callbacks once, with repeated semantic column headers.
 
-    row_break='avoid' prefers intact rows. Oversized rows with repeated headers
-    currently raise the experimental renderer's layout.unsplittable error.
+    row_break='avoid' prefers intact rows. Top-aligned oversized cells can
+    continue across pages. Unsupported layouts raise layout.unsplittable when
+    the native trace reports forced overflow; this is not a general validator.
     Use with_parts(header=..., cell=..., row=..., caption=..., empty=...) to customize.
     """
     if isinstance(columns, (Mapping, Set, str, bytes)):

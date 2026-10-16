@@ -1,7 +1,7 @@
 use crate::canvas::Canvas;
 use crate::flowable::{
-    BreakInside, Flowable, PageFootnoteEntry, draw_page_footnotes, page_footnote_height,
-    partition_page_footnotes_for_max_height,
+    BreakInside, Flowable, PageFootnoteEntry, SplitContext, draw_page_footnotes,
+    page_footnote_height, partition_page_footnotes_for_max_height,
 };
 use crate::types::{Pt, Rect, Size};
 
@@ -207,7 +207,14 @@ impl Frame {
             });
         }
 
-        if let Some((first, second)) = flowable.split(avail_width, avail_height) {
+        let split_context = if self.is_empty() {
+            SplitContext::at_fragment_start()
+        } else {
+            SplitContext::default()
+        };
+        if let Some((first, second)) =
+            flowable.split_with_context(avail_width, avail_height, split_context)
+        {
             let all_first_footnotes = first.page_footnotes();
             let (first_footnotes, first_deferred_footnotes) =
                 partition_page_footnotes_for_max_height(&all_first_footnotes, avail_width);

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from base64 import b64encode
 from dataclasses import asdict
 from hashlib import sha256
 from importlib import metadata, resources
@@ -17,7 +18,7 @@ import time
 
 import fullbleed
 from fullbleed.ui.experimental import (
-    Column, DataTable, Document, Flow, Page, Paragraph, Renderer, Theme,
+    Column, DataTable, Document, Flow, Image as ComponentImage, Page, Paragraph, Renderer, Strong, Theme,
     mm, pt, style,
 )
 from PIL import Image
@@ -31,9 +32,26 @@ def compact(text):
     return "".join(text.casefold().split())
 
 
-def oversized_document():
+def oversized_document(kind="single"):
     markers = [f"ROW_SEGMENT_{index:03d}" for index in range(1, 91)]
-    table = DataTable([markers], columns=[Column("Segments", lambda row: Flow([Paragraph(value) for value in row], gap=pt(3)))])
+    children = [Paragraph(value) for value in markers]
+    if kind in {"mixed-image", "tall-image"}:
+        image = BytesIO()
+        Image.new("RGB", (8, 8), "#a3269b").save(image, format="PNG")
+        children[20:20] = [ComponentImage(src="data:image/png;base64," + b64encode(image.getvalue()).decode("ascii"),
+                                          alt="Test square", style=style(width=pt(40), height=pt(900 if kind == "tall-image" else 45)))]
+        children[30] = Paragraph(Strong(markers[29]))
+    rows = [Flow(children, gap=pt(3)), Paragraph("FOLLOWING_ROW")]
+    columns = [Column("Segments", lambda row: row)]
+    if kind in {"uneven", "bordered"}:
+        columns.append(Column("Companion", lambda row: Flow(
+            [Paragraph(f"RIGHT_SEGMENT_{index:03d}") for index in range(1, 41)], gap=pt(3)
+        ) if row is rows[0] else Paragraph("FOLLOWING_RIGHT")))
+    table = DataTable(rows, columns=columns, repeat_header=kind != "header-off")
+    if kind == "bordered":
+        table = table.with_parts(cell=style(border="1pt solid #315d9b", background="#edf3fa"))
+    if kind == "unsupported-alignment":
+        table = table.with_parts(cell=style(vertical_align="bottom"))
     return Document(table, page=Page("A5", margin=mm(12)),
                     theme=Theme(text=style(font_family="Inter", font_size=pt(9), line_height=1.45)))
 
@@ -104,9 +122,9 @@ def main():
                         character_count += 1
                 finally:
                     text_page.close()
-                if page_index == 0:
+                if page_index == 0 or name.startswith("oversized-"):
                     bitmap = page.render(scale=1)
-                    bitmap.to_pil().save(folder / "independent-page-1.png")
+                    bitmap.to_pil().save(folder / f"independent-page-{page_index + 1}.png")
                     bitmap.close()
             finally:
                 page.close()
@@ -137,34 +155,53 @@ def main():
     check("portable-custom-page", Document(shared, page=Page((mm(100), mm(150)), margin=mm(10)), theme=studio_theme()),
           ["PORTABLE_VALUE"], size=(283.465, 425.197), pages=1)
 
-    # Keep the unsupported case explicit. Exercise it in a bounded child process
-    # so a regression of the repeated-header progress guard cannot hang this gate.
-    oversized = oversized_document()
-    folder = args.out / "oversized-row"
-    folder.mkdir(exist_ok=True)
-    plan = oversized.compile()
-    (folder / "document.html").write_text(plan.html, encoding="utf-8")
-    (folder / "document.css").write_text(plan.css, encoding="utf-8")
+    # Bound the native pagination work before inspecting the rendered artifacts.
+    # Text must occur once across logical cell continuations, with no header-only
+    # pages. A short cell must finish while its taller neighbour continues.
     child = """import json, runpy, sys
 from fullbleed.ui.experimental import AuthoringError, Renderer
-document = runpy.run_path(sys.argv[1])['oversized_document']()
+document = runpy.run_path(sys.argv[1])['oversized_document'](sys.argv[3])
 renderer = Renderer(font_files=[sys.argv[2]], document_timestamp='2026-10-15T00:00:00Z')
 try:
-    document.render_pdf(renderer)
+    pdf = document.render_pdf(renderer)
 except AuthoringError as error:
-    print(json.dumps(error.to_dict()))
+    print(json.dumps({'error': error.to_dict()}))
 else:
-    raise AssertionError('Oversized rows now render; replace the known-gap check with content-preservation evidence')
+    print(json.dumps({'pdf_bytes': len(pdf)}))
 """
-    started = time.monotonic()
-    failure = subprocess.run([sys.executable, "-I", "-c", child, str(Path(__file__).resolve()), str(font)],
-                             capture_output=True, text=True, encoding="utf-8", timeout=20)
-    assert failure.returncode == 0, failure.stderr
-    error = json.loads(failure.stdout)
-    assert error["code"] == "layout.unsplittable", error
-    unsupported = {"name": "oversized-row", "behavior": "bounded component renderer rejection", "error": error,
-                   "elapsed_seconds": time.monotonic() - started, "content_preserving_continuation": False}
-    (folder / "known-gap.json").write_text(json.dumps(unsupported, indent=2) + "\n", encoding="utf-8")
+    unsupported = []
+    for kind in ("single", "uneven", "header-off", "bordered", "mixed-image", "tall-image", "unsupported-alignment"):
+        started = time.monotonic()
+        bounded = subprocess.run([sys.executable, "-I", "-c", child, str(Path(__file__).resolve()), str(font), kind],
+                                 capture_output=True, text=True, encoding="utf-8", timeout=20)
+        assert bounded.returncode == 0, (kind, bounded.stderr)
+        result = json.loads(bounded.stdout)
+        if kind in {"unsupported-alignment", "tall-image"}:
+            assert result["error"]["code"] == "layout.unsplittable", result
+            unsupported.append({"name": kind, "behavior": "bounded component renderer rejection",
+                                "error": result["error"], "elapsed_seconds": time.monotonic() - started})
+            continue
+        assert result.get("pdf_bytes", 0) > 0, (kind, result)
+        markers = [f"ROW_SEGMENT_{index:03d}" for index in range(1, 91)] + ["FOLLOWING_ROW"]
+        if kind in {"uneven", "bordered"}:
+            markers += [f"RIGHT_SEGMENT_{index:03d}" for index in range(1, 41)] + ["FOLLOWING_RIGHT"]
+        reader, text = check(f"oversized-{kind}", oversized_document(kind), markers, size=a5)
+        assert 2 <= len(reader.pages) <= 8, (kind, len(reader.pages))
+        for marker in markers:
+            assert compact(text).count(compact(marker)) == 1, (kind, "missing or duplicated", marker)
+        for index, page in enumerate(reader.pages):
+            page_text = page.extract_text()
+            assert "ROW_SEGMENT_" in page_text or "FOLLOWING_ROW" in page_text, (kind, "empty continuation", index)
+            assert ("Segments" in page_text) == (kind != "header-off" or index == 0), (kind, "header", index)
+        if kind == "mixed-image":
+            counts = []
+            for preview in sorted((args.out / f"oversized-{kind}").glob("independent-page-*.png")):
+                with Image.open(preview) as painted:
+                    counts.append(sum(count for count, rgb in painted.convert("RGB").getcolors(1000000)
+                                      if rgb == (163, 38, 155)))
+            assert sum(count > 100 for count in counts) == 1, (kind, "image pages", counts)
+            assert 1600 <= sum(counts) <= 1900, (kind, "image area", counts)
+        cases[-1]["unique_cell_markers"] = len(markers)
 
     # A single extra column declares both its header and all corresponding cells.
     columns = [Column("Project", lambda row: row), Column("Hours", lambda row: "2"),
@@ -198,8 +235,8 @@ else:
     assert PdfReader(snippet_dir / "customer.pdf").metadata.title == "Customer details"
 
     result = {"ok": True, "version": metadata.version("fullbleed"), "runtime": str(fullbleed.__file__),
-              "cases": cases, "readme_blocks": len(snippets), "ready_for_stabilization": False, "unsupported_cases": [unsupported],
-              "scope": "Experimental authoring, metadata, geometry, ordinary table continuation, data edits, theme colors, source maps, glyphs and deterministic fixture bytes. Oversized rows are explicitly unsupported. Not a conformance or performance claim."}
+              "cases": cases, "readme_blocks": len(snippets), "ready_for_stabilization": False, "unsupported_cases": unsupported,
+              "scope": "Experimental authoring, metadata, geometry, ordinary and oversized top-aligned text cell continuation, data edits, theme colors, source maps, glyphs and deterministic fixture bytes. Rowspans, page-tall images in cells, and non-top-aligned oversized cells remain unsupported. Not a conformance or performance claim."}
     (args.out / "verification.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"ok": True, "cases": len(cases), "pages": sum(case["pages"] for case in cases)}))
 
