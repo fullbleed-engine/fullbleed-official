@@ -17,8 +17,8 @@ import fullbleed.ui.experimental as components
 
 VALID = '''from dataclasses import dataclass
 from fullbleed.ui.experimental import (
-    Column, DataTable, Document, Flow, Heading, Image, Node, Page, Paragraph,
-    Row, Stack, Style, Theme, component, css, mm, pt, style, styled, token,
+    Column, DataTable, Document, Flow, Heading, Image, LayoutError, Node, Page, Paragraph,
+    Row, Source, Stack, Style, Theme, component, css, mm, pt, style, styled, token,
 )
 
 @component(parts=("label", "note"))
@@ -55,6 +55,9 @@ brand = Row(Paragraph("Fullbleed"), Image(src="mark.png", alt="Company mark"), j
 document = Document(heading, brand, root, flow, table, theme=Theme({"muted": "#667580"}), page=Page("A5", margin=mm(12)))
 compiled_html: str = document.to_html()
 assert "Design" in compiled_html
+diagnostic = LayoutError("Cannot fit", page=2, sources=document.compile().sources)
+error_page: int = diagnostic.at("Batch").page
+error_sources: tuple[Source, ...] = diagnostic.sources
 escaped = css("transform: rotate(2deg)")
 custom_variables = style({"--brand": "#315d9b"}, color="var(--brand)")
 '''

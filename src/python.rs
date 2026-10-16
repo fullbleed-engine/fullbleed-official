@@ -3187,6 +3187,17 @@ fn owner_from_trace_fields(fields: &HashMap<&str, &str>) -> TraceOwnerContext {
     }
 }
 
+fn source_ids_from_trace_fields(fields: &HashMap<&str, &str>) -> Vec<String> {
+    fields
+        .get("source_ids_b64")
+        .into_iter()
+        .flat_map(|value| value.split(','))
+        .filter_map(|value| crate::base64::decode_url_safe_no_pad(value).ok())
+        .filter_map(|value| String::from_utf8(value).ok())
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
 fn trace_i64(fields: &HashMap<&str, &str>, key: &str) -> Option<i64> {
     fields.get(key).and_then(|value| value.parse::<i64>().ok())
 }
@@ -3374,6 +3385,7 @@ fn build_render_time_pagination_trace_py(
                     row.set_item("page", page_index + 1)?;
                     row.set_item("owner", trace_owner_to_py(py, &owner)?)?;
                     row.set_item("owner_label", owner.label())?;
+                    row.set_item("source_ids", source_ids_from_trace_fields(&fields))?;
 
                     if event_type == "layout" {
                         layout_event_count = layout_event_count.saturating_add(1);

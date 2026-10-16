@@ -8,7 +8,7 @@ import pytest
 
 from fullbleed.ui.experimental import (
     AuthoringError, Box, Card, Column, DataTable, Document, Flow, Fragment,
-    Heading, Node, Page, Paragraph, Renderer, Stack, Style, Theme, component,
+    Heading, LayoutError, Node, Page, Paragraph, Renderer, Stack, Style, Theme, component,
     css, mm, pct, pt, style, styled, token,
 )
 
@@ -383,6 +383,36 @@ def test_experimental_renderer_rejects_native_unsplittable_overflow(monkeypatch)
         Document(Paragraph("Huge"), title="Invoice").render_pdf(Renderer())
     assert caught.value.code == "layout.unsplittable"
     assert caught.value.path == ("Invoice", "page 2")
+    assert isinstance(caught.value, LayoutError)
+    assert caught.value.sources == ()
+
+
+@pytest.mark.parametrize("identifiers", [("n1", "n1", "unknown"), ("n1", "n3")])
+def test_native_fragment_sources_resolve_without_guessing_an_owner(monkeypatch, identifiers):
+    import fullbleed
+    @component
+    def Notice(text: str):
+        return Box(Paragraph(text))
+    document = Document(Notice("First"), Notice("Second"), title="Report")
+    class Engine:
+        def __init__(self, **options):
+            pass
+        def export_render_time_pagination_trace(self, html, css):
+            return {"events": [{"reason": "forced_unsplittable_full_frame", "page": 2,
+                                "source_ids": identifiers}]}
+        def render_image_pages(self, *args, **kwargs):
+            pytest.fail("An overflowing document must not be returned")
+    monkeypatch.setattr(fullbleed, "PdfEngine", Engine)
+    with pytest.raises(LayoutError) as caught:
+        document.render_image_pages(Renderer())
+    error = caught.value
+    expected_ids = ("n1",) if identifiers[1] == "n1" else ("n1", "n3")
+    assert tuple(source.node_id for source in error.sources) == expected_ids
+    assert all(source.path == ("Notice", "div") and source.file == __file__ for source in error.sources)
+    assert error.path == (("Report", "page 2", "Notice", "div") if len(error.sources) == 1 else ("Report", "page 2"))
+    assert error.at("Batch").sources == error.sources
+    assert error.at("Batch").page == 2
+    assert error.to_dict()["sources"][0]["path"] == ["Notice", "div"]
 
 
 def test_export_links_actual_relative_stylesheet(tmp_path):

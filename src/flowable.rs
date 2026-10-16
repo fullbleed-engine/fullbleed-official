@@ -2813,6 +2813,19 @@ pub trait Flowable: FlowableClone + Send + Sync {
         Vec::new()
     }
 
+    /// Authored roots associated with this layout fragment. These identify the
+    /// fragment's scope, not a guessed descendant responsible for a failure.
+    /// Anonymous containers forward their in-flow roots; an explicitly authored
+    /// wrapper stops traversal at its own data-fb-id boundary.
+    fn diagnostic_source_ids(&self) -> Vec<String> {
+        self.diagnostic_metadata()
+            .into_iter()
+            .filter_map(|(key, value)| {
+                (key == "fb.owner.source_id" && !value.is_empty()).then_some(value)
+            })
+            .collect()
+    }
+
     /// A zero-area compiler marker records page-local generated-content state
     /// without contributing a CSS box to fragmentation.
     fn is_layout_marker(&self) -> bool {
@@ -10389,6 +10402,10 @@ impl CssPixelHeightFlowable {
 }
 
 impl Flowable for CssPixelHeightFlowable {
+    fn diagnostic_source_ids(&self) -> Vec<String> {
+        self.child.diagnostic_source_ids()
+    }
+
     fn with_inline_bidi_levels(&self, levels: &[unicode_bidi::Level]) -> Option<Box<dyn Flowable>> {
         let mut resolved = self.clone();
         resolved.child = self.child.with_inline_bidi_levels(levels)?;
@@ -34172,6 +34189,15 @@ impl ContainerFlowable {
 }
 
 impl Flowable for ContainerFlowable {
+    fn diagnostic_source_ids(&self) -> Vec<String> {
+        self.state
+            .children
+            .iter()
+            .filter(|child| !child.out_of_flow() && !child.is_layout_marker())
+            .flat_map(|child| child.diagnostic_source_ids())
+            .collect()
+    }
+
     fn with_inline_bidi_levels(&self, levels: &[unicode_bidi::Level]) -> Option<Box<dyn Flowable>> {
         if !self.state.inline_bidi_transparent {
             return None;
@@ -37940,6 +37966,10 @@ impl FloatFlowable {
 }
 
 impl Flowable for FloatFlowable {
+    fn diagnostic_source_ids(&self) -> Vec<String> {
+        self.child.diagnostic_source_ids()
+    }
+
     fn wrap(&self, _avail_width: Pt, _avail_height: Pt) -> Size {
         Size {
             width: Pt::ZERO,
@@ -38005,6 +38035,10 @@ impl ClearFlowable {
 }
 
 impl Flowable for ClearFlowable {
+    fn diagnostic_source_ids(&self) -> Vec<String> {
+        self.child.diagnostic_source_ids()
+    }
+
     fn wrap(&self, avail_width: Pt, avail_height: Pt) -> Size {
         self.child.wrap(avail_width, avail_height)
     }
@@ -38292,6 +38326,10 @@ impl ExpandedWidthFlowable {
 }
 
 impl Flowable for ExpandedWidthFlowable {
+    fn diagnostic_source_ids(&self) -> Vec<String> {
+        self.child.diagnostic_source_ids()
+    }
+
     fn with_sliced_decoration_block_extension(&self, extra: Pt) -> Box<dyn Flowable> {
         let mut extended = self.clone();
         extended.child = self
@@ -38805,6 +38843,16 @@ impl MetaFlowable {
 }
 
 impl Flowable for MetaFlowable {
+    fn diagnostic_source_ids(&self) -> Vec<String> {
+        if let Some(source) = self.metadata.iter().find_map(|(key, value)| {
+            (key == "fb.owner.source_id" && !value.is_empty()).then_some(value)
+        }) {
+            vec![source.clone()]
+        } else {
+            self.child.diagnostic_source_ids()
+        }
+    }
+
     fn with_inline_bidi_levels(&self, levels: &[unicode_bidi::Level]) -> Option<Box<dyn Flowable>> {
         let end = levels.len().checked_sub(self.bidi_suffix.len())?;
         let levels = levels.get(self.bidi_prefix.len()..end)?;
@@ -39518,6 +39566,10 @@ impl RelativePositionedFlowable {
 }
 
 impl Flowable for AbsolutePositionedFlowable {
+    fn diagnostic_source_ids(&self) -> Vec<String> {
+        self.child.diagnostic_source_ids()
+    }
+
     fn wrap(&self, _avail_width: Pt, _avail_height: Pt) -> Size {
         Size {
             width: Pt::ZERO,
@@ -39779,6 +39831,10 @@ impl Flowable for AbsolutePositionedFlowable {
 }
 
 impl Flowable for RelativePositionedFlowable {
+    fn diagnostic_source_ids(&self) -> Vec<String> {
+        self.child.diagnostic_source_ids()
+    }
+
     fn with_inline_bidi_levels(&self, levels: &[unicode_bidi::Level]) -> Option<Box<dyn Flowable>> {
         let mut resolved = self.clone();
         resolved.child = self.child.with_inline_bidi_levels(levels)?;

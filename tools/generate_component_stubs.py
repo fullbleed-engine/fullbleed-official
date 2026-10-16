@@ -176,10 +176,11 @@ class _TableFactory(Protocol):
 DataTable: _TableFactory
 '''
 
-    document = HEADER + '''from dataclasses import dataclass
+    document = HEADER + '''from collections.abc import Iterable
+from dataclasses import dataclass
 from os import PathLike
 from typing import Any
-from ._style import Length, Theme
+from ._style import AuthoringError, Length, Theme
 from ._tree import _Child
 
 @dataclass(frozen=True)
@@ -195,6 +196,14 @@ class Source:
     path: tuple[str, ...]
     file: str | None
     line: int | None
+
+class LayoutError(AuthoringError):
+    page: int
+    sources: tuple[Source, ...]
+    def __init__(self, message: str, *, page: int, sources: Iterable[Source] = ...,
+                 code: str = ..., path: Iterable[str] = ...) -> None: ...
+    def at(self, name: str) -> LayoutError: ...
+    def to_dict(self) -> dict[str, Any]: ...
 
 @dataclass(frozen=True)
 class CompiledDocument:

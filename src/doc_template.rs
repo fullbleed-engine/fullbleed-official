@@ -127,9 +127,89 @@ fn trace_b64(value: &str) -> String {
     crate::base64::encode_url_safe_no_pad(value.as_bytes())
 }
 
-fn owner_trace_fields(owner_meta: &[(String, String)]) -> String {
+#[cfg(test)]
+mod provenance_tests {
+    use super::*;
+    use crate::flowable::{ContainerFlowable, MetaFlowable, Spacer, SplitContext};
+
+    fn authored(source: &str, child: Box<dyn Flowable>) -> Box<dyn Flowable> {
+        Box::new(MetaFlowable::new(
+            child,
+            vec![("fb.owner.source_id".to_string(), source.to_string())],
+        ))
+    }
+
+    #[test]
+    fn fragment_provenance_tracks_remaining_authored_roots_after_split() {
+        let first = authored("first", authored("nested", Box::new(Spacer::new(12.0))));
+        let second = authored("second", Box::new(Spacer::new(12.0)));
+        let anonymous = MetaFlowable::new(
+            Box::new(ContainerFlowable::new(vec![first, second], 12.0, 12.0)),
+            vec![("fb.reading.layout".to_string(), "block".to_string())],
+        );
+        assert_eq!(anonymous.diagnostic_source_ids(), ["first", "second"]);
+        let (head, tail) = anonymous
+            .split_with_context(
+                Pt::from_f32(100.0),
+                Pt::from_f32(12.0),
+                SplitContext::at_fragment_start(),
+            )
+            .expect("The anonymous container should split between its authored children");
+        assert_eq!(head.diagnostic_source_ids(), ["first"]);
+        assert_eq!(tail.diagnostic_source_ids(), ["second"]);
+    }
+
+    #[test]
+    fn fragment_provenance_preserves_arbitrary_ids_and_deduplicates_in_order() {
+        let source = "first,|=\"\n\u{00e9}";
+        let anonymous = ContainerFlowable::new(
+            vec![
+                authored(source, Box::new(Spacer::new(12.0))),
+                authored("second", Box::new(Spacer::new(12.0))),
+                authored(source, Box::new(Spacer::new(12.0))),
+            ],
+            12.0,
+            12.0,
+        );
+        let provenance = TraceProvenance::for_flowable(&anonymous);
+        assert_eq!(provenance.source_ids, [source, "second"]);
+        let packet = owner_trace_fields(&provenance);
+        let encoded = packet
+            .strip_prefix("|source_ids_b64=")
+            .expect("Only source IDs were authored");
+        let decoded: Vec<String> = encoded
+            .split(',')
+            .map(|value| {
+                String::from_utf8(crate::base64::decode_url_safe_no_pad(value).unwrap()).unwrap()
+            })
+            .collect();
+        assert_eq!(decoded, [source, "second"]);
+    }
+}
+
+struct TraceProvenance {
+    metadata: Vec<(String, String)>,
+    source_ids: Vec<String>,
+}
+
+impl TraceProvenance {
+    fn for_flowable(flowable: &dyn Flowable) -> Self {
+        let mut seen = BTreeSet::new();
+        Self {
+            metadata: flowable.diagnostic_metadata(),
+            source_ids: flowable
+                .diagnostic_source_ids()
+                .into_iter()
+                .filter(|source| !source.is_empty() && seen.insert(source.clone()))
+                .collect(),
+        }
+    }
+}
+
+fn owner_trace_fields(owner_meta: &TraceProvenance) -> String {
     let get = |key: &str| {
         owner_meta
+            .metadata
             .iter()
             .find_map(|(candidate, value)| (candidate == key).then(|| value.as_str()))
     };
@@ -147,6 +227,15 @@ fn owner_trace_fields(owner_meta: &[(String, String)]) -> String {
             fields.push(format!("{field}={}", trace_b64(value)));
         }
     }
+    if !owner_meta.source_ids.is_empty() {
+        // URL-safe base64 cannot contain commas or the trace field separators.
+        let encoded = owner_meta
+            .source_ids
+            .iter()
+            .map(|value| trace_b64(value))
+            .collect::<Vec<_>>();
+        fields.push(format!("source_ids_b64={}", encoded.join(",")));
+    }
     if fields.is_empty() {
         String::new()
     } else {
@@ -159,7 +248,7 @@ fn emit_pagination_layout_event(
     source_order: usize,
     segment_index: usize,
     flowable_name: &str,
-    owner_meta: &[(String, String)],
+    owner_meta: &TraceProvenance,
     frame_index: usize,
     is_last_frame: bool,
     placed_on_page_before: bool,
@@ -211,7 +300,7 @@ fn emit_pagination_transition_event(
     to_frame_index: usize,
     reason: &str,
     flowable_name: Option<&str>,
-    owner_meta: &[(String, String)],
+    owner_meta: &TraceProvenance,
     source_order: Option<usize>,
     segment_index: Option<usize>,
 ) {
@@ -501,7 +590,7 @@ impl DocTemplate {
             let mut suppress_break_before = false;
             loop {
                 let current_name = current.debug_name().to_string();
-                let current_owner_meta = current.diagnostic_metadata();
+                let current_owner_meta = TraceProvenance::for_flowable(current.as_ref());
                 let pagination = current.pagination();
                 let ends_with_vertical_fragmentainer = current.ends_with_vertical_fragmentainer();
                 let mut named_page_advanced = false;

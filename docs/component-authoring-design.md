@@ -132,6 +132,8 @@ deliberately simple but incurs another layout pass; it is not a qualified
 performance design. A later render-result API should expose PDF bytes, diagnostics,
 and source associations from the same native layout operation. Engine reuse needs
 an explicit isolation contract and measurements before it becomes the default.
+Native source collection currently runs on every pagination attempt; its cost
+also needs qualification for large authored and unmarked documents.
 
 ## Where the API should add real value
 
@@ -155,9 +157,16 @@ outside the primitive authoring layer.
 
 Diagnostics are part of ergonomics. The desired error is
 `Invoice → WorkTable → row 17 → Amount`, with the authored source and actionable
-reason. The prototype retains that path for authoring errors and table callbacks;
-native pagination errors currently reach only the document and page. Full native
-diagnostic translation is still work to do.
+reason. The prototype retains that path for authoring errors and table callbacks.
+Native pagination events now retain the authored roots associated with each
+layout fragment. Anonymous containers forward those roots, and splits retain
+only the roots belonging to each fragment. The experimental `LayoutError`
+resolves those IDs through the document's source map and exposes page, component
+paths, and definition locations. A failing table can identify `DataTable → table`.
+This is scope attribution, not a claim that the engine has identified the failing
+row or cell. Multiple roots remain separate; unknown IDs do not cause a guessed
+selector match. Other native diagnostics and descendant-level failure locations
+still need work.
 
 ## Findings from the prototype
 
@@ -191,7 +200,7 @@ pagination behavior that the renderer has not demonstrated.
 | Work | Acceptance condition |
 | --- | --- |
 | Oversized-row continuation (partial implementation) | Extend the tested top-aligned text cell behavior to rowspans, page-tall cell images, and other vertical alignments; qualify changing page geometry, complex decorations, and semantic continuity; unsupported cases fail explicitly |
-| Native diagnostics | Overflow, missing glyphs, and invalid layout report the responsible component/part where source IDs exist |
+| Native diagnostics (partial implementation) | Unsplittable fragments resolve to authored root scopes; identify failing descendants and map missing glyphs/other layout diagnostics before claiming full component-level attribution |
 | Typing and completion (partial implementation) | Generated stubs and installed mypy/Pyright checks cover styles, primitive props, layout choices, page options, record types and component arguments; token/part-name completion remains open |
 | Declared parts (implemented in the prototype) | Empty/conditional states accept documented parts; boundaries, root delegation, schema validation, and callable argument types have focused coverage; author feedback remains needed |
 | Semantics and accessibility | Reuse the existing semantic validation contract; test generated structure and final delivery profiles separately |

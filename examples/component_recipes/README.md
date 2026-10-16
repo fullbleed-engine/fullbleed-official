@@ -156,9 +156,22 @@ default. The engine remains responsible for final pagination; components do not
 estimate font metrics or pre-paginate rows in Python.
 
 `document.compile()` returns HTML, CSS, and a source map. Generated `data-fb-id`
-values use the engine's existing source-ID mechanism. Source filenames and line
-numbers live in the sidecar, not in the generated PDF. Translating all native
-layout diagnostics into component-level messages is still future work.
+values use the engine's source-ID mechanism. Source filenames and line numbers
+identify component definitions in the sidecar, not in the generated PDF.
+
+An unsplittable native fragment raises `LayoutError`, a subclass of
+`AuthoringError`. Its `page` and `sources` identify the page and affected authored
+component roots. For a failing table, the path includes `DataTable → table`, and
+`error.to_dict()` includes the source IDs, component paths, definition files and
+line numbers. Anonymous containers forward their roots through page splits;
+completed siblings do not remain in a continuation's scope.
+
+These locations describe the failing fragment's scope. They do not identify a
+particular overflowing cell or image inside it. Multiple roots remain separate
+entries in `sources`; an unknown native ID is not guessed from a CSS class or
+selector. Traces without source associations retain the document/page error.
+Mapping other native diagnostics and locating individual failing descendants
+remain future work.
 
 ## Run the candidate
 

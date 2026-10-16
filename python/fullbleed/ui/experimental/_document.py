@@ -64,6 +64,29 @@ class Source:
     line: int | None
 
 
+class LayoutError(AuthoringError):
+    """A native pagination failure with the authored roots of its fragment.
+
+    Sources identify the affected scope, not a guessed failing descendant.
+    Their file/line fields identify component definitions in the source sidecar.
+    """
+
+    def __init__(self, message, *, page, sources=(), code="layout.unsplittable", path=()):
+        self.page, self.sources = page, tuple(sources)
+        super().__init__(message, code=code, path=path)
+
+    def at(self, name: str) -> LayoutError:
+        return LayoutError(self.message, page=self.page, sources=self.sources,
+                           code=self.code, path=(name, *self.path))
+
+    def to_dict(self) -> dict:
+        return {
+            **super().to_dict(), "page": self.page,
+            "sources": [{"node_id": source.node_id, "path": list(source.path),
+                         "file": source.file, "line": source.line} for source in self.sources],
+        }
+
+
 @dataclass(frozen=True)
 class CompiledDocument:
     html: str
@@ -190,9 +213,15 @@ class Renderer:
         trace = engine.export_render_time_pagination_trace(plan.html, plan.css)
         for event in trace["events"]:
             if event.get("reason") == "forced_unsplittable_full_frame":
-                raise AuthoringError(
+                by_id = {source.node_id: source for source in plan.sources}
+                sources = tuple(by_id[node_id] for node_id in dict.fromkeys(event.get("source_ids", ()))
+                                if node_id in by_id)
+                path = (document.title, f"page {event['page']}")
+                if len(sources) == 1:
+                    path += sources[0].path
+                raise LayoutError(
                     "Content cannot fit or continue within the page. The engine would place an unsplittable "
                     "block beyond the page edge; no PDF was returned. Restructure the block or use a larger page.",
-                    code="layout.unsplittable", path=(document.title, f"page {event['page']}"),
+                    page=event["page"], sources=sources, path=path,
                 )
         return engine
