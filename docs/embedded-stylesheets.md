@@ -91,15 +91,29 @@ does not rebuild the document stylesheet. Put shared rules in the template, and
 compile a separate template when stylesheet sources change. CSS text and style
 attributes are not scalar binding slots.
 
-Inline SVG remains a leaf rendered by the existing SVG subset pipeline. Its
-connected `<style>` elements also contribute to the HTML cascade, but HTML
-selector rules are not propagated into SVG descendants. The SVG renderer has
-separate local stylesheet handling, including existing differences in `type`,
-`media`, and preferred-set filtering. Use explicit SVG presentation attributes or
-a tested self-contained SVG asset when those distinctions matter. Consult the
-runtime SVG capability map; this change does not establish shared HTML/SVG
-stylesheet parity.
-The shared-cascade work is tracked in [issue 87](https://github.com/fullbleed-engine/fullbleed-official/issues/87).
+Inline SVG uses the document cascade for supported paint and font properties
+before its subtree is compiled by the native SVG painter. Document class,
+ancestor, child, attribute, positional and sibling selectors can style its
+descendants. Connected SVG `<style>` elements participate in the same source
+order, type, media and preferred-set selection as HTML styles. Their rules are
+applied once. SVG presentation attributes precede author stylesheet declarations;
+normal inline styles then win unless an important declaration takes precedence.
+
+For example, `.brand svg path {fill:currentColor}` uses the color supplied by
+`.brand {color:#d00000}`. Supported paint properties inherit through the HTML
+ancestors into the SVG. Registered fonts remain the typography source; no system
+font lookup or browser is introduced.
+
+`fill-opacity` and `stroke-opacity` replace inherited or earlier values. A paint
+color's own alpha remains separate. `opacity` composites the element or group
+once, so two overlapping shapes inside `<g opacity="0.5">` do not darken their
+overlap. The outer inline SVG's opacity is applied by its document wrapper once.
+
+SVG assets loaded through `<img>` or an asset reference remain isolated from the
+containing document's selectors. Their supported local styles use print media
+and type/title selection. Fullbleed still implements an SVG subset: this change
+does not add browser layout, script execution, animation, arbitrary filters, or
+complete SVG/CSS conformance. See the runtime SVG capability map.
 
 Batch outputs retain their single-paper-size restriction. Embedded page settings
 initialize streaming writers from the first record; later records must use the
@@ -121,3 +135,11 @@ authored explicit-CSS controls. It retains PDFs, PDFium page images, extracted
 text, page boxes, and deterministic-repeat checks across direct, compiled,
 binding, preview, reporting, and batch paths. These fixtures verify this input
 feature; the independent CSS corpus remains a separate broader qualification.
+
+`tools/smoke_svg_styles.py` retains known-color fixtures for document selectors,
+inheritance, cascade priority, stylesheet selection, custom properties, gradients,
+group opacity and SVG asset isolation. It checks PDFium samples, native previews,
+repeat determinism and direct/compiled/fixed/reflow output with forms on/off and
+the optional native raster fallback. The expected paint and compositing rules
+come from [SVG styling](https://www.w3.org/TR/SVG2/styling.html) and
+[SVG group compositing](https://www.w3.org/TR/SVG2/render.html#ObjectAndGroupOpacityProperties).

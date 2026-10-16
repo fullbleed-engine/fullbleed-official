@@ -1990,6 +1990,9 @@ enum BorderCascadeOp {
 
 #[derive(Debug, Clone, Default)]
 struct StyleDelta {
+    // The SVG painter consumes these after the same selector/media/layer
+    // selection as HTML. Keeping them here also retains paint-only rules.
+    svg_declarations: Vec<crate::css_native::Declaration>,
     all: Option<CascadeWideKeyword>,
     background_reset: Option<CascadeWideKeyword>,
     revert_layer: RevertLayerDelta,
@@ -5693,6 +5696,151 @@ impl StyleResolver {
         self.compute_style(&ElementInfo::synthetic_root("html"), &initial, None, &[])
     }
 
+    fn matching_rules<'a>(
+        &'a self,
+        element: &ElementInfo,
+        ancestors: &[ElementInfo],
+        important: bool,
+    ) -> Vec<&'a RuleEntry> {
+        let (index, rules) = if important {
+            (&self.important_index, &self.important_rules)
+        } else {
+            (&self.normal_index, &self.normal_rules)
+        };
+        let mut matched: Vec<_> = index
+            .candidate_indices(element)
+            .into_iter()
+            .filter_map(|idx| rules.get(idx))
+            .filter(|rule| rule.selector.matches(element, ancestors))
+            .filter(|rule| container_conditions_match(&rule.container_conditions, ancestors))
+            .filter(|rule| scope_conditions_match(&rule.scope_conditions, element, ancestors))
+            .collect();
+        matched.sort_by_key(|rule| {
+            if important {
+                (
+                    true,
+                    rule.important_layer_rank(self.layer_count),
+                    rule.specificity,
+                    rule.order,
+                )
+            } else {
+                (
+                    rule.order >= self.author_rule_order_start,
+                    rule.normal_layer_rank(),
+                    rule.specificity,
+                    rule.order,
+                )
+            }
+        });
+        matched
+    }
+
+    /// Select declarations while HTML ancestors, sibling positions, print
+    /// media, preferred stylesheet sets and cascade layers are still available.
+    pub(crate) fn svg_declarations(
+        &self,
+        element: &ElementInfo,
+        ancestors: &[ElementInfo],
+        presentation_attributes: bool,
+        computed: &ComputedStyle,
+    ) -> svg::SvgProperties {
+        fn apply(
+            out: &mut svg::SvgProperties,
+            declarations: &[crate::css_native::Declaration],
+            layer_base: &svg::SvgProperties,
+            origin_base: &svg::SvgProperties,
+            computed: &ComputedStyle,
+        ) {
+            for declaration in declarations {
+                let value = if declaration.value.to_ascii_lowercase().contains("var(") {
+                    // Invalid at computed-value time behaves as unset, rather
+                    // than resurrecting an earlier declaration.
+                    substitute_vars_in_color_expr(computed, &declaration.value, 0)
+                        .unwrap_or_else(|| "unset".into())
+                } else {
+                    declaration.value.clone()
+                };
+                let mut expanded = svg::SvgProperties::new();
+                svg::insert_svg_property(&mut expanded, &declaration.name, &value);
+                if expanded.is_empty() && declaration.value.to_ascii_lowercase().contains("var(") {
+                    svg::insert_svg_property(&mut expanded, &declaration.name, "unset");
+                }
+                for (name, value) in expanded {
+                    let base = if value.eq_ignore_ascii_case("revert-layer") {
+                        Some(layer_base)
+                    } else if value.eq_ignore_ascii_case("revert") {
+                        Some(origin_base)
+                    } else {
+                        None
+                    };
+                    if let Some(base) = base {
+                        if let Some(value) = base.get(&name) {
+                            out.insert(name, value.clone());
+                        } else {
+                            out.remove(&name);
+                        }
+                    } else {
+                        out.insert(name, value);
+                    }
+                }
+            }
+        }
+        let mut out = svg::SvgProperties::new();
+        if presentation_attributes {
+            // Presentation attributes have author specificity zero and precede
+            // stylesheet rules. !important is not valid in an attribute value.
+            let mut attributes: Vec<_> = element.attrs.iter().collect();
+            attributes.sort_by_key(|(name, _)| {
+                (
+                    !matches!(name.as_str(), "marker" | "font-synthesis"),
+                    name.as_str(),
+                )
+            });
+            for (name, value) in attributes {
+                if !value.contains('!') && name != "all" {
+                    svg::insert_svg_property(&mut out, name, value);
+                }
+            }
+        }
+        let origin_base = svg::SvgProperties::new();
+        let inline = element
+            .attrs
+            .get("style")
+            .and_then(|s| crate::css_native::parse_declaration_block(s).ok());
+        for important in [false, true] {
+            let mut layer = None;
+            let mut layer_base = out.clone();
+            for rule in self.matching_rules(element, ancestors, important) {
+                let rank = if important {
+                    rule.important_layer_rank(self.layer_count)
+                } else {
+                    rule.normal_layer_rank()
+                };
+                if layer != Some(rank) {
+                    layer = Some(rank);
+                    layer_base = out.clone();
+                }
+                apply(
+                    &mut out,
+                    &rule.delta.svg_declarations,
+                    &layer_base,
+                    &origin_base,
+                    computed,
+                );
+            }
+            if let Some(inline) = &inline {
+                let declarations: Vec<_> = if important {
+                    inline.important().cloned().collect()
+                } else {
+                    inline.normal().cloned().collect()
+                };
+                let base = out.clone();
+                apply(&mut out, &declarations, &base, &origin_base, computed);
+            }
+        }
+        out
+    }
+
     pub fn compute_style(
         &self,
         element: &ElementInfo,
@@ -6019,25 +6167,7 @@ impl StyleResolver {
             }
         }
 
-        let mut matches: Vec<&RuleEntry> = self
-            .normal_index
-            .candidate_indices(element)
-            .into_iter()
-            .filter_map(|idx| self.normal_rules.get(idx))
-            .filter(|rule| rule.selector.matches(element, ancestors))
-            .filter(|rule| container_conditions_match(&rule.container_conditions, ancestors))
-            .filter(|rule| scope_conditions_match(&rule.scope_conditions, element, ancestors))
-            .collect();
-        matches.sort_by(|a, b| {
-            (a.order >= self.author_rule_order_start)
-                .cmp(&(b.order >= self.author_rule_order_start))
-                .then_with(|| a.normal_layer_rank().cmp(&b.normal_layer_rank()))
-                .then_with(|| {
-                    a.specificity
-                        .cmp(&b.specificity)
-                        .then_with(|| a.order.cmp(&b.order))
-                })
-        });
+        let matches = self.matching_rules(element, ancestors, false);
 
         if let (Some(logger), Some(node)) = (debug, debug_node.as_ref()) {
             let selectors: Vec<String> = matches
@@ -6135,24 +6265,7 @@ impl StyleResolver {
             }
         }
 
-        let mut important_matches: Vec<&RuleEntry> = self
-            .important_index
-            .candidate_indices(element)
-            .into_iter()
-            .filter_map(|idx| self.important_rules.get(idx))
-            .filter(|rule| rule.selector.matches(element, ancestors))
-            .filter(|rule| container_conditions_match(&rule.container_conditions, ancestors))
-            .filter(|rule| scope_conditions_match(&rule.scope_conditions, element, ancestors))
-            .collect();
-        important_matches.sort_by(|a, b| {
-            a.important_layer_rank(self.layer_count)
-                .cmp(&b.important_layer_rank(self.layer_count))
-                .then_with(|| {
-                    a.specificity
-                        .cmp(&b.specificity)
-                        .then_with(|| a.order.cmp(&b.order))
-                })
-        });
+        let important_matches = self.matching_rules(element, ancestors, true);
 
         let mut current_important_layer_rank = None;
         let mut important_layer_base = computed.clone();
@@ -7158,7 +7271,15 @@ fn native_supports_prelude_matches(prelude: &str) -> bool {
                     height: Pt::ZERO,
                 },
             );
-            !delta.is_empty()
+            // Raw SVG copies of shared CSS properties must not make invalid
+            // HTML values appear supported. The painter additionally supports
+            // validated SVG-only properties such as fill and stroke.
+            delta.svg_declarations.clear();
+            let mut paint = svg::SvgProperties::new();
+            if !matches!(name, "color" | "opacity" | "all") && !name.starts_with("font-") {
+                svg::insert_svg_property(&mut paint, name, value);
+            }
+            !delta.is_empty() || !paint.is_empty()
         },
         |selector| parse_selector_pattern(selector).is_some(),
     )
@@ -9149,6 +9270,13 @@ fn apply_raw_declaration(
     viewport: Size,
 ) {
     let resolved = resolve_viewport_units_in_raw(&declaration.value, viewport);
+    if svg::is_svg_style_property(&declaration.name) {
+        delta.svg_declarations.push(crate::css_native::Declaration {
+            name: declaration.name.clone(),
+            value: resolved.clone(),
+            important: declaration.important,
+        });
+    }
     let _ = apply_native_raw_property(&declaration.name, &resolved, delta);
 }
 
@@ -33947,7 +34075,8 @@ fn apply_white_space_collapse_from_raw(delta: &mut StyleDelta, raw: &str) -> boo
 
 impl StyleDelta {
     fn is_empty(&self) -> bool {
-        self.all.is_none()
+        self.svg_declarations.is_empty()
+            && self.all.is_none()
             && self.background_reset.is_none()
             && self.revert_layer.is_empty()
             && self.font_size.is_none()

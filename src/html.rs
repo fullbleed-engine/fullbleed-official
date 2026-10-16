@@ -3293,7 +3293,12 @@ fn node_to_flowables_in_scope(
                     "svg" => (|| {
                         // Inline SVG. We intentionally treat this as a leaf node and render it with a
                         // dedicated subset parser, rather than trying to interpret SVG children as HTML.
-                        let xml = serialize_svg_node(node);
+                        let xml = serialize_styled_svg_node(
+                            node,
+                            resolver,
+                            &mut style,
+                            &ancestors[..ancestors.len() - 1],
+                        );
                         let font_context = crate::svg::SvgFontContext {
                             style: style.to_text_style(),
                             registry: font_registry.clone(),
@@ -4387,12 +4392,174 @@ fn node_to_flowables_in_scope(
     }
 }
 
+#[cfg(test)]
 fn serialize_svg_node(node: &NodeRef) -> String {
     // The HTML parser applies HTML recovery semantics, while the SVG compiler expects well-formed
     // XML. Emit a minimal XML serialization for the foreign-content subtree.
     let mut out = String::new();
     write_svg_xml(node, &mut out);
     out
+}
+
+/// Flatten only the supported SVG presentation cascade, before detaching the
+/// foreign-content subtree from its HTML ancestors. Local <style> elements have
+/// already participated in the document stylesheet selection and must not be
+/// applied a second time by the standalone SVG compiler.
+fn serialize_styled_svg_node(
+    node: &NodeRef,
+    resolver: &StyleResolver,
+    root_style: &mut ComputedStyle,
+    ancestors: &[ElementInfo],
+) -> String {
+    let mut inherited = crate::svg::SvgProperties::new();
+    let mut parent_style = resolver.default_style();
+    for (index, ancestor) in ancestors.iter().enumerate() {
+        let computed = resolver.compute_style(
+            ancestor,
+            &parent_style,
+            ancestor.attrs.get("style").map(String::as_str),
+            &ancestors[..index],
+        );
+        let own = resolver.svg_declarations(ancestor, &ancestors[..index], false, &computed);
+        for (name, value) in own {
+            if !crate::svg::svg_property_inherits(&name) {
+                continue;
+            }
+            if matches!(value.to_ascii_lowercase().as_str(), "inherit" | "unset") {
+                continue;
+            }
+            let value = if name == "font-size" {
+                (computed.font_size.to_f32() / 0.75).to_string()
+            } else {
+                value
+            };
+            inherited.insert(
+                name.clone(),
+                if value.eq_ignore_ascii_case("initial") {
+                    crate::svg::svg_property_initial(&name).unwrap_or("").into()
+                } else {
+                    value
+                },
+            );
+        }
+        parent_style = computed;
+    }
+    let mut root = resolver.svg_declarations(
+        &element_info(node, resolver.has_sibling_selectors()),
+        ancestors,
+        true,
+        root_style,
+    );
+    if let Some(opacity) = root
+        .get("opacity")
+        .and_then(|s| crate::svg::parse_svg_alpha(s))
+    {
+        root_style.opacity = opacity;
+    } else if root
+        .get("opacity")
+        .is_some_and(|v| v.eq_ignore_ascii_case("inherit"))
+    {
+        root_style.opacity = parent_style.opacity;
+    }
+    // The replaced-element wrapper composites the outer SVG once.
+    root.insert("opacity".into(), "1".into());
+    for (name, value) in root {
+        if value.eq_ignore_ascii_case("inherit")
+            || (value.eq_ignore_ascii_case("unset") && crate::svg::svg_property_inherits(&name))
+        {
+            continue;
+        }
+        let value = if name == "font-size" {
+            crate::svg::parse_svg_font_size(&value, parent_style.font_size.to_f32() / 0.75)
+                .map(|size| size.to_string())
+                .unwrap_or(value)
+        } else {
+            value
+        };
+        inherited.insert(name, value);
+    }
+    let mut out = String::new();
+    write_styled_svg_xml(
+        node,
+        &mut out,
+        resolver,
+        root_style,
+        &mut ancestors.to_vec(),
+        Some(inherited),
+    );
+    out
+}
+
+fn write_styled_svg_xml(
+    node: &NodeRef,
+    out: &mut String,
+    resolver: &StyleResolver,
+    parent_style: &ComputedStyle,
+    ancestors: &mut Vec<ElementInfo>,
+    root: Option<crate::svg::SvgProperties>,
+) {
+    match node.data() {
+        NodeData::Element(element) => {
+            let tag = element.name.local.as_ref();
+            if tag.eq_ignore_ascii_case("style") {
+                return;
+            }
+            let mut info = element_info(node, resolver.has_sibling_selectors());
+            let computed = if root.is_some() {
+                parent_style.clone()
+            } else {
+                resolver.compute_style(
+                    &info,
+                    parent_style,
+                    info.attrs.get("style").map(String::as_str),
+                    ancestors,
+                )
+            };
+            let properties = root
+                .unwrap_or_else(|| resolver.svg_declarations(&info, ancestors, true, &computed));
+            info.apply_computed_container_style(&computed);
+            out.push('<');
+            out.push_str(tag);
+            let attrs = element.attributes.borrow();
+            let mut has_xmlns = false;
+            for (key, value) in &attrs.map {
+                let name = key.local.as_ref();
+                if name == "style" || crate::svg::is_svg_style_property(name) {
+                    continue;
+                }
+                has_xmlns |= name.eq_ignore_ascii_case("xmlns");
+                out.push(' ');
+                out.push_str(name);
+                out.push_str("=\"");
+                escape_xml_attr(&value.value, out);
+                out.push('"');
+            }
+            if tag.eq_ignore_ascii_case("svg") && !has_xmlns {
+                out.push_str(" xmlns=\"http://www.w3.org/2000/svg\"");
+            }
+            for (name, value) in properties {
+                // Materialize winners as presentation attributes. Referenced
+                // markers/masks also inspect paint attributes in this private
+                // serialization; keeping them here preserves that behavior.
+                out.push(' ');
+                out.push_str(&name);
+                out.push_str("=\"");
+                escape_xml_attr(&value, out);
+                out.push('"');
+            }
+            out.push('>');
+            ancestors.push(info);
+            for child in node.children() {
+                write_styled_svg_xml(&child, out, resolver, &computed, ancestors, None);
+            }
+            ancestors.pop();
+            out.push_str("</");
+            out.push_str(tag);
+            out.push('>');
+        }
+        NodeData::Text(text) => escape_xml_text(&text.borrow(), out),
+        _ => {}
+    }
 }
 
 fn resolve_inline_svg_mask_sources(node: &NodeRef, style: &mut ComputedStyle) {
