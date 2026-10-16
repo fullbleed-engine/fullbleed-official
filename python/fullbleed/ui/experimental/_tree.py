@@ -9,6 +9,7 @@ from typing import Callable, ParamSpec, Protocol, cast, overload
 
 from ..core import _normalize_attr_name, _ATTR_NAME, _TAG_NAME, _HTML_VOID_ELEMENTS
 from ._style import AuthoringError, Style, _number, pt, style
+from ._schema import ALIGNMENTS, JUSTIFICATIONS, PRIMITIVE_TAGS
 
 P = ParamSpec("P")
 
@@ -202,7 +203,8 @@ def _element(tag, children, *, base=None, style=None, class_name=None, attrs=Non
     return Node(tag, _children(children), _attrs(attributes), Style(base, style), part)
 
 
-def _primitive(name, tag, base=None):
+def _primitive(name, base=None):
+    tag = PRIMITIVE_TAGS[name]
     def build(*children, style=None, class_name=None, attrs=None, part=None) -> Node:
         return _element(tag, children, base=base, style=style, class_name=class_name, attrs=attrs, part=part)
     build.__name__ = name
@@ -211,15 +213,15 @@ def _primitive(name, tag, base=None):
     return build
 
 
-Box = _primitive("Box", "div")
-Paragraph = _primitive("Paragraph", "p", style(margin=0))
-Text = _primitive("Text", "span")
-Strong = _primitive("Strong", "strong")
-Emphasis = _primitive("Emphasis", "em")
-Section = _primitive("Section", "section")
-Header = _primitive("Header", "header")
-Footer = _primitive("Footer", "footer")
-Card = _primitive("Card", "section", style(padding=pt(12), border="1pt solid #d3ded8", border_radius=pt(4)))
+Box = _primitive("Box")
+Paragraph = _primitive("Paragraph", style(margin=0))
+Text = _primitive("Text")
+Strong = _primitive("Strong")
+Emphasis = _primitive("Emphasis")
+Section = _primitive("Section")
+Header = _primitive("Header")
+Footer = _primitive("Footer")
+Card = _primitive("Card", style(padding=pt(12), border="1pt solid #d3ded8", border_radius=pt(4)))
 
 
 def Fragment(*children) -> Node:
@@ -236,16 +238,16 @@ def Heading(*children, level: int = 2, keep_with_next: bool = True, style=None, 
 
 
 def Stack(*children, gap=pt(8), align="stretch", style=None, class_name=None, attrs=None, part=None) -> Node:
-    if align not in {"stretch", "start", "end", "center", "baseline"}:
+    if align not in ALIGNMENTS:
         raise AuthoringError(f"Unknown alignment {align!r}", code="layout.align")
     return _element("div", children, base=Style(display="flex", flex_direction="column", gap=gap, align_items=align),
                     style=style, class_name=class_name, attrs=attrs, part=part)
 
 
 def Row(*children, gap=pt(8), align="center", justify="space-between", style=None, class_name=None, attrs=None, part=None) -> Node:
-    if align not in {"stretch", "start", "end", "center", "baseline"}:
+    if align not in ALIGNMENTS:
         raise AuthoringError(f"Unknown alignment {align!r}", code="layout.align")
-    if justify not in {"start", "end", "center", "space-between", "space-around", "space-evenly"}:
+    if justify not in JUSTIFICATIONS:
         raise AuthoringError(f"Unknown justification {justify!r}", code="layout.justify")
     return _element("div", children, base=Style(display="flex", gap=gap, align_items=align, justify_content=justify),
                     style=style, class_name=class_name, attrs=attrs, part=part)
@@ -329,4 +331,5 @@ def styled(factory: Callable[..., Node], *fragments, **properties):
         if not isinstance(node, Node):
             raise AuthoringError("A styled factory must return a component node", code="style.root")
         return node.with_style(base, style)
+    setattr(build, "parts", getattr(factory, "parts", None))
     return build

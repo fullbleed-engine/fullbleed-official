@@ -390,3 +390,38 @@ def test_export_links_actual_relative_stylesheet(tmp_path):
     document.emit_artifacts(html_path=tmp_path / "html/report.html", css_path=tmp_path / "styles/report.css")
     assert 'href="../styles/report.css"' in (tmp_path / "html/report.html").read_text()
     assert (tmp_path / "styles/report.css").read_text() == document.to_css()
+
+
+@pytest.mark.parametrize("property_name", ["margin", "padding", "border_width", "gap"])
+@pytest.mark.parametrize("value", [(pt(2), 4), [0, Decimal("1.5")]])
+def test_length_shorthand_numbers_need_units(property_name, value):
+    with pytest.raises(AuthoringError) as caught:
+        style(**{property_name: value})
+    assert caught.value.code == "style.unit"
+
+
+@pytest.mark.parametrize("number", [8, 8.5, Decimal("1E+2"), "8"])
+def test_length_shorthand_tokens_keep_unit_checks_and_component_paths(number):
+    @component
+    def Panel():
+        return Card("Body", style=style(padding=(pt(4), token("spacing"))))
+
+    with pytest.raises(AuthoringError) as caught:
+        Document(Panel(), theme=Theme({"spacing": number})).compile()
+    assert caught.value.code == "style.unit"
+    assert caught.value.path == ("Panel", "section")
+    valid = Document(Panel(), theme=Theme({"spacing": mm(2)})).to_css()
+    assert "padding: 4pt 2mm;" in valid
+    assert style(padding=(0, 0.0, Decimal("0"), pt(2))).resolve(Theme()) == "padding: 0 0.0 0 2pt;"
+
+
+def test_styled_factories_expose_their_optional_part_contract():
+    @component(parts=("label",))
+    def Field(value: str):
+        return Paragraph(value, part="label")
+
+    StyledField = styled(Field, color="blue")
+    StyledParagraph = styled(Paragraph, color="blue")
+    assert StyledField.parts == Field.parts == ("label",)
+    assert StyledParagraph.parts is None
+    assert "color: red;" in Document(StyledField("value").with_parts(label=style(color="red"))).to_css()

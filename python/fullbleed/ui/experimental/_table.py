@@ -7,6 +7,7 @@ from typing import Generic, TypeVar
 
 from ._style import AuthoringError, Length, Style, pt
 from ._tree import Node, _element, component
+from ._schema import COLUMN_ALIGNMENTS, ROW_BREAKS, TABLE_PARTS
 
 T = TypeVar("T")
 
@@ -21,13 +22,13 @@ class Column(Generic[T]):
     def __post_init__(self):
         if not isinstance(self.label, str) or not self.label.strip() or not callable(self.cell):
             raise AuthoringError("Column requires a label and a cell function", code="table.column")
-        if self.align not in {"left", "right", "center"}:
+        if self.align not in COLUMN_ALIGNMENTS:
             raise AuthoringError("Column alignment must be left, right, or center", code="table.align")
         if self.width is not None and (not isinstance(self.width, Length) or self.width.value <= 0):
             raise AuthoringError("Column width requires a positive length", code="table.width")
 
 
-@component(parts=("header", "cell", "row", "caption", "empty"))
+@component(parts=TABLE_PARTS)
 def DataTable(rows, *, columns, caption=None, empty="No records.", repeat_header=True,
               row_break="avoid", style=None, class_name=None, attrs=None) -> Node:
     """Capture rows and cell callbacks once, with repeated semantic column headers.
@@ -42,7 +43,7 @@ def DataTable(rows, *, columns, caption=None, empty="No records.", repeat_header
     columns = tuple(columns)
     if not columns or any(not isinstance(column, Column) for column in columns):
         raise AuthoringError("DataTable requires at least one Column", code="table.columns")
-    if not isinstance(repeat_header, bool) or row_break not in {"avoid", "auto"}:
+    if not isinstance(repeat_header, bool) or row_break not in ROW_BREAKS:
         raise AuthoringError("Use boolean repeat_header and row_break='avoid' or 'auto'", code="table.pagination")
     if isinstance(rows, (Mapping, Set, str, bytes, bytearray)):
         raise AuthoringError("Table rows must be an ordered iterable", code="table.rows")

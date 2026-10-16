@@ -71,7 +71,8 @@ parts. An undeclared wrapper retains root delegation.
 public names. Plain `@component` remains supported and discovers names from
 present content; use an explicit declaration for a stable customization contract.
 `ComponentFactory` preserves a decorated function's argument types while exposing
-its optional declaration. Style-property and part-name completion remain future work.
+its optional declaration. Styled factories expose the same optional declaration;
+styling a primitive exposes `parts=None`.
 
 Styles compose in this order: primitive defaults, a styled factory's defaults,
 the call's `style`, then later `with_style` or `with_parts` changes. Overrides move
@@ -177,16 +178,39 @@ python -m pytest tests/test_fullbleed_ui_experimental.py
 python -I tools/smoke_component_recipes.py --out target/recipe-verification
 ```
 
-To verify the decorated function's argument types from the installed wheel,
-install the test-only `mypy` package and run:
+The wheel bundles generated type stubs for style keywords, primitive props,
+layout choices, document options, table record types, and component arguments.
+Editors using Pyright can suggest `padding`, `font_size`, `class_name`, table
+`columns`, and valid alignment values. A misspelled `style(paddding=pt(8))` is
+reported before rendering. The property vocabulary and layout choices come from
+the same definitions used by runtime validation.
+
+To verify the installed types, install the test-only `mypy` package and run:
 
 ```console
 python -I tools/smoke_component_typing.py --out target/recipe-verification/typing.json
 ```
 
-This checks both a valid consumer and intentional argument errors. The typing
-marker applies to the experimental subpackage; it does not claim that the full
-native package or every style/part name has complete static typing.
+This executes a valid consumer and checks deliberate errors using strict typing
+with Python 3.10 as the target. The independent editor check uses the official
+Pyright CLI and language server. Node and Pyright are test-only tools:
+
+```console
+npm install --ignore-scripts --no-package-lock --no-save --no-audit --no-fund --prefix target/component-editor-tools pyright@1.1.414
+python -I tools/smoke_component_editor.py --pyright-root target/component-editor-tools/node_modules/pyright --out target/recipe-verification/editor.json
+python tools/generate_component_stubs.py --check
+```
+
+Runtime checks still own finite values, units, CSS syntax, token names and part
+names. For example, `padding=(pt(4), 8)` needs a unit on its second value, including
+when that value comes from a theme token. Recursive iterable child types are
+checked differently by type checkers; `Flow` always rejects unwrapped text at
+runtime. For full argument checking on a styled custom function, call it normally
+and apply `.with_style(...)` to the resulting node. The convenience call with an
+extra `style=` keyword needs a permissive typing fallback for its other arguments.
+
+The typing marker applies to the experimental subpackage. Automatic token/part
+name completion and broader native-package typing remain separate work.
 
 Before stabilization, this prototype still needs broader row-continuation coverage,
 broader layout-diagnostic translation, static typing and completion refinement,

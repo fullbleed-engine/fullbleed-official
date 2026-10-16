@@ -11,6 +11,9 @@ import re
 import warnings
 
 from ..style import StyleWarning, _parse_style_string
+from ._schema import STYLE_PROPERTIES as _PROPERTIES, LENGTH_PROPERTIES as _LENGTHS
+
+_UNITLESS_NUMBER = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
 
 
 class AuthoringError(ValueError):
@@ -78,29 +81,6 @@ def token(name: str) -> Token:
     return Token(name)
 
 
-# A deliberately bounded, checked vocabulary for the experimental authoring API.
-# css(...) retains explicit access to additional engine CSS declarations.
-_PROPERTIES = frozenset("""
-    color background background-color font-family font-size font-weight font-style
-    font-variant-numeric line-height letter-spacing text-align text-transform
-    text-decoration white-space vertical-align display flex-direction flex-grow
-    flex-shrink flex-basis flex-wrap align-items align-self justify-content gap
-    row-gap column-gap grid-template-columns grid-column grid-row width height
-    min-width max-width min-height max-height margin margin-top margin-right
-    margin-bottom margin-left padding padding-top padding-right padding-bottom
-    padding-left border border-top border-right border-bottom border-left
-    border-width border-style border-color border-radius border-collapse
-    box-sizing table-layout break-before break-after break-inside orphans widows
-    overflow opacity object-fit list-style-type
-""".split())
-_LENGTHS = frozenset("""
-    font-size letter-spacing gap row-gap column-gap width height min-width
-    max-width min-height max-height margin margin-top margin-right margin-bottom
-    margin-left padding padding-top padding-right padding-bottom padding-left
-    border-width border-radius
-""".split())
-
-
 def _value(value):
     if isinstance(value, (Length, Token)):
         return value
@@ -122,6 +102,14 @@ def _validate_declaration(name: str, value: str):
             raise AuthoringError(str(error), code="style.syntax") from error
     if parsed != [(name, value)]:
         raise AuthoringError(f"Invalid declaration value for {name}", code="style.syntax")
+
+
+def _check_length_numbers(name, value):
+    if isinstance(value, (tuple, list)):
+        for part in value:
+            _check_length_numbers(name, part)
+    elif isinstance(value, (int, float, Decimal)) and value != 0:
+        raise AuthoringError(f"{name} needs an explicit unit, for example pt({value})", code="style.unit")
 
 
 @dataclass(frozen=True, init=False)
@@ -151,29 +139,30 @@ class Style:
                 if not re.fullmatch(r"(?:--)?[A-Za-z][A-Za-z0-9-]*", normalized):
                     raise AuthoringError(f"Invalid style property {name!r}", code="style.property")
                 frozen = _value(value)
-                if normalized in _LENGTHS and isinstance(value, (int, float, Decimal)) and value != 0:
-                    raise AuthoringError(f"{name} needs an explicit unit, for example pt({value})", code="style.unit")
+                if normalized in _LENGTHS:
+                    _check_length_numbers(name, value)
                 result.pop(normalized, None)
                 result[normalized] = frozen
         object.__setattr__(self, "entries", tuple(result.items()))
 
     def resolve(self, theme: Theme) -> str:
-        def resolve(value):
+        def resolve(value, name):
             if isinstance(value, Token):
                 try:
                     value = dict(theme.values)[value.name]
                 except KeyError as error:
                     raise AuthoringError(f"Missing theme token {value.name!r}", code="theme.missing") from error
             if isinstance(value, tuple):
-                return " ".join(resolve(part) for part in value)
-            return str(value)
+                return " ".join(resolve(part, name) for part in value)
+            text = str(value)
+            if name in _LENGTHS and _UNITLESS_NUMBER.fullmatch(text) and Decimal(text) != 0:
+                raise AuthoringError(f"{name} needs an explicit unit", code="style.unit")
+            return text
 
         declarations = []
         for name, value in self.entries:
-            text = resolve(value)
+            text = resolve(value, name)
             _validate_declaration(name, text)
-            if name in _LENGTHS and re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)", text) and Decimal(text) != 0:
-                raise AuthoringError(f"{name} needs an explicit unit", code="style.unit")
             declarations.append(f"{name}: {text};")
         return " ".join(declarations)
 

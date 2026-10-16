@@ -73,7 +73,7 @@ supplies values rather than silently defeating local component choices.
 
 Parts need an actual boundary rule. In the prototype, root delegation preserves
 the delegated component's exposed parts, while a nested component starts a new
-boundary. A missing part is an error. Decorating a function establishes this
+boundary. An unknown part name is an error. Decorating a function establishes this
 identity; an ordinary function still composes but introduces no boundary.
 Fragment components have no implicit styling root and require a real container
 when root styling is requested.
@@ -192,18 +192,30 @@ pagination behavior that the renderer has not demonstrated.
 | --- | --- |
 | Oversized-row continuation (partial implementation) | Extend the tested top-aligned text cell behavior to rowspans, page-tall cell images, and other vertical alignments; qualify changing page geometry, complex decorations, and semantic continuity; unsupported cases fail explicitly |
 | Native diagnostics | Overflow, missing glyphs, and invalid layout report the responsible component/part where source IDs exist |
-| Typing and completion | Editors suggest valid props, styles, token names, and parts; misspellings fail before rendering where practical |
+| Typing and completion (partial implementation) | Generated stubs and installed mypy/Pyright checks cover styles, primitive props, layout choices, page options, record types and component arguments; token/part-name completion remains open |
 | Declared parts (implemented in the prototype) | Empty/conditional states accept documented parts; boundaries, root delegation, schema validation, and callable argument types have focused coverage; author feedback remains needed |
 | Semantics and accessibility | Reuse the existing semantic validation contract; test generated structure and final delivery profiles separately |
 | Rendering reuse | Measure authoring, compilation, layout, and output costs independently; verify metadata/configuration isolation |
 | Migration | Provide an explicit adapter for legacy elements/styles, keep existing imports working, and avoid two permanent incompatible component systems |
 | Author usability | Independent authors can rebrand a document, reuse a component, add a table column, change page size, and diagnose a failure without editing generated HTML or learning internal selectors |
 
-The current dynamic primitive factories and `**properties` style construction
-do not yet deliver strong static completion. Use explicit typed signatures or
-generated stubs backed by the same property definitions as runtime validation.
-Runtime typo suggestions alone do not satisfy this requirement. The prototype's
-small checked property vocabulary is also not a CSS capability declaration.
+The candidate now ships generated stubs backed by the same style-property,
+primitive and layout vocabulary as runtime validation. Installed consumer checks
+use mypy and Pyright; actual Pyright language-server requests verify completion
+items rather than inferring editor behavior from annotations. The generation
+check prevents edits to the runtime vocabulary from leaving stale packaged stubs.
+The prototype's small checked vocabulary is not a CSS capability declaration.
+
+Typing has a real boundary around `styled`: Python's parameter specifications
+cannot generally add arbitrary keyword parameters to an existing signature
+([PEP 612](https://peps.python.org/pep-0612/#concatenating-keyword-parameters)).
+Normal calls preserve the factory's argument types. The extra `style=` convenience
+keyword needs a permissive fallback for other arguments; applying `.with_style`
+after a normal call keeps full checking. Runtime validation still handles token
+and part names, finite values, explicit units (including shorthand tuples), and
+CSS syntax. Recursive iterable constraints also need runtime checks: the installed
+Pyright consumer rejects unwrapped `Flow` text, while mypy accepts that recursive
+case. Do not confuse editor assistance with complete static validation.
 
 Keep the first implementation in `fullbleed.ui.experimental`. Stabilize its
 contracts using the invoice, report, adversarial pagination cases, and actual

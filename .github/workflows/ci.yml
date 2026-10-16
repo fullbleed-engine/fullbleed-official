@@ -30,6 +30,8 @@ jobs:
           python-version: "3.12"
       - name: Check release versions and documentation
         run: python tools/check_release_metadata.py --expected-version "${{ env.FULLBLEED_CI_VERSION }}" --json
+      - name: Check generated component typing contracts
+        run: python tools/generate_component_stubs.py --check
 
   print-profile-preflight:
     uses: ./.github/workflows/pdfvt-release-gate.yml
@@ -187,6 +189,11 @@ jobs:
           python -m pytest tests/test_fullbleed_ui_experimental.py -q --junitxml target/component-recipes/unit-tests.xml
           python -I tools/smoke_component_recipes.py --out target/component-recipes
           python -I tools/smoke_component_typing.py --out target/component-recipes/typing.json
+
+      - name: Verify installed editor diagnostics and completions
+        run: |
+          npm install --ignore-scripts --no-package-lock --no-save --no-audit --no-fund --prefix target/component-editor-tools pyright@1.1.414
+          python -I tools/smoke_component_editor.py --pyright-root target/component-editor-tools/node_modules/pyright --out target/component-recipes/editor.json
 
       - name: Retain experimental component evidence
         uses: actions/upload-artifact@v7
