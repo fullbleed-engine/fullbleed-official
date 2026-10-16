@@ -168,6 +168,17 @@ jobs:
           path: target/hidden-text
           if-no-files-found: error
 
+      - name: Verify embedded stylesheets across installed rendering paths
+        run: python -I tools/smoke_embedded_styles.py --out target/embedded-styles
+
+      - name: Retain embedded stylesheet PDFs and independent previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-embedded-styles
+          path: target/embedded-styles
+          if-no-files-found: error
+
       - name: Verify floated initials in installed release output
         run: python -I tools/smoke_floating_first_letter.py --out target/floating-first-letter
 

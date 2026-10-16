@@ -326,6 +326,7 @@
         "compact"
       ],
       "compiled_reflow_bindings": true,
+      "embedded_stylesheets": true,
       "explicit_table_headers": true,
       "glyph_report": true,
       "image_pages": true,
@@ -4080,7 +4081,7 @@
       "media_types": [
         "text/html"
       ],
-      "notes": "Static document markup; JavaScript is not executed."
+      "notes": "Static document markup; JavaScript is not executed. Consult capabilities.engine.embedded_stylesheets before relying on style elements. External stylesheet links and CSS imports are not fetched."
     },
     {
       "forms": [
@@ -4216,7 +4217,7 @@
     "license": "MIT",
     "name": "Fullbleed PDF Engine",
     "python_package": "fullbleed",
-    "version": "2.5.25"
+    "version": "2.5.26"
   },
   "profiles": {
     "pdf": {

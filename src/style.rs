@@ -4588,7 +4588,25 @@ impl StyleResolver {
         viewport: Option<Size>,
         font_registry: Option<Arc<FontRegistry>>,
     ) -> Self {
-        let has_target_counter_content = css.to_ascii_lowercase().contains("target-counter(");
+        Self::from_stylesheets(
+            &[crate::css_native::StylesheetSource::new(css)],
+            false,
+            debug,
+            viewport,
+            font_registry,
+        )
+    }
+
+    pub(crate) fn from_stylesheets(
+        sources: &[crate::css_native::StylesheetSource<'_>],
+        print_document: bool,
+        debug: Option<Arc<DebugLogger>>,
+        viewport: Option<Size>,
+        font_registry: Option<Arc<FontRegistry>>,
+    ) -> Self {
+        let has_target_counter_content = sources
+            .iter()
+            .any(|source| source.text.to_ascii_lowercase().contains("target-counter("));
         let viewport = viewport.unwrap_or(Size {
             width: Pt::ZERO,
             height: Pt::ZERO,
@@ -5057,19 +5075,22 @@ impl StyleResolver {
         }
 
         let ua_sheet = crate::css_native::parse_stylesheet(default_ua_css()).ok();
-        let user_sheet = if css.trim().is_empty() {
-            None
-        } else {
-            crate::css_native::parse_stylesheet(css).ok()
-        };
-        let prefer_print = ua_sheet
-            .as_ref()
-            .map(|sheet| native_rule_list_has_print_media(&sheet.rules))
-            .unwrap_or(false)
-            || user_sheet
+        let user_sheets: Vec<_> = sources
+            .iter()
+            .filter_map(|source| {
+                crate::css_native::parse_stylesheet(source.text)
+                    .ok()
+                    .map(|sheet| (source, sheet))
+            })
+            .collect();
+        let prefer_print = print_document
+            || ua_sheet
                 .as_ref()
                 .map(|sheet| native_rule_list_has_print_media(&sheet.rules))
-                .unwrap_or(false);
+                .unwrap_or(false)
+            || user_sheets
+                .iter()
+                .any(|(_, sheet)| native_rule_list_has_print_media(&sheet.rules));
 
         if let Some(sheet) = ua_sheet {
             append_native_rule_list(
@@ -5098,7 +5119,12 @@ impl StyleResolver {
 
         let author_rule_order_start = order;
 
-        if let Some(sheet) = user_sheet {
+        for (source, sheet) in user_sheets {
+            if source.media.is_some_and(|media| {
+                !native_media_prelude_matches(media, viewport, true, debug.as_deref())
+            }) {
+                continue;
+            }
             append_native_rule_list(
                 &sheet.rules,
                 &mut normal_rules,
@@ -5151,9 +5177,14 @@ impl StyleResolver {
             logger.log_json(&json);
         }
 
-        let page_footnote_area = extract_css_page_styles(css, debug.as_deref(), Some(viewport))
-            .base
-            .footnote_area;
+        let page_footnote_area = extract_stylesheet_page_styles(
+            sources,
+            print_document,
+            debug.as_deref(),
+            Some(viewport),
+        )
+        .base
+        .footnote_area;
 
         Self {
             normal_rules,
@@ -7641,36 +7672,65 @@ pub(crate) fn extract_css_page_setup(
     extract_css_page_styles(css, debug, viewport).base
 }
 
+#[cfg(test)]
 pub(crate) fn extract_css_page_styles(
     css: &str,
     debug: Option<&DebugLogger>,
     viewport: Option<Size>,
 ) -> CssPageStyles {
-    if css.trim().is_empty() {
-        return CssPageStyles::default();
-    }
-    let Ok(sheet) = crate::css_native::parse_stylesheet(css) else {
-        return CssPageStyles::default();
-    };
+    extract_stylesheet_page_styles(
+        &[crate::css_native::StylesheetSource::new(css)],
+        false,
+        debug,
+        viewport,
+    )
+}
+
+pub(crate) fn extract_stylesheet_page_styles(
+    sources: &[crate::css_native::StylesheetSource<'_>],
+    print_document: bool,
+    debug: Option<&DebugLogger>,
+    viewport: Option<Size>,
+) -> CssPageStyles {
     let viewport = viewport.unwrap_or(Size {
         width: Pt::ZERO,
         height: Pt::ZERO,
     });
-    let prefer_print = native_rule_list_has_print_media(&sheet.rules);
+    let sheets: Vec<_> = sources
+        .iter()
+        .filter_map(|source| {
+            crate::css_native::parse_stylesheet(source.text)
+                .ok()
+                .map(|sheet| (source, sheet))
+        })
+        .collect();
+    let prefer_print = print_document
+        || sheets
+            .iter()
+            .any(|(_, sheet)| native_rule_list_has_print_media(&sheet.rules));
     let mut styles = CssPageStyles::default();
-    extract_native_css_page_styles_from_rules(
-        &sheet.rules,
-        &mut styles,
-        viewport,
-        prefer_print,
-        debug,
-    );
-    extract_native_page_margin_box_styles(css, &mut styles);
+    for (source, sheet) in sheets {
+        if source
+            .media
+            .is_some_and(|media| !native_media_prelude_matches(media, viewport, true, debug))
+        {
+            continue;
+        }
+        extract_native_css_page_styles_from_rules(
+            &sheet.rules,
+            source.text,
+            &mut styles,
+            viewport,
+            prefer_print,
+            debug,
+        );
+    }
     styles
 }
 
 fn extract_native_css_page_styles_from_rules(
     rules: &[crate::css_native::Rule],
+    source: &str,
     styles: &mut CssPageStyles,
     viewport: Size,
     prefer_print: bool,
@@ -7690,12 +7750,19 @@ fn extract_native_css_page_styles_from_rules(
                         apply_native_page_declarations(declarations, target);
                     }
                 }
+                // Extract margin boxes only from an actual, applicable page
+                // rule. A raw scan of the entire stylesheet would also apply
+                // boxes inside nonmatching media rules or CSS string literals.
+                if let Some(page_source) = source.get(at_rule.source_range.clone()) {
+                    extract_native_page_margin_box_styles(page_source, styles);
+                }
             }
             "media" => {
                 if native_media_prelude_matches(&at_rule.prelude, viewport, prefer_print, debug) {
                     if let Some(crate::css_native::AtRuleBlock::Rules(nested)) = &at_rule.block {
                         extract_native_css_page_styles_from_rules(
                             nested,
+                            source,
                             styles,
                             viewport,
                             prefer_print,
@@ -34289,6 +34356,68 @@ mod tests {
 
     fn rgb8(r: u8, g: u8, b: u8) -> Color {
         Color::rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
+    }
+
+    #[test]
+    fn embedded_stylesheet_boundaries_media_and_shared_cascade() {
+        use crate::css_native::StylesheetSource as Sheet;
+        let sources = [
+            Sheet::new("@layer base, theme; @layer base { p {color:red !important} }"),
+            Sheet::new("/* incomplete stylesheet"),
+            Sheet {
+                text: "p {color: green !important}",
+                media: Some("screen"),
+            },
+            Sheet::new("@layer theme { p {color:blue !important} } p {color:purple}"),
+        ];
+        let resolver =
+            StyleResolver::from_stylesheets(&sources, true, None, Some(Size::a4()), None);
+        let computed = resolver.compute_style(
+            &element("p", None, &[]),
+            &resolver.default_style(),
+            None,
+            &[],
+        );
+        // Important layer priority reverses the layer declaration order, even
+        // when the layer's declarations occur in different source sheets.
+        assert_eq!(computed.color, rgb8(255, 0, 0));
+        let sources = [
+            Sheet::new("p {color:red}"),
+            Sheet::new("/* incomplete"),
+            Sheet::new("p {color:blue}"),
+        ];
+        let resolver =
+            StyleResolver::from_stylesheets(&sources, true, None, Some(Size::a4()), None);
+        let computed = resolver.compute_style(
+            &element("p", None, &[]),
+            &resolver.default_style(),
+            None,
+            &[],
+        );
+        assert_eq!(computed.color, rgb8(0, 0, 255));
+    }
+
+    #[test]
+    fn embedded_stylesheet_media_controls_page_boxes_and_margin_boxes() {
+        use crate::css_native::StylesheetSource as Sheet;
+        let sources = [
+            Sheet {
+                text: "@page {size: A3; @top-left {content:'screen'}}",
+                media: Some("screen"),
+            },
+            Sheet::new("@media screen { @page { @top-center {content:'screen'} } }"),
+            Sheet {
+                text: "@media print { @page {size: A5; @top-right {content:'print'}} }",
+                media: Some("print"),
+            },
+        ];
+        let pages = extract_stylesheet_page_styles(&sources, true, None, Some(Size::a4()));
+        assert_eq!(pages.base.margin_boxes.len(), 1);
+        assert_eq!(
+            pages.base.margin_boxes[0].kind,
+            Some(CssPageMarginBoxKind::TopRight)
+        );
+        assert!(pages.base.size.unwrap().width < Size::a4().width);
     }
 
     #[test]

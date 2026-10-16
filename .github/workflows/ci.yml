@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.25"
+  FULLBLEED_CI_VERSION: "2.5.26"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -238,6 +238,17 @@ jobs:
 
       - name: Verify independent font synthesis in PDFs and previews
         run: python -I tools/smoke_font_synthesis.py --out target/font-synthesis
+
+      - name: Verify static embedded stylesheets from the installed wheel
+        run: python -I tools/smoke_embedded_styles.py --out target/embedded-stylesheets
+
+      - name: Retain embedded stylesheet PDFs and independent previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: embedded-stylesheets-${{ runner.os }}
+          path: target/embedded-stylesheets/
+          if-no-files-found: warn
 
       - name: Verify font-selected decoration thickness in PDFs and previews
         run: python -I tools/smoke_text_decoration_thickness.py --out target/text-decoration-thickness

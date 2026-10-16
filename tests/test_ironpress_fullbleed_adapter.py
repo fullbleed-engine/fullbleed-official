@@ -49,8 +49,9 @@ def test_embedded_css_requires_explicit_page_geometry() -> None:
         adapter.embedded_css("<html><head><style>body { margin: 0 }</style></head></html>")
 
 
-def test_render_fixture_uses_parity_geometry_fonts_and_extracted_css(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("native_styles", [False, True])
+def test_render_fixture_uses_parity_geometry_fonts_and_native_or_extracted_css(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_styles: bool,
 ) -> None:
     adapter = _load_adapter()
     base_path = tmp_path / "cases" / "probes"
@@ -73,7 +74,9 @@ def test_render_fixture_uses_parity_geometry_fonts_and_extracted_css(
             observed["cwd"] = Path.cwd()
             return b"%PDF-1.7\n%%EOF\n"
 
-    monkeypatch.setitem(sys.modules, "fullbleed", SimpleNamespace(PdfEngine=FakeEngine))
+    monkeypatch.setitem(sys.modules, "fullbleed", SimpleNamespace(
+        PdfEngine=FakeEngine, build_features=lambda: {"embedded_stylesheets": native_styles},
+    ))
     original_directory = Path.cwd()
     html = (
         "<html><head><style>@page { size: 10px 10px; margin: 0 }"
@@ -88,9 +91,8 @@ def test_render_fixture_uses_parity_geometry_fonts_and_extracted_css(
 
     assert pdf == b"%PDF-1.7\n%%EOF\n"
     assert observed["html"] == html
-    assert observed["css"] == (
-        "@page { size: 10px 10px; margin: 0 }.box { width: 10px }"
-    )
+    assert observed["css"] == ("" if native_styles else
+        "@page { size: 10px 10px; margin: 0 }.box { width: 10px }")
     assert observed["cwd"] == base_path.resolve()
     assert Path.cwd() == original_directory
     expected_font_files = [

@@ -478,6 +478,7 @@ fn build_features(py: Python<'_>) -> PyResult<PyObject> {
     out.set_item("explicit_table_headers", true)?;
     out.set_item("logical_table_pagination", true)?;
     out.set_item("bundled_standard_font_previews", true)?;
+    out.set_item("embedded_stylesheets", true)?;
     out.set_item(
         "compiled_flow_compression_modes",
         PyList::new(py, ["throughput", "compact"])?,

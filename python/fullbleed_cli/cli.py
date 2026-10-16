@@ -3194,6 +3194,7 @@ def _capabilities_payload(cli_surface=None):
                 and hasattr(compiled_document, "export_render_time_pagination_trace")
             ),
             "explicit_table_headers": bool(build_features.get("explicit_table_headers", False)),
+            "embedded_stylesheets": bool(build_features.get("embedded_stylesheets", False)),
             "logical_table_pagination": bool(build_features.get("logical_table_pagination", False)),
             "bundled_standard_font_previews": bool(
                 build_features.get("bundled_standard_font_previews", False)

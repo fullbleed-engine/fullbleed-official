@@ -623,8 +623,86 @@ fn override_inline_vertical_align(
         .collect()
 }
 
-pub fn scan_html_asset_warnings(html: &str) -> Vec<HtmlAssetWarning> {
-    let document = parse_html(html);
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct EmbeddedStylesheet {
+    pub(crate) text: String,
+    pub(crate) media: String,
+}
+
+/// Collect connected static HTML/SVG style elements in document order. The DOM
+/// parser excludes inert HTML template contents and preserves HTML raw text.
+pub(crate) fn embedded_stylesheets(document: &NodeRef) -> Vec<EmbeddedStylesheet> {
+    let mut result = Vec::new();
+    let mut preferred_title: Option<String> = None;
+    if let Ok(elements) = document.select("style, link, meta") {
+        for element in elements {
+            if !element.name.ns.is_html_or_svg() {
+                continue;
+            }
+            let attrs = element.attributes.borrow();
+            let tag = element.name.local.as_ref();
+            if tag == "meta" {
+                if element.name.ns.is_html()
+                    && preferred_title.is_none()
+                    && attrs
+                        .get("http-equiv")
+                        .is_some_and(|name| name.eq_ignore_ascii_case("default-style"))
+                {
+                    preferred_title = attrs
+                        .get("content")
+                        .filter(|name| !name.is_empty())
+                        .map(str::to_string);
+                }
+                continue;
+            }
+            if tag == "link" {
+                let rel = attrs.get("rel").unwrap_or("");
+                let stylesheet = rel
+                    .split_ascii_whitespace()
+                    .any(|value| value.eq_ignore_ascii_case("stylesheet"));
+                let alternate = rel
+                    .split_ascii_whitespace()
+                    .any(|value| value.eq_ignore_ascii_case("alternate"));
+                if element.name.ns.is_html()
+                    && preferred_title.is_none()
+                    && stylesheet
+                    && !alternate
+                    && attrs.get("href").is_some_and(|href| !href.is_empty())
+                {
+                    preferred_title = attrs
+                        .get("title")
+                        .filter(|name| !name.is_empty())
+                        .map(str::to_string);
+                }
+                continue;
+            }
+            let kind = attrs.get("type").unwrap_or("");
+            // HTML requires an exact ASCII-insensitive text/css match. A MIME
+            // parameter or surrounding whitespace does not qualify.
+            if !kind.is_empty() && !kind.eq_ignore_ascii_case("text/css") {
+                continue;
+            }
+            if let Some(title) = attrs.get("title").filter(|title| !title.is_empty()) {
+                let preferred = preferred_title.get_or_insert_with(|| title.to_string());
+                if title != preferred {
+                    continue;
+                }
+            }
+            result.push(EmbeddedStylesheet {
+                text: element.as_node().text_contents(),
+                media: attrs.get("media").unwrap_or("").to_string(),
+            });
+        }
+    }
+    result
+}
+
+#[cfg(test)]
+fn scan_html_asset_warnings(html: &str) -> Vec<HtmlAssetWarning> {
+    scan_html_asset_warnings_from_document(&parse_html(html))
+}
+
+pub(crate) fn scan_html_asset_warnings_from_document(document: &NodeRef) -> Vec<HtmlAssetWarning> {
     let mut warnings: Vec<HtmlAssetWarning> = Vec::new();
 
     let mut stylesheet_links: Vec<String> = Vec::new();
@@ -664,39 +742,35 @@ pub fn scan_html_asset_warnings(html: &str) -> Vec<HtmlAssetWarning> {
         });
     }
 
-    if let Ok(styles) = document.select("style") {
-        let mut count = 0usize;
-        let mut has_import = false;
-        for style in styles {
-            let node = style.as_node();
-            let nested_in_svg = node.ancestors().any(|ancestor| {
-                if let NodeData::Element(el) = ancestor.data() {
-                    el.name.local.as_ref().eq_ignore_ascii_case("svg")
-                } else {
-                    false
+    for (index, source) in embedded_stylesheets(document).iter().enumerate() {
+        match crate::css_native::parse_stylesheet(&source.text) {
+            Ok(sheet) => {
+                let imports: Vec<_> = sheet
+                    .rules
+                    .iter()
+                    .filter_map(|rule| match rule {
+                        crate::css_native::Rule::At(rule) if rule.name == "import" => {
+                            Some(rule.prelude.clone())
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                if !imports.is_empty() {
+                    warnings.push(HtmlAssetWarning {
+                        kind: "style-import".to_string(),
+                        message: "Embedded CSS @import is not loaded; supply stylesheet bytes through AssetBundle.".to_string(),
+                        details: imports,
+                    });
                 }
-            });
-            if nested_in_svg {
-                continue;
             }
-            count += 1;
-            let text = node.text_contents();
-            if text.contains("@import") {
-                has_import = true;
-            }
-        }
-        if count > 0 {
-            let mut message = format!(
-                "HTML contains {count} <style> block(s). FullBleed ignores embedded CSS in HTML; use AssetBundle instead."
-            );
-            if has_import {
-                message.push_str(" Detected @import which will be ignored.");
-            }
-            warnings.push(HtmlAssetWarning {
-                kind: "style-tag".to_string(),
-                message,
-                details: Vec::new(),
-            });
+            Err(error) => warnings.push(HtmlAssetWarning {
+                kind: "style-parse".to_string(),
+                message: format!("Embedded stylesheet {} was ignored: {error}", index + 1),
+                details: vec![
+                    format!("stylesheet_index={index}"),
+                    format!("byte_offset={}", error.offset()),
+                ],
+            }),
         }
     }
 
@@ -6647,6 +6721,82 @@ fn css_display_list_item_flowables(
 mod tests {
     use super::*;
     use crate::canvas::{Canvas, Command};
+
+    #[test]
+    fn embedded_stylesheets_preserve_raw_text_types_order_and_inert_boundaries() {
+        let document = parse_html(
+            r#"<style>p::after {content: '&amp;'}</style>
+            <style type=" text/css ">ignored</style>
+            <template><style>inert</style></template>
+            <style type="TEXT/CSS" media="print">p {color:red}</style>
+            <style type="text/css;charset=utf-8">ignored</style>
+            <svg><style><![CDATA[p {color:blue}]]></style>
+                <style>p::before {content: '&amp;'}</style></svg>
+            <style type="">p {color:green}</style>"#,
+        );
+        let sheets = embedded_stylesheets(&document);
+        assert_eq!(sheets.len(), 5);
+        assert_eq!(sheets[0].text, "p::after {content: '&amp;'}");
+        assert_eq!(sheets[1].media, "print");
+        assert_eq!(sheets[2].text, "p {color:blue}");
+        assert_eq!(sheets[3].text, "p::before {content: '&'}");
+        assert_eq!(sheets[4].text, "p {color:green}");
+    }
+
+    #[test]
+    fn embedded_stylesheets_default_to_first_named_set_and_persistent_sheets() {
+        let document = parse_html(
+            r#"<style title="first" media="screen">first</style>
+            <style title="second">second</style><style>persistent</style>
+            <style title="first">first-again</style>"#,
+        );
+        let sheets = embedded_stylesheets(&document);
+        assert_eq!(
+            sheets
+                .iter()
+                .map(|sheet| sheet.text.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "persistent", "first-again"]
+        );
+        for (prefix, expected) in [
+            (
+                r#"<meta http-equiv="default-style" content="second">"#,
+                "second",
+            ),
+            (
+                r#"<link rel="stylesheet" title="second" href="missing.css">"#,
+                "second",
+            ),
+            (
+                r#"<link rel="alternate stylesheet" title="second" href="missing.css">"#,
+                "first",
+            ),
+        ] {
+            let document = parse_html(&format!(
+                "{prefix}<style title='first'>first</style><style title='second'>second</style>"
+            ));
+            let sheets = embedded_stylesheets(&document);
+            assert_eq!(sheets.len(), 1);
+            assert_eq!(sheets[0].text, expected);
+        }
+    }
+
+    #[test]
+    fn embedded_stylesheet_warnings_report_ignored_imports_and_parse_errors() {
+        assert!(scan_html_asset_warnings("<style>p {color:red}</style>").is_empty());
+        let warnings = scan_html_asset_warnings(
+            r#"<style>/* @import 'not-real'; */ p::after {content: '@import'}</style>
+            <style>@import url('missing.css'); p {color:blue}</style>
+            <style>/* unclosed</style><style>p {color:green}</style>"#,
+        );
+        assert_eq!(
+            warnings
+                .iter()
+                .map(|warning| warning.kind.as_str())
+                .collect::<Vec<_>>(),
+            ["style-import", "style-parse"]
+        );
+    }
 
     fn approx_eq_pt(value: Pt, expected: f32) -> bool {
         (value.to_f32() - expected).abs() <= 0.01
