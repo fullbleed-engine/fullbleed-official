@@ -49,6 +49,13 @@ compile to the same HTML/CSS print engine. Follow the
 [designed component invoice](examples/components) with explicit fonts, reusable
 rows, paid/unpaid states and PNG previews.
 
+The [opt-in Python component alpha](https://docs.fullbleed.dev/guides/bootstrap-components-preview/)
+adds components that carry their styles, named customization parts, column-based
+tables, and static Bootstrap 5.0.0 components. Export HTML with styles included or
+removed, or render the same document as a PDF. The guide explains `class_name`
+and includes a runnable kit. This API is experimental; follow its explicit
+prerelease installation instructions.
+
 For JavaScript, [compose documents with functions or JSX/TSX](https://docs.fullbleed.dev/guides/javascript-components/).
 The [React starter](https://docs.fullbleed.dev/guides/react-pdf/) connects typed
 document components to editable data, live PDF previews and downloads. It
