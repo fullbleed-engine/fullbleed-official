@@ -276,11 +276,12 @@ ARIA and data booleans emit `"true"` or `"false"`. Invalid names, cycles and
 children on void elements raise errors. Format these inputs explicitly if they
 were previously intentional text.
 
-This guide covers Python. The [JavaScript/TypeScript component guide](https://docs.fullbleed.dev/guides/javascript-components/)
-and [C# component guide](https://github.com/fullbleed-engine/fullbleed-dotnet/blob/master/docs/components.md)
-describe their authoring interfaces separately. The JavaScript layer does not
-include Python's semantic validator or promise complete API parity. The
-experimental contracts below remain a Python proposal.
+This guide covers Python. [JavaScript/TypeScript components](https://docs.fullbleed.dev/guides/javascript-components/)
+are published in npm package 0.6.0, with ordinary functions and optional JSX/TSX.
+[C# components](https://docs.fullbleed.dev/guides/csharp-components/) are available
+in FullBleed.DotNet 0.2.0, with typed methods, LINQ children and immutable styles.
+Rust accepts HTML/CSS. The JavaScript and C# layers do not include Python's
+semantic validator or promise complete API parity.
 
 The separate [experimental authoring proposal](component-authoring-design.md)
 explores component-owned styles and named parts. Its source-branch prototype has
