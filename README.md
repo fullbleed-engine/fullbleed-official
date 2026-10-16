@@ -4,7 +4,7 @@
 [![PyPI Downloads](https://img.shields.io/pypi/dm/fullbleed)](https://pypistats.org/packages/fullbleed)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Build PDFs with reusable Python and JavaScript components, or HTML/CSS. MIT licensed.**
+**Build PDFs with reusable Python, JavaScript and C# components, or HTML/CSS. MIT licensed.**
 
 Build invoices, reports, statements, and variable-data print jobs with a deterministic Rust engine. Use the native Rust API, the Python package, or the optional JavaScript and .NET integrations. The Python wheel includes the engine, fonts, and CLI with no required third-party Python packages or system PDF stack. The JavaScript package includes the WebAssembly engine and fonts for Node.js and browser workers; the .NET package includes native libraries for in-process rendering.
 
@@ -62,7 +62,7 @@ includes the complete component and style source for customization.
 | Rust | `cargo add fullbleed` | [Native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/) |
 | Node.js / TypeScript | `npm install fullbleed` | [Node quickstart](https://docs.fullbleed.dev/getting-started/node/) · [Next.js PDF download](https://docs.fullbleed.dev/guides/nextjs-pdf/) |
 | Browser JavaScript | `npm install --save-exact fullbleed@0.6.0` | [PDF components and JSX](https://docs.fullbleed.dev/guides/javascript-components/) · [React starter](https://docs.fullbleed.dev/guides/react-pdf/) · [HTML/CSS starter](https://docs.fullbleed.dev/guides/browser-pdf/) |
-| C# / .NET | `dotnet add package FullBleed.DotNet --version 0.1.8` | [C# quickstart and designed invoice](https://docs.fullbleed.dev/getting-started/dotnet/) |
+| C# / .NET | `dotnet add package FullBleed.DotNet --version 0.2.0` | [C# components and styles](https://docs.fullbleed.dev/guides/csharp-components/) · [NuGet quickstart](https://docs.fullbleed.dev/getting-started/dotnet/) |
 
 The JavaScript component workflow and React starter use package 0.6.0. The
 pinned HTML/CSS Node.js quickstart and JavaScript, Vue and Next.js starters use
@@ -70,7 +70,7 @@ pinned HTML/CSS Node.js quickstart and JavaScript, Vue and Next.js starters use
 `fullbleed` in Node or `fullbleed/browser` in a web app. Node applications can use
 a [bounded render queue](https://docs.fullbleed.dev/guides/node-render-queue/)
 and optional process isolation.
-FullBleed.DotNet 0.1.8 uses engine 2.5.22. Its managed library targets .NET 8 and works with .NET 8, 9, and 10 applications, with native rendering, compiled bindings, and previews. Its separate CLI adapter requires the Python CLI.
+FullBleed.DotNet 0.2.0 uses engine 2.5.22. Its managed library targets .NET 8 and works with .NET 8, 9, and 10 applications, with C# document components, native rendering, compiled bindings, and previews. Its separate CLI adapter requires the Python CLI.
 The Python package provides the complete CLI, including compiled variable-data jobs and print profiles; the Rust guide covers the native API.
 
 ## Your first PDF
@@ -145,7 +145,7 @@ Start with the [native Rust quickstart](https://docs.fullbleed.dev/getting-start
 
 ### C# and .NET
 
-Install [`FullBleed.DotNet`](https://www.nuget.org/packages/FullBleed.DotNet/0.1.8) in a .NET 8, 9, or 10 project and follow the [C# quickstart](https://docs.fullbleed.dev/getting-started/dotnet/). The guide includes a runnable invoice with explicit fonts and HTML/CSS source. Native rendering runs inside the .NET process on Windows x64, Linux x64, Intel macOS, and Apple Silicon macOS, without a Python or browser runtime.
+Install [`FullBleed.DotNet`](https://www.nuget.org/packages/FullBleed.DotNet/0.2.0) in a .NET 8, 9, or 10 project and follow the [C# quickstart](https://docs.fullbleed.dev/getting-started/dotnet/). Compose documents with ordinary methods, LINQ children and immutable style objects. The [component guide](https://docs.fullbleed.dev/guides/csharp-components/) explains `WithClass`, attached stylesheets and inline overrides and includes a complete invoice download with explicit fonts. Existing HTML/CSS templates remain supported. Native rendering runs inside the .NET process on Windows x64, Linux x64, Intel macOS, and Apple Silicon macOS, without a Python or browser runtime.
 
 ## Choose your starting point
 
