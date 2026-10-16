@@ -182,11 +182,12 @@ jobs:
         run: python -I tools/smoke_component_authoring.py --out target/component-authoring
 
       - name: Verify experimental component contracts and rendered examples
+        shell: bash
         env:
           FULLBLEED_TEST_INSTALLED_NATIVE: "1"
         run: |
           python -m pip install pypdfium2==5.14.0 pillow==12.3.0 mypy==2.4.0
-          python -m pytest tests/test_fullbleed_ui_experimental.py tests/test_fullbleed_ui_experimental_styles.py tests/test_fullbleed_ui_html_export.py tests/test_fullbleed_ui_bootstrap.py -q --junitxml target/component-recipes/unit-tests.xml
+          python -m pytest tests/test_fullbleed_ui_experimental.py tests/test_fullbleed_ui_experimental_styles.py tests/test_fullbleed_ui_parts.py tests/test_fullbleed_ui_html_export.py tests/test_fullbleed_ui_bootstrap.py -q --junitxml target/component-recipes/unit-tests.xml
           python -I tools/smoke_component_recipes.py --out target/component-recipes
           python -I tools/smoke_component_flow.py --out target/component-recipes/flow
           python -I tools/smoke_component_layout_props.py --out target/component-recipes/layout-props
@@ -195,11 +196,13 @@ jobs:
           python -I tools/smoke_component_semantics.py --out target/component-recipes/semantics
           python -I tools/smoke_component_themes.py --out target/component-recipes/themes
           python -I tools/smoke_component_styles.py --out target/component-recipes/styles
+          python -I tools/smoke_component_parts.py --out target/component-recipes/parts
           python -I tools/smoke_component_migration.py --out target/component-recipes/migration
           python -I tools/smoke_component_bootstrap.py --out target/component-recipes/bootstrap
           python -I tools/smoke_component_typing.py --out target/component-recipes/typing.json
 
       - name: Verify installed editor diagnostics and completions
+        shell: bash
         run: |
           npm install --ignore-scripts --no-package-lock --no-save --no-audit --no-fund --prefix target/component-editor-tools pyright@1.1.414
           python -I tools/smoke_component_editor.py --pyright-root target/component-editor-tools/node_modules/pyright --out target/component-recipes/editor.json

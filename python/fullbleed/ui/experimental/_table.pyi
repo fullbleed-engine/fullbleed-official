@@ -18,6 +18,8 @@ class Column(Generic[T]):
 class _TableFactory(Protocol):
     @property
     def parts(self) -> tuple[str, ...]: ...
+    @property
+    def optional_parts(self) -> tuple[str, ...]: ...
     def __call__(self, rows: Iterable[T], *, columns: Iterable[Column[T]],
                  caption: _Child = ..., empty: _Child = ..., repeat_header: bool = ...,
                  row_break: Literal['avoid', 'auto'] | None = ..., style: _StyleInput = ...,

@@ -77,7 +77,9 @@ PDF controls show authored state; no browser state or JavaScript is evaluated.
 Fonts and image assets remain explicit application choices.
 
 The deeper declared-part forwarding issue described in the
-[implementation review](component-authoring-next-iteration.md) remains open.
-The kit's card sections own their marked elements directly, avoiding that
-unresolved nested-component binding contract. Stable API promotion, independent
-author feedback and other language surfaces remain separate work.
+[implementation review](component-authoring-next-iteration.md) remains in the
+pinned Bootstrap preview validated here. A subsequent source-branch update adds
+explicit forwarding and distinguishes required from optional targets. The kit's
+card sections continue to own their marked elements directly. Stable API
+promotion, independent author feedback and other language surfaces remain
+separate work.

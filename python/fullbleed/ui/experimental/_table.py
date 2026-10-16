@@ -35,7 +35,7 @@ class Column(Generic[T]):
             raise AuthoringError("Column width requires a positive length", code="table.width")
 
 
-@component(parts=TABLE_PARTS)
+@component(parts=TABLE_PARTS[:1], optional_parts=TABLE_PARTS[1:])
 def DataTable(rows, *, columns, caption=None, empty="No records.", repeat_header=True,
               row_break=None, style=None, class_name=None, attrs=None) -> Node:
     """Capture rows and cell callbacks once, with repeated semantic column headers.

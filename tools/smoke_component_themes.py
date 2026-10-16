@@ -21,7 +21,7 @@ import pypdfium2 as pdfium
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@component(parts=("label", "note"))
+@component(parts=("label",), optional_parts=("note",))
 def Notice(text, *, note=None):
     Default = styled(Box, color=token("overridden"))
     return Default(

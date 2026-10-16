@@ -217,7 +217,7 @@ def test_token_discovery_uses_effective_styles_and_crosses_component_boundaries(
     calls = []
     Label = styled(Paragraph, color=token("discarded"), padding=(token("space"), pt(2)))
 
-    @component(parts=("label", "note"))
+    @component(parts=("label",), optional_parts=("note",))
     def Notice(message, note=None):
         calls.append(message)
         return Flow(Label(message, part="label", style=style(color=token("ink"))),
@@ -289,7 +289,7 @@ def test_a_component_delegating_its_root_keeps_the_roots_exposed_parts():
 
 
 def test_declared_parts_are_stable_across_conditional_content():
-    @component(parts=("label", "note"))
+    @component(parts=("label",), optional_parts=("note",))
     def Notice(message: str, note: str | None = None) -> Node:
         return Card(Paragraph(message, part="label"), note and Paragraph(note, part="note"))
 
@@ -316,11 +316,11 @@ def test_table_customization_does_not_depend_on_whether_rows_or_caption_exist():
 
 
 def test_declared_parts_do_not_leak_through_nested_component_boundaries():
-    @component(parts=("title", "note"))
+    @component(parts=("title",), optional_parts=("note",))
     def Inner():
         return Card(Paragraph("Inner", part="title", style=style(color="green")))
 
-    @component(parts=("title", "note"))
+    @component(parts=("title",), optional_parts=("note",))
     def Outer():
         return Card(Paragraph("Outer", part="title"), Inner())
 
@@ -349,13 +349,14 @@ def test_root_delegation_preserves_optional_parts_and_can_expose_a_subset():
 
 
 def test_part_declarations_are_captured_once_and_check_authored_markers():
-    names = ["label", "note"]
+    names, optional = ["label"], ["note"]
 
-    @component(parts=iter(names))
+    @component(parts=iter(names), optional_parts=iter(optional))
     def Notice(typo=False):
         return Paragraph("Paid", part="lable" if typo else "label")
 
     names.clear()
+    optional.clear()
     assert Notice.parts == Notice().parts == ("label", "note")
     with pytest.raises(AuthoringError, match="missing from the component declaration: lable") as caught:
         Notice(typo=True)

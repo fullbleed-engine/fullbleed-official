@@ -254,21 +254,28 @@ Fragment components have no implicit styling root and require a real container
 when root styling is requested.
 
 The initial prototype discovered parts from the constructed tree, so an empty
-table had no `cell` part to customize. It now supports `@component(parts=(...))`
-to declare a contract independently of current content. A declared optional part
-accepts an override even when absent; an undeclared name still raises a useful
-error. Authored markers are checked against the declaration. The factory and
-instance expose the names for tools, and the decorator preserves argument types.
-Automatic part-name completion still needs work. Callers should not branch on row
-count just to apply a reusable style.
+table had no `cell` part to customize. The published `component-preview-41a2cee`
+declares names independently of content, but treats every declaration as
+optional. The [next design pass](component-authoring-next-iteration.md#1-a-public-part-needs-an-explicit-target)
+reproduced a consequence: a parent could advertise a nested child's part, accept
+an override, and change nothing.
 
-Declaring names does not establish forwarding into nested components. The
-[current design pass](component-authoring-next-iteration.md#1-a-public-part-needs-an-explicit-target)
-demonstrates an accepted override that changes nothing: a parent declares a
-child's part but places that child behind a nested component boundary. The same
-permission that supports absent optional parts can conceal missing forwarding.
-Explicit binding and re-export semantics remain unresolved; declarations alone
-are not a stable customization contract.
+The source branch now distinguishes `parts=(...)` (required real targets) from
+`optional_parts=(...)` (conditional targets). A child opts into forwarding with
+`child.forward_parts(heading="label")`; the containing component exposes
+`heading`, while other child parts stay private. Binding resolution runs at
+component construction, without adding elements or rerunning component
+functions. Missing required targets fail with `component.part_missing`.
+Bindings use ordered occurrence paths, so repeated table cells are all addressed
+and a shared node can be customized in one place without changing another.
+Optional absent parts accept styles without introducing unused theme tokens.
+The [authoring guide](../examples/component_recipes/README.md#customize-a-root-or-an-exposed-part)
+documents delegation, alias ordering and migration from the published preview.
+
+These changes remain experimental. Factories retain argument types and advertise
+both their full declaration and optional names. Generated editor types check
+the forwarding argument shapes; dynamic part-name completion still needs work.
+Independent authors must assess whether the advanced contract is understandable.
 
 Ordinary conditionals should handle variants initially: `paid=True` or
 `tone="warning"` is a function argument. A variant registry, implicit prop
@@ -551,7 +558,7 @@ pagination behavior that the renderer has not demonstrated.
 | Oversized-row continuation (partial implementation) | Extend the tested top-aligned text cell behavior to rowspans, page-tall cell images, and other vertical alignments; qualify changing page geometry, complex decorations, and semantic continuity; unsupported cases fail explicitly |
 | Native diagnostics (partial implementation) | Native table/block split rejections identify cell constraints or container owners while retaining fragment scopes; extend precise causes through other layout models and map missing glyphs/other diagnostic families before claiming full attribution |
 | Typing and completion (partial implementation) | Generated stubs and installed mypy/Pyright checks cover styles, primitive props, layout choices, page options, record types and component arguments; token/part-name completion remains open |
-| Declared parts (partial contract) | Empty/conditional states and root delegation have focused coverage; specify explicit forwarding and distinguish optional absence from broken bindings before stabilization |
+| Declared parts (implemented in the source prototype) | Required targets, explicitly optional absence and selected child forwarding are distinct; retain rendered controls for internal-container changes, private/shared children and empty/populated tables, then obtain author feedback before stabilization |
 | Kit dependencies | Two independent kits compose with separate palettes and documented defaults; token inspection alone does not supply values, semantic types or isolation |
 | Semantics and accessibility | Reuse the existing semantic validation contract; test generated structure and final delivery profiles separately |
 | Rendering reuse | Measure authoring, compilation, layout, and output costs independently; verify metadata/configuration isolation |

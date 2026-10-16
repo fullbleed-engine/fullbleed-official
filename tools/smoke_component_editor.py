@@ -159,6 +159,9 @@ def main():
         server = LanguageServer([node, str(package / metadata["bin"]["pyright-langserver"]), "--stdio"], folder, environment)
         try:
             cases = [
+                ("component_optional_parts", 'component(opt§)', {"optional_parts"}),
+                ("component_part_forwarding", 'Paragraph("Text").forward_§', {"forward_parts"}),
+                ("factory_part_metadata", '@component(parts=("label",), optional_parts=("note",))\ndef Label(text: str) -> Node:\n    return Paragraph(text, part="label")\nLabel.opt§', {"optional_parts"}),
                 ("bootstrap_card_slots", 'bs.Card("Text", tit§)', {"title"}),
                 ("bootstrap_variants", 'bs.Badge("Paid", variant="§")', {"primary", "success", "warning"}),
                 ("bootstrap_class_name", 'bs.Card("Text", cla§)', {"class_name"}),
@@ -182,7 +185,7 @@ def main():
                 ("theme_derivation", 'Document(Paragraph("Text")).theme.with_§', {"with_values"}),
             ]
             for index, (name, expression, required) in enumerate(cases):
-                prefix = "from fullbleed.ui.experimental import style, styled, Paragraph, Stack, Row, Grid, DataTable, Heading, Node, Document, Renderer, bootstrap as bs\n"
+                prefix = "from fullbleed.ui.experimental import component, style, styled, Paragraph, Stack, Row, Grid, DataTable, Heading, Node, Document, Renderer, bootstrap as bs\n"
                 before, after = (prefix + expression).split("§")
                 path = folder / f"completion_{index}.py"
                 server.open(path, before + after)

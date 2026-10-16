@@ -12,6 +12,12 @@ current branch's wheel with `python build_backend/fullbleed_build_backend.py
 wheel --out dist` before running these examples. The stable `fullbleed.ui` API
 continues to work as before.
 
+The [published Bootstrap preview](https://github.com/fullbleed-engine/fullbleed-official/releases/tag/component-preview-41a2cee)
+supports this kit and HTML export. The newer source-only
+[part-forwarding contract](../examples/component_recipes/README.md#customize-a-root-or-an-exposed-part)
+adds `forward_parts(...)` and explicit required/optional declarations; build
+the branch to use those additions. Existing preview downloads are unchanged.
+
 All components are static. There is no Bootstrap JavaScript, browser in the PDF
 renderer, CDN dependency, event lifecycle or automatic network fetch.
 

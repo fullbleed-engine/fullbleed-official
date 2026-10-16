@@ -3,7 +3,7 @@
 This prototype explores a document API with reusable styling, named component
 parts, theme values, page geometry, and data tables. It is available from this
 source branch's wheel under `fullbleed.ui.experimental`; it is not in the
-published 2.5.26 wheel. Names and contracts may change before stabilization.
+PyPI 2.5.26 wheel. Names and contracts may change before stabilization.
 
 The [implementation review](../../docs/component-authoring-design.md) explains
 the design decisions, remaining gaps, and criteria for stabilizing this API.
@@ -105,20 +105,60 @@ exposed parts. Named parts stop at components nested inside the root, so an oute
 names raise an error listing the available names. Root styling requires a single rooted element; fragments
 need an explicit container.
 
-Declare a reusable component's public parts with `@component(parts=(...))`.
-Declared parts can be absent in an instance: an optional note or an empty table's
-cells can receive overrides without making callers branch on the content.
+Declare required targets with `@component(parts=(...))` and conditional targets
+with `optional_parts=(...)`. A required part must reach at least one element;
+otherwise construction raises `component.part_missing` with the component and
+part name. An optional note or an empty table's cells can receive overrides while
+absent, without making callers branch on the content. These explicit required /
+optional declarations are a source-branch update; the published
+`component-preview-41a2cee` still treats all declared parts as optional.
 Authored `part=` markers must match the declaration; misspellings fail when the
 component is constructed. Nested components validate their own declarations.
 An explicit declaration on a delegating wrapper can expose a subset of its root's
 parts. An undeclared wrapper retains root delegation.
 
+To expose a nested child's part, forward it deliberately:
+
+```python
+from fullbleed.ui.experimental import Box, Paragraph, component, style
+
+@component(parts=("label",), optional_parts=("note",))
+def Notice(text, note=None):
+    return Box(
+        Paragraph(text, part="label"),
+        Paragraph(note, part="note") if note is not None else None,
+    )
+
+@component(parts=("heading",), optional_parts=("details",))
+def Summary(text, note=None):
+    return Box(Notice(text, note).forward_parts(heading="label", details="note"))
+
+summary = Summary("Ready").with_parts(heading=style(color="#315d9b"))
+```
+
+`forward_parts(heading="label")` exposes the child's `label` under the parent's
+name `heading`. `forward_parts("label")` keeps the name. It adds no HTML element,
+does not run the child again, and survives inserting ordinary containers around
+it. Other child parts remain private. Only a child's advertised parts can be
+forwarded; repeating the same public name on several children targets each
+occurrence in order. A reused child can be customized in one occurrence without
+changing another. Content still comes through ordinary function arguments.
+
+Forwarding returns a new node and leaves that node's own `.parts` unchanged;
+the selection applies when a parent consumes it. A second `forward_parts` call
+replaces the selection. Explicit forwarding also replaces implicit delegation
+when returning a child directly. An optional child target cannot satisfy a
+parent's required part while absent. When multiple aliases target the same
+element, `.with_parts(...)` composes their styles in keyword order.
+
 `Field.parts` exposes its declaration, and `field.parts` exposes the instance's
 public names. Plain `@component` remains supported and discovers names from
 present content; use an explicit declaration for a stable customization contract.
 `ComponentFactory` preserves a decorated function's argument types while exposing
-its optional declaration. Styled factories expose the same optional declaration;
-styling a primitive exposes `parts=None`.
+its declaration. `.parts` lists required then optional names; `.optional_parts`
+lists the declared optional names. Factories with inferred parts expose `None`
+for both declarations. Styled factories preserve both; styling a primitive
+exposes `parts=None` and `optional_parts=None`.
 
 Styles compose in this order: primitive defaults, styled defaults from inner to
 outer, explicit layout arguments, `style=` declarations, then later `with_style`

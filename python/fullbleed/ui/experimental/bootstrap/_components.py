@@ -77,7 +77,7 @@ def BreadcrumbItem(*children, href=None, active=False, **props):
                 attributes={"aria-current": "page" if active else None}, **props)
 
 
-@component(parts=("header", "body", "title", "subtitle", "footer"))
+@component(optional_parts=("header", "body", "title", "subtitle", "footer"))
 def Card(*children, title=None, subtitle=None, header=None, footer=None, image=None,
          variant=None, outline=False, body=True, **props):
     """One call owns the optional header, image, body, title, subtitle and footer.

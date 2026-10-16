@@ -21,12 +21,15 @@ from fullbleed.ui.experimental import (
     Renderer, Row, Source, Stack, Style, Theme, component, css, mm, pt, style, styled, to_legacy, token,
 )
 
-@component(parts=("label", "note"))
+@component(parts=("label",), optional_parts=("note",))
 def Notice(message: str, note: str | None = None) -> Node:
     return Paragraph(message, part="label")
 
 valid: Node = Notice("Paid")
 parts: tuple[str, ...] | None = Notice.parts
+optional_parts: tuple[str, ...] | None = Notice.optional_parts
+forwarded: Node = valid.forward_parts("label", details="note")
+instance_optional_parts: tuple[str, ...] = forwarded.optional_parts
 
 Label = styled(Paragraph, color=token("muted"), font_size=pt(8))
 QuietNotice = styled(Notice, color="#334455")
@@ -34,6 +37,7 @@ typed: Node = QuietNotice("Paid").with_style(padding=pt(8))
 override: Node = QuietNotice("Paid").with_style(color="blue")
 primitive_override: Node = Label("Paid", style=style(color="blue"))
 styled_parts: tuple[str, ...] | None = QuietNotice.parts
+styled_optional_parts: tuple[str, ...] | None = QuietNotice.optional_parts
 
 @component
 def Choice(*, style: str) -> Node:
@@ -117,6 +121,11 @@ kit_source: DocumentSource = Document(kit_field).compile(target="pdf")
 '''
 
 INVALID_CASES = [
+    ("forward_part_name_type", 'valid.forward_parts(3)'),
+    ("forward_part_alias_type", 'valid.forward_parts(heading=3)'),
+    ("optional_part_name_type", 'component(optional_parts=(3,))'),
+    ("factory_optional_parts_readonly", 'Notice.optional_parts = ()'),
+    ("node_optional_parts_readonly", 'valid.optional_parts = ()'),
     ("bootstrap_variant", 'bs.Badge("Ready", variant="brand")'),
     ("bootstrap_missing_group_id", 'bs.Tabs(bs.Tab("Summary", "Text"))'),
     ("bootstrap_unknown_prop", 'bs.Card("Text", paddding=3)'),

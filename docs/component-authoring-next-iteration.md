@@ -14,8 +14,8 @@ following the requested scope. It adds owned stylesheet dependencies, static
 component families, content slots, generated group IDs, checked utilities, and
 HTML export with or without styles. Explicit print representations handle
 browser controls and navigation without adding a browser to the engine. This
-addresses everyday composition; the deeper part-forwarding and independent-author
-questions below remain open. Other language APIs should follow the settled
+addresses everyday composition. The source branch now implements the explicit
+part-binding proposal below; independent-author feedback remains open. Other language APIs should follow the settled
 content/style/print contract, rather than copying Python syntax prematurely.
 
 The preview already implements component-owned styles, immutable overrides,
@@ -157,12 +157,13 @@ that tag selectors always beat generated classes.
 
 ### 1. A public part needs an explicit target
 
-**Observed in the installed preview:** a component that directly returns another
+**Observed in the published `f88cced` and `41a2cee` previews:** a component that directly returns another
 component delegates its parts. Adding a real container makes the child a nested
 boundary and hides those parts. Declaring the same names on the parent makes
 them available again, but does not forward their styles into that boundary.
 
-This small example runs in the preview:
+This small example reproduces the problem in those published previews. The
+updated source branch instead rejects `Summary("Ready")` at construction:
 
 ```python
 from fullbleed.ui.experimental import Box, Document, Paragraph, component, style
@@ -185,26 +186,45 @@ The override succeeds without changing the output. Allowing an absent declared
 part is intentional for conditional and empty states; it also conceals missing
 forwarding. A list of names establishes spelling, not a binding contract.
 
-**Recommendation:** settle explicit part forwarding before stabilizing parts.
-The contract must identify the owning component and exposed target, preserve
-nested privacy, and distinguish an optional absent target from broken wiring.
-It must survive adding an internal container without adding a container solely
-for styling. Do not invent the final helper spelling yet. Use ordinary content
-arguments and explicit component options for common customizations while this
-advanced contract is designed. The implementation belongs in
-[`_tree.py`](../python/fullbleed/ui/experimental/_tree.py), independently of HTML
-wrapper emission; a spelling-only check cannot qualify it.
+**Implemented in the source prototype:** `parts=("label",)` requires a real
+target; `optional_parts=("note",)` permits a conditional target to be absent.
+To fix the example, return `Box(Label(text).forward_parts("label"))`.
+Aliases such as `.forward_parts(heading="label")` expose a child part using
+the parent's vocabulary. A required target missing at construction raises
+`component.part_missing`; merely repeating a child's part name no longer
+pretends to connect it. The public preview downloads remain unchanged.
 
-A candidate implementation should resolve public bindings when the component
-boundary is constructed. A binding can target an owned element or explicitly
-forward to a child's advertised part. It should not search through private
-descendants. Repeated targets, such as table cells, must remain ordered; zero
-targets are valid only for a declared optional case. Validate required targets
-before applying styles, then use the existing immutable tree/style operations.
-Keep bindings virtual so this adds no layout boxes. Qualification must include
-the same public override before and after inserting an internal container,
-nested components that reuse the same part name, and both empty and populated
-tables. This is an implementation direction, not an implemented new API.
+[`_tree.py`](../python/fullbleed/ui/experimental/_tree.py) resolves bindings at
+component construction. A binding reaches an owned marker or a deliberately
+forwarded child part, never a search through private descendants. Ordered tree
+paths identify occurrences, so aliases and repeated table cells keep their
+order while shared child instances remain independently customizable. Zero
+targets are valid for explicitly optional parts. All forwarding is metadata;
+it adds no elements or layout boxes, and does not run component functions again.
+
+[Focused tests](../tests/test_fullbleed_ui_parts.py) cover these boundaries,
+including nested aliases, optional-only fragments, multi-level forwarding,
+deep trees, shared nodes and style composition. The
+[installed-wheel check](../tools/smoke_component_parts.py) compares rendered
+controls for the same override before and after inserting a container, private
+labels, shared children, empty and paginated tables, and a Bootstrap card.
+It also checks styled/unstyled HTML. This is a candidate API change awaiting
+author feedback, not a stable compatibility promise. Ordinary content arguments
+remain the first choice for common customizations.
+
+Local Windows qualification on 2026-10-16 used a rebuilt, installed wheel
+(SHA-256 `30fe308dd7d4d1b9daf37dfff2b0672b68159003a53a52387a5c0f32b2317437`).
+All seven rendered cases, spanning eleven pages, match their controls in PDFium
+pixels and retain repeatable PDF bytes. The existing Bootstrap catalog, report
+and long table retain all 29 PDF byte sequences and five HTML exports from the
+public `41a2cee` wheel. Mypy rejects 55 deliberate errors; Pyright rejects 56
+and passes 24 actual completion requests. Dynamic part names still need runtime
+validation. All 893 Python tests pass with the installed native extension,
+including 33 focused part-binding cases. Raw evidence lives under
+`target/growth/component-parts-20261016/`;
+CI runs the same new parts check and retains its PDFs, previews and report under
+`component-recipes-<OS>/parts/`. These checks do not establish usability or wider
+CSS compatibility.
 
 ### 2. Defaults and decisions need a kit-author convention
 
@@ -296,7 +316,7 @@ permits splitting; it does not force an otherwise fitting row to split.
 
 | Order | Work | Evidence required |
 | --- | --- | --- |
-| 1 | Specify and implement public part binding/forwarding | A wrapper refactor preserves advertised customization; nested private parts remain private; an absent optional target is distinguishable from broken wiring |
+| 1 | Public part binding/forwarding (implemented in the source prototype) | A wrapper refactor preserves advertised customization; nested private parts remain private; an absent optional target is distinguishable from broken wiring; independent author feedback is still needed |
 | 2 | Consolidate the recommended authoring path and one default kit | First PDF, reuse, content replacement and local restyling need no selectors or token/part machinery; advanced recipes explain their dependencies |
 | 3 | Close bounded print contracts in the native engine | Empty, long and unbreakable content renders correctly or reports an actionable limitation; repeated page elements have explicit semantics |
 | 4 | Evaluate the same tasks with independent authors and two independent kits | Record successful edits, internal knowledge and integration failures; use that evidence to decide token/part typing and discovery work |
@@ -353,5 +373,7 @@ installed `f88cced` preview, checking its four relevant Python modules against t
 commit. They cover default versus explicit styling, part delegation and the
 accepted no-op above, theme dependencies and namespaced values, and eager table
 callbacks. They establish those API behaviors; they add no new rendering,
-performance or usability claim. The next implementation should qualify the
-proposed contracts rather than merely preserve these observations.
+performance or usability claim. The source follow-up now qualifies explicit
+bindings with the rendered controls described in section 1. The observed
+behavior remains documented here so the change from the pinned downloads is
+reviewable.

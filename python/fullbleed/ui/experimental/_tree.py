@@ -28,16 +28,57 @@ def _declared_parts(values) -> tuple[str, ...] | None:
     return names
 
 
-def _owned_parts(children):
-    """Authored markers in this component, excluding other component boundaries."""
-    pending = list(reversed(children))
+def _collect_part_bindings(root):
+    """Resolve owned markers and explicit child exports to ordered tree paths.
+
+    Paths identify occurrences, not object identities: the same immutable child
+    can appear in two positions with different public customization boundaries.
+    Nested private trees are never searched for a matching spelling.
+    """
+    found, owned = {}, set()
+    pending = [(root, (), True)]
     while pending:
-        node = pending.pop()
-        if not isinstance(node, Node) or node.boundary:
+        node, path, delegate = pending.pop()
+        if node is not root and node.boundary:
+            bindings = dict(node._part_bindings())
+            if node._forwarded_parts:
+                for alias, name in node._forwarded_parts:
+                    owned.add(alias)
+                    found.setdefault(alias, []).extend(path + target for target in bindings[name])
+            elif delegate:
+                for name, targets in bindings.items():
+                    found.setdefault(name, []).extend(path + target for target in targets)
             continue
         if node.part is not None:
-            yield node.part
-        pending.extend(reversed(node.children))
+            owned.add(node.part)
+            found.setdefault(node.part, []).append(path)
+        delegated = delegate and node.tag is None and len(node.children) == 1
+        pending.extend((child, (*path, index), delegated)
+                       for index, child in reversed(tuple(enumerate(node.children))) if isinstance(child, Node))
+    return tuple((name, tuple(paths)) for name, paths in found.items()), owned
+
+
+def _apply_part_styles(root, targets):
+    """Copy only addressed paths, iteratively and without shared-node aliasing."""
+    trie = {}
+    for path, declarations in targets.items():
+        branch = trie
+        for index in path:
+            branch = branch.setdefault(index, {})
+        branch[None] = declarations
+    pending, results = [(root, trie, False)], []
+    while pending:
+        node, branch, visited = pending.pop()
+        indices = tuple(index for index in branch if index is not None)
+        if not visited:
+            pending.append((node, branch, True))
+            pending.extend((node.children[index], branch[index], False) for index in reversed(indices))
+        else:
+            children = list(node.children)
+            for index in reversed(indices):
+                children[index] = results.pop()
+            results.append(replace(node, children=tuple(children), style=Style(node.style, branch.get(None))))
+    return results[0]
 
 
 def _children(values) -> tuple:
@@ -116,9 +157,12 @@ class Node:
     source: tuple[str, int] | None = None
     boundary: bool = False
     declared_parts: tuple[str, ...] | None = None
+    optional_parts: tuple[str, ...] = field(default=(), kw_only=True)
     _defaults: Style = field(default=Style(), repr=False, kw_only=True)
     _resources: tuple[Resource, ...] = field(default=(), repr=False, kw_only=True)
     _print: Node | None = field(default=None, repr=False, kw_only=True)
+    _forwarded_parts: tuple[tuple[str, str], ...] = field(default=(), repr=False, kw_only=True)
+    _bindings: tuple | None = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self):
         if self.tag is not None and (not isinstance(self.tag, str) or not _TAG_NAME.fullmatch(self.tag)):
@@ -136,14 +180,13 @@ class Node:
             raise AuthoringError("A print representation requires a concrete element snapshot", code="print.node")
         declared = _declared_parts(self.declared_parts)
         object.__setattr__(self, "declared_parts", declared)
+        optional = _declared_parts(self.optional_parts)
+        if optional is None or optional and (declared is None or set(optional) - set(declared)):
+            raise AuthoringError("Optional parts must belong to the component declaration", code="component.parts")
+        object.__setattr__(self, "optional_parts", optional)
         if declared is not None:
             if not self.boundary:
                 raise AuthoringError("Only component boundaries declare parts", code="component.parts")
-            if unknown := set(_owned_parts(self.children)) - set(declared):
-                raise AuthoringError(
-                    f"Authored parts are missing from the component declaration: {', '.join(sorted(unknown))}",
-                    code="component.parts",
-                )
         for name in (self.part, self.name):
             if name is not None and (not isinstance(name, str) or not name.strip()):
                 raise AuthoringError("Component and part names must be nonempty strings", code="component.name")
@@ -155,6 +198,38 @@ class Node:
             raise AuthoringError("Virtual nodes cannot carry element styles or attributes", code="style.root")
         if self.tag is not None and self.tag.casefold() in _HTML_VOID_ELEMENTS and self.children:
             raise AuthoringError(f"Void element {self.tag!r} cannot have children", code="element.void")
+        if self.boundary:
+            bindings, owned = _collect_part_bindings(self)
+            resolved = dict(bindings)
+            if declared is not None:
+                if unknown := owned - set(declared):
+                    raise AuthoringError(
+                        f"Authored parts are missing from the component declaration: {', '.join(sorted(unknown))}",
+                        code="component.parts",
+                    )
+                for name in declared:
+                    if not resolved.get(name) and name not in optional:
+                        raise AuthoringError(
+                            f"Required part {name!r} has no target. Mark an owned element with part={name!r}, "
+                            "forward a child's advertised part with forward_parts(), or declare an optional part.",
+                            code="component.part_missing", path=(name,),
+                        )
+                bindings = tuple((name, resolved.get(name, ())) for name in declared)
+            object.__setattr__(self, "_bindings", bindings)
+        forwarded = tuple(self._forwarded_parts)
+        if forwarded:
+            if not self.boundary or any(not isinstance(pair, tuple) or len(pair) != 2
+                                        or not all(isinstance(value, str) for value in pair) for pair in forwarded):
+                raise AuthoringError("Forward parts on a component boundary using name pairs", code="component.part_forward")
+            aliases = _declared_parts(alias for alias, _ in forwarded)
+            if unknown := {name for _, name in forwarded} - set(self.parts):
+                raise AuthoringError(
+                    f"Cannot forward unknown child parts: {', '.join(sorted(unknown))}. "
+                    f"Available parts: {', '.join(self.parts) or 'none'}", code="component.part_forward",
+                    path=(self.name,) if self.name else (),
+                )
+            forwarded = tuple(zip(aliases, (name for _, name in forwarded)))
+        object.__setattr__(self, "_forwarded_parts", forwarded)
 
     @property
     def required_tokens(self) -> tuple[str, ...]:
@@ -168,21 +243,24 @@ class Node:
     @property
     def parts(self) -> tuple[str, ...]:
         """Exposed names, including declared parts absent from this instance."""
-        found = {}
-        pending = [(self, True)]
-        while pending:
-            node, root = pending.pop()
-            if node.boundary:
-                if not root:
-                    continue
-                if node.declared_parts is not None:
-                    found.update((name, None) for name in node.declared_parts)
-                    continue
-            if node.part is not None:
-                found[node.part] = None
-            delegated = root and node.tag is None and len(node.children) == 1
-            pending.extend((child, delegated) for child in reversed(node.children) if isinstance(child, Node))
-        return tuple(found)
+        return tuple(name for name, _ in self._part_bindings())
+
+    def _part_bindings(self):
+        return self._bindings if self._bindings is not None else _collect_part_bindings(self)[0]
+
+    def forward_parts(self, *names: str, **aliases: str) -> Node:
+        """Expose selected child parts to the containing component, without markup.
+
+        Positional names keep their spelling; aliases map a parent's public name
+        to this child's advertised name. A second call replaces the forwarding
+        selection. This node's own public parts remain unchanged.
+        """
+        if not self.boundary:
+            raise AuthoringError("Forward parts on a component; use part= on an owned element", code="component.part_forward")
+        if not names and not aliases:
+            raise AuthoringError("Select at least one advertised child part to forward", code="component.part_forward")
+        _declared_parts((*names, *aliases))
+        return replace(self, _forwarded_parts=tuple((name, name) for name in names) + tuple(aliases.items()))
 
     def with_style(self, *fragments, **properties) -> Node:
         return self._with_root_styles(authored=Style(*fragments, **properties))
@@ -238,32 +316,19 @@ class Node:
     def with_parts(self, **overrides) -> Node:
         """Style exposed parts; declared optional parts may be absent from the tree."""
         styles = {name: Style(value) for name, value in overrides.items()}
-        if missing := styles.keys() - set(self.parts):
-            available = ", ".join(self.parts) or "none"
+        bindings = dict(self._part_bindings())
+        if missing := styles.keys() - bindings.keys():
+            available = ", ".join(bindings) or "none"
             raise AuthoringError(
                 f"Unknown component parts: {', '.join(sorted(missing))}. Available parts: {available}",
                 code="style.part", path=(self.name,) if self.name else (),
             )
 
-        replacements = {}
-        pending = [(self, True, False, frozenset(styles))]
-        while pending:
-            node, root, visited, allowed = pending.pop()
-            if node.boundary and not root:
-                replacements[id(node)] = node
-            elif not visited:
-                if node.boundary and node.declared_parts is not None:
-                    allowed = allowed.intersection(node.declared_parts)
-                pending.append((node, root, True, allowed))
-                delegate_root = root and node.tag is None and len(node.children) == 1
-                pending.extend((child, delegate_root, False, allowed) for child in reversed(node.children) if isinstance(child, Node))
-            else:
-                updated = node
-                if node.part in allowed:
-                    updated = node.with_style(styles[node.part])
-                replacements[id(node)] = replace(updated, children=tuple(
-                    replacements[id(child)] if isinstance(child, Node) else child for child in updated.children))
-        return replacements[id(self)]
+        targets = {}
+        for name, declarations in styles.items():
+            for path in bindings[name]:
+                targets[path] = Style(targets.get(path), declarations)
+        return _apply_part_styles(self, targets) if targets else self
 
 
 def _element(tag, children, *, base=None, style=None, class_name=None, attrs=None, part=None):
@@ -397,24 +462,33 @@ class ComponentFactory(Protocol[P]):
     @property
     def parts(self) -> tuple[str, ...] | None: ...
 
+    @property
+    def optional_parts(self) -> tuple[str, ...] | None: ...
+
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> Node: ...
 
 
 @overload
-def component(fn: Callable[P, Node], *, parts: Iterable[str] | None = None) -> ComponentFactory[P]: ...
+def component(fn: Callable[P, Node], *, parts: Iterable[str] | None = None,
+              optional_parts: Iterable[str] = ()) -> ComponentFactory[P]: ...
 
 
 @overload
-def component(fn: None = None, *, parts: Iterable[str] | None = None) -> Callable[[Callable[P, Node]], ComponentFactory[P]]: ...
+def component(fn: None = None, *, parts: Iterable[str] | None = None,
+              optional_parts: Iterable[str] = ()) -> Callable[[Callable[P, Node]], ComponentFactory[P]]: ...
 
 
 def component(
     fn: Callable[P, Node] | None = None, *, parts: Iterable[str] | None = None,
+    optional_parts: Iterable[str] = (),
 ) -> ComponentFactory[P] | Callable[[Callable[P, Node]], ComponentFactory[P]]:
-    """Retain component identity; optionally declare stable names for customization."""
-    declared = _declared_parts(parts)
+    """Declare required and optional customization targets at a virtual boundary."""
+    required, optional = _declared_parts(parts), _declared_parts(optional_parts)
+    if optional is None:
+        raise AuthoringError("optional_parts requires an ordered iterable of names", code="component.parts")
+    declared = _declared_parts((*(required or ()), *optional)) if required is not None or optional else None
     if fn is None:
-        return lambda factory: component(factory, parts=declared)
+        return lambda factory: component(factory, parts=required, optional_parts=optional)
 
     @wraps(fn)
     def wrapped(*args: P.args, **kwargs: P.kwargs) -> Node:
@@ -423,12 +497,14 @@ def component(
             children = _children((result,))
             code = getattr(fn, "__code__", None)
             source = (code.co_filename, code.co_firstlineno) if code else None
-            return Node(None, children, name=fn.__name__, source=source, boundary=True, declared_parts=declared)
+            return Node(None, children, name=fn.__name__, source=source, boundary=True,
+                        declared_parts=declared, optional_parts=optional)
         except AuthoringError as error:
             raise error.at(fn.__name__) from error
         except (TypeError, ValueError) as error:
             raise AuthoringError(str(error), code="component.call", path=(fn.__name__,)) from error
     setattr(wrapped, "parts", declared)
+    setattr(wrapped, "optional_parts", optional if declared is not None else None)
     return cast(ComponentFactory[P], wrapped)
 
 
@@ -447,4 +523,5 @@ def styled(factory: Callable[P, Node], *fragments, **properties) -> ComponentFac
             raise AuthoringError("A styled factory must return a component node", code="style.root")
         return node._with_root_styles(defaults=base)
     setattr(build, "parts", getattr(factory, "parts", None))
+    setattr(build, "optional_parts", getattr(factory, "optional_parts", None))
     return cast(ComponentFactory[P], build)
