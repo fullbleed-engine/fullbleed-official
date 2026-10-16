@@ -55,12 +55,16 @@ def document(node):
 def failure_cases():
     return {
         "nested-table-cell": (document(Box(Box(WorkTable(align="bottom")))), "table_cell_alignment",
-                              [("WorkTable", "DataTable", "row 2", "Description", "cell")], 2),
+                              [("WorkTable", "DataTable", "row 2", "column 1", "Description", "cell")], 2),
         "multiple-table-cells": (document(WorkTable(align="bottom", multiple=True)), "table_cell_alignment",
-                                 [("WorkTable", "DataTable", "row 2", label, "cell") for label in ("Description", "Amount")], 2),
+                                 [("WorkTable", "DataTable", "row 2", f"column {i}", label, "cell")
+                                  for i, label in enumerate(("Description", "Amount"), 1)], 2),
         "completed-companion": (document(DataTable([0], columns=[
             Column("Blocked", lambda _: ClippedCard()), Column("Complete", lambda _: "FINISHED_CELL")
-        ])), "table_cell_content", [("DataTable", "row 1", "Blocked", "cell")], 2),
+        ])), "table_cell_content", [("DataTable", "row 1", "column 1", "Blocked", "cell")], 2),
+        "duplicate-column-labels": (document(DataTable([0], columns=[
+            Column("Value", lambda _: "FINISHED_CELL"), Column("Value", lambda _: ClippedCard())
+        ])), "table_cell_content", [("DataTable", "row 1", "column 2", "Value", "cell")], 2),
         "clipping-owner": (document(Flow(ClippedCard())), "clipped_container", [("ClippedCard", "div")], 1),
         "padding-owner": (document(Box(PaddedCard())), "container_decoration_height", [("PaddedCard", "div")], 1),
         "table-header-space": (document(WorkTable(header_height=pt(300))), "table_fixed_height",

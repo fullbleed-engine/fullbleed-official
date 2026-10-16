@@ -13,7 +13,7 @@ from pathlib import Path
 import fullbleed
 from fullbleed.ui import StyleSheet
 from fullbleed.ui.experimental import (
-    Card, Document, Flow, Heading, Page, Paragraph, Renderer, Theme,
+    Card, Column, DataTable, Document, Flow, Heading, Page, Paragraph, Renderer, Theme,
     css, mm, pt, style, styled, token,
 )
 from PIL import ImageChops
@@ -39,7 +39,7 @@ def main():
         return Document(Flow(Heading("A considered record", level=1), node, gap=pt(18)),
                         title="Component style contract", lang="en-US", page=page, theme=theme, styles=rules)
 
-    def check(name, actual, control, rules=None):
+    def check(name, actual, control, rules=None, *, pages=1):
         folder = args.out / name
         folder.mkdir(exist_ok=True)
         authored, expected = document(actual, rules), document(control)
@@ -50,26 +50,28 @@ def main():
         _, missing = renderer.engine_for(authored).render_pdf_with_glyph_report(plan.html, plan.css)
         assert not missing, (name, missing)
         reader = PdfReader(BytesIO(pdf))
-        assert len(reader.pages) == 1, name
+        assert len(reader.pages) == pages, (name, len(reader.pages))
         box = reader.pages[0].mediabox
         assert abs(float(box.width) - 419.528) < .01 and abs(float(box.height) - 595.276) < .01
-        assert "PAIDINFULL" in "".join(reader.pages[0].extract_text().split())
+        assert "PAIDINFULL" in "".join("".join(page.extract_text().split()) for page in reader.pages)
         assert reader.metadata.title == authored.title
         assert reader.trailer["/Root"]["/Lang"] == authored.lang
         with closing(pdfium.PdfDocument(pdf)) as actual_pdf, closing(pdfium.PdfDocument(reference)) as expected_pdf:
-            with closing(actual_pdf[0]) as actual_page, closing(expected_pdf[0]) as expected_page:
-                with closing(actual_page.render(scale=1.5)) as actual_bitmap, closing(expected_page.render(scale=1.5)) as expected_bitmap:
-                    image, expected_image = actual_bitmap.to_pil().convert("RGB"), expected_bitmap.to_pil().convert("RGB")
-                    assert image.size == expected_image.size
-                    assert ImageChops.difference(image, expected_image).getbbox() is None, (name, "control pixels")
-                    image.save(folder / "independent.png")
+            assert len(actual_pdf) == len(expected_pdf) == pages, name
+            for index in range(pages):
+                with closing(actual_pdf[index]) as actual_page, closing(expected_pdf[index]) as expected_page:
+                    with closing(actual_page.render(scale=1.5)) as actual_bitmap, closing(expected_page.render(scale=1.5)) as expected_bitmap:
+                        image, expected_image = actual_bitmap.to_pil().convert("RGB"), expected_bitmap.to_pil().convert("RGB")
+                        assert image.size == expected_image.size
+                        assert ImageChops.difference(image, expected_image).getbbox() is None, (name, index, "control pixels")
+                        image.save(folder / ("independent.png" if index == 0 else f"independent-{index + 1}.png"))
         authored.emit_artifacts(html_path=folder / "document.html", css_path=folder / "document.css")
         (folder / "document.pdf").write_bytes(pdf)
         (folder / "control.pdf").write_bytes(reference)
         (folder / "native.png").write_bytes(rendered.render_image_pages(dpi=96)[0])
         records.append({"name": name, "pdf_sha256": sha256(pdf).hexdigest(),
                         "control_pdf_sha256": sha256(reference).hexdigest(), "control_pixels_equal": True,
-                        "repeat_bytes_equal": True, "missing_glyphs": 0, "pages": 1,
+                        "repeat_bytes_equal": True, "missing_glyphs": 0, "pages": pages,
                         "page_size_pt": [float(box.width), float(box.height)]})
 
     Label = styled(Paragraph, font_size=pt(18), color="#a0442e")
@@ -107,6 +109,43 @@ def main():
     check("conditional-styles", Paragraph("PAID IN FULL", style=style(False, None, color="#315d9b", margin=0)),
           Paragraph("PAID IN FULL").with_style(color="#315d9b", margin=0))
 
+    def table(*, columns=None, rows=("PAID IN FULL",), **options):
+        return DataTable(rows, columns=columns or [Column("Status", str)],
+                         caption="Payment status", class_name="ledger", **options)
+
+    compact_cells = style(padding=pt(2), border_bottom="none", text_align="right")
+    check("table-selector-defaults", table(), table().with_parts(header=compact_cells, cell=compact_cells),
+          ".ledger th, .ledger td { padding:2pt; border-bottom:none; text-align:right }")
+    columns = [Column("Status", str, align="left", width=pt(125)), Column("Code", lambda _: "A01")]
+    check("table-explicit-column-choices", table(columns=columns), table(columns=columns),
+          ".ledger th:first-child, .ledger td:first-child { text-align:right; width:60pt }")
+    overridden = table().with_parts(cell=style(padding=0, text_align="center", border_bottom="none"))
+    check("table-parts-override-selectors", overridden, overridden,
+          ".ledger td { padding:20pt; text-align:right; border-bottom:3pt solid red }")
+    check("table-empty-defaults", table(rows=(), empty="PAID IN FULL"),
+          table(rows=(), empty="PAID IN FULL").with_parts(empty=style(padding=pt(2))),
+          ".ledger td { padding:2pt }")
+    check("table-caption-defaults", table(), table().with_parts(caption=style(text_align="right", padding_bottom=pt(2))),
+          ".ledger caption { text-align:right; padding-bottom:2pt }")
+    # Make the complete table taller than a fresh page. Both auto and avoid
+    # permit keeping these individually fitting rows intact; auto is not a
+    # request to force a split. Check complete content and the explicit controls.
+    rows = (Flow([Paragraph("PAID IN FULL") for _ in range(14)], gap=0),
+            Flow([Paragraph(f"SECOND_{index:02d}") for index in range(20)], gap=0))
+    columns = [Column("Status", lambda row: row)]
+    check("table-selector-row-break", table(rows=rows, columns=columns),
+          table(rows=rows, columns=columns, row_break="auto"),
+          ".ledger tbody tr { break-inside:auto }", pages=2)
+    check("table-explicit-row-break", table(rows=rows, columns=columns, row_break="avoid"),
+          table(rows=rows, columns=columns, row_break="avoid"),
+          ".ledger tbody tr { break-inside:auto }", pages=2)
+    for name in ("table-selector-row-break", "table-explicit-row-break"):
+        reader = PdfReader(args.out / name / "document.pdf")
+        assert "SECOND_00" not in reader.pages[0].extract_text(), name
+        content = "\n".join(page.extract_text() for page in reader.pages)
+        assert content.count("PAID IN FULL") == 14, name
+        assert all(content.count(f"SECOND_{index:02d}") == 1 for index in range(20)), name
+
     # Page furniture remains usable while typed Page keeps actual PDF geometry.
     furniture = document(base, '@page { @bottom-center { content:"FULLBLEED"; font-family:Inter; font-size:8pt; margin-top:2pt } }')
     pdf = furniture.render_pdf(renderer)
@@ -115,6 +154,7 @@ def main():
     assert abs(float(reader.pages[0].mediabox.width) - 419.528) < .01
     (args.out / "page-furniture.pdf").write_bytes(pdf)
     report = {"ok": True, "checks": records, "shared_stylesheet_snapshotted": True,
+              "row_break_scope": "Selector/explicit controls retain complete content and the existing native preference for intact fitting rows. Auto permits a break; it does not force one. These fixtures do not establish different pagination for auto and avoid.",
               "page_furniture_and_typed_geometry": True}
     (args.out / "verification.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"ok": True, "rendered_controls": len(records), "page_furniture_and_typed_geometry": True}))

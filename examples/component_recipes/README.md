@@ -13,13 +13,19 @@ document imports a stylesheet or coordinates selectors. The kit contains the
 styles and the components that use them. The example data is the existing
 fictional [Northstar invoice data](../components/data.json).
 
-## Start with a function
+## Make your first PDF
 
-A component takes ordinary arguments and returns a tree. Start with a local style;
-themes and named parts are optional tools for reuse and customization:
+A component takes ordinary arguments and returns a tree. After installing the
+[candidate](#run-the-candidate), save this as `summary.py` and run
+`python summary.py`. It writes `summary.pdf` using an explicitly selected bundled
+font. Themes and named parts are optional; this example needs neither:
 
 ```python
-from fullbleed.ui.experimental import Document, Paragraph, Stack, component, pt
+from importlib.resources import files
+from pathlib import Path
+from fullbleed.ui.experimental import (
+    Document, Flow, Heading, Page, Paragraph, Renderer, Stack, component, mm, pt,
+)
 
 @component
 def Field(label: str, value: str):
@@ -29,14 +35,24 @@ def Field(label: str, value: str):
         gap=pt(4),
     )
 
-field = Field("Prepared for", "Maple & Finch")
-document = Document(field)
+body = Flow(
+    Heading("Project summary", level=1),
+    Field("Prepared for", "Maple & Finch"),
+    Field("Status", "Ready for review"),
+    gap=pt(14),
+).with_style(font_family="Inter", font_size=pt(11), color="#263b46")
+document = Document(body, title="Project summary", page=Page("A5", margin=mm(16)))
+font = files("fullbleed_assets").joinpath("fonts/Inter-Variable.ttf")
+renderer = Renderer(font_files=[str(font)])
+Path("summary.pdf").write_bytes(document.render_pdf(renderer))
 ```
 
 The label's appearance travels with `Field`; the document does not attach a
-stylesheet. The [rendering step](#configure-the-page-and-render) below selects
-the paper and font and writes a PDF. `@component` adds a diagnostic boundary;
-ordinary undecorated functions can also compose nodes.
+stylesheet. Change the label color in `Field` to update both fields, or use
+`Field(...).with_style(background="#f2f5f8", padding=pt(8))` to customize one
+instance. Reuse the same function in another document without stylesheet wiring.
+`@component` adds a diagnostic boundary; ordinary undecorated functions can also
+compose nodes. Renderer and font setup belong at the application boundary.
 
 ## Reuse styles and expose customization
 
@@ -291,11 +307,26 @@ state spanning. With `repeat_header=False`, scoped column-header cells stay in
 the first body row because the native engine always repeats a `thead` group.
 Application code owns monetary calculations and formatting.
 
+Table padding, borders, caption spacing and default alignment use the same
+default-style layer as other components. Normal selector rules can customize
+them; named-part overrides are explicit instance choices. `Column(align=None)`
+or an omitted alignment allows the left-aligned default or stylesheet rule to
+apply. An explicit `align="left"`, `"right"`, or `"center"` and an explicit width
+take inline precedence on that column's header and cells. Likewise, omitted/None
+`row_break` allows the default `avoid` preference or selector styling; an explicit
+`row_break="avoid"` or `"auto"` takes inline precedence. Native `!important`
+rules still apply.
+
 Table parts are `header`, `cell`, `row`, `caption`, and `empty`, whether or not the
 current data produces cells, a caption, or an empty-state row. Each body cell retains its table,
-row, and column path in the compiled source map.
+row, column position and printed label in the compiled source map. Duplicate
+labels remain distinguishable, for example `row 1 → column 2 → Value → cell`.
 
 **Pagination:** ordinary rows move intact when they fit on a fresh page.
+This remains the native preference with `row_break="auto"`; removing an avoidance
+request does not force a split at the remaining page space. This distinction
+follows the difference between allowed and forced breaks in the
+[CSS fragmentation model](https://www.w3.org/TR/css-break-3/#break-within).
 Top-aligned oversized cells continue independently through the native layout
 engine, with repeated headers and stable column widths on equal-width pages.
 The examples check long text, uneven cells, borders, and mixed content.
@@ -424,7 +455,7 @@ An unsplittable native fragment raises `LayoutError`, a subclass of
 component roots. Its `reason` and `failure_sources` report the constraint rejected
 by the native splitter when it can identify one. For example, an oversized,
 bottom-aligned cell reports `table_cell_alignment` with a path such as
-`WorkTable → DataTable → row 2 → Description → cell` and advice to use top alignment.
+`WorkTable → DataTable → row 2 → column 1 → Description → cell` and advice to use top alignment.
 A cell whose content cannot fit or continue reports `table_cell_content`.
 
 These details come from the actual split attempt. A completed companion cell is

@@ -157,7 +157,7 @@ T = TypeVar("T")
 class Column(Generic[T]):
     label: str
     cell: Callable[[T], _Child]
-    align: {literal("COLUMN_ALIGNMENTS")} = ...
+    align: {literal("COLUMN_ALIGNMENTS")} | None = ...
     width: Length | None = ...
 
 class _TableFactory(Protocol):
@@ -165,7 +165,7 @@ class _TableFactory(Protocol):
     def parts(self) -> tuple[str, ...]: ...
     def __call__(self, rows: Iterable[T], *, columns: Iterable[Column[T]],
                  caption: _Child = ..., empty: _Child = ..., repeat_header: bool = ...,
-                 row_break: {literal("ROW_BREAKS")} = ..., style: _StyleInput = ...,
+                 row_break: {literal("ROW_BREAKS")} | None = ..., style: _StyleInput = ...,
                  class_name: str | None = ..., attrs: _Attributes = ...) -> Node: ...
 
 DataTable: _TableFactory

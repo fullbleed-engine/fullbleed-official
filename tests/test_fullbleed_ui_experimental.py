@@ -632,7 +632,7 @@ def test_table_owns_header_empty_state_and_single_evaluation_of_cells():
     assert before.html.count('scope="col"') == 2
     assert "A &amp; B" in before.html and "Late" not in before.html
     assert "padding: 10pt;" in _styles(before) and "background: #fafafa;" in _styles(before)
-    assert any(source.path == ("DataTable", "row 2", "Description", "cell") for source in before.sources)
+    assert any(source.path == ("DataTable", "row 2", "column 1", "Description", "cell") for source in before.sources)
     empty = Document(DataTable([], columns=[Column("A", str), Column("B", str)], empty="Nothing yet")).to_html()
     assert 'colspan="2"' in empty and "Nothing yet" in empty
 
@@ -640,11 +640,30 @@ def test_table_owns_header_empty_state_and_single_evaluation_of_cells():
 def test_table_callback_error_has_row_and_column_context():
     with pytest.raises(AuthoringError) as caught:
         DataTable([{"value": 1}, {}], columns=[Column("Amount", lambda row: row["value"])])
-    assert caught.value.path == ("DataTable", "row 2", "Amount")
+    assert caught.value.path == ("DataTable", "row 2", "column 1", "Amount")
     cause = caught.value
     while cause.__cause__ is not None:
         cause = cause.__cause__
     assert isinstance(cause, KeyError)
+
+
+def test_duplicate_column_labels_have_distinct_header_cell_and_callback_locations():
+    table = DataTable([1], columns=[Column("Value", str), Column("Value", str)])
+    sources = Document(table).compile().sources
+    for part, prefix in (("header", ("DataTable",)), ("cell", ("DataTable", "row 1"))):
+        selected = [source for source in sources if source.path[-1] == part]
+        assert [source.path for source in selected] == [(*prefix, f"column {i}", "Value", part) for i in (1, 2)]
+        assert len({source.node_id for source in selected}) == 2
+    with pytest.raises(AuthoringError) as caught:
+        DataTable([{}], columns=[Column("Value", lambda row: "First"), Column("Value", lambda row: row["missing"])])
+    assert caught.value.path == ("DataTable", "row 1", "column 2", "Value")
+    assert caught.value.code == "table.cell"
+
+
+def test_omitted_table_choices_and_explicit_none_compile_identically():
+    omitted = DataTable(["One"], columns=[Column("Item", str)])
+    forwarded = DataTable(["One"], columns=[Column("Item", str, align=None)], row_break=None)
+    assert Document(omitted).compile() == Document(forwarded).compile()
 
 
 @pytest.mark.parametrize("kwargs", [

@@ -22,6 +22,7 @@ These docs target the current repository source layout. For the published releas
 - `docs/embedded-stylesheets.md`: complete HTML documents, stylesheet order, print media, and compiled styling boundaries
 - `docs/component-authoring.md`: React-inspired Python functions, named elements, reusable styles, and document rendering
 - `docs/component-authoring-design.md`: implementation review and experimental component API direction
+- `docs/component-authoring-next-iteration.md`: component ergonomics decision brief, observed gaps, and implementation priorities
 - `docs/ui-accessibility.md`: `fullbleed.ui` authoring, accessibility primitives, validation, signatures
 - `docs/cli.md`: command reference, JSON/machine mode, reproducibility and validation flows
 - `docs/agent-discovery.md`: maintained package, Skill, MCP Registry, and ecosystem distribution strategy

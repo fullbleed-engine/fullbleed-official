@@ -58,6 +58,7 @@ def description(row: Line) -> str:
 
 rows = [Line("Design", 100)]
 table = DataTable(rows, columns=[Column("Item", description)], row_break="avoid")
+optional_table = DataTable(rows, columns=[Column("Item", description, align=None)], row_break=None)
 table = table.with_parts(cell=style(padding=(pt(4), pt(6))))
 heading = Heading("Invoice", level=1, keep_with_next=True)
 brand = Row(Paragraph("Fullbleed"), Image(src="mark.png", alt="Company mark"), justify="start")

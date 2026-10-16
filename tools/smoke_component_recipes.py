@@ -178,9 +178,9 @@ else:
         result = json.loads(bounded.stdout)
         if kind in {"unsupported-alignment", "tall-image"}:
             assert result["error"]["code"] == "layout.unsplittable", result
-            assert result["error"]["path"][-4:] == ["DataTable", "row 1", "Segments", "cell"], result
+            assert result["error"]["path"][-5:] == ["DataTable", "row 1", "column 1", "Segments", "cell"], result
             assert result["error"]["reason"] == ("table_cell_alignment" if kind == "unsupported-alignment" else "table_cell_content"), result
-            assert [source["path"] for source in result["error"]["failure_sources"]] == [["DataTable", "row 1", "Segments", "cell"]], result
+            assert [source["path"] for source in result["error"]["failure_sources"]] == [["DataTable", "row 1", "column 1", "Segments", "cell"]], result
             assert [source["node_id"] for source in result["error"]["sources"]] == ["n1"], result
             assert result["error"]["sources"][0]["path"] == ["DataTable", "table"], result
             assert result["error"]["sources"][0]["file"].endswith("_table.py"), result
@@ -264,6 +264,26 @@ else:
     namespace = {}
     snippet_dir = (args.out / "readme").resolve()
     snippet_dir.mkdir(exist_ok=True)
+    # The first example must work alone, before later blocks populate a shared
+    # teaching namespace. Execute the exact documented program as a consumer.
+    first_script = snippet_dir / "summary.py"
+    first_script.write_text(snippets[0], encoding="utf-8")
+    first_run = subprocess.run([sys.executable, "-I", str(first_script)], cwd=snippet_dir,
+                               capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert first_run.returncode == 0, (first_run.stdout, first_run.stderr)
+    first_pdf = snippet_dir / "summary.pdf"
+    first_reader = PdfReader(first_pdf)
+    assert len(first_reader.pages) == 1 and first_reader.metadata.title == "Project summary"
+    first_text = compact(first_reader.pages[0].extract_text())
+    assert all(compact(value) in first_text for value in ("Project summary", "Maple & Finch", "Ready for review"))
+    assert abs(float(first_reader.pages[0].mediabox.width) - a5[0]) < .1
+    assert abs(float(first_reader.pages[0].mediabox.height) - a5[1]) < .1
+    with pdfium.PdfDocument(first_pdf) as first_output:
+        page = first_output[0]
+        bitmap = page.render(scale=1.5)
+        bitmap.to_pil().save(snippet_dir / "summary.png")
+        bitmap.close()
+        page.close()
     try:
         os.chdir(snippet_dir)
         for index, snippet in enumerate(snippets, 1):
@@ -273,7 +293,8 @@ else:
     assert PdfReader(snippet_dir / "customer.pdf").metadata.title == "Customer details"
 
     result = {"ok": True, "version": metadata.version("fullbleed"), "runtime": str(fullbleed.__file__),
-              "cases": cases, "readme_blocks": len(snippets), "ready_for_stabilization": False, "unsupported_cases": unsupported,
+              "cases": cases, "readme_blocks": len(snippets), "first_example_runs_alone": True,
+              "ready_for_stabilization": False, "unsupported_cases": unsupported,
               "scope": "Experimental authoring, metadata, geometry, ordinary and oversized top-aligned text cell continuation, data edits, theme colors, source maps, glyphs and deterministic fixture bytes. Native split failures retain fragment scopes and identify rejected cell constraints when available. Rowspans, page-tall images in cells, and non-top-aligned oversized cells remain unsupported. Not a conformance or performance claim."}
     (args.out / "verification.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"ok": True, "cases": len(cases), "pages": sum(case["pages"] for case in cases)}))

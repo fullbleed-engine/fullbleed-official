@@ -4,6 +4,11 @@ Status: working proposal with a source-branch Python prototype, reviewed 2026-10
 the published API or a promise of cross-language parity. The stable authoring
 guide remains [component-authoring.md](component-authoring.md).
 
+Start with the [next-iteration decision brief](component-authoring-next-iteration.md)
+for the recommended public mental model, newly observed consistency gaps, and
+prioritized work. The material below retains the detailed implementation history
+and qualification boundaries.
+
 ## Assessment
 
 The current API is a useful safe serializer and composition layer, but it leaves
@@ -474,7 +479,7 @@ patterns that recur. Financial rules, branding, and commerce automation belong
 outside the primitive authoring layer.
 
 Diagnostics are part of ergonomics. The desired error is
-`Invoice → WorkTable → row 17 → Amount`, with the authored source and actionable
+`Invoice → WorkTable → row 17 → column 4 → Amount`, with the authored source and actionable
 reason. The prototype retains that path for authoring errors and table callbacks.
 Native pagination also retains authored fragment roots. A split attempt now
 returns either the same layout fragments or a structured rejection. The table
@@ -485,7 +490,7 @@ the next attempt uses the remaining cells and their original source IDs.
 
 The experimental `LayoutError` keeps its original `sources` scope and adds
 `reason` and `failure_sources`. A single known failure source becomes the error
-path, such as `WorkTable → DataTable → row 2 → Description → cell`. Multiple causes
+path, such as `WorkTable → DataTable → row 2 → column 1 → Description → cell`. Multiple causes
 remain separate. A clipped container or oversized parent padding names the
 container, rather than attributing its constraint to innocent child text. A tall
 header can identify the table without blaming a body cell. Unknown IDs do not

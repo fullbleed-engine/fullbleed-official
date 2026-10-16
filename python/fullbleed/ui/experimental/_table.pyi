@@ -12,7 +12,7 @@ T = TypeVar("T")
 class Column(Generic[T]):
     label: str
     cell: Callable[[T], _Child]
-    align: Literal['left', 'right', 'center'] = ...
+    align: Literal['left', 'right', 'center'] | None = ...
     width: Length | None = ...
 
 class _TableFactory(Protocol):
@@ -20,7 +20,7 @@ class _TableFactory(Protocol):
     def parts(self) -> tuple[str, ...]: ...
     def __call__(self, rows: Iterable[T], *, columns: Iterable[Column[T]],
                  caption: _Child = ..., empty: _Child = ..., repeat_header: bool = ...,
-                 row_break: Literal['avoid', 'auto'] = ..., style: _StyleInput = ...,
+                 row_break: Literal['avoid', 'auto'] | None = ..., style: _StyleInput = ...,
                  class_name: str | None = ..., attrs: _Attributes = ...) -> Node: ...
 
 DataTable: _TableFactory
