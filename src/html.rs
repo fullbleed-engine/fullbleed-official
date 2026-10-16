@@ -3943,6 +3943,9 @@ fn node_to_flowables_in_scope(
                             }
                             let container_options = ContainerCompilationOptions {
                                 suppress_single_used_column_rule: suppress_unused_multicol_rule,
+                                flow_gap: (info.attrs.get("data-fb-flow").map(String::as_str)
+                                    == Some("true"))
+                                .then_some(style.row_gap),
                                 ..ContainerCompilationOptions::default()
                             };
                             if text.is_empty() {
@@ -4076,6 +4079,12 @@ fn node_to_flowables_in_scope(
                                     ContainerCompilationOptions {
                                         suppress_single_used_column_rule:
                                             suppress_unused_multicol_rule,
+                                        flow_gap: (info
+                                            .attrs
+                                            .get("data-fb-flow")
+                                            .map(String::as_str)
+                                            == Some("true"))
+                                        .then_some(style.row_gap),
                                         ..ContainerCompilationOptions::default()
                                     },
                                 )
@@ -4086,6 +4095,12 @@ fn node_to_flowables_in_scope(
                                     ContainerCompilationOptions {
                                         suppress_single_used_column_rule:
                                             suppress_unused_multicol_rule,
+                                        flow_gap: (info
+                                            .attrs
+                                            .get("data-fb-flow")
+                                            .map(String::as_str)
+                                            == Some("true"))
+                                        .then_some(style.row_gap),
                                         ..ContainerCompilationOptions::default()
                                     },
                                 )
@@ -4144,7 +4159,9 @@ fn node_to_flowables_in_scope(
             // Use a tiny spacer to ensure the flowable is drawable; zero-height carriers can
             // be skipped in layout paths and lose metadata emission.
             if flowables.is_empty() && !node_meta.is_empty() {
-                let carrier = Spacer::new_pt(Pt::from_f32(0.01)).with_pagination(style.pagination);
+                let carrier = Spacer::new_pt(Pt::from_f32(0.01))
+                    .with_pagination(style.pagination)
+                    .with_metadata_only();
                 flowables.push(LayoutItem::Block {
                     flowable: Box::new(carrier) as Box<dyn Flowable>,
                     flex_grow: style.flex_grow,
@@ -11331,6 +11348,7 @@ fn container_flowables(children: Vec<LayoutItem>, style: &ComputedStyle) -> Vec<
 struct ContainerCompilationOptions {
     suppress_single_used_column_rule: bool,
     list_numbering: Option<&'static str>,
+    flow_gap: Option<LengthSpec>,
 }
 
 impl Default for ContainerCompilationOptions {
@@ -11338,6 +11356,7 @@ impl Default for ContainerCompilationOptions {
         Self {
             suppress_single_used_column_rule: false,
             list_numbering: None,
+            flow_gap: None,
         }
     }
 }
@@ -11610,6 +11629,7 @@ fn container_flowable_with_role_options(
             .collect();
     }
     let mut container = ContainerFlowable::new_pt(flowables, style.font_size, style.root_font_size)
+        .with_flow_gap(options.flow_gap)
         .with_inline_bidi_transparency(matches!(style.display, DisplayMode::Inline))
         .with_establishes_abs_containing_block(establishes_abs_containing_block(style))
         .with_establishes_stacking_context(establishes_stacking_context(style))

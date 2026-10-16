@@ -127,7 +127,13 @@ A custom function without a `style` argument does not gain one through `styled`.
 Earlier prototype callers using that shortcut should move the declarations to
 `.with_style(...)` after the call. See the
 [implementation review](../../docs/component-authoring-design.md#composition-contracts-to-settle-before-adding-more-api)
-for the remaining fragment and spacing contracts.
+for the fragment, spacing and argument-forwarding contracts.
+
+One prototype limitation remains: layout keywords such as `Flow(gap=...)` are
+stored as primitive defaults. A recipe's `row_gap` can therefore override even
+an explicitly supplied `gap`. Use `.with_style(row_gap=pt(3))` for a definite
+instance override today. Explicit layout-argument precedence needs a consistent
+contract before this API is stabilized.
 
 `class_name` still means a literal CSS class label. It does not load styles or
 refer to a Python variable. In this prototype, use style values for the normal
@@ -216,17 +222,31 @@ pooling and performance qualification remain future work. The check catches forc
 unsplittable overflow; it is not a general overflow or accessibility validator.
 
 Choose `Flow` for a flowing document body and `Stack` for a local flex group such
-as the field above. `Flow` uses ordinary block flow with space between rooted
-children; `Stack` uses column flex layout. They have different pagination
+as the field above. `Flow` uses native paginated block layout with explicit space
+between children; `Stack` uses column flex layout. They have different pagination
 behavior. `Heading` requests keeping following content with it by default. The
 engine remains responsible for final pagination; components do not estimate font
 metrics or pre-paginate rows in Python.
 
-`Flow` currently applies its gap by replacing the top margin of every child after
-the first. The original child remains unchanged, but its placed copy loses an
-authored top margin. Use rooted children: fragment-returning components can pass
-in the first position and fail later when spacing is applied. This inconsistency
-and the ownership of gap versus margin must be resolved before stabilization.
+`Flow` owns spacing independently of its children. The preceding child's bottom
+margin, the gap, and the following child's top margin add; child margins do not
+collapse into each other or into the `Flow` container. Moving a shared child
+between flows does not change its styles. There is no gap before the first item
+or after the last item on a page; a page break discards the inter-item gap.
+Authored margins and padding remain separate from that rule.
+
+A component returning `Fragment(...)` contributes siblings in any position.
+Its source identity remains available for diagnostics without adding an HTML
+wrapper. Empty fragments add no box or gap. Wrap direct text in `Paragraph`.
+Prefer physical gaps such as `pt(8)` or `mm(3)`. Font-relative gaps use the flow's
+font size; percentage gaps need a definite container height and otherwise resolve
+to zero.
+
+This spacing uses Fullbleed's experimental native `data-fb-flow` annotation and
+`row-gap` declaration. A browser does not apply gaps to ordinary block layout,
+so use the generated PDF or Fullbleed preview to judge it. Unmarked HTML retains
+the engine's ordinary margin-collapse behavior. The legacy adapter preserves
+the annotation when embedding a new `Flow` in an existing Fullbleed document.
 
 `document.compile()` returns HTML, CSS, and a source map. Generated `data-fb-id`
 values use the engine's source-ID mechanism. Source filenames and line numbers

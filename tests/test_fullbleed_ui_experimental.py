@@ -389,11 +389,55 @@ def test_page_configuration_changes_the_compiled_geometry_in_one_place():
 
 
 def test_flow_keeps_block_flow_and_requires_real_blocks():
-    flow = Flow(Paragraph("First"), Paragraph("Second"), gap=pt(14))
-    assert "margin-top: 14pt;" in Document(flow).to_css()
+    child = Paragraph("Second").with_style(margin_top=pt(24))
+    flow = Flow(Paragraph("First"), child, gap=pt(14))
+    assert flow.children[1] is child
+    assert "row-gap: 14pt;" in Document(flow).to_css()
+    assert "margin-top: 24pt;" in Document(flow).to_css()
+    assert 'data-fb-flow="true"' in Document(flow).to_html()
     assert "display: flex" not in Document(flow).to_css()
     with pytest.raises(AuthoringError, match="wrap text"):
         Flow("bare text")
+
+
+@pytest.mark.parametrize("position", [0, 1, 2])
+def test_flow_accepts_fragment_components_in_every_sibling_position(position):
+    @component
+    def Notes():
+        return Fragment(Paragraph("Note A"), Fragment(Paragraph("Note B")))
+
+    siblings = [Paragraph("First"), Paragraph("Last")]
+    siblings.insert(position, Notes())
+    plan = Document(Flow(Fragment(), siblings, Fragment())).compile()
+    assert plan.html.count("<div") == 1
+    assert plan.html.count("<p ") == 4
+    assert sum(source.path == ("Notes", "p") for source in plan.sources) == 2
+    expected = ["First", "Last"]
+    expected[position:position] = ["Note A", "Note B"]
+    assert [plan.html.index(value) for value in expected] == sorted(plan.html.index(value) for value in expected)
+
+
+def test_flow_ignores_empty_component_content_and_checks_text_inside_fragments():
+    @component
+    def Empty():
+        return Fragment()
+
+    @component
+    def BareText():
+        return Fragment("Unwrapped")
+
+    plan = Document(Flow(Empty(), Paragraph("Only"), Empty())).compile()
+    assert plan.html.count("<p ") == 1
+    for siblings in ((BareText(), Paragraph("After")), (Paragraph("Before"), BareText())):
+        with pytest.raises(AuthoringError, match="wrap text") as caught:
+            Flow(*siblings)
+        assert caught.value.path == ("BareText",)
+
+
+@pytest.mark.parametrize("name", ["data-fb-flow", "DATA-FB-FLOW"])
+def test_flow_rejects_conflicting_layout_annotations(name):
+    with pytest.raises(AuthoringError, match="owns"):
+        Flow(Paragraph("Text"), attrs={name: "false"})
 
 
 def test_renderer_applies_metadata_per_document_without_shared_engine_mutation(monkeypatch):

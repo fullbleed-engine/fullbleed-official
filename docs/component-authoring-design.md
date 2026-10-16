@@ -74,14 +74,14 @@ every syntactically accepted declaration has identical layout behavior.
 ## Composition contracts to settle before adding more API
 
 Initial installed-candidate probes found three places where the prototype asked
-authors to know its implementation. Fragment and spacing behavior remain open.
-The current candidate addresses argument forwarding with separate style layers;
-that improvement does not make the whole design ready to stabilize.
+authors to know its implementation. The current source candidate addresses them
+with transparent fragments, native parent spacing, and separate style layers.
+These contracts still need author feedback before stabilization.
 
 | Operation | Observed behavior | Recommended contract |
 | --- | --- | --- |
-| Move a fragment-returning component later in a `Flow` | It works as the first child, but fails later with a root-styling error because spacing is applied through `with_style` | Moving a valid child must not change whether it is accepted. Define transparent fragment expansion at the flow boundary while retaining component provenance. Until that exists, reject the unsupported shape consistently. |
-| Place a child with `margin_top=pt(24)` into `Flow(..., gap=pt(8))` | The placed copy has an 8 pt top margin; the original node stays unchanged | Parent spacing and child styling need separate ownership. Specify whether gap and margin combine, collapse or conflict; do not implement that decision as an undocumented style replacement. Check the behavior at page boundaries too. |
+| Move a fragment-returning component later in a `Flow` | The initial implementation worked only in the first position because later children received root styling | Fragments now contribute siblings in any position, without extra HTML containers. Component boundaries remain in the source map; bare text inside a fragment still needs a paragraph. |
+| Place a child with `margin_top=pt(24)` into `Flow(..., gap=pt(8))` | The initial implementation replaced the placed child's margin with 8 pt | Native `Flow` now owns the gap separately. Child margins do not collapse at this boundary: the preceding bottom margin, gap and following top margin add. A page break discards the inter-item gap. |
 | Apply `styled` to a function with a required business argument named `style` | The initial wrapper consumed the argument and called the function without it; the current candidate forwards it unchanged | Preserve business arguments. Use per-instance appearance overrides on the returned node rather than injecting a new argument into arbitrary call signatures. |
 
 The position-dependent case is small enough to expose the problem directly:
@@ -91,15 +91,27 @@ The position-dependent case is small enough to expose the problem directly:
 def Notes():
     return Fragment(Paragraph("First note"), Paragraph("Second note"))
 
-Flow(Notes(), Paragraph("After"))   # Currently accepted.
-Flow(Paragraph("Before"), Notes())  # Currently raises a root-styling error.
+Flow(Notes(), Paragraph("After"))   # Two notes, then a paragraph.
+Flow(Paragraph("Before"), Notes())  # A paragraph, then the same two notes.
 ```
 
 Transparent composition and styling a root are separate contracts. A fragment
-can contribute siblings without having a single root to style. Do not introduce
-an implicit container just to make the second call work: that can change layout,
-semantics and pagination. A future implementation needs to carry diagnostic
-boundaries independently of the emitted element structure.
+can contribute siblings without having a single root to style. The implementation
+retains diagnostic boundaries independently of the emitted element structure.
+An empty fragment adds neither a box nor a gap. Styling a multi-root fragment
+still needs an explicitly authored container or styling its individual roots.
+
+Parent spacing belongs in native layout, where measurement, painting and
+fragmentation can agree. The source candidate marks a block container with
+`data-fb-flow="true"` and uses `row-gap` for its spacing. This is an explicit
+Fullbleed layout extension beyond the
+[layout contexts in the CSS Gaps working draft](https://drafts.csswg.org/css-gaps-1/#column-row-gap).
+A browser's ordinary block layout will not apply that gap. Exported HTML/CSS
+remains useful for inspection and interchange with the
+same engine; a browser screenshot is not an authoritative preview of `Flow`.
+Ordinary unmarked HTML keeps its existing margin-collapse behavior. `Stack`
+continues to use flex layout. The experimental API should describe this boundary
+openly instead of implying that all three layout models are interchangeable.
 
 `styled` cannot both transparently forward arbitrary function arguments and
 unconditionally reserve `style` for itself. The current candidate preserves
@@ -116,6 +128,16 @@ business data. A function without that argument no longer gains it implicitly.
 Such callers use `.with_style(...)` after the call. This changes the experimental
 shortcut, not established `fullbleed.ui` imports. The node's `style` stores authored
 declarations; compilation and the legacy adapter combine those with defaults.
+
+One precedence question remains: layout arguments such as `Flow(gap=...)` are
+currently translated into primitive defaults. Consequently,
+`styled(Flow, row_gap=pt(12))(..., gap=pt(3))` still produces a 12 pt gap even
+though the function received `gap=pt(3)`. The result's
+`.with_style(row_gap=pt(3))` is an explicit override today. Before stabilization,
+distinguish an omitted layout argument from an explicitly supplied value, and
+make explicit constructor choices outrank recipe defaults. Apply that rule
+consistently to gap, alignment, tracks and keep-with-next; fixing only one spelling
+would leave authors guessing. Do not add new variant or prop systems to hide it.
 
 Before stabilizing, retain executable cases for moving a component among sibling
 positions, empty and multi-root returns, reusing a child under different parents,
@@ -260,7 +282,8 @@ should require one declaration, not parallel edits to a header and every row.
 Print-aware primitives should follow: flowing blocks with spacing, headings kept
 with following content, explicit breaks, page regions, and repeated headers or
 footers. Distinguish ordinary content `<Header>` from a repeated page header in
-names and documentation. `Flow` is normal block flow; `Stack` is flex layout.
+names and documentation. `Flow` is native paginated block flow with explicit
+spacing; `Stack` is flex layout.
 Changing between them can change pagination, so they are not synonyms.
 React-pdf's [page-wrapping API](https://react-pdf.org/docs/v4/advanced/page-wrapping)
 is a useful example of exposing these print decisions directly.
@@ -314,7 +337,8 @@ pagination behavior that the renderer has not demonstrated.
 
 | Work | Acceptance condition |
 | --- | --- |
-| Composition and spacing | Child acceptance is independent of sibling position; fragments retain provenance; parent spacing has an explicit relationship to child margins; generic wrappers preserve business arguments |
+| Composition and spacing (implemented in the prototype) | Qualify fragment provenance, additive margins, independent parent gaps, page breaks and wrapper arguments in rendered fixtures; obtain author feedback on the explicit native layout contract |
+| Explicit layout-prop precedence (open) | An explicit `gap`, alignment, column-track or keep-with-next argument outranks a recipe default; omitted arguments still allow recipe defaults. Keep runtime behavior and callable typing aligned. |
 | Oversized-row continuation (partial implementation) | Extend the tested top-aligned text cell behavior to rowspans, page-tall cell images, and other vertical alignments; qualify changing page geometry, complex decorations, and semantic continuity; unsupported cases fail explicitly |
 | Native diagnostics (partial implementation) | Unsplittable fragments resolve to authored root scopes; identify failing descendants and map missing glyphs/other layout diagnostics before claiming full component-level attribution |
 | Typing and completion (partial implementation) | Generated stubs and installed mypy/Pyright checks cover styles, primitive props, layout choices, page options, record types and component arguments; token/part-name completion remains open |
@@ -377,8 +401,8 @@ change real documents. A larger number of element wrappers is not that milestone
    component-owned styles, explicit overrides, table columns and page ownership
    are implemented in the draft. Use the shared kit and editing tasks above to
    decide which concepts deserve stable names. Keep the established API working
-   through the explicit adapter during that evaluation. Settle fragment, spacing
-   and wrapper-argument contracts before adding more authoring helpers.
+   through the explicit adapter during that evaluation. Evaluate the fragment,
+   spacing and wrapper-argument contracts before adding more authoring helpers.
 2. **Close the print and diagnostic contracts.** Extend continuation deliberately,
    retain semantic structure, and improve descendant attribution. Document
    unsupported content instead of making a component promise stronger than its

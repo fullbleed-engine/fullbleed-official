@@ -2831,6 +2831,12 @@ pub trait Flowable: FlowableClone + Send + Sync {
     fn is_layout_marker(&self) -> bool {
         false
     }
+
+    /// Authored block-flow gaps separate content boxes, not metadata carriers.
+    /// Wrappers can preserve a drawable epsilon without manufacturing a gap.
+    fn is_flow_spacing_item(&self, avail_width: Pt, avail_height: Pt) -> bool {
+        !self.is_layout_marker() && self.wrap(avail_width, avail_height).height > Pt::ZERO
+    }
 }
 
 pub trait FlowableClone {
@@ -10890,6 +10896,7 @@ impl Flowable for ListItemFlowable {
 pub struct Spacer {
     height: Pt,
     pagination: Pagination,
+    metadata_only: bool,
 }
 
 impl Spacer {
@@ -10901,6 +10908,7 @@ impl Spacer {
         Self {
             height,
             pagination: Pagination::default(),
+            metadata_only: false,
         }
     }
 
@@ -10908,9 +10916,18 @@ impl Spacer {
         self.pagination = pagination;
         self
     }
+
+    pub(crate) fn with_metadata_only(mut self) -> Self {
+        self.metadata_only = true;
+        self
+    }
 }
 
 impl Flowable for Spacer {
+    fn is_flow_spacing_item(&self, _avail_width: Pt, _avail_height: Pt) -> bool {
+        !self.metadata_only && self.height > Pt::ZERO
+    }
+
     fn wrap(&self, avail_width: Pt, _avail_height: Pt) -> Size {
         Size {
             width: avail_width,
@@ -26153,6 +26170,7 @@ struct ContainerLayoutCache {
     total_width: Pt,
     total_height: Pt,
     child_avail_height: Pt,
+    flow_gap: Pt,
     child_sizes: Vec<Option<Size>>,
     child_collapsed_top: Vec<Pt>,
     child_collapsed_bottom: Vec<Pt>,
@@ -26189,6 +26207,9 @@ pub struct ContainerFlowable {
 #[derive(Clone)]
 struct ContainerState {
     children: Vec<Box<dyn Flowable>>,
+    // Opt-in print-authoring flow: independent item gaps and non-collapsing
+    // child margins. Ordinary HTML block layout keeps its existing behavior.
+    flow_gap: Option<LengthSpec>,
     inline_bidi_transparent: bool,
     margin: EdgeSizes,
     border_width: EdgeSizes,
@@ -26296,6 +26317,7 @@ impl ContainerFlowable {
     pub fn new_pt(children: Vec<Box<dyn Flowable>>, font_size: Pt, root_font_size: Pt) -> Self {
         Self::from_state(ContainerState {
             children,
+            flow_gap: None,
             inline_bidi_transparent: false,
             margin: EdgeSizes::zero(),
             border_width: EdgeSizes::zero(),
@@ -26399,6 +26421,56 @@ impl ContainerFlowable {
     pub fn with_margin(mut self, margin: EdgeSizes) -> Self {
         self.state.margin = margin;
         self
+    }
+
+    pub(crate) fn with_flow_gap(mut self, gap: Option<LengthSpec>) -> Self {
+        if self.state.flow_gap.is_some() || gap.is_some() {
+            self.state.layout_cache = Arc::new(Mutex::new(None));
+        }
+        self.state.flow_gap = gap;
+        self
+    }
+
+    fn resolved_flow_gap(&self, content_height: Option<Pt>) -> Pt {
+        self.state.flow_gap.map_or(Pt::ZERO, |gap| {
+            gap.resolve_height(
+                content_height.unwrap_or(Pt::ZERO),
+                self.state.font_size,
+                self.state.root_font_size,
+            )
+            .max(Pt::ZERO)
+        })
+    }
+
+    fn authored_flow_baseline(&self, avail_width: Pt, use_last: bool) -> Option<Pt> {
+        let layout = self.cached_layout(avail_width, huge_pt());
+        let mut offset = layout.margin.top + layout.border.top + layout.padding.top;
+        let mut baseline = None;
+        let mut has_item = false;
+        for (index, child) in self.state.children.iter().enumerate() {
+            let Some(size) = layout.child_sizes[index] else {
+                continue;
+            };
+            if child.is_flow_spacing_item(layout.content_width, layout.child_avail_height) {
+                if has_item {
+                    offset += layout.flow_gap;
+                }
+                has_item = true;
+            }
+            let child_baseline = if use_last {
+                child.inline_baseline(layout.content_width)
+            } else {
+                child.first_baseline(layout.content_width)
+            };
+            if let Some(value) = child_baseline {
+                baseline = Some(offset + value);
+                if !use_last {
+                    return baseline;
+                }
+            }
+            offset += size.height;
+        }
+        baseline
     }
 
     pub fn with_inline_paint_snapping(mut self, enabled: bool) -> Self {
@@ -27052,7 +27124,7 @@ impl ContainerFlowable {
         border: ResolvedEdges,
         padding: ResolvedEdges,
     ) -> (Option<(usize, Pt)>, Option<(usize, Pt)>) {
-        if self.state.contain_floats || self.clips_any_overflow() {
+        if self.state.flow_gap.is_some() || self.state.contain_floats || self.clips_any_overflow() {
             return (None, None);
         }
 
@@ -27377,6 +27449,8 @@ impl ContainerFlowable {
         // Only provide a bounded height to children when we have an explicit height. Otherwise,
         // children should measure naturally (important for flex rows not ballooning to page height).
         let child_avail_height = fixed_content_height.unwrap_or(huge_pt());
+        let flow_gap = self.resolved_flow_gap(fixed_content_height);
+        let mut has_flow_item = false;
         let mut content_height: Pt = Pt::ZERO;
         let mut child_sizes: Vec<Option<Size>> = Vec::with_capacity(self.state.children.len());
         let mut child_collapsed_top = vec![Pt::ZERO; self.state.children.len()];
@@ -27416,7 +27490,12 @@ impl ContainerFlowable {
                 content_height = content_height.max(clearance);
                 previous_block_margin_bottom = None;
             }
-            let block_margins = child.collapsible_block_margins(content_width);
+            let block_margins = self
+                .state
+                .flow_gap
+                .is_none()
+                .then(|| child.collapsible_block_margins(content_width))
+                .flatten();
             if let (Some(previous_bottom), Some((current_top, _))) =
                 (previous_block_margin_bottom, block_margins)
             {
@@ -27425,6 +27504,14 @@ impl ContainerFlowable {
             }
             in_flow_pagination.push(child.pagination());
             let size = child.wrap(content_width, child_avail_height);
+            if self.state.flow_gap.is_some()
+                && child.is_flow_spacing_item(content_width, child_avail_height)
+            {
+                if has_flow_item {
+                    content_height += flow_gap;
+                }
+                has_flow_item = true;
+            }
             content_height = content_height + size.height
                 - child_collapsed_top[child_index]
                 - child_collapsed_bottom[child_index];
@@ -27563,6 +27650,7 @@ impl ContainerFlowable {
             total_width,
             total_height,
             child_avail_height,
+            flow_gap,
             child_sizes,
             child_collapsed_top,
             child_collapsed_bottom,
@@ -27700,6 +27788,10 @@ impl ContainerFlowable {
         };
 
         let mut first = self.clone();
+        first.state.flow_gap = self
+            .state
+            .flow_gap
+            .map(|_| LengthSpec::Absolute(original.flow_gap));
         first.state.margin = Self::zero_bottom(self.state.margin);
         first.state.border_width = Self::zero_bottom(self.state.border_width);
         first.state.border_radius = Self::zero_bottom_radii(self.state.border_radius);
@@ -27717,6 +27809,7 @@ impl ContainerFlowable {
         first.state.layout_cache = Arc::new(Mutex::new(None));
 
         let mut second = self.clone();
+        second.state.flow_gap = first.state.flow_gap;
         if carries_content {
             second.state.children.clear();
         }
@@ -34802,6 +34895,9 @@ impl Flowable for ContainerFlowable {
     }
 
     fn first_baseline(&self, avail_width: Pt) -> Option<Pt> {
+        if self.state.flow_gap.is_some() {
+            return self.authored_flow_baseline(avail_width, false);
+        }
         let (margin, border, padding, content_width, _) = self.resolve_box(avail_width);
         let mut offset = margin.top + border.top + padding.top;
         for child in &self.state.children {
@@ -34817,6 +34913,9 @@ impl Flowable for ContainerFlowable {
     }
 
     fn inline_baseline(&self, avail_width: Pt) -> Option<Pt> {
+        if self.state.flow_gap.is_some() {
+            return self.authored_flow_baseline(avail_width, true);
+        }
         let (margin, border, padding, content_width, _) = self.resolve_box(avail_width);
         let mut offset = margin.top + border.top + padding.top;
         let mut baseline = None;
@@ -34887,6 +34986,12 @@ impl Flowable for ContainerFlowable {
         }
 
         let mut remaining_height = available_content_height;
+        let flow_gap = if self.state.flow_gap.is_some() {
+            self.cached_layout(avail_width, avail_height).flow_gap
+        } else {
+            Pt::ZERO
+        };
+        let mut has_placed_flow_item = false;
         let split_debug = std::env::var_os("FULLBLEED_SPLIT_DEBUG").is_some();
         if split_debug {
             eprintln!(
@@ -34951,6 +35056,11 @@ impl Flowable for ContainerFlowable {
             let collapsed_top = collapsed_parent_top
                 .filter(|(child_index, _)| *child_index == original_index)
                 .map_or(Pt::ZERO, |(_, margin)| margin);
+            let is_flow_item = self.state.flow_gap.is_some()
+                && child.is_flow_spacing_item(content_width, remaining_height + collapsed_top);
+            if has_placed_flow_item && is_flow_item {
+                remaining_height = (remaining_height - flow_gap).max(Pt::ZERO);
+            }
             // A first child's top margin may already have collapsed through
             // this container and become the container's own top margin. Give
             // that space back while splitting the child, then subtract it from
@@ -35074,6 +35184,7 @@ impl Flowable for ContainerFlowable {
 
                 let mut kept_height = Pt::ZERO;
                 let mut previous_margin_bottom = None;
+                let mut kept_flow_item = false;
                 for member in placed[chain_start..]
                     .iter()
                     .map(|member| member.as_ref())
@@ -35081,13 +35192,25 @@ impl Flowable for ContainerFlowable {
                 {
                     if let (Some(previous_bottom), Some((current_top, _))) = (
                         previous_margin_bottom,
-                        member.collapsible_block_margins(content_width),
+                        self.state
+                            .flow_gap
+                            .is_none()
+                            .then(|| member.collapsible_block_margins(content_width))
+                            .flatten(),
                     ) {
                         kept_height = kept_height
                             - adjacent_margin_stack_adjustment(previous_bottom, current_top);
                     }
-                    kept_height =
-                        kept_height + member.wrap(content_width, available_content_height).height;
+                    let member_height = member.wrap(content_width, available_content_height).height;
+                    if self.state.flow_gap.is_some()
+                        && member.is_flow_spacing_item(content_width, available_content_height)
+                    {
+                        if kept_flow_item {
+                            kept_height += flow_gap;
+                        }
+                        kept_flow_item = true;
+                    }
+                    kept_height += member_height;
                     previous_margin_bottom = member
                         .collapsible_block_margins(content_width)
                         .map(|(_, bottom)| bottom);
@@ -35175,6 +35298,7 @@ impl Flowable for ContainerFlowable {
 
             if combined_occupied_height <= remaining_height || paint_only_edge_overhang {
                 placed_footnotes = candidate_footnotes;
+                has_placed_flow_item |= is_flow_item;
                 placed.push(child);
                 placed_paint_only_edge_overhang |= paint_only_edge_overhang;
                 remaining_height = (remaining_height - combined_occupied_height).max(Pt::ZERO);
@@ -35321,6 +35445,7 @@ impl Flowable for ContainerFlowable {
 
         let mut first = Self::from_state(ContainerState {
             children: placed,
+            flow_gap: self.state.flow_gap.map(|_| LengthSpec::Absolute(flow_gap)),
             inline_bidi_transparent: self.state.inline_bidi_transparent,
             margin: if clones_decoration {
                 self.state.margin
@@ -35427,6 +35552,7 @@ impl Flowable for ContainerFlowable {
         });
         let mut second = Self::from_state(ContainerState {
             children: remaining,
+            flow_gap: self.state.flow_gap.map(|_| LengthSpec::Absolute(flow_gap)),
             inline_bidi_transparent: self.state.inline_bidi_transparent,
             margin: if clones_decoration {
                 self.state.margin
@@ -37091,6 +37217,7 @@ impl Flowable for ContainerFlowable {
         let mut positioned_pos: Vec<(i32, usize, Pt, Pt, Pt, Pt, &Box<dyn Flowable>)> = Vec::new();
         let mut in_flow_static_y = vec![None; self.state.children.len()];
         let mut static_cursor_y = inner_y;
+        let mut has_flow_item = false;
         let mut left_float_bottom = inner_y;
         let mut right_float_bottom = inner_y;
         let mut previous_block_margin_bottom: Option<Pt> = None;
@@ -37107,7 +37234,12 @@ impl Flowable for ContainerFlowable {
                     static_cursor_y = static_cursor_y.max(clearance);
                     previous_block_margin_bottom = None;
                 }
-                let block_margins = child.collapsible_block_margins(content_width);
+                let block_margins = self
+                    .state
+                    .flow_gap
+                    .is_none()
+                    .then(|| child.collapsible_block_margins(content_width))
+                    .flatten();
                 if let (Some(previous_bottom), Some((current_top, _))) =
                     (previous_block_margin_bottom, block_margins)
                 {
@@ -37115,6 +37247,14 @@ impl Flowable for ContainerFlowable {
                         - adjacent_margin_stack_adjustment(previous_bottom, current_top);
                 }
                 previous_block_margin_bottom = block_margins.map(|(_, bottom)| bottom);
+                if self.state.flow_gap.is_some()
+                    && child.is_flow_spacing_item(content_width, child_avail_height)
+                {
+                    if has_flow_item {
+                        static_cursor_y += cache.flow_gap;
+                    }
+                    has_flow_item = true;
+                }
             }
             let static_x = inner_x;
             let collapsed_top = cache.child_collapsed_top[idx];
@@ -37743,8 +37883,13 @@ impl Flowable for ContainerFlowable {
 
 #[cfg(test)]
 mod margin_collapse_tests {
-    use super::{Canvas, ContainerFlowable, EdgeSizes, Flowable, LengthSpec, Pt, Size};
-    use std::sync::{Arc, Mutex};
+    use super::{
+        Canvas, ContainerFlowable, EdgeSizes, Flowable, LengthSpec, MetaFlowable, Pt, Size, Spacer,
+    };
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    };
 
     #[derive(Clone)]
     struct MarginProbe {
@@ -37773,6 +37918,260 @@ mod margin_collapse_tests {
 
         fn collapsible_block_margins(&self, _avail_width: Pt) -> Option<(Pt, Pt)> {
             Some((self.top, self.bottom))
+        }
+    }
+
+    #[test]
+    fn authored_flow_gap_keeps_child_margins_and_matches_painted_positions() {
+        let drawn_y = Arc::new(Mutex::new(Vec::new()));
+        let first = MarginProbe {
+            size: Size {
+                width: Pt::from_f32(100.0),
+                height: Pt::from_f32(50.0),
+            },
+            top: Pt::from_f32(12.0),
+            bottom: Pt::from_f32(10.0),
+            drawn_y: drawn_y.clone(),
+        };
+        let second = MarginProbe {
+            size: Size {
+                width: Pt::from_f32(100.0),
+                height: Pt::from_f32(60.0),
+            },
+            top: Pt::from_f32(24.0),
+            bottom: Pt::from_f32(8.0),
+            drawn_y: drawn_y.clone(),
+        };
+        let parent = ContainerFlowable::new_pt(
+            vec![Box::new(first), Box::new(second)],
+            Pt::from_f32(12.0),
+            Pt::from_f32(12.0),
+        )
+        .with_flow_gap(Some(LengthSpec::Absolute(Pt::from_f32(8.0))));
+        let available = Pt::from_f32(300.0);
+        assert_eq!(
+            parent.wrap(available, available).height,
+            Pt::from_f32(118.0)
+        );
+        assert_eq!(
+            parent.collapsible_block_margins(available),
+            Some((Pt::ZERO, Pt::ZERO))
+        );
+        let mut canvas = Canvas::new(Size {
+            width: available,
+            height: available,
+        });
+        parent.draw(&mut canvas, Pt::ZERO, Pt::ZERO, available, available);
+        assert_eq!(
+            drawn_y.lock().unwrap().as_slice(),
+            &[Pt::ZERO, Pt::from_f32(58.0)]
+        );
+    }
+
+    #[test]
+    fn authored_flow_gap_does_not_lead_or_trail_a_page_fragment() {
+        let drawn_y = Arc::new(Mutex::new(Vec::new()));
+        let children = (0..3)
+            .map(|_| {
+                Box::new(MarginProbe {
+                    size: Size {
+                        width: Pt::from_f32(100.0),
+                        height: Pt::from_f32(50.0),
+                    },
+                    top: Pt::ZERO,
+                    bottom: Pt::ZERO,
+                    drawn_y: drawn_y.clone(),
+                }) as Box<dyn Flowable>
+            })
+            .collect();
+        let parent = ContainerFlowable::new_pt(children, Pt::from_f32(12.0), Pt::from_f32(12.0))
+            .with_flow_gap(Some(LengthSpec::Absolute(Pt::from_f32(10.0))));
+        let width = Pt::from_f32(300.0);
+        let height = Pt::from_f32(115.0);
+        assert_eq!(parent.wrap(width, height).height, Pt::from_f32(170.0));
+        let (first, second) = parent
+            .split(width, height)
+            .expect("split between flow items");
+        assert!(first.wrap(width, height).height <= height);
+        assert_eq!(second.wrap(width, height).height, Pt::from_f32(50.0));
+        let mut canvas = Canvas::new(Size { width, height });
+        first.draw(&mut canvas, Pt::ZERO, Pt::ZERO, width, height);
+        second.draw(&mut canvas, Pt::ZERO, Pt::ZERO, width, height);
+        assert_eq!(
+            drawn_y.lock().unwrap().as_slice(),
+            &[Pt::ZERO, Pt::from_f32(60.0), Pt::ZERO]
+        );
+    }
+
+    #[test]
+    fn authored_flow_gap_ignores_zero_height_items() {
+        let drawn_y = Arc::new(Mutex::new(Vec::new()));
+        let children = [50.0, 0.0, 50.0]
+            .into_iter()
+            .map(|height| {
+                Box::new(MarginProbe {
+                    size: Size {
+                        width: Pt::from_f32(100.0),
+                        height: Pt::from_f32(height),
+                    },
+                    top: Pt::ZERO,
+                    bottom: Pt::ZERO,
+                    drawn_y: drawn_y.clone(),
+                }) as Box<dyn Flowable>
+            })
+            .collect();
+        let parent = ContainerFlowable::new_pt(children, Pt::from_f32(12.0), Pt::from_f32(12.0))
+            .with_flow_gap(Some(LengthSpec::Absolute(Pt::from_f32(10.0))));
+        let available = Pt::from_f32(300.0);
+        assert_eq!(
+            parent.wrap(available, available).height,
+            Pt::from_f32(110.0)
+        );
+        let mut canvas = Canvas::new(Size {
+            width: available,
+            height: available,
+        });
+        parent.draw(&mut canvas, Pt::ZERO, Pt::ZERO, available, available);
+        assert_eq!(
+            drawn_y.lock().unwrap().as_slice(),
+            &[Pt::ZERO, Pt::from_f32(50.0), Pt::from_f32(60.0)]
+        );
+    }
+
+    #[test]
+    fn authored_flow_gap_ignores_metadata_carriers_without_losing_their_extent() {
+        let drawn_y = Arc::new(Mutex::new(Vec::new()));
+        let probe = MarginProbe {
+            size: Size {
+                width: Pt::from_f32(100.0),
+                height: Pt::from_f32(50.0),
+            },
+            top: Pt::ZERO,
+            bottom: Pt::ZERO,
+            drawn_y: drawn_y.clone(),
+        };
+        let epsilon = Pt::from_f32(0.01);
+        let width = Pt::from_f32(300.0);
+        let metadata = MetaFlowable::new(
+            Box::new(ContainerFlowable::new_pt(
+                Vec::new(),
+                Pt::from_f32(12.0),
+                Pt::from_f32(12.0),
+            )),
+            vec![("fb.owner.source_id".into(), "empty".into())],
+        );
+        assert_eq!(metadata.wrap(width, width).height, epsilon);
+        assert!(!metadata.is_flow_spacing_item(width, width));
+        let parent = ContainerFlowable::new_pt(
+            vec![
+                Box::new(probe.clone()),
+                Box::new(metadata),
+                Box::new(Spacer::new_pt(epsilon).with_metadata_only()),
+                Box::new(probe),
+            ],
+            Pt::from_f32(12.0),
+            Pt::from_f32(12.0),
+        )
+        .with_flow_gap(Some(LengthSpec::Absolute(Pt::from_f32(10.0))));
+        assert_eq!(
+            parent.wrap(width, width).height,
+            Pt::from_f32(110.0) + epsilon * 2
+        );
+        let mut canvas = Canvas::new(Size {
+            width,
+            height: width,
+        });
+        parent.draw(&mut canvas, Pt::ZERO, Pt::ZERO, width, width);
+        assert_eq!(
+            drawn_y.lock().unwrap().as_slice(),
+            &[Pt::ZERO, Pt::from_f32(60.0) + epsilon * 2]
+        );
+    }
+
+    #[derive(Clone)]
+    struct FlowBaselineProbe(Arc<AtomicUsize>);
+
+    impl Flowable for FlowBaselineProbe {
+        fn wrap(&self, _width: Pt, _height: Pt) -> Size {
+            Size {
+                width: Pt::from_f32(100.0),
+                height: Pt::from_f32(12.0),
+            }
+        }
+        fn split(&self, _width: Pt, _height: Pt) -> Option<(Box<dyn Flowable>, Box<dyn Flowable>)> {
+            None
+        }
+        fn draw(&self, _canvas: &mut Canvas, _x: Pt, _y: Pt, _width: Pt, _height: Pt) {}
+        fn first_baseline(&self, _width: Pt) -> Option<Pt> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Some(Pt::from_f32(9.0))
+        }
+    }
+
+    #[test]
+    fn authored_flow_gap_is_included_in_first_and_last_baselines() {
+        let probe = FlowBaselineProbe(Arc::new(AtomicUsize::new(0)));
+        let parent = ContainerFlowable::new_pt(
+            vec![
+                Box::new(Spacer::new_pt(Pt::from_f32(18.0))),
+                Box::new(probe.clone()),
+                Box::new(probe),
+            ],
+            Pt::from_f32(12.0),
+            Pt::from_f32(12.0),
+        )
+        .with_flow_gap(Some(LengthSpec::Absolute(Pt::from_f32(9.0))));
+        let width = Pt::from_f32(300.0);
+        assert_eq!(parent.first_baseline(width), Some(Pt::from_f32(36.0)));
+        assert_eq!(parent.inline_baseline(width), Some(Pt::from_f32(57.0)));
+    }
+
+    #[test]
+    fn authored_flow_gap_baseline_lookup_does_not_repeat_nested_work() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut child: Box<dyn Flowable> = Box::new(FlowBaselineProbe(calls.clone()));
+        for _ in 0..8 {
+            child = Box::new(
+                ContainerFlowable::new_pt(vec![child], Pt::from_f32(12.0), Pt::from_f32(12.0))
+                    .with_flow_gap(Some(LengthSpec::Absolute(Pt::from_f32(9.0)))),
+            );
+        }
+        let width = Pt::from_f32(300.0);
+        assert_eq!(child.first_baseline(width), Some(Pt::from_f32(9.0)));
+        assert_eq!(calls.swap(0, Ordering::Relaxed), 1);
+        assert_eq!(child.inline_baseline(width), Some(Pt::from_f32(9.0)));
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn authored_flow_gap_preserves_resolved_percentage_across_page_fragments() {
+        let drawn_y = Arc::new(Mutex::new(Vec::new()));
+        let children = (0..5)
+            .map(|_| {
+                Box::new(MarginProbe {
+                    size: Size {
+                        width: Pt::from_f32(100.0),
+                        height: Pt::from_f32(36.0),
+                    },
+                    top: Pt::ZERO,
+                    bottom: Pt::ZERO,
+                    drawn_y: drawn_y.clone(),
+                }) as Box<dyn Flowable>
+            })
+            .collect();
+        let parent = ContainerFlowable::new_pt(children, Pt::from_f32(12.0), Pt::from_f32(12.0))
+            .with_height(LengthSpec::Absolute(Pt::from_f32(240.0)))
+            .with_flow_gap(Some(LengthSpec::Percent(0.1)));
+        let width = Pt::from_f32(300.0);
+        let height = Pt::from_f32(160.0);
+        let (first, second) = parent.split(width, height).expect("split authored flow");
+        let mut canvas = Canvas::new(Size { width, height });
+        first.draw(&mut canvas, Pt::ZERO, Pt::ZERO, width, height);
+        second.draw(&mut canvas, Pt::ZERO, Pt::ZERO, width, height);
+        let positions = drawn_y.lock().unwrap();
+        assert_eq!(positions.len(), 5);
+        for (actual, expected) in positions.iter().zip([0.0, 60.0, 120.0, 0.0, 60.0]) {
+            assert!((actual.to_f32() - expected).abs() < 0.001, "{positions:?}");
         }
     }
 
@@ -39322,6 +39721,10 @@ impl Flowable for MetaFlowable {
 
     fn is_layout_marker(&self) -> bool {
         self.child.is_layout_marker()
+    }
+
+    fn is_flow_spacing_item(&self, avail_width: Pt, avail_height: Pt) -> bool {
+        self.child.is_flow_spacing_item(avail_width, avail_height)
     }
 
     fn grid_row_span(&self) -> usize {

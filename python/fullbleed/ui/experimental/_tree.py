@@ -263,12 +263,26 @@ def Row(*children, gap=pt(8), align="center", justify="space-between", style=Non
 
 
 def Flow(*children, gap=pt(8), style=None, class_name=None, attrs=None, part=None) -> Node:
-    """Ordinary block flow. Spacing is attached to blocks, without a flex wrapper."""
+    """Native paginated block flow with independent gaps and child margins.
+
+    Fragments contribute siblings while retaining their diagnostic boundaries.
+    No gap is inserted at the beginning or end of a page fragment.
+    """
     captured = _children(children)
-    if any(not isinstance(child, Node) or child.tag is None and child.name is None for child in captured):
-        raise AuthoringError("Flow children must be rooted components; wrap text in Paragraph", code="flow.child")
-    spaced = tuple(child if index == 0 else child.with_style(margin_top=gap) for index, child in enumerate(captured))
-    return _element("div", spaced, style=style, class_name=class_name, attrs=attrs, part=part)
+    pending = [(child, ()) for child in reversed(captured)]
+    while pending:
+        child, path = pending.pop()
+        if not isinstance(child, Node):
+            raise AuthoringError("Flow children must be blocks or fragments; wrap text in Paragraph", code="flow.child", path=path)
+        if child.tag is None:
+            path = (*path, child.name) if child.name else path
+            pending.extend((nested, path) for nested in reversed(child.children))
+    attributes = dict(_attrs(attrs))
+    if "data-fb-flow" in attributes:
+        raise AuthoringError("Flow owns the data-fb-flow layout annotation", code="attribute.duplicate")
+    attributes["data-fb-flow"] = "true"
+    return _element("div", captured, base=Style(display="block", row_gap=gap),
+                    style=style, class_name=class_name, attrs=attributes, part=part)
 
 
 def Grid(*children, columns: int | str = 2, gap=pt(8), style=None, class_name=None, attrs=None, part=None) -> Node:
