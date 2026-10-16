@@ -232,7 +232,14 @@ class Renderer:
     def engine_for(self, document: Document) -> Any: ...
     def checked_engine_for(self, document: Document, plan: CompiledDocument) -> Any: ...
 '''
-    return {"_style.pyi": style, "_tree.pyi": tree, "_table.pyi": table, "_document.pyi": document}
+    bridge = HEADER + '''from ..core import Element
+from ._style import Theme
+from ._tree import Node
+
+def to_legacy(node: Node, *, theme: Theme | None = ...) -> tuple[Element | str, ...]: ...
+'''
+    return {"_style.pyi": style, "_tree.pyi": tree, "_table.pyi": table,
+            "_document.pyi": document, "_bridge.pyi": bridge}
 
 
 def main():

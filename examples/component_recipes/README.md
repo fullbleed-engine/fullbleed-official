@@ -173,6 +173,56 @@ selector. Traces without source associations retain the document/page error.
 Mapping other native diagnostics and locating individual failing descendants
 remain future work.
 
+## Adopt components in an existing document
+
+Use `to_legacy` at the boundary between a new component and an existing
+`fullbleed.ui` document. The component keeps its styles and part overrides;
+the existing application keeps its stylesheet and rendering configuration:
+
+```python
+from fullbleed.ui import (
+    Document as LegacyDocument, Paragraph as LegacyParagraph, StyleSheet,
+)
+from fullbleed.ui.experimental import to_legacy
+
+migration_theme = Theme({"muted": "#667580"})
+
+@LegacyDocument(
+    title="Existing report",
+    styles=StyleSheet({".legacy-note": {"color": "#667580"}}),
+)
+def existing_report():
+    return (
+        LegacyParagraph("This section keeps its existing stylesheet.", class_name="legacy-note"),
+        to_legacy(field.with_parts(label=style(font_weight=700)), theme=migration_theme),
+    )
+
+mixed = existing_report()
+assert "Maple &amp; Finch" in mixed.to_html()
+```
+
+Keep using the existing document's `PdfEngine` and rendering call. The adapter
+returns a tuple of legacy elements/text accepted as children, including multiple
+roots from a fragment. It adds no wrapper and copies no HTML strings. Each call
+creates an independent snapshot; mutating the legacy elements cannot change the
+original component. Passing a new node directly into the old API raises an error
+pointing to the adapter instead of printing the node's representation.
+
+Component styles become inline declarations. `class_name` remains available to
+the existing stylesheet, and inline declarations participate in that document's
+CSS cascade. This bridge does not isolate document-wide selectors. Tokens resolve
+from `theme`; `Theme.text` still belongs to the document. If adopting its text
+defaults, add `StyleSheet({"body": theme.text.resolve(theme)})` to the existing
+document once. Font selection, page geometry and PDF metadata remain its choices.
+
+This is an incremental bridge into `Element`/`DocumentArtifact`. It does not
+convert an entire old document to the experimental `Document`, load external
+stylesheets, or add experimental renderer checks/source maps to the old renderer.
+Once the component tree has migrated, switch the outer document and explicitly
+review its page, theme and renderer settings. The migration smoke below compares
+mixed documents with equivalent experimental documents, including repeated table
+headers and fragments.
+
 ## Run the candidate
 
 From the repository, build and install a wheel into an isolated environment:
@@ -189,6 +239,7 @@ the test-only readers `pypdf`, `pypdfium2`, and `pillow`:
 ```console
 python -m pytest tests/test_fullbleed_ui_experimental.py
 python -I tools/smoke_component_recipes.py --out target/recipe-verification
+python -I tools/smoke_component_migration.py --out target/recipe-verification/migration
 ```
 
 The wheel bundles generated type stubs for style keywords, primitive props,

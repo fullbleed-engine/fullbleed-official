@@ -18,7 +18,7 @@ import fullbleed.ui.experimental as components
 VALID = '''from dataclasses import dataclass
 from fullbleed.ui.experimental import (
     Column, DataTable, Document, Flow, Heading, Image, LayoutError, Node, Page, Paragraph,
-    Row, Source, Stack, Style, Theme, component, css, mm, pt, style, styled, token,
+    Row, Source, Stack, Style, Theme, component, css, mm, pt, style, styled, to_legacy, token,
 )
 
 @component(parts=("label", "note"))
@@ -58,6 +58,8 @@ assert "Design" in compiled_html
 diagnostic = LayoutError("Cannot fit", page=2, sources=document.compile().sources)
 error_page: int = diagnostic.at("Batch").page
 error_sources: tuple[Source, ...] = diagnostic.sources
+legacy_children = to_legacy(root, theme=Theme({"muted": "#667580"}))
+assert len(legacy_children) == 1
 escaped = css("transform: rotate(2deg)")
 custom_variables = style({"--brand": "#315d9b"}, color="var(--brand)")
 '''
@@ -84,6 +86,8 @@ INVALID_CASES = [
     ("flow_text_requires_paragraph", 'Flow("raw text")'),
     ("styled_argument", "QuietNotice(123)"),
     ("styled_keyword", 'QuietNotice("Paid", unexpected=True)'),
+    ("migration_node", 'to_legacy("<p>HTML</p>")'),
+    ("migration_theme", 'to_legacy(valid, theme={"muted": "gray"})'),
 ]
 
 # Recursive Iterable types also admit strings. Preserve valid custom iterables
@@ -108,7 +112,7 @@ def main():
     source = Path(__file__).resolve().parents[1] / "python"
     assert source not in Path(components.__file__).parents, "Use an installed candidate wheel with python -I"
     assert Path(components.__file__).with_name("py.typed").is_file(), "The wheel must carry its typing marker"
-    for name in ("_style", "_tree", "_table", "_document"):
+    for name in ("_style", "_tree", "_table", "_document", "_bridge"):
         assert Path(components.__file__).with_name(name + ".pyi").is_file(), name
     environment = dict(os.environ)
     environment.pop("MYPYPATH", None)

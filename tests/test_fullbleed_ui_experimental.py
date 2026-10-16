@@ -9,7 +9,7 @@ import pytest
 from fullbleed.ui.experimental import (
     AuthoringError, Box, Card, Column, DataTable, Document, Flow, Fragment,
     Heading, LayoutError, Node, Page, Paragraph, Renderer, Stack, Style, Theme, component,
-    css, mm, pct, pt, style, styled, token,
+    css, mm, pct, pt, style, styled, to_legacy, token,
 )
 
 
@@ -455,3 +455,81 @@ def test_styled_factories_expose_their_optional_part_contract():
     assert StyledField.parts == Field.parts == ("label",)
     assert StyledParagraph.parts is None
     assert "color: red;" in Document(StyledField("value").with_parts(label=style(color="red"))).to_css()
+
+
+def test_migration_carries_styles_and_keeps_legacy_document_ownership():
+    from fullbleed.ui import Document as LegacyDocument, Paragraph as LegacyParagraph, StyleSheet, to_html
+    @component(parts=("label",))
+    def Notice(message):
+        return Paragraph(message, part="label", class_name="custom", style=style(color=token("accent")))
+    notice = Notice("Paid <in full>").with_parts(label=style(font_weight=700))
+    theme = Theme({"accent": "#315d9b"}, text=style(font_size=pt(99)))
+    @LegacyDocument(title="Existing report", styles=StyleSheet({".old": {"color": "gray"}}))
+    def Report():
+        return [LegacyParagraph("Existing content", class_name="old"), to_legacy(notice, theme=theme)]
+    artifact = Report()
+    html = to_html(artifact)
+    assert 'class="custom" style="margin: 0; color: #315d9b; font-weight: 700;"' in html
+    assert "Paid &lt;in full&gt;" in html and "Existing content" in html
+    assert "99pt" not in html  # Theme.text remains a document setting.
+    assert artifact.title == "Existing report" and ".old { color: gray; }" in artifact.to_css()
+    assert "data-fb-id=" not in html and "fbx-" not in html
+
+
+def test_migration_preserves_fragments_attributes_and_independent_snapshots():
+    from fullbleed.ui import Element, render_node
+    from fullbleed.ui.experimental import Image
+    text = Paragraph('A & "B"', attrs={"aria_hidden": False, "title": '<sample>'})
+    node = Fragment("Prefix < ", text, text, Image(src="mark.png", alt="Mark"))
+    before = Document(node).compile()
+    children = to_legacy(node)
+    assert len(children) == 4 and children[0] == "Prefix < "
+    first, second, image = children[1:]
+    assert all(isinstance(child, Element) for child in (first, second, image))
+    assert first is not second and image.tag == "img" and image.children == []
+    html = render_node(children)
+    assert html.startswith('Prefix &lt; <p aria-hidden="false" title="&lt;sample&gt;"')
+    assert html.count('A &amp; &quot;B&quot;') == 2
+    first.props["class"] = "changed"
+    first.children.append("Changed")
+    assert "class" not in second.props and len(second.children) == 1
+    assert Document(node).compile() == before
+
+
+def test_migration_matches_style_order_and_reports_the_same_authoring_path():
+    @component
+    def Panel():
+        return Box(style=style(padding=pt(8), padding_left=pt(12), color=token("accent")))
+    panel = Panel().with_style(padding=pt(4))
+    with pytest.raises(AuthoringError) as compiled:
+        Document(panel).compile()
+    with pytest.raises(AuthoringError) as adapted:
+        to_legacy(panel)
+    assert adapted.value.to_dict() == compiled.value.to_dict()
+    theme = Theme({"accent": "blue"})
+    assert to_legacy(panel, theme=theme)[0].props["style"] == "padding-left: 12pt; color: blue; padding: 4pt;"
+
+
+def test_migration_requires_an_explicit_node_boundary():
+    from fullbleed.ui import el
+    node = Paragraph("New component")
+    with pytest.raises(TypeError, match="to_legacy"):
+        el("div", node)
+    for invalid in ("<p>HTML</p>", el("p", "Existing"), Document(node)):
+        with pytest.raises(AuthoringError) as caught:
+            to_legacy(invalid)
+        assert caught.value.code == "migration.node"
+    with pytest.raises(AuthoringError) as caught:
+        to_legacy(node, theme={"accent": "blue"})
+    assert caught.value.code == "migration.theme"
+
+
+def test_migration_constructs_deep_trees_without_recursive_conversion():
+    node = Paragraph("Deep content")
+    for _ in range(1500):
+        node = Box(node)
+    converted = to_legacy(node)[0]
+    for _ in range(1500):
+        assert converted.tag == "div"
+        converted = converted.children[0]
+    assert converted.tag == "p" and converted.children == ["Deep content"]

@@ -280,3 +280,9 @@ Python is the reference authoring experience. [JavaScript/TypeScript components]
 are published in npm package 0.6.0, with ordinary functions and optional JSX/TSX.
 Rust and .NET currently accept HTML/CSS. The JavaScript layer does not include
 Python's semantic validator or promise complete API parity.
+
+The separate [experimental authoring proposal](component-authoring-design.md)
+explores component-owned styles and named parts. Its source-branch prototype has
+an [incremental migration adapter](../examples/component_recipes/README.md#adopt-components-in-an-existing-document)
+for trying a new component inside an existing document. It is not part of the
+published 2.5.25 API, and these existing imports remain supported.

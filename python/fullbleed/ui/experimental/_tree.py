@@ -5,7 +5,7 @@ from collections.abc import Iterable, Mapping, Set
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from functools import wraps
-from typing import Callable, ParamSpec, Protocol, cast, overload
+from typing import Callable, ClassVar, ParamSpec, Protocol, cast, overload
 
 from ..core import _normalize_attr_name, _ATTR_NAME, _TAG_NAME, _HTML_VOID_ELEMENTS
 from ._style import AuthoringError, Style, _number, pt, style
@@ -90,6 +90,7 @@ def _attrs(values):
 class Node:
     """An immutable authoring node; component and fragment nodes emit no wrapper."""
 
+    __fullbleed_authoring_node__: ClassVar[bool] = True
     tag: str | None
     children: tuple = ()
     attributes: tuple = ()

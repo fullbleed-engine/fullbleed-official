@@ -205,7 +205,7 @@ pagination behavior that the renderer has not demonstrated.
 | Declared parts (implemented in the prototype) | Empty/conditional states accept documented parts; boundaries, root delegation, schema validation, and callable argument types have focused coverage; author feedback remains needed |
 | Semantics and accessibility | Reuse the existing semantic validation contract; test generated structure and final delivery profiles separately |
 | Rendering reuse | Measure authoring, compilation, layout, and output costs independently; verify metadata/configuration isolation |
-| Migration | Provide an explicit adapter for legacy elements/styles, keep existing imports working, and avoid two permanent incompatible component systems |
+| Migration (incremental bridge implemented) | `to_legacy` embeds new styled nodes in existing documents; whole-document migration still needs an explicit page/theme/renderer audit and a decision on the stable namespace |
 | Author usability | Independent authors can rebrand a document, reuse a component, add a table column, change page size, and diagnose a failure without editing generated HTML or learning internal selectors |
 
 The candidate now ships generated stubs backed by the same style-property,
@@ -234,6 +234,21 @@ copying Python syntax. The existing .NET element API already demonstrates
 immutable `WithStyle` customization; keep useful behavior that a binding has
 instead of restarting it to match Python names. Keep rendering in the existing engine and optional
 language/framework integrations outside the core dependency set.
+
+The migration direction matters. `to_legacy(node, theme=...)` lets an existing
+`DocumentArtifact` use one new component while retaining the old document's CSS,
+fonts, geometry, metadata and renderer. It snapshots new component values to
+legacy elements, resolves tokens and emits their styles inline. Fragments remain
+siblings; no HTML parser, extra wrapper, generated source IDs or global style
+registry is involved. The legacy cascade still applies, and the document owns
+base text styles. Missing tokens keep the same component paths as compilation.
+
+Converting an old document automatically would require deciding how its external
+selectors, inline priority and previously informational page settings interact
+with the new document's ownership rules. The bridge leaves that audit explicit.
+It also does not promise experimental renderer checks or source maps when the
+application continues to use the old renderer. This supports gradual adoption
+without declaring the old imports deprecated or committing to two permanent APIs.
 
 The next useful milestone is a reusable design kit whose authors can confidently
 change real documents. A larger number of element wrappers is not that milestone.
