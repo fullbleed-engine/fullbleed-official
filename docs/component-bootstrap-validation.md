@@ -10,6 +10,12 @@ The final built and installed candidate wheel is
 Its experimental Python modules and stubs match the working source. This wheel
 is distinct from both PyPI 2.5.26 and the earlier `component-preview-f88cced`.
 
+The first remote run passed on Linux but exposed Windows Git line-ending
+conversion of the pinned Bootstrap stylesheet. The asset now has an explicit
+byte-preserving `.gitattributes` rule. A checkout with `core.autocrlf=true`
+reproduces the original checksum, and the existing asset test checks the
+installed CSS bytes. The stylesheet and its integrity check remain unchanged.
+
 ## Checks
 
 | Check | Result |
