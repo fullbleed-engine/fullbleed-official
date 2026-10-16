@@ -171,7 +171,7 @@ number of decisions an author must coordinate for a specific change:
 | --- | --- | --- |
 | Reuse a field in a report | Import its function and attach the relevant selector rules to the new document | Import the styled function; provide its documented theme values. The shared invoice/report kit demonstrates this. |
 | Rebrand an imported theme | In the initial prototype, unpack `Theme.values` and manually carry its text style into another constructor | `theme.with_values(accent=...)` derives an immutable theme while retaining typography; mappings support externally supplied palettes. |
-| Learn a component's theme requirements | Read implementation details or fix missing-token errors one at a time | Inspect `node.required_tokens`, or `document.required_tokens` to include document text styles. This reports actual constructed content, not all potential variants. |
+| Learn a component's theme requirements | Read implementation details or fix missing-token errors one at a time | Inspect `node.required_tokens`, or `document.required_tokens` to include document text and selector styles. This reports actual constructed content, not all potential variants. |
 | Change one component's background | Its function must accept and forward a styling prop to a chosen root | Call `.with_style(background=...)` on the result. A fragment still needs an explicit root. |
 | Restyle a label inside a third-party component | Learn its classes and selector structure | Use a documented `label` part. Internal structure may change while that contract remains; automatic part-name completion is unfinished. |
 | Add a formatted table column | Coordinate the header, each row's cell and column styling | Add one `Column` containing label, callback, width and alignment. Calculations and formatting stay in application code. |
@@ -323,13 +323,13 @@ component handles its presentation. This is a design reference, not a parity cla
 
 Installed-candidate checks against source commit `d686153` identified the
 following gaps. The current source implements the naming, content-boundary and
-semantic-policy changes described below; the selector-styles input remains
-pending. The candidate's version metadata alone cannot distinguish it from the
-published 2.5.25 wheel.
+semantic-policy changes described below, and now adds explicit selector styles
+with separate default and instance precedence. The candidate's version metadata
+alone cannot distinguish it from the published 2.5.26 wheel.
 
 | Gap | Recommended contract | Acceptance evidence |
 | --- | --- | --- |
-| `class_name` is accepted, but experimental `Document` has no stylesheet input | Keep literal CSS labels. Add an explicit document `styles=` escape hatch, consistent with the established surface; keep ordinary component styles automatic. | A named class actually changes a rendered PDF through the public API. Source order, specificity, `!important`, and page-geometry conflicts have explicit tests. |
+| `class_name` was accepted without a document stylesheet input | `Document(styles=...)` snapshots CSS text, selector mappings, or the established `StyleSheet`. Generated defaults precede it; explicit node declarations use inline precedence. | Installed rendered controls cover class rules, specificity, `!important`, shorthand/longhand interactions, explicit layout choices, and typed paper geometry. |
 | Both source translation and prepared native layout were named `CompiledDocument` | The source value is now `DocumentSource`; the object owning a native layout keeps the existing native name. One-shot rendering remains the starting point. | Installed signatures, examples and editor checks distinguish pure translation from native preparation. A source value is not a renderable layout. |
 | The experimental render methods omitted the established `a11y_mode` option | Compilation and rendering now accept the existing semantic policy and reuse `A11yContract`, with added component locations. | Duplicate IDs fail in strict mode through the public experimental path. Warning mode retains diagnostics in `DocumentSource.a11y_report`; delivery-profile verification remains separate. |
 | `Paragraph("Outer", Paragraph("Inner"))` compiled without rejecting nested paragraphs | The compiler now checks inline/block boundaries, table/list structure and nested links before serialization. | An invalid composition reports the authored component and expected child kind. Valid rich text, fragments and conditional children keep working. These bounded checks are not a complete HTML validator. |
@@ -357,10 +357,38 @@ manual naming collisions; they do not create CSS isolation. The native cascade
 still controls competing declarations. The authored precedence described above
 orders a node's style values before that cascade. A final `.with_style(...)`
 cannot be advertised as defeating arbitrary external `!important` rules.
-Reserve document page size and margins for `Page`; reject conflicting raw page
-geometry using parsed rules rather than searching CSS strings. Qualify this
-before introducing the stylesheet input. The existing legacy adapter remains
-the documented selector-based migration path meanwhile.
+Document page size, orientation and margins remain owned by `Page`. The existing
+native CSS parser finds competing geometry declarations, including nested rules,
+without mistaking strings, comments or margin-box declarations for page settings.
+The ownership check rejects inactive conditions as well; it does not depend on
+the eventual rendering context. Page furniture remains available. Embedded style
+content nodes are rejected in favor of the explicit document stylesheet input.
+CSS-controlled page families remain available through the established engine
+interface; a typed page-family API needs its own design and rendered fixtures.
+
+The compiler retains two style layers. Reusable defaults become deduplicated
+class rules; explicit layout choices, `style=`, and instance overrides become
+inline declarations. A directly replaced default property is removed before
+token resolution, so an unused token does not become an accidental requirement.
+The engine resolves remaining shorthand/longhand interactions, inheritance,
+specificity and important declarations. Generated classes provide default rule
+identity, not CSS isolation. A low-specificity tag rule does not automatically
+override a generated class. The legacy adapter deliberately retains its existing
+all-inline migration behavior; migrating the whole document uses the new
+default/explicit distinction.
+
+Selector mappings also retain experimental `Style` values and their token
+requirements. Documents capture those immutable values without prematurely
+resolving a missing theme. Compilation resolves them with component styles and
+reports a missing token at `Document -> styles -> selector`. Existing stylesheet
+providers are captured through `to_css() -> str` once; invalid declaration values
+fail rather than silently becoming empty rules. The public resolved `styles`
+property is read-only, and its typing uses that small provider protocol instead
+of importing an untyped class into a union and accidentally accepting any input.
+
+Conditional style composition now skips `False` and `None`, matching common
+conditional-child expressions, while retaining zero-valued declarations. This
+small consistency improvement needs no new conditional or variant API.
 
 There is no need to replace the working eager evaluation model with a reactive
 runtime. Component calls and table callbacks run during construction; compilation
@@ -502,7 +530,7 @@ pagination behavior that the renderer has not demonstrated.
 
 | Work | Acceptance condition |
 | --- | --- |
-| Public contract cleanup (partial implementation) | Source/layout names and semantic policy are now distinct and connected; the explicit selector-styles input still needs defined cascade/page ownership |
+| Public contract cleanup (implemented in the prototype) | Source/layout names, semantic policy, explicit selector styles, and page ownership are connected; qualify their integration and obtain author feedback before stabilization |
 | Authored content model (bounded implementation) | Invalid inline/block, table/list and nested-link compositions fail before serialization with component paths; extend coverage deliberately while preserving valid rich text and transparent fragments |
 | Composition and spacing (implemented in the prototype) | Qualify fragment provenance, additive margins, independent parent gaps, page breaks and wrapper arguments in rendered fixtures; obtain author feedback on the explicit native layout contract |
 | Explicit layout-prop precedence (implemented in the prototype) | Explicit choices outrank recipes; omitted/None choices allow defaults. Check zero/false, optional forwarding, final style overrides, editor types and actual printed geometry/pagination. |

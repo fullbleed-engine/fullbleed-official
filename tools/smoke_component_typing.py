@@ -43,6 +43,7 @@ StyledChoice = styled(Choice, color="purple")
 business_style: Node = StyledChoice(style="formal")
 spacing = [pt(4), mm(2)]
 recipe = Style(style(color="black"), padding=spacing)
+conditional_recipe = style(recipe, False, None, True and style(font_weight=700))
 root = Stack(Label("Invoice"), typed, gap=pt(6), align="start", style=recipe)
 root = root.with_parts(label=style(font_weight=700)) if root.parts else root
 flow = Flow([Paragraph("One"), Paragraph("Two")], (Paragraph(str(i)) for i in range(2)), None)
@@ -80,6 +81,11 @@ compiled_html: str = document.to_html()
 assert "Design" in compiled_html
 compiled_source: DocumentSource = document.compile(a11y_mode="raise")
 assert compiled_source.a11y_report is not None
+selector_document = Document(Paragraph("Paid", class_name="notice"), styles={".notice": {"color": "blue"}})
+selector_css: str = selector_document.styles
+typed_selector_document = Document(Paragraph("Paid", class_name="notice"),
+                                   styles={".notice": style(color=token("accent"))},
+                                   theme=Theme({"accent": "blue"}))
 
 def prepare_outputs(document: Document, renderer: Renderer) -> tuple[bytes, list[bytes]]:
     prepared = document.prepare(renderer, a11y_mode="raise")
@@ -98,6 +104,9 @@ custom_variables = style({"--brand": "#315d9b"}, color="var(--brand)")
 '''
 
 INVALID_CASES = [
+    ("document_styles_type", 'Document(Paragraph("x"), styles=123)'),
+    ("document_styles_readonly", 'selector_document.styles = ""'),
+    ("conditional_style_true", 'style(True)'),
     ("source_is_not_layout", "compiled_source.render_pdf()"),
     ("semantic_policy", 'document.compile(a11y_mode="strict")'),
     ("component_argument", "Notice(10)"),

@@ -33,12 +33,12 @@ def generated_files():
     style = HEADER + '''from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, TypeAlias
+from typing import Any, Literal, TypeAlias
 
 _Number: TypeAlias = int | float | Decimal
 _StyleAtom: TypeAlias = str | _Number | Length | Token
 _StyleValue: TypeAlias = _StyleAtom | Sequence[_StyleValue]
-_StyleInput: TypeAlias = Style | Mapping[str, _StyleValue | None] | None
+_StyleInput: TypeAlias = Style | Mapping[str, _StyleValue | None] | Literal[False] | None
 _ThemeValue: TypeAlias = str | _Number | Length
 
 class AuthoringError(ValueError):
@@ -171,12 +171,15 @@ class _TableFactory(Protocol):
 DataTable: _TableFactory
 '''
 
-    document = HEADER + '''from collections.abc import Iterable
+    document = HEADER + '''from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from os import PathLike
 from typing import Any, Literal, Protocol
 from ._style import AuthoringError, Length, Theme
 from ._tree import _Child
+
+class _SelectorStyles(Protocol):
+    def to_css(self) -> str: ...
 
 # A typing view of the existing native compiled document, not a runtime wrapper.
 class _PreparedDocument(Protocol):
@@ -226,7 +229,10 @@ class Document:
     page: Page
     theme: Theme
     def __init__(self, *children: _Child, title: str = ..., lang: str = ...,
-                 page: Page | None = ..., theme: Theme | None = ...) -> None: ...
+                 page: Page | None = ..., theme: Theme | None = ...,
+                 styles: str | Mapping[str, Any] | _SelectorStyles | None = ...) -> None: ...
+    @property
+    def styles(self) -> str: ...
     def compile(self, *, a11y_mode: Literal["warn", "raise"] | None = ...) -> DocumentSource: ...
     @property
     def required_tokens(self) -> tuple[str, ...]: ...

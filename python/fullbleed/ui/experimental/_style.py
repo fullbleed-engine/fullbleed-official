@@ -121,7 +121,7 @@ class Style:
     def __init__(self, *fragments, **properties):
         result = {}
         for fragment in (*fragments, properties):
-            if fragment is None:
+            if fragment is None or fragment is False:
                 continue
             if not isinstance(fragment, (Style, Mapping)):
                 raise AuthoringError("Compose Style values or mappings; use css(...) for CSS text", code="style.fragment")

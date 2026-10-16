@@ -3,7 +3,7 @@
 This prototype explores a document API with reusable styling, named component
 parts, theme values, page geometry, and data tables. It is available from this
 source branch's wheel under `fullbleed.ui.experimental`; it is not in the
-published 2.5.25 wheel. Names and contracts may change before stabilization.
+published 2.5.26 wheel. Names and contracts may change before stabilization.
 
 The [implementation review](../../docs/component-authoring-design.md) explains
 the design decisions, remaining gaps, and criteria for stabilizing this API.
@@ -63,8 +63,9 @@ field = Field("Prepared for", "Maple & Finch")
 document = Document(field, theme=Theme({"muted": "#667580"}))
 ```
 
-`styled` captures a reusable root style. Compilation collects the styles used by
-the document and generates class names from the resolved declarations. There is
+`styled` captures reusable root defaults. Compilation collects those defaults
+and generates class names from the resolved declarations. Explicit layout
+arguments, `style=`, and instance overrides become inline declarations. There is
 no module-level style registry or stylesheet registration step. A component using
 theme tokens requires a theme that supplies those tokens; a missing value reports
 the component and part that referenced it.
@@ -156,8 +157,8 @@ for those optional layout arguments so reusable defaults can take effect.
 `class_name` still means a literal CSS class label. It does not load styles or
 refer to a Python variable. In this prototype, use style values for the normal
 authoring path. `css("transform: rotate(2deg)")` is an explicit declaration escape
-hatch for CSS beyond the checked property vocabulary. Full selector stylesheets
-remain available through the established `fullbleed.ui` and engine APIs.
+hatch for CSS beyond the checked property vocabulary. To use selectors, attach
+their rules explicitly with `Document(styles=...)`.
 
 Choose the control that matches the change:
 
@@ -168,11 +169,70 @@ Choose the control that matches the change:
 | Defaults reused by many elements | A `styled(...)` factory, such as `Label` above |
 | A public internal label or cell | `.with_parts(label=style(...))`, using the component's advertised parts |
 | Shared brand values or document typography | `Theme` tokens and `Theme.text` |
-| Existing selector-based CSS | `class_name` with the established document's stylesheet; use the [adapter](#adopt-components-in-an-existing-document) when mixing APIs |
+| Existing selector-based CSS | `class_name` with `Document(styles=...)`; use the [adapter](#adopt-components-in-an-existing-document) when mixing APIs |
 
-The standalone experimental `Document` collects node styles; it has no external
-stylesheet argument. A `class_name` alone therefore supplies a label, not an
-appearance. Do not pass a `StyleSheet` or a style value as a class name.
+A `class_name` alone supplies a label, not an appearance. Do not pass a
+`StyleSheet` or a style value as a class name.
+
+## Use existing CSS with class names
+
+`styles` accepts CSS text, a selector mapping, or the established
+`fullbleed.ui.StyleSheet`. The document snapshots that input; later edits to a
+shared sheet or mapping do not change an existing document.
+Other stylesheet objects can implement `to_css() -> str`; it is called once
+during document construction and its returned text goes through the same checks.
+Selector mappings also accept the same `style(...)` values used on components,
+including theme tokens. Compilation resolves those tokens and checks stylesheet
+syntax and page ownership before native layout.
+
+```python
+from fullbleed.ui.experimental import Document, Page, Paragraph, mm, pt, styled
+
+Notice = styled(Paragraph, font_size=pt(18), color="#a0442e")
+notice = Notice("Paid in full", class_name="notice")
+document = Document(
+    notice,
+    page=Page("A5", margin=mm(15)),
+    styles={".notice": {"color": "#315d9b"}},
+)
+```
+
+The notice prints blue. For a themed rule, use
+`styles={".notice": style(color=token("accent"))}` and supply that token through
+the document's theme. `document.required_tokens` includes tokens in these rules.
+
+Generated default rules precede the document stylesheet;
+ordinary specificity and source order apply. A selector such as `p` has lower
+specificity than a generated class, while `.notice` has equal specificity and
+wins by appearing later. Class order in the attribute has no effect.
+
+An explicit `notice.with_style(color="#245541")` prints green with those same
+ordinary class rules. Explicit styles use inline precedence; an external
+`!important` rule can still override a normal inline declaration. Theme text
+styles supply body defaults and participate in ordinary inheritance. There is
+no Python implementation of the CSS cascade.
+
+`Page` owns paper size, orientation and page margins. The native CSS parser
+rejects competing `@page` geometry in `styles`, including named, pseudo-page,
+conditional and layered rules. This ownership check covers inactive conditions
+too, so changing context cannot activate a second paper configuration. Ordinary
+element margins and page furniture such as `@bottom-center` remain available.
+Add selectors through `styles`; embedding a `Node("style", ...)` is rejected.
+Advanced documents needing CSS-controlled page families can continue using the
+established HTML/CSS engine interface.
+
+Style fragments support normal Python conditionals:
+
+```python
+from fullbleed.ui.experimental import style
+
+paid = False
+appearance = style(color="#233c36")
+appearance = style(appearance, paid and style(font_weight=700), margin=0)
+```
+
+`None` and `False` fragments are omitted. Zero-valued declarations remain zero;
+`True` is not a style fragment.
 
 ## Rebrand a shared theme
 
@@ -199,7 +259,7 @@ values here; create a `Theme(..., text=...)` when changing the text-style defini
 
 `required_tokens` lists sorted, unique explicit `token(...)` references in the
 constructed component or document. It crosses nested component boundaries, uses
-the final style layers, and includes document-wide text styles. An overridden
+the final style layers, and includes document-wide text and selector styles. An overridden
 default or absent optional part adds no requirement. Extra values supplied by a
 theme are not requirements. Discovery does not resolve a theme or rerun component
 functions; missing values still report their component path during compilation.

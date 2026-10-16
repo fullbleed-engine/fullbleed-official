@@ -3,12 +3,12 @@
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, TypeAlias
+from typing import Any, Literal, TypeAlias
 
 _Number: TypeAlias = int | float | Decimal
 _StyleAtom: TypeAlias = str | _Number | Length | Token
 _StyleValue: TypeAlias = _StyleAtom | Sequence[_StyleValue]
-_StyleInput: TypeAlias = Style | Mapping[str, _StyleValue | None] | None
+_StyleInput: TypeAlias = Style | Mapping[str, _StyleValue | None] | Literal[False] | None
 _ThemeValue: TypeAlias = str | _Number | Length
 
 class AuthoringError(ValueError):

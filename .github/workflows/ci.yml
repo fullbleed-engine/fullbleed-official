@@ -186,7 +186,7 @@ jobs:
           FULLBLEED_TEST_INSTALLED_NATIVE: "1"
         run: |
           python -m pip install pypdfium2==5.14.0 pillow==12.3.0 mypy==2.4.0
-          python -m pytest tests/test_fullbleed_ui_experimental.py -q --junitxml target/component-recipes/unit-tests.xml
+          python -m pytest tests/test_fullbleed_ui_experimental.py tests/test_fullbleed_ui_experimental_styles.py -q --junitxml target/component-recipes/unit-tests.xml
           python -I tools/smoke_component_recipes.py --out target/component-recipes
           python -I tools/smoke_component_flow.py --out target/component-recipes/flow
           python -I tools/smoke_component_layout_props.py --out target/component-recipes/layout-props
@@ -194,6 +194,7 @@ jobs:
           python -I tools/smoke_component_preparation.py --out target/component-recipes/preparation
           python -I tools/smoke_component_semantics.py --out target/component-recipes/semantics
           python -I tools/smoke_component_themes.py --out target/component-recipes/themes
+          python -I tools/smoke_component_styles.py --out target/component-recipes/styles
           python -I tools/smoke_component_migration.py --out target/component-recipes/migration
           python -I tools/smoke_component_typing.py --out target/component-recipes/typing.json
 

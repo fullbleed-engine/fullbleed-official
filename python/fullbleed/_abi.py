@@ -906,6 +906,12 @@ def concat_css(parts):
     return _call(None, "concat_css", parts)
 
 
+def _stylesheet_page_geometry(css):
+    """Private syntax inspection for the experimental document's page ownership."""
+    _require_string(css, "css")
+    return _call(None, "_stylesheet_page_geometry", css)
+
+
 def finalize_stamp_pdf(template, overlay, out, page_map=None, dx=0.0, dy=0.0):
     return _call(None, "finalize_stamp_pdf", template, overlay, out, page_map, dx, dy)
 

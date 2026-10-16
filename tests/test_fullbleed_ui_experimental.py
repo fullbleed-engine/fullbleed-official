@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError
 from decimal import Decimal
 import inspect
+from html.parser import HTMLParser
 
 import pytest
 
@@ -11,6 +12,19 @@ from fullbleed.ui.experimental import (
     Heading, LayoutError, Node, Page, Paragraph, Renderer, Row, Stack, Style, Theme, component,
     css, mm, pct, pt, style, styled, to_legacy, token,
 )
+
+
+def _styles(document_or_source):
+    """Inspect both stylesheet defaults and explicit inline declarations."""
+    source = document_or_source.compile() if isinstance(document_or_source, Document) else document_or_source
+    declarations = [source.css]
+
+    class Styles(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            declarations.extend(value for key, value in attrs if key == "style")
+
+    Styles().feed(source.html)
+    return "\n".join(declarations)
 
 
 def test_document_source_distinguishes_serialized_input_from_native_layout():
@@ -150,9 +164,9 @@ def test_styled_component_moves_between_documents_without_registering_css():
     shared = Field("Customer", "A & B")
     blue = Document(shared, theme=Theme({"muted": "blue"}))
     red = Document(shared, theme=Theme({"muted": "red"}))
-    assert "color: blue;" in blue.to_css()
-    assert "color: red;" in red.to_css()
-    assert "color: red;" not in blue.to_css()
+    assert "color: blue;" in _styles(blue)
+    assert "color: red;" in _styles(red)
+    assert "color: red;" not in _styles(blue)
     assert "A &amp; B" in blue.to_html()
     assert inspect.signature(Field).parameters["label"].annotation == "str"
     assert any(source.path == ("Field", "label") for source in blue.compile().sources)
@@ -170,7 +184,7 @@ def test_theme_updates_preserve_text_and_snapshot_values_without_changing_shared
     assert dict(warm.values) == {"accent": "red", "spacing": pt(8), "brand.note": "Warm"}
     assert dict(base.values) == {"accent": "blue", "spacing": pt(6)}
     assert original.compile() == before
-    changed = Document(content, theme=warm).to_css()
+    changed = _styles(Document(content, theme=warm))
     assert "color: red;" in changed and "padding: 8pt;" in changed and "font-size: 10pt;" in changed
     assert "padding: 99pt;" not in changed
     assert base.with_values() == base
@@ -226,7 +240,7 @@ def test_token_discovery_uses_effective_styles_and_crosses_component_boundaries(
     assert caught.value.code == "theme.missing"
     assert caught.value.path == ("Notice", "label")
     complete = themed.with_values(ink="black", accent="red", body_ink="gray", space=pt(4))
-    assert "color: red;" in Document(*doc.children, theme=complete).to_css()
+    assert "color: red;" in _styles(Document(*doc.children, theme=complete))
 
 
 def test_token_discovery_is_explicit_and_does_not_parse_css_variable_strings():
@@ -246,7 +260,7 @@ def test_named_parts_do_not_require_selectors_or_leak_into_nested_components():
         return Card(Heading("Outer", part="title"), Inner())
 
     panel = Panel().with_parts(title=style(color="red"))
-    css_text = Document(panel).to_css()
+    css_text = _styles(Document(panel))
     assert "color: red;" in css_text and "color: green;" in css_text
     with pytest.raises(AuthoringError, match="Unknown component parts"):
         Panel().with_parts(missing=style(color="blue"))
@@ -259,8 +273,8 @@ def test_root_styles_work_without_custom_prop_forwarding_and_are_immutable():
 
     original = Notice("Paid")
     custom = original.with_style(color="blue")
-    assert "color: black;" in Document(original).to_css()
-    assert "color: blue;" in Document(custom).to_css()
+    assert "color: black;" in _styles(Document(original))
+    assert "color: blue;" in _styles(Document(custom))
     with pytest.raises(AuthoringError, match="explicit container"):
         Fragment(Paragraph("One"), Paragraph("Two")).with_style(color="blue")
 
@@ -271,7 +285,7 @@ def test_a_component_delegating_its_root_keeps_the_roots_exposed_parts():
         return DataTable(rows, columns=[Column("Work", str)])
 
     table = WorkTable(["First"]).with_parts(cell=style(color="blue"))
-    assert "color: blue;" in Document(table).to_css()
+    assert "color: blue;" in _styles(Document(table))
 
 
 def test_declared_parts_are_stable_across_conditional_content():
@@ -284,9 +298,9 @@ def test_declared_parts_are_stable_across_conditional_content():
     empty, full = Notice("Paid"), Notice("Paid", "Thank you")
     assert empty.parts == full.parts == Notice.parts
     override = style(color="purple")
-    assert "color: purple;" not in Document(empty.with_parts(note=override)).to_css()
-    assert "color: purple;" in Document(full.with_parts(note=override)).to_css()
-    assert "color: purple;" not in Document(full).to_css()
+    assert "color: purple;" not in _styles(Document(empty.with_parts(note=override)))
+    assert "color: purple;" in _styles(Document(full.with_parts(note=override)))
+    assert "color: purple;" not in _styles(Document(full))
     with pytest.raises(AuthoringError, match="Available parts: label, note") as caught:
         empty.with_parts(notte=override)
     assert caught.value.path == ("Notice",)
@@ -297,8 +311,8 @@ def test_table_customization_does_not_depend_on_whether_rows_or_caption_exist():
     empty = DataTable([], columns=[Column("Item", str)]).with_parts(**overrides)
     populated = DataTable(["One"], columns=[Column("Item", str)], caption="Items").with_parts(**overrides)
     assert empty.parts == populated.parts == DataTable.parts == ("header", "cell", "row", "caption", "empty")
-    assert "color: gray;" in Document(empty).to_css()
-    assert "color: blue;" in Document(populated).to_css()
+    assert "color: gray;" in _styles(Document(empty))
+    assert "color: blue;" in _styles(Document(populated))
 
 
 def test_declared_parts_do_not_leak_through_nested_component_boundaries():
@@ -311,7 +325,7 @@ def test_declared_parts_do_not_leak_through_nested_component_boundaries():
         return Card(Paragraph("Outer", part="title"), Inner())
 
     result = Outer().with_parts(title=style(color="red"), note=style(color="purple"))
-    css_text = Document(result).to_css()
+    css_text = _styles(Document(result))
     assert "color: red;" in css_text and "color: green;" in css_text
     assert "color: purple;" not in css_text
 
@@ -329,7 +343,7 @@ def test_root_delegation_preserves_optional_parts_and_can_expose_a_subset():
     WorkTable([]).with_parts(cell=style(color="blue"))
     restricted = HeaderOnly(["One"])
     assert restricted.parts == ("header",)
-    assert "color: blue;" in Document(restricted.with_parts(header=style(color="blue"))).to_css()
+    assert "color: blue;" in _styles(Document(restricted.with_parts(header=style(color="blue"))))
     with pytest.raises(AuthoringError):
         restricted.with_parts(cell=style(color="blue"))
 
@@ -365,10 +379,10 @@ def test_invalid_part_declarations_fail_at_decoration(parts):
 def test_style_precedence_preserves_shorthand_order_and_caller_override():
     Notice = styled(Card, padding=pt(12), color="green")
     node = Notice("Paid", style=style(padding_left=pt(24), color="blue"))
-    declarations = Document(node).to_css()
+    declarations = _styles(Document(node))
     assert declarations.index("padding: 12pt") < declarations.index("padding-left: 24pt")
     assert "color: blue;" in declarations and "color: green;" not in declarations
-    overridden = Document(node.with_style(padding=pt(6))).to_css()
+    overridden = _styles(Document(node.with_style(padding=pt(6))))
     assert overridden.index("padding-left: 24pt") < overridden.index("padding: 6pt")
 
 
@@ -387,8 +401,8 @@ def test_styled_preserves_business_arguments_and_invokes_the_factory_once():
     assert StyledChoice.parts == ("value",)
     compiled = Document(node).compile()
     assert "Invitation: formal" in compiled.html and "color: red;" in compiled.css
-    assert "color: blue;" in Document(node.with_style(color="blue")).to_css()
-    assert "color: red;" in Document(node).to_css()
+    assert "color: blue;" in _styles(Document(node.with_style(color="blue")))
+    assert "color: red;" in _styles(Document(node))
     assert calls == [("Invitation", "formal")]
 
 
@@ -396,19 +410,19 @@ def test_styled_layers_preserve_explicit_styles_and_nested_recipe_precedence():
     Base = styled(Card, padding=pt(18), color="green")
     Outer = styled(Base, padding_left=pt(24), color="red")
     node = Outer("Invoice", style=style(color="blue"))
-    compiled = Document(node).to_css()
+    compiled = _styles(Document(node))
     assert compiled.index("padding: 18pt") < compiled.index("padding-left: 24pt")
     assert "color: blue;" in compiled and "color: green;" not in compiled and "color: red;" not in compiled
-    assert "color: red;" in Document(Outer("Invoice")).to_css()
+    assert "color: red;" in _styles(Document(Outer("Invoice")))
 
     @component
     def Explicit():
         return Paragraph("Important").with_style(color="purple")
 
     result = styled(Explicit, color="red", padding=pt(8))()
-    assert "color: purple;" in Document(result).to_css()
-    assert "padding: 8pt;" in Document(result).to_css()
-    assert "color: blue;" in Document(result.with_style(color="blue")).to_css()
+    assert "color: purple;" in _styles(Document(result))
+    assert "padding: 8pt;" in _styles(Document(result))
+    assert "color: blue;" in _styles(Document(result.with_style(color="blue")))
     legacy = to_legacy(result)
     assert "color: purple;" in legacy[0].props["style"]
     assert "padding: 8pt;" in legacy[0].props["style"]
@@ -420,7 +434,7 @@ def test_styled_no_longer_injects_style_into_custom_function_arguments():
 
     with pytest.raises(TypeError, match="unexpected keyword argument 'style'"):
         styled(Notice, color="red")("Paid", style=style(color="blue"))
-    assert "color: blue;" in Document(styled(Notice, color="red")("Paid").with_style(color="blue")).to_css()
+    assert "color: blue;" in _styles(Document(styled(Notice, color="red")("Paid").with_style(color="blue")))
 
 
 @pytest.mark.parametrize("factory,argument,property_name,builtin,builtin_css,recipe,given,given_css", [
@@ -442,7 +456,7 @@ def test_explicit_layout_choices_override_recipes_while_omitted_choices_do_not(
     recipe_factory = styled(factory, {property_name: recipe})
 
     def declaration(node, expected):
-        assert f"{property_name}: {expected};" in Document(node).to_css()
+        assert f"{property_name}: {expected};" in _styles(Document(node))
 
     declaration(factory(child), builtin_css)
     declaration(factory(child, **{argument: None}), builtin_css)
@@ -471,8 +485,8 @@ def test_component_authored_layout_choices_survive_outer_styling_and_optional_fo
     for factory in (ChosenFlow, OptionalFlow):
         decorated = styled(factory, row_gap=pt(12))
         expected = "3pt" if factory is ChosenFlow else "12pt"
-        assert f"row-gap: {expected};" in Document(decorated()).to_css()
-    assert "row-gap: 0;" in Document(styled(OptionalFlow, row_gap=pt(12))(gap=0)).to_css()
+        assert f"row-gap: {expected};" in _styles(Document(decorated()))
+    assert "row-gap: 0;" in _styles(Document(styled(OptionalFlow, row_gap=pt(12))(gap=0)))
 
 
 @pytest.mark.parametrize("factory,kwargs", [
@@ -581,7 +595,7 @@ def test_compilation_is_document_local_repeatable_and_handles_deep_nesting():
         node = Box(node)
     assert "Deep" in Document(node).to_html()
     deep_part = Box(node, part="root").with_parts(root=style(color="blue"))
-    assert "color: blue;" in Document(deep_part).to_css()
+    assert "color: blue;" in _styles(Document(deep_part))
 
 
 def test_ordered_children_are_consumed_once_and_mutable_collections_are_captured():
@@ -617,7 +631,7 @@ def test_table_owns_header_empty_state_and_single_evaluation_of_cells():
     assert calls == ["A & B", "Second"]
     assert before.html.count('scope="col"') == 2
     assert "A &amp; B" in before.html and "Late" not in before.html
-    assert "padding: 10pt;" in before.css and "background: #fafafa;" in before.css
+    assert "padding: 10pt;" in _styles(before) and "background: #fafafa;" in _styles(before)
     assert any(source.path == ("DataTable", "row 2", "Description", "cell") for source in before.sources)
     empty = Document(DataTable([], columns=[Column("A", str), Column("B", str)], empty="Nothing yet")).to_html()
     assert 'colspan="2"' in empty and "Nothing yet" in empty
@@ -643,9 +657,9 @@ def test_invalid_table_contracts_are_rejected(kwargs):
 
 
 def test_page_configuration_changes_the_compiled_geometry_in_one_place():
-    portrait = Document(Paragraph("A"), page=Page("A5", margin=mm(12))).to_css()
-    landscape = Document(Paragraph("A"), page=Page("LETTER", margin=(mm(10), mm(15)), landscape=True)).to_css()
-    custom = Document(Paragraph("A"), page=Page((mm(100), mm(200)), margin=mm(0))).to_css()
+    portrait = _styles(Document(Paragraph("A"), page=Page("A5", margin=mm(12))))
+    landscape = _styles(Document(Paragraph("A"), page=Page("LETTER", margin=(mm(10), mm(15)), landscape=True)))
+    custom = _styles(Document(Paragraph("A"), page=Page((mm(100), mm(200)), margin=mm(0))))
     assert "@page { size: A5; margin: 12mm; }" in portrait
     assert "size: LETTER landscape; margin: 10mm 15mm;" in landscape
     assert "size: 100mm 200mm; margin: 0mm;" in custom
@@ -659,10 +673,10 @@ def test_flow_keeps_block_flow_and_requires_real_blocks():
     child = Paragraph("Second").with_style(margin_top=pt(24))
     flow = Flow(Paragraph("First"), child, gap=pt(14))
     assert flow.children[1] is child
-    assert "row-gap: 14pt;" in Document(flow).to_css()
-    assert "margin-top: 24pt;" in Document(flow).to_css()
+    assert "row-gap: 14pt;" in _styles(Document(flow))
+    assert "margin-top: 24pt;" in _styles(Document(flow))
     assert 'data-fb-flow="true"' in Document(flow).to_html()
-    assert "display: flex" not in Document(flow).to_css()
+    assert "display: flex" not in _styles(Document(flow))
     with pytest.raises(AuthoringError, match="wrap text"):
         Flow("bare text")
 
@@ -847,7 +861,7 @@ def test_length_shorthand_tokens_keep_unit_checks_and_component_paths(number):
         Document(Panel(), theme=Theme({"spacing": number})).compile()
     assert caught.value.code == "style.unit"
     assert caught.value.path == ("Panel", "section")
-    valid = Document(Panel(), theme=Theme({"spacing": mm(2)})).to_css()
+    valid = _styles(Document(Panel(), theme=Theme({"spacing": mm(2)})))
     assert "padding: 4pt 2mm;" in valid
     assert style(padding=(0, 0.0, Decimal("0"), pt(2))).resolve(Theme()) == "padding: 0 0.0 0 2pt;"
 
@@ -861,7 +875,7 @@ def test_styled_factories_expose_their_optional_part_contract():
     StyledParagraph = styled(Paragraph, color="blue")
     assert StyledField.parts == Field.parts == ("label",)
     assert StyledParagraph.parts is None
-    assert "color: red;" in Document(StyledField("value").with_parts(label=style(color="red"))).to_css()
+    assert "color: red;" in _styles(Document(StyledField("value").with_parts(label=style(color="red"))))
 
 
 def test_migration_carries_styles_and_keeps_legacy_document_ownership():

@@ -5,14 +5,78 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from html import escape
 import json
+import warnings
 from pathlib import Path
 from types import MappingProxyType
 from copy import deepcopy
+from collections.abc import Mapping
 
 from ..core import Element, _render_attrs, _HTML_VOID_ELEMENTS
+from ..stylesheet import StyleSheet
+from ..style import StyleWarning
 from ._style import AuthoringError, Length, Style, Theme, mm
 from ._tree import Node, _children, _required_tokens
 from ._semantics import ContentContext, normalize_mode, semantic_report
+
+
+def _capture_document_styles(value) -> tuple:
+    """Snapshot the existing selector stylesheet API, preserving native CSS rules."""
+    if value is None:
+        return ()
+    try:
+        if isinstance(value, Mapping):
+            fragments = []
+            for selector, declarations in value.items():
+                if not isinstance(selector, str) or not selector.strip():
+                    raise TypeError("Stylesheet selectors must be nonempty strings")
+                if isinstance(declarations, Style):
+                    fragments.append((selector.strip(), Style(declarations)))
+                else:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("error", StyleWarning)
+                        fragments.append(StyleSheet({selector: declarations}).to_css())
+            return tuple(fragments)
+        if isinstance(value, str):
+            text = value.strip()
+        elif callable(getattr(value, "to_css", None)):
+            text = value.to_css()
+        else:
+            raise TypeError("Document styles expects CSS text, a selector mapping, or a stylesheet with to_css()")
+        if not isinstance(text, str):
+            raise TypeError("Stylesheet to_css() must return CSS text")
+    except (TypeError, ValueError, StyleWarning) as error:
+        raise AuthoringError(str(error), code="styles.type", path=("Document", "styles")) from error
+    return (text,)
+
+
+def _document_styles(fragments, theme) -> str:
+    resolved = []
+    for fragment in fragments:
+        if isinstance(fragment, str):
+            resolved.append(fragment)
+        else:
+            selector, declarations = fragment
+            try:
+                resolved.append(f"{selector} {{ {declarations.resolve(theme)} }}")
+            except AuthoringError as error:
+                raise error.at(selector).at("styles").at("Document") from error
+    text = "\n".join(resolved)
+    if text.strip():
+        from ..._abi import _stylesheet_page_geometry
+        try:
+            conflicts = _stylesheet_page_geometry(text)
+        except ValueError as error:
+            raise AuthoringError(str(error), code="styles.syntax", path=("Document", "styles")) from error
+        if conflicts:
+            selector, property_name, offset = conflicts[0]
+            rule = "@page" + (" " + selector if selector else "")
+            raise AuthoringError(
+                f"Page owns paper size, orientation and margins; remove {property_name!r} from "
+                f"{rule} at CSS byte {offset} and configure Document(page=Page(...)). "
+                "Page furniture and ordinary element margins remain available in styles.",
+                code="styles.page", path=("Document", "styles", rule, property_name),
+            )
+    return text
 
 
 @dataclass(frozen=True)
@@ -120,18 +184,26 @@ class Document:
     lang: str
     page: Page
     theme: Theme
+    _styles: tuple
 
-    def __init__(self, *children, title="Fullbleed document", lang="en", page=None, theme=None):
+    def __init__(self, *children, title="Fullbleed document", lang="en", page=None, theme=None, styles=None):
         if not isinstance(title, str) or not title.strip() or not isinstance(lang, str) or not lang.strip():
             raise AuthoringError("Document title and language must be nonempty strings", code="document.metadata")
         if page is not None and not isinstance(page, Page) or theme is not None and not isinstance(theme, Theme):
             raise AuthoringError("Document expects Page and Theme values", code="document.options")
         for name, value in {"children": _children(children), "title": title, "lang": lang,
-                            "page": page or Page(), "theme": theme or Theme()}.items():
+                            "page": page or Page(), "theme": theme or Theme(),
+                            "_styles": _capture_document_styles(styles)}.items():
             object.__setattr__(self, name, value)
+
+    @property
+    def styles(self) -> str:
+        """Resolved selector CSS; source inputs were captured at construction."""
+        return _document_styles(self._styles, self.theme)
 
     def compile(self, *, a11y_mode: str | None = None) -> DocumentSource:
         mode = normalize_mode(a11y_mode)
+        selector_styles = self.styles
         rules, sources, output = {}, [], []
         semantic_root = Element("main") if mode else None
         # Explicit traversal avoids Python recursion limits for nested documents.
@@ -155,12 +227,16 @@ class Document:
                 continue
             node_id = f"n{len(sources) + 1}"
             location = (*path, node.part or node.tag)
+            if node.tag.casefold() == "style":
+                raise AuthoringError("Attach selector CSS with Document(styles=...), rather than a style content node",
+                                     code="structure.stylesheet", path=location)
             child_context = context.element(node.tag, location)
             sources.append(Source(node_id, location, source[0] if source else None, source[1] if source else None))
             attributes = dict(node.attributes)
             attributes["data-fb-id"] = node_id
             try:
-                declarations = node._effective_style().resolve(self.theme)
+                declarations = node._remaining_defaults().resolve(self.theme)
+                explicit = node.style.resolve(self.theme)
             except AuthoringError as error:
                 raise AuthoringError(error.message, code=error.code, path=location) from error
             if declarations:
@@ -169,6 +245,8 @@ class Document:
                     raise AuthoringError("Generated style identity collision", code="style.collision")
                 rules[class_name] = declarations
                 attributes["class"] = " ".join(filter(None, (attributes.get("class"), class_name)))
+            if explicit:
+                attributes["style"] = explicit
             output.append(f"<{node.tag}{_render_attrs(attributes)}>")
             if semantic_parent is not None:
                 semantic_node = Element(node.tag, props=attributes)
@@ -182,7 +260,8 @@ class Document:
         text = Style(body, self.theme.text).resolve(self.theme)
         css = "\n".join((self.page.to_css(), f"body {{ {text} }}",
                           "* { box-sizing: border-box; }",
-                          *(f".{name} {{ {value} }}" for name, value in rules.items())))
+                          *(f".{name} {{ {value} }}" for name, value in rules.items()),
+                          selector_styles))
         html = (f'<!doctype html><html lang="{escape(self.lang, quote=True)}"><head>'
                 f'<meta charset="utf-8"><title>{escape(self.title)}</title></head><body><main>'
                 + "".join(output) + "</main></body></html>")
@@ -192,7 +271,11 @@ class Document:
     @property
     def required_tokens(self) -> tuple[str, ...]:
         """Sorted explicit token names used by content and the theme's text style."""
-        return tuple(sorted(set(_required_tokens(self.children)) | set(self.theme.text._token_names())))
+        names = set(_required_tokens(self.children)) | set(self.theme.text._token_names())
+        for fragment in self._styles:
+            if not isinstance(fragment, str):
+                names.update(fragment[1]._token_names())
+        return tuple(sorted(names))
 
     def to_html(self, *, a11y_mode: str | None = None) -> str:
         return self.compile(a11y_mode=a11y_mode).html

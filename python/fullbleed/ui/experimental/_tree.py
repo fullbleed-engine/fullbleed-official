@@ -178,6 +178,15 @@ class Node:
     def _effective_style(self) -> Style:
         return Style(self._defaults, self.style)
 
+    def _remaining_defaults(self) -> Style:
+        # An explicit property replaces a recipe property before token resolution.
+        # Keep shorthand/longhand interactions for the native cascade to resolve.
+        authored = {name for name, _ in self.style.entries}
+        result = object.__new__(Style)
+        object.__setattr__(result, "entries", tuple(
+            (name, value) for name, value in self._defaults.entries if name not in authored))
+        return result
+
     def _with_root_styles(self, *, defaults=None, authored=None) -> Node:
         node, wrappers = self, []
         while node.tag is None:

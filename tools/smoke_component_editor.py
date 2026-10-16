@@ -174,6 +174,7 @@ def main():
                 ("prepared_preview_dpi", 'Document(Paragraph("Text")).prepare(Renderer()).render_image_pages(d§)', {"dpi"}),
                 ("node_theme_requirements", 'Paragraph("Text").required_§', {"required_tokens"}),
                 ("document_theme_requirements", 'Document(Paragraph("Text")).required_§', {"required_tokens"}),
+                ("document_selector_styles", 'Document(Paragraph("Text"), sty§)', {"styles"}),
                 ("theme_derivation", 'Document(Paragraph("Text")).theme.with_§', {"with_values"}),
             ]
             for index, (name, expression, required) in enumerate(cases):
