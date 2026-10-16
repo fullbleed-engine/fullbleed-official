@@ -5,6 +5,11 @@ parts, theme values, page geometry, and data tables. It is available from this
 source branch's wheel under `fullbleed.ui.experimental`; it is not in the
 PyPI 2.5.26 wheel. Names and contracts may change before stabilization.
 
+The `2.6.0a1` alpha has its own package version. Install it explicitly with
+`python -m pip install --pre "fullbleed==2.6.0a1"` in a virtual environment, or
+[build an unpublished checkout](#run-the-candidate). The
+[alpha runbook](../../docs/release/2.6.0a1-runbook.md) records the release gates.
+
 The [implementation review](../../docs/component-authoring-design.md) explains
 the design decisions, remaining gaps, and criteria for stabilizing this API.
 
@@ -110,7 +115,7 @@ with `optional_parts=(...)`. A required part must reach at least one element;
 otherwise construction raises `component.part_missing` with the component and
 part name. An optional note or an empty table's cells can receive overrides while
 absent, without making callers branch on the content. These explicit required /
-optional declarations are a source-branch update; the published
+optional declarations are an alpha update; the published
 `component-preview-41a2cee` still treats all declared parts as optional.
 Authored `part=` markers must match the declaration; misspellings fail when the
 component is constructed. Nested components validate their own declarations.

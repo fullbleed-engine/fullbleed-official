@@ -1,3 +1,35 @@
+# Fullbleed Release Notes - 2.6.0a1
+
+This opt-in Python alpha introduces `fullbleed.ui.experimental`: function
+components with immutable content and styles, explicit page geometry, reusable
+themes, column-based tables and authored diagnostics. The Bootstrap 5.0.0 kit
+supplies all 23 component families plus layout, content, forms and utilities.
+Components carry the pinned stylesheet and export static HTML with
+`to_html(include_styles=True/False)`. PDF controls retain printed values and
+selected states. No Bootstrap JavaScript, browser engine or required Python
+dependency is added.
+
+Custom components preserve ordinary Python signatures. Root styles and exposed
+parts are immutable overrides. Required parts must have targets; optional parts
+permit conditional content, and `forward_parts()` deliberately exposes selected
+child parts through a parent without adding elements or exposing private parts.
+The guide explains `class_name`, default versus explicit styles, eager data
+capture, migration from the stable authoring API and the earlier GitHub previews.
+
+The API remains experimental. The stable `fullbleed.ui` surface stays available;
+this does not establish cross-language parity, complete Bootstrap CSS/browser
+parity, PDF accessibility conformance or independent author usability. Existing
+native CSS and PDF/VT validation limits remain documented. HTML-only export
+still requires the installed Fullbleed distribution.
+
+Python uses `2.6.0a1`; Cargo uses the corresponding SemVer `2.6.0-alpha.1`.
+The release gate checks that both spellings, the lockfile, wheel metadata and
+installed contracts agree. This alpha distribution targets Python; the Rust
+registry's stable release is managed separately. See the
+[alpha runbook](docs/release/2.6.0a1-runbook.md) for verification and publication.
+
+---
+
 # Fullbleed Release Notes - 2.5.26
 
 Render a complete HTML document with its embedded `<style>` sheets. Supported

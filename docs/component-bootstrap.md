@@ -5,18 +5,21 @@ The experimental Python kit covers the 23 component families in **Bootstrap
 utility stylesheet. It uses the repository's existing, unmodified MIT-licensed
 stylesheet. Components carry that dependency; a document includes it once.
 
-This is work on the component preview branch, under
-`fullbleed.ui.experimental.bootstrap`. It is not included in the PyPI 2.5.26
-wheel or the earlier `component-preview-f88cced` download. Build and install the
-current branch's wheel with `python build_backend/fullbleed_build_backend.py
-wheel --out dist` before running these examples. The stable `fullbleed.ui` API
-continues to work as before.
+This is the experimental `2.6.0a1` Python surface, under
+`fullbleed.ui.experimental.bootstrap`. Use an explicit alpha install in a virtual
+environment: `python -m pip install --pre "fullbleed==2.6.0a1"`. For an unpublished
+checkout, build with `python build_backend/fullbleed_build_backend.py wheel --out
+dist` and install the printed wheel path. The
+[alpha runbook](release/2.6.0a1-runbook.md) records the gates and publication scope.
+This kit is absent from the stable PyPI 2.5.26 wheel and the older
+`component-preview-f88cced` download. The established `fullbleed.ui` API remains
+available.
 
 The [published Bootstrap preview](https://github.com/fullbleed-engine/fullbleed-official/releases/tag/component-preview-41a2cee)
-supports this kit and HTML export. The newer source-only
+supports this kit and HTML export. The alpha's newer
 [part-forwarding contract](../examples/component_recipes/README.md#customize-a-root-or-an-exposed-part)
-adds `forward_parts(...)` and explicit required/optional declarations; build
-the branch to use those additions. Existing preview downloads are unchanged.
+adds `forward_parts(...)` and explicit required/optional declarations. Existing
+preview downloads are unchanged.
 
 All components are static. There is no Bootstrap JavaScript, browser in the PDF
 renderer, CDN dependency, event lifecycle or automatic network fetch.

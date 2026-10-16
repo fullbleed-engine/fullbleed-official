@@ -4048,6 +4048,12 @@
       "interface": "python"
     },
     {
+      "code": "from fullbleed.ui.experimental import Document, style\nfrom fullbleed.ui.experimental import bootstrap as bs\ncard = bs.Card('Your order has passed inspection.', title='Ready to ship',\n               footer=bs.Badge('Approved', variant='success'))\ndocument = Document(card.with_parts(title=style(color='#205b47')), title='Order summary')\nstyled_html = document.to_html(include_styles=True)\nplain_html = document.to_html(include_styles=False)",
+      "id": "component_authoring_experimental_python",
+      "intent": "Opt into the experimental Python component kit and export static styled or unstyled HTML without constructing a PDF engine.",
+      "interface": "python"
+    },
+    {
       "code": "engine = fullbleed.PdfEngine()\ncompiled = engine.compile_pdf(template_html, css)\ncompiled.render_pdf_bindings_to_file(bindings, 'out/vdp.pdf')",
       "id": "compiled_fixed_bindings_python",
       "intent": "Compile once and render distinct fixed-geometry records.",
@@ -4130,6 +4136,11 @@
     }
   ],
   "known_limitations": [
+    {
+      "agent_action": "Opt into the experimental namespace explicitly, inspect the installed examples, and validate the resulting document. Use fullbleed.ui for the established component API; themes, fonts and assets remain explicit application choices.",
+      "id": "experimental_python_components",
+      "summary": "The fullbleed.ui.experimental API may change. Bootstrap components and HTML exports use authored static states; no Bootstrap JavaScript is included, and component inventory coverage does not establish complete CSS/browser or accessibility parity."
+    },
     {
       "agent_action": "Use --watch-path for extra dependencies. Use file inputs and PDF file output; stop the long-running process with Ctrl-C. Use one-shot render for delivery gates.",
       "id": "watch_scope",
@@ -4217,7 +4228,7 @@
     "license": "MIT",
     "name": "Fullbleed PDF Engine",
     "python_package": "fullbleed",
-    "version": "2.5.26"
+    "version": "2.6.0a1"
   },
   "profiles": {
     "pdf": {

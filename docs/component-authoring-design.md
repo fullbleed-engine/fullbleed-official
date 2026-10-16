@@ -345,8 +345,10 @@ component handles its presentation. This is a design reference, not a parity cla
 Installed-candidate checks against source commit `d686153` identified the
 following gaps. The current source implements the naming, content-boundary and
 semantic-policy changes described below, and now adds explicit selector styles
-with separate default and instance precedence. The candidate's version metadata
-alone cannot distinguish it from the published 2.5.26 wheel.
+with separate default and instance precedence. The original GitHub previews
+reuse version metadata 2.5.26 and require commit/hash identification. The source
+branch now prepares an explicitly versioned `2.6.0a1` alpha; the API remains
+experimental while its contracts are evaluated.
 
 | Gap | Recommended contract | Acceptance evidence |
 | --- | --- | --- |

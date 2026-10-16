@@ -114,6 +114,24 @@ def test_markdown_renderer_is_deterministic(monkeypatch: pytest.MonkeyPatch) -> 
     assert render_llms_txt(contract) == render_llms_txt(contract)
 
 
+def test_experimental_agent_example_is_self_contained_and_exports_without_a_pdf_engine(monkeypatch):
+    import fullbleed
+
+    def forbidden_engine(*args, **kwargs):
+        raise AssertionError("HTML authoring must not create a PDF engine")
+
+    monkeypatch.setattr(fullbleed, "PdfEngine", forbidden_engine)
+    contract = cli._agent_contract_payload()
+    example = next(item for item in contract["examples"] if item["id"] == "component_authoring_experimental_python")
+    namespace = {}
+    exec(compile(example["code"], "agent component example", "exec"), namespace)
+    assert "Bootstrap v5.0.0" in namespace["styled_html"]
+    assert "color: #205b47;" in namespace["styled_html"]
+    assert "Ready to ship" in namespace["plain_html"] and "Approved" in namespace["plain_html"]
+    assert "<style" not in namespace["plain_html"] and "style=" not in namespace["plain_html"]
+    assert any(item["id"] == "experimental_python_components" for item in contract["known_limitations"])
+
+
 def test_missing_glyph_failure_provides_machine_action_hints() -> None:
     args = SimpleNamespace(
         fail_on=["missing-glyphs"],

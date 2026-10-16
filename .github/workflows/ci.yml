@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.5.26"
+  FULLBLEED_CI_VERSION: "2.6.0a1"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -188,6 +188,7 @@ jobs:
         run: |
           python -m pip install pypdfium2==5.14.0 pillow==12.3.0 mypy==2.4.0
           python -m pytest tests/test_fullbleed_ui_experimental.py tests/test_fullbleed_ui_experimental_styles.py tests/test_fullbleed_ui_parts.py tests/test_fullbleed_ui_html_export.py tests/test_fullbleed_ui_bootstrap.py -q --junitxml target/component-recipes/unit-tests.xml
+          python -I tools/smoke_component_quickstart.py --expected-version "${{ env.FULLBLEED_CI_VERSION }}" --out target/component-recipes/quickstart
           python -I tools/smoke_component_recipes.py --out target/component-recipes
           python -I tools/smoke_component_flow.py --out target/component-recipes/flow
           python -I tools/smoke_component_layout_props.py --out target/component-recipes/layout-props

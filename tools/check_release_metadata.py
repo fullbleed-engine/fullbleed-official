@@ -122,6 +122,22 @@ def _flag(flags: list[dict[str, str]], code: str, target: str, message: str) -> 
     flags.append({"code": code, "target": target, "message": message})
 
 
+def _cargo_version(python_version: str | None) -> str | None:
+    """Map Fullbleed's canonical Python release spelling to Cargo SemVer.
+
+    This is our release policy, not a general PEP 440 parser: stable, alpha,
+    beta and release-candidate versions have three release numbers and an
+    explicit prerelease number. Local/dev/post releases are not published here.
+    """
+    number = r"(?:0|[1-9][0-9]*)"
+    match = re.fullmatch(rf"({number}\.{number}\.{number})(?:(a|b|rc)({number}))?", python_version or "")
+    if match is None:
+        return None
+    base, phase, ordinal = match.groups()
+    phases = {"a": "alpha", "b": "beta", "rc": "rc"}
+    return base if phase is None else f"{base}-{phases[phase]}.{ordinal}"
+
+
 def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
     cargo_path = repo_root / "Cargo.toml"
     pyproject_path = repo_root / "pyproject.toml"
@@ -146,13 +162,17 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
     cargo_version = _table_string(cargo, "package", "version")
     python_version = _table_string(pyproject, "project", "version")
     audit_version = _table_string(audit, "package", "version")
-    expected_version = expected_version or cargo_version
-    expected_tag = f"v{expected_version}" if expected_version else None
+    expected_version = expected_version or python_version
+    expected_cargo_version = _cargo_version(expected_version)
+    expected_tag = f"v{expected_version}" if expected_cargo_version else None
     audit_dependency = _dependency_requirement(cargo, "fullbleed_audit_contract")
 
     flags: list[dict[str, str]] = []
     if not expected_version:
-        _flag(flags, "REL_VERSION_MISSING", "Cargo.toml", "Main package version is missing")
+        _flag(flags, "REL_VERSION_MISSING", "pyproject.toml", "Python package version is missing")
+    elif expected_cargo_version is None:
+        _flag(flags, "REL_VERSION_INVALID", "pyproject.toml",
+              "Use canonical MAJOR.MINOR.PATCH with an optional aN, bN or rcN suffix")
     elif f'FULLBLEED_CI_VERSION: "{expected_version}"' not in ci_workflow:
         _flag(
             flags,
@@ -160,16 +180,16 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
             ".github/workflows/ci.yml",
             f"CI wheel smoke version does not match {expected_version}",
         )
-    for target, observed in (
-        ("Cargo.toml", cargo_version),
-        ("pyproject.toml", python_version),
+    for target, observed, expected in (
+        ("Cargo.toml", cargo_version, expected_cargo_version),
+        ("pyproject.toml", python_version, expected_version),
     ):
-        if observed != expected_version:
+        if observed != expected:
             _flag(
                 flags,
                 "REL_VERSION_MISMATCH",
                 target,
-                f"Expected {expected_version}, observed {observed}",
+                f"Expected {expected}, observed {observed}",
             )
 
     for target, text, table in (
@@ -252,7 +272,7 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
         )
 
     for package, expected in (
-        ("fullbleed", expected_version),
+        ("fullbleed", expected_cargo_version),
         ("fullbleed_audit_contract", audit_version),
     ):
         observed = _lock_version(lock, package)
@@ -408,11 +428,12 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
             _flag(flags, "REL_PROFILE_GATE_MISSING", str(profile_gate.relative_to(repo_root)),
                   f"Missing required print-profile gate marker: {marker}")
 
-    for relative_path, marker in (
+    versioned_documents = (
         ("README.md", f"fullbleed-{expected_version}"),
         ("ReleaseNotes.MD", f"Release Notes - {expected_version}"),
         (f"docs/release/{expected_version}-runbook.md", expected_tag or ""),
-    ):
+    ) if expected_cargo_version else ()
+    for relative_path, marker in versioned_documents:
         path = repo_root / relative_path
         if not path.exists() or marker not in _read(path):
             _flag(
@@ -426,7 +447,9 @@ def run(repo_root: Path, expected_version: str | None = None) -> dict[str, Any]:
         "schema": "fullbleed.release_metadata.v1",
         "ok": not flags,
         "expected_version": expected_version,
+        "expected_cargo_version": expected_cargo_version,
         "expected_tag": expected_tag,
+        "prerelease": expected_cargo_version is not None and "-" in expected_cargo_version,
         "supported_python": list(SUPPORTED_PYTHONS),
         "wheel_targets": list(REQUIRED_WHEEL_TARGETS),
         "packages": {

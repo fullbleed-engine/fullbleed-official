@@ -9,6 +9,11 @@ PyPI 2.5.26 wheel.
 The [detailed implementation review](component-authoring-design.md) records
 the existing prototype and its validation limits.
 
+The source branch now prepares the separately versioned `2.6.0a1` alpha. Its
+[runbook](release/2.6.0a1-runbook.md) defines installation, publication gates and
+the corresponding Cargo version. The older GitHub downloads and the observations
+against them below remain pinned to their original commits.
+
 The next implementation now uses [Bootstrap 5.0.0 as the baseline kit](component-bootstrap.md),
 following the requested scope. It adds owned stylesheet dependencies, static
 component families, content slots, generated group IDs, checked utilities, and
