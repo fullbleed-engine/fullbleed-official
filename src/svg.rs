@@ -5,7 +5,171 @@ use crate::font::FontRegistry;
 use crate::style::{FontStyleMode, FontSynthesisStyle, parse_font_synthesis};
 use crate::types::{Color, Pt};
 use crate::xml::{ContentNode as XmlContentNode, Document as XmlDocument, Node as XmlNode};
+use std::collections::BTreeMap;
 use std::sync::Arc;
+
+/// Properties understood by the native SVG painter. Keep raw declarations until
+/// the document cascade has selected a winner; geometry attributes are not CSS.
+pub(crate) type SvgProperties = BTreeMap<String, String>;
+
+pub(crate) fn svg_property_initial(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "color" | "fill" | "stop-color" => "black",
+        "stroke" | "marker-start" | "marker-mid" | "marker-end" => "none",
+        "opacity" | "fill-opacity" | "stroke-opacity" => "1",
+        "stroke-width" => "1",
+        "stroke-miterlimit" => "4",
+        "stroke-linecap" => "butt",
+        "stroke-linejoin" => "miter",
+        "stroke-dasharray" => "none",
+        "stroke-dashoffset" => "0",
+        "fill-rule" => "nonzero",
+        "font-family" => "Helvetica",
+        "font-size" => "16",
+        "font-weight" | "font-style" => "normal",
+        "font-synthesis-weight" | "font-synthesis-style" => "auto",
+        "text-anchor" => "start",
+        _ => return None,
+    })
+}
+
+pub(crate) fn svg_property_inherits(name: &str) -> bool {
+    !matches!(name, "opacity" | "stop-color")
+}
+
+pub(crate) fn is_svg_style_property(name: &str) -> bool {
+    svg_property_initial(name).is_some() || matches!(name, "marker" | "font-synthesis" | "all")
+}
+
+/// Reject invalid declarations before overwriting an earlier valid value.
+pub(crate) fn insert_svg_property(out: &mut SvgProperties, name: &str, value: &str) {
+    let value = value.trim();
+    let lower = value.to_ascii_lowercase();
+    let keyword = matches!(
+        lower.as_str(),
+        "inherit" | "initial" | "unset" | "revert" | "revert-layer"
+    );
+    if name == "all" && keyword {
+        for name in SVG_LONGHANDS {
+            out.insert((*name).into(), lower.clone());
+        }
+        return;
+    }
+    if name == "marker" {
+        if keyword || lower == "none" || parse_url_ref(value).is_some() {
+            for name in ["marker-start", "marker-mid", "marker-end"] {
+                out.insert(name.into(), value.into());
+            }
+        }
+        return;
+    }
+    if name == "font-synthesis" {
+        if keyword {
+            for name in ["font-synthesis-weight", "font-synthesis-style"] {
+                out.insert(name.into(), lower.clone());
+            }
+        } else if let Some(parsed) = parse_font_synthesis(name, value) {
+            if let Some(weight) = parsed.weight {
+                out.insert(
+                    "font-synthesis-weight".into(),
+                    if weight.resolve(true, true) {
+                        "auto"
+                    } else {
+                        "none"
+                    }
+                    .into(),
+                );
+            }
+            if let Some(style) = parsed.style {
+                out.insert(
+                    "font-synthesis-style".into(),
+                    match style.resolve(FontSynthesisStyle::Auto, FontSynthesisStyle::Auto) {
+                        FontSynthesisStyle::Auto => "auto",
+                        FontSynthesisStyle::None => "none",
+                        _ => "oblique-only",
+                    }
+                    .into(),
+                );
+            }
+        }
+        return;
+    }
+    if svg_property_initial(name).is_none() {
+        return;
+    }
+    let valid = keyword
+        || match name {
+            "fill" | "stroke" => {
+                matches!(
+                    lower.as_str(),
+                    "none" | "currentcolor" | "context-fill" | "context-stroke"
+                ) || parse_url_ref(value).is_some()
+                    || parse_svg_color(value).is_some()
+            }
+            "color" | "stop-color" => lower == "currentcolor" || parse_svg_color(value).is_some(),
+            "opacity" | "fill-opacity" | "stroke-opacity" => parse_svg_alpha(value).is_some(),
+            "stroke-width" | "stroke-miterlimit" => {
+                parse_number(value).is_some_and(|v| v.is_finite() && v >= 0.0)
+            }
+            "stroke-dashoffset" => parse_number(value).is_some_and(f32::is_finite),
+            "stroke-dasharray" => {
+                lower == "none"
+                    || (!parse_length_list(value).is_empty()
+                        && value
+                            .split(|c: char| c.is_ascii_whitespace() || c == ',')
+                            .filter(|s| !s.is_empty())
+                            .all(|s| parse_number(s).is_some_and(|v| v.is_finite() && v >= 0.0)))
+            }
+            "stroke-linecap" => matches!(lower.as_str(), "butt" | "round" | "square"),
+            "stroke-linejoin" => matches!(
+                lower.as_str(),
+                "miter" | "miter-clip" | "arcs" | "round" | "bevel"
+            ),
+            "fill-rule" => matches!(lower.as_str(), "nonzero" | "evenodd"),
+            "text-anchor" => matches!(lower.as_str(), "start" | "middle" | "end"),
+            "font-family" => !value.is_empty(),
+            "font-size" => parse_svg_font_size(value, 16.0).is_some(),
+            "font-weight" => parse_svg_font_weight(value).is_some(),
+            "font-style" => lower == "normal" || lower == "italic" || lower.starts_with("oblique"),
+            "font-synthesis-weight" | "font-synthesis-style" => {
+                parse_font_synthesis(name, value).is_some()
+            }
+            "marker-start" | "marker-mid" | "marker-end" => {
+                lower == "none" || parse_url_ref(value).is_some()
+            }
+            _ => false,
+        };
+    if valid {
+        out.insert(name.into(), value.into());
+    }
+}
+
+const SVG_LONGHANDS: &[&str] = &[
+    "color",
+    "fill",
+    "stroke",
+    "stop-color",
+    "opacity",
+    "fill-opacity",
+    "stroke-opacity",
+    "stroke-width",
+    "stroke-miterlimit",
+    "stroke-linecap",
+    "stroke-linejoin",
+    "stroke-dasharray",
+    "stroke-dashoffset",
+    "fill-rule",
+    "font-family",
+    "font-size",
+    "font-weight",
+    "font-style",
+    "font-synthesis-weight",
+    "font-synthesis-style",
+    "text-anchor",
+    "marker-start",
+    "marker-mid",
+    "marker-end",
+];
 
 /// The HTML cascade owns the selected face. Inline SVG may inherit it, while
 /// explicit SVG font declarations remain overrides. No host-font discovery.
@@ -13,6 +177,9 @@ use std::sync::Arc;
 pub(crate) struct SvgFontContext {
     pub style: TextStyle,
     pub registry: Option<Arc<FontRegistry>>,
+    /// The HTML replaced-element wrapper applies the outer SVG's opacity.
+    /// Preserve that computed value inside SVG for explicit inheritance.
+    pub root_opacity_in_wrapper: bool,
 }
 
 // Lightweight detection for SVG features that our vector compiler does not support yet.
@@ -198,10 +365,15 @@ fn q(value: f32) -> f32 {
 struct Paint {
     color: Option<Color>,        // None => "none" (unless gradient_id is set)
     gradient_id: Option<String>, // url(#id)
+    alpha: f32,
+    current_color: bool,
 }
 
 #[derive(Debug, Clone)]
 struct SvgStyle {
+    color: Color,
+    color_alpha: f32,
+    opacity: f32,
     fill: Paint,
     stroke: Paint,
     stroke_width: f32,
@@ -240,13 +412,20 @@ impl SvgStyle {
     fn default() -> Self {
         // SVG defaults: black fill, no stroke.
         Self {
+            color: Color::BLACK,
+            color_alpha: 1.0,
+            opacity: 1.0,
             fill: Paint {
                 color: Some(Color::BLACK),
                 gradient_id: None,
+                alpha: 1.0,
+                current_color: false,
             },
             stroke: Paint {
                 color: None,
                 gradient_id: None,
+                alpha: 1.0,
+                current_color: false,
             },
             stroke_width: 1.0,
             line_cap: 0,
@@ -359,6 +538,7 @@ pub(crate) struct CompiledMask {
 
 #[derive(Debug, Clone)]
 pub(crate) struct CompiledGroup {
+    opacity: f32,
     items: Vec<CompiledItem>,
     filter: Option<PaintFilterSpec>,
     mask: Option<CompiledMask>,
@@ -402,7 +582,7 @@ pub(crate) fn compile_svg_with_font_context(
         return Vec::new();
     };
 
-    let mut stylesheet = extract_svg_stylesheet(&doc);
+    let mut stylesheet = extract_svg_stylesheet(&doc, crate::types::Size { width, height });
     stylesheet.font_registry = font.and_then(|font| font.registry.clone());
     let gradients = extract_gradients(&doc, &stylesheet);
     let id_map = build_id_map(&doc);
@@ -468,6 +648,7 @@ pub(crate) fn compile_svg_with_font_context(
         &stylesheet,
         &mut resolving_ids,
         false,
+        !font.is_some_and(|context| context.root_opacity_in_wrapper),
     );
     out
 }
@@ -543,7 +724,7 @@ fn draw_compiled_group(canvas: &mut Canvas, group: &CompiledGroup, x: Pt, y: Pt)
         canvas.clip_path(mask.evenodd);
     }
 
-    if let Some(filter) = &group.filter {
+    if group.filter.is_some() || group.opacity < 1.0 {
         let size = canvas.page_size();
         let mut form_canvas = Canvas::new(size);
         render_compiled_items(&group.items, &mut form_canvas, x, y);
@@ -555,17 +736,22 @@ fn draw_compiled_group(canvas: &mut Canvas, group: &CompiledGroup, x: Pt, y: Pt)
             .unwrap_or_default();
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        format!("{group:?}").hash(&mut hasher);
+        format!("{group:?}:{x:?}:{y:?}:{size:?}").hash(&mut hasher);
         let resource_id = format!("svg-effect:{:016x}", hasher.finish());
         canvas.define_isolated_form(resource_id.clone(), size.width, size.height, commands);
-        canvas.draw_filtered_form(
-            Pt::ZERO,
-            Pt::ZERO,
-            size.width,
-            size.height,
-            resource_id,
-            filter.clone(),
-        );
+        canvas.set_opacity(group.opacity, group.opacity);
+        if let Some(filter) = &group.filter {
+            canvas.draw_filtered_form(
+                Pt::ZERO,
+                Pt::ZERO,
+                size.width,
+                size.height,
+                resource_id,
+                filter.clone(),
+            );
+        } else {
+            canvas.draw_form(Pt::ZERO, Pt::ZERO, size.width, size.height, resource_id);
+        }
     } else {
         render_compiled_items(&group.items, canvas, x, y);
     }
@@ -678,6 +864,7 @@ fn compile_element(
         stylesheet,
         resolving_ids,
         true,
+        true,
     );
 }
 
@@ -692,7 +879,10 @@ fn compile_element_with_source_capture(
     stylesheet: &SvgStylesheet,
     resolving_ids: &mut Vec<String>,
     capture_source_id: bool,
+    composite_opacity: bool,
 ) {
+    let mut local_style = style.clone();
+    apply_presentation_and_style(node, stylesheet, &mut local_style);
     let mut effect_ctm = ctm;
     if let Some(transform) = node.attribute("transform") {
         effect_ctm = effect_ctm.mul(parse_transform(transform));
@@ -705,12 +895,17 @@ fn compile_element_with_source_capture(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_owned);
-    if filter.is_none() && mask.is_none() && source_id.is_none() {
+    let opacity = if composite_opacity {
+        local_style.opacity
+    } else {
+        1.0
+    };
+    if filter.is_none() && mask.is_none() && source_id.is_none() && opacity >= 1.0 {
         compile_element_inner(
             out,
             node,
             ctm,
-            style,
+            &local_style,
             gradients,
             id_map,
             stylesheet,
@@ -724,7 +919,7 @@ fn compile_element_with_source_capture(
         &mut items,
         node,
         ctm,
-        style,
+        &local_style,
         gradients,
         id_map,
         stylesheet,
@@ -732,6 +927,7 @@ fn compile_element_with_source_capture(
     );
     if !items.is_empty() {
         out.push(CompiledItem::Group(CompiledGroup {
+            opacity,
             items,
             filter,
             mask,
@@ -754,8 +950,7 @@ fn compile_element_inner(
         return;
     }
 
-    let mut local_style = style.clone();
-    apply_presentation_and_style(node, stylesheet, &mut local_style);
+    let local_style = style.clone();
 
     let mut local_ctm = ctm;
     if let Some(transform) = node.attribute("transform") {
@@ -956,7 +1151,7 @@ fn compile_element_inner(
                     width: q(w),
                     height: q(h),
                     source: href,
-                    opacity: local_style.fill_opacity.clamp(0.0, 1.0),
+                    opacity: (local_style.fill_opacity * local_style.fill.alpha).clamp(0.0, 1.0),
                     transform: Some(local_ctm),
                 }));
                 return;
@@ -989,7 +1184,7 @@ fn compile_element_inner(
                 width: iw,
                 height: ih,
                 source: href,
-                opacity: local_style.fill_opacity.clamp(0.0, 1.0),
+                opacity: (local_style.fill_opacity * local_style.fill.alpha).clamp(0.0, 1.0),
                 transform: None,
             }));
         }
@@ -1100,6 +1295,7 @@ fn compile_mask_for_node(
         &mut positive,
         &mut negative,
         0,
+        1.0,
     );
     let paints_anything = !positive.is_empty();
     positive.extend(negative);
@@ -1120,12 +1316,17 @@ fn compile_mask_subtree(
     positive: &mut Vec<PathSeg>,
     negative: &mut Vec<PathSeg>,
     depth: usize,
+    ancestor_opacity: f32,
 ) {
     if depth > 32 {
         return;
     }
     let mut style = inherited_style.clone();
     apply_presentation_and_style(node, stylesheet, &mut style);
+    let opacity = ancestor_opacity * style.opacity;
+    if opacity <= 0.0 {
+        return;
+    }
     let mut local_ctm = ctm;
     if let Some(transform) = node.attribute("transform") {
         local_ctm = local_ctm.mul(parse_transform(transform));
@@ -1142,6 +1343,7 @@ fn compile_mask_subtree(
                 positive,
                 negative,
                 depth + 1,
+                opacity,
             );
         }
         return;
@@ -1160,6 +1362,7 @@ fn compile_mask_subtree(
                     positive,
                     negative,
                     depth + 1,
+                    opacity,
                 );
             }
         }
@@ -1177,6 +1380,12 @@ fn compile_mask_subtree(
         _ => None,
     };
     let Some(raw) = raw else { return };
+    let alpha = style.fill.alpha * style.fill_opacity * opacity;
+    // Transparent paint contributes nothing, including over an earlier white
+    // mask shape. It must not become a black cutout in the binary mask subset.
+    if alpha <= 0.0 {
+        return;
+    }
     let transformed = transform_path_segs(&raw, local_ctm);
     let luminance = style
         .fill
@@ -1189,7 +1398,7 @@ fn compile_mask_subtree(
                 0.0
             }
         })
-        * style.fill_opacity;
+        * alpha;
     if luminance >= 0.5 {
         positive.extend(transformed);
     } else {
@@ -1239,9 +1448,10 @@ fn compile_symbol_use(
         symbol_ctm = symbol_ctm.mul(parse_transform(transform));
     }
 
+    let mut items = Vec::new();
     for child in symbol.children() {
         compile_element(
-            out,
+            &mut items,
             child,
             symbol_ctm,
             &symbol_style,
@@ -1250,6 +1460,17 @@ fn compile_symbol_use(
             stylesheet,
             resolving_ids,
         );
+    }
+    if symbol_style.opacity < 1.0 {
+        out.push(CompiledItem::Group(CompiledGroup {
+            opacity: symbol_style.opacity,
+            items,
+            filter: None,
+            mask: None,
+            source_id: None,
+        }));
+    } else {
+        out.extend(items);
     }
 }
 
@@ -1323,7 +1544,7 @@ fn compile_text_content(
                     synthetic_bold,
                     italic_shear,
                     fill,
-                    opacity: style.fill_opacity.clamp(0.0, 1.0),
+                    opacity: (style.fill_opacity * style.fill.alpha).clamp(0.0, 1.0),
                     anchor: TextAnchor::Start,
                     transform: ctm,
                 }));
@@ -1350,7 +1571,26 @@ fn compile_text_content(
                 cursor.x += first_length(child.attribute("dx")).unwrap_or(0.0);
                 cursor.y += first_length(child.attribute("dy")).unwrap_or(0.0);
                 apply_text_anchor_offset(child, &child_style, stylesheet, cursor, resets_chunk);
-                compile_text_content(out, child, child_ctm, &child_style, stylesheet, cursor);
+                if child_style.opacity < 1.0 {
+                    let mut items = Vec::new();
+                    compile_text_content(
+                        &mut items,
+                        child,
+                        child_ctm,
+                        &child_style,
+                        stylesheet,
+                        cursor,
+                    );
+                    out.push(CompiledItem::Group(CompiledGroup {
+                        opacity: child_style.opacity,
+                        items,
+                        filter: None,
+                        mask: None,
+                        source_id: None,
+                    }));
+                } else {
+                    compile_text_content(out, child, child_ctm, &child_style, stylesheet, cursor);
+                }
             }
         }
     }
@@ -1761,6 +2001,7 @@ fn compile_pattern_fill(
         return;
     }
     out.push(CompiledItem::Group(CompiledGroup {
+        opacity: 1.0,
         items,
         filter: None,
         mask: Some(CompiledMask {
@@ -2725,11 +2966,10 @@ fn draw_compiled_path(canvas: &mut Canvas, path: &CompiledPath, x_off: Pt, y_off
         }
     }
 
-    if path.style.fill_opacity < 1.0 || path.style.stroke_opacity < 1.0 {
-        canvas.set_opacity(path.style.fill_opacity, path.style.stroke_opacity);
-    } else {
-        canvas.set_opacity(1.0, 1.0);
-    }
+    canvas.set_opacity(
+        path.style.fill_opacity * path.style.fill.alpha,
+        path.style.stroke_opacity * path.style.stroke.alpha,
+    );
 
     // Gradient fill path: clip then shade, then optionally stroke.
     if let Some(sh) = &path.style.fill_shading {
@@ -2858,14 +3098,33 @@ fn viewbox_to_viewport_matrix_with_aspect(
     Matrix::translate(tx, ty).mul(Matrix::scale(s, s))
 }
 
-fn extract_svg_stylesheet(doc: &XmlDocument) -> SvgStylesheet {
+fn extract_svg_stylesheet(doc: &XmlDocument, viewport: crate::types::Size) -> SvgStylesheet {
     let mut out = SvgStylesheet::default();
     let mut order = 0usize;
+    let mut preferred_title: Option<String> = None;
 
     for node in doc
         .descendants()
         .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("style"))
     {
+        let kind = node.attribute("type").unwrap_or("");
+        if !kind.is_empty() && !kind.eq_ignore_ascii_case("text/css") {
+            continue;
+        }
+        if let Some(title) = node.attribute("title").filter(|s| !s.is_empty()) {
+            if preferred_title.get_or_insert_with(|| title.into()) != title {
+                continue;
+            }
+        }
+        if !crate::css_queries::evaluate_media_list(
+            node.attribute("media").unwrap_or(""),
+            viewport,
+            true,
+        )
+        .matched
+        {
+            continue;
+        }
         let css = node.text().unwrap_or_default().trim();
         if css.is_empty() {
             continue;
@@ -2873,13 +3132,18 @@ fn extract_svg_stylesheet(doc: &XmlDocument) -> SvgStylesheet {
         let Ok(sheet) = css_native::parse_stylesheet(css) else {
             continue;
         };
-        collect_svg_style_rules(&sheet.rules, &mut out.rules, &mut order);
+        collect_svg_style_rules(&sheet.rules, &mut out.rules, &mut order, viewport);
     }
 
     out
 }
 
-fn collect_svg_style_rules(rules: &[CssRule], out: &mut Vec<SvgCssRule>, order: &mut usize) {
+fn collect_svg_style_rules(
+    rules: &[CssRule],
+    out: &mut Vec<SvgCssRule>,
+    order: &mut usize,
+    viewport: crate::types::Size,
+) {
     for rule in rules {
         match rule {
             CssRule::Style(style_rule) => {
@@ -2901,8 +3165,11 @@ fn collect_svg_style_rules(rules: &[CssRule], out: &mut Vec<SvgCssRule>, order: 
                 *order += 1;
             }
             CssRule::At(at_rule) if at_rule.name == "media" => {
-                if let Some(AtRuleBlock::Rules(nested)) = &at_rule.block {
-                    collect_svg_style_rules(nested, out, order);
+                if crate::css_queries::evaluate_media_list(&at_rule.prelude, viewport, true).matched
+                {
+                    if let Some(AtRuleBlock::Rules(nested)) = &at_rule.block {
+                        collect_svg_style_rules(nested, out, order, viewport);
+                    }
                 }
             }
             _ => {}
@@ -3088,40 +3355,47 @@ fn svg_selector_matches(node: XmlNode<'_>, selector: &SvgSelector) -> bool {
     true
 }
 
-fn apply_svg_stylesheet(
-    node: XmlNode<'_>,
-    stylesheet: &SvgStylesheet,
-    style: &mut SvgStyle,
-    inherited_synthesis: (bool, FontSynthesisStyle),
-    important: bool,
-) {
-    if stylesheet.rules.is_empty() {
-        return;
+fn cascaded_svg_properties(node: XmlNode<'_>, stylesheet: &SvgStylesheet) -> SvgProperties {
+    let mut out = SvgProperties::new();
+    for name in SVG_LONGHANDS.iter().copied().chain(["marker"]) {
+        if let Some(value) = node.attribute(name) {
+            if !value.contains('!') {
+                insert_svg_property(&mut out, name, value);
+            }
+        }
     }
-
-    let mut matched: Vec<&SvgCssRule> = stylesheet
+    let mut matched: Vec<_> = stylesheet
         .rules
         .iter()
         .filter(|rule| svg_selector_matches(node, &rule.selector))
         .collect();
-    if matched.is_empty() {
-        return;
-    }
-
-    matched.sort_by(|a, b| {
-        a.selector
-            .specificity
-            .cmp(&b.selector.specificity)
-            .then(a.order.cmp(&b.order))
-    });
-
-    for rule in &matched {
-        if important {
-            apply_svg_declarations(rule.declarations.important(), style, inherited_synthesis);
-        } else {
-            apply_svg_declarations(rule.declarations.normal(), style, inherited_synthesis);
+    matched.sort_by_key(|rule| (rule.selector.specificity, rule.order));
+    let inline = node
+        .attribute("style")
+        .and_then(|s| css_native::parse_declaration_block(s).ok());
+    for important in [false, true] {
+        for rule in &matched {
+            let declarations: Vec<_> = if important {
+                rule.declarations.important().collect()
+            } else {
+                rule.declarations.normal().collect()
+            };
+            for declaration in declarations {
+                insert_svg_property(&mut out, &declaration.name, &declaration.value);
+            }
+        }
+        if let Some(inline) = &inline {
+            let declarations: Vec<_> = if important {
+                inline.important().collect()
+            } else {
+                inline.normal().collect()
+            };
+            for declaration in declarations {
+                insert_svg_property(&mut out, &declaration.name, &declaration.value);
+            }
         }
     }
+    out
 }
 
 fn apply_presentation_and_style(
@@ -3129,143 +3403,46 @@ fn apply_presentation_and_style(
     stylesheet: &SvgStylesheet,
     style: &mut SvgStyle,
 ) {
+    let inherited_opacity = style.opacity;
     let inherited_synthesis = (style.font_synthesis_weight, style.font_synthesis_style);
-    // Presentation attributes are the baseline.
-    if let Some(fill) = node.attribute("fill") {
-        if let Some(alpha) = apply_svg_paint_value(fill, &mut style.fill) {
-            style.fill_opacity *= alpha;
-        }
-    }
-    if let Some(stroke) = node.attribute("stroke") {
-        if let Some(alpha) = apply_svg_paint_value(stroke, &mut style.stroke) {
-            style.stroke_opacity *= alpha;
-        }
-    }
-    if let Some(sw) = node.attribute("stroke-width") {
-        if let Some(v) = parse_number(sw) {
-            style.stroke_width = v.max(0.0);
-        }
-    }
-    if let Some(m) = node.attribute("stroke-miterlimit") {
-        if let Some(v) = parse_number(m) {
-            style.miter_limit = v.max(0.0);
-        }
-    }
-    if let Some(cap) = node.attribute("stroke-linecap") {
-        style.line_cap = match cap.trim() {
-            "round" => 1,
-            "square" => 2,
-            _ => 0,
-        };
-    }
-    if let Some(join) = node.attribute("stroke-linejoin") {
-        style.line_join = match join.trim() {
-            "round" => 1,
-            "bevel" => 2,
-            _ => 0,
-        };
-    }
-    if let Some(fr) = node.attribute("fill-rule") {
-        style.fill_rule_evenodd = fr.trim().eq_ignore_ascii_case("evenodd");
-    }
-    if let Some(da) = node.attribute("stroke-dasharray") {
-        if da.trim().eq_ignore_ascii_case("none") {
-            style.dash_pattern.clear();
-        } else {
-            style.dash_pattern = parse_length_list(da);
-            if style.dash_pattern.len() % 2 == 1 {
-                let dup = style.dash_pattern.clone();
-                style.dash_pattern.extend_from_slice(&dup);
+    // Opacity composites this element as a group. It is not inherited paint.
+    style.opacity = 1.0;
+    for (name, value) in cascaded_svg_properties(node, stylesheet) {
+        let lower = value.to_ascii_lowercase();
+        if lower == "inherit"
+            || (matches!(lower.as_str(), "unset" | "revert" | "revert-layer")
+                && svg_property_inherits(&name))
+        {
+            if name == "opacity" {
+                style.opacity = inherited_opacity;
             }
+            continue;
         }
-    }
-    if let Some(off) = node.attribute("stroke-dashoffset") {
-        if let Some(v) = parse_number(off) {
-            style.dash_offset = v;
-        }
-    }
-    if let Some(value) = node.attribute("font-family") {
-        apply_svg_font_family(value, style);
-    }
-    if let Some(value) = node.attribute("font-size") {
-        if let Some(size) = parse_svg_font_size(value, style.font_size) {
-            style.font_size = size;
-        }
-    }
-    if let Some(value) = node.attribute("font-weight") {
-        apply_svg_font_weight(value, style);
-    }
-    if let Some(value) = node.attribute("font-style") {
-        apply_svg_font_style(value, style);
-    }
-    if let Some(value) = node.attribute("text-anchor") {
-        style.text_anchor = parse_text_anchor(value);
-    }
-    if let Some(value) = node.attribute("marker") {
-        let marker = parse_optional_url_ref(value);
-        style.marker_start = marker.clone();
-        style.marker_mid = marker.clone();
-        style.marker_end = marker;
-    }
-    if let Some(value) = node.attribute("marker-start") {
-        style.marker_start = parse_optional_url_ref(value);
-    }
-    if let Some(value) = node.attribute("marker-mid") {
-        style.marker_mid = parse_optional_url_ref(value);
-    }
-    if let Some(value) = node.attribute("marker-end") {
-        style.marker_end = parse_optional_url_ref(value);
-    }
-
-    // Opacity attributes multiply (opacity affects both fill/stroke).
-    if let Some(v) = node.attribute("opacity").and_then(parse_number) {
-        let o = v.clamp(0.0, 1.0);
-        style.fill_opacity *= o;
-        style.stroke_opacity *= o;
-    }
-    if let Some(v) = node.attribute("fill-opacity").and_then(parse_number) {
-        style.fill_opacity *= v.clamp(0.0, 1.0);
-    }
-    if let Some(v) = node.attribute("stroke-opacity").and_then(parse_number) {
-        style.stroke_opacity *= v.clamp(0.0, 1.0);
-    }
-
-    // Inline/embedded stylesheet rules override presentation attributes.
-    apply_svg_stylesheet(node, stylesheet, style, inherited_synthesis, false);
-
-    // Inline style="" wins over presentation attributes.
-    if let Some(s) = node.attribute("style") {
-        apply_style_string(s, style, inherited_synthesis, false);
-    }
-    // Important stylesheet declarations outrank normal inline declarations.
-    apply_svg_stylesheet(node, stylesheet, style, inherited_synthesis, true);
-    if let Some(s) = node.attribute("style") {
-        apply_style_string(s, style, inherited_synthesis, true);
-    }
-}
-
-fn apply_style_string(
-    input: &str,
-    style: &mut SvgStyle,
-    inherited_synthesis: (bool, FontSynthesisStyle),
-    important: bool,
-) {
-    if let Ok(declarations) = css_native::parse_declaration_block(input) {
-        if important {
-            apply_svg_declarations(declarations.important(), style, inherited_synthesis);
+        let value = if matches!(
+            lower.as_str(),
+            "initial" | "unset" | "revert" | "revert-layer"
+        ) {
+            svg_property_initial(&name).unwrap_or("").to_string()
         } else {
-            apply_svg_declarations(declarations.normal(), style, inherited_synthesis);
-        }
+            value
+        };
+        apply_svg_declaration(
+            &Declaration {
+                name,
+                value,
+                important: false,
+            },
+            style,
+            inherited_synthesis,
+        );
     }
-}
-
-fn apply_svg_declarations<'a>(
-    declarations: impl IntoIterator<Item = &'a Declaration>,
-    style: &mut SvgStyle,
-    inherited_synthesis: (bool, FontSynthesisStyle),
-) {
-    for declaration in declarations {
-        apply_svg_declaration(declaration, style, inherited_synthesis);
+    if style.fill.current_color {
+        style.fill.color = Some(style.color);
+        style.fill.alpha = style.color_alpha;
+    }
+    if style.stroke.current_color {
+        style.stroke.color = Some(style.color);
+        style.stroke.alpha = style.color_alpha;
     }
 }
 
@@ -3276,14 +3453,20 @@ fn apply_svg_declaration(
 ) {
     let value = declaration.value.trim();
     match declaration.name.to_ascii_lowercase().as_str() {
+        "color" => {
+            if let Some((color, alpha)) = crate::style::parse_color_string(value) {
+                style.color = color;
+                style.color_alpha = alpha.clamp(0.0, 1.0);
+            }
+        }
         "fill" => {
             if let Some(alpha) = apply_svg_paint_value(value, &mut style.fill) {
-                style.fill_opacity *= alpha;
+                style.fill.alpha = alpha;
             }
         }
         "stroke" => {
             if let Some(alpha) = apply_svg_paint_value(value, &mut style.stroke) {
-                style.stroke_opacity *= alpha;
+                style.stroke.alpha = alpha;
             }
         }
         "stroke-width" => {
@@ -3334,18 +3517,17 @@ fn apply_svg_declaration(
         }
         "opacity" => {
             if let Some(opacity) = parse_svg_alpha(value) {
-                style.fill_opacity *= opacity;
-                style.stroke_opacity *= opacity;
+                style.opacity = opacity;
             }
         }
         "fill-opacity" => {
             if let Some(opacity) = parse_svg_alpha(value) {
-                style.fill_opacity *= opacity;
+                style.fill_opacity = opacity;
             }
         }
         "stroke-opacity" => {
             if let Some(opacity) = parse_svg_alpha(value) {
-                style.stroke_opacity *= opacity;
+                style.stroke_opacity = opacity;
             }
         }
         "font-family" => apply_svg_font_family(value, style),
@@ -3390,28 +3572,36 @@ fn apply_svg_paint_value(value: &str, output: &mut Paint) -> Option<f32> {
     if value.eq_ignore_ascii_case("none") {
         output.color = None;
         output.gradient_id = None;
+        output.current_color = false;
         return Some(1.0);
     }
     if let Some(id) = parse_url_ref(value) {
         output.color = None;
         output.gradient_id = Some(id);
+        output.current_color = false;
+        return Some(1.0);
+    }
+    if value.eq_ignore_ascii_case("currentcolor") {
+        output.current_color = true;
+        output.gradient_id = None;
         return Some(1.0);
     }
     if matches!(
         value.to_ascii_lowercase().as_str(),
-        "context-fill" | "context-stroke" | "currentcolor"
+        "context-fill" | "context-stroke"
     ) {
         return None;
     }
     if let Some((color, alpha)) = crate::style::parse_color_string(value) {
         output.color = Some(color);
         output.gradient_id = None;
+        output.current_color = false;
         return Some(alpha.clamp(0.0, 1.0));
     }
     None
 }
 
-fn parse_svg_alpha(value: &str) -> Option<f32> {
+pub(crate) fn parse_svg_alpha(value: &str) -> Option<f32> {
     let value = value.trim();
     let alpha = if let Some(percent) = value.strip_suffix('%') {
         percent.trim().parse::<f32>().ok()? / 100.0
@@ -3421,7 +3611,7 @@ fn parse_svg_alpha(value: &str) -> Option<f32> {
     alpha.is_finite().then_some(alpha.clamp(0.0, 1.0))
 }
 
-fn parse_svg_font_size(value: &str, inherited: f32) -> Option<f32> {
+pub(crate) fn parse_svg_font_size(value: &str, inherited: f32) -> Option<f32> {
     let raw = value.trim().to_ascii_lowercase();
     let size = if let Some(percent) = raw.strip_suffix('%') {
         inherited * percent.trim().parse::<f32>().ok()? / 100.0
@@ -3440,7 +3630,20 @@ fn parse_svg_font_size(value: &str, inherited: f32) -> Option<f32> {
             "xx-large" => 32.0,
             "smaller" => inherited * 0.8,
             "larger" => inherited * 1.2,
-            _ => parse_number(&raw)?,
+            _ => {
+                let scale = if raw.ends_with("pt") {
+                    96.0 / 72.0
+                } else if raw.ends_with("mm") {
+                    96.0 / 25.4
+                } else if raw.ends_with("cm") {
+                    96.0 / 2.54
+                } else if raw.ends_with("in") {
+                    96.0
+                } else {
+                    1.0
+                };
+                parse_number(&raw)? * scale
+            }
         }
     };
     size.is_finite().then_some(size.max(0.0))
@@ -3566,58 +3769,27 @@ fn parse_stop_offset(input: Option<&str>) -> Option<f32> {
 }
 
 fn parse_stop_color(node: XmlNode<'_>, stylesheet: &SvgStylesheet) -> Option<Color> {
-    let mut stop_color = node.attribute("stop-color").and_then(parse_svg_color);
-
-    // Support class/id based declarations in embedded <style> blocks.
-    if !stylesheet.rules.is_empty() {
-        let mut matched: Vec<&SvgCssRule> = stylesheet
-            .rules
-            .iter()
-            .filter(|rule| svg_selector_matches(node, &rule.selector))
-            .collect();
-        matched.sort_by(|a, b| {
-            a.selector
-                .specificity
-                .cmp(&b.selector.specificity)
-                .then(a.order.cmp(&b.order))
-        });
-        for rule in &matched {
-            if let Some(color) = stop_color_from_declarations(rule.declarations.normal()) {
-                stop_color = Some(color);
-            }
+    let properties = cascaded_svg_properties(node, stylesheet);
+    let value = properties
+        .get("stop-color")
+        .map(String::as_str)
+        .unwrap_or("black");
+    if value.eq_ignore_ascii_case("currentcolor") {
+        let mut style = SvgStyle::default();
+        let mut ancestors = vec![node];
+        let mut parent = node.parent();
+        while let Some(node) = parent {
+            ancestors.push(node);
+            parent = node.parent();
         }
-        for rule in &matched {
-            if let Some(color) = stop_color_from_declarations(rule.declarations.important()) {
-                stop_color = Some(color);
-            }
+        ancestors.reverse();
+        for ancestor in ancestors {
+            apply_presentation_and_style(ancestor, stylesheet, &mut style);
         }
+        Some(style.color)
+    } else {
+        parse_svg_color(value)
     }
-
-    if let Some(style_attr) = node.attribute("style") {
-        if let Ok(declarations) = css_native::parse_declaration_block(style_attr) {
-            if let Some(color) = stop_color_from_declarations(declarations.normal()) {
-                stop_color = Some(color);
-            }
-            if let Some(color) = stop_color_from_declarations(declarations.important()) {
-                stop_color = Some(color);
-            }
-        }
-    }
-    stop_color
-}
-
-fn stop_color_from_declarations<'a>(
-    declarations: impl IntoIterator<Item = &'a Declaration>,
-) -> Option<Color> {
-    let mut color = None;
-    for declaration in declarations {
-        if declaration.name_eq("stop-color") {
-            if let Some(parsed) = parse_svg_color(&declaration.value) {
-                color = Some(parsed);
-            }
-        }
-    }
-    color
 }
 
 fn parse_svg_color(value: &str) -> Option<Color> {
@@ -4844,6 +5016,7 @@ mod tests {
                 ..TextStyle::default()
             },
             registry: Some(Arc::new(registry)),
+            root_opacity_in_wrapper: false,
         }
     }
 
@@ -5460,7 +5633,16 @@ mod tests {
         </svg>
         "##;
         let compiled = compile_svg(svg, Pt::from_f32(24.0), Pt::from_f32(12.0));
-        let path = compiled
+        let group = compiled
+            .iter()
+            .find_map(|item| match item {
+                CompiledItem::Group(group) => Some(group),
+                _ => None,
+            })
+            .expect("opacity creates an isolated group");
+        assert_eq!(group.opacity, 0.5);
+        let path = group
+            .items
             .iter()
             .find_map(|item| match item {
                 CompiledItem::Path(path) => Some(path),
@@ -5480,7 +5662,110 @@ mod tests {
         assert_eq!(path.style.line_join, 2);
         assert!(path.style.fill_rule_evenodd);
         assert_eq!(path.style.dash_pattern, vec![2.0, 3.0, 4.0, 2.0, 3.0, 4.0]);
-        assert!((path.style.fill_opacity - 0.2).abs() < 0.001);
-        assert!((path.style.stroke_opacity - 0.0625).abs() < 0.001);
+        assert!((path.style.fill_opacity - 0.8).abs() < 0.001);
+        assert!((path.style.stroke_opacity - 0.5).abs() < 0.001);
+        assert_eq!(path.style.fill.alpha, 0.5);
+        assert_eq!(path.style.stroke.alpha, 0.25);
+    }
+
+    #[test]
+    fn svg_opacity_composites_overlapping_children_once() {
+        for (content, expected) in [
+            (
+                r##"<g opacity="0.5"><rect width="40" height="40" fill="#d00000"/><rect width="40" height="40" fill="#d00000"/></g>"##,
+                [231, 128, 128],
+            ),
+            (
+                r##"<g opacity="0.5"><g opacity="0.5"><rect width="40" height="40" fill="#d00000"/></g></g>"##,
+                [243, 192, 192],
+            ),
+            (
+                r##"<g fill-opacity="0.25"><rect width="40" height="40" fill="#d00000" fill-opacity="1"/></g>"##,
+                [208, 0, 0],
+            ),
+            (
+                r##"<rect width="40" height="40" fill="rgba(0,96,192,0.25)" style="fill:#d00000;fill-opacity:1;fill-opacity:invalid"/>"##,
+                [208, 0, 0],
+            ),
+        ] {
+            let xml = format!(r#"<svg width="40" height="40">{content}</svg>"#);
+            let image = rasterize_native_svg(&xml, 40.0, 40.0);
+            let pixel = image.get_pixel(20, 20);
+            for channel in 0..3 {
+                assert!(
+                    (pixel[channel] as i32 - expected[channel]).abs() <= 2,
+                    "{content}: {pixel:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn standalone_svg_selects_print_styles_and_important_stops() {
+        for attributes in [r#"media="screen""#, r#"type="text/plain""#] {
+            let xml = format!(
+                r#"<svg width="40" height="40"><style {attributes}>rect {{fill:red}}</style><rect width="40" height="40"/></svg>"#
+            );
+            assert_eq!(
+                rasterize_native_svg(&xml, 40.0, 40.0).get_pixel(20, 20)[0],
+                0
+            );
+        }
+        let xml = r##"<svg width="40" height="40"><style>@media screen {rect {fill:blue}} stop {stop-color:#d00000 !important}</style><defs><linearGradient id="paint"><stop offset="0" style="stop-color:blue"/><stop offset="1" style="stop-color:blue"/></linearGradient></defs><rect width="40" height="40" fill="url(#paint)"/></svg>"##;
+        let image = rasterize_native_svg(xml, 40.0, 40.0);
+        assert_eq!(&image.get_pixel(20, 20).0[..3], &[208, 0, 0]);
+    }
+
+    #[test]
+    fn svg_currentcolor_preserves_alpha_and_child_color_override() {
+        for (content, expected) in [
+            (
+                r#"<rect width="40" height="40" fill="currentColor"/>"#,
+                [231, 128, 128],
+            ),
+            (
+                r#"<rect width="40" height="40" fill="none" stroke="currentColor" stroke-width="40"/>"#,
+                [231, 128, 128],
+            ),
+            (
+                r##"<g fill="currentColor"><rect width="40" height="40" color="#0060c0"/></g>"##,
+                [0, 96, 192],
+            ),
+        ] {
+            let xml =
+                format!(r#"<svg width="40" height="40" color="rgba(208,0,0,0.5)">{content}</svg>"#);
+            let image = rasterize_native_svg(&xml, 40.0, 40.0);
+            let pixel = image.get_pixel(10, 10);
+            for channel in 0..3 {
+                assert!(
+                    (pixel[channel] as i32 - expected[channel]).abs() <= 2,
+                    "{content}: {pixel:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn svg_transparent_mask_paint_does_not_contribute() {
+        for (content, expected) in [
+            (
+                r#"<rect width="40" height="40" fill="rgba(255,255,255,0)"/>"#,
+                [255, 255, 255],
+            ),
+            (
+                r#"<rect width="40" height="40" fill="white"/><rect width="40" height="40" fill="rgba(255,255,255,0)"/>"#,
+                [208, 0, 0],
+            ),
+            (
+                r#"<g opacity="0"><rect width="40" height="40" fill="white"/></g>"#,
+                [255, 255, 255],
+            ),
+        ] {
+            let xml = format!(
+                r##"<svg width="40" height="40"><defs><mask id="m">{content}</mask></defs><rect width="40" height="40" fill="#d00000" mask="url(#m)"/></svg>"##
+            );
+            let image = rasterize_native_svg(&xml, 40.0, 40.0);
+            assert_eq!(&image.get_pixel(10, 10).0[..3], &expected, "{content}");
+        }
     }
 }

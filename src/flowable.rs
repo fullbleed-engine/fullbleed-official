@@ -12131,6 +12131,7 @@ struct SvgCompiledSurface {
     size: Size,
     items: Vec<svg::CompiledItem>,
     text_identity: u64,
+    root_opacity_in_wrapper: bool,
     authoring_fragments: Vec<svg::SvgAuthoringFragment>,
     raster_source: Option<String>,
 }
@@ -12146,6 +12147,7 @@ impl SvgCompiledSurface {
         Arc::new(Self {
             size,
             text_identity: svg::compiled_text_identity(&items),
+            root_opacity_in_wrapper: font.is_some_and(|context| context.root_opacity_in_wrapper),
             authoring_fragments: svg::authoring_fragments(&items),
             raster_source: raster_fallback
                 .then(|| {
@@ -12374,6 +12376,9 @@ impl SvgFlowable {
         surface.size.width.to_milli_i64().hash(&mut hasher);
         surface.size.height.to_milli_i64().hash(&mut hasher);
         surface.text_identity.hash(&mut hasher);
+        if surface.root_opacity_in_wrapper {
+            "root-opacity-in-wrapper".hash(&mut hasher);
+        }
         if surface.raster_source.is_some() {
             "raster-fallback".hash(&mut hasher);
             (self.image_rendering == ImageRenderingMode::Pixelated).hash(&mut hasher);
@@ -12593,6 +12598,43 @@ mod svg_flowable_tests {
     use crate::Canvas;
     use crate::canvas::{Command, META_FLOWABLE_BBOX_KEY};
     use crate::types::{MixBlendMode, Pt, Size};
+
+    #[test]
+    fn svg_form_reuse_distinguishes_root_opacity_ownership() {
+        let xml = r##"<svg width="40" height="40" opacity="0.5"><rect width="40" height="40" fill="#d00000" opacity="inherit"/></svg>"##;
+        let size = Pt::from_f32(40.0);
+        let context = crate::svg::SvgFontContext {
+            style: crate::TextStyle::default(),
+            registry: None,
+            root_opacity_in_wrapper: true,
+        };
+        let standalone = SvgFlowable::new_pt(size, size, xml).with_form_enabled(true);
+        let delegated = SvgFlowable::new_pt_with_font_context(size, size, xml, Some(&context))
+            .with_form_enabled(true);
+        let mut canvas = Canvas::new(Size {
+            width: size * 2.0,
+            height: size,
+        });
+        standalone.draw(&mut canvas, Pt::ZERO, Pt::ZERO, size, size);
+        // The delegated surface omits its root opacity, but its child still
+        // inherits 0.5. Identical XML must not reuse the standalone form.
+        delegated.draw(&mut canvas, size, Pt::ZERO, size, size);
+        let png = crate::raster::document_to_png_pages(&canvas.finish(), 72, None, true)
+            .unwrap()
+            .remove(0);
+        let image = crate::image_native::load_from_memory(&png)
+            .unwrap()
+            .into_rgba8();
+        for (x, expected) in [(10, [243, 192, 192]), (50, [231, 128, 128])] {
+            let pixel = image.get_pixel(x, 10);
+            for channel in 0..3 {
+                assert!(
+                    (pixel[channel] as i32 - expected[channel]).abs() <= 2,
+                    "x={x}: {pixel:?}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn replaced_svg_viewports_are_compiled_at_the_fitted_size_and_reused() {

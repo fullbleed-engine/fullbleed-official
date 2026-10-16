@@ -1,3 +1,22 @@
+# Fullbleed Release Notes - 2.6.0a2
+
+This opt-in Python alpha brings the qualified 2.5.27 inline SVG cascade and
+isolated-opacity fixes into the experimental component branch. Document class
+rules, inherited paint and `currentColor` reach supported inline SVG descendants.
+SVG assets loaded separately retain their own styling context.
+
+The static Bootstrap 5.0.0 kit, component-owned styles, named parts and
+styled/unstyled HTML exports retain their existing API. Components remain static
+in both PDF and HTML; no Bootstrap JavaScript is added. The 2.6.0a1 and earlier
+preview downloads stay immutable.
+
+Python uses `2.6.0a2`; Cargo uses `2.6.0-alpha.2`. The
+[alpha update runbook](docs/release/2.6.0a2-runbook.md) records the required
+installed-package, component, SVG and independent corpus qualification. This
+entry describes the candidate; registry publication requires the release gates.
+
+---
+
 # Fullbleed Release Notes - 2.6.0a1
 
 This opt-in Python alpha introduces `fullbleed.ui.experimental`: function
@@ -27,6 +46,29 @@ The release gate checks that both spellings, the lockfile, wheel metadata and
 installed contracts agree. This alpha distribution targets Python; the Rust
 registry's stable release is managed separately. See the
 [alpha runbook](docs/release/2.6.0a1-runbook.md) for verification and publication.
+
+---
+
+# Fullbleed Release Notes - 2.5.27
+
+Document CSS now reaches inline SVG shapes and text through the native cascade,
+including ancestor selectors, stylesheet selection, layers, custom properties
+and `currentColor`. SVG assets retain their own stylesheet context.
+
+SVG group opacity composites overlapping shapes once. Paint alpha, inherited
+fill/stroke opacity and group opacity remain separate; explicit root-opacity
+inheritance, translucent `currentColor`, transparent masks and form reuse are
+covered by installed-output fixtures. Masks keep the existing binary luminance
+subset. No runtime dependency is added.
+
+The feature checks cover 54 fixtures and 810 installed-output checks across
+Windows and Linux builds. The complete 1,662-case CSS comparator retains the
+baseline's 1,619 passes, 25 failures and 18 disputed references. One passing
+fixture has a reviewed antialiasing change at a translucent rectangle's perimeter;
+its slightly higher mismatch score is retained in the evidence.
+
+See the [inline SVG styling guide](docs/embedded-stylesheets.md) and
+[2.5.27 runbook](docs/release/2.5.27-runbook.md) for checks and limitations.
 
 ---
 

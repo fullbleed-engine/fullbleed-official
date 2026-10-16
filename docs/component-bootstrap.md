@@ -5,13 +5,13 @@ The experimental Python kit covers the 23 component families in **Bootstrap
 utility stylesheet. It uses the repository's existing, unmodified MIT-licensed
 stylesheet. Components carry that dependency; a document includes it once.
 
-This is the experimental `2.6.0a1` Python surface, under
+This is the experimental `2.6.0a2` Python surface, under
 `fullbleed.ui.experimental.bootstrap`. Use an explicit alpha install in a virtual
-environment: `python -m pip install --pre "fullbleed==2.6.0a1"`. For an unpublished
+environment: `python -m pip install --pre "fullbleed==2.6.0a2"`. For an unpublished
 checkout, build with `python build_backend/fullbleed_build_backend.py wheel --out
 dist` and install the printed wheel path. The
-[alpha runbook](release/2.6.0a1-runbook.md) records the gates and publication scope.
-This kit is absent from the stable PyPI 2.5.26 wheel and the older
+[alpha runbook](release/2.6.0a2-runbook.md) records the gates and publication scope.
+This kit is absent from the stable PyPI 2.5.27 wheel and the older
 `component-preview-f88cced` download. The established `fullbleed.ui` API remains
 available.
 

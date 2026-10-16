@@ -283,7 +283,9 @@ children on void elements raise errors. Format these inputs explicitly if they
 were previously intentional text.
 
 This guide covers Python. [JavaScript/TypeScript components](https://docs.fullbleed.dev/guides/javascript-components/)
-are published in npm package 0.6.0, with ordinary functions and optional JSX/TSX.
+are published in npm package 0.7.0, with ordinary functions, optional JSX/TSX,
+and static HTML export with styles included or removed. The downloadable
+component project remains pinned to 0.6.0.
 [C# components](https://docs.fullbleed.dev/guides/csharp-components/) are available
 in FullBleed.DotNet 0.2.0, with typed methods, LINQ children and immutable styles.
 Rust accepts HTML/CSS. The JavaScript and C# layers do not include Python's

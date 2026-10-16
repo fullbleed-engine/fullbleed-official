@@ -1,7 +1,7 @@
 name: CI
 
 env:
-  FULLBLEED_CI_VERSION: "2.6.0a1"
+  FULLBLEED_CI_VERSION: "2.6.0a2"
   RUST_MIN_STACK: "4194304"
 
 on:
@@ -197,6 +197,7 @@ jobs:
           python -I tools/smoke_component_semantics.py --out target/component-recipes/semantics
           python -I tools/smoke_component_themes.py --out target/component-recipes/themes
           python -I tools/smoke_component_styles.py --out target/component-recipes/styles
+          python -I tools/smoke_component_svg.py --out target/component-recipes/svg
           python -I tools/smoke_component_parts.py --out target/component-recipes/parts
           python -I tools/smoke_component_migration.py --out target/component-recipes/migration
           python -I tools/smoke_component_bootstrap.py --out target/component-recipes/bootstrap
@@ -247,6 +248,17 @@ jobs:
 
       - name: Verify static embedded stylesheets from the installed wheel
         run: python -I tools/smoke_embedded_styles.py --out target/embedded-stylesheets
+
+      - name: Verify inline SVG cascade and group opacity from the installed wheel
+        run: python -I tools/smoke_svg_styles.py --out target/svg-styles
+
+      - name: Retain SVG cascade PDFs and independent previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: svg-styles-${{ runner.os }}
+          path: target/svg-styles/
+          if-no-files-found: error
 
       - name: Retain embedded stylesheet PDFs and independent previews
         if: always()

@@ -56,13 +56,13 @@ includes the complete component and style source for customization.
 
 ## Try the Python component alpha
 
-The **2.6.0a1 prerelease** adds components that carry their appearance, a static
+The **2.6.0a2 prerelease** adds components that carry their appearance, a static
 Bootstrap 5.0.0 kit, and HTML export with or without styles. This API lives under
 `fullbleed.ui.experimental`; names and behavior may change. Install the alpha
 explicitly in a virtual environment:
 
 ```console
-python -m pip install --pre "fullbleed==2.6.0a1"
+python -m pip install --pre "fullbleed==2.6.0a2"
 ```
 
 Save this as `order.py` and run `python order.py`:
@@ -96,7 +96,7 @@ HTML export; no Bootstrap JavaScript is included.
 Continue with the [Bootstrap and styling guide](docs/component-bootstrap.md),
 the [reusable component guide](examples/component_recipes/README.md), or the
 [report and catalog](examples/component_bootstrap). The
-[alpha runbook](docs/release/2.6.0a1-runbook.md) records the release gates and
+[alpha runbook](docs/release/2.6.0a2-runbook.md) records the release gates and
 limits. For an unpublished checkout, build a wheel using
 `python build_backend/fullbleed_build_backend.py wheel --out dist` and install
 the returned path. Ordinary `pip install fullbleed` selects the stable channel.
@@ -108,12 +108,13 @@ the returned path. Ordinary `pip install fullbleed` selects the stable channel.
 | Python | `python -m pip install fullbleed` | [Python quickstart](https://docs.fullbleed.dev/getting-started/quickstart/) |
 | Rust | `cargo add fullbleed` | [Native Rust quickstart](https://docs.fullbleed.dev/getting-started/rust/) |
 | Node.js / TypeScript | `npm install fullbleed` | [Node quickstart](https://docs.fullbleed.dev/getting-started/node/) · [Next.js PDF download](https://docs.fullbleed.dev/guides/nextjs-pdf/) |
-| Browser JavaScript | `npm install --save-exact fullbleed@0.6.0` | [PDF components and JSX](https://docs.fullbleed.dev/guides/javascript-components/) · [React starter](https://docs.fullbleed.dev/guides/react-pdf/) · [HTML/CSS starter](https://docs.fullbleed.dev/guides/browser-pdf/) |
+| Browser JavaScript | `npm install --save-exact fullbleed@0.7.0` | [PDF components and JSX](https://docs.fullbleed.dev/guides/javascript-components/) · [React starter](https://docs.fullbleed.dev/guides/react-pdf/) · [HTML/CSS starter](https://docs.fullbleed.dev/guides/browser-pdf/) |
 | C# / .NET | `dotnet add package FullBleed.DotNet --version 0.2.0` | [C# components and styles](https://docs.fullbleed.dev/guides/csharp-components/) · [NuGet quickstart](https://docs.fullbleed.dev/getting-started/dotnet/) |
 
-The JavaScript component workflow and React starter use package 0.6.0. The
-pinned HTML/CSS Node.js quickstart and JavaScript, Vue and Next.js starters use
-0.5.1. Both package versions wrap engine 2.5.24 and generate ordinary PDFs and previews. Import
+JavaScript package 0.7.0 adds [static HTML export with or without styles](https://docs.fullbleed.dev/guides/javascript-components/#export-html-with-or-without-styles).
+The downloadable component project and React starter remain pinned to 0.6.0;
+the HTML/CSS Node.js quickstart and JavaScript, Vue and Next.js starters use
+0.5.1. All three package versions wrap engine 2.5.24 and generate ordinary PDFs and previews. Import
 `fullbleed` in Node or `fullbleed/browser` in a web app. Node applications can use
 a [bounded render queue](https://docs.fullbleed.dev/guides/node-render-queue/)
 and optional process isolation.
@@ -396,7 +397,7 @@ python -m pip install fullbleed
 From a local wheel:
 
 ```bash
-python -m pip install C:\path\to\fullbleed-2.6.0a1-cp310-abi3-win_amd64.whl
+python -m pip install C:\path\to\fullbleed-2.6.0a2-cp310-abi3-win_amd64.whl
 ```
 
 From a source checkout with Rust installed, no Python build package is needed:

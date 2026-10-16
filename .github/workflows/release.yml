@@ -154,6 +154,7 @@ jobs:
           python -I tools/smoke_component_quickstart.py --expected-version "${{ steps.release-version.outputs.version }}" --out target/release-components/quickstart
           python -I tools/smoke_component_recipes.py --out target/release-components/recipes
           python -I tools/smoke_component_parts.py --out target/release-components/parts
+          python -I tools/smoke_component_svg.py --out target/release-components/svg
           python -I tools/smoke_component_bootstrap.py --out target/release-components/bootstrap
           python -I tools/smoke_component_typing.py --out target/release-components/typing.json
           npm install --ignore-scripts --no-package-lock --no-save --no-audit --no-fund --prefix target/component-editor-tools pyright@1.1.414
@@ -194,6 +195,17 @@ jobs:
 
       - name: Verify embedded stylesheets across installed rendering paths
         run: python -I tools/smoke_embedded_styles.py --out target/embedded-styles
+
+      - name: Verify inline SVG cascade and group opacity in release output
+        run: python -I tools/smoke_svg_styles.py --out target/svg-styles
+
+      - name: Retain SVG cascade release PDFs and independent previews
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-svg-styles
+          path: target/svg-styles/
+          if-no-files-found: error
 
       - name: Retain embedded stylesheet PDFs and independent previews
         if: always()
