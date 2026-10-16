@@ -14535,6 +14535,22 @@ mod tests {
     }
 
     #[test]
+    fn repeated_table_header_cannot_split_without_consuming_a_body_row() {
+        let header = vec![vec![table_cell("HEADER")]];
+        let body = vec![vec![table_cell(&"oversized line\n".repeat(100))]];
+        let table = TableFlowable::new(body)
+            .with_header(header)
+            .repeat_header(true);
+        let width = Pt::from_f32(300.0);
+        let height = Pt::from_f32(72.0);
+        assert!(table.wrap(width, height).height > height);
+        assert!(
+            table.split(width, height).is_none(),
+            "a repeated-header-only fragment would leave the same body for every page"
+        );
+    }
+
+    #[test]
     fn table_split_repeats_header_when_enabled() {
         let header = vec![vec![table_cell("HDR_ID"), table_cell("HDR_NAME")]];
         let body: Vec<Vec<TableCell>> = (1..=20)

@@ -16873,6 +16873,15 @@ impl Flowable for TableFlowable {
         let first_include_footer = self.include_footer && self.repeat_footer;
         let second_include_header = self.repeat_header && !moved_leading_keep_group;
 
+        // A fragment containing only repeated header/footer rows does not consume
+        // any body content. If the continuation retains the same header state,
+        // returning it would reproduce this split on every fresh page forever.
+        // Defer the whole table to the caller's frame/overflow policy instead.
+        // Returning None alone does not reject an oversized row.
+        if split_at == start && second_include_header == self.include_header {
+            return None;
+        }
+
         let first = TableFlowable {
             data: self.data.clone(),
             body_range: start..split_at,
