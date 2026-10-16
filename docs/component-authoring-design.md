@@ -272,14 +272,33 @@ flowchart TD
    leak metadata or mutable configuration between them.
 
 The prototype implements these boundaries with frozen Python values, generated
-classes, native `data-fb-id` attributes, and a source map. It creates a fresh engine
-per render and runs a pagination trace before returning output. That policy is
-deliberately simple but incurs another layout pass; it is not a qualified
-performance design. A later render-result API should expose PDF bytes, diagnostics,
-and source associations from the same native layout operation. Engine reuse needs
-an explicit isolation contract and measurements before it becomes the default.
-Native source collection currently runs on every pagination attempt; its cost
-also needs qualification for large authored and unmarked documents.
+classes, native `data-fb-id` attributes, and a source map. `Document.prepare`
+creates an isolated engine and returns its existing native `CompiledDocument`.
+That snapshot owns the layout, fonts and PDF options. The component renderer
+checks its pagination trace before allowing output; PDF serialization and layout
+previews then use the same layout. The temporary engine can be discarded. This
+avoids a second document model, implicit caching, and repeated layout for each
+requested output. The one-shot `render_pdf` and `render_image_pages` methods each
+prepare independently; applications requesting both should retain one preparation.
+Outputs remain separately requested: generating a PDF does not eagerly rasterize
+every page. Ordinary document authors can keep using the one-shot methods without
+learning this lifecycle.
+
+`Document.compile()` remains the pure HTML/CSS/source-map translation step. Native
+preparation performs font and asset I/O and can fail on layout constraints.
+Changed content or renderer options require another preparation. Returned traces
+are independent Python values; editing one cannot change the native snapshot.
+Binding renders on the native object also leave the template unchanged. Its
+previews describe the template, not a separately rendered binding batch or
+finalized PDF. General glyph and overflow policy still needs a coherent result
+contract; preparation currently applies only the established unsplittable check.
+
+Installed tests compare PDFs, previews and trace fields against the ordinary
+engine, check ownership after engine/font-file disposal, and count native layout
+events. These bounded checks do not establish general performance. Engine pooling
+needs an explicit isolation contract and measurements before becoming the default.
+Source collection still runs on every pagination attempt; its cost needs
+qualification for large authored and unmarked documents.
 
 ## Where the API should add real value
 
@@ -430,9 +449,10 @@ change real documents. A larger number of element wrappers is not that milestone
    unsupported content instead of making a component promise stronger than its
    engine. Correct HTML serialization alone is insufficient evidence.
 3. **Make the common path pleasant in an editor and at runtime.** Finish token/part
-   discoverability and measure compilation, source collection and the extra
-   preflight layout pass. Prefer a native result containing output and diagnostics
-   from one layout operation before committing to a stable rendering interface.
+   discoverability and qualify compilation and source collection at larger scales.
+   The prototype now reuses native compiled layout for validation, PDF output and
+   previews. Extend diagnostic policy and evaluate that lifecycle before committing
+   to a stable rendering interface.
 4. **Stabilize semantics, then adapt syntax to each language.** Specify style
    precedence, children, units, theme resolution, part boundaries and error paths
    with shared fixtures. JavaScript/TypeScript can use functions and JSX; C# can

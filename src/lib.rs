@@ -1143,6 +1143,27 @@ impl CompiledDocument {
         )?)
     }
 
+    /// Preview the compiled template without parsing or laying out the input again.
+    ///
+    /// Uses the layout rasterizer, with the same semantics as
+    /// [`FullBleed::render_image_pages`]. These previews are not a rasterization
+    /// of the finalized PDF. Bindings rendered separately do not modify this
+    /// immutable template or its previews.
+    pub fn render_image_pages(&self, dpi: u32) -> Result<Vec<Vec<u8>>, FullBleedError> {
+        let start = std::time::Instant::now();
+        let pages = raster::document_to_png_pages(
+            &self.document,
+            dpi,
+            Some(self.font_registry.as_ref()),
+            self.pdf_options.shape_text,
+        )?;
+        if let Some(logger) = self.perf.as_deref() {
+            logger.log_span_ms("raster", Some(0), start.elapsed().as_secs_f64() * 1000.0);
+            logger.log_counts("raster", Some(0), &[("pages", pages.len() as u64)]);
+        }
+        Ok(pages)
+    }
+
     /// Serialize the template to a writer and return the number of bytes written.
     ///
     /// The caller owns and flushes the writer. An error can leave partial output.
@@ -3629,17 +3650,6 @@ impl FullBleed {
             asset_bundle: self.asset_bundle.clone(),
             render_context_cache: Mutex::new(RenderContextCache::new()),
         }
-    }
-
-    #[cfg(feature = "python")]
-    pub(crate) fn measure_text_width_for_trace(
-        &self,
-        font_name: &str,
-        font_size: Pt,
-        text: &str,
-    ) -> Pt {
-        self.font_registry
-            .measure_text_width(font_name, font_size, text)
     }
 
     #[cfg(feature = "python")]
@@ -15156,6 +15166,33 @@ mod tests {
             compiled.render_many_to_buffer(0),
             Err(FullBleedError::EmptyDocumentSet)
         ));
+    }
+
+    #[test]
+    fn compiled_preview_owns_the_template_after_engine_drop() {
+        let engine = FullBleed::builder().build().expect("engine");
+        let html = "<p>Compiled {{label}}</p><p style='break-before: page'>Second page</p>";
+        let css = "@page { size: 180pt 120pt; margin: 12pt; } p { color: #345678; }";
+        let expected = engine
+            .render_image_pages(html, css, 48)
+            .expect("ordinary preview");
+        let compiled = engine.compile_document(html, css).expect("compile");
+        drop(engine);
+        assert_eq!(compiled.page_count(), 2);
+        compiled
+            .render_bindings_to_buffer(&HashMap::from([(
+                "label".to_string(),
+                vec!["changed".to_string()],
+            )]))
+            .expect("binding output");
+        assert_eq!(
+            compiled.render_image_pages(48).expect("owned preview"),
+            expected
+        );
+        assert_eq!(
+            compiled.render_image_pages(48).expect("repeated preview"),
+            expected
+        );
     }
 
     #[test]

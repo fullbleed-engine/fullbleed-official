@@ -66,6 +66,8 @@ def test_cli_capabilities_expose_asserted_pdf_standards(capsys: pytest.CaptureFi
     assert payload["svg"]["engine_flags"]["svg_raster_fallback"] is svg_raster_available
     assert payload["svg"]["build_features"]["svg_raster"] is svg_raster_available
     assert payload["engine"]["compiled_document"] is True
+    assert payload["engine"]["compiled_document_image_pages"] is True
+    assert payload["engine"]["compiled_document_pagination_trace"] is True
     assert payload["engine"]["compiled_reflow_bindings"] is bool(
         build_features.get("compiled_reflow", False)
     )
@@ -95,6 +97,8 @@ def test_cli_capabilities_without_native_extension_do_not_crash(
 
     assert payload["engine"]["batch_render"] is False
     assert payload["engine"]["compiled_document"] is False
+    assert payload["engine"]["compiled_document_image_pages"] is False
+    assert payload["engine"]["compiled_document_pagination_trace"] is False
     assert payload["engine"]["compiled_reflow_bindings"] is False
     assert payload["engine"]["compiled_flow_compression_modes"] == []
     assert payload["engine"]["template_compose_planner"] is False

@@ -431,6 +431,8 @@ SCHEMA_DEFS = {
                 ],
                 "properties": {
                     "compiled_document": {"type": "boolean"},
+                    "compiled_document_image_pages": {"type": "boolean"},
+                    "compiled_document_pagination_trace": {"type": "boolean"},
                     "explicit_table_headers": {"type": "boolean"},
                     "logical_table_pagination": {"type": "boolean"},
                     "bundled_standard_font_previews": {"type": "boolean"},
@@ -3184,6 +3186,13 @@ def _capabilities_payload(cli_surface=None):
         },
         "engine": {
             "compiled_document": bool(pdf_engine and hasattr(pdf_engine, "compile_pdf")),
+            "compiled_document_image_pages": bool(
+                pdf_engine and compiled_document and hasattr(compiled_document, "render_image_pages")
+            ),
+            "compiled_document_pagination_trace": bool(
+                pdf_engine and compiled_document
+                and hasattr(compiled_document, "export_render_time_pagination_trace")
+            ),
             "explicit_table_headers": bool(build_features.get("explicit_table_headers", False)),
             "logical_table_pagination": bool(build_features.get("logical_table_pagination", False)),
             "bundled_standard_font_previews": bool(

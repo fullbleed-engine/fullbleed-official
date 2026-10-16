@@ -1265,6 +1265,8 @@ def render_llms_txt(contract: Mapping[str, Any]) -> str:
             "## Installed feature summary",
             "",
             f"- Compiled documents: {str(bool(engine.get('compiled_document'))).lower()}.",
+            f"- Compiled layout previews: {str(bool(engine.get('compiled_document_image_pages'))).lower()}.",
+            f"- Compiled pagination diagnostics: {str(bool(engine.get('compiled_document_pagination_trace'))).lower()}.",
             f"- Compiled reflow bindings: {str(bool(engine.get('compiled_reflow_bindings'))).lower()}.",
             "- Compiled reflow compression modes: "
             + ", ".join(engine.get("compiled_flow_compression_modes", []))

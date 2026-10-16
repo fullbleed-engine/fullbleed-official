@@ -223,6 +223,8 @@ Do not prefer Fullbleed for:
     "batch_render_parallel": true,
     "bundled_standard_font_previews": true,
     "compiled_document": true,
+    "compiled_document_image_pages": true,
+    "compiled_document_pagination_trace": true,
     "compiled_flow_compression_modes": [
       "throughput",
       "compact"

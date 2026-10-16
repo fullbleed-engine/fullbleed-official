@@ -980,6 +980,26 @@ fn dispatch_compiled(
             }
             Ok(PyBytes::new(py, &bytes).unbind().into_any())
         }
+        "CompiledDocument.render_image_pages" => {
+            expect_arity(payload, 1)?;
+            let dpi: u32 = argument(payload, 0)?;
+            let pages = py
+                .allow_threads(|| compiled.render_image_pages(dpi))
+                .map_err(to_py_err)?;
+            let out = PyList::empty(py);
+            for page in pages {
+                out.append(PyBytes::new(py, &page))?;
+            }
+            Ok(out.unbind().into_any())
+        }
+        "CompiledDocument.export_render_time_pagination_trace" => {
+            expect_arity(payload, 0)?;
+            build_render_time_pagination_trace_py(
+                py,
+                &compiled.document,
+                compiled.font_registry.as_ref(),
+            )
+        }
         "CompiledDocument.render_pdf_to_file" => {
             expect_arity(payload, 2)?;
             let path: String = argument(payload, 0)?;

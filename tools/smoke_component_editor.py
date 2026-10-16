@@ -170,9 +170,11 @@ def main():
                 ("styled_layout_values", 'Aligned = styled(Row, align_items="end")\nAligned(Paragraph("Text"), align="§")', {"start", "center", "stretch"}),
                 ("styled_grid_columns", 'Columns = styled(Grid, grid_template_columns="2fr 1fr")\nColumns(Paragraph("Text"), col§)', {"columns"}),
                 ("styled_heading_keep", 'Title = styled(Heading, break_after="auto")\nTitle("Text", keep_§)', {"keep_with_next"}),
+                ("prepared_outputs", 'Document(Paragraph("Text")).prepare(Renderer()).§', {"render_pdf", "render_image_pages", "export_render_time_pagination_trace"}),
+                ("prepared_preview_dpi", 'Document(Paragraph("Text")).prepare(Renderer()).render_image_pages(d§)', {"dpi"}),
             ]
             for index, (name, expression, required) in enumerate(cases):
-                prefix = "from fullbleed.ui.experimental import style, styled, Paragraph, Stack, Row, Grid, DataTable, Heading, Node\n"
+                prefix = "from fullbleed.ui.experimental import style, styled, Paragraph, Stack, Row, Grid, DataTable, Heading, Node, Document, Renderer\n"
                 before, after = (prefix + expression).split("§")
                 path = folder / f"completion_{index}.py"
                 server.open(path, before + after)

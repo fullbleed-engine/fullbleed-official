@@ -173,13 +173,23 @@ class Document:
     def to_css(self) -> str:
         return self.compile().css
 
-    def render_pdf(self, renderer: Renderer) -> bytes:
+    def prepare(self, renderer: Renderer):
+        """Lay out and check once, returning the engine's owned CompiledDocument.
+
+        Reuse the result for PDF bytes, layout previews and pagination diagnostics.
+        A changed document or renderer needs a new preparation. No global cache
+        or mutable engine is shared between documents.
+        """
         plan = self.compile()
-        return renderer.checked_engine_for(self, plan).render_pdf(plan.html, plan.css)
+        prepared = renderer.engine_for(self).compile_pdf(plan.html, plan.css)
+        renderer._check_layout(self, plan, prepared.export_render_time_pagination_trace())
+        return prepared
+
+    def render_pdf(self, renderer: Renderer) -> bytes:
+        return self.prepare(renderer).render_pdf()
 
     def render_image_pages(self, renderer: Renderer, *, dpi=150) -> list[bytes]:
-        plan = self.compile()
-        return renderer.checked_engine_for(self, plan).render_image_pages(plan.html, plan.css, dpi=dpi)
+        return self.prepare(renderer).render_image_pages(dpi=dpi)
 
     def emit_artifacts(self, *, html_path, css_path):
         plan = self.compile()
@@ -202,7 +212,7 @@ class Renderer:
     """Explicit engine configuration; each document gets isolated engine metadata.
 
     Font files, profiles, assets and diagnostic options remain caller choices.
-    Engine creation per render is intentional in this experimental implementation.
+    Each preparation creates a fresh engine and returns its owned layout snapshot.
     """
 
     def __init__(self, **engine_options):
@@ -216,8 +226,14 @@ class Renderer:
         return fullbleed.PdfEngine(**deepcopy(dict(self._options)), document_title=document.title, document_lang=document.lang)
 
     def checked_engine_for(self, document: Document, plan: CompiledDocument):
+        """Compatibility helper; use Document.prepare to reuse the checked layout."""
         engine = self.engine_for(document)
         trace = engine.export_render_time_pagination_trace(plan.html, plan.css)
+        self._check_layout(document, plan, trace)
+        return engine
+
+    @staticmethod
+    def _check_layout(document: Document, plan: CompiledDocument, trace):
         for event in trace["events"]:
             if event.get("reason") == "forced_unsplittable_full_frame":
                 by_id = {source.node_id: source for source in plan.sources}
@@ -244,4 +260,3 @@ class Renderer:
                     "block beyond the page edge; no PDF was returned. " + advice,
                     page=event["page"], sources=sources, reason=reason, failure_sources=failure_sources, path=path,
                 )
-        return engine

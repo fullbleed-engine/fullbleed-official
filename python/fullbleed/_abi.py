@@ -176,7 +176,11 @@ class WatermarkSpec(metaclass=_NativeFacadeType):
 
 
 class CompiledDocument(metaclass=_NativeFacadeType):
-    """Compiled fixed-paint and content-reflow programs from ``PdfEngine.compile_pdf``."""
+    """An owned layout snapshot plus optional fixed-paint and reflow programs.
+
+    PDF output, layout previews and pagination diagnostics reuse the template
+    layout from ``PdfEngine.compile_pdf``. Rendering bindings leaves it unchanged.
+    """
 
     __slots__ = ("_handle",)
 
@@ -198,6 +202,14 @@ class CompiledDocument(metaclass=_NativeFacadeType):
             "CompiledDocument.render_pdf",
             deterministic_hash,
         )
+
+    def render_image_pages(self, /, dpi=150):
+        """Return PNG layout previews without another layout; not finalized-PDF images."""
+        return _call(self._handle, "CompiledDocument.render_image_pages", dpi)
+
+    def export_render_time_pagination_trace(self, /):
+        """Inspect the unchanged template layout using the pagination_trace.v1 schema."""
+        return _call(self._handle, "CompiledDocument.export_render_time_pagination_trace")
 
     def render_pdf_to_file(self, /, path, deterministic_hash=None):
         return _call(

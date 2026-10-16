@@ -18,7 +18,7 @@ import fullbleed.ui.experimental as components
 VALID = '''from dataclasses import dataclass
 from fullbleed.ui.experimental import (
     Column, DataTable, Document, Flow, Grid, Heading, Image, LayoutError, Node, Page, Paragraph,
-    Row, Source, Stack, Style, Theme, component, css, mm, pt, style, styled, to_legacy, token,
+    Renderer, Row, Source, Stack, Style, Theme, component, css, mm, pt, style, styled, to_legacy, token,
 )
 
 @component(parts=("label", "note"))
@@ -75,6 +75,12 @@ explicit_heading = KeptHeading("Choice", keep_with_next=False)
 document = Document(heading, brand, root, flow, table, theme=Theme({"muted": "#667580"}), page=Page("A5", margin=mm(12)))
 compiled_html: str = document.to_html()
 assert "Design" in compiled_html
+
+def prepare_outputs(document: Document, renderer: Renderer) -> tuple[bytes, list[bytes]]:
+    prepared = document.prepare(renderer)
+    pdf: bytes = prepared.render_pdf()
+    previews: list[bytes] = prepared.render_image_pages(dpi=96)
+    return pdf, previews
 diagnostic = LayoutError("Cannot fit", page=2, sources=document.compile().sources)
 error_page: int = diagnostic.at("Batch").page
 error_sources: tuple[Source, ...] = diagnostic.sources
@@ -117,6 +123,9 @@ INVALID_CASES = [
     ("styled_business_style_type", 'StyledChoice(style=10)'),
     ("migration_node", 'to_legacy("<p>HTML</p>")'),
     ("migration_theme", 'to_legacy(valid, theme={"muted": "gray"})'),
+    ("preparation_renderer", 'document.prepare("default")'),
+    ("prepared_preview_dpi", 'document.prepare(Renderer()).render_image_pages(dpi="96")'),
+    ("prepared_pdf_input", 'document.prepare(Renderer()).render_pdf(html="<p>New</p>")'),
 ]
 
 # Recursive Iterable types also admit strings. Preserve valid custom iterables

@@ -1804,14 +1804,14 @@ impl TraceTextState {
 }
 
 fn estimate_trace_text_bbox(
-    engine: Option<&FullBleed>,
+    fonts: Option<&crate::font::FontRegistry>,
     state: &TraceTextState,
     x: Pt,
     y: Pt,
     text: &str,
 ) -> (f32, f32, f32, f32) {
-    let width = if let Some(e) = engine {
-        e.measure_text_width_for_trace(&state.font_name, state.font_size, text)
+    let width = if let Some(fonts) = fonts {
+        fonts.measure_text_width(&state.font_name, state.font_size, text)
     } else {
         let approx = text.chars().count() as f32 * 0.6;
         Pt::from_f32(state.font_size.to_f32() * approx)
@@ -1976,7 +1976,7 @@ fn accumulate_owner_hint(
 fn collect_render_time_text_blocks_for_page(
     page: &crate::canvas::Page,
     page_height: Pt,
-    engine: Option<&FullBleed>,
+    fonts: Option<&crate::font::FontRegistry>,
 ) -> TracePageTextCollection {
     let mut out = TracePageTextCollection::default();
     let mut tag_stack: Vec<String> = Vec::new();
@@ -2045,7 +2045,7 @@ fn collect_render_time_text_blocks_for_page(
                         out.artifact_text_blocks_excluded.saturating_add(1);
                     continue;
                 }
-                let bbox = estimate_trace_text_bbox(engine, &state, *x, *y, text);
+                let bbox = estimate_trace_text_bbox(fonts, &state, *x, *y, text);
                 if tag_stack.last().is_none() {
                     out.untagged_text_blocks = out.untagged_text_blocks.saturating_add(1);
                 }
@@ -2084,7 +2084,7 @@ fn collect_render_time_text_blocks_for_page(
                     ),
                     ..state.clone()
                 };
-                let bbox = estimate_trace_text_bbox(engine, &text_state, Pt::ZERO, Pt::ZERO, text);
+                let bbox = estimate_trace_text_bbox(fonts, &text_state, Pt::ZERO, Pt::ZERO, text);
                 if tag_stack.last().is_none() {
                     out.untagged_text_blocks = out.untagged_text_blocks.saturating_add(1);
                 }
@@ -2238,7 +2238,7 @@ fn build_render_time_typography_drift_trace_py(
             crate::canvas::PageGeometry::for_page(page, doc.page_size)
                 .logical_size
                 .height,
-            Some(engine),
+            Some(engine.font_registry.as_ref()),
         );
         let flagged_blocks = PyList::empty(py);
         let mut page_flagged_count = 0usize;
@@ -2447,7 +2447,7 @@ fn build_render_time_region_text_alignment_trace_py(
             crate::canvas::PageGeometry::for_page(page, doc.page_size)
                 .logical_size
                 .height,
-            Some(engine),
+            Some(engine.font_registry.as_ref()),
         );
         let mut table_blocks: Vec<&TraceTextBlockRow> = text_collection
             .blocks
@@ -3286,7 +3286,7 @@ fn count_rect_overlaps(rects: &[(f32, f32, f32, f32)]) -> usize {
 fn build_render_time_pagination_trace_py(
     py: Python<'_>,
     doc: &Document,
-    engine: &FullBleed,
+    fonts: &crate::font::FontRegistry,
 ) -> PyResult<PyObject> {
     let out = PyDict::new(py);
     out.set_item("schema", "fullbleed.pagination_trace.v1")?;
@@ -3346,7 +3346,7 @@ fn build_render_time_pagination_trace_py(
             crate::canvas::PageGeometry::for_page(page, doc.page_size)
                 .logical_size
                 .height,
-            Some(engine),
+            Some(fonts),
         );
 
         for cmd in &page.commands {
@@ -3896,7 +3896,7 @@ fn build_render_time_reading_order_trace_py(
             crate::canvas::PageGeometry::for_page(page, doc.page_size)
                 .logical_size
                 .height,
-            engine,
+            engine.map(|engine| engine.font_registry.as_ref()),
         );
         let block_count = text_collection.blocks.len();
         let page_draw_form_count = text_collection.draw_form_count;
@@ -10219,7 +10219,7 @@ impl PdfEngine {
         let doc = py
             .allow_threads(|| self.engine.render_to_document(html, css))
             .map_err(to_py_err)?;
-        build_render_time_pagination_trace_py(py, &doc, &self.engine)
+        build_render_time_pagination_trace_py(py, &doc, self.engine.font_registry.as_ref())
     }
 
     fn export_render_time_typography_drift_trace(

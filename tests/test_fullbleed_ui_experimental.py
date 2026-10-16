@@ -508,10 +508,13 @@ def test_renderer_applies_metadata_per_document_without_shared_engine_mutation(m
     class Engine:
         def __init__(self, **options):
             calls.append(options)
-        def export_render_time_pagination_trace(self, html, css):
+        def compile_pdf(self, html, css):
+            self.html = html
+            return self
+        def export_render_time_pagination_trace(self):
             return {"events": []}
-        def render_pdf(self, html, css):
-            return html.encode()
+        def render_pdf(self):
+            return self.html.encode()
     monkeypatch.setattr(fullbleed, "PdfEngine", Engine)
     fonts = ["project.ttf"]
     renderer = Renderer(font_files=fonts)
@@ -531,9 +534,12 @@ def test_experimental_renderer_rejects_native_unsplittable_overflow(monkeypatch)
     class Engine:
         def __init__(self, **options):
             pass
-        def export_render_time_pagination_trace(self, html, css):
+        def compile_pdf(self, html, css):
+            self.html = html
+            return self
+        def export_render_time_pagination_trace(self):
             return {"events": [{"reason": "forced_unsplittable_full_frame", "page": 2}]}
-        def render_pdf(self, html, css):
+        def render_pdf(self):
             pytest.fail("An overflowing document must not be returned")
     monkeypatch.setattr(fullbleed, "PdfEngine", Engine)
     with pytest.raises(AuthoringError) as caught:
@@ -554,7 +560,10 @@ def test_native_fragment_sources_resolve_without_guessing_an_owner(monkeypatch, 
     class Engine:
         def __init__(self, **options):
             pass
-        def export_render_time_pagination_trace(self, html, css):
+        def compile_pdf(self, html, css):
+            self.html = html
+            return self
+        def export_render_time_pagination_trace(self):
             return {"events": [{"reason": "forced_unsplittable_full_frame", "page": 2,
                                 "source_ids": identifiers}]}
         def render_image_pages(self, *args, **kwargs):
@@ -590,7 +599,10 @@ def test_native_split_rejection_retains_scope_and_resolves_exact_cell_sources(mo
     class Engine:
         def __init__(self, **options):
             pass
-        def export_render_time_pagination_trace(self, html, css):
+        def compile_pdf(self, html, css):
+            self.html = html
+            return self
+        def export_render_time_pagination_trace(self):
             return {"events": [{"reason": "forced_unsplittable_full_frame", "page": 2, "source_ids": ["n1"],
                                 "split_failure": {"reason": "table_cell_alignment", "source_ids": ids}}]}
         def render_pdf(self, *args):

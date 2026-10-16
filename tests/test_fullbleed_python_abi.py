@@ -146,6 +146,12 @@ def test_pdf_engine_constructor_and_method_signatures_remain_explicit() -> None:
     assert str(inspect.signature(fullbleed.CompiledDocument.render_pdf)) == (
         "(self, /, deterministic_hash=None)"
     )
+    assert str(inspect.signature(fullbleed.CompiledDocument.render_image_pages)) == (
+        "(self, /, dpi=150)"
+    )
+    assert str(inspect.signature(fullbleed.CompiledDocument.export_render_time_pagination_trace)) == (
+        "(self, /)"
+    )
     assert str(inspect.signature(fullbleed.CompiledDocument.render_pdf_bindings)) == (
         "(self, /, bindings, deterministic_hash=None)"
     )
@@ -236,6 +242,48 @@ def test_facade_routes_assets_and_pdf_rendering_through_capsules(tmp_path) -> No
     assert compiled.stats()["page_count"] == 1
     assert compiled.stats()["command_count"] > 0
     assert compiled.render_pdf_batch(2).count(b"/Type /Page ") == 2
+
+
+@pytest.mark.parametrize("shape_text", [False, True])
+def test_compiled_previews_and_trace_own_the_original_layout_and_fonts(tmp_path, shape_text) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from importlib.resources import files
+
+    font = tmp_path / "Inter.ttf"
+    font.write_bytes(files("fullbleed_assets").joinpath("fonts/Inter-Variable.ttf").read_bytes())
+    engine = fullbleed.PdfEngine(font_files=[str(font)], shape_text=shape_text,
+                               document_title="Owned snapshot", document_lang="fr",
+                               watermark=fullbleed.WatermarkSpec("text", "DRAFT"),
+                               document_timestamp="2026-10-15T00:00:00Z")
+    html = '<main><p data-fb-id="first">Affiche {{label}}</p><p style="break-before: page">Suite</p></main>'
+    css = "@page { size: 180pt 140pt; margin: 12pt; } body { font-family: Inter; font-size: 10pt; }"
+    expected_pdf = engine.render_pdf(html, css)
+    expected_images = engine.render_image_pages(html, css, dpi=48)
+    expected_trace = engine.export_render_time_pagination_trace(html, css)
+    expected_trace.pop("generated_at_unix_ms")
+    compiled = engine.compile_pdf(html, css)
+    del engine
+    font.unlink()
+
+    # The template survives its engine and font file. Binding renders must not
+    # replace the original template inspected by either new method.
+    assert compiled.stats()["page_count"] == 2
+    compiled.render_pdf_bindings({"label": ["changed"]})
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        jobs = [pool.submit(compiled.render_pdf),
+                pool.submit(compiled.render_image_pages, dpi=48),
+                pool.submit(compiled.export_render_time_pagination_trace)]
+        pdf, images, trace = [job.result() for job in jobs]
+    trace.pop("generated_at_unix_ms")
+    assert pdf == expected_pdf
+    assert images == expected_images
+    assert trace == expected_trace
+    assert any("first" in event.get("source_ids", []) for event in trace["events"])
+    trace["events"].clear()
+    assert compiled.export_render_time_pagination_trace()["events"]
+    assert compiled.render_image_pages(dpi=48) == expected_images
+    with pytest.raises((TypeError, ValueError, OverflowError)):
+        compiled.render_image_pages(dpi=-1)
 
 
 def test_compiled_document_renders_distinct_columnar_bindings(tmp_path) -> None:

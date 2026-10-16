@@ -234,10 +234,26 @@ Path("customer.pdf").write_bytes(document.render_pdf(renderer))
 `Page` controls actual CSS page geometry. `Document` owns the PDF title and
 language as well as HTML metadata. `Renderer` takes the engine's font, profile,
 and diagnostic options; conflicting page or metadata options fail explicitly.
-It creates an engine for each render to isolate document metadata and checks the
-native pagination trace before producing output. This adds a layout pass. Engine
-pooling and performance qualification remain future work. The check catches forced
+It creates an isolated engine, prepares one layout, and checks that layout's
+native pagination trace before producing output. The check catches forced
 unsplittable overflow; it is not a general overflow or accessibility validator.
+
+When you need a PDF and previews, prepare once:
+
+```python
+prepared = document.prepare(renderer)
+Path("customer.pdf").write_bytes(prepared.render_pdf())
+preview_pages = prepared.render_image_pages(dpi=96)
+pagination = prepared.export_render_time_pagination_trace()
+```
+
+The result is the engine's existing `fullbleed.CompiledDocument`. It owns its
+layout, fonts and delivery options and survives the temporary engine. These
+operations reuse that layout; changing content, styles or renderer settings
+requires a new preparation. Calling the two `document.render_*` conveniences
+separately prepares twice. Layout PNGs preview native drawing commands, not the
+final PDF's encoding or conformance. Engine pooling and broad performance
+qualification remain future work.
 
 Choose `Flow` for a flowing document body and `Stack` for a local flex group such
 as the field above. `Flow` uses native paginated block layout with explicit space
@@ -358,6 +374,7 @@ the test-only readers `pypdf`, `pypdfium2`, and `pillow`:
 ```console
 python -m pytest tests/test_fullbleed_ui_experimental.py
 python -I tools/smoke_component_recipes.py --out target/recipe-verification
+python -I tools/smoke_component_preparation.py --out target/recipe-verification/preparation
 python -I tools/smoke_component_migration.py --out target/recipe-verification/migration
 ```
 
@@ -397,6 +414,6 @@ name completion and broader native-package typing remain separate work.
 
 Before stabilization, this prototype still needs broader row-continuation coverage,
 broader layout-diagnostic translation, static typing and completion refinement,
-an evaluated rendering reuse policy, and independent author usability feedback.
+larger-scale rendering qualification, and independent author usability feedback.
 The legacy authoring surface is unchanged. No language parity, PDF conformance,
 or performance claim follows from these examples.

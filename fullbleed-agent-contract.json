@@ -319,6 +319,8 @@
       "batch_render_parallel": true,
       "bundled_standard_font_previews": true,
       "compiled_document": true,
+      "compiled_document_image_pages": true,
+      "compiled_document_pagination_trace": true,
       "compiled_flow_compression_modes": [
         "throughput",
         "compact"
@@ -4724,6 +4726,12 @@
                 "type": "boolean"
               },
               "compiled_document": {
+                "type": "boolean"
+              },
+              "compiled_document_image_pages": {
+                "type": "boolean"
+              },
+              "compiled_document_pagination_trace": {
                 "type": "boolean"
               },
               "compiled_flow_compression_modes": {
