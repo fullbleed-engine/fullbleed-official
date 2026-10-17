@@ -5,6 +5,7 @@
 Interior color probes follow CSS Backgrounds 3 section 6.1.1 and have also been
 checked against printed browser output. The blurred straight edge is compared
 with an independent Gaussian CDF, using the authored blur radius / 2 as sigma.
+Whole-region comparisons at 300 DPI reject stray paint on unshadowed edges.
 https://www.w3.org/TR/css-backgrounds-3/#shadow-shape
 https://www.w3.org/TR/css-backgrounds-3/#shadow-blur
 
@@ -31,9 +32,11 @@ COLORS = {"background": (144, 202, 249), "shadow": (1, 87, 155), "white": (255, 
 # are on a 160 by 120 CSS-pixel page; the box occupies (20, 20) to (140, 100).
 CASES = [
     ("negative-hidden", "8px 0 0 -12px", "0", [(25, 60, "background"), (135, 60, "background")]),
+    ("negative-hidden-rounded", "8px 0 0 -12px", "20px", [(25, 60, "background"), (135, 60, "background"), (21, 21, "white")]),
     ("negative-left", "24px 0 0 -12px", "0", [(25, 60, "shadow"), (35, 60, "background"), (135, 60, "background")]),
     ("negative-right", "-24px 0 0 -12px", "0", [(25, 60, "background"), (125, 60, "background"), (135, 60, "shadow")]),
     ("positive-offset", "12px 0 0 8px", "0", [(25, 60, "shadow"), (45, 60, "background"), (135, 60, "background"), (80, 25, "shadow")]),
+    ("diagonal-offset", "24px 24px 0 0", "0", [(25, 60, "shadow"), (80, 25, "shadow"), (60, 60, "background"), (135, 90, "background")]),
     ("large-left", "100px 0 0 0", "0", [(25, 60, "shadow"), (105, 60, "shadow"), (125, 60, "background")]),
     ("large-right", "-100px 0 0 0", "0", [(25, 60, "background"), (45, 60, "shadow"), (135, 60, "shadow")]),
     ("large-down", "0 60px 0 0", "0", [(80, 25, "shadow"), (80, 65, "shadow"), (80, 90, "background")]),
@@ -92,13 +95,68 @@ def selected_cases():
     return selected
 
 
+def check_clear_region(engine, html, css, case, folder, pdfs, *, pdfium=False):
+    """Check the complete unshadowed region, including fractional raster edges."""
+    if case[0] not in ("negative-hidden", "negative-hidden-rounded", "diagonal-offset"):
+        return []
+    reference_css = css.replace(f"box-shadow: inset {case[1]} #01579b;", "box-shadow: none;")
+    assert reference_css != css
+    reference_pdf = bytes(engine.render_pdf(html, reference_css))
+    reference_path = folder / "clear-reference.pdf"
+    reference_path.write_bytes(reference_pdf)
+    start = math.ceil(46 * 300 / 96) if case[0] == "diagonal-offset" else 0
+    checks = []
+
+    def compare(mode, actual, reference):
+        (folder / f"{mode}-300.png").write_bytes(actual)
+        (folder / f"{mode}-300-reference.png").write_bytes(reference)
+        width, height, rows = decode_png(actual)
+        ref_width, ref_height, ref_rows = decode_png(reference)
+        assert (width, height) == (ref_width, ref_height)
+        # PDF readers may ceil a fractional device size one pixel upward.
+        assert width in (500, 501) and height in (375, 376)
+        different = sum(a[i:i+4] != b[i:i+4] for a, b in zip(rows[start:], ref_rows[start:])
+                        for i in range(start*4, width*4, 4))
+        checks.append(dict(mode=mode, dpi=300, region=[start, start, width, height],
+                           differing_pixels=different, ok=different == 0))
+
+    for mode, actual, reference in [
+        ("native", engine.render_image_pages(html, css, 300), engine.render_image_pages(html, reference_css, 300)),
+        ("finalized", engine.render_finalized_pdf_image_pages(str(folder / "direct.pdf"), 300),
+         engine.render_finalized_pdf_image_pages(str(reference_path), 300)),
+    ]:
+        assert len(actual) == len(reference) == 1
+        compare(mode, bytes(actual[0]), bytes(reference[0]))
+    if pdfium:
+        from io import BytesIO
+        import pypdfium2
+
+        def raster(data):
+            with pypdfium2.PdfDocument(data) as doc:
+                assert len(doc) == 1
+                page = doc[0]
+                bitmap = page.render(scale=300/72)
+                try:
+                    buffer = BytesIO()
+                    bitmap.to_pil().convert("RGBA").save(buffer, format="PNG")
+                    return buffer.getvalue()
+                finally:
+                    bitmap.close()
+                    page.close()
+
+        reference = raster(reference_pdf)
+        for mode, data in pdfs.items():
+            compare(mode+"-pdfium", raster(data), reference)
+    return checks
+
+
 def check(output: Path, *, pdfium=False):
     if pdfium:
         import pypdfium2
     output.mkdir(parents=True, exist_ok=True)
     engine = fullbleed.PdfEngine()
     report = dict(schema="fullbleed.inset_shadows.v1", version=metadata.version("fullbleed"), ok=False,
-                  scope="Interior shadow geometry, straight-edge blur, clipping and deterministic output; not complete CSS parity.", cases=[])
+                  scope="Interior shadow geometry, straight-edge blur, clear regions at 300 DPI, clipping and deterministic output; not complete CSS parity.", cases=[])
     for case, element in selected_cases():
         name = case[0] + "-" + element
         folder = output / name
@@ -163,10 +221,12 @@ def check(output: Path, *, pdfium=False):
                     finally:
                         bitmap.close()
                         page.close()
+        clear_regions = check_clear_region(engine, html, css, case, folder, pdfs, pdfium=pdfium)
         deterministic = direct == bytes(engine.render_pdf(html, css)) and pdfs["compiled"] == bytes(compiled.render_pdf())
         report["cases"].append(dict(name=name, deterministic=deterministic, views=views, equivalent_to_no_shadow=equivalent_to_no_shadow,
+            clear_region_checks=clear_regions,
             pdfs={k:hashlib.sha256(v).hexdigest() for k,v in pdfs.items()},
-            ok=deterministic and all(view["ok"] for view in views) and equivalent_to_no_shadow is not False))
+            ok=deterministic and all(view["ok"] for view in views) and equivalent_to_no_shadow is not False and all(c["ok"] for c in clear_regions)))
     report["ok"] = all(case["ok"] for case in report["cases"])
     (output / "verification.json").write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8")
     return report

@@ -33808,31 +33808,81 @@ impl ContainerFlowable {
         hole_height: Pt,
         hole_radii: ResolvedClipPathRadii,
     ) {
-        canvas.move_to(x, y);
-        canvas.line_to(x + width, y);
-        canvas.line_to(x + width, y + height);
-        canvas.line_to(x, y + height);
-        canvas.close_path();
-        if hole_width <= Pt::ZERO || hole_height <= Pt::ZERO {
-            canvas.fill();
+        if hole_width <= Pt::ZERO
+            || hole_height <= Pt::ZERO
+            || hole_x >= x + width
+            || hole_x + hole_width <= x
+            || hole_y >= y + height
+            || hole_y + hole_height <= y
+        {
+            canvas.draw_rect(x, y, width, height);
             return;
         }
-        if Self::clip_radii_have_rounding(hole_radii) {
-            Self::rounded_rect_corners_path(
-                canvas,
-                hole_x,
-                hole_y,
-                hole_width,
-                hole_height,
-                hole_radii,
-            );
-        } else {
-            canvas.move_to(hole_x, hole_y);
-            canvas.line_to(hole_x + hole_width, hole_y);
-            canvas.line_to(hole_x + hole_width, hole_y + hole_height);
-            canvas.line_to(hole_x, hole_y + hole_height);
-            canvas.close_path();
+        if !Self::clip_radii_have_rounding(hole_radii) {
+            // Intersect a rectangular hole before painting. An even-odd hole
+            // that extends outside the outer rectangle paints its own exterior;
+            // antialiasing the destination clip can leak that paint back onto
+            // an otherwise unshadowed edge. These disjoint rectangles describe
+            // the exact difference, including negative spread and large offsets.
+            let right = x + width;
+            let bottom = y + height;
+            let inner_left = hole_x.max(x).min(right);
+            let inner_top = hole_y.max(y).min(bottom);
+            let inner_right = (hole_x + hole_width).max(x).min(right);
+            let inner_bottom = (hole_y + hole_height).max(y).min(bottom);
+            if inner_left >= inner_right || inner_top >= inner_bottom {
+                canvas.draw_rect(x, y, width, height);
+                return;
+            }
+            let pieces = [
+                (x, y, width, inner_top - y),
+                (x, inner_bottom, width, bottom - inner_bottom),
+                (x, inner_top, inner_left - x, inner_bottom - inner_top),
+                (
+                    inner_right,
+                    inner_top,
+                    right - inner_right,
+                    inner_bottom - inner_top,
+                ),
+            ];
+            let mut has_paint = false;
+            for (left, top, piece_width, piece_height) in pieces {
+                if piece_width > Pt::ZERO && piece_height > Pt::ZERO {
+                    canvas.move_to(left, top);
+                    canvas.line_to(left + piece_width, top);
+                    canvas.line_to(left + piece_width, top + piece_height);
+                    canvas.line_to(left, top + piece_height);
+                    canvas.close_path();
+                    has_paint = true;
+                }
+            }
+            // One nonzero fill cancels shared interior edges between pieces.
+            if has_paint {
+                canvas.fill();
+            }
+            return;
         }
+        // Keep the rounded hole inside the ring's outer path. When it extends
+        // beyond the destination, a coincident outer path would expose the
+        // hole's exterior through antialiased clip coverage. Shared straight
+        // edges still coincide and cancel when the hole merely touches them.
+        let outer_left = x.min(hole_x);
+        let outer_top = y.min(hole_y);
+        let outer_right = (x + width).max(hole_x + hole_width);
+        let outer_bottom = (y + height).max(hole_y + hole_height);
+        canvas.move_to(outer_left, outer_top);
+        canvas.line_to(outer_right, outer_top);
+        canvas.line_to(outer_right, outer_bottom);
+        canvas.line_to(outer_left, outer_bottom);
+        canvas.close_path();
+        Self::rounded_rect_corners_path(
+            canvas,
+            hole_x,
+            hole_y,
+            hole_width,
+            hole_height,
+            hole_radii,
+        );
         canvas.fill_evenodd();
     }
 }
