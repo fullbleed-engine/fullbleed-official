@@ -3314,11 +3314,9 @@ fn spread_shadow_radii(radius: ResolvedClipPathRadii, spread: Pt) -> ResolvedCli
 }
 
 fn shrink_shadow_radius(radius: Pt, spread: Pt) -> Pt {
-    if radius > Pt::ZERO {
-        (radius - spread).max(Pt::ZERO)
-    } else {
-        Pt::ZERO
-    }
+    // Negative inset spread expands the hole, with the same small-corner
+    // adjustment as positive outer spread (CSS Backgrounds 3, section 6.1.1).
+    spread_shadow_radius(radius, -spread)
 }
 
 fn shrink_shadow_radii(radius: ResolvedClipPathRadii, spread: Pt) -> ResolvedClipPathRadii {
@@ -13563,17 +13561,24 @@ impl TableCell {
                 .resolve_height(height, self.style.font_size, self.root_font_size);
         let spread = shadow
             .spread
-            .resolve_width(width, self.style.font_size, self.root_font_size)
-            .max(Pt::ZERO);
+            .resolve_width(width, self.style.font_size, self.root_font_size);
 
-        canvas.save_state();
-        canvas.clip_rect(x, y, width, height);
-        ContainerFlowable::draw_inset_shadow_layers(
+        ContainerFlowable::draw_resolved_inset_shadow(
             canvas,
             x,
             y,
             width,
             height,
+            ResolvedClipPathRadii {
+                top_left_x: Pt::ZERO,
+                top_left_y: Pt::ZERO,
+                top_right_x: Pt::ZERO,
+                top_right_y: Pt::ZERO,
+                bottom_right_x: Pt::ZERO,
+                bottom_right_y: Pt::ZERO,
+                bottom_left_x: Pt::ZERO,
+                bottom_left_y: Pt::ZERO,
+            },
             offset_x,
             offset_y,
             spread,
@@ -13581,7 +13586,6 @@ impl TableCell {
             shadow.opacity.clamp(0.0, 1.0),
             shadow.color,
         );
-        canvas.restore_state();
     }
 
     fn draw_text_line(&self, canvas: &mut Canvas, x: Pt, y: Pt, text: &str) {
@@ -29426,17 +29430,6 @@ impl ContainerFlowable {
             || radius.bottom_left_y > Pt::ZERO
     }
 
-    fn clip_radii_are_uniform(radius: ResolvedClipPathRadii) -> bool {
-        let value = radius.top_left_x;
-        radius.top_left_y == value
-            && radius.top_right_x == value
-            && radius.top_right_y == value
-            && radius.bottom_right_x == value
-            && radius.bottom_right_y == value
-            && radius.bottom_left_x == value
-            && radius.bottom_left_y == value
-    }
-
     fn inset_clip_radii(radius: ResolvedClipPathRadii, inset: Pt) -> ResolvedClipPathRadii {
         ResolvedClipPathRadii {
             top_left_x: (radius.top_left_x - inset).max(Pt::ZERO),
@@ -33662,7 +33655,7 @@ impl ContainerFlowable {
         radii: ResolvedClipPathRadii,
         shadow: &BoxShadowSpec,
     ) {
-        if !shadow.inset || shadow.opacity <= 0.0 || width <= Pt::ZERO || height <= Pt::ZERO {
+        if !shadow.inset {
             return;
         }
         let blur = shadow
@@ -33677,30 +33670,62 @@ impl ContainerFlowable {
             shadow
                 .offset_y
                 .resolve_height(height, self.state.font_size, self.state.root_font_size);
-        let spread = shadow
-            .spread
-            .resolve_width(width, self.state.font_size, self.state.root_font_size)
-            .max(Pt::ZERO);
+        let spread =
+            shadow
+                .spread
+                .resolve_width(width, self.state.font_size, self.state.root_font_size);
+        Self::draw_resolved_inset_shadow(
+            canvas,
+            x,
+            y,
+            width,
+            height,
+            radii,
+            offset_x,
+            offset_y,
+            spread,
+            blur,
+            shadow.opacity,
+            self.apply_paint_filter_color(shadow.color),
+        );
+    }
 
-        let rounded_clip = Self::clip_radii_have_rounding(radii);
+    fn draw_resolved_inset_shadow(
+        canvas: &mut Canvas,
+        x: Pt,
+        y: Pt,
+        width: Pt,
+        height: Pt,
+        radii: ResolvedClipPathRadii,
+        offset_x: Pt,
+        offset_y: Pt,
+        spread: Pt,
+        blur: Pt,
+        opacity: f32,
+        color: Color,
+    ) {
+        if opacity <= 0.0 || width <= Pt::ZERO || height <= Pt::ZERO {
+            return;
+        }
+        // An inset shadow is the complement of a translated padding-box hole.
+        // Signed spread changes the hole, not independent edge bands: opposite
+        // edges can disappear, and an offset can cover the entire destination.
+        let hole_width = (width - spread * 2).max(Pt::ZERO);
+        let hole_height = (height - spread * 2).max(Pt::ZERO);
+        let hole_radii = shrink_shadow_radii(radii, spread);
         canvas.save_state();
-        if rounded_clip {
+        if Self::clip_radii_have_rounding(radii) {
             Self::rounded_rect_corners_path(canvas, x, y, width, height, radii);
             canvas.clip_path(false);
         } else {
             canvas.clip_rect(x, y, width, height);
         }
-        let opacity = shadow.opacity.clamp(0.0, 1.0);
+
         if blur > Pt::ZERO {
             let sigma = css_shadow_blur_sigma(blur);
             let padding = css_shadow_filter_padding(sigma);
             let form_width = width + padding * 2;
             let form_height = height + padding * 2;
-            let hole_x = padding + spread + offset_x;
-            let hole_y = padding + spread + offset_y;
-            let hole_width = (width - spread * 2).max(Pt::ZERO);
-            let hole_height = (height - spread * 2).max(Pt::ZERO);
-            let hole_radii = shrink_shadow_radii(radii, spread);
             let form_id = format!(
                 "inset-box-shadow:{}:{}:{}",
                 canvas.current_command_count(),
@@ -33711,51 +33736,25 @@ impl ContainerFlowable {
                 width: form_width,
                 height: form_height,
             });
-            source.set_fill_color(self.apply_paint_filter_color(shadow.color));
-            source.set_opacity(opacity, opacity);
-            if hole_width > Pt::ZERO && hole_height > Pt::ZERO {
-                // Blink describes the outer caster with the authored blur
-                // radius, but its Skia shadow looper lowers that geometry onto
-                // the first PlanGauss box window before clipping the filtered
-                // result. Our explicit even-odd/A8 lowering starts one stage
-                // later, so retaining one half-window of opaque caster is the
-                // equivalent boundary. A full two-sigma source over-saturates
-                // the visible inset edge even though its geometric bounds look
-                // identical at the display-list level.
-                let halo = sigma * (37.0 / 40.0);
-                let outer_x = padding - halo;
-                let outer_y = padding - halo;
-                let outer_width = width + halo * 2.0;
-                let outer_height = height + halo * 2.0;
-                // The outer source remains rectangular; the element's rounded
-                // padding edge clips the filtered result afterward. Rounding
-                // both the source halo and the destination clip removes mask
-                // mass twice at corners.
-                source.move_to(outer_x, outer_y);
-                source.line_to(outer_x + outer_width, outer_y);
-                source.line_to(outer_x + outer_width, outer_y + outer_height);
-                source.line_to(outer_x, outer_y + outer_height);
-                source.close_path();
-                if Self::clip_radii_have_rounding(hole_radii) {
-                    Self::rounded_rect_corners_path(
-                        &mut source,
-                        hole_x,
-                        hole_y,
-                        hole_width,
-                        hole_height,
-                        hole_radii,
-                    );
-                } else {
-                    source.move_to(hole_x, hole_y);
-                    source.line_to(hole_x + hole_width, hole_y);
-                    source.line_to(hole_x + hole_width, hole_y + hole_height);
-                    source.line_to(hole_x, hole_y + hole_height);
-                    source.close_path();
-                }
-                source.fill_evenodd();
-            } else {
-                source.draw_rect(Pt::ZERO, Pt::ZERO, form_width, form_height);
-            }
+            source.set_fill_color(color);
+            source.set_opacity(opacity.clamp(0.0, 1.0), opacity.clamp(0.0, 1.0));
+            // Everything outside the hole casts the shadow. Retain a full
+            // filter-support margin so the finite source cannot fade an opaque
+            // inset edge. Clip the source before even-odd filling: a translated
+            // or expanded hole may extend beyond its finite outer rectangle.
+            source.clip_rect(Pt::ZERO, Pt::ZERO, form_width, form_height);
+            Self::inset_shadow_ring_path(
+                &mut source,
+                Pt::ZERO,
+                Pt::ZERO,
+                form_width,
+                form_height,
+                padding + spread + offset_x,
+                padding + spread + offset_y,
+                hole_width,
+                hole_height,
+                hole_radii,
+            );
             let commands = source
                 .finish()
                 .pages
@@ -33773,282 +33772,63 @@ impl ContainerFlowable {
                 form_id,
                 filter,
             );
-            canvas.restore_state();
-            return;
+        } else {
+            canvas.set_fill_color(color);
+            canvas.set_opacity(opacity.clamp(0.0, 1.0), opacity.clamp(0.0, 1.0));
+            Self::inset_shadow_ring_path(
+                canvas,
+                x,
+                y,
+                width,
+                height,
+                x + spread + offset_x,
+                y + spread + offset_y,
+                hole_width,
+                hole_height,
+                hole_radii,
+            );
         }
-        // The fast side-band path below is exact for square and circular inset
-        // shadows, but it cannot represent an elliptical or independently
-        // rounded inner hole.  Keep those fixed-point corner radii in vector
-        // form and paint the zero-blur shadow as one even-odd ring.
-        if Self::clip_radii_have_rounding(radii) && !Self::clip_radii_are_uniform(radii) {
-            let max_spread = (width / 2.0).min(height / 2.0);
-            let spread = spread.min(max_spread).max(Pt::ZERO);
-            let hole_x = x + spread + offset_x;
-            let hole_y = y + spread + offset_y;
-            let hole_width = (width - spread * 2).max(Pt::ZERO);
-            let hole_height = (height - spread * 2).max(Pt::ZERO);
-            let hole_radii = shrink_shadow_radii(radii, spread);
-            canvas.set_fill_color(self.apply_paint_filter_color(shadow.color));
-            canvas.set_opacity(opacity, opacity);
-            canvas.move_to(x, y);
-            canvas.line_to(x + width, y);
-            canvas.line_to(x + width, y + height);
-            canvas.line_to(x, y + height);
-            canvas.close_path();
-            if hole_width > Pt::ZERO && hole_height > Pt::ZERO {
-                if Self::clip_radii_have_rounding(hole_radii) {
-                    Self::rounded_rect_corners_path(
-                        canvas,
-                        hole_x,
-                        hole_y,
-                        hole_width,
-                        hole_height,
-                        hole_radii,
-                    );
-                } else {
-                    canvas.move_to(hole_x, hole_y);
-                    canvas.line_to(hole_x + hole_width, hole_y);
-                    canvas.line_to(hole_x + hole_width, hole_y + hole_height);
-                    canvas.line_to(hole_x, hole_y + hole_height);
-                    canvas.close_path();
-                }
-                canvas.fill_evenodd();
-            } else {
-                canvas.fill();
-            }
-            canvas.restore_state();
-            return;
-        }
-        Self::draw_inset_shadow_layers(
-            canvas,
-            x,
-            y,
-            width,
-            height,
-            offset_x,
-            offset_y,
-            spread,
-            blur,
-            opacity,
-            self.apply_paint_filter_color(shadow.color),
-        );
         canvas.restore_state();
     }
 
-    fn draw_inset_shadow_layers(
+    fn inset_shadow_ring_path(
         canvas: &mut Canvas,
         x: Pt,
         y: Pt,
         width: Pt,
         height: Pt,
-        offset_x: Pt,
-        offset_y: Pt,
-        spread: Pt,
-        blur: Pt,
-        opacity: f32,
-        color: Color,
+        hole_x: Pt,
+        hole_y: Pt,
+        hole_width: Pt,
+        hole_height: Pt,
+        hole_radii: ResolvedClipPathRadii,
     ) {
-        let max_thickness = (width / 2.0).min(height / 2.0);
-        let spread = spread.min(max_thickness).max(Pt::ZERO);
-        let blur = blur.max(Pt::ZERO);
-        let offset_present = offset_x != Pt::ZERO || offset_y != Pt::ZERO;
-        let core = ResolvedEdges {
-            top: (spread
-                + if offset_y > Pt::ZERO {
-                    offset_y
-                } else {
-                    Pt::ZERO
-                })
-            .min(max_thickness),
-            right: (spread
-                + if offset_x < Pt::ZERO {
-                    -offset_x
-                } else {
-                    Pt::ZERO
-                })
-            .min(max_thickness),
-            bottom: (spread
-                + if offset_y < Pt::ZERO {
-                    -offset_y
-                } else {
-                    Pt::ZERO
-                })
-            .min(max_thickness),
-            left: (spread
-                + if offset_x > Pt::ZERO {
-                    offset_x
-                } else {
-                    Pt::ZERO
-                })
-            .min(max_thickness),
-        };
-        let blur_growth = ResolvedEdges {
-            top: if spread > Pt::ZERO || offset_y > Pt::ZERO || !offset_present {
-                blur
-            } else {
-                Pt::ZERO
-            },
-            right: if spread > Pt::ZERO || offset_x < Pt::ZERO || !offset_present {
-                blur
-            } else {
-                Pt::ZERO
-            },
-            bottom: if spread > Pt::ZERO || offset_y < Pt::ZERO || !offset_present {
-                blur
-            } else {
-                Pt::ZERO
-            },
-            left: if spread > Pt::ZERO || offset_x > Pt::ZERO || !offset_present {
-                blur
-            } else {
-                Pt::ZERO
-            },
-        };
-        let has_core = Self::inset_shadow_sides_have_paint(core);
-        let has_blur = Self::inset_shadow_sides_have_paint(blur_growth);
-        if opacity <= 0.0 || (!has_core && !has_blur) {
+        canvas.move_to(x, y);
+        canvas.line_to(x + width, y);
+        canvas.line_to(x + width, y + height);
+        canvas.line_to(x, y + height);
+        canvas.close_path();
+        if hole_width <= Pt::ZERO || hole_height <= Pt::ZERO {
+            canvas.fill();
             return;
         }
-
-        canvas.set_fill_color(color);
-        if blur <= Pt::ZERO {
-            canvas.set_opacity(opacity, opacity);
-            Self::draw_inset_shadow_sides(canvas, x, y, width, height, core);
-            canvas.set_opacity(1.0, 1.0);
-            return;
-        }
-
-        if has_core {
-            canvas.set_opacity(opacity, opacity);
-            Self::draw_inset_shadow_sides(canvas, x, y, width, height, core);
-        }
-
-        if !has_blur {
-            canvas.set_opacity(1.0, 1.0);
-            return;
-        }
-
-        let blur_f = blur.to_f32().max(0.0);
-        let steps = ((blur_f / 1.5).ceil() as usize).clamp(6, 24);
-        let sigma = 0.45_f32;
-        for i in 0..steps {
-            let t0 = i as f32 / steps as f32;
-            let t1 = (i + 1) as f32 / steps as f32;
-            let outer = Self::inset_shadow_sides_lerp(core, blur_growth, t0, max_thickness);
-            let inner = Self::inset_shadow_sides_lerp(core, blur_growth, t1, max_thickness);
-            let midpoint = (i as f32 + 0.5) / steps as f32;
-            let z = midpoint / sigma;
-            let band_opacity = (opacity * (-0.5 * z * z).exp()).clamp(0.0, 1.0);
-            if band_opacity <= 0.0 {
-                continue;
-            }
-            canvas.set_opacity(band_opacity, band_opacity);
-            Self::draw_inset_shadow_sides_band(canvas, x, y, width, height, outer, inner);
-        }
-        canvas.set_opacity(1.0, 1.0);
-    }
-
-    fn inset_shadow_sides_have_paint(sides: ResolvedEdges) -> bool {
-        sides.top > Pt::ZERO
-            || sides.right > Pt::ZERO
-            || sides.bottom > Pt::ZERO
-            || sides.left > Pt::ZERO
-    }
-
-    fn inset_shadow_sides_lerp(
-        core: ResolvedEdges,
-        growth: ResolvedEdges,
-        t: f32,
-        max_thickness: Pt,
-    ) -> ResolvedEdges {
-        ResolvedEdges {
-            top: (core.top + growth.top * t).min(max_thickness),
-            right: (core.right + growth.right * t).min(max_thickness),
-            bottom: (core.bottom + growth.bottom * t).min(max_thickness),
-            left: (core.left + growth.left * t).min(max_thickness),
-        }
-    }
-
-    fn draw_inset_shadow_sides(
-        canvas: &mut Canvas,
-        x: Pt,
-        y: Pt,
-        width: Pt,
-        height: Pt,
-        inner: ResolvedEdges,
-    ) {
-        Self::draw_inset_shadow_sides_band(
-            canvas,
-            x,
-            y,
-            width,
-            height,
-            ResolvedEdges {
-                top: Pt::ZERO,
-                right: Pt::ZERO,
-                bottom: Pt::ZERO,
-                left: Pt::ZERO,
-            },
-            inner,
-        );
-    }
-
-    fn draw_inset_shadow_sides_band(
-        canvas: &mut Canvas,
-        x: Pt,
-        y: Pt,
-        width: Pt,
-        height: Pt,
-        outer: ResolvedEdges,
-        inner: ResolvedEdges,
-    ) {
-        let max_thickness = (width / 2.0).min(height / 2.0);
-        let outer = ResolvedEdges {
-            top: outer.top.min(max_thickness).max(Pt::ZERO),
-            right: outer.right.min(max_thickness).max(Pt::ZERO),
-            bottom: outer.bottom.min(max_thickness).max(Pt::ZERO),
-            left: outer.left.min(max_thickness).max(Pt::ZERO),
-        };
-        let inner = ResolvedEdges {
-            top: inner.top.min(max_thickness).max(outer.top),
-            right: inner.right.min(max_thickness).max(outer.right),
-            bottom: inner.bottom.min(max_thickness).max(outer.bottom),
-            left: inner.left.min(max_thickness).max(outer.left),
-        };
-        let top_band = inner.top - outer.top;
-        let right_band = inner.right - outer.right;
-        let bottom_band = inner.bottom - outer.bottom;
-        let left_band = inner.left - outer.left;
-        if top_band <= Pt::ZERO
-            && right_band <= Pt::ZERO
-            && bottom_band <= Pt::ZERO
-            && left_band <= Pt::ZERO
-        {
-            return;
-        }
-
-        let horizontal_x = x + outer.left;
-        let horizontal_w = (width - outer.left - outer.right).max(Pt::ZERO);
-        if top_band > Pt::ZERO && horizontal_w > Pt::ZERO {
-            canvas.draw_rect(horizontal_x, y + outer.top, horizontal_w, top_band);
-        }
-        if bottom_band > Pt::ZERO && horizontal_w > Pt::ZERO {
-            canvas.draw_rect(
-                horizontal_x,
-                y + height - inner.bottom,
-                horizontal_w,
-                bottom_band,
+        if Self::clip_radii_have_rounding(hole_radii) {
+            Self::rounded_rect_corners_path(
+                canvas,
+                hole_x,
+                hole_y,
+                hole_width,
+                hole_height,
+                hole_radii,
             );
+        } else {
+            canvas.move_to(hole_x, hole_y);
+            canvas.line_to(hole_x + hole_width, hole_y);
+            canvas.line_to(hole_x + hole_width, hole_y + hole_height);
+            canvas.line_to(hole_x, hole_y + hole_height);
+            canvas.close_path();
         }
-
-        let side_y = y + inner.top;
-        let side_h = (height - inner.top - inner.bottom).max(Pt::ZERO);
-        if left_band > Pt::ZERO && side_h > Pt::ZERO {
-            canvas.draw_rect(x + outer.left, side_y, left_band, side_h);
-        }
-        if right_band > Pt::ZERO && side_h > Pt::ZERO {
-            canvas.draw_rect(x + width - inner.right, side_y, right_band, side_h);
-        }
+        canvas.fill_evenodd();
     }
 }
 
@@ -41298,7 +41078,7 @@ mod grid_and_transform_regression_tests {
     }
 
     #[test]
-    fn blurred_rounded_inset_shadow_compiles_plan_gauss_caster_and_vector_clip() {
+    fn blurred_rounded_inset_shadow_keeps_full_filter_support_and_vector_clip() {
         let flowable =
             ContainerFlowable::new_pt(Vec::new(), Pt::from_f32(12.0), Pt::from_f32(12.0));
         let shadow = BoxShadowSpec {
@@ -41350,11 +41130,9 @@ mod grid_and_transform_regression_tests {
             Command::MoveTo { x, y } => Some((*x, *y)),
             _ => None,
         });
-        // The explicit A8 lowering retains the PlanGauss half-window caster.
-        let sigma = css_shadow_blur_sigma(Pt::from_f32(13.5));
-        let padding = css_shadow_filter_padding(sigma);
-        let expected_start = padding - sigma * (37.0 / 40.0);
-        assert_eq!(outer_start, Some((expected_start, expected_start)));
+        // The opaque caster reaches the full source bounds, beyond the blur
+        // kernel's support from every point in the visible padding box.
+        assert_eq!(outer_start, Some((Pt::ZERO, Pt::ZERO)));
         assert!(
             document.pages[0]
                 .commands
